@@ -1,0 +1,394 @@
+// ─── ECON STUDIO · ExplorerModule.jsx ────────────────────────────────────────
+// Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
+// Consumes cleanedData emitted by WranglingModule.
+import { useState, useMemo } from "react";
+import { buildInfo } from "./WranglingModule.jsx";
+
+// ─── THEME ────────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
+  border:"#1c1c1c", border2:"#252525",
+  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
+  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
+  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
+  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
+  violet:"#9e7ec8",
+};
+const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
+
+// ─── ATOMS ────────────────────────────────────────────────────────────────────
+function Lbl({children,color=C.textMuted,mb=6}){return<div style={{fontSize:10,color,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:mb,fontFamily:mono}}>{children}</div>;}
+function Btn({onClick,ch,color=C.gold,v="out",dis=false,sm=false}){
+  const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily:mono,fontSize:sm?10:11,transition:"all 0.13s",opacity:dis?0.4:1};
+  if(v==="solid")return<button onClick={onClick} disabled={dis} style={{...b,background:color,color:C.bg,border:`1px solid ${color}`,fontWeight:700}}>{ch}</button>;
+  return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:`1px solid ${C.border2}`,color:dis?C.textMuted:C.textDim}}>{ch}</button>;
+}
+function Spin(){return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
+
+// ─── MINI MATH ────────────────────────────────────────────────────────────────
+function olsSimple(xs,ys){
+  const n=xs.length;if(n<2)return{b0:0,b1:0,r2:0};
+  const mx=xs.reduce((a,b)=>a+b,0)/n,my=ys.reduce((a,b)=>a+b,0)/n;
+  let ssxy=0,ssxx=0,ssyy=0;
+  for(let i=0;i<n;i++){ssxy+=(xs[i]-mx)*(ys[i]-my);ssxx+=(xs[i]-mx)**2;ssyy+=(ys[i]-my)**2;}
+  const b1=ssxx?ssxy/ssxx:0,b0=my-b1*mx;
+  const r2=ssyy?(1-xs.map((x,i)=>(ys[i]-(b0+b1*x))**2).reduce((a,b)=>a+b,0)/ssyy):0;
+  return{b0,b1,r2};
+}
+function pearson(xs,ys){
+  const n=xs.length;if(n<2)return 0;
+  const mx=xs.reduce((a,b)=>a+b,0)/n,my=ys.reduce((a,b)=>a+b,0)/n;
+  let sxy=0,sx=0,sy=0;
+  for(let i=0;i<n;i++){sxy+=(xs[i]-mx)*(ys[i]-my);sx+=(xs[i]-mx)**2;sy+=(ys[i]-my)**2;}
+  return(sx&&sy)?sxy/Math.sqrt(sx*sy):0;
+}
+
+// ─── SVG CHARTS ───────────────────────────────────────────────────────────────
+function SvgHistogram({data,color=C.gold,label=""}){
+  const W=320,H=120,PAD=24;
+  if(!data.length)return null;
+  const min=Math.min(...data),max=Math.max(...data);
+  const range=max-min||1;
+  const bins=20,bw=range/bins;
+  const counts=Array(bins).fill(0);
+  data.forEach(v=>{const b=Math.min(bins-1,Math.floor((v-min)/bw));counts[b]++;});
+  const maxC=Math.max(...counts,1);
+  const barW=(W-PAD*2)/bins;
+  return(
+    <svg viewBox={`0 0 ${W} ${H+PAD}`} style={{width:"100%",maxWidth:W,display:"block",fontFamily:mono}}>
+      {counts.map((c,i)=>{
+        const x=PAD+i*barW,h=(c/maxC)*(H-8),y=H-h;
+        return<rect key={i} x={x+1} y={y} width={barW-2} height={h} fill={color} opacity={0.7} rx={1}/>;
+      })}
+      <line x1={PAD} y1={H} x2={W-PAD} y2={H} stroke={C.border2} strokeWidth={1}/>
+      <text x={PAD} y={H+14} fill={C.textMuted} fontSize={8} fontFamily={mono}>{min.toFixed(2)}</text>
+      <text x={W-PAD} y={H+14} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{max.toFixed(2)}</text>
+      {label&&<text x={W/2} y={H+14} fill={C.textDim} fontSize={8} fontFamily={mono} textAnchor="middle">{label}</text>}
+    </svg>
+  );
+}
+
+function SvgScatter({xs,ys,xlbl="",ylbl="",showOls=true}){
+  const W=340,H=200,PAD=36;
+  if(!xs.length||!ys.length)return null;
+  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  const rX=maxX-minX||1,rY=maxY-minY||1;
+  const toSvgX=x=>PAD+(x-minX)/rX*(W-PAD*2);
+  const toSvgY=y=>(H-PAD)-(y-minY)/rY*(H-PAD*2);
+  const ols=olsSimple(xs,ys);
+  const tx1=minX,tx2=maxX,ty1=ols.b0+ols.b1*tx1,ty2=ols.b0+ols.b1*tx2;
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",fontFamily:mono}}>
+      <line x1={PAD} y1={PAD} x2={PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
+      <line x1={PAD} y1={H-PAD} x2={W-PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
+      {xs.map((x,i)=><circle key={i} cx={toSvgX(x)} cy={toSvgY(ys[i])} r={2.5} fill={C.teal} opacity={0.6}/>)}
+      {showOls&&<line x1={toSvgX(tx1)} y1={toSvgY(ty1)} x2={toSvgX(tx2)} y2={toSvgY(ty2)} stroke={C.orange} strokeWidth={1.5} strokeDasharray="4,2"/>}
+      <text x={PAD-4} y={PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{maxY.toFixed(1)}</text>
+      <text x={PAD-4} y={H-PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{minY.toFixed(1)}</text>
+      <text x={PAD} y={H-PAD+12} fill={C.textMuted} fontSize={8} fontFamily={mono}>{minX.toFixed(1)}</text>
+      <text x={W-PAD} y={H-PAD+12} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{maxX.toFixed(1)}</text>
+      {xlbl&&<text x={W/2} y={H-4} fill={C.textDim} fontSize={9} fontFamily={mono} textAnchor="middle">{xlbl}</text>}
+      {showOls&&<text x={W-PAD} y={PAD} fill={C.orange} fontSize={8} fontFamily={mono} textAnchor="end">R²={ols.r2.toFixed(3)}</text>}
+    </svg>
+  );
+}
+
+function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
+  const W=380,H=200,PAD=36;
+  const entities=[...new Set(rows.map(r=>r[entityCol]))];
+  const seed=entities.length;
+  const sampled=entities.slice().sort(()=>Math.sin(seed)*0.5).slice(0,sampleN);
+  const times=[...new Set(rows.map(r=>r[timeCol]))].sort((a,b)=>a-b);
+  if(times.length<2||sampled.length<2)return<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Need ≥2 periods and ≥2 units.</div>;
+  const allVals=rows.filter(r=>sampled.includes(r[entityCol])&&typeof r[col]==="number").map(r=>r[col]);
+  if(!allVals.length)return null;
+  const minV=Math.min(...allVals),maxV=Math.max(...allVals);
+  const rV=maxV-minV||1;
+  const toX=t=>PAD+(times.indexOf(t)/(times.length-1))*(W-PAD*2);
+  const toY=v=>(H-PAD)-(v-minV)/rV*(H-PAD*2);
+  const palette=[C.teal,C.gold,C.blue,C.purple,C.orange,C.green,C.red,C.violet,C.yellow,"#8ecac8","#c8b46e","#9eb896"];
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",fontFamily:mono}}>
+      <line x1={PAD} y1={PAD} x2={PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
+      <line x1={PAD} y1={H-PAD} x2={W-PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
+      {times.map(t=><line key={t} x1={toX(t)} y1={PAD} x2={toX(t)} y2={H-PAD} stroke={C.border} strokeWidth={1} strokeDasharray="2,4"/>)}
+      {sampled.map((e,ei)=>{
+        const pts=times.map(t=>{const r=rows.find(r=>r[entityCol]===e&&r[timeCol]===t);return r&&typeof r[col]==="number"?{x:toX(t),y:toY(r[col])}:null;}).filter(Boolean);
+        if(pts.length<2)return null;
+        const d=pts.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+        return<path key={e} d={d} fill="none" stroke={palette[ei%palette.length]} strokeWidth={1.4} opacity={0.75}/>;
+      })}
+      {times.map(t=><text key={t} x={toX(t)} y={H-PAD+12} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="middle">{t}</text>)}
+      <text x={PAD-4} y={PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{maxV.toFixed(1)}</text>
+      <text x={PAD-4} y={H-PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{minV.toFixed(1)}</text>
+    </svg>
+  );
+}
+
+function CorrHeatmap({headers,rows,info}){
+  const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+  if(numH.length<2)return<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Need ≥2 numeric columns.</div>;
+  const mat=numH.map(h1=>numH.map(h2=>{
+    const pairs=rows.filter(r=>typeof r[h1]==="number"&&typeof r[h2]==="number");
+    return pearson(pairs.map(r=>r[h1]),pairs.map(r=>r[h2]));
+  }));
+  const cellSz=Math.min(44,Math.floor(380/numH.length));
+  const lblH=60;
+  const W=lblH+numH.length*cellSz,H_total=lblH+numH.length*cellSz;
+  const corToColor=v=>{
+    const abs=Math.abs(v);
+    if(v>0)return`rgba(110,200,180,${abs*0.9})`;
+    return`rgba(196,112,112,${abs*0.9})`;
+  };
+  return(
+    <div style={{overflowX:"auto"}}>
+      <svg viewBox={`0 0 ${W+8} ${H_total+8}`} style={{width:"100%",maxWidth:W+8,display:"block",fontFamily:mono}}>
+        {numH.map((h,i)=>(
+          <text key={h} x={lblH+i*cellSz+cellSz/2} y={lblH-4} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={mono} textAnchor="middle" transform={`rotate(-35,${lblH+i*cellSz+cellSz/2},${lblH-4})`}>{h.slice(0,8)}</text>
+        ))}
+        {numH.map((h,i)=>(
+          <text key={h} x={lblH-4} y={lblH+i*cellSz+cellSz/2+3} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={mono} textAnchor="end">{h.slice(0,8)}</text>
+        ))}
+        {mat.map((row,ri)=>row.map((v,ci)=>(
+          <g key={`${ri}-${ci}`}>
+            <rect x={lblH+ci*cellSz} y={lblH+ri*cellSz} width={cellSz-1} height={cellSz-1} fill={corToColor(v)} rx={2}/>
+            {cellSz>28&&<text x={lblH+ci*cellSz+cellSz/2} y={lblH+ri*cellSz+cellSz/2+4} fill={C.text} fontSize={Math.max(6,Math.min(9,cellSz/5))} fontFamily={mono} textAnchor="middle" opacity={0.9}>{v.toFixed(2)}</text>}
+          </g>
+        )))}
+      </svg>
+      <div style={{display:"flex",gap:12,marginTop:8,alignItems:"center"}}>
+        <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>← negative (red)</span>
+        <div style={{flex:1,height:6,borderRadius:3,background:`linear-gradient(to right,${C.red},${C.surface3},${C.teal})`}}/>
+        <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>positive (teal) →</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── SUMMARY TABLE (Table 1) ──────────────────────────────────────────────────
+function SummaryTable({rows,headers,info,panel}){
+  const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+  const catH=headers.filter(h=>info[h]?.isCat&&!info[h]?.isNum);
+  const [groupBy,setGroupBy]=useState("");
+  const groups=groupBy?[...new Set(rows.map(r=>r[groupBy]).filter(v=>v!=null))].sort():["All"];
+
+  function statsFor(subset,col){
+    const vals=subset.map(r=>r[col]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
+    if(!vals.length)return{mean:null,std:null,min:null,max:null,median:null,n:0};
+    const mean=vals.reduce((a,b)=>a+b,0)/vals.length;
+    const std=Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length);
+    const median=vals.length%2===0?(vals[vals.length/2-1]+vals[vals.length/2])/2:vals[Math.floor(vals.length/2)];
+    return{mean,std,min:vals[0],max:vals[vals.length-1],median,n:vals.length};
+  }
+  const fmt=v=>v!=null?v.toFixed(3):"—";
+  const thS={padding:"0.35rem 0.6rem",fontFamily:mono,fontSize:9,color:C.textMuted,fontWeight:400,letterSpacing:"0.1em",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,background:C.surface2,textAlign:"right",whiteSpace:"nowrap"};
+  const tdS={padding:"0.32rem 0.6rem",fontFamily:mono,fontSize:10,color:C.text,borderBottom:`1px solid ${C.border}`,textAlign:"right",whiteSpace:"nowrap"};
+  return(
+    <div>
+      <div style={{marginBottom:"1.2rem",display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+        <Lbl mb={0}>Group by</Lbl>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+          <button onClick={()=>setGroupBy("")} style={{padding:"0.22rem 0.6rem",border:`1px solid ${!groupBy?C.gold:C.border2}`,background:!groupBy?C.goldFaint:"transparent",color:!groupBy?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>None</button>
+          {catH.map(h=><button key={h} onClick={()=>setGroupBy(h)} style={{padding:"0.22rem 0.6rem",border:`1px solid ${groupBy===h?C.gold:C.border2}`,background:groupBy===h?C.goldFaint:"transparent",color:groupBy===h?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{h}</button>)}
+        </div>
+      </div>
+      <div style={{overflowX:"auto",borderRadius:4,border:`1px solid ${C.border}`}}>
+        <table style={{borderCollapse:"collapse",width:"100%",fontSize:11}}>
+          <thead>
+            <tr>
+              <th style={{...thS,textAlign:"left",minWidth:80}}>Variable</th>
+              {groups.map(g=><th key={g} colSpan={5} style={{...thS,textAlign:"center",color:C.gold,minWidth:groupBy?320:260}}>{groupBy?String(g):"Full sample"} {groupBy&&<span style={{color:C.textMuted}}>({rows.filter(r=>r[groupBy]===g).length})</span>}</th>)}
+            </tr>
+            <tr>
+              <th style={{...thS,textAlign:"left"}}/>
+              {groups.map(g=>["Mean","SD","Median","Min","Max"].map(l=><th key={g+l} style={thS}>{l}</th>))}
+            </tr>
+          </thead>
+          <tbody>
+            {numH.map((h,ri)=>(
+              <tr key={h} style={{background:ri%2?C.surface2:C.surface}}>
+                <td style={{...tdS,textAlign:"left",color:C.teal}}>{h}</td>
+                {groups.map(g=>{
+                  const subset=groupBy?rows.filter(r=>r[groupBy]===g):rows;
+                  const s=statsFor(subset,h);
+                  return["mean","std","median","min","max"].map(k=><td key={g+k} style={tdS}>{fmt(s[k])}</td>);
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{marginTop:8,fontSize:10,color:C.textMuted,fontFamily:mono}}>N={rows.length} total observations · {numH.length} numeric variables</div>
+    </div>
+  );
+}
+
+// ─── DISTRIBUTION TAB ─────────────────────────────────────────────────────────
+function DistributionTab({rows,headers,info,panel}){
+  const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+  const [histCol,setHistCol]=useState(numH[0]||"");
+  const [scX,setScX]=useState(numH[0]||""),[scY,setScY]=useState(numH[1]||"");
+  const [spagCol,setSpagCol]=useState(numH[0]||"");
+  const [sub,setSub]=useState("hist");
+  const hasPanel=panel?.entityCol&&panel?.timeCol;
+  const subTabs=[["hist","Histogram"],["scatter","Scatter + OLS"],...(hasPanel?[["spaghetti","Spaghetti"]]:[])]
+
+  return(
+    <div>
+      <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
+        {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
+      </div>
+      {sub==="hist"&&(
+        <div>
+          <Lbl>Variable</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
+            {numH.map(h=><button key={h} onClick={()=>setHistCol(h)} style={{padding:"0.25rem 0.6rem",border:`1px solid ${histCol===h?C.teal:C.border2}`,background:histCol===h?`${C.teal}18`:"transparent",color:histCol===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>{histCol===h?"✓ ":""}{h}</button>)}
+          </div>
+          {histCol&&(()=>{
+            const vals=rows.map(r=>r[histCol]).filter(v=>typeof v==="number"&&isFinite(v));
+            const i=info[histCol];
+            return(
+              <div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1rem"}}>
+                  {[["mean",i?.mean],["std",i?.std],["median",i?.median],["min",i?.min],["max",i?.max]].map(([l,v])=>(
+                    <div key={l} style={{background:C.surface,padding:"0.5rem 0.6rem"}}>
+                      <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:2}}>{l}</div>
+                      <div style={{fontSize:14,color:C.gold,fontFamily:mono}}>{v!=null?v.toFixed(3):"—"}</div>
+                    </div>
+                  ))}
+                </div>
+                <SvgHistogram data={vals} color={C.teal} label={histCol}/>
+                {i?.outliers>0&&<div style={{marginTop:8,fontSize:11,color:C.orange,fontFamily:mono}}>⚠ {i.outliers} IQR-outlier{i.outliers>1?"s":""} detected. Consider winsorizing.</div>}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+      {sub==="scatter"&&(
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1.2rem"}}>
+            {[["X axis",scX,setScX,C.teal],["Y axis",scY,setScY,C.gold]].map(([lbl,val,setter,color])=>(
+              <div key={lbl}><Lbl color={color}>{lbl}</Lbl>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                  {numH.map(h=><button key={h} onClick={()=>setter(h)} style={{padding:"0.22rem 0.5rem",border:`1px solid ${val===h?color:C.border2}`,background:val===h?`${color}18`:"transparent",color:val===h?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{val===h?"✓ ":""}{h}</button>)}
+                </div>
+              </div>
+            ))}
+          </div>
+          {scX&&scY&&scX!==scY&&(()=>{
+            const pairs=rows.filter(r=>typeof r[scX]==="number"&&typeof r[scY]==="number");
+            const xs=pairs.map(r=>r[scX]),ys=pairs.map(r=>r[scY]);
+            const ols=olsSimple(xs,ys);
+            return(
+              <div>
+                <SvgScatter xs={xs} ys={ys} xlbl={scX} ylbl={scY} showOls/>
+                <div style={{marginTop:8,padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono}}>
+                  OLS: <span style={{color:C.gold}}>{scY}</span> = <span style={{color:C.teal}}>{ols.b0.toFixed(4)}</span> + <span style={{color:C.teal}}>{ols.b1.toFixed(4)}</span>·<span style={{color:C.gold}}>{scX}</span> · R²=<span style={{color:C.orange}}>{ols.r2.toFixed(4)}</span> · n={xs.length}
+                </div>
+              </div>
+            );
+          })()}
+          {scX===scY&&<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Select two different variables.</div>}
+        </div>
+      )}
+      {sub==="spaghetti"&&hasPanel&&(
+        <div>
+          <Lbl>Variable to track</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
+            {numH.map(h=><button key={h} onClick={()=>setSpagCol(h)} style={{padding:"0.25rem 0.6rem",border:`1px solid ${spagCol===h?C.orange:C.border2}`,background:spagCol===h?`${C.orange}18`:"transparent",color:spagCol===h?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>{spagCol===h?"✓ ":""}{h}</button>)}
+          </div>
+          {spagCol&&<div>
+            <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:8}}>i={panel.entityCol} · t={panel.timeCol} · showing ≤15 random units</div>
+            <SvgSpaghetti rows={rows} entityCol={panel.entityCol} timeCol={panel.timeCol} col={spagCol} sampleN={15}/>
+          </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AI INSIGHTS ──────────────────────────────────────────────────────────────
+function AIInsights({rows,headers,info,panel}){
+  const [text,setText]=useState(""),[loading,setLoading]=useState(false),[done,setDone]=useState(false);
+  const ran = { current: false };
+
+  function runInsights(){
+    if(ran.current||done) return;
+    ran.current=true;
+    setLoading(true);
+    const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+    const summary=numH.slice(0,6).map(h=>{
+      const i=info[h];
+      return `${h}: mean=${i.mean?.toFixed(3)}, std=${i.std?.toFixed(3)}, min=${i.min?.toFixed(3)}, max=${i.max?.toFixed(3)}, median=${i.median?.toFixed(3)}, NAs=${(i.naPct*100).toFixed(1)}%`;
+    }).join("; ");
+    const panelNote=panel?`Dataset is a ${panel.balance||"panel"} panel with i=${panel.entityCol} and t=${panel.timeCol}.`:"Dataset is cross-sectional.";
+    const prompt=`You are a senior econometrician. Write a concise 3-4 sentence descriptive paragraph (Table 1 prose style, academic tone) about this dataset. Include: total observations, key variables and their distributions (mention skewness or outliers if relevant), any notable patterns. ${panelNote}\n\nStats: ${summary}\n\nObs: ${rows.length}, Cols: ${headers.length}.\n\nRespond ONLY with the prose paragraph, no markdown, no headers.`;
+    fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:prompt}]})})
+      .then(r=>r.json()).then(d=>{const t=d.content?.find(b=>b.type==="text")?.text||"";setText(t);setDone(true);}).catch(()=>setText("AI analysis unavailable.")).finally(()=>setLoading(false));
+  }
+
+  // Run once on mount
+  useState(()=>{runInsights();},[]);
+
+  return(
+    <div style={{padding:"1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.purple}`,borderRadius:4,marginBottom:"1.4rem"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+        <span style={{fontSize:10,color:C.purple,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>✦ AI Insights</span>
+        {loading&&<Spin/>}
+        {done&&<button onClick={()=>{setDone(false);setText("");ran.current=false;setTimeout(runInsights,50);}} style={{marginLeft:"auto",fontSize:9,background:"transparent",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textMuted,cursor:"pointer",fontFamily:mono,padding:"2px 6px"}}>↻ refresh</button>}
+      </div>
+      {loading&&!text&&<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Analyzing dataset…</div>}
+      {text&&<div style={{fontSize:12,color:C.text,lineHeight:1.75,fontFamily:mono}}>{text}</div>}
+      {!loading&&!text&&!done&&<Btn onClick={runInsights} color={C.purple} sm ch="✦ Generate AI insights"/>}
+    </div>
+  );
+}
+
+// ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
+export default function ExplorerModule({cleanedData, onBack, onProceed}) {
+  const {headers, cleanRows:rows, panelIndex:panel} = cleanedData;
+  const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
+  const [tab,setTab] = useState("summary");
+
+  return(
+    <div style={{display:"flex",height:"100%",minHeight:0,background:C.bg,color:C.text,fontFamily:mono,overflow:"hidden"}}>
+      <div style={{flex:1,minWidth:0,overflowY:"auto",padding:"1.4rem",paddingBottom:"3rem"}}>
+        {/* Header */}
+        <div style={{marginBottom:"1.2rem",display:"flex",alignItems:"flex-start",gap:12}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:9,color:C.violet,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>Evidence Explorer</div>
+            <div style={{fontSize:18,color:C.text,letterSpacing:"-0.02em",marginBottom:3}}>Exploratory Analysis</div>
+            <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
+              <span style={{color:C.gold}}>{rows.length}</span> obs ·{" "}
+              <span style={{color:C.teal}}>{headers.filter(h=>info[h]?.isNum).length}</span> numeric ·{" "}
+              <span style={{color:C.purple}}>{headers.filter(h=>info[h]?.isCat).length}</span> categorical
+              {panel&&<span style={{color:C.blue}}> · panel i={panel.entityCol} t={panel.timeCol}</span>}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+            <button onClick={onBack} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:"transparent",border:`1px solid ${C.border2}`,color:C.textDim}}>← Wrangling</button>
+            <button onClick={onProceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>→ Modeling</button>
+          </div>
+        </div>
+        {/* AI Insights */}
+        <AIInsights rows={rows} headers={headers} info={info} panel={panel}/>
+        {/* Tabs */}
+        <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
+          {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"0.6rem 0.7rem",background:tab===k?C.goldFaint:C.surface,border:"none",color:tab===k?C.gold:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,borderBottom:tab===k?`2px solid ${C.gold}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>
+          ))}
+        </div>
+        {tab==="summary"&&<SummaryTable rows={rows} headers={headers} info={info} panel={panel}/>}
+        {tab==="visuals"&&<DistributionTab rows={rows} headers={headers} info={info} panel={panel}/>}
+        {tab==="corr"&&(
+          <div>
+            <div style={{fontSize:11,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
+              Pearson correlation between all numeric variables. Red = negative, Teal = positive.
+            </div>
+            <CorrHeatmap headers={headers} rows={rows} info={info}/>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
