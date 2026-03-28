@@ -126,9 +126,10 @@ export function run2SLS(rows, yCol, endog, exog, instr) {
     const weak = Fstat < 10;
     return { ...res, endVar, firstXCols, Fstat, Fpval, weak };
   });
-  if (firstStages.some(s => !s)) return { error: "First-stage OLS failed — singular matrix or insufficient data." };
+  if (firstStages.some(s => !s))
+    return { error: "First-stage OLS failed — singular matrix or insufficient data." };
 
-  // Second stage with fitted values
+  // Second stage with fitted values (on augmented X̂)
   const augRows = valid.map((r, i) => {
     const aug = { ...r };
     endog.forEach((ev, j) => { aug[`__hat_${ev}`] = firstStages[j].Yhat[i]; });
@@ -136,28 +137,60 @@ export function run2SLS(rows, yCol, endog, exog, instr) {
   });
   const secondXCols = [...endog.map(ev => `__hat_${ev}`), ...exog];
   const secondRes = runOLS(augRows, yCol, secondXCols);
-  if (!secondRes) return { error: "Second-stage OLS failed — singular matrix." };
+  if (!secondRes)
+    return { error: "Second-stage OLS failed — singular matrix." };
 
-  // Correct SE using true residuals
-  const Y = valid.map(r => r[yCol]);
-  const X2 = valid.map(r => [1, ...endog.map(ev => r[ev]), ...exog.map(c => r[c])]);
-  const trueResid = Y.map((y, i) => y - X2[i].reduce((s, v, j) => s + v * secondRes.beta[j], 0));
+  // ── Correct SE: σ̂² = (y − X·β_IV)′(y − X·β_IV) / (n − k) ─────────────────
+  // Use ORIGINAL X (not X̂) with IV coefficients — this is the textbook IV SE formula.
+  // secondRes.beta is indexed as [intercept, endog..., exog...]
+  // X2 columns: [1, endog..., exog...] — aligned with secondRes.beta
+  const k  = 1 + endog.length + exog.length;   // intercept + all regressors
+  const df = n - k;
+  if (df <= 0) return { error: "Degrees of freedom ≤ 0 — add more observations or reduce regressors." };
+
+  const Y   = valid.map(r => r[yCol]);
+  const X2  = valid.map(r => [1, ...endog.map(ev => r[ev]), ...exog.map(c => r[c])]);
+
+  // True residuals from original X
+  const trueResid = Y.map((y, i) =>
+    y - X2[i].reduce((s, v, j) => s + v * (secondRes.beta[j] ?? 0), 0)
+  );
   const trueSSR = trueResid.reduce((s, e) => s + e * e, 0);
-  const trueS2 = trueSSR / secondRes.df;
-  const Xt = transpose(X2);
+  const trueS2  = trueSSR / df;
+
+  // IV variance-covariance: (X′X)⁻¹ · σ̂²
+  const Xt     = transpose(X2);
   const XtXinv = matInv(matMul(Xt, X2));
-  const corrSE = XtXinv ? XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * trueS2))) : secondRes.se;
-  const corrT = secondRes.beta.map((b, i) => b / corrSE[i]);
-  const corrP = corrT.map(t => pValue(t, secondRes.df));
-  const Ym = Y.reduce((a, b) => a + b, 0) / n;
-  const SST = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
-  const R2 = 1 - trueSSR / SST;
-  const adjR2 = 1 - (1 - R2) * (n - 1) / secondRes.df;
+  if (!XtXinv) return { error: "Matrix is singular (check for perfect collinearity or weak instruments)." };
+
+  // Build corrected arrays — length must match k exactly
+  const corrSE = XtXinv.map((row, i) => {
+    const v = row[i] * trueS2;
+    return (isFinite(v) && v >= 0) ? Math.sqrt(v) : NaN;
+  });
+  const corrT = secondRes.beta.map((b, i) => {
+    const s = corrSE[i];
+    return (isFinite(b) && isFinite(s) && s > 0) ? b / s : NaN;
+  });
+  const corrP = corrT.map(t => isFinite(t) ? pValue(t, df) : NaN);
+
+  const Ym    = Y.reduce((a, b) => a + b, 0) / n;
+  const SST   = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
+  const R2    = SST > 0 ? 1 - trueSSR / SST : NaN;
+  const adjR2 = isFinite(R2) ? 1 - (1 - R2) * (n - 1) / df : NaN;
+
+  // varNames aligned with X2 column order (intercept first)
   const varNames = ["(Intercept)", ...endog, ...exog];
+
+  // Sanity-check: arrays must all be length k
+  const beta = secondRes.beta.slice(0, k);
 
   return {
     firstStages,
-    second: { beta: secondRes.beta, se: corrSE, tStats: corrT, pVals: corrP, R2, adjR2, n, df: secondRes.df, varNames }
+    second: {
+      beta, se: corrSE, tStats: corrT, pVals: corrP,
+      R2, adjR2, n, df, varNames,
+    }
   };
 }
 
@@ -200,7 +233,7 @@ export function runFE(rows, yCol, xCols, unitCol, timeCol) {
   const res = runOLS(demeaned, dmY, dmX);
   if (!res) return { error: "Within-group OLS failed — singular matrix after demeaning." };
   const df_fe = valid.length - units.length - xCols.length;
-  if (df_fe <= 0) return { error: "Singular matrix or insufficient observations — degrees of freedom ≤ 0." };
+  if (df_fe <= 0) return { error: "Degrees of freedom ≤ 0 after demeaning — add more observations or reduce regressors." };
   const s2_fe = res.SSR / df_fe;
   const Xmat = demeaned.map(r => [1, ...dmX.map(x => r[x])]);
   const Xt = transpose(Xmat);

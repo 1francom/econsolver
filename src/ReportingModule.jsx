@@ -25,13 +25,22 @@ const C = {
 };
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
+// ─── SAFE NUMBER FORMATTER ────────────────────────────────────────────────────
+// Central utility: returns val.toFixed(dp) for valid finite numbers, 'N/A' for
+// anything else (null, undefined, NaN, Infinity). Used everywhere a number is
+// displayed so a single bad value can never crash the render cycle.
+function safeNum(val, dp = 4) {
+  if (val == null || !isFinite(val)) return "N/A";
+  return val.toFixed(dp);
+}
+
 // ─── RESULT NORMALISER ────────────────────────────────────────────────────────
 // Different estimators return slightly different shapes. This gives us one
 // consistent object the rest of the module can rely on.
 function normaliseResult(raw) {
   if (!raw) return null;
 
-  // Engine returned an error object instead of results — surface it cleanly
+  // Engine returned an error object — surface it cleanly
   if (raw.error) return { __error: raw.error };
 
   // 2SLS wraps everything in raw.second
@@ -45,9 +54,20 @@ function normaliseResult(raw) {
     modelLabel = "OLS", yVar = "y", xVars = [],
   } = core;
 
-  return { varNames, beta, se, tStats, pVals, R2, adjR2, n, df, Fstat, Fpval,
-           att, attSE, attP, modelLabel, yVar, xVars,
-           firstStages: raw.firstStages ?? null };
+  // Sanitise every numeric array: replace undefined/null entries with NaN so
+  // downstream guards (isFinite) work uniformly instead of crashing on .toFixed()
+  const clean = arr => (arr ?? []).map(v => (v == null ? NaN : v));
+
+  return {
+    varNames: varNames ?? [],
+    beta:   clean(beta),
+    se:     clean(se),
+    tStats: clean(tStats),
+    pVals:  clean(pVals),
+    R2, adjR2, n, df, Fstat, Fpval,
+    att, attSE, attP, modelLabel, yVar, xVars,
+    firstStages: raw.firstStages ?? null,
+  };
 }
 
 // ─── AI CALL ──────────────────────────────────────────────────────────────────
@@ -211,12 +231,12 @@ function ForestPlot({ varNames, beta, se, pVals }) {
               {/* β value + stars */}
               <text x={PAD.l + iW + 8} y={cy + 4} textAnchor="start"
                     fill={dotC} fontSize={9.5} fontFamily={mono}>
-                {d.b > 0 ? "+" : ""}{d.b.toFixed(3)}{stars(d.p)}
+                {isFinite(d.b) && d.b > 0 ? "+" : ""}{safeNum(d.b, 3)}{stars(d.p)}
               </text>
               {/* p-value hint */}
               <text x={PAD.l + iW + 8} y={cy + 15} textAnchor="start"
                     fill={C.textMuted} fontSize={8} fontFamily={mono}>
-                p={d.p < 0.001 ? "<.001" : d.p.toFixed(3)}
+                p={!isFinite(d.p) ? "N/A" : d.p < 0.001 ? "<.001" : safeNum(d.p, 3)}
               </text>
             </g>
           );
@@ -228,7 +248,7 @@ function ForestPlot({ varNames, beta, se, pVals }) {
         {ticks.map((t, i) => (
           <text key={i} x={sx(t)} y={H - PAD.b + 12}
                 textAnchor="middle" fill={C.textMuted} fontSize={8}>
-            {t === 0 ? "0" : t.toFixed(2)}
+            {t === 0 ? "0" : safeNum(t, 2)}
           </text>
         ))}
         <text x={PAD.l + iW / 2} y={H - 3}
@@ -298,9 +318,9 @@ function buildStargazer(models) {
   // Fit stats
   rows.push(`  \\hline`);
   rows.push(`  $R^2$${sep}${models.map(m =>
-    m.result.R2 != null ? m.result.R2.toFixed(4).padStart(12) : dash).join(sep)} \\\\`);
+    (m.result.R2 != null && isFinite(m.result.R2)) ? m.result.R2.toFixed(4).padStart(12) : dash).join(sep)} \\\\`);
   rows.push(`  Adj. $R^2$${sep}${models.map(m =>
-    m.result.adjR2 != null ? m.result.adjR2.toFixed(4).padStart(12) : dash).join(sep)} \\\\`);
+    (m.result.adjR2 != null && isFinite(m.result.adjR2)) ? m.result.adjR2.toFixed(4).padStart(12) : dash).join(sep)} \\\\`);
   rows.push(`  $n$${sep}${models.map(m =>
     m.result.n != null ? String(m.result.n).padStart(12) : dash).join(sep)} \\\\`);
 
@@ -362,9 +382,10 @@ function LatexPanel({ result, modelLabel, yVar }) {
   );
 }
 
-// ─── RDD SCATTER PLOT ─────────────────────────────────────────────────────────
+// ─── RDD BINNED SCATTER PLOT ──────────────────────────────────────────────────
 // Pure SVG — no external libs.
-// Shows binned raw data + two fitted regression lines (left/right of cutoff) + vertical threshold line.
+// Bins raw data (~20 bins per side) for performance, draws two fitted lines
+// (local linear from engine) that meet/jump at the cutoff threshold.
 function RDDScatterPlot({ rddResult }) {
   const { valid, xc, D, Y, leftFit, rightFit, cutoff, h, kernelType } = rddResult ?? {};
 
@@ -374,59 +395,51 @@ function RDDScatterPlot({ rddResult }) {
     </div>
   );
 
-  // ── Bin the raw data into ~20 bins per side for performance ──────────────────
-  const BIN_COUNT = 20;
-  const binSide = (pts, nbins) => {
+  // Bin each side into ≤20 mean-points for performance
+  const binSide = (pts, nbins = 20) => {
     if (!pts.length) return [];
     const xs = pts.map(p => p.x);
-    const lo = Math.min(...xs), hi = Math.max(...xs);
-    const bw = (hi - lo) / nbins || 1;
-    const bins = Array.from({ length: nbins }, (_, i) => {
-      const bLo = lo + i * bw, bHi = lo + (i + 1) * bw;
-      const inside = pts.filter(p => p.x >= bLo && p.x < bHi);
+    const lo = Math.min(...xs), rng = (Math.max(...xs) - lo) || 1;
+    const bw = rng / nbins;
+    return Array.from({ length: nbins }, (_, i) => {
+      const inside = pts.filter(p => p.x >= lo + i * bw && p.x < lo + (i + 1) * bw);
       if (!inside.length) return null;
       return {
         x: inside.reduce((s, p) => s + p.x, 0) / inside.length,
         y: inside.reduce((s, p) => s + p.y, 0) / inside.length,
       };
-    });
-    return bins.filter(Boolean);
+    }).filter(Boolean);
   };
 
-  const runCol = Object.keys(valid[0]).find(k => !k.startsWith("__")) ?? "";
-  const rawLeft  = valid.map((r, i) => ({ x: xc[i] + cutoff, y: Y[i] })).filter((_, i) => D[i] === 0);
-  const rawRight = valid.map((r, i) => ({ x: xc[i] + cutoff, y: Y[i] })).filter((_, i) => D[i] === 1);
-  const binnedLeft  = binSide(rawLeft,  BIN_COUNT);
-  const binnedRight = binSide(rawRight, BIN_COUNT);
+  const rawLeft  = valid.map((_, i) => ({ x: xc[i] + cutoff, y: Y[i] })).filter((_, i) => D[i] === 0);
+  const rawRight = valid.map((_, i) => ({ x: xc[i] + cutoff, y: Y[i] })).filter((_, i) => D[i] === 1);
+  const bL = binSide(rawLeft);
+  const bR = binSide(rawRight);
 
-  // ── SVG layout ───────────────────────────────────────────────────────────────
-  const W = 620, H = 320;
-  const PAD = { l: 52, r: 24, t: 20, b: 40 };
-  const iW = W - PAD.l - PAD.r;
-  const iH = H - PAD.t - PAD.b;
+  // Layout
+  const W = 620, H = 300;
+  const PAD = { l: 52, r: 24, t: 22, b: 42 };
+  const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
 
-  const allX = [...binnedLeft, ...binnedRight, ...(leftFit ?? []), ...(rightFit ?? [])].map(p => p.x);
-  const allY = [...binnedLeft, ...binnedRight, ...(leftFit ?? []), ...(rightFit ?? [])].map(p => p.y ?? p.yhat);
+  const allPts = [...bL, ...bR, ...(leftFit ?? []), ...(rightFit ?? [])];
+  const allX = allPts.map(p => p.x ?? 0), allY = allPts.map(p => p.y ?? p.yhat ?? 0);
   const xLo = Math.min(...allX), xHi = Math.max(...allX);
   const yLo = Math.min(...allY), yHi = Math.max(...allY);
-  const xRange = xHi - xLo || 1, yRange = yHi - yLo || 1;
-  const xPad = xRange * 0.04, yPad = yRange * 0.08;
+  const xR = (xHi - xLo) || 1, yR = (yHi - yLo) || 1;
+  const xPad = xR * 0.04, yPad = yR * 0.1;
 
-  const sx = x => PAD.l + ((x - xLo + xPad) / (xRange + 2 * xPad)) * iW;
-  const sy = y => PAD.t + iH - ((y - yLo + yPad) / (yRange + 2 * yPad)) * iH;
-
-  // Cutoff x position in SVG coords
+  const sx = x  => PAD.l + ((x - xLo + xPad) / (xR + 2 * xPad)) * iW;
+  const sy = y  => PAD.t + iH - ((y - yLo + yPad) / (yR + 2 * yPad)) * iH;
   const cx0 = sx(cutoff);
 
-  // Fit line paths
-  const fitPath = (pts, accessor) => {
+  const linePath = (pts, acc) => {
     if (!pts || pts.length < 2) return "";
-    const sorted = [...pts].sort((a, b) => a.x - b.x);
-    return sorted.map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p.x).toFixed(1)} ${sy(accessor(p)).toFixed(1)}`).join(" ");
+    return [...pts].sort((a, b) => a.x - b.x)
+      .map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x).toFixed(1)} ${sy(acc(p)).toFixed(1)}`)
+      .join(" ");
   };
 
-  // Y-axis ticks
-  const yTicks = Array.from({ length: 5 }, (_, i) => yLo - yPad + ((yRange + 2 * yPad) * i) / 4);
+  const yTicks = Array.from({ length: 5 }, (_, i) => yLo - yPad + ((yR + 2 * yPad) * i) / 4);
 
   return (
     <div style={{ overflowX: "auto" }}>
@@ -434,83 +447,68 @@ function RDDScatterPlot({ rddResult }) {
            style={{ width: "100%", minWidth: 400, display: "block", fontFamily: mono }}>
         <rect width={W} height={H} fill={C.bg} />
 
-        {/* Grid lines */}
+        {/* Horizontal grid */}
         {yTicks.map((t, i) => (
-          <line key={i}
-            x1={PAD.l} x2={PAD.l + iW}
-            y1={sy(t)} y2={sy(t)}
-            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" />
+          <line key={i} x1={PAD.l} x2={PAD.l + iW} y1={sy(t)} y2={sy(t)}
+                stroke={C.border} strokeWidth={1} strokeDasharray="3 3" />
         ))}
 
-        {/* Left raw scatter */}
-        {binnedLeft.map((p, i) => (
-          <circle key={`L${i}`}
-            cx={sx(p.x)} cy={sy(p.y)} r={3.5}
-            fill={C.blue} opacity={0.55} />
+        {/* Control-side scatter */}
+        {bL.map((p, i) => (
+          <circle key={`L${i}`} cx={sx(p.x)} cy={sy(p.y)} r={3.5}
+                  fill={C.blue} opacity={0.55} />
         ))}
-        {/* Right raw scatter */}
-        {binnedRight.map((p, i) => (
-          <circle key={`R${i}`}
-            cx={sx(p.x)} cy={sy(p.y)} r={3.5}
-            fill={C.orange} opacity={0.55} />
+        {/* Treatment-side scatter */}
+        {bR.map((p, i) => (
+          <circle key={`R${i}`} cx={sx(p.x)} cy={sy(p.y)} r={3.5}
+                  fill={C.orange} opacity={0.55} />
         ))}
 
         {/* Fitted lines */}
-        {leftFit && leftFit.length >= 2 && (
-          <path d={fitPath(leftFit, p => p.yhat)}
-                fill="none" stroke={C.blue} strokeWidth={2} opacity={0.9} />
-        )}
-        {rightFit && rightFit.length >= 2 && (
-          <path d={fitPath(rightFit, p => p.yhat)}
-                fill="none" stroke={C.orange} strokeWidth={2} opacity={0.9} />
-        )}
+        {leftFit  && <path d={linePath(leftFit,  p => p.yhat)} fill="none" stroke={C.blue}   strokeWidth={2} opacity={0.9} />}
+        {rightFit && <path d={linePath(rightFit, p => p.yhat)} fill="none" stroke={C.orange} strokeWidth={2} opacity={0.9} />}
 
-        {/* Vertical cutoff line */}
+        {/* Cutoff threshold */}
         {cx0 >= PAD.l && cx0 <= PAD.l + iW && (
           <>
             <line x1={cx0} x2={cx0} y1={PAD.t} y2={PAD.t + iH}
                   stroke={C.gold} strokeWidth={1.5} strokeDasharray="6 3" opacity={0.85} />
-            <text x={cx0 + 4} y={PAD.t + 12}
-                  fill={C.gold} fontSize={9} fontFamily={mono}>
+            <text x={cx0 + 5} y={PAD.t + 13} fill={C.gold} fontSize={9} fontFamily={mono}>
               c = {cutoff}
             </text>
           </>
         )}
 
         {/* Axes */}
-        <line x1={PAD.l} x2={PAD.l + iW} y1={PAD.t + iH} y2={PAD.t + iH}
-              stroke={C.border2} strokeWidth={1} />
-        <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t + iH}
-              stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} x2={PAD.l + iW} y1={PAD.t + iH} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} x2={PAD.l}       y1={PAD.t}       y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
 
         {/* Y-axis labels */}
         {yTicks.map((t, i) => (
-          <text key={i} x={PAD.l - 6} y={sy(t) + 3}
-                textAnchor="end" fill={C.textMuted} fontSize={8}>
-            {Math.abs(t) < 0.01 && t !== 0 ? t.toExponential(1) : t.toFixed(2)}
+          <text key={i} x={PAD.l - 5} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8}>
+            {safeNum(t, 2)}
           </text>
         ))}
 
         {/* X-axis label */}
-        <text x={PAD.l + iW / 2} y={H - 4}
-              textAnchor="middle" fill={C.textMuted} fontSize={8}>
-          Running variable · bandwidth h = {h?.toFixed(3) ?? "?"} · kernel: {kernelType}
+        <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textMuted} fontSize={8}>
+          Running variable · h = {safeNum(h, 3)} · kernel: {kernelType ?? "—"}
         </text>
 
         {/* Legend */}
-        <circle cx={PAD.l + 12} cy={PAD.t + 10} r={4} fill={C.blue} opacity={0.7} />
-        <text x={PAD.l + 20} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Control side</text>
-        <circle cx={PAD.l + 90} cy={PAD.t + 10} r={4} fill={C.orange} opacity={0.7} />
-        <text x={PAD.l + 98} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Treatment side</text>
-        <line x1={PAD.l + 170} x2={PAD.l + 188} y1={PAD.t + 10} y2={PAD.t + 10}
-              stroke={C.gold} strokeWidth={1.5} strokeDasharray="4 2" />
-        <text x={PAD.l + 192} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Cutoff</text>
+        <circle cx={PAD.l + 10} cy={PAD.t + 10} r={4} fill={C.blue}   opacity={0.7} />
+        <text x={PAD.l + 18} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Control side</text>
+        <circle cx={PAD.l + 88} cy={PAD.t + 10} r={4} fill={C.orange} opacity={0.7} />
+        <text x={PAD.l + 96} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Treatment side</text>
+        <line  x1={PAD.l + 168} x2={PAD.l + 186} y1={PAD.t + 10} y2={PAD.t + 10}
+               stroke={C.gold} strokeWidth={1.5} strokeDasharray="4 2" />
+        <text x={PAD.l + 190} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Cutoff</text>
       </svg>
     </div>
   );
 }
 
-
+// ─── 3. AI NARRATIVE ──────────────────────────────────────────────────────────
 // Delegates to AIService.interpretRegression which handles:
 //   - Functional form detection (log-log / log-level / level-log)
 //   - Natural language phrasing from dataDictionary
@@ -715,16 +713,18 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
 // ─── FIT STATS SUMMARY BAR ────────────────────────────────────────────────────
 function FitBar({ result }) {
   const { R2, adjR2, n, df, Fstat, Fpval, modelLabel } = result;
-  const fmt = (v, d = 4) => (v != null && isFinite(v)) ? v.toFixed(d) : "—";
   const items = [
-    { l: "Model",    v: modelLabel ?? "—",                                    c: C.gold },
-    { l: "R²",       v: fmt(R2),                                              c: C.teal },
-    { l: "Adj. R²",  v: fmt(adjR2),                                           c: C.teal },
-    { l: "n",        v: n     != null ? n                : "—",               c: C.text },
-    { l: "df",       v: df    != null ? df               : "—",               c: C.textDim },
+    { l: "Model",    v: modelLabel ?? "—",               c: C.gold },
+    { l: "R²",       v: safeNum(R2),                     c: C.teal },
+    { l: "Adj. R²",  v: safeNum(adjR2),                  c: C.teal },
+    { l: "n",        v: n  != null ? n  : "—",           c: C.text },
+    { l: "df",       v: df != null ? df : "—",           c: C.textDim },
     ...(Fstat != null && isFinite(Fstat)
-      ? [{ l: "F-stat",  v: fmt(Fstat, 3),                                    c: C.orange },
-         { l: "F p-val", v: Fpval != null ? (Fpval < 0.001 ? "<.001" : fmt(Fpval)) : "—", c: C.orange }]
+      ? [
+          { l: "F-stat",  v: safeNum(Fstat, 3),           c: C.orange },
+          { l: "F p-val", v: (Fpval != null && isFinite(Fpval))
+              ? (Fpval < 0.001 ? "<.001" : safeNum(Fpval)) : "—",    c: C.orange },
+        ]
       : []),
   ];
   return (
@@ -769,11 +769,11 @@ function SigCallout({ result }) {
         }}>
           <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 2 }}>{d.v}</div>
           <div style={{ fontSize: 13, color: d.b >= 0 ? C.teal : C.red }}>
-            {d.b >= 0 ? "+" : ""}{d.b?.toFixed(4) ?? "N/A"}
+            {d.b >= 0 ? "+" : ""}{safeNum(d.b)}
             <span style={{ fontSize: 9, color: C.gold, marginLeft: 4 }}>{stars(d.p)}</span>
           </div>
           <div style={{ fontSize: 9, color: C.textMuted }}>
-            95% CI [{(d.b - 1.96 * d.s)?.toFixed(3) ?? "N/A"}, {(d.b + 1.96 * d.s)?.toFixed(3) ?? "N/A"}]
+            95% CI [{safeNum(d.b - 1.96 * d.s, 3)}, {safeNum(d.b + 1.96 * d.s, 3)}]
           </div>
         </div>
       ))}
@@ -785,9 +785,12 @@ function SigCallout({ result }) {
 export default function ReportingModule({ result: rawResult, cleanedData, onClose }) {
   const [tab, setTab] = useState("forest");
 
+  // ── Debug: log raw result so any NaN/undefined shows in console ──────────────
+  console.log("DEBUG_RESULTS:", rawResult);
+
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
 
-  // Detect if this is an RDD result — raw shape has .valid, .leftFit, .rightFit
+  // Detect Sharp RDD — raw result carries .valid / .leftFit / .rightFit
   const isRDD = !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
 
   if (!result) return (
@@ -796,48 +799,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
     </div>
   );
 
-  // ── Safety guard: engine returned an error object ──────────────────────────
-  if (result.__error) return (
-    <div style={{ background: C.bg, color: C.text, fontFamily: mono,
-                  height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ flexShrink: 0, borderBottom: `1px solid ${C.border}`,
-                    padding: "0.75rem 1.4rem", background: C.surface,
-                    display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ flex: 1, fontSize: 9, color: C.red, letterSpacing: "0.26em",
-                      textTransform: "uppercase" }}>Estimation Error</div>
-        {onClose && (
-          <button onClick={onClose}
-            style={{ background: "transparent", border: `1px solid ${C.border2}`,
-                     borderRadius: 3, color: C.textMuted, cursor: "pointer",
-                     fontFamily: mono, fontSize: 10, padding: "0.3rem 0.7rem" }}>
-            ✕ Close
-          </button>
-        )}
-      </div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center",
-                    justifyContent: "center", padding: "3rem 2rem" }}>
-        <div style={{ maxWidth: 480, padding: "1.5rem 1.8rem",
-                      background: "#0d0808", border: `1px solid ${C.red}40`,
-                      borderLeft: `3px solid ${C.red}`, borderRadius: 4 }}>
-          <div style={{ fontSize: 10, color: C.red, letterSpacing: "0.2em",
-                        textTransform: "uppercase", marginBottom: 10, fontFamily: mono }}>
-            ⚠ Estimation Failed
-          </div>
-          <div style={{ fontSize: 13, color: C.text, fontFamily: mono,
-                        lineHeight: 1.7, marginBottom: 12 }}>
-            {result.__error}
-          </div>
-          <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.6 }}>
-            Common causes: perfect multicollinearity, insufficient observations relative to
-            parameters, singular instrument matrix, or degrees of freedom ≤ 0 after
-            within-transformation. Review your variable selection in the Modeling Lab.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Safety guard — engine returned an error object instead of valid results
+  // ── Safety guard: engine returned an error instead of valid results ───────────
   if (result.__error) return (
     <div style={{ padding: "2rem", fontFamily: mono }}>
       <div style={{
@@ -969,13 +931,13 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
             <Lbl color={C.orange}>Sharp RDD · Binned Scatter + Fitted Lines</Lbl>
             <div style={{ marginBottom: "0.8rem", fontSize: 11, color: C.textDim,
                           fontFamily: mono, lineHeight: 1.6 }}>
-              <span style={{ color: C.blue }}>● Blue</span> = control side ·{" "}
+              <span style={{ color: C.blue }}>● Blue</span> = control side (running var &lt; cutoff) ·{" "}
               <span style={{ color: C.orange }}>● Orange</span> = treatment side ·{" "}
-              Lines are local linear fits within bandwidth.{" "}
+              Lines are local linear fits (kernel-weighted).{" "}
               <span style={{ color: C.gold }}>— Dashed</span> = cutoff threshold.
             </div>
             <div style={{ border: `1px solid ${C.border}`, borderRadius: 4,
-                          padding: "0.5rem", background: C.bg }}>
+                          padding: "0.5rem", background: C.bg, marginBottom: "1rem" }}>
               <RDDScatterPlot rddResult={rawResult} />
             </div>
           </div>

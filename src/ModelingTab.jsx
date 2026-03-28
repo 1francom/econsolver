@@ -116,8 +116,9 @@ function RegressionEquation({ varNames, beta, yVar }) {
     .map((v, i) => ({ v, b: beta[i] }))
     .filter(({ v }) => v !== "(Intercept)");
 
-  // Format a coefficient value to 4 dp, never -0.0000
+  // Format a coefficient value to 4 dp — safe against NaN/undefined/Infinity
   const fmt = b => {
+    if (b == null || !isFinite(b)) return "N/A";
     const s = Math.abs(b).toFixed(4);
     return s === "0.0000" ? "0.0000" : s;
   };
@@ -155,12 +156,13 @@ function RegressionEquation({ varNames, beta, yVar }) {
 
         {/* Regressors */}
         {regressors.map(({ v, b }, i) => {
-          const op = b >= 0 ? " + " : " – ";
+          const bOk = b != null && isFinite(b);
+          const op = (bOk && b < 0) ? " – " : " + ";
           const varLabel = v.replace(/_/g, "​_");  // allow soft-wrap on underscores
           return (
             <span key={v}>
               <span style={{ color: C.textMuted }}>{op}</span>
-              <span style={{ color: b >= 0 ? C.teal : C.red }}>{fmt(b)}</span>
+              <span style={{ color: bOk ? (b >= 0 ? C.teal : C.red) : C.textMuted }}>{fmt(b)}</span>
               <span style={{ color: C.textMuted }}>·</span>
               <span style={{ color: C.text }}>{varLabel}</span>
             </span>
@@ -788,17 +790,18 @@ export default function ModelingTab({ cleanedData, onBack }) {
       } else if (model === "FE" || model === "FD") {
         if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
         const ec = panel.entityCol, tc = panel.timeCol;
-        const fe = runFE(rows, y, allX, ec, tc);
-        const fd = runFD(rows, y, allX, ec, tc);
-        // Unwrap error objects — treat them as null for display purposes
-        const feResult = fe?.error ? null : fe;
-        const fdResult = fd?.error ? null : fd;
-        const feErr = fe?.error ?? null;
-        const fdErr = fd?.error ?? null;
-        setPanelFE(feResult);
-        setPanelFD(fdResult);
-        if (!feResult && !fdResult) { setErr(feErr ?? fdErr ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid."); setRunning(false); return; }
-        setResult({ type: model, fe: feResult, fd: fdResult, y, x: allX });
+        const feRaw = runFE(rows, y, allX, ec, tc);
+        const fdRaw = runFD(rows, y, allX, ec, tc);
+        // Unwrap error objects — surface the message, treat as null for render
+        const fe = feRaw?.error ? null : feRaw;
+        const fd = fdRaw?.error ? null : fdRaw;
+        setPanelFE(fe);
+        setPanelFD(fd);
+        if (!fe && !fd) {
+          setErr(feRaw?.error ?? fdRaw?.error ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid.");
+          setRunning(false); return;
+        }
+        setResult({ type: model, fe, fd, y, x: allX });
 
       } else if (model === "2SLS") {
         if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
@@ -1338,11 +1341,11 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
                     Local Average Treatment Effect (LATE) at cutoff = {r.cutoff}
                   </div>
-                  <div style={{ fontSize: 24, color: r.lateP < 0.05 ? C.orange : C.textDim }}>
-                    {r.late >= 0 ? "+" : ""}{r.late.toFixed(4)}{stars(r.lateP)}
+                  <div style={{ fontSize: 24, color: r.lateP != null && r.lateP < 0.05 ? C.orange : C.textDim }}>
+                    {r.late != null && isFinite(r.late) ? (r.late >= 0 ? "+" : "") + r.late.toFixed(4) : "N/A"}{r.lateP != null ? stars(r.lateP) : ""}
                   </div>
                   <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
-                    SE = {r.lateSE.toFixed(4)} · p = {r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)} · Kernel: {r.kernelType}
+                    SE = {r.lateSE != null && isFinite(r.lateSE) ? r.lateSE.toFixed(4) : "N/A"} · p = {r.lateP != null && isFinite(r.lateP) ? (r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)) : "N/A"} · Kernel: {r.kernelType}
                   </div>
                 </div>
                 <FitBar items={[
