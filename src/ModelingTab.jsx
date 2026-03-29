@@ -697,6 +697,153 @@ function VarPanel({ title, color, vars, selected, onToggle, multi = true, info }
   );
 }
 
+// ─── PANEL FE/FD RESULTS SUB-COMPONENT ───────────────────────────────────────
+// Extracted from inline IIFE to satisfy React Rules of Hooks (useState must be
+// called at the top level of a React function component, never inside a callback).
+function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, openReport }) {
+  const [tab, setTab] = useState("fe");
+  const fe = result.fe;
+  const fd = result.fd;
+  const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
+  const active = tab === "fe" ? fe : fd;
+  const safeR = (v) => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 10, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>Panel Results</span>
+        {panel && <Badge label={`${panel.entityCol} × ${panel.timeCol}`} color={C.blue} />}
+      </div>
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+        {[["fe", "Fixed Effects (Within)"], ["fd", "First Differences"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{
+              flex: 1, padding: "0.6rem 1rem",
+              background: tab === k ? C.goldFaint : C.surface,
+              border: "none", color: tab === k ? C.gold : C.textDim,
+              cursor: "pointer", fontFamily: mono, fontSize: 11,
+              borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent",
+              transition: "all 0.15s",
+            }}>
+            {l}
+          </button>
+        ))}
+      </div>
+      {active && (
+        <>
+          <FitBar items={[
+            { label: tab === "fe" ? "R² within"  : "R²",      value: safeR(tab === "fe" ? active.R2_within  : active.R2),    color: C.blue },
+            { label: tab === "fe" ? "R² between" : "Adj. R²", value: safeR(tab === "fe" ? active.R2_between : active.adjR2), color: C.blue },
+            { label: "n",     value: active.n,     color: C.text },
+            { label: "Units", value: active.units, color: C.textDim },
+            { label: "df",    value: active.df,    color: C.textDim },
+          ]} />
+          <Lbl color={C.textMuted}>Coefficient Table — {tab === "fe" ? "FE" : "FD"}</Lbl>
+          <div style={{ marginBottom: "1.2rem" }}>
+            <CoeffTable varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.tStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
+          </div>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem", background: C.bg }}>
+            <ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} />
+          </div>
+        </>
+      )}
+      {hausman && (
+        <InfoBox color={parseFloat(hausman.pVal) < 0.05 ? C.red : C.green}>
+          Hausman test: H = {hausman.H} · df = {hausman.df} · p = {hausman.pVal} ·{" "}
+          {parseFloat(hausman.pVal) < 0.05
+            ? "⚠ Reject H₀ — FE and FD differ. Investigate serial correlation."
+            : "✓ FE preferred (consistent and more efficient)."}
+        </InfoBox>
+      )}
+      <DiagnosticsPanel panelFE={panelFE} panelFD={panelFD} xColsPanel={[...xVars, ...wVars]} />
+      {active && (
+        <ExportBar
+          yVar={yVar[0]}
+          results={{ ...active, varNames: active.varNames || xVars }}
+          model={tab.toUpperCase()}
+          onReport={() => openReport({
+            ...active,
+            varNames: active.varNames || xVars,
+            modelLabel: tab === "fe" ? "Fixed Effects" : "First Differences",
+            yVar: yVar[0],
+            xVars: [...xVars, ...wVars],
+          })}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── 2SLS RESULTS SUB-COMPONENT ──────────────────────────────────────────────
+function TwoSLSResults({ result, yVar, xVars, openReport }) {
+  const [tab, setTab] = useState("second");
+  const { firstStages, second } = result;
+  const safeR = (v) => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>2SLS / IV Results</span>
+        <Badge label={`n = ${second.n}`} color={C.textDim} />
+      </div>
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+        {[["second", "Second Stage (Structural)"], ...firstStages.map((s, i) => [`fs_${i}`, `First Stage: ${s.endVar}`])].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{
+              flex: 1, padding: "0.6rem 0.8rem",
+              background: tab === k ? C.goldFaint : C.surface,
+              border: "none", color: tab === k ? C.gold : C.textDim,
+              cursor: "pointer", fontFamily: mono, fontSize: 11,
+              borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent",
+              transition: "all 0.15s",
+            }}>
+            {l}
+          </button>
+        ))}
+      </div>
+      {tab === "second" && (
+        <>
+          <FitBar items={[
+            { label: "R²",      value: safeR(second.R2),    color: C.gold },
+            { label: "Adj. R²", value: safeR(second.adjR2), color: C.gold },
+            { label: "n",  value: second.n,  color: C.text },
+            { label: "df", value: second.df, color: C.textDim },
+          ]} />
+          <Lbl color={C.textMuted}>Second Stage Coefficients</Lbl>
+          <div style={{ marginBottom: "1.2rem" }}>
+            <CoeffTable varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.tStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
+          </div>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem" }}>
+            <ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} />
+          </div>
+          <ExportBar
+            yVar={yVar[0]}
+            results={second}
+            model="2SLS"
+            onReport={() => openReport({ second, firstStages, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
+          />
+        </>
+      )}
+      {firstStages.map((fs, i) => tab === `fs_${i}` && (
+        <div key={i}>
+          <FitBar items={[
+            { label: "R²",     value: safeR(fs.R2),                                         color: C.gold },
+            { label: "F-stat", value: (fs.Fstat != null && isFinite(fs.Fstat)) ? fs.Fstat.toFixed(3) : "—", color: fs.weak ? C.red : C.green, hint: "F < 10 → weak instrument" },
+            { label: "Weak?",  value: fs.weak ? "YES ⚠" : "No",                             color: fs.weak ? C.red : C.green },
+            { label: "n",      value: fs.n,                                                  color: C.text },
+          ]} />
+          {fs.weak && (
+            <InfoBox color={C.red}>
+              ⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. Stock-Yogo threshold is F &gt; 10. 2SLS estimates may be biased toward OLS.
+            </InfoBox>
+          )}
+          <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── MODELS CONFIG ────────────────────────────────────────────────────────────
 const MODELS = [
   { id: "OLS", label: "OLS", color: C.green, desc: "Ordinary Least Squares" },
@@ -1145,127 +1292,28 @@ export default function ModelingTab({ cleanedData, onBack }) {
           })()}
 
           {/* ── PANEL FE / FD RESULTS ── */}
-          {(result?.type === "FE" || result?.type === "FD") && (() => {
-            const fe = result.fe;
-            const fd = result.fd;
-            const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
-            const [tab, setTab] = useState("fe");
-            const active = tab === "fe" ? fe : fd;
-            return (
-              <div style={{ animation: "fadeUp 0.22s ease" }}>
-                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>Panel Results</span>
-                  {panel && <Badge label={`${panel.entityCol} × ${panel.timeCol}`} color={C.blue} />}
-                </div>
-                <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-                  {[["fe", "Fixed Effects (Within)"], ["fd", "First Differences"]].map(([k, l]) => (
-                    <button key={k} onClick={() => setTab(k)}
-                      style={{
-                        flex: 1, padding: "0.6rem 1rem",
-                        background: tab === k ? C.goldFaint : C.surface,
-                        border: "none", color: tab === k ? C.gold : C.textDim,
-                        cursor: "pointer", fontFamily: mono, fontSize: 11,
-                        borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent",
-                        transition: "all 0.15s",
-                      }}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-                {active && (
-                  <>
-                    <FitBar items={[
-                      { label: tab === "fe" ? "R² within" : "R²", value: (tab === "fe" ? active.R2_within : active.R2)?.toFixed(4) ?? "—", color: C.blue },
-                      { label: tab === "fe" ? "R² between" : "Adj. R²", value: (tab === "fe" ? active.R2_between : active.adjR2)?.toFixed(4) ?? "—", color: C.blue },
-                      { label: "n", value: active.n, color: C.text },
-                      { label: "Units", value: active.units, color: C.textDim },
-                      { label: "df", value: active.df, color: C.textDim },
-                    ]} />
-                    <Lbl color={C.textMuted}>Coefficient Table — {tab === "fe" ? "FE" : "FD"}</Lbl>
-                    <div style={{ marginBottom: "1.2rem" }}>
-                      <CoeffTable varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.tStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
-                    </div>
-                    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem", background: C.bg }}>
-                      <ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} />
-                    </div>
-                  </>
-                )}
-                {hausman && (
-                  <InfoBox color={parseFloat(hausman.pVal) < 0.05 ? C.red : C.green}>
-                    Hausman test: H = {hausman.H} · df = {hausman.df} · p = {hausman.pVal} ·{" "}
-                    {parseFloat(hausman.pVal) < 0.05
-                      ? "⚠ Reject H₀ — FE and FD differ. Investigate serial correlation."
-                      : "✓ FE preferred (consistent and more efficient)."}
-                  </InfoBox>
-                )}
-                <DiagnosticsPanel panelFE={panelFE} panelFD={panelFD} xColsPanel={[...xVars, ...wVars]} />
-                {active && <ExportBar yVar={yVar[0]} results={{ ...active, varNames: active.varNames || xVars }} model={tab.toUpperCase()} onReport={() => openReport({ ...active, varNames: active.varNames || xVars, modelLabel: tab === "fe" ? "Fixed Effects" : "First Differences", yVar: yVar[0], xVars: [...xVars, ...wVars] })} />}
-              </div>
-            );
-          })()}
+          {(result?.type === "FE" || result?.type === "FD") && (
+            <PanelResults
+              result={result}
+              panel={panel}
+              xVars={xVars}
+              wVars={wVars}
+              yVar={yVar}
+              panelFE={panelFE}
+              panelFD={panelFD}
+              openReport={openReport}
+            />
+          )}
 
           {/* ── 2SLS RESULTS ── */}
-          {result?.type === "2SLS" && (() => {
-            const { firstStages, second } = result;
-            const [tab, setTab] = useState("second");
-            return (
-              <div style={{ animation: "fadeUp 0.22s ease" }}>
-                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>2SLS / IV Results</span>
-                  <Badge label={`n = ${second.n}`} color={C.textDim} />
-                </div>
-                <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-                  {[["second", "Second Stage (Structural)"], ...firstStages.map((s, i) => ([`fs_${i}`, `First Stage: ${s.endVar}`]))].map(([k, l]) => (
-                    <button key={k} onClick={() => setTab(k)}
-                      style={{
-                        flex: 1, padding: "0.6rem 0.8rem",
-                        background: tab === k ? C.goldFaint : C.surface,
-                        border: "none", color: tab === k ? C.gold : C.textDim,
-                        cursor: "pointer", fontFamily: mono, fontSize: 11,
-                        borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent",
-                        transition: "all 0.15s",
-                      }}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-                {tab === "second" && (
-                  <>
-                    <FitBar items={[
-                      { label: "R²", value: second.R2.toFixed(4), color: C.gold },
-                      { label: "Adj. R²", value: second.adjR2.toFixed(4), color: C.gold },
-                      { label: "n", value: second.n, color: C.text },
-                      { label: "df", value: second.df, color: C.textDim },
-                    ]} />
-                    <Lbl color={C.textMuted}>Second Stage Coefficients</Lbl>
-                    <div style={{ marginBottom: "1.2rem" }}>
-                      <CoeffTable varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.tStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
-                    </div>
-                    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem" }}>
-                      <ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} />
-                    </div>
-                    <ExportBar yVar={yVar[0]} results={second} model="2SLS" onReport={() => openReport({ second, firstStages, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })} />
-                  </>
-                )}
-                {firstStages.map((fs, i) => tab === `fs_${i}` && (
-                  <div key={i}>
-                    <FitBar items={[
-                      { label: "R²", value: fs.R2.toFixed(4), color: C.gold },
-                      { label: "F-stat", value: fs.Fstat?.toFixed(3) ?? "—", color: fs.weak ? C.red : C.green, hint: "F < 10 → weak instrument" },
-                      { label: "Weak?", value: fs.weak ? "YES ⚠" : "No", color: fs.weak ? C.red : C.green },
-                      { label: "n", value: fs.n, color: C.text },
-                    ]} />
-                    {fs.weak && (
-                      <InfoBox color={C.red}>
-                        ⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. Stock-Yogo threshold is F &gt; 10. 2SLS estimates may be biased toward OLS.
-                      </InfoBox>
-                    )}
-                    <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
+          {result?.type === "2SLS" && (
+            <TwoSLSResults
+              result={result}
+              yVar={yVar}
+              xVars={xVars}
+              openReport={openReport}
+            />
+          )}
 
           {/* ── DiD RESULTS ── */}
           {(result?.type === "DiD" || result?.type === "TWFE") && result.main && (() => {
