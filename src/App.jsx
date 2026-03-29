@@ -4,7 +4,7 @@
 import { useState, useRef } from "react";
 import WranglingModule from "./WranglingModule.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
-import ModelingTab from "./ModelingTab.jsx";
+import ModelingTab from './components/ModelingTab';
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {

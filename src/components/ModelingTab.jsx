@@ -12,8 +12,8 @@ import {
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
-} from "./src/math/index.js";
-import ReportingModule from "./ReportingModule.jsx";
+} from "../src/math/index.js";
+import ReportingModule from "./src";
 
 import EstimatorSidebar   from "./src/components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "./src/components/modeling/VariableSelector.jsx";
