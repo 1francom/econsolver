@@ -30,7 +30,7 @@ function lsSave(id,upd){
 const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
 
 // ─── PIPELINE ENGINE ─────────────────────────────────────────────────────────
-export function applyStep(rows, headers, s) {
+export function applyStep(rows, headers, s, context = {}) {
   let R = rows, H = [...headers];
   switch (s.type) {
     case "rename": R=rows.map(r=>{const c={...r};c[s.newName]=c[s.col];delete c[s.col];return c;});H=headers.map(h=>h===s.col?s.newName:h);break;
@@ -110,13 +110,69 @@ export function applyStep(rows, headers, s) {
         if(!H.includes(nn)) H=[...H,nn];
       });
       break;}
+    case "join": {
+      // LEFT JOIN or INNER JOIN against another dataset via context registry.
+      // RHS is the raw (pre-pipeline) data of the referenced dataset.
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break; // dataset not loaded — step is a no-op, preserved in history
+      const rRows = right.rows, rHeaders = right.headers;
+      const newCols = rHeaders.filter(h => h !== s.rightKey);
+      const rightMap = new Map();
+      rRows.forEach(r => {
+        const k = String(r[s.rightKey] ?? "");
+        if (!rightMap.has(k)) rightMap.set(k, r);
+      });
+      const outRows = [];
+      rows.forEach(r => {
+        const k = String(r[s.leftKey] ?? "");
+        const match = rightMap.get(k);
+        if (match) {
+          const merged = {...r};
+          newCols.forEach(h => {
+            const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h;
+            merged[dest] = match[h] ?? null;
+          });
+          outRows.push(merged);
+        } else if (s.how === "left" || !s.how) {
+          // Keep unmatched left rows; fill right columns with null
+          const merged = {...r};
+          newCols.forEach(h => {
+            const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h;
+            merged[dest] = null;
+          });
+          outRows.push(merged);
+        }
+        // how === "inner": unmatched left rows are dropped
+      });
+      R = outRows;
+      newCols.forEach(h => {
+        const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h;
+        if (!H.includes(dest)) H = [...H, dest];
+      });
+      break;
+    }
+    case "append": {
+      // Vertical stack (bind_rows / UNION ALL). Columns matched by name.
+      // Columns only in right → added to left rows as null.
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const rRows = right.rows, rHeaders = right.headers;
+      const onlyRight = rHeaders.filter(h => !H.includes(h));
+      // Pad left rows with null for new right-only columns
+      R = [
+        ...rows.map(r => { const c = {...r}; onlyRight.forEach(h => { c[h] = null; }); return c; }),
+        ...rRows.map(r => { const c = {}; [...H, ...onlyRight].forEach(h => { c[h] = r[h] ?? null; }); return c; }),
+      ];
+      onlyRight.forEach(h => { if (!H.includes(h)) H = [...H, h]; });
+      break;
+    }
     default:break;
   }
   return{rows:R,headers:H};
 }
-export function runPipeline(rows, headers, pipeline) {
+export function runPipeline(rows, headers, pipeline, context = {}) {
   let s = {rows, headers};
-  for (const step of pipeline) s = applyStep(s.rows, s.headers, step);
+  for (const step of pipeline) s = applyStep(s.rows, s.headers, step, context);
   return s;
 }
 
@@ -328,8 +384,8 @@ export function Grid({headers,rows,hi,max=20,types,onType}){
 }
 function History({pipeline,onRm,onClear}){
   if(!pipeline.length)return null;
-  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_extract:C.violet};
-  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_extract:"📅"};
+  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_extract:C.violet,join:C.teal,append:C.violet};
+  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_extract:"📅",join:"⊞",append:"⊕"};
   return(
     <div style={{width:230,flexShrink:0,borderLeft:`1px solid ${C.border}`,background:C.surface,overflowY:"auto",padding:"1rem"}}>
       <div style={{display:"flex",alignItems:"center",marginBottom:"0.8rem",gap:6}}>
@@ -1495,17 +1551,321 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
   );
 }
 
+// ─── MERGE TAB ───────────────────────────────────────────────────────────────
+// JOIN and APPEND operations against other loaded datasets.
+// RHS always uses raw (pre-pipeline) data of the referenced dataset.
+function MergeTab({ rows, headers, allDatasets, onAdd }) {
+  const [subTab, setSubTab]       = useState("join");
+  // JOIN state
+  const [rightId, setRightId]     = useState("");
+  const [leftKey, setLeftKey]     = useState("");
+  const [rightKey, setRightKey]   = useState("");
+  const [how, setHow]             = useState("left");
+  const [suffix, setSuffix]       = useState("_r");
+  // APPEND state
+  const [appendId, setAppendId]   = useState("");
+
+  const rightDs   = allDatasets.find(d => d.id === rightId);
+  const appendDs  = allDatasets.find(d => d.id === appendId);
+  const rightHdrs = rightDs?.rawData?.headers || [];
+
+  const matchPreview = useMemo(() => {
+    if (!rightDs || !leftKey || !rightKey) return null;
+    const rKeys = new Set(rightDs.rawData.rows.map(r => String(r[rightKey] ?? "")));
+    let matched = 0;
+    rows.forEach(r => { if (rKeys.has(String(r[leftKey] ?? ""))) matched++; });
+    const pct = rows.length ? matched / rows.length : 0;
+    return { matched, total: rows.length, pct };
+  }, [rightDs, leftKey, rightKey, rows]);
+
+  const appendPreview = useMemo(() => {
+    if (!appendDs) return null;
+    const rSet = new Set(appendDs.rawData.headers);
+    const lSet = new Set(headers);
+    return {
+      shared:    headers.filter(h => rSet.has(h)).length,
+      onlyLeft:  headers.filter(h => !rSet.has(h)).length,
+      onlyRight: appendDs.rawData.headers.filter(h => !lSet.has(h)).length,
+      rightRows: appendDs.rawData.rows.length,
+    };
+  }, [appendDs, headers]);
+
+  function doJoin() {
+    if (!rightId || !leftKey || !rightKey) return;
+    onAdd({ type:"join", rightId, leftKey, rightKey, how, suffix,
+      desc:`${how.toUpperCase()} JOIN ${rightDs?.filename} on ${leftKey} = ${rightKey}` });
+    setRightId(""); setLeftKey(""); setRightKey("");
+  }
+  function doAppend() {
+    if (!appendId) return;
+    onAdd({ type:"append", rightId:appendId,
+      desc:`APPEND ${appendDs?.filename} (+${appendDs?.rawData?.rows?.length} rows)` });
+    setAppendId("");
+  }
+
+  const colBtnStyle = (sel, color) => ({
+    padding:"0.28rem 0.55rem", border:`1px solid ${sel?color:C.border}`,
+    background:sel?`${color}18`:"transparent", color:sel?color:C.textDim,
+    borderRadius:2, cursor:"pointer", fontSize:10, fontFamily:mono,
+    textAlign:"left", transition:"all 0.1s",
+  });
+  const joinTypBtn = (k,l) => (
+    <button key={k} onClick={()=>setHow(k)}
+      style={{padding:"0.32rem 0.75rem",border:`1px solid ${how===k?C.teal:C.border2}`,
+        background:how===k?`${C.teal}18`:"transparent",color:how===k?C.teal:C.textDim,
+        borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.1s"}}>
+      {how===k?"✓ ":""}{l}
+    </button>
+  );
+
+  // ── Empty state — no other datasets loaded ──
+  if (!allDatasets.length) {
+    return (
+      <div style={{padding:"2.5rem 1.5rem",textAlign:"center",border:`1px dashed ${C.border2}`,borderRadius:4}}>
+        <div style={{fontSize:22,marginBottom:10}}>⊞</div>
+        <div style={{fontSize:12,color:C.textDim,lineHeight:1.8,fontFamily:mono}}>
+          No other datasets loaded.<br/>
+          Use the <span style={{color:C.teal}}>Dataset Manager</span> sidebar
+          to load a second file — then join or append it here.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* ── Sub-tabs: JOIN / APPEND ── */}
+      <Tabs tabs={[["join","⊞ Join"],["append","⊕ Append"]]} active={subTab} set={setSubTab} accent={C.teal} sm/>
+
+      {/* ════════════ JOIN ════════════ */}
+      {subTab==="join" && (
+        <div>
+          {/* Context note */}
+          <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
+            borderLeft:`3px solid ${C.blue}`,borderRadius:4,marginBottom:"1.2rem",
+            fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+            Equivalent to dplyr's <span style={{color:C.blue}}>left_join()</span> / <span style={{color:C.blue}}>inner_join()</span>.
+            The right dataset is joined against its <em>raw</em> (pre-pipeline) state.
+            Apply cleaning to it first if needed.
+          </div>
+
+          {/* Right dataset picker */}
+          <Lbl color={C.teal}>Right dataset</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:"1.4rem"}}>
+            {allDatasets.map(d=>(
+              <button key={d.id}
+                onClick={()=>{ setRightId(d.id); setLeftKey(""); setRightKey(""); }}
+                style={{padding:"0.4rem 0.9rem",border:`1px solid ${rightId===d.id?C.teal:C.border2}`,
+                  background:rightId===d.id?`${C.teal}18`:"transparent",
+                  color:rightId===d.id?C.teal:C.textDim,borderRadius:3,cursor:"pointer",
+                  fontSize:11,fontFamily:mono,transition:"all 0.1s"}}>
+                {rightId===d.id?"✓ ":""}{d.filename}
+                <span style={{fontSize:9,color:C.textMuted,marginLeft:6}}>
+                  {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {rightDs && (<>
+            {/* Key column selectors — two-column grid */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.2rem",marginBottom:"1.2rem"}}>
+              <div>
+                <Lbl color={C.gold}>Left key — this dataset</Lbl>
+                <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:180,overflowY:"auto",
+                  padding:"0.4rem",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:3}}>
+                  {headers.map(h=>(
+                    <button key={h} onClick={()=>setLeftKey(h)} style={colBtnStyle(leftKey===h,C.gold)}>
+                      {leftKey===h?"✓ ":""}{h}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Lbl color={C.blue}>Right key — {rightDs.filename}</Lbl>
+                <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:180,overflowY:"auto",
+                  padding:"0.4rem",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:3}}>
+                  {rightHdrs.map(h=>(
+                    <button key={h} onClick={()=>setRightKey(h)} style={colBtnStyle(rightKey===h,C.blue)}>
+                      {rightKey===h?"✓ ":""}{h}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Match preview bar */}
+            {matchPreview && (() => {
+              const mc = matchPreview.pct > 0.8 ? C.green : matchPreview.pct > 0.4 ? C.yellow : C.red;
+              return (
+                <div style={{padding:"0.65rem 0.9rem",background:C.surface,
+                  border:`1px solid ${mc}30`,borderLeft:`3px solid ${mc}`,
+                  borderRadius:4,marginBottom:"1.2rem"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                    <div style={{flex:1,height:4,background:C.border,borderRadius:2,overflow:"hidden"}}>
+                      <div style={{width:`${matchPreview.pct*100}%`,height:"100%",background:mc,borderRadius:2,transition:"width 0.3s"}}/>
+                    </div>
+                    <span style={{fontSize:11,color:mc,fontFamily:mono,flexShrink:0}}>
+                      {(matchPreview.pct*100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
+                    <span style={{color:mc}}>{matchPreview.matched.toLocaleString()}</span>
+                    {" of "}{matchPreview.total.toLocaleString()} left rows matched
+                  </div>
+                  {matchPreview.pct < 0.5 && (
+                    <div style={{fontSize:10,color:C.yellow,fontFamily:mono,marginTop:4}}>
+                      ⚠ Low match rate — verify key columns use compatible formats (e.g. "DEU" vs "Germany").
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Join type + suffix */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.2rem",marginBottom:"1.2rem"}}>
+              <div>
+                <Lbl color={C.teal}>Join type</Lbl>
+                <div style={{display:"flex",gap:4}}>
+                  {[["left","LEFT"],["inner","INNER"]].map(([k,l])=>joinTypBtn(k,l))}
+                </div>
+                <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:5,lineHeight:1.5}}>
+                  {how==="left"
+                    ? "Keep all left rows. Right columns = null when unmatched."
+                    : "Keep only rows that matched on both sides."}
+                </div>
+              </div>
+              <div>
+                <Lbl color={C.textDim}>Suffix for column conflicts</Lbl>
+                <input value={suffix} onChange={e=>setSuffix(e.target.value)} placeholder="_r"
+                  style={{width:"100%",boxSizing:"border-box",padding:"0.38rem 0.6rem",
+                    background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,
+                    color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+                <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:4}}>
+                  Added to right columns whose name already exists in left.
+                </div>
+              </div>
+            </div>
+
+            {/* Formula preview */}
+            {leftKey && rightKey && (
+              <div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,
+                borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
+                <span style={{color:C.gold}}>this</span> {how.toUpperCase()} JOIN{" "}
+                <span style={{color:C.teal}}>{rightDs.filename}</span>
+                {" ON "}<span style={{color:C.gold}}>{leftKey}</span>
+                {" = "}<span style={{color:C.teal}}>{rightKey}</span>
+                {" → "}<span style={{color:C.green}}>
+                  +{rightHdrs.filter(h=>h!==rightKey).length} columns
+                </span>
+              </div>
+            )}
+            <Btn onClick={doJoin} color={C.teal} v="solid"
+              dis={!leftKey||!rightKey}
+              ch={`Add ${how.toUpperCase()} JOIN to pipeline →`}/>
+          </>)}
+        </div>
+      )}
+
+      {/* ════════════ APPEND ════════════ */}
+      {subTab==="append" && (
+        <div>
+          <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
+            borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",
+            fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+            Vertically stacks rows from another dataset — equivalent to dplyr's{" "}
+            <span style={{color:C.violet}}>bind_rows()</span> / SQL's UNION ALL.
+            Columns are matched by name. Mismatched columns are filled with null.
+          </div>
+
+          <Lbl color={C.violet}>Dataset to append</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:"1.4rem"}}>
+            {allDatasets.map(d=>(
+              <button key={d.id} onClick={()=>setAppendId(d.id)}
+                style={{padding:"0.4rem 0.9rem",border:`1px solid ${appendId===d.id?C.violet:C.border2}`,
+                  background:appendId===d.id?`${C.violet}18`:"transparent",
+                  color:appendId===d.id?C.violet:C.textDim,borderRadius:3,cursor:"pointer",
+                  fontSize:11,fontFamily:mono,transition:"all 0.1s"}}>
+                {appendId===d.id?"✓ ":""}{d.filename}
+                <span style={{fontSize:9,color:C.textMuted,marginLeft:6}}>
+                  {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {appendPreview && (<>
+            {/* Schema overlap stats */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:"1.2rem"}}>
+              {[
+                [appendPreview.shared,   "shared columns", C.green],
+                [appendPreview.onlyLeft, "only in left",   C.yellow],
+                [appendPreview.onlyRight,"only in right",  C.yellow],
+              ].map(([val,label,color])=>(
+                <div key={label} style={{padding:"0.65rem",background:C.surface2,
+                  border:`1px solid ${C.border}`,borderRadius:3,textAlign:"center"}}>
+                  <div style={{fontSize:20,color,fontFamily:mono,marginBottom:3}}>{val}</div>
+                  <div style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{label}</div>
+                </div>
+              ))}
+            </div>
+            {appendPreview.onlyLeft > 0 || appendPreview.onlyRight > 0 ? (
+              <div style={{padding:"0.5rem 0.75rem",background:`${C.yellow}08`,
+                border:`1px solid ${C.yellow}30`,borderLeft:`3px solid ${C.yellow}`,
+                borderRadius:4,marginBottom:"1rem",fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+                ⚠ Schema mismatch — {appendPreview.onlyLeft} column{appendPreview.onlyLeft!==1?"s":""} found
+                only in left, {appendPreview.onlyRight} only in right.
+                These will be filled with null for the rows that lack them.
+              </div>
+            ) : (
+              <div style={{padding:"0.5rem 0.75rem",background:`${C.green}08`,
+                border:`1px solid ${C.green}30`,borderLeft:`3px solid ${C.green}`,
+                borderRadius:4,marginBottom:"1rem",fontSize:10,color:C.green,fontFamily:mono}}>
+                ✓ Schemas match exactly — clean append.
+              </div>
+            )}
+            <div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,
+              borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
+              Result: <span style={{color:C.violet}}>
+                {(rows.length+appendPreview.rightRows).toLocaleString()}
+              </span> rows × <span style={{color:C.violet}}>
+                {headers.length+appendPreview.onlyRight}
+              </span> cols
+            </div>
+            <Btn onClick={doAppend} color={C.violet} v="solid" ch="Add APPEND to pipeline →"/>
+          </>)}
+        </div>
+      )}
+
+      {/* ════════════ RESULT PREVIEW ════════════ */}
+      <div style={{marginTop:"2rem"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"0.7rem"}}>
+          <Lbl mb={0}>Current dataset — pipeline output</Lbl>
+          <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+            {rows.length.toLocaleString()} rows × {headers.length} cols
+          </span>
+        </div>
+        <Grid headers={headers} rows={rows} max={8}/>
+      </div>
+    </div>
+  );
+}
+
 // ─── WRANGLING MODULE ROOT ────────────────────────────────────────────────────
-export default function WranglingModule({rawData, filename, onComplete, pid}) {
+export default function WranglingModule({rawData, filename, onComplete, pid, allDatasets = []}) {
   const [pipeline, setPipeline] = useState(()=>{try{return lsGet().find(p=>p.id===pid)?.pipeline||[];}catch{return[];}});
   const [panel, setPanel] = useState(()=>{try{return lsGet().find(p=>p.id===pid)?.panel||null;}catch{return null;}});
   const [dataDictionary, setDataDictionary] = useState(()=>{try{return lsGet().find(p=>p.id===pid)?.dataDictionary||null;}catch{return null;}});
   const [tab, setTab] = useState("clean");
 
+  const context = useMemo(()=>({
+    datasets: Object.fromEntries((allDatasets||[]).map(d=>[d.id, d.rawData]))
+  }), [allDatasets]);
+
   const {rows, headers} = useMemo(()=>{
     const init = rawData.rows.map(r=>{const c={};rawData.headers.forEach(h=>{c[h]=r[h]??null;});return c;});
-    return runPipeline(init, rawData.headers, pipeline);
-  }, [rawData, pipeline]);
+    return runPipeline(init, rawData.headers, pipeline, context);
+  }, [rawData, pipeline, context]);
 
   const info = useMemo(()=>buildInfo(headers, rows), [headers, rows]);
 
@@ -1559,10 +1919,11 @@ export default function WranglingModule({rawData, filename, onComplete, pid}) {
           </div>
         </div>
         {/* Tabs */}
-        <Tabs tabs={[["clean","⬡ Cleaning"],["structure","⊞ Panel Structure"],["features","⊕ Feature Engineering"],["dictionary","◈ Data Dictionary"]]} active={tab} set={setTab}/>
+        <Tabs tabs={[["clean","⬡ Cleaning"],["structure","⊞ Panel Structure"],["features","⊕ Feature Engineering"],["merge","⊕ Merge"],["dictionary","◈ Data Dictionary"]]} active={tab} set={setTab}/>
         {tab==="clean"&&<CleanTab rows={rows} headers={headers} info={info} rawData={rawData} onAdd={addStep}/>}
         {tab==="structure"&&<PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>}
         {tab==="features"&&<FeatureEngineeringTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>}
+        {tab==="merge"&&<MergeTab rows={rows} headers={headers} allDatasets={allDatasets} onAdd={addStep}/>}
         {tab==="dictionary"&&<DataDictionaryTab headers={headers} rows={rows} dict={dataDictionary} setDict={setDataDictionary}/>}
       </div>
       <History pipeline={pipeline} onRm={rmStep} onClear={clear}/>

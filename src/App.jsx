@@ -2,7 +2,7 @@
 // Root orchestrator. Manages global state and screen routing.
 // All heavy logic lives in the module files — this file should stay thin.
 import { useState, useRef } from "react";
-import WranglingModule from "./WranglingModule.jsx";
+import DataStudio from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './ModelingTab';
 
@@ -408,13 +408,13 @@ export default function App() {
           <Uploader onReady={handleReady}/>
         )}
         {screen==="studio"&&rawData&&(
-          <WranglingModule
-            rawData={rawData}
-            filename={filename}
-            pid={pid}
-            onComplete={r=>{setOutput(r);setScreen("output");}}
+        <DataStudio
+         rawData={rawData}
+         filename={filename}
+         pid={pid}
+          onComplete={r=>{setOutput(r);setScreen("output");}}
           />
-        )}
+          )}
         {screen==="output"&&output&&(
           <OutputReview
             result={output}

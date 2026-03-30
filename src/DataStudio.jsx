@@ -1,0 +1,414 @@
+// ─── ECON STUDIO · DataStudio.jsx ────────────────────────────────────────────
+// Multi-dataset manager.
+// Manages a list of loaded datasets, exposes them to WranglingModule
+// for JOIN / APPEND operations, and renders the active dataset's pipeline editor.
+//
+// External interface — drop-in replacement for WranglingModule:
+//   rawData    {headers, rows}  – initial (primary) dataset, pre-parsed
+//   filename   {string}
+//   onComplete {fn}             – (cleanedData) => void — same shape as before
+//   pid        {string}         – project ID for the primary dataset
+//
+// Additional datasets loaded here are available in WranglingModule's Merge tab.
+// They are kept in component state (not persisted) — equivalent to R's
+// "you must re-run your script to reload data" behavior.
+
+import { useState, useRef, useCallback, useEffect } from "react";
+import WranglingModule from "./WranglingModule.jsx";
+
+// ─── THEME ────────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
+  border:"#1c1c1c", border2:"#252525",
+  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
+  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
+  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
+  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
+  violet:"#9e7ec8",
+};
+const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
+
+// ─── UTILITIES ────────────────────────────────────────────────────────────────
+function genId() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+// ─── CSV PARSER ───────────────────────────────────────────────────────────────
+// Handles: RFC 4180 quoting, embedded commas/newlines, CRLF/LF, type inference.
+// Detects and handles TSV automatically.
+function parseCSV(text, delimiter = ",") {
+  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+
+  function tokenize(line) {
+    const fields = [];
+    let i = 0;
+    while (i <= line.length) {
+      if (i === line.length) { fields.push(""); break; }
+      if (line[i] === '"') {
+        let field = ""; i++;
+        while (i < line.length) {
+          if (line[i] === '"') {
+            if (line[i + 1] === '"') { field += '"'; i += 2; }
+            else { i++; break; }
+          } else { field += line[i++]; }
+        }
+        fields.push(field);
+        if (line[i] === delimiter) i++;
+      } else {
+        const end = line.indexOf(delimiter, i);
+        if (end === -1) { fields.push(line.slice(i)); break; }
+        fields.push(line.slice(i, end)); i = end + 1;
+      }
+    }
+    return fields;
+  }
+
+  const lines = text.split(/\r?\n/);
+  const rawHeaders = tokenize(lines[0]);
+  // Deduplicate headers (Excel often exports duplicates)
+  const headerCount = {};
+  const headers = rawHeaders.map(h => {
+    const t = h.trim() || "col";
+    headerCount[t] = (headerCount[t] || 0) + 1;
+    return headerCount[t] === 1 ? t : `${t}_${headerCount[t]}`;
+  });
+  if (!headers.length) return null;
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const vals = tokenize(lines[i]);
+    const row = {};
+    headers.forEach((h, j) => {
+      const raw = (vals[j] ?? "").trim();
+      if (!raw || NA_PAT.test(raw)) { row[h] = null; return; }
+      // Strip thousands separators before numeric parse
+      const clean = raw.replace(/,(?=\d{3})/g, "");
+      const n = Number(clean);
+      row[h] = isNaN(n) ? raw : n;
+    });
+    rows.push(row);
+  }
+  return rows.length ? { headers, rows } : null;
+}
+
+// ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
+// Excel parser — loads SheetJS from CDN (same pattern as App.jsx)
+async function parseExcel(file) {
+  try {
+    const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+    const buf  = await file.arrayBuffer();
+    const wb   = read(buf, { type: "array", cellDates: true });
+    const ws   = wb.Sheets[wb.SheetNames[0]];
+    const data = utils.sheet_to_json(ws, { defval: null, raw: false });
+    if (!data.length) return null;
+
+    const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+    const headers = Object.keys(data[0]);
+    const rows = data.map(r => {
+      const row = {};
+      headers.forEach(h => {
+        const v = r[h];
+        if (v === null || v === undefined) { row[h] = null; return; }
+        if (typeof v === "number") { row[h] = v; return; }
+        const t = String(v).trim();
+        if (!t || NA_PAT.test(t)) { row[h] = null; return; }
+        const n = Number(t.replace(/,(?=\d{3})/g, ""));
+        row[h] = isNaN(n) ? t : n;
+      });
+      return row;
+    });
+    return { headers, rows };
+  } catch (e) {
+    console.error("Excel parse failed:", e);
+    return null;
+  }
+}
+
+// ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
+async function parseFile(file) {
+  const ext = file.name.split(".").pop().toLowerCase();
+  if (["csv", "txt"].includes(ext)) {
+    const text = await file.text();
+    return parseCSV(text, ",");
+  }
+  if (ext === "tsv") {
+    const text = await file.text();
+    return parseCSV(text, "\t");
+  }
+  if (["xlsx", "xls"].includes(ext)) {
+    return parseExcel(file);
+  }
+  // Unknown extension: try CSV as fallback
+  try {
+    const text = await file.text();
+    // Detect delimiter heuristically from first line
+    const first = text.split("\n")[0];
+    const tabs   = (first.match(/\t/g) || []).length;
+    const commas = (first.match(/,/g)  || []).length;
+    const semis  = (first.match(/;/g)  || []).length;
+    const delim  = tabs > commas && tabs > semis ? "\t"
+                 : semis > commas ? ";"
+                 : ",";
+    return parseCSV(text, delim);
+  } catch { return null; }
+}
+
+// ─── DATASET SIDEBAR ──────────────────────────────────────────────────────────
+function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, loadErr, loading }) {
+  const fileRef = useRef();
+  const [dragOver, setDragOver] = useState(false);
+
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) onLoadFile(file);
+  }
+
+  return (
+    <div
+      style={{
+        width: 210, flexShrink: 0,
+        background: C.surface,
+        borderRight: `1px solid ${C.border}`,
+        display: "flex", flexDirection: "column",
+        height: "100%", overflow: "hidden",
+        transition: "border-color 0.15s",
+      }}
+      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+    >
+      {/* ── Header ── */}
+      <div style={{
+        padding: "0.9rem 0.85rem 0.6rem",
+        borderBottom: `1px solid ${C.border}`,
+        flexShrink: 0,
+      }}>
+        <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>
+          Dataset Manager
+        </div>
+        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+          {datasets.length} dataset{datasets.length !== 1 ? "s" : ""} loaded
+        </div>
+      </div>
+
+      {/* ── Dataset list ── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "0.3rem 0" }}>
+        {datasets.map((ds, idx) => {
+          const isActive = ds.id === activeId;
+          return (
+            <div
+              key={ds.id}
+              onClick={() => onActivate(ds.id)}
+              style={{
+                display: "flex", alignItems: "flex-start", gap: 6,
+                padding: "0.65rem 0.7rem",
+                background: isActive ? `${C.teal}0d` : "transparent",
+                borderLeft: `2px solid ${isActive ? C.teal : "transparent"}`,
+                cursor: "pointer",
+                transition: "background 0.1s, border-color 0.1s",
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Index badge + status */}
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
+                  <span style={{
+                    fontSize: 8, padding: "1px 5px",
+                    border: `1px solid ${isActive ? C.teal : C.border2}`,
+                    color: isActive ? C.teal : C.textMuted,
+                    borderRadius: 2, fontFamily: mono, flexShrink: 0,
+                    letterSpacing: "0.08em",
+                  }}>
+                    D{idx + 1}
+                  </span>
+                  {isActive && (
+                    <span style={{ fontSize: 8, color: C.teal, fontFamily: mono }}>● active</span>
+                  )}
+                  {idx === 0 && !isActive && (
+                    <span style={{ fontSize: 8, color: C.textMuted, fontFamily: mono }}>primary</span>
+                  )}
+                </div>
+
+                {/* Filename — truncated */}
+                <div style={{
+                  fontSize: 11, color: isActive ? C.text : C.textDim,
+                  fontFamily: mono, overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  lineHeight: 1.4, marginBottom: 2,
+                }}>
+                  {ds.filename}
+                </div>
+
+                {/* Dimensions */}
+                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                  {ds.rawData.rows.length.toLocaleString()} rows ×{" "}
+                  {ds.rawData.headers.length} cols
+                </div>
+              </div>
+
+              {/* Remove — only for non-primary datasets */}
+              {idx > 0 && (
+                <button
+                  onClick={e => { e.stopPropagation(); onRemove(ds.id); }}
+                  title="Remove dataset"
+                  style={{
+                    background: "transparent", border: "none",
+                    color: C.textMuted, cursor: "pointer",
+                    fontSize: 14, padding: "0 2px", lineHeight: 1,
+                    flexShrink: 0, marginTop: 1,
+                    transition: "color 0.1s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Load new dataset ── */}
+      <div style={{
+        padding: "0.7rem 0.75rem",
+        borderTop: `1px solid ${C.border}`,
+        flexShrink: 0,
+        background: dragOver ? `${C.teal}08` : "transparent",
+        transition: "background 0.15s",
+      }}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,.tsv,.xlsx,.xls,.txt"
+          style={{ display: "none" }}
+          onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={loading}
+          style={{
+            width: "100%",
+            padding: "0.55rem 0.5rem",
+            background: dragOver ? `${C.teal}14` : "transparent",
+            border: `1px dashed ${dragOver ? C.teal : C.border2}`,
+            borderRadius: 3,
+            color: loading ? C.textMuted : dragOver ? C.teal : C.textDim,
+            cursor: loading ? "not-allowed" : "pointer",
+            fontFamily: mono, fontSize: 10,
+            transition: "all 0.12s",
+          }}
+          onMouseEnter={e => { if (!loading) { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; } }}
+          onMouseLeave={e => { if (!loading && !dragOver) { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; } }}
+        >
+          {loading ? "Parsing…" : dragOver ? "Drop to load" : "+ Load dataset"}
+        </button>
+
+        {/* Error message */}
+        {loadErr && (
+          <div style={{ fontSize: 9, color: C.red, fontFamily: mono, marginTop: 6, lineHeight: 1.5 }}>
+            {loadErr}
+          </div>
+        )}
+
+        {/* Format hint */}
+        <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 6, lineHeight: 1.6 }}>
+          CSV · TSV · XLSX · drag & drop supported
+          <br/>
+          Loaded datasets available for JOIN / APPEND in the Merge tab.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
+export default function DataStudio({ rawData, filename, onComplete, pid }) {
+  // Primary dataset uses the project's pid as its stable ID.
+  // Additional datasets get random IDs and live only in memory for this session.
+  const primaryId = pid || genId();
+
+  const [datasets, setDatasets] = useState(() => ([
+    { id: primaryId, filename: filename || "dataset.csv", rawData }
+  ]));
+  const [activeId, setActiveId]   = useState(primaryId);
+  const [loading, setLoading]     = useState(false);
+  const [loadErr, setLoadErr]     = useState("");
+
+  // Keep primary rawData in sync if parent re-loads a new file
+  useEffect(() => {
+    setDatasets(prev => prev.map(ds =>
+      ds.id === primaryId ? { ...ds, rawData, filename: filename || ds.filename } : ds
+    ));
+  }, [rawData, filename]);
+
+  const activeDs       = datasets.find(d => d.id === activeId) || datasets[0];
+  // Other datasets — passed to WranglingModule for join/append context
+  const otherDatasets  = datasets.filter(d => d.id !== activeId);
+
+  const handleLoadFile = useCallback(async (file) => {
+    setLoading(true);
+    setLoadErr("");
+    try {
+      const parsed = await parseFile(file);
+      if (!parsed || !parsed.rows.length) {
+        setLoadErr("Could not parse file. Check format (CSV, TSV, XLSX).");
+        return;
+      }
+      const id = genId();
+      const entry = { id, filename: file.name, rawData: parsed };
+      setDatasets(prev => [...prev, entry]);
+      setActiveId(id);
+    } catch (e) {
+      setLoadErr("Parse error: " + (e?.message || "unknown"));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleRemove = useCallback((id) => {
+    if (id === primaryId) return; // primary dataset is protected
+    setDatasets(prev => prev.filter(d => d.id !== id));
+    // If we were viewing the removed dataset, fall back to primary
+    setActiveId(prev => prev === id ? primaryId : prev);
+  }, [primaryId]);
+
+  return (
+    <div style={{
+      display: "flex", height: "100%", minHeight: 0,
+      background: C.bg, overflow: "hidden",
+    }}>
+      {/* ── Left sidebar: dataset list ── */}
+      <DatasetSidebar
+        datasets={datasets}
+        activeId={activeId}
+        onActivate={setActiveId}
+        onRemove={handleRemove}
+        onLoadFile={handleLoadFile}
+        loadErr={loadErr}
+        loading={loading}
+      />
+
+      {/* ── Main panel: WranglingModule for active dataset ── */}
+      {activeDs && (
+        <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          {/*
+            key={activeDs.id} ensures a fresh WranglingModule instance per dataset.
+            This gives each dataset independent pipeline state and tab position.
+            allDatasets = all OTHER datasets (context for join/append steps).
+          */}
+          <WranglingModule
+            key={activeDs.id}
+            rawData={activeDs.rawData}
+            filename={activeDs.filename}
+            onComplete={onComplete}
+            pid={activeDs.id}
+            allDatasets={otherDatasets}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
