@@ -1554,7 +1554,7 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
 // ─── MERGE TAB ───────────────────────────────────────────────────────────────
 // JOIN and APPEND operations against other loaded datasets.
 // RHS always uses raw (pre-pipeline) data of the referenced dataset.
-function MergeTab({ rows, headers, allDatasets, onAdd }) {
+function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   const [subTab, setSubTab]       = useState("join");
   // JOIN state
   const [rightId, setRightId]     = useState("");
@@ -1572,10 +1572,15 @@ function MergeTab({ rows, headers, allDatasets, onAdd }) {
   const matchPreview = useMemo(() => {
     if (!rightDs || !leftKey || !rightKey) return null;
     const rKeys = new Set(rightDs.rawData.rows.map(r => String(r[rightKey] ?? "")));
-    let matched = 0;
-    rows.forEach(r => { if (rKeys.has(String(r[leftKey] ?? ""))) matched++; });
-    const pct = rows.length ? matched / rows.length : 0;
-    return { matched, total: rows.length, pct };
+    let matched = 0, keyNulls = 0;
+    rows.forEach(r => {
+      const v = r[leftKey];
+      if (v === null || v === undefined) { keyNulls++; return; }
+      if (rKeys.has(String(v))) matched++;
+    });
+    const validRows = rows.length - keyNulls;
+    const pct = validRows ? matched / validRows : 0;
+    return { matched, total: rows.length, validRows, keyNulls, pct };
   }, [rightDs, leftKey, rightKey, rows]);
 
   const appendPreview = useMemo(() => {
@@ -1711,8 +1716,13 @@ function MergeTab({ rows, headers, allDatasets, onAdd }) {
                   </div>
                   <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
                     <span style={{color:mc}}>{matchPreview.matched.toLocaleString()}</span>
-                    {" of "}{matchPreview.total.toLocaleString()} left rows matched
+                    {" of "}{matchPreview.validRows.toLocaleString()} left rows matched
                   </div>
+                  {matchPreview.keyNulls > 0 && (
+                    <div style={{fontSize:10,color:C.orange,fontFamily:mono,marginTop:4}}>
+                      ⚠ {matchPreview.keyNulls} row{matchPreview.keyNulls!==1?"s":""} have null in key column '{leftKey}' — excluded from join, kept with null right-side values in LEFT JOIN.
+                    </div>
+                  )}
                   {matchPreview.pct < 0.5 && (
                     <div style={{fontSize:10,color:C.yellow,fontFamily:mono,marginTop:4}}>
                       ⚠ Low match rate — verify key columns use compatible formats (e.g. "DEU" vs "Germany").
@@ -1844,6 +1854,37 @@ function MergeTab({ rows, headers, allDatasets, onAdd }) {
           <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
             {rows.length.toLocaleString()} rows × {headers.length} cols
           </span>
+          <button
+            onClick={()=>{
+              // Serialize to CSV and trigger download
+              const esc = v => {
+                if(v===null||v===undefined) return "";
+                const s = String(v);
+                return s.includes(",")||s.includes('"')||s.includes("\n")
+                  ? `"${s.replace(/"/g,'""')}"` : s;
+              };
+              const lines = [
+                headers.map(esc).join(","),
+                ...rows.map(r=>headers.map(h=>esc(r[h])).join(","))
+              ];
+              const blob = new Blob([lines.join("\r\n")],{type:"text/csv"});
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = (filename ? filename.replace(/\.[^.]+$/, "") : "pipeline_output") + "_merged.csv";
+              a.click();
+              URL.revokeObjectURL(a.href);
+            }}
+            style={{
+              marginLeft:"auto", padding:"0.25rem 0.65rem",
+              background:"transparent", border:`1px solid ${C.border2}`,
+              borderRadius:3, color:C.textDim, cursor:"pointer",
+              fontFamily:mono, fontSize:10, transition:"all 0.12s",
+            }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;e.currentTarget.style.color=C.teal;}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+          >
+            ↓ Export CSV
+          </button>
         </div>
         <Grid headers={headers} rows={rows} max={8}/>
       </div>
@@ -1880,12 +1921,15 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
   const naCount = useMemo(()=>rows.filter(r=>headers.some(h=>{const v=r[h];return v===null||v===undefined;})).length, [rows, headers]);
 
   const proceed = () => {
-    const final = rows.filter(r=>headers.every(h=>{const v=r[h];return v!==null&&v!==undefined;}));
+    // Do NOT drop rows with NAs here — listwise deletion happens in the modeling
+    // engine, restricted to the variables the user actually selects.
+    // Dropping at this stage would silently delete valid observations whenever
+    // any auxiliary column (e.g. a joined metadata col) has nulls.
     const ci = {};
-    headers.forEach(h=>{const s=final.find(r=>r[h]!==undefined);ci[h]={isNumeric:typeof s?.[h]==="number"};});
+    headers.forEach(h=>{const s=rows.find(r=>r[h]!==undefined&&r[h]!==null);ci[h]={isNumeric:typeof s?.[h]==="number"};});
     onComplete({
       headers,
-      cleanRows: final,
+      cleanRows: rows,
       colInfo: ci,
       issues: [],
       removed: naCount,
@@ -1923,7 +1967,7 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
         {tab==="clean"&&<CleanTab rows={rows} headers={headers} info={info} rawData={rawData} onAdd={addStep}/>}
         {tab==="structure"&&<PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>}
         {tab==="features"&&<FeatureEngineeringTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>}
-        {tab==="merge"&&<MergeTab rows={rows} headers={headers} allDatasets={allDatasets} onAdd={addStep}/>}
+        {tab==="merge"&&<MergeTab rows={rows} headers={headers} filename={filename} allDatasets={allDatasets} onAdd={addStep}/>}
         {tab==="dictionary"&&<DataDictionaryTab headers={headers} rows={rows} dict={dataDictionary} setDict={setDataDictionary}/>}
       </div>
       <History pipeline={pipeline} onRm={rmStep} onClear={clear}/>

@@ -93,7 +93,7 @@ function parseCSV(text, delimiter = ",") {
 }
 
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
-// Excel parser — loads SheetJS from CDN (same pattern as App.jsx)
+// Excel parser — loads SheetJS from CDN (same pattern as App.jsx, avoids Vite bare-module error)
 async function parseExcel(file) {
   try {
     const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
@@ -324,25 +324,63 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
   );
 }
 
+// ─── SESSION STORAGE — secondary datasets persist across navigation ───────────
+// Primary dataset comes from App.jsx (rawData prop) and is never stored here.
+// Secondary datasets are serialized to sessionStorage so a round-trip through
+// Output/Explorer/Modeling and back to Wrangling doesn't break join context.
+const SS_KEY = "econ_studio_secondary_ds";
+function ssRead() {
+  try { return JSON.parse(sessionStorage.getItem(SS_KEY) || "[]"); } catch { return []; }
+}
+function ssWrite(secondaryDatasets) {
+  try {
+    // Guard against very large datasets — skip sessionStorage silently if > 8MB
+    const s = JSON.stringify(secondaryDatasets);
+    if (s.length < 8 * 1024 * 1024) sessionStorage.setItem(SS_KEY, s);
+  } catch { /* quota exceeded — non-fatal */ }
+}
+
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
 export default function DataStudio({ rawData, filename, onComplete, pid }) {
-  // Primary dataset uses the project's pid as its stable ID.
-  // Additional datasets get random IDs and live only in memory for this session.
   const primaryId = pid || genId();
 
-  const [datasets, setDatasets] = useState(() => ([
-    { id: primaryId, filename: filename || "dataset.csv", rawData }
-  ]));
+  const [datasets, setDatasets] = useState(() => {
+    // Restore secondary datasets from sessionStorage on mount
+    const secondary = ssRead();
+    return [
+      { id: primaryId, filename: filename || "dataset.csv", rawData },
+      ...secondary,
+    ];
+  });
   const [activeId, setActiveId]   = useState(primaryId);
   const [loading, setLoading]     = useState(false);
   const [loadErr, setLoadErr]     = useState("");
 
-  // Keep primary rawData in sync if parent re-loads a new file
+  // Keep primary rawData in sync if parent re-loads a new file.
+  // If rawData actually changed (new file), clear secondary datasets — they
+  // belonged to the previous project and would produce stale join results.
+  const prevRawDataRef = useRef(rawData);
   useEffect(() => {
-    setDatasets(prev => prev.map(ds =>
-      ds.id === primaryId ? { ...ds, rawData, filename: filename || ds.filename } : ds
-    ));
+    const newFile = prevRawDataRef.current !== rawData;
+    prevRawDataRef.current = rawData;
+    if (newFile) {
+      // New primary file loaded — drop secondary datasets and clear sessionStorage
+      setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData }]);
+      setActiveId(primaryId);
+      ssWrite([]);
+    } else {
+      // Same file, just sync props (e.g. filename rename)
+      setDatasets(prev => prev.map(ds =>
+        ds.id === primaryId ? { ...ds, rawData, filename: filename || ds.filename } : ds
+      ));
+    }
   }, [rawData, filename]);
+
+  // Persist secondary datasets to sessionStorage whenever the list changes
+  useEffect(() => {
+    const secondary = datasets.filter(d => d.id !== primaryId);
+    ssWrite(secondary);
+  }, [datasets, primaryId]);
 
   const activeDs       = datasets.find(d => d.id === activeId) || datasets[0];
   // Other datasets — passed to WranglingModule for join/append context
