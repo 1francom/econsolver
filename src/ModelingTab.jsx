@@ -13,12 +13,12 @@ import {
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
 } from "../src/math/index.js";
-import ReportingModule from "./src";
+import ReportingModule from "./ReportingModule.jsx";
 
-import EstimatorSidebar   from "./src/components/modeling/EstimatorSidebar.jsx";
-import VariableSelector   from "./src/components/modeling/VariableSelector.jsx";
-import ModelConfiguration from "./src/components/modeling/ModelConfiguration.jsx";
-import { C, mono }        from "./src/components/modeling/shared.jsx";
+import EstimatorSidebar   from "./components/modeling/EstimatorSidebar.jsx";
+import VariableSelector   from "./components/modeling/VariableSelector.jsx";
+import ModelConfiguration from "./components/modeling/ModelConfiguration.jsx";
+import { C, mono }        from "./components/modeling/shared.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
