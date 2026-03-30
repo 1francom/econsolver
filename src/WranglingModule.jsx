@@ -166,7 +166,52 @@ export function applyStep(rows, headers, s, context = {}) {
       onlyRight.forEach(h => { if (!H.includes(h)) H = [...H, h]; });
       break;
     }
-    default:break;
+    case "mutate": {
+      // Safe expression evaluator — columns exposed as named params + whitelisted helpers.
+      // Column names that are not valid JS identifiers are excluded from the scope;
+      // the user can reference them via the `row` object instead (row["my col"]).
+      const helpers = {
+        ifelse:(c,t,f)=>c?t:f,
+        between:(x,lo,hi)=>(typeof x==="number"&&x>=lo&&x<=hi)?1:0,
+        log:(x)=>(typeof x==="number"&&x>0)?Math.log(x):null,
+        log2:(x)=>(typeof x==="number"&&x>0)?Math.log2(x):null,
+        log10:(x)=>(typeof x==="number"&&x>0)?Math.log10(x):null,
+        sqrt:(x)=>(typeof x==="number"&&x>=0)?Math.sqrt(x):null,
+        exp:(x)=>typeof x==="number"?Math.exp(x):null,
+        abs:(x)=>typeof x==="number"?Math.abs(x):null,
+        round:(x,d=0)=>typeof x==="number"?Math.round(x*10**d)/10**d:null,
+        floor:(x)=>typeof x==="number"?Math.floor(x):null,
+        ceil:(x)=>typeof x==="number"?Math.ceil(x):null,
+        sign:(x)=>typeof x==="number"?Math.sign(x):null,
+        isna:(x)=>(x===null||x===undefined)?1:0,
+        notna:(x)=>(x!==null&&x!==undefined)?1:0,
+        coalesce:(...args)=>args.find(v=>v!==null&&v!==undefined)??null,
+        pmin:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.min(a,b):null,
+        pmax:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.max(a,b):null,
+        clamp:(x,lo,hi)=>typeof x==="number"?Math.max(lo,Math.min(hi,x)):null,
+        rescale:(x,oMin,oMax,nMin=0,nMax=1)=>(typeof x==="number"&&oMax!==oMin)?(nMin+(x-oMin)*(nMax-nMin)/(oMax-oMin)):null,
+        case_when:(...pairs)=>{
+          // case_when(cond1, val1, cond2, val2, ..., defaultVal)
+          for(let i=0;i<pairs.length-1;i+=2){if(pairs[i])return pairs[i+1];}
+          return pairs.length%2===1?pairs[pairs.length-1]:null;
+        },
+      };
+      const safeH=H.filter(h=>/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+      const pNames=[...Object.keys(helpers),"row",...safeH];
+      let fn;
+      try{ fn=new Function(...pNames,`"use strict";return (${s.expr});`); }catch{ break; }
+      R=rows.map(r=>{
+        const pVals=[...Object.values(helpers),r,...safeH.map(h=>r[h]??null)];
+        let val=null;
+        try{
+          val=fn(...pVals);
+          if(val===undefined||val===null||(typeof val==="number"&&!isFinite(val)))val=null;
+        }catch{}
+        return{...r,[s.nn]:val};
+      });
+      if(!H.includes(s.nn))H=[...H,s.nn];
+      break;
+    }
   }
   return{rows:R,headers:H};
 }
@@ -384,8 +429,8 @@ export function Grid({headers,rows,hi,max=20,types,onType}){
 }
 function History({pipeline,onRm,onClear}){
   if(!pipeline.length)return null;
-  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_extract:C.violet,join:C.teal,append:C.violet};
-  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_extract:"📅",join:"⊞",append:"⊕"};
+  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_extract:C.violet,join:C.teal,append:C.violet,mutate:C.green};
+  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_extract:"📅",join:"⊞",append:"⊕",mutate:"ƒ"};
   return(
     <div style={{width:230,flexShrink:0,borderLeft:`1px solid ${C.border}`,background:C.surface,overflowY:"auto",padding:"1rem"}}>
       <div style={{display:"flex",alignItems:"center",marginBottom:"0.8rem",gap:6}}>
@@ -1097,6 +1142,236 @@ function PanelTab({rows,headers,panel,setPanel}){
   );
 }
 
+// ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
+// dplyr-style free-form expression evaluator.
+// Exposes all column names as variables + a whitelist of helper functions.
+// Generates a pipeline step {type:"mutate", nn, expr, desc}.
+function MutateSubTab({rows, headers, info, onAdd}){
+  const [name,   setName]   = useState("");
+  const [expr,   setExpr]   = useState("");
+  const [refOpen,setRefOpen]= useState(false);
+  const nameRef = useRef("");
+
+  // ── Live preview ────────────────────────────────────────────────────────────
+  const preview = useMemo(()=>{
+    const n=name.trim(), e=expr.trim();
+    if(!e) return null;
+    const helpers={
+      ifelse:(c,t,f)=>c?t:f,
+      between:(x,lo,hi)=>(typeof x==="number"&&x>=lo&&x<=hi)?1:0,
+      log:(x)=>(typeof x==="number"&&x>0)?Math.log(x):null,
+      log2:(x)=>(typeof x==="number"&&x>0)?Math.log2(x):null,
+      log10:(x)=>(typeof x==="number"&&x>0)?Math.log10(x):null,
+      sqrt:(x)=>(typeof x==="number"&&x>=0)?Math.sqrt(x):null,
+      exp:(x)=>typeof x==="number"?Math.exp(x):null,
+      abs:(x)=>typeof x==="number"?Math.abs(x):null,
+      round:(x,d=0)=>typeof x==="number"?Math.round(x*10**d)/10**d:null,
+      floor:(x)=>typeof x==="number"?Math.floor(x):null,
+      ceil:(x)=>typeof x==="number"?Math.ceil(x):null,
+      sign:(x)=>typeof x==="number"?Math.sign(x):null,
+      isna:(x)=>(x===null||x===undefined)?1:0,
+      notna:(x)=>(x!==null&&x!==undefined)?1:0,
+      coalesce:(...args)=>args.find(v=>v!==null&&v!==undefined)??null,
+      pmin:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.min(a,b):null,
+      pmax:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.max(a,b):null,
+      clamp:(x,lo,hi)=>typeof x==="number"?Math.max(lo,Math.min(hi,x)):null,
+      rescale:(x,oMin,oMax,nMin=0,nMax=1)=>(typeof x==="number"&&oMax!==oMin)?(nMin+(x-oMin)*(nMax-nMin)/(oMax-oMin)):null,
+      case_when:(...pairs)=>{for(let i=0;i<pairs.length-1;i+=2){if(pairs[i])return pairs[i+1];}return pairs.length%2===1?pairs[pairs.length-1]:null;},
+    };
+    const safeH=headers.filter(h=>/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+    const pNames=[...Object.keys(helpers),"row",...safeH];
+    let fn, parseErr=null;
+    try{ fn=new Function(...pNames,`"use strict";return (${e});`); }
+    catch(err){ return{error:`Syntax: ${err.message}`,vals:[]}; }
+    const vals=[], errs=[];
+    rows.slice(0,6).forEach(r=>{
+      try{
+        const pVals=[...Object.values(helpers),r,...safeH.map(h=>r[h]??null)];
+        let v=fn(...pVals);
+        if(v===undefined||(typeof v==="number"&&!isFinite(v)))v=null;
+        vals.push(v);
+      }catch(err){ errs.push(err.message); vals.push(null); }
+    });
+    const runtimeErr=errs.length===rows.slice(0,6).length?errs[0]:null;
+    return{vals, error:runtimeErr, hasResult:vals.some(v=>v!==null)};
+  },[expr,rows,headers]);
+
+  function doAdd(){
+    const n=name.trim(), e=expr.trim();
+    if(!n||!e||preview?.error) return;
+    onAdd({type:"mutate",nn:n,expr:e,desc:`${n} = ${e}`});
+    setName(""); setExpr(""); nameRef.current="";
+  }
+
+  const canAdd=name.trim()&&expr.trim()&&preview?.hasResult&&!preview?.error;
+  const inpS={width:"100%",boxSizing:"border-box",padding:"0.45rem 0.7rem",background:C.surface2,
+    border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"};
+
+  // Helper reference data
+  const HELPERS=[
+    ["ifelse(cond, true_val, false_val)", "Conditional — like R's ifelse()"],
+    ["between(x, lo, hi)",               "Returns 1 if lo ≤ x ≤ hi, else 0"],
+    ["log(x)  log2(x)  log10(x)",        "Natural / base-2 / base-10 log"],
+    ["sqrt(x)  exp(x)  abs(x)",          "Square root, exponential, absolute value"],
+    ["round(x, digits)  floor(x)  ceil(x)", "Rounding functions"],
+    ["sign(x)",                           "−1, 0, or 1"],
+    ["isna(x)  notna(x)",                "Returns 1/0 for null check"],
+    ["coalesce(a, b, ...)",              "First non-null value — like SQL COALESCE"],
+    ["pmin(a, b)  pmax(a, b)",           "Element-wise min/max of two values"],
+    ["clamp(x, lo, hi)",                 "Clip x to [lo, hi] range"],
+    ["rescale(x, oMin, oMax)",           "Rescale to [0, 1] — or pass nMin, nMax"],
+    ["case_when(c1, v1, c2, v2, ..., default)", "Multi-condition recode"],
+  ];
+  const EXAMPLES=[
+    ["gdp_per_cap","gdp / population"],
+    ["log_wage","log(wage)"],
+    ["treat_post","treated * post"],
+    ["income_real","income / cpi * 100"],
+    ["age_sq","age ** 2"],
+    ["hi_edu","ifelse(educ >= 16, 1, 0)"],
+    ["wage_clamp","clamp(wage, 0, 500)"],
+    ["size_cat","case_when(area < 10, 'small', area < 50, 'medium', 'large')"],
+  ];
+
+  return(
+    <div>
+      {/* ── Context note ── */}
+      <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
+        borderLeft:`3px solid ${C.green}`,borderRadius:4,marginBottom:"1.4rem",
+        fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+        Equivalent to dplyr's <span style={{color:C.green}}>mutate()</span>.
+        Column names are available as variables. All math operators (+, −, *, /, **) supported.
+        New column is appended; existing columns are overwritten if name matches.
+      </div>
+
+      {/* ── Name + Expression inputs ── */}
+      <div style={{display:"grid",gridTemplateColumns:"200px 1fr",gap:8,marginBottom:8,alignItems:"end"}}>
+        <div>
+          <Lbl color={C.green}>New column name</Lbl>
+          <input value={name} onChange={e=>setName(e.target.value)}
+            placeholder="e.g. gdp_per_cap"
+            style={inpS}/>
+        </div>
+        <div>
+          <Lbl color={C.green}>Expression</Lbl>
+          <input value={expr} onChange={e=>setExpr(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"&&canAdd)doAdd();}}
+            placeholder="e.g. gdp / population"
+            style={inpS}/>
+        </div>
+      </div>
+
+      {/* ── Formula display + Add button ── */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.2rem"}}>
+        {name.trim()&&expr.trim()?(
+          <div style={{flex:1,padding:"0.42rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,
+            borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono}}>
+            <span style={{color:C.green}}>{name.trim()||"?"}</span>
+            <span style={{color:C.border2,margin:"0 6px"}}>=</span>
+            <span style={{color:C.text}}>{expr.trim()||"…"}</span>
+          </div>
+        ):<div style={{flex:1}}/>}
+        <Btn onClick={doAdd} color={C.green} v="solid" dis={!canAdd} ch="Add to pipeline →"/>
+      </div>
+
+      {/* ── Live preview ── */}
+      {preview&&(
+        <div style={{marginBottom:"1.4rem",padding:"0.75rem",
+          background:preview.error?`${C.red}08`:`${C.green}08`,
+          border:`1px solid ${preview.error?C.red+"30":C.green+"30"}`,
+          borderRadius:4}}>
+          <div style={{fontSize:9,color:preview.error?C.red:C.green,
+            letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:6}}>
+            {preview.error?"✕ Error":"✓ Preview — first 6 values"}
+          </div>
+          {preview.error?(
+            <div style={{fontSize:11,color:C.red,fontFamily:mono}}>{preview.error}</div>
+          ):(
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {preview.vals.map((v,i)=>(
+                <span key={i} style={{fontSize:11,fontFamily:mono,padding:"2px 8px",
+                  borderRadius:2,border:`1px solid ${v===null?C.border:C.green+"40"}`,
+                  color:v===null?C.textMuted:C.green,
+                  background:v===null?"transparent":`${C.green}0a`}}>
+                  {v===null?"·":typeof v==="number"?
+                    (Number.isInteger(v)?v:v.toFixed(4).replace(/\.?0+$/,"")):
+                    String(v)}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Quick examples ── */}
+      <div style={{marginBottom:"1.2rem"}}>
+        <Lbl color={C.textMuted}>Quick examples — click to load</Lbl>
+        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+          {EXAMPLES.map(([n,e])=>(
+            <button key={n} onClick={()=>{setName(n);setExpr(e);}}
+              style={{padding:"0.25rem 0.6rem",border:`1px solid ${C.border2}`,
+                background:"transparent",color:C.textMuted,borderRadius:3,
+                cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.1s",
+                textAlign:"left"}}
+              onMouseEnter={e2=>{e2.currentTarget.style.borderColor=C.green;e2.currentTarget.style.color=C.green;}}
+              onMouseLeave={e2=>{e2.currentTarget.style.borderColor=C.border2;e2.currentTarget.style.color=C.textMuted;}}>
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Column reference ── */}
+      <div style={{marginBottom:"1.2rem"}}>
+        <Lbl color={C.textMuted}>Available columns</Lbl>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+          {headers.map(h=>(
+            <button key={h}
+              onClick={()=>setExpr(p=>p+(p&&!p.endsWith(" ")?" ":"")+h)}
+              title={info[h]?.isNum
+                ? `μ=${info[h].mean?.toFixed(2)} · [${info[h].min?.toFixed(2)}, ${info[h].max?.toFixed(2)}]`
+                : `${info[h]?.uCount} unique vals`}
+              style={{padding:"0.22rem 0.55rem",border:`1px solid ${C.border}`,
+                background:"transparent",color:info[h]?.isNum?C.blue:C.purple,
+                borderRadius:2,cursor:"pointer",fontSize:10,fontFamily:mono,
+                transition:"all 0.1s"}}
+              onMouseEnter={e=>{e.currentTarget.style.background=`${info[h]?.isNum?C.blue:C.purple}18`;}}
+              onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+              {h}
+            </button>
+          ))}
+        </div>
+        <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:4}}>
+          Click to insert into expression · <span style={{color:C.blue}}>blue</span> = numeric · <span style={{color:C.purple}}>purple</span> = categorical
+        </div>
+      </div>
+
+      {/* ── Helper function reference (collapsible) ── */}
+      <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
+        <button onClick={()=>setRefOpen(o=>!o)}
+          style={{width:"100%",padding:"0.55rem 0.85rem",background:C.surface2,border:"none",
+            display:"flex",alignItems:"center",gap:8,cursor:"pointer",
+            color:C.textMuted,fontFamily:mono,fontSize:10,textAlign:"left"}}>
+          <span style={{fontSize:9,letterSpacing:"0.18em",textTransform:"uppercase"}}>
+            {refOpen?"▾":"▸"} Helper functions reference
+          </span>
+        </button>
+        {refOpen&&(
+          <div style={{padding:"0.75rem",background:C.surface}}>
+            {HELPERS.map(([sig,desc])=>(
+              <div key={sig} style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,
+                padding:"0.35rem 0",borderBottom:`1px solid ${C.border}`}}>
+                <code style={{fontSize:10,color:C.green,fontFamily:mono}}>{sig}</code>
+                <span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
   const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
@@ -1196,7 +1471,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
 
   return(
     <div>
-      <Tabs tabs={[["quick","⚡ Transforms"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["did","DiD"]]} active={vt} set={setVt} accent={C.teal} sm/>
+      <Tabs tabs={[["quick","⚡ Transforms"],["mutate","ƒ Mutate"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["did","DiD"]]} active={vt} set={setVt} accent={C.teal} sm/>
 
       {/* ── Variable name input (shared by quick/panel/did) ── */}
       {(vt==="quick"||vt==="panel"||vt==="did")&&(
@@ -1348,6 +1623,9 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
           <Btn onClick={doDummy} color={C.green} v="solid" ch="Create dummies"/></>}
         </div>
       )}
+
+      {/* ── Mutate ── */}
+      {vt==="mutate"&&<MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>}
 
       {/* ── DiD ── */}
       {vt==="did"&&(
