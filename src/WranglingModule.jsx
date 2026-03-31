@@ -3,6 +3,11 @@
 // Consumes rawData {headers, rows} and emits a cleanedData object.
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { inferVariableUnits } from "./AIService.js";
+import { applyStep, runPipeline, NA_PAT } from "./pipeline/runner.js";
+import { validatePanel, buildInfo } from "./pipeline/validator.js";
+export { validatePanel, buildInfo } from "./pipeline/validator.js";
+export { applyStep, runPipeline } from "./pipeline/runner.js";
+
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -13,7 +18,7 @@ const C = {
   green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
   blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
   violet:"#9e7ec8",
-};
+}
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 const LS_KEY = "econ_wrangle_v2";
 
@@ -26,241 +31,9 @@ function lsSave(id,upd){
   lsSet(all.slice(0,8));
 }
 
-// ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
-const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
-
 // ─── PIPELINE ENGINE ─────────────────────────────────────────────────────────
-export function applyStep(rows, headers, s, context = {}) {
-  let R = rows, H = [...headers];
-  switch (s.type) {
-    case "rename": R=rows.map(r=>{const c={...r};c[s.newName]=c[s.col];delete c[s.col];return c;});H=headers.map(h=>h===s.col?s.newName:h);break;
-    case "drop": R=rows.map(r=>{const c={...r};delete c[s.col];return c;});H=headers.filter(h=>h!==s.col);break;
-    case "filter": {
-      R=rows.filter(r=>{const v=r[s.col];
-        if(s.op==="notna")return v!==null&&v!==undefined;
-        const n=parseFloat(s.value);
-        if(s.op==="eq")return String(v)===String(s.value);
-        if(s.op==="neq")return String(v)!==String(s.value);
-        if(s.op==="gt")return typeof v==="number"&&v>n;
-        if(s.op==="lt")return typeof v==="number"&&v<n;
-        if(s.op==="gte")return typeof v==="number"&&v>=n;
-        if(s.op==="lte")return typeof v==="number"&&v<=n;
-        return true;});break;}
-    case "ai_tr": {
-      try{const fn=new Function("value","rowIndex",`return (${s.js});`);R=rows.map((r,i)=>({...r,[s.col]:fn(r[s.col],i)}));}catch{}break;}
-    case "log": R=rows.map(r=>{const v=r[s.col];return{...r,[s.nn]:(typeof v==="number"&&v>0)?Math.log(v):null};});if(!H.includes(s.nn))H=[...H,s.nn];break;
-    case "sq": R=rows.map(r=>{const v=r[s.col];return{...r,[s.nn]:typeof v==="number"?v*v:null};});if(!H.includes(s.nn))H=[...H,s.nn];break;
-    case "std": {R=rows.map(r=>{const v=r[s.col];return{...r,[s.nn]:(typeof v==="number"&&s.sd>0)?(v-s.mu)/s.sd:null};});if(!H.includes(s.nn))H=[...H,s.nn];break;}
-    case "winz": R=rows.map(r=>{const v=r[s.col];if(typeof v!=="number")return r;return{...r,[s.nn||s.col]:Math.max(s.lo,Math.min(s.hi,v))};});if(s.nn&&s.nn!==s.col&&!H.includes(s.nn))H=[...H,s.nn];break;
-    case "ix": R=rows.map(r=>{const a=r[s.c1],b=r[s.c2];return{...r,[s.nn]:(typeof a==="number"&&typeof b==="number")?a*b:null};});if(!H.includes(s.nn))H=[...H,s.nn];break;
-    case "did": R=rows.map(r=>{const t=r[s.tc],p=r[s.pc];return{...r,[s.nn]:(typeof t==="number"&&typeof p==="number")?t*p:null};});if(!H.includes(s.nn))H=[...H,s.nn];break;
-    case "dummy": {const cats=[...new Set(rows.map(r=>r[s.col]).filter(v=>v!=null))];
-      R=rows.map(r=>{const a={...r};cats.forEach(c=>{a[`${s.pfx}_${c}`]=r[s.col]===c?1:0;});return a;});
-      cats.forEach(c=>{const d=`${s.pfx}_${c}`;if(!H.includes(d))H=[...H,d];});break;}
-    case "lag": case "lead": {
-      const isL=s.type==="lag",n=s.n||1;
-      if(s.ec&&s.tc){
-        const em={};rows.forEach((r,idx)=>{const e=r[s.ec];if(!em[e])em[e]=[];em[e].push({idx,t:r[s.tc]});});
-        const rv=new Array(rows.length).fill(null);
-        Object.values(em).forEach(g=>{g.sort((a,b)=>a.t-b.t);g.forEach((item,pos)=>{const sp=isL?pos-n:pos+n;if(sp>=0&&sp<g.length)rv[item.idx]=rows[g[sp].idx][s.col];});});
-        R=rows.map((r,i)=>({...r,[s.nn]:rv[i]}));
-      } else R=rows.map((r,i)=>{const si=isL?i-n:i+n;return{...r,[s.nn]:(si>=0&&si<rows.length)?rows[si][s.col]:null};});
-      if(!H.includes(s.nn))H=[...H,s.nn];break;}
-    case "diff": {
-      if(s.ec&&s.tc){
-        const em={};rows.forEach((r,idx)=>{const e=r[s.ec];if(!em[e])em[e]=[];em[e].push({idx,t:r[s.tc]});});
-        const rv=new Array(rows.length).fill(null);
-        Object.values(em).forEach(g=>{g.sort((a,b)=>a.t-b.t);for(let p=1;p<g.length;p++){const c=rows[g[p].idx][s.col],pv=rows[g[p-1].idx][s.col];if(typeof c==="number"&&typeof pv==="number")rv[g[p].idx]=c-pv;}});
-        R=rows.map((r,i)=>({...r,[s.nn]:rv[i]}));
-      } else R=rows.map((r,i)=>{if(i===0)return{...r,[s.nn]:null};const c=r[s.col],p=rows[i-1][s.col];return{...r,[s.nn]:(typeof c==="number"&&typeof p==="number")?c-p:null};});
-      if(!H.includes(s.nn))H=[...H,s.nn];break;}
-    case "recode": {
-      const map=s.map||{};
-      R=rows.map(r=>{const v=r[s.col];const k=v!=null?String(v):null;return{...r,[s.col]:k!=null&&map[k]!==undefined?map[k]:v};});
-      break;}
-    case "quickclean": {
-      const mode=s.mode||"lower";
-      R=rows.map(r=>{const v=r[s.col];if(typeof v!=="string")return r;const t=v.trim();
-        let out=t;
-        if(mode==="lower")out=t.toLowerCase();
-        else if(mode==="upper")out=t.toUpperCase();
-        else if(mode==="title")out=t.replace(/\b\w/g,c=>c.toUpperCase()).replace(/\B\w/g,c=>c.toLowerCase());
-        return{...r,[s.col]:out};});
-      break;}
-    case "date_extract": {
-      // s.col: source date column (string like "2021-03-15")
-      // s.parts: array of "month"|"dow"|"isweekend"
-      // s.names: {month:"...", dow:"...", isweekend:"..."}
-      const parseDate=v=>{
-        if(v==null) return null;
-        const d=new Date(String(v).trim());
-        return isNaN(d.getTime())?null:d;
-      };
-      s.parts.forEach(part=>{
-        const nn=s.names[part];
-        if(!nn) return;
-        R=R.map(r=>{
-          const d=parseDate(r[s.col]);
-          if(!d) return{...r,[nn]:null};
-          if(part==="month") return{...r,[nn]:d.getMonth()+1};       // 1–12
-          if(part==="dow")   return{...r,[nn]:d.getDay()};            // 0=Sun…6=Sat
-          if(part==="isweekend"){const dow=d.getDay();return{...r,[nn]:(dow===0||dow===6)?1:0};}
-          return r;
-        });
-        if(!H.includes(nn)) H=[...H,nn];
-      });
-      break;}
-    case "join": {
-      // LEFT JOIN or INNER JOIN against another dataset via context registry.
-      // RHS is the raw (pre-pipeline) data of the referenced dataset.
-      const right = context?.datasets?.[s.rightId];
-      if (!right) break; // dataset not loaded — step is a no-op, preserved in history
-      const rRows = right.rows, rHeaders = right.headers;
-      const newCols = rHeaders.filter(h => h !== s.rightKey);
-      const rightMap = new Map();
-      rRows.forEach(r => {
-        const k = String(r[s.rightKey] ?? "");
-        if (!rightMap.has(k)) rightMap.set(k, r);
-      });
-      const outRows = [];
-      rows.forEach(r => {
-        const k = String(r[s.leftKey] ?? "");
-        const match = rightMap.get(k);
-        if (match) {
-          const merged = {...r};
-          newCols.forEach(h => {
-            const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h;
-            merged[dest] = match[h] ?? null;
-          });
-          outRows.push(merged);
-        } else if (s.how === "left" || !s.how) {
-          // Keep unmatched left rows; fill right columns with null
-          const merged = {...r};
-          newCols.forEach(h => {
-            const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h;
-            merged[dest] = null;
-          });
-          outRows.push(merged);
-        }
-        // how === "inner": unmatched left rows are dropped
-      });
-      R = outRows;
-      newCols.forEach(h => {
-        const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h;
-        if (!H.includes(dest)) H = [...H, dest];
-      });
-      break;
-    }
-    case "append": {
-      // Vertical stack (bind_rows / UNION ALL). Columns matched by name.
-      // Columns only in right → added to left rows as null.
-      const right = context?.datasets?.[s.rightId];
-      if (!right) break;
-      const rRows = right.rows, rHeaders = right.headers;
-      const onlyRight = rHeaders.filter(h => !H.includes(h));
-      // Pad left rows with null for new right-only columns
-      R = [
-        ...rows.map(r => { const c = {...r}; onlyRight.forEach(h => { c[h] = null; }); return c; }),
-        ...rRows.map(r => { const c = {}; [...H, ...onlyRight].forEach(h => { c[h] = r[h] ?? null; }); return c; }),
-      ];
-      onlyRight.forEach(h => { if (!H.includes(h)) H = [...H, h]; });
-      break;
-    }
-    case "mutate": {
-      // Safe expression evaluator — columns exposed as named params + whitelisted helpers.
-      // Column names that are not valid JS identifiers are excluded from the scope;
-      // the user can reference them via the `row` object instead (row["my col"]).
-      const helpers = {
-        ifelse:(c,t,f)=>c?t:f,
-        between:(x,lo,hi)=>(typeof x==="number"&&x>=lo&&x<=hi)?1:0,
-        log:(x)=>(typeof x==="number"&&x>0)?Math.log(x):null,
-        log2:(x)=>(typeof x==="number"&&x>0)?Math.log2(x):null,
-        log10:(x)=>(typeof x==="number"&&x>0)?Math.log10(x):null,
-        sqrt:(x)=>(typeof x==="number"&&x>=0)?Math.sqrt(x):null,
-        exp:(x)=>typeof x==="number"?Math.exp(x):null,
-        abs:(x)=>typeof x==="number"?Math.abs(x):null,
-        round:(x,d=0)=>typeof x==="number"?Math.round(x*10**d)/10**d:null,
-        floor:(x)=>typeof x==="number"?Math.floor(x):null,
-        ceil:(x)=>typeof x==="number"?Math.ceil(x):null,
-        sign:(x)=>typeof x==="number"?Math.sign(x):null,
-        isna:(x)=>(x===null||x===undefined)?1:0,
-        notna:(x)=>(x!==null&&x!==undefined)?1:0,
-        coalesce:(...args)=>args.find(v=>v!==null&&v!==undefined)??null,
-        pmin:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.min(a,b):null,
-        pmax:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.max(a,b):null,
-        clamp:(x,lo,hi)=>typeof x==="number"?Math.max(lo,Math.min(hi,x)):null,
-        rescale:(x,oMin,oMax,nMin=0,nMax=1)=>(typeof x==="number"&&oMax!==oMin)?(nMin+(x-oMin)*(nMax-nMin)/(oMax-oMin)):null,
-        case_when:(...pairs)=>{
-          // case_when(cond1, val1, cond2, val2, ..., defaultVal)
-          for(let i=0;i<pairs.length-1;i+=2){if(pairs[i])return pairs[i+1];}
-          return pairs.length%2===1?pairs[pairs.length-1]:null;
-        },
-      };
-      const safeH=H.filter(h=>/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
-      const pNames=[...Object.keys(helpers),"row",...safeH];
-      let fn;
-      try{ fn=new Function(...pNames,`"use strict";return (${s.expr});`); }catch{ break; }
-      R=rows.map(r=>{
-        const pVals=[...Object.values(helpers),r,...safeH.map(h=>r[h]??null)];
-        let val=null;
-        try{
-          val=fn(...pVals);
-          if(val===undefined||val===null||(typeof val==="number"&&!isFinite(val)))val=null;
-        }catch{}
-        return{...r,[s.nn]:val};
-      });
-      if(!H.includes(s.nn))H=[...H,s.nn];
-      break;
-    }
-  }
-  return{rows:R,headers:H};
-}
-export function runPipeline(rows, headers, pipeline, context = {}) {
-  let s = {rows, headers};
-  for (const step of pipeline) s = applyStep(s.rows, s.headers, step, context);
-  return s;
-}
-
-// ─── PANEL VALIDATION ─────────────────────────────────────────────────────────
-export function validatePanel(rows, ec, tc) {
-  if (!ec || !tc) return null;
-  const entities=[...new Set(rows.map(r=>r[ec]))].sort((a,b)=>String(a).localeCompare(String(b)));
-  const times=[...new Set(rows.map(r=>r[tc]))].sort((a,b)=>a-b);
-  const seen={},dups=[];
-  rows.forEach((r,i)=>{const k=`${r[ec]}||${r[tc]}`;if(seen[k]!==undefined)dups.push({e:r[ec],t:r[tc],rows:[seen[k]+2,i+2]});else seen[k]=i;});
-  const pres={};
-  entities.forEach(e=>{pres[e]={};times.forEach(t=>{pres[e][t]=false;});});
-  rows.forEach(r=>{if(pres[r[ec]])pres[r[ec]][r[tc]]=true;});
-  const allHave=entities.every(e=>times.every(t=>pres[e][t]));
-  const t0=times[0],tN=times[times.length-1];
-  const at0=entities.filter(e=>pres[e][t0]).length,atN=entities.filter(e=>pres[e][tN]).length;
-  const attrition=at0>0?(at0-atN)/at0:0;
-  const gaps=[];
-  entities.slice(0,8).forEach(e=>{const m=times.filter(t=>!pres[e][t]);if(m.length>0)gaps.push({e,m});});
-  return{entities,times,balance:allHave?"strongly_balanced":"unbalanced",dups:dups.slice(0,5),gaps,blockFE:dups.length>0,pres,attrition,at0,atN};
-}
-
-// ─── COLUMN STATS ─────────────────────────────────────────────────────────────
-export function buildInfo(headers, rows) {
-  const info={};
-  headers.forEach(h=>{
-    const vals=rows.map(r=>r[h]);
-    let nc=0,na=0,tx=0; const u=new Set();
-    vals.forEach(v=>{if(v===null||v===undefined){na++;return;}u.add(v);if(typeof v==="number")nc++;else tx++;});
-    const num=vals.filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
-    const mean=num.length?num.reduce((a,b)=>a+b,0)/num.length:null;
-    const std=num.length&&mean!=null?Math.sqrt(num.reduce((s,v)=>s+(v-mean)**2,0)/num.length):null;
-    const q1=num[Math.floor(num.length*.25)]??null,q3=num[Math.floor(num.length*.75)]??null;
-    const iqr=(q1!=null&&q3!=null)?q3-q1:null;
-    const outliers=iqr!=null?num.filter(v=>v<q1-1.5*iqr||v>q3+1.5*iqr).length:0;
-    const sorted=[...num];
-    const median=sorted.length?sorted.length%2===0?(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2:sorted[Math.floor(sorted.length/2)]:null;
-    info[h]={isNum:nc>0&&tx===0,isCat:tx>0&&u.size<=30,naCount:na,naPct:vals.length?na/vals.length:0,
-      total:vals.length,uCount:u.size,uVals:[...u].slice(0,20),
-      mean,std,q1,q3,iqr,min:num[0]??null,max:num[num.length-1]??null,outliers,median};
-  });
-  return info;
-}
+// applyStep, runPipeline, NA_PAT → imported from ../pipeline/runner.js
+// validatePanel, buildInfo       → imported from ../pipeline/validator.js
 
 // ─── FUZZY MATCHING ───────────────────────────────────────────────────────────
 function levenshtein(a,b,maxD=6){
