@@ -128,16 +128,19 @@ function runWLS(xData, yData, weights) {
   const yhat  = xData.map(row => row.reduce((s, v, j) => s + v * beta[j], 0));
   const resid = yData.map((y, i) => y - yhat[i]);
   const n = yData.length, k = beta.length;
-  const SSR = resid.reduce((s, e, i) => s + weights[i] * e * e, 0);
   const df  = n - k;
-  const s2  = SSR / Math.max(1, df);
+  // σ² uses UNWEIGHTED residuals: kernel weights determine β̂ efficiency,
+  // not the error variance. Using weighted SSR deflates σ² by mean(W) < 1
+  // (≈0.5 for triangular kernel), causing SE underestimation by ~√mean(W).
+  const SSR_uw = resid.reduce((s, e) => s + e * e, 0);
+  const s2     = SSR_uw / Math.max(1, df);
   const Ym  = yData.reduce((a, b) => a + b, 0) / n;
   const SST = yData.reduce((s, y) => s + (y - Ym) ** 2, 0);
-  const R2  = 1 - resid.reduce((s, e) => s + e * e, 0) / SST;
+  const R2  = 1 - SSR_uw / SST;
   const se  = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals  = tStats.map(t => pValue(t, df));
-  return { beta, se, tStats, pVals, R2, n, df, SSR, resid, yhat };
+  return { beta, se, tStats, pVals, R2, n, df, SSR: SSR_uw, resid, yhat };
 }
 
 // ─── IK BANDWIDTH SELECTOR ───────────────────────────────────────────────────
