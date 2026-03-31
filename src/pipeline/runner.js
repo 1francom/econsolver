@@ -366,6 +366,62 @@ export function applyStep(rows, headers, s, context = {}) {
       if (!H.includes(s.nn)) H = [...H, s.nn];
       break;
     }
+    case "type_cast": {
+      // Convert a column to a target type in-place.
+      // s.col:    column name
+      // s.to:     "number" | "string" | "boolean"
+      // Unparseable values → null (never silently corrupt)
+      R = rows.map(r => {
+        const v = r[s.col];
+        if (v === null || v === undefined) return r;
+        let out = null;
+        if (s.to === "number") {
+          const n = Number(v);
+          out = isFinite(n) ? n : null;
+        } else if (s.to === "string") {
+          out = String(v);
+        } else if (s.to === "boolean") {
+          // Truthy strings: "1", "true", "yes", "y" (case-insensitive)
+          if (typeof v === "number") out = v !== 0 ? 1 : 0;
+          else out = /^(1|true|yes|y)$/i.test(String(v).trim()) ? 1 : 0;
+        }
+        return { ...r, [s.col]: out };
+      });
+      break;
+    }
+
+    case "drop_na": {
+      // Remove rows where the target column(s) are null/undefined.
+      // s.cols:  string[] — columns to check (required)
+      // s.how:   "any" (default) | "all"
+      //   "any" → drop row if ANY of s.cols is null
+      //   "all" → drop row only if ALL of s.cols are null
+      const cols = s.cols || (s.col ? [s.col] : H);
+      const isNull = v => v === null || v === undefined;
+      R = rows.filter(r => {
+        const nulls = cols.filter(c => isNull(r[c]));
+        if (s.how === "all") return nulls.length < cols.length;
+        return nulls.length === 0; // "any" — default
+      });
+      break;
+    }
+
+    case "normalize_cats": {
+      // Apply a value-replacement map to a categorical column.
+      // Equivalent to running fuzzyGroups + applying canonical mapping.
+      // s.col:  column name
+      // s.map:  Record<originalValue, canonicalValue>  (plain JSON — serializable)
+      // Values not in map are left unchanged.
+      const map = s.map || {};
+      R = rows.map(r => {
+        const v = r[s.col];
+        if (v === null || v === undefined) return r;
+        const k = String(v);
+        return { ...r, [s.col]: map[k] !== undefined ? map[k] : v };
+      });
+      break;
+    }
+
   }
   return { rows: R, headers: H };
 }

@@ -6,7 +6,7 @@
 
 const API_URL   = "https://api.anthropic.com/v1/messages";
 const MODEL     = "claude-sonnet-4-20250514";
-const MAX_TOK   = 1000;
+const MAX_TOK   = 700;
 
 // ─── MOCK FALLBACKS ───────────────────────────────────────────────────────────
 // Used when the API key is absent or the network call fails (CORS in dev, etc.)

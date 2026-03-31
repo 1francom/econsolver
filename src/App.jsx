@@ -4,7 +4,7 @@
 import { useState, useRef } from "react";
 import DataStudio from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
-import ModelingTab from './ModelingTab';
+import ModelingTab from './components/ModelingTab.jsx';
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {

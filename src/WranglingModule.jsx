@@ -2,9 +2,11 @@
 // Data Studio: cleaning, panel declaration, feature engineering.
 // Consumes rawData {headers, rows} and emits a cleanedData object.
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { inferVariableUnits } from "./AIService.js";
+import { inferVariableUnits } from "././services/ai/AIService.js";
 import { applyStep, runPipeline, NA_PAT } from "./pipeline/runner.js";
 import { validatePanel, buildInfo } from "./pipeline/validator.js";
+import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQuality.js";
+import DataQualityReport from "./components/wrangling/DataQualityReport.jsx";
 export { validatePanel, buildInfo } from "./pipeline/validator.js";
 export { applyStep, runPipeline } from "./pipeline/runner.js";
 
@@ -1961,6 +1963,14 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
 
   const info = useMemo(()=>buildInfo(headers, rows), [headers, rows]);
 
+  const panelReport = useMemo(()=>
+    panel ? validatePanel(rows, panel.entityCol, panel.timeCol) : null,
+  [rows, panel]);
+
+  const qualityReport = useMemo(()=>
+    buildDataQualityReport(headers, rows, info, panelReport),
+  [headers, rows, info, panelReport]);
+
   useEffect(()=>{
     lsSave(pid, {filename, pipeline, panel, dataDictionary, rowCount:rawData.rows.length, colCount:rawData.headers.length, pipelineLength:pipeline.length});
   }, [pipeline, panel, dataDictionary]);
@@ -2014,8 +2024,27 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
           </div>
         </div>
         {/* Tabs */}
-        <Tabs tabs={[["clean","⬡ Cleaning"],["structure","⊞ Panel Structure"],["features","⊕ Feature Engineering"],["merge","⊕ Merge"],["dictionary","◈ Data Dictionary"]]} active={tab} set={setTab}/>
+        <Tabs tabs={[
+          ["clean","⬡ Cleaning"],
+          ["quality",`◈ Quality${qualityReport?.flags?.filter(f=>f.severity!=="ok").length>0?` (${qualityReport.flags.filter(f=>f.severity!=="ok").length})`:"  ✓"}`],
+          ["structure","⊞ Panel Structure"],
+          ["features","⊕ Feature Engineering"],
+          ["merge","⊕ Merge"],
+          ["dictionary","◈ Data Dictionary"],
+        ]} active={tab} set={setTab}/>
         {tab==="clean"&&<CleanTab rows={rows} headers={headers} info={info} rawData={rawData} onAdd={addStep}/>}
+        {tab==="quality"&&<DataQualityReport
+          report={qualityReport}
+          onApplyStep={s=>addStep(s)}
+          onExportMd={()=>{
+            const md = exportMarkdown(qualityReport);
+            const blob = new Blob([md], {type:"text/markdown"});
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = (filename?filename.replace(/\.[^.]+$/,""):"dataset")+"_quality_report.md";
+            a.click(); URL.revokeObjectURL(a.href);
+          }}
+        />}
         {tab==="structure"&&<PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>}
         {tab==="features"&&<FeatureEngineeringTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>}
         {tab==="merge"&&<MergeTab rows={rows} headers={headers} filename={filename} allDatasets={allDatasets} onAdd={addStep}/>}

@@ -12,13 +12,13 @@ import {
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
-} from "./src/math/index.js";
-import ReportingModule from "./src";
+} from "../math/index.js";
+import ReportingModule from "../ReportingModule.jsx";
 
-import EstimatorSidebar   from "./src/components/modeling/EstimatorSidebar.jsx";
-import VariableSelector   from "./src/components/modeling/VariableSelector.jsx";
-import ModelConfiguration from "./src/components/modeling/ModelConfiguration.jsx";
-import { C, mono }        from "./src/components/modeling/shared.jsx";
+import EstimatorSidebar   from "./modeling/EstimatorSidebar.jsx";
+import VariableSelector   from "./modeling/VariableSelector.jsx";
+import ModelConfiguration from "./modeling/ModelConfiguration.jsx";
+import { C, mono }        from "./modeling/shared.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
