@@ -3,9 +3,12 @@
 // All components are stateless — they receive engine output as props and render.
 //
 // Exports:
-//   RDDPlot        — binned scatter + local linear fit + cutoff + LATE annotation
-//   DiDPlot        — 2×2 parallel trends + counterfactual + ATT arrow
-//   EventStudyPlot — per-period means (treated vs control) + treatment line
+//   RDDPlot              — binned scatter + local linear fit + cutoff + LATE annotation
+//   DiDPlot              — 2×2 parallel trends + counterfactual + ATT arrow
+//   EventStudyPlot       — per-period means (treated vs control) + treatment line
+//   FirstStagePlot       — 2SLS: instrument(s) vs endogenous, fitted line, F-stat
+//   RDDBandwidthPlot     — LATE(h) sensitivity across bandwidth range
+//   RDDCovariateBalance  — covariate means left/right of cutoff (balance check)
 //
 // Depends on: C, mono from ./shared.jsx
 // No React state. No side effects.
@@ -605,5 +608,512 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
         <text x={22} y={24} fill={C.textDim} fontSize={8} fontFamily={mono}>Treated</text>
       </g>
     </PlotShell>
+  );
+}
+
+// ─── FIRST STAGE PLOT (2SLS) ──────────────────────────────────────────────────
+// Scatter of instrument(s) vs endogenous variable with OLS fit line.
+// One panel per instrument. Shows F-stat and weak instrument threshold.
+//
+// Props:
+//   firstStages — array from run2SLS: [{ endVar, Fstat, Fpval, weak, beta, Yhat, varNames, firstXCols }]
+//   rows        — the original data rows (for raw scatter)
+//   instrVars   — instrument column names (zVars from ModelingTab)
+//   endogVars   — endogenous column names (xVars from ModelingTab)
+
+export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
+  if (!firstStages?.length || !rows?.length) return null;
+
+  const W = 420, H = 300;
+  const PAD = { l: 52, r: 20, t: 28, b: 48 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  // one panel per (instrument × endogenous) pair — cap at 4 to avoid overflow
+  const panels = [];
+  firstStages.forEach(fs => {
+    instrVars.forEach(z => {
+      if (panels.length >= 4) return;
+      const pts = rows
+        .map(r => ({ x: r[z], y: r[fs.endVar] }))
+        .filter(p => typeof p.x === "number" && typeof p.y === "number" && isFinite(p.x) && isFinite(p.y));
+      if (pts.length < 4) return;
+
+      const xs = pts.map(p => p.x);
+      const ys = pts.map(p => p.y);
+      const xMin = Math.min(...xs), xMax = Math.max(...xs);
+      const yMin = Math.min(...ys), yMax = Math.max(...ys);
+      const xPad = (xMax - xMin) * 0.05 || 1;
+      const yPad = (yMax - yMin) * 0.08 || 1;
+
+      // OLS fit line through raw data (instrument → endogenous)
+      const n   = pts.length;
+      const xm  = xs.reduce((s, v) => s + v, 0) / n;
+      const ym  = ys.reduce((s, v) => s + v, 0) / n;
+      const sxx = xs.reduce((s, v) => s + (v - xm) ** 2, 0);
+      const sxy = xs.reduce((s, v, i) => s + (v - xm) * (ys[i] - ym), 0);
+      const b1  = sxx > 0 ? sxy / sxx : 0;
+      const b0  = ym - b1 * xm;
+
+      panels.push({
+        z, endVar: fs.endVar,
+        pts, xMin, xMax, yMin, yMax, xPad, yPad,
+        b0, b1,
+        Fstat: fs.Fstat, weak: fs.weak,
+      });
+    });
+  });
+
+  if (!panels.length) return null;
+
+  const cols  = Math.min(panels.length, 2);
+  const rows_ = Math.ceil(panels.length / cols);
+  const totalW = cols * W + (cols - 1) * 1;
+  const totalH = rows_ * H + (rows_ - 1) * 1;
+
+  const svgId = "first-stage-plot";
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          First Stage — Instrument Relevance
+        </span>
+        <button
+          onClick={() => {
+            const el = document.getElementById(svgId);
+            if (!el) return;
+            const src = new XMLSerializer().serializeToString(el);
+            const blob = new Blob([src], { type: "image/svg+xml" });
+            const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+            a.download = "first_stage.svg"; a.click(); URL.revokeObjectURL(a.href);
+          }}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+        >↓ SVG</button>
+      </div>
+      <div style={{ background: C.bg, overflowX: "auto", padding: "0.5rem" }}>
+        <svg id={svgId} viewBox={`0 0 ${totalW} ${totalH}`}
+          style={{ width: "100%", minWidth: 320, display: "block", fontFamily: mono }}>
+          <rect width={totalW} height={totalH} fill={C.bg} />
+          {panels.map((p, pi) => {
+            const col = pi % cols;
+            const row = Math.floor(pi / cols);
+            const ox  = col * (W + 1);
+            const oy  = row * (H + 1);
+
+            const xLo = p.xMin - p.xPad, xHi = p.xMax + p.xPad;
+            const yLo = p.yMin - p.yPad, yHi = p.yMax + p.yPad;
+            const sx = v => ox + PAD.l + ((v - xLo) / (xHi - xLo)) * iW;
+            const sy = v => oy + PAD.t + iH - ((v - yLo) / (yHi - yLo)) * iH;
+
+            const xTicks = niceTicks(xLo, xHi, 5);
+            const yTicks = niceTicks(yLo, yHi, 4);
+
+            const fitX1 = xLo, fitX2 = xHi;
+            const fitY1 = p.b0 + p.b1 * fitX1;
+            const fitY2 = p.b0 + p.b1 * fitX2;
+            const fitClipped = fitY1 >= yLo && fitY1 <= yHi && fitY2 >= yLo && fitY2 <= yHi;
+
+            const fColor = p.weak ? C.red : C.green;
+
+            return (
+              <g key={pi}>
+                {/* panel bg */}
+                <rect x={ox} y={oy} width={W} height={H} fill={C.bg} />
+
+                {/* title */}
+                <text x={ox + PAD.l + iW / 2} y={oy + 14} textAnchor="middle"
+                  fill={C.textDim} fontSize={9} fontFamily={mono}>
+                  {p.z} → {p.endVar}
+                </text>
+
+                {/* grid */}
+                {xTicks.map((t, i) => (
+                  <line key={`gx${i}`} x1={sx(t)} x2={sx(t)} y1={oy + PAD.t} y2={oy + PAD.t + iH}
+                    stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+                ))}
+                {yTicks.map((t, i) => (
+                  <line key={`gy${i}`} x1={ox + PAD.l} x2={ox + PAD.l + iW} y1={sy(t)} y2={sy(t)}
+                    stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+                ))}
+
+                {/* scatter */}
+                {p.pts.map((pt, i) => (
+                  <circle key={i} cx={sx(pt.x)} cy={sy(pt.y)} r={2.2}
+                    fill={C.violet} opacity={0.45} />
+                ))}
+
+                {/* fit line */}
+                {fitClipped && (
+                  <line x1={sx(fitX1)} y1={sy(fitY1)} x2={sx(fitX2)} y2={sy(fitY2)}
+                    stroke={C.gold} strokeWidth={1.8} opacity={0.9} />
+                )}
+
+                {/* F-stat badge */}
+                <rect x={ox + PAD.l + iW - 90} y={oy + PAD.t + 4} width={86} height={22}
+                  fill={p.weak ? "#100505" : "#050f08"}
+                  stroke={fColor + "40"} rx={3} />
+                <text x={ox + PAD.l + iW - 47} y={oy + PAD.t + 14} textAnchor="middle"
+                  fill={fColor} fontSize={8} fontFamily={mono}>
+                  F = {p.Fstat != null && isFinite(p.Fstat) ? p.Fstat.toFixed(2) : "—"}
+                </text>
+                <text x={ox + PAD.l + iW - 47} y={oy + PAD.t + 23} textAnchor="middle"
+                  fill={p.weak ? C.red : C.textMuted} fontSize={7} fontFamily={mono}>
+                  {p.weak ? "⚠ weak (F<10)" : "✓ relevant"}
+                </text>
+
+                {/* axes */}
+                {xTicks.map((t, i) => (
+                  <g key={i}>
+                    <line x1={sx(t)} x2={sx(t)} y1={oy + PAD.t + iH} y2={oy + PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
+                    <text x={sx(t)} y={oy + PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={7.5} fontFamily={mono}>
+                      {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(1)}
+                    </text>
+                  </g>
+                ))}
+                {yTicks.map((t, i) => (
+                  <g key={i}>
+                    <line x1={ox + PAD.l - 4} x2={ox + PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
+                    <text x={ox + PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={7.5} fontFamily={mono}>
+                      {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(1)}
+                    </text>
+                  </g>
+                ))}
+                <line x1={ox + PAD.l} x2={ox + PAD.l + iW} y1={oy + PAD.t + iH} y2={oy + PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+                <line x1={ox + PAD.l} x2={ox + PAD.l} y1={oy + PAD.t} y2={oy + PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+
+                {/* axis labels */}
+                <text x={ox + PAD.l + iW / 2} y={oy + H - 4} textAnchor="middle" fill={C.textDim} fontSize={8} fontFamily={mono}>
+                  {p.z}
+                </text>
+                <text transform={`translate(${ox + 11}, ${oy + PAD.t + iH / 2}) rotate(-90)`}
+                  textAnchor="middle" fill={C.textDim} fontSize={8} fontFamily={mono}>
+                  {p.endVar}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+        Stock-Yogo weak instrument threshold: F &gt; 10 · gold line = OLS fit · each panel = one instrument
+      </div>
+    </div>
+  );
+}
+
+// ─── RDD BANDWIDTH SENSITIVITY ────────────────────────────────────────────────
+// Re-estimates RDD LATE across a range of bandwidths around the IK-optimal h.
+// Plots LATE(h) ± 1.96·SE with the optimal bandwidth highlighted.
+//
+// Props:
+//   rows, yCol, runCol, cutoff, optH, kernel — same params used in runSharpRDD
+//   controls — wVars
+//   runSharpRDD — the engine function (passed in to avoid circular imports)
+
+export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "triangular", controls = [], runSharpRDD }) {
+  if (!rows?.length || !optH || !runSharpRDD) return null;
+
+  // evaluate at 15 bandwidths: 0.4h to 1.8h
+  const factors  = Array.from({ length: 15 }, (_, i) => 0.4 + i * 0.1);
+  const results  = factors.map(f => {
+    const h   = f * optH;
+    const res = runSharpRDD(rows, yCol, runCol, cutoff, h, kernel, controls);
+    if (!res || !isFinite(res.late) || !isFinite(res.lateSE)) return null;
+    return { h, late: res.late, lo: res.late - 1.96 * res.lateSE, hi: res.late + 1.96 * res.lateSE, sig: res.lateP < 0.05 };
+  }).filter(Boolean);
+
+  if (results.length < 3) return null;
+
+  const W = 560, H = 300;
+  const PAD = { l: 60, r: 24, t: 28, b: 48 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  const hVals    = results.map(r => r.h);
+  const allY     = results.flatMap(r => [r.lo, r.hi]).filter(isFinite);
+  const hMin = Math.min(...hVals), hMax = Math.max(...hVals);
+  const yMin = Math.min(...allY),  yMax = Math.max(...allY);
+  const yPad = (yMax - yMin) * 0.1 || 0.1;
+  const yLo  = yMin - yPad, yHi = yMax + yPad;
+
+  const sx = v => PAD.l + ((v - hMin) / (hMax - hMin || 1)) * iW;
+  const sy = v => PAD.t + iH - ((v - yLo) / (yHi - yLo)) * iH;
+
+  const hTicks = niceTicks(hMin, hMax, 6);
+  const yTicks = niceTicks(yLo, yHi, 5);
+
+  // CI band polygon
+  const bandTop = results.map((r, i) => `${i === 0 ? "M" : "L"}${sx(r.h).toFixed(1)},${sy(r.hi).toFixed(1)}`).join(" ");
+  const bandBot = [...results].reverse().map((r, i) => `${i === 0 ? "M" : "L"}${sx(r.h).toFixed(1)},${sy(r.lo).toFixed(1)}`).join(" ");
+  const latePath = results.map((r, i) => `${i === 0 ? "M" : "L"}${sx(r.h).toFixed(1)},${sy(r.late).toFixed(1)}`).join(" ");
+
+  const svgId = "rdd-bw-plot";
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          RDD Bandwidth Sensitivity · LATE(h) ± 1.96 SE
+        </span>
+        <button
+          onClick={() => {
+            const el = document.getElementById(svgId);
+            if (!el) return;
+            const src = new XMLSerializer().serializeToString(el);
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml" }));
+            a.download = "rdd_bandwidth_sensitivity.svg"; a.click();
+            URL.revokeObjectURL(a.href);
+          }}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+        >↓ SVG</button>
+      </div>
+      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto" }}>
+        <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+          style={{ width: "100%", minWidth: 320, display: "block", fontFamily: mono }}>
+          <rect width={W} height={H} fill={C.bg} />
+
+          {/* grid */}
+          {hTicks.map((t, i) => (
+            <line key={`gx${i}`} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t + iH}
+              stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+          ))}
+          {yTicks.map((t, i) => (
+            <line key={`gy${i}`} x1={PAD.l} x2={PAD.l + iW} y1={sy(t)} y2={sy(t)}
+              stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+          ))}
+
+          {/* zero line */}
+          {yLo < 0 && yHi > 0 && (
+            <line x1={PAD.l} x2={PAD.l + iW} y1={sy(0)} y2={sy(0)}
+              stroke={C.border2} strokeWidth={1.5} strokeDasharray="5 3" />
+          )}
+
+          {/* CI band */}
+          <path d={`${bandTop} ${bandBot} Z`} fill={C.orange} opacity={0.1} />
+          <path d={bandTop} fill="none" stroke={C.orange} strokeWidth={1} opacity={0.4} strokeDasharray="3 3" />
+          <path d={bandBot} fill="none" stroke={C.orange} strokeWidth={1} opacity={0.4} strokeDasharray="3 3" />
+
+          {/* LATE line */}
+          <path d={latePath} fill="none" stroke={C.orange} strokeWidth={2} />
+
+          {/* dots colored by significance */}
+          {results.map((r, i) => (
+            <circle key={i} cx={sx(r.h)} cy={sy(r.late)} r={3}
+              fill={r.sig ? C.orange : C.textMuted} opacity={0.9} />
+          ))}
+
+          {/* optimal h line */}
+          <line x1={sx(optH)} x2={sx(optH)} y1={PAD.t} y2={PAD.t + iH}
+            stroke={C.gold} strokeWidth={1.5} strokeDasharray="5 3" />
+          <text x={sx(optH) + 4} y={PAD.t + 12} fill={C.gold} fontSize={8} fontFamily={mono}>
+            IK h = {optH.toFixed(3)}
+          </text>
+
+          {/* axes */}
+          {hTicks.map((t, i) => (
+            <g key={i}>
+              <line x1={sx(t)} x2={sx(t)} y1={PAD.t + iH} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
+              <text x={sx(t)} y={PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+                {t.toFixed(3)}
+              </text>
+            </g>
+          ))}
+          {yTicks.map((t, i) => (
+            <g key={i}>
+              <line x1={PAD.l - 4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
+              <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+                {Math.abs(t) >= 100 ? t.toFixed(1) : t.toFixed(3)}
+              </text>
+            </g>
+          ))}
+          <line x1={PAD.l} x2={PAD.l + iW} y1={PAD.t + iH} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+          <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+
+          {/* axis labels */}
+          <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+            Bandwidth (h)
+          </text>
+          <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
+            textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+            LATE estimate
+          </text>
+        </svg>
+      </div>
+      <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+        15 bandwidths from 0.4h to 1.8h · filled = p&lt;0.05 · band = ±1.96 SE · gold = IK-optimal
+      </div>
+    </div>
+  );
+}
+
+// ─── RDD COVARIATE BALANCE ────────────────────────────────────────────────────
+// For each control variable, plots mean left vs right of cutoff within bandwidth.
+// If RDD assumptions hold, covariates should be balanced at the cutoff.
+//
+// Props:
+//   result   — from runSharpRDD: { valid, D, xc, h, cutoff }
+//   controls — wVars (covariate column names)
+//   rows     — original data rows (needed to read covariate values)
+
+export function RDDCovariateBalance({ result, controls, rows }) {
+  if (!result?.valid?.length || !controls?.length || !rows?.length) return null;
+
+  const { valid, D, xc, h, cutoff } = result;
+
+  // for each covariate: mean and SE left / right of cutoff
+  const stats = controls.map(col => {
+    const leftVals  = valid.filter((_, i) => D[i] === 0).map(r => r[col]).filter(v => typeof v === "number" && isFinite(v));
+    const rightVals = valid.filter((_, i) => D[i] === 1).map(r => r[col]).filter(v => typeof v === "number" && isFinite(v));
+    if (!leftVals.length || !rightVals.length) return null;
+
+    const mean = arr => arr.reduce((s, v) => s + v, 0) / arr.length;
+    const se   = arr => {
+      const m = mean(arr);
+      const v = arr.reduce((s, v) => s + (v - m) ** 2, 0) / Math.max(1, arr.length - 1);
+      return Math.sqrt(v / arr.length);
+    };
+    const lMean = mean(leftVals), rMean = mean(rightVals);
+    const lSE   = se(leftVals),   rSE   = se(rightVals);
+    // t-test for difference at cutoff
+    const diff  = rMean - lMean;
+    const seDiff = Math.sqrt(lSE ** 2 + rSE ** 2);
+    const tStat  = seDiff > 0 ? diff / seDiff : 0;
+    const imbal  = Math.abs(tStat) > 1.96;
+
+    return { col, lMean, rMean, lSE, rSE, diff, tStat, imbal };
+  }).filter(Boolean);
+
+  if (!stats.length) return null;
+
+  const W = 560;
+  const rowH = 44;
+  const PAD = { l: 120, r: 20, t: 24, b: 36 };
+  const iW = W - PAD.l - PAD.r;
+  const H = stats.length * rowH + PAD.t + PAD.b;
+
+  // scale: centered on 0, symmetric
+  const allVals = stats.flatMap(s => [s.lMean - 1.96 * s.lSE, s.lMean + 1.96 * s.lSE, s.rMean - 1.96 * s.rSE, s.rMean + 1.96 * s.rSE]);
+  const vMin = Math.min(...allVals), vMax = Math.max(...allVals);
+  const vPad = (vMax - vMin) * 0.05 || 1;
+  const vLo = vMin - vPad, vHi = vMax + vPad;
+
+  const sx = v => PAD.l + ((v - vLo) / (vHi - vLo)) * iW;
+  const vTicks = niceTicks(vLo, vHi, 5);
+
+  const svgId = "rdd-covariate-balance";
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+            RDD Covariate Balance
+          </span>
+          {stats.some(s => s.imbal) && (
+            <span style={{ fontSize: 9, color: C.red, fontFamily: mono, padding: "1px 6px", border: `1px solid ${C.red}40`, borderRadius: 2 }}>
+              ⚠ {stats.filter(s => s.imbal).length} imbalanced
+            </span>
+          )}
+          {!stats.some(s => s.imbal) && (
+            <span style={{ fontSize: 9, color: C.green, fontFamily: mono, padding: "1px 6px", border: `1px solid ${C.green}40`, borderRadius: 2 }}>
+              ✓ all balanced
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => {
+            const el = document.getElementById(svgId);
+            if (!el) return;
+            const src = new XMLSerializer().serializeToString(el);
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml" }));
+            a.download = "rdd_covariate_balance.svg"; a.click();
+            URL.revokeObjectURL(a.href);
+          }}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+        >↓ SVG</button>
+      </div>
+      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto" }}>
+        <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+          style={{ width: "100%", minWidth: 320, display: "block", fontFamily: mono }}>
+          <rect width={W} height={H} fill={C.bg} />
+
+          {/* header ticks */}
+          {vTicks.map((t, i) => (
+            <g key={i}>
+              <line x1={sx(t)} x2={sx(t)} y1={PAD.t - 4} y2={PAD.t + stats.length * rowH}
+                stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+              <text x={sx(t)} y={PAD.t - 6} textAnchor="middle" fill={C.textMuted} fontSize={7.5} fontFamily={mono}>
+                {Math.abs(t) >= 100 ? t.toFixed(0) : t.toFixed(2)}
+              </text>
+            </g>
+          ))}
+
+          {stats.map((s, i) => {
+            const cy = PAD.t + i * rowH + rowH / 2;
+            const lx  = sx(s.lMean), rx = sx(s.rMean);
+            const lLo = sx(s.lMean - 1.96 * s.lSE), lHi = sx(s.lMean + 1.96 * s.lSE);
+            const rLo = sx(s.rMean - 1.96 * s.rSE), rHi = sx(s.rMean + 1.96 * s.rSE);
+            const rowBg = i % 2 === 0 ? C.surface : C.surface2;
+            const dotColor = s.imbal ? C.red : C.green;
+
+            return (
+              <g key={i}>
+                <rect x={0} y={PAD.t + i * rowH} width={W} height={rowH} fill={rowBg} opacity={0.5} />
+
+                {/* covariate label */}
+                <text x={PAD.l - 10} y={cy + 4} textAnchor="end" fill={s.imbal ? C.red : C.text} fontSize={10} fontFamily={mono}>
+                  {s.col.length > 16 ? s.col.slice(0, 15) + "…" : s.col}
+                </text>
+
+                {/* left CI */}
+                <line x1={lLo} x2={lHi} y1={cy - 3} y2={cy - 3} stroke={C.blue} strokeWidth={1.4} opacity={0.8} />
+                <circle cx={lx} cy={cy - 3} r={3.5} fill={C.blue} opacity={0.9} />
+
+                {/* right CI */}
+                <line x1={rLo} x2={rHi} y1={cy + 3} y2={cy + 3} stroke={C.orange} strokeWidth={1.4} opacity={0.8} />
+                <circle cx={rx} cy={cy + 3} r={3.5} fill={C.orange} opacity={0.9} />
+
+                {/* t-stat */}
+                <text x={W - PAD.r + 2} y={cy + 4} textAnchor="start" fill={dotColor} fontSize={8} fontFamily={mono}>
+                  t={s.tStat.toFixed(2)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* bottom axis */}
+          <line x1={PAD.l} x2={PAD.l + iW} y1={PAD.t + stats.length * rowH + 6} y2={PAD.t + stats.length * rowH + 6}
+            stroke={C.border2} strokeWidth={1} />
+          <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+            Covariate mean within bandwidth
+          </text>
+        </svg>
+      </div>
+      <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", justifyContent: "space-between" }}>
+        <span>● blue = left of cutoff · ● orange = right · bars = 95% CI</span>
+        <span>imbalanced if |t| &gt; 1.96</span>
+      </div>
+    </div>
   );
 }

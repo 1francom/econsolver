@@ -20,7 +20,7 @@ import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
 import { C, mono }        from "../components/modeling/shared.jsx";
-import { RDDPlot, DiDPlot, EventStudyPlot } from "../components/modeling/ModelPlots.jsx";
+import { RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance } from "../components/modeling/ModelPlots.jsx";
 import { ResidualPlots } from "../components/modeling/ResidualPlots.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
@@ -586,7 +586,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
 }
 
 // ─── 2SLS RESULTS ─────────────────────────────────────────────────────────────
-function TwoSLSResults({ result, yVar, xVars, openReport }) {
+function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseRConfig }) {
   const [tab, setTab] = useState("second");
   const { firstStages, second } = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
@@ -630,10 +630,11 @@ function TwoSLSResults({ result, yVar, xVars, openReport }) {
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem" }}>
             <ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} />
           </div>
+          <FirstStagePlot firstStages={firstStages} rows={rows} instrVars={zVars} endogVars={xVars} />
           <ExportBar
             yVar={yVar[0]} results={second} model="2SLS"
             onReport={() => openReport({ second, firstStages, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
-            rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } }}
+            rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } } : null}
           />
         </>
       )}
@@ -963,7 +964,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
 
           {/* 2SLS */}
           {result?.type === "2SLS" && (
-            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} openReport={openReport} />
+            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseRConfig={baseRConfig} />
           )}
 
           {/* DiD / TWFE */}
@@ -1001,6 +1002,12 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
+                {result.type === "DiD" && (
+                  <DiDPlot result={r} yLabel={yVar[0]} />
+                )}
+                {result.type === "TWFE" && (
+                  <EventStudyPlot result={r} yLabel={yVar[0]} />
+                )}
                 <ExportBar yVar={yVar[0]} results={r} model={result.type}
                   onReport={() => openReport({ ...r, modelLabel: result.type === "DiD" ? "DiD 2×2" : "TWFE DiD", yVar: yVar[0], xVars: [...wVars] })}
                   rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], wVars,
@@ -1037,10 +1044,21 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   { label: "cutoff",    value: r.cutoff,                 color: C.textDim },
                   { label: "bandwidth", value: result.h.toFixed(3),      color: C.textDim },
                 ]} />
+                <Lbl color={C.textMuted}>RDD Binned Scatter</Lbl>
+                <RDDPlot result={r} yLabel={yVar[0]} xLabel={runningVar[0]} />
                 <Lbl color={C.textMuted}>RDD Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
+                <RDDBandwidthPlot
+                  rows={rows} yCol={yVar[0]} runCol={runningVar[0]}
+                  cutoff={parseFloat(cutoff)} optH={result.h}
+                  kernel={kernel} controls={wVars}
+                  runSharpRDD={runSharpRDD}
+                />
+                {wVars.length > 0 && (
+                  <RDDCovariateBalance result={r} controls={wVars} rows={rows} />
+                )}
                 <ExportBar
                   yVar={yVar[0]}
                   results={{ ...r, varNames: r.varNames, adjR2: null }}
