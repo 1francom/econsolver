@@ -21,6 +21,7 @@ import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
 import { C, mono }        from "../components/modeling/shared.jsx";
 import { RDDPlot, DiDPlot, EventStudyPlot } from "../components/modeling/ModelPlots.jsx";
+import { ResidualPlots } from "../components/modeling/ResidualPlots.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
@@ -562,6 +563,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
             : "✓ FE preferred (consistent and more efficient)."}
         </InfoBox>
       )}
+      {active && <ResidualPlots result={active} modelLabel={tab === "fe" ? "FE" : "FD"} svgIdSuffix={`-${tab}`} />}
       <DiagnosticsPanel panelFE={panelFE} panelFD={panelFD} xColsPanel={[...xVars, ...wVars]} />
       {active && (
         <ExportBar
@@ -946,6 +948,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
                 <DiagnosticsPanel olsResult={r} rows={rows} xCols={diagX} />
+                <ResidualPlots result={r} modelLabel="OLS" />
                 <ExportBar yVar={yVar[0]} results={r} model="OLS"
                   onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                   rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />
@@ -998,12 +1001,6 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
-                {result.type === "DiD" && (
-                  <DiDPlot result={r} yLabel={yVar[0]} />
-                )}
-                {result.type === "TWFE" && (
-                  <EventStudyPlot result={r} yLabel={yVar[0]} />
-                )}
                 <ExportBar yVar={yVar[0]} results={r} model={result.type}
                   onReport={() => openReport({ ...r, modelLabel: result.type === "DiD" ? "DiD 2×2" : "TWFE DiD", yVar: yVar[0], xVars: [...wVars] })}
                   rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], wVars,
@@ -1040,8 +1037,6 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   { label: "cutoff",    value: r.cutoff,                 color: C.textDim },
                   { label: "bandwidth", value: result.h.toFixed(3),      color: C.textDim },
                 ]} />
-                <Lbl color={C.textMuted}>RDD Binned Scatter</Lbl>
-                <RDDPlot result={r} yLabel={yVar[0]} xLabel={runningVar[0]} />
                 <Lbl color={C.textMuted}>RDD Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
