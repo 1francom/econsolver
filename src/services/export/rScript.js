@@ -504,16 +504,31 @@ export function generateRScript(config) {
   lines.push(``);
 
   // ── Output table ─────────────────────────────────────────────────────────────
-  lines.push(
-    `# ── 5. Output table ─────────────────────────────────────────────────────`,
-    `modelsummary::modelsummary(`,
-    `  list(${rStr(model.type ?? "Model")} = fit),`,
-    `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
-    `  gof_omit   = "AIC|BIC|Log|F$",`,
-    `  output     = ${rStr(baseName + "_results.docx")}`,
-    `)`,
-    ``
-  );
+  lines.push(`# ── 5. Output table ─────────────────────────────────────────────────────`);
+
+  if (model.type === "RDD") {
+    // rdrobust objects are not supported by modelsummary/broom — use summary() directly
+    lines.push(
+      `# rdrobust does not support modelsummary — use summary() output instead`,
+      `summary(fit)`,
+      ``,
+      `# Extract point estimate and SE manually if needed:`,
+      `cat("LATE:", fit$coef[1], "\n")`,
+      `cat("SE:  ", fit$se[3],   "\n")  # robust SE (col 3 = HC3)`,
+      `cat("p:   ", fit$pv[3],   "\n")`,
+      ``
+    );
+  } else {
+    lines.push(
+      `modelsummary::modelsummary(`,
+      `  list(${rStr(model.type ?? "Model")} = fit),`,
+      `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
+      `  gof_omit   = "AIC|BIC|Log|F$",`,
+      `  output     = ${rStr(baseName + "_results.docx")}`,
+      `)`,
+      ``
+    );
+  }
 
   // ── Session info ─────────────────────────────────────────────────────────────
   lines.push(
@@ -531,7 +546,7 @@ function buildPackageList(modelType, pipeline) {
 
   // Model-specific
   if (modelType === "FE" || modelType === "FD") pkgs.add("plm");
-  if (modelType === "RDD") { pkgs.add("rdrobust"); pkgs.delete("fixest"); }
+  if (modelType === "RDD") { pkgs.add("rdrobust"); pkgs.delete("fixest"); pkgs.delete("modelsummary"); }
 
   // Pipeline-specific
   pipeline.forEach(s => {

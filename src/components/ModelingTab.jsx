@@ -13,12 +13,14 @@ import {
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
 } from "../math/index.js";
+import { generateRScript } from "../services/export/rScript.js";
 import ReportingModule from "../ReportingModule.jsx";
 
-import EstimatorSidebar   from "./modeling/EstimatorSidebar.jsx";
-import VariableSelector   from "./modeling/VariableSelector.jsx";
-import ModelConfiguration from "./modeling/ModelConfiguration.jsx";
-import { C, mono }        from "./modeling/shared.jsx";
+import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
+import VariableSelector   from "../components/modeling/VariableSelector.jsx";
+import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
+import { C, mono }        from "../components/modeling/shared.jsx";
+import { RDDPlot, DiDPlot, EventStudyPlot } from "../components/modeling/ModelPlots.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
@@ -411,11 +413,22 @@ function DiagnosticsPanel({ olsResult, rows, xCols, panelFE, panelFD, xColsPanel
 }
 
 // ─── EXPORT BAR ───────────────────────────────────────────────────────────────
-function ExportBar({ yVar, results, model, onReport }) {
+function ExportBar({ yVar, results, model, onReport, rScriptConfig }) {
   const [showLatex, setShowLatex] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied]       = useState(false);
   const latex = useMemo(() => buildLatex(yVar, results?.varNames?.slice(1) || [], results, model), [yVar, results, model]);
   const csv   = useMemo(() => buildCSVExport(yVar, results), [yVar, results]);
+
+  const handleRScript = () => {
+    if (!rScriptConfig) return;
+    const script = generateRScript(rScriptConfig);
+    const blob   = new Blob([script], { type: "text/plain" });
+    const a      = document.createElement("a");
+    a.href       = URL.createObjectURL(blob);
+    a.download   = `${(rScriptConfig.filename ?? "analysis").replace(/\.[^.]+$/, "")}_${model}.R`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
@@ -440,6 +453,19 @@ function ExportBar({ yVar, results, model, onReport }) {
             {label}
           </button>
         ))}
+        {rScriptConfig && (
+          <button onClick={handleRScript}
+            style={{
+              flex: 1, padding: "0.6rem 1rem", background: C.surface,
+              border: "none", color: C.green, cursor: "pointer", fontFamily: mono,
+              fontSize: 11, transition: "background 0.15s",
+            }}
+            onMouseOver={e => { e.currentTarget.style.background = `${C.green}14`; }}
+            onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
+          >
+            ↓ R Script
+          </button>
+        )}
         {onReport && (
           <button onClick={onReport}
             style={{
@@ -482,7 +508,7 @@ function ExportBar({ yVar, results, model, onReport }) {
 
 // ─── PANEL FE/FD RESULTS ─────────────────────────────────────────────────────
 // Must be a named component (not an IIFE) — React Rules of Hooks.
-function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, openReport }) {
+function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, openReport, baseRConfig }) {
   const [tab, setTab] = useState("fe");
   const fe     = result.fe, fd = result.fd;
   const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
@@ -549,6 +575,8 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
             yVar: yVar[0],
             xVars: [...xVars, ...wVars],
           })}
+          rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model,
+            type: tab === "fe" ? "FE" : "FD", yVar: yVar[0], xVars, wVars } } : null}
         />
       )}
     </div>
@@ -603,6 +631,7 @@ function TwoSLSResults({ result, yVar, xVars, openReport }) {
           <ExportBar
             yVar={yVar[0]} results={second} model="2SLS"
             onReport={() => openReport({ second, firstStages, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
+            rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } }}
           />
         </>
       )}
@@ -749,6 +778,19 @@ export default function ModelingTab({ cleanedData, onBack }) {
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
+
+  // ── R Script config — base object shared by all ExportBar callsites ──────────
+  // Each callsite merges this with its specific model params.
+  const baseRConfig = useMemo(() => ({
+    filename:        cleanedData?.filename ?? "dataset.csv",
+    pipeline:        cleanedData?.changeLog ?? [],
+    dataDictionary:  cleanedData?.dataDictionary ?? null,
+    auditTrail:      null,  // auditor runs on-demand inside generateRScript
+    model: {
+      entityCol: panel?.entityCol ?? null,
+      timeCol:   panel?.timeCol   ?? null,
+    },
+  }), [cleanedData, panel]);
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
   return (
@@ -905,14 +947,15 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 </div>
                 <DiagnosticsPanel olsResult={r} rows={rows} xCols={diagX} />
                 <ExportBar yVar={yVar[0]} results={r} model="OLS"
-                  onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })} />
+                  onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />
               </div>
             );
           })()}
 
           {/* Panel FE / FD */}
           {(result?.type === "FE" || result?.type === "FD") && (
-            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} />
+            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseRConfig={baseRConfig} />
           )}
 
           {/* 2SLS */}
@@ -955,8 +998,16 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
+                {result.type === "DiD" && (
+                  <DiDPlot result={r} yLabel={yVar[0]} />
+                )}
+                {result.type === "TWFE" && (
+                  <EventStudyPlot result={r} yLabel={yVar[0]} />
+                )}
                 <ExportBar yVar={yVar[0]} results={r} model={result.type}
                   onReport={() => openReport({ ...r, modelLabel: result.type === "DiD" ? "DiD 2×2" : "TWFE DiD", yVar: yVar[0], xVars: [...wVars] })}
+                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], wVars,
+                    postVar: postVar[0], treatVar: treatVar[0] } }}
                 />
               </div>
             );
@@ -989,6 +1040,8 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   { label: "cutoff",    value: r.cutoff,                 color: C.textDim },
                   { label: "bandwidth", value: result.h.toFixed(3),      color: C.textDim },
                 ]} />
+                <Lbl color={C.textMuted}>RDD Binned Scatter</Lbl>
+                <RDDPlot result={r} yLabel={yVar[0]} xLabel={runningVar[0]} />
                 <Lbl color={C.textMuted}>RDD Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
@@ -998,6 +1051,8 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   results={{ ...r, varNames: r.varNames, adjR2: null }}
                   model="RDD"
                   onReport={() => openReport({ ...r, varNames: r.varNames, adjR2: null, modelLabel: "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
+                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "RDD", yVar: yVar[0], wVars,
+                    runningVar: runningVar[0], cutoff: parseFloat(cutoff), bandwidth: result.h, kernel } }}
                 />
               </div>
             );
