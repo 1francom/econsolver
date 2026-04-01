@@ -8,7 +8,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import {
-  runOLS, run2SLS, runFE, runFD, runSharpRDD,
+  runOLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
@@ -20,7 +20,7 @@ import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
 import { C, mono }        from "../components/modeling/shared.jsx";
-import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance } from "../components/modeling/ModelPlots.jsx";
+import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot } from "../components/modeling/ModelPlots.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
@@ -1156,6 +1156,11 @@ export default function ModelingTab({ cleanedData, onBack }) {
                         rows={rows} yCol={yVar[0]} runCol={runningVar[0]}
                         cutoff={parseFloat(cutoff)} optH={result.h}
                         kernel={kernel} controls={wVars} runSharpRDD={runSharpRDD}
+                      /> },
+                    { id: "mccrary", label: "McCrary density",
+                      node: <McCraryPlot
+                        result={runMcCrary(rows, runningVar[0], parseFloat(cutoff))}
+                        xLabel={runningVar[0]}
                       /> },
                     ...wVars.map(xc => ({
                       id: `bal_${xc}`,

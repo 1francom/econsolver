@@ -179,7 +179,218 @@ export function ikBandwidth(runningVals, yVals, cutoff) {
   return Math.min(Math.max(h, range * 0.05), range * 0.8);
 }
 
-// ─── SHARP RDD ───────────────────────────────────────────────────────────────
+// ─── McCRARY DENSITY TEST ─────────────────────────────────────────────────────
+// McCrary (2008) test for manipulation of the running variable in RDD.
+// H₀: no discontinuity in the density of the running variable at the cutoff.
+// Rejection (p < 0.05) suggests potential manipulation — observations may have
+// selectively sorted across the cutoff.
+//
+// Algorithm (McCrary 2008, JOE):
+//   1. Bin the running variable into fine equal-width bins
+//   2. Compute bin frequencies (raw density estimate)
+//   3. Fit a local linear regression to each side of the density using
+//      a triangular kernel, evaluated at the cutoff
+//   4. θ = log(f̂_R / f̂_L) — log ratio of density at c⁺ vs c⁻
+//   5. SE(θ) via delta method from the WLS variance
+//   6. z = θ / SE(θ), p = 2Φ(−|z|)
+//
+// Returns null if insufficient data (<20 obs or <5 on either side).
+//
+// Props:
+//   rows       — dataset rows
+//   runCol     — running variable column name
+//   cutoff     — RDD cutoff value
+//   h          — bandwidth for local linear fit (default: IK-style rule)
+//   bins       — number of bins for histogram (default: auto, Freedman-Diaconis)
+export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
+  // ── 1. Extract valid running variable values ─────────────────────────────
+  const vals = rows
+    .map(r => r[runCol])
+    .filter(v => typeof v === "number" && isFinite(v));
+
+  if (vals.length < 20) return null;
+
+  const n    = vals.length;
+  const xMin = Math.min(...vals);
+  const xMax = Math.max(...vals);
+  const range = xMax - xMin;
+  if (range <= 0) return null;
+
+  // Verify cutoff is interior
+  if (cutoff <= xMin || cutoff >= xMax) return null;
+
+  // ── 2. Bin width — Freedman-Diaconis rule ────────────────────────────────
+  const sorted = [...vals].sort((a, b) => a - b);
+  const q1 = sorted[Math.floor(n * 0.25)];
+  const q3 = sorted[Math.floor(n * 0.75)];
+  const iqr = q3 - q1;
+
+  const autoBins = iqr > 0
+    ? Math.ceil(range / (2 * iqr * Math.pow(n, -1 / 3)))
+    : Math.ceil(Math.sqrt(n));
+  const nBins = bins ?? Math.min(Math.max(autoBins, 10), 100);
+  const bw    = range / nBins;
+
+  // ── 3. Build histogram — bin centers and normalized frequencies ──────────
+  // Bins are aligned so the cutoff falls exactly on a bin boundary.
+  // We shift the grid: find the bin that would contain the cutoff and align.
+  const cutoffBin = Math.floor((cutoff - xMin) / bw);
+  const gridStart = cutoff - cutoffBin * bw;
+
+  const binCounts = new Array(nBins + 2).fill(0);
+  vals.forEach(v => {
+    const bi = Math.floor((v - gridStart) / bw);
+    if (bi >= 0 && bi < binCounts.length) binCounts[bi]++;
+  });
+
+  // Convert to density: frequency / (n * bw)
+  const binData = [];
+  for (let i = 0; i < binCounts.length; i++) {
+    const xCenter = gridStart + (i + 0.5) * bw;
+    if (xCenter < xMin - bw || xCenter > xMax + bw) continue;
+    const density = binCounts[i] / (n * bw);
+    binData.push({ x: xCenter, density, side: xCenter < cutoff ? "left" : "right" });
+  }
+
+  const leftBins  = binData.filter(b => b.side === "left"  && b.x >= xMin);
+  const rightBins = binData.filter(b => b.side === "right" && b.x <= xMax);
+
+  if (leftBins.length < 3 || rightBins.length < 3) return null;
+
+  // ── 4. Bandwidth for local linear fit ────────────────────────────────────
+  // Default: Silverman's rule-of-thumb on the running variable
+  const mean = vals.reduce((s, v) => s + v, 0) / n;
+  const std  = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / n);
+  const hAuto = 1.06 * Math.min(std, iqr / 1.34) * Math.pow(n, -0.2);
+  const hFit  = h ?? Math.max(hAuto, range * 0.1);
+
+  // ── 5. Local linear WLS on density bins — evaluated at cutoff ────────────
+  // Left side: fit density ~ (x - cutoff) with triangular kernel, eval at cutoff
+  function localLinearDensity(bins, evalPt) {
+    const weights = bins.map(b => {
+      const u = Math.abs(b.x - evalPt) / hFit;
+      return u <= 1 ? 1 - u : 0; // triangular kernel
+    });
+
+    const active = bins.map((b, i) => ({ ...b, w: weights[i] })).filter(b => b.w > 0);
+    if (active.length < 3) return null;
+
+    // WLS: density = a + b*(x - evalPt), weighted
+    const xc = active.map(b => b.x - evalPt);
+    const y  = active.map(b => b.density);
+    const w  = active.map(b => b.w);
+
+    const sw   = w.reduce((s, v) => s + v, 0);
+    const swx  = w.reduce((s, v, i) => s + v * xc[i], 0);
+    const swy  = w.reduce((s, v, i) => s + v * y[i], 0);
+    const swxx = w.reduce((s, v, i) => s + v * xc[i] ** 2, 0);
+    const swxy = w.reduce((s, v, i) => s + v * xc[i] * y[i], 0);
+
+    const det = sw * swxx - swx * swx;
+    if (Math.abs(det) < 1e-15) return null;
+
+    const a = (swxx * swy - swx * swxy) / det; // intercept = f̂(evalPt)
+    const b_slope = (sw * swxy - swx * swy) / det;
+
+    // Variance of â via WLS formula: Var(â) = σ²_w * (XᵀWX)⁻¹[0,0]
+    const yhat = active.map((_, i) => a + b_slope * xc[i]);
+    const resid = y.map((yi, i) => yi - yhat[i]);
+    // Use weighted residuals for σ²
+    const sigmaW2 = active.reduce((s, b, i) => s + b.w * resid[i] ** 2, 0) /
+      Math.max(1, active.length - 2);
+    const varA = sigmaW2 * swxx / det;
+
+    return { fhat: a, varFhat: varA, nActive: active.length };
+  }
+
+  const leftFit  = localLinearDensity(leftBins,  cutoff);
+  const rightFit = localLinearDensity(rightBins, cutoff);
+
+  if (!leftFit || !rightFit) return null;
+  if (leftFit.fhat <= 0 || rightFit.fhat <= 0) return null;
+
+  // ── 6. θ = log(f̂_R / f̂_L), SE via delta method ─────────────────────────
+  // Var(log f̂) ≈ Var(f̂) / f̂²  (delta method)
+  const theta   = Math.log(rightFit.fhat / leftFit.fhat);
+  const varTheta = rightFit.varFhat / rightFit.fhat ** 2
+                 + leftFit.varFhat  / leftFit.fhat  ** 2;
+  const seTheta  = Math.sqrt(Math.max(0, varTheta));
+
+  if (!isFinite(theta) || seTheta <= 0) return null;
+
+  const zStat = theta / seTheta;
+  // Two-sided p-value: 2 * Φ(-|z|) via normal approximation
+  const pVal  = 2 * Math.exp(-0.5 * zStat ** 2) / Math.sqrt(2 * Math.PI) *
+    // integrate tail: use complementary error function approximation
+    (() => {
+      // Abramowitz & Stegun 26.2.17 approximation of Φ(-|z|)
+      const absZ = Math.abs(zStat);
+      const t = 1 / (1 + 0.2316419 * absZ);
+      const poly = t * (0.319381530
+        + t * (-0.356563782
+        + t * (1.781477937
+        + t * (-1.821255978
+        + t * 1.330274429))));
+      const phi = Math.exp(-0.5 * absZ ** 2) / Math.sqrt(2 * Math.PI);
+      return phi * poly * Math.sqrt(2 * Math.PI); // returns Φ(-|z|) * √(2π) / φ(z)
+    })();
+
+  // Simpler and more reliable: use normal CDF approximation directly
+  const absZ = Math.abs(zStat);
+  const t    = 1 / (1 + 0.2316419 * absZ);
+  const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  const pNormal = 2 * Math.exp(-0.5 * absZ ** 2) / Math.sqrt(2 * Math.PI) * poly;
+  const pFinal  = Math.min(1, Math.max(0, pNormal));
+
+  // ── 7. Fit lines for plotting ─────────────────────────────────────────────
+  // Local linear fit evaluated at each bin center for the density plot
+  function fitLine(bins, evalPt) {
+    return bins.map(b => {
+      const u = Math.abs(b.x - evalPt) / hFit;
+      const w = u <= 1 ? 1 - u : 0;
+      return { x: b.x, w };
+    }).filter(b => b.w > 0).map(b => {
+      // reuse the local linear coefficients — approximate via the fit at evalPt
+      // (for plotting we just use the bin densities smoothed by LOWESS-style local fit)
+      return b;
+    });
+  }
+
+  // For plot fit lines: evaluate local linear at each bin center
+  function evalLocalLinear(bins, evalPt) {
+    const h2 = hFit * 1.5; // slightly wider for smooth curve
+    return bins.map(b => {
+      const res = localLinearDensity(
+        bins.filter(bb => Math.abs(bb.x - b.x) <= h2),
+        b.x
+      );
+      return { x: b.x, yhat: res ? Math.max(0, res.fhat) : b.density };
+    });
+  }
+
+  const leftFitLine  = evalLocalLinear(leftBins,  cutoff);
+  const rightFitLine = evalLocalLinear(rightBins, cutoff);
+
+  return {
+    bins: binData,
+    leftBins,
+    rightBins,
+    leftFit:  leftFitLine,
+    rightFit: rightFitLine,
+    fhatLeft:  leftFit.fhat,
+    fhatRight: rightFit.fhat,
+    theta,
+    thetaSE:  seTheta,
+    zStat,
+    pVal:     pFinal,
+    manipulation: pFinal < 0.05,
+    h:   hFit,
+    bw,
+    nBins,
+    cutoff,
+    n,
+  };
+}
 export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangular", controls = []) {
   const valid = rows.filter(r =>
     typeof r[yCol]   === "number" && typeof r[runCol] === "number" &&
