@@ -101,7 +101,7 @@ function RegressionEquation({ varNames, beta, yVar }) {
 }
 
 // ─── FOREST PLOT ─────────────────────────────────────────────────────────────
-function ForestPlot({ varNames, beta, se, pVals }) {
+function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename = "coefficient_plot.svg" }) {
   const items = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
     .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s));
@@ -118,62 +118,93 @@ function ForestPlot({ varNames, beta, se, pVals }) {
   const zero = sx(0);
   const ticks = Array.from({ length: 5 }, (_, i) => lo + (range * i) / 4);
 
+  const handleExport = () => {
+    const el = document.getElementById(svgId);
+    if (!el) return;
+    let src = new XMLSerializer().serializeToString(el);
+    if (!src.includes('xmlns="http://www.w3.org/2000/svg"'))
+      src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+    src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
+    src = src.replace(/<rect[^>]*fill="#0f0f0f"[^>]*\/>/g, '');
+    src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml;charset=utf-8" }));
+    a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+  };
+
   return (
-    <div style={{ overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", minWidth: 360, display: "block", fontFamily: mono }}>
-        <rect width={W} height={H} fill={C.bg} />
-        {items.map((_, i) => (
-          <rect key={i} x={PAD.l} y={PAD.t + i * rowH} width={iW} height={rowH}
-            fill={i % 2 === 0 ? C.surface : C.surface2} opacity={0.7} />
-        ))}
-        {ticks.map((t, i) => (
-          <line key={i} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={H - PAD.b}
-            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" />
-        ))}
-        {zero >= PAD.l && zero <= PAD.l + iW && (
-          <line x1={zero} x2={zero} y1={PAD.t} y2={H - PAD.b}
-            stroke={C.border2} strokeWidth={1.5} strokeDasharray="4 3" />
-        )}
-        {items.map((d, i) => {
-          const cy = PAD.t + i * rowH + rowH / 2;
-          const cx = sx(d.b);
-          const ciLo = sx(d.b - 1.96 * d.s), ciHi = sx(d.b + 1.96 * d.s);
-          const sig = d.p < 0.05;
-          const dot = sig ? C.teal : C.textMuted;
-          const lbl = sig ? C.text : C.textDim;
-          const CAP = 5;
-          const ciLoC = Math.max(PAD.l, ciLo), ciHiC = Math.min(PAD.l + iW, ciHi);
-          return (
-            <g key={d.v}>
-              <text x={PAD.l - 10} y={cy + 4} textAnchor="end" fill={lbl} fontSize={10.5}>
-                {d.v.length > 18 ? d.v.slice(0, 17) + "…" : d.v}
-              </text>
-              <line x1={ciLoC} x2={ciHiC} y1={cy} y2={cy} stroke={dot} strokeWidth={sig ? 1.6 : 1.1} opacity={sig ? 0.85 : 0.45} />
-              <line x1={ciLo} x2={ciLo} y1={cy - CAP} y2={cy + CAP} stroke={dot} strokeWidth={1} opacity={0.65} />
-              <line x1={ciHi} x2={ciHi} y1={cy - CAP} y2={cy + CAP} stroke={dot} strokeWidth={1} opacity={0.65} />
-              <rect x={cx - 5} y={cy - 5} width={10} height={10}
-                fill={sig ? dot : "transparent"} stroke={dot}
-                strokeWidth={sig ? 0 : 1.5} opacity={sig ? 0.95 : 0.55}
-                transform={`rotate(45,${cx},${cy})`} />
-              <text x={PAD.l + iW + 8} y={cy + 3} textAnchor="start" fill={dot} fontSize={10}>
-                {d.b > 0 ? "+" : ""}{d.b.toFixed(3)}{stars(d.p)}
-              </text>
-              <text x={PAD.l + iW + 8} y={cy + 14} textAnchor="start" fill={C.textMuted} fontSize={8}>
-                p={d.p < 0.001 ? "<.001" : d.p.toFixed(3)}
-              </text>
-            </g>
-          );
-        })}
-        <line x1={PAD.l} x2={PAD.l + iW} y1={H - PAD.b} y2={H - PAD.b} stroke={C.border2} strokeWidth={1} />
-        {ticks.map((t, i) => (
-          <text key={i} x={sx(t)} y={H - PAD.b + 13} textAnchor="middle" fill={C.textMuted} fontSize={8}>
-            {t === 0 ? "0" : Math.abs(t) < 0.01 ? t.toExponential(1) : t.toFixed(2)}
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          Coefficient plot · 95% CI
+        </span>
+        <button onClick={handleExport}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+        >↓ SVG</button>
+      </div>
+      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
+        <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+          style={{ width: "100%", maxWidth: 700, minWidth: 360, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+          <rect width={W} height={H} fill={C.bg} />
+          {items.map((_, i) => (
+            <rect key={i} x={PAD.l} y={PAD.t + i * rowH} width={iW} height={rowH}
+              fill={i % 2 === 0 ? C.surface : C.surface2} opacity={0.7} />
+          ))}
+          {ticks.map((t, i) => (
+            <line key={i} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={H - PAD.b}
+              stroke={C.border} strokeWidth={1} strokeDasharray="3 3" />
+          ))}
+          {zero >= PAD.l && zero <= PAD.l + iW && (
+            <line x1={zero} x2={zero} y1={PAD.t} y2={H - PAD.b}
+              stroke={C.border2} strokeWidth={1.5} strokeDasharray="4 3" />
+          )}
+          {items.map((d, i) => {
+            const cy = PAD.t + i * rowH + rowH / 2;
+            const cx = sx(d.b);
+            const ciLo = sx(d.b - 1.96 * d.s), ciHi = sx(d.b + 1.96 * d.s);
+            const sig = d.p < 0.05;
+            const dot = sig ? C.teal : C.textMuted;
+            const lbl = sig ? C.text : C.textDim;
+            const CAP = 5;
+            const ciLoC = Math.max(PAD.l, ciLo), ciHiC = Math.min(PAD.l + iW, ciHi);
+            return (
+              <g key={d.v}>
+                <text x={PAD.l - 10} y={cy + 4} textAnchor="end" fill={lbl} fontSize={10.5}>
+                  {d.v.length > 18 ? d.v.slice(0, 17) + "…" : d.v}
+                </text>
+                <line x1={ciLoC} x2={ciHiC} y1={cy} y2={cy} stroke={dot} strokeWidth={sig ? 1.6 : 1.1} opacity={sig ? 0.85 : 0.45} />
+                <line x1={ciLo} x2={ciLo} y1={cy - CAP} y2={cy + CAP} stroke={dot} strokeWidth={1} opacity={0.65} />
+                <line x1={ciHi} x2={ciHi} y1={cy - CAP} y2={cy + CAP} stroke={dot} strokeWidth={1} opacity={0.65} />
+                <rect x={cx - 5} y={cy - 5} width={10} height={10}
+                  fill={sig ? dot : "transparent"} stroke={dot}
+                  strokeWidth={sig ? 0 : 1.5} opacity={sig ? 0.95 : 0.55}
+                  transform={`rotate(45,${cx},${cy})`} />
+                <text x={PAD.l + iW + 8} y={cy + 3} textAnchor="start" fill={dot} fontSize={10}>
+                  {d.b > 0 ? "+" : ""}{d.b.toFixed(3)}{stars(d.p)}
+                </text>
+                <text x={PAD.l + iW + 8} y={cy + 14} textAnchor="start" fill={C.textMuted} fontSize={8}>
+                  p={d.p < 0.001 ? "<.001" : d.p.toFixed(3)}
+                </text>
+              </g>
+            );
+          })}
+          <line x1={PAD.l} x2={PAD.l + iW} y1={H - PAD.b} y2={H - PAD.b} stroke={C.border2} strokeWidth={1} />
+          {ticks.map((t, i) => (
+            <text key={i} x={sx(t)} y={H - PAD.b + 13} textAnchor="middle" fill={C.textMuted} fontSize={8}>
+              {t === 0 ? "0" : Math.abs(t) < 0.01 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+          ))}
+          <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textMuted} fontSize={8}>
+            Coefficient estimate · 95% CI · ◆ p&lt;0.05 (teal) · ◇ n.s. (grey)
           </text>
-        ))}
-        <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textMuted} fontSize={8}>
-          Coefficient estimate · 95% CI · ◆ p&lt;0.05 (teal) · ◇ n.s. (grey)
-        </text>
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -562,7 +593,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
               { id: "yhat",   label: "Y vs Ŷ",
                 node: <YFittedPlot resid={active.resid} Yhat={active.Yhat} yLabel={yVar[0]} svgIdSuffix={`-${tab}`} /> },
               { id: "forest", label: "Coefficient plot",
-                node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} /></div> },
+                node: <ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} svgId={`forest-${tab}`} filename={`${tab}_coefficients.svg`} /> },
               { id: "resid",  label: "Residuals vs Fitted",
                 node: <ResidualVsFitted resid={active.resid} Yhat={active.Yhat} svgIdSuffix={`-${tab}-rv`} /> },
               { id: "qq",     label: "Q-Q",
@@ -667,7 +698,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
                 };
               }),
               { id: "forest", label: "Coefficient plot",
-                node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} /></div> },
+                node: <ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} svgId="forest-2sls-second" filename="2sls_second_stage_coefficients.svg" /> },
               { id: "resid",  label: "Residuals vs Fitted",
                 node: <ResidualVsFitted resid={second.resid} Yhat={second.Yhat} svgIdSuffix="-2sls-resid" /> },
               { id: "qq",     label: "Q-Q",
@@ -714,7 +745,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
               { id: "scatter", label: "Instrument scatter",
                 node: <FirstStagePlot firstStages={[fs]} rows={rows} instrVars={zVars} endogVars={[fs.endVar]} /> },
               { id: "forest", label: "Coefficient plot",
-                node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={fs.varNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} /></div> },
+                node: <ForestPlot varNames={fs.varNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId={`forest-2sls-fs${i}`} filename={`2sls_first_stage_${fs.endVar}_coefficients.svg`} /> },
             ]}
           />
         </div>
@@ -1028,7 +1059,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                       };
                     }),
                     { id: "forest", label: "Coefficient plot",
-                      node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} /></div> },
+                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-ols" filename="ols_coefficients.svg" /> },
                     { id: "resid",  label: "Residuals vs Fitted",
                       node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
                     { id: "qq",     label: "Q-Q",
@@ -1101,7 +1132,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                       ? { id: "main", label: "Parallel trends", node: <DiDPlot result={r} yLabel={yVar[0]} /> }
                       : { id: "main", label: "Event study",     node: <EventStudyPlot result={r} yLabel={yVar[0]} /> },
                     { id: "forest", label: "Coefficient plot",
-                      node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} /></div> },
+                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${result.type.toLowerCase()}`} filename={`${result.type.toLowerCase()}_coefficients.svg`} /> },
                   ]}
                 />
                 <ExportBar yVar={yVar[0]} results={r} model={result.type}

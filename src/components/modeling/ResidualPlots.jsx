@@ -32,8 +32,14 @@ function niceTicks(lo, hi, n = 5) {
 function exportSVG(svgId, filename) {
   const el = document.getElementById(svgId);
   if (!el) return;
-  const src = new XMLSerializer().serializeToString(el);
-  const blob = new Blob([src], { type: "image/svg+xml" });
+  let src = new XMLSerializer().serializeToString(el);
+  if (!src.includes('xmlns="http://www.w3.org/2000/svg"')) {
+    src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+  }
+  src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
+  src = src.replace(/<rect[^>]*fill="#0f0f0f"[^>]*\/>/g, '');
+  src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
+  const blob = new Blob([src], { type: "image/svg+xml;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;
@@ -203,9 +209,9 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
   const svgId = `resid-fitted${svgIdSuffix}`;
 
   return (
-    <div style={{ background: C.bg, overflowX: "auto" }}>
+    <div style={{ background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", minWidth: 320, display: "block", fontFamily: mono }}>
+        style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* grid */}
@@ -334,9 +340,9 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
   const svgId = `qq-plot${svgIdSuffix}`;
 
   return (
-    <div style={{ background: C.bg, overflowX: "auto" }}>
+    <div style={{ background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", minWidth: 320, display: "block", fontFamily: mono }}>
+        style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* grid */}
