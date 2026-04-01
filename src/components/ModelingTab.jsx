@@ -20,8 +20,8 @@ import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
 import { C, mono }        from "../components/modeling/shared.jsx";
-import { PlotSelector, YFittedPlot, PartialPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance } from "../components/modeling/ModelPlots.jsx";
-import { ResidualVsFitted, QQPlot, ResidualPlots } from "../components/modeling/ResidualPlots.jsx";
+import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance } from "../components/modeling/ModelPlots.jsx";
+import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
@@ -539,6 +539,11 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
       </div>
       {active && (
         <>
+          <RegressionEquation
+            varNames={["(Intercept)", ...(active.varNames || xVars)]}
+            beta={[null, ...active.beta]}
+            yVar={`${yVar[0]} (within)`}
+          />
           <FitBar items={[
             { label: tab === "fe" ? "R² within"  : "R²",      value: safeR(tab === "fe" ? active.R2_within  : active.R2),    color: C.blue },
             { label: tab === "fe" ? "R² between" : "Adj. R²", value: safeR(tab === "fe" ? active.R2_between : active.adjR2), color: C.blue },
@@ -554,14 +559,14 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
             accentColor={C.blue}
             defaultId="yhat"
             plots={[
-              { id: "yhat",  label: "Y vs Ŷ",
+              { id: "yhat",   label: "Y vs Ŷ",
                 node: <YFittedPlot resid={active.resid} Yhat={active.Yhat} yLabel={yVar[0]} svgIdSuffix={`-${tab}`} /> },
               { id: "forest", label: "Coefficient plot",
                 node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} /></div> },
-              { id: "resid", label: "Residuals vs Fitted",
-                node: <ResidualVsFitted resid={active.resid} Yhat={active.Yhat} svgIdSuffix={`-${tab}`} /> },
-              { id: "qq",    label: "Q-Q",
-                node: <QQPlot resid={active.resid} svgIdSuffix={`-${tab}`} /> },
+              { id: "resid",  label: "Residuals vs Fitted",
+                node: <ResidualVsFitted resid={active.resid} Yhat={active.Yhat} svgIdSuffix={`-${tab}-rv`} /> },
+              { id: "qq",     label: "Q-Q",
+                node: <QQPlot resid={active.resid} svgIdSuffix={`-${tab}-qq`} /> },
             ]}
           />
         </>
@@ -574,7 +579,6 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
             : "✓ FE preferred (consistent and more efficient)."}
         </InfoBox>
       )}
-      {active && null /* plots handled by PlotSelector above */}
       <DiagnosticsPanel panelFE={panelFE} panelFD={panelFD} xColsPanel={[...xVars, ...wVars]} />
       {active && (
         <ExportBar
@@ -628,6 +632,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
       </div>
       {tab === "second" && (
         <>
+          <RegressionEquation varNames={second.varNames} beta={second.beta} yVar={yVar[0]} />
           <FitBar items={[
             { label: "R²",      value: safeR(second.R2),    color: C.gold },
             { label: "Adj. R²", value: safeR(second.adjR2), color: C.gold },
@@ -644,10 +649,39 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
             plots={[
               { id: "yhat",   label: "Y vs Ŷ",
                 node: <YFittedPlot resid={second.resid} Yhat={second.Yhat} yLabel={yVar[0]} svgIdSuffix="-2sls" /> },
+              ...xVars.map((xc, i) => {
+                const fs   = firstStages[i];
+                const idx  = second.varNames.indexOf(xc);
+                return {
+                  id: `yxhat_${xc}`,
+                  label: `Y vs ${xc}̂`,
+                  node: <YXhatPlot
+                    Y={second.Yhat?.map((yh, j) => yh + (second.resid?.[j] ?? 0))}
+                    Xhat={fs?.Yhat}
+                    beta_iv={idx >= 0 ? second.beta[idx] : null}
+                    pVal={idx >= 0 ? second.pVals[idx] : null}
+                    yLabel={yVar[0]} xLabel={xc}
+                    resid2={second.resid}
+                    svgIdSuffix={`-${i}`}
+                  />,
+                };
+              }),
               { id: "forest", label: "Coefficient plot",
                 node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} /></div> },
-              { id: "fs",     label: "First stage",
-                node: <FirstStagePlot firstStages={firstStages} rows={rows} instrVars={zVars} endogVars={xVars} /> },
+              { id: "resid",  label: "Residuals vs Fitted",
+                node: <ResidualVsFitted resid={second.resid} Yhat={second.Yhat} svgIdSuffix="-2sls-resid" /> },
+              { id: "qq",     label: "Q-Q",
+                node: <QQPlot resid={second.resid} svgIdSuffix="-2sls-qq" /> },
+              ...firstStages.map((fs, i) => ({
+                id: `endog_${i}`,
+                label: `Endogeneity: ${fs.endVar}`,
+                node: <EndogeneityPlot
+                  residFirst={fs.resid}
+                  residSecond={second.resid}
+                  endVar={fs.endVar}
+                  svgIdSuffix={`-${i}`}
+                />,
+              })),
             ]}
           />
           <ExportBar
@@ -671,6 +705,18 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
             </InfoBox>
           )}
           <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+          <PlotSelector
+            accentColor={C.gold}
+            defaultId="xhat"
+            plots={[
+              { id: "xhat",   label: `${fs.endVar} vs X̂`,
+                node: <XvsXhatPlot rows={rows} endVar={fs.endVar} Xhat={fs.Yhat} Fstat={fs.Fstat} weak={fs.weak} svgIdSuffix={`-fs${i}`} /> },
+              { id: "scatter", label: "Instrument scatter",
+                node: <FirstStagePlot firstStages={[fs]} rows={rows} instrVars={zVars} endogVars={[fs.endVar]} /> },
+              { id: "forest", label: "Coefficient plot",
+                node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={fs.varNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} /></div> },
+            ]}
+          />
         </div>
       ))}
     </div>
@@ -959,10 +1005,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
-                <Lbl color={C.textMuted}>Coefficient Plot (95% CI)</Lbl>
-                <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem", background: C.bg }}>
-                  <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} />
-                </div>
+                <Lbl color={C.textMuted}>Coefficient Plot & Diagnostics</Lbl>
                 <PlotSelector
                   accentColor={C.green}
                   defaultId="yhat"
@@ -984,9 +1027,11 @@ export default function ModelingTab({ cleanedData, onBack }) {
                         />,
                       };
                     }),
-                    { id: "resid", label: "Residuals vs Fitted",
+                    { id: "forest", label: "Coefficient plot",
+                      node: <div style={{ padding: "0.5rem", background: C.bg }}><ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} /></div> },
+                    { id: "resid",  label: "Residuals vs Fitted",
                       node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
-                    { id: "qq",    label: "Q-Q",
+                    { id: "qq",     label: "Q-Q",
                       node: <QQPlot resid={r.resid} /> },
                   ]}
                 />
@@ -1037,6 +1082,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                     </div>
                   </div>
                 )}
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
                   { label: "R²",     value: r.R2?.toFixed(4)    ?? "—", color: C.teal },
                   { label: "Adj. R²",value: r.adjR2?.toFixed(4) ?? "—", color: C.teal },
@@ -1088,6 +1134,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                     SE = {r.lateSE != null && isFinite(r.lateSE) ? r.lateSE.toFixed(4) : "N/A"} · p = {r.lateP != null && isFinite(r.lateP) ? (r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)) : "N/A"} · Kernel: {r.kernelType}
                   </div>
                 </div>
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
                   { label: "R²",        value: r.R2?.toFixed(4) ?? "—", color: C.orange },
                   { label: "n in bw",   value: r.n,                     color: C.text },
@@ -1110,7 +1157,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                         cutoff={parseFloat(cutoff)} optH={result.h}
                         kernel={kernel} controls={wVars} runSharpRDD={runSharpRDD}
                       /> },
-                    ...wVars.map((xc, i) => ({
+                    ...wVars.map(xc => ({
                       id: `bal_${xc}`,
                       label: `Balance: ${xc}`,
                       node: <RDDCovariateBalance result={r} controls={[xc]} rows={rows} />,

@@ -1429,3 +1429,401 @@ export function RDDCovariateBalance({ result, controls, rows }) {
     </div>
   );
 }
+
+// ─── Y vs X̂ PLOT (2SLS) ──────────────────────────────────────────────────────
+// Scatter of Y vs instrumented endogenous variable (X̂ from first stage).
+// The slope of the fitted line = β_IV (the 2SLS coefficient on that endogenous var).
+// This shows the exogenous variation the instrument is exploiting.
+//
+// Props:
+//   Y         — array of outcome values (Yhat + resid from second stage)
+//   Xhat      — array of first-stage fitted values for one endogenous variable
+//   beta_iv   — 2SLS coefficient on the endogenous variable (for annotation)
+//   pVal      — p-value of that coefficient
+//   yLabel    — outcome variable name
+//   xLabel    — endogenous variable name
+//   resid2    — second stage residuals (for coloring points)
+export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂", resid2, svgIdSuffix = "" }) {
+  if (!Y?.length || !Xhat?.length) return null;
+
+  const pts = Y.map((y, i) => ({ y, x: Xhat[i], e: resid2?.[i] ?? 0 }))
+    .filter(p => isFinite(p.y) && isFinite(p.x));
+  if (pts.length < 4) return null;
+
+  const W = 480, H = 320;
+  const PAD = { l: 58, r: 24, t: 28, b: 48 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  const xVals = pts.map(p => p.x), yVals = pts.map(p => p.y);
+  const xMin = Math.min(...xVals), xMax = Math.max(...xVals);
+  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const xPad = (xMax - xMin) * 0.05 || 1;
+  const yPad = (yMax - yMin) * 0.08 || 1;
+  const xLo = xMin - xPad, xHi = xMax + xPad;
+  const yLo = yMin - yPad, yHi = yMax + yPad;
+
+  const sx = v => PAD.l + ((v - xLo) / (xHi - xLo)) * iW;
+  const sy = v => PAD.t + iH - ((v - yLo) / (yHi - yLo)) * iH;
+
+  const xTicks = niceTicks(xLo, xHi, 5);
+  const yTicks = niceTicks(yLo, yHi, 5);
+
+  // standardize resid2 for coloring
+  const n   = pts.length;
+  const em  = pts.reduce((s, p) => s + p.e, 0) / n;
+  const esd = Math.sqrt(pts.reduce((s, p) => s + (p.e - em) ** 2, 0) / Math.max(1, n - 1));
+
+  // IV fit line: y = intercept + beta_iv * x
+  // intercept estimated from means: ȳ - beta_iv * x̄
+  const xm  = xVals.reduce((s, v) => s + v, 0) / n;
+  const ym  = yVals.reduce((s, v) => s + v, 0) / n;
+  const slope = beta_iv ?? (() => {
+    const sxx = xVals.reduce((s, v) => s + (v - xm) ** 2, 0);
+    const sxy = xVals.reduce((s, v, i) => s + (v - xm) * (yVals[i] - ym), 0);
+    return sxx > 0 ? sxy / sxx : 0;
+  })();
+  const intercept = ym - slope * xm;
+  const fitY1 = slope * xLo + intercept;
+  const fitY2 = slope * xHi + intercept;
+
+  const sig    = pVal != null && pVal < 0.05;
+  const lColor = sig ? C.gold : C.textMuted;
+  const svgId  = `y-xhat${svgIdSuffix}`;
+
+  return (
+    <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto" }}>
+      <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", minWidth: 300, display: "block", fontFamily: mono }}>
+        <rect width={W} height={H} fill={C.bg} />
+
+        {/* title */}
+        <text x={PAD.l + iW / 2} y={16} textAnchor="middle"
+          fill={C.textDim} fontSize={9} fontFamily={mono}>
+          {yLabel} vs {xLabel} — IV exogenous variation
+        </text>
+
+        {/* grid */}
+        {xTicks.map((t, i) => (
+          <line key={`gx${i}`} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t + iH}
+            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+        ))}
+        {yTicks.map((t, i) => (
+          <line key={`gy${i}`} x1={PAD.l} x2={PAD.l + iW} y1={sy(t)} y2={sy(t)}
+            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+        ))}
+
+        {/* scatter — colored by |z| of second-stage residual */}
+        {pts.map((p, i) => {
+          const z   = esd > 0 ? Math.abs(p.e / esd) : 0;
+          const big = z > 2;
+          return (
+            <circle key={i}
+              cx={sx(p.x)} cy={sy(p.y)} r={big ? 3.5 : 2.5}
+              fill={big ? C.red : C.violet}
+              opacity={big ? 0.8 : 0.4}
+            />
+          );
+        })}
+
+        {/* IV fit line */}
+        <line
+          x1={sx(xLo)} y1={sy(fitY1)}
+          x2={sx(xHi)} y2={sy(fitY2)}
+          stroke={lColor} strokeWidth={2} opacity={0.9}
+        />
+
+        {/* β annotation */}
+        <text x={PAD.l + iW - 4} y={PAD.t + 14} textAnchor="end"
+          fill={lColor} fontSize={9} fontFamily={mono}>
+          β_IV = {slope >= 0 ? "+" : ""}{slope.toFixed(4)}
+          {pVal != null ? (pVal < 0.01 ? "***" : pVal < 0.05 ? "**" : pVal < 0.1 ? "*" : "") : ""}
+        </text>
+        {pVal != null && (
+          <text x={PAD.l + iW - 4} y={PAD.t + 25} textAnchor="end"
+            fill={C.textMuted} fontSize={8} fontFamily={mono}>
+            p = {pVal < 0.001 ? "<0.001" : pVal.toFixed(4)}
+          </text>
+        )}
+
+        {/* axes */}
+        {xTicks.map((t, i) => (
+          <g key={i}>
+            <line x1={sx(t)} x2={sx(t)} y1={PAD.t + iH} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
+            <text x={sx(t)} y={PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        {yTicks.map((t, i) => (
+          <g key={i}>
+            <line x1={PAD.l - 4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
+            <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        <line x1={PAD.l} x2={PAD.l + iW} y1={PAD.t + iH} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+
+        <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle"
+          fill={C.textDim} fontSize={9} fontFamily={mono}>{xLabel} (instrumented)</text>
+        <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
+          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          {yLabel}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+// ─── X vs X̂ PLOT (2SLS first stage) ─────────────────────────────────────────
+// Scatter of original endogenous X vs instrumented X̂.
+// Tight diagonal = strong instrument. Loose = weak.
+// Props:
+//   rows     — original data rows
+//   endVar   — endogenous variable column name
+//   Xhat     — first-stage fitted values array (aligned to valid rows)
+//   Fstat    — first-stage F-statistic (shown as annotation)
+//   weak     — boolean weak instrument flag
+export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" }) {
+  if (!rows?.length || !endVar || !Xhat?.length) return null;
+
+  const xVals = rows
+    .map(r => r[endVar])
+    .filter(v => typeof v === "number" && isFinite(v));
+
+  // Xhat is aligned to valid rows from OLS — match length
+  if (xVals.length !== Xhat.length) return null;
+
+  const pts = xVals.map((x, i) => ({ x, xh: Xhat[i] }))
+    .filter(p => isFinite(p.x) && isFinite(p.xh));
+  if (pts.length < 4) return null;
+
+  const W = 420, H = 300;
+  const PAD = { l: 56, r: 24, t: 28, b: 48 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  const allV = [...pts.map(p => p.x), ...pts.map(p => p.xh)];
+  const vMin = Math.min(...allV), vMax = Math.max(...allV);
+  const vPad = (vMax - vMin) * 0.05 || 1;
+  const vLo = vMin - vPad, vHi = vMax + vPad;
+
+  const sx = v => PAD.l + ((v - vLo) / (vHi - vLo)) * iW;
+  const sy = v => PAD.t + iH - ((v - vLo) / (vHi - vLo)) * iH; // same scale
+
+  const ticks  = niceTicks(vLo, vHi, 5);
+  const fColor = weak ? C.red : C.green;
+  const svgId  = `x-xhat${svgIdSuffix}`;
+
+  return (
+    <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto" }}>
+      <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", minWidth: 280, display: "block", fontFamily: mono }}>
+        <rect width={W} height={H} fill={C.bg} />
+
+        {/* title */}
+        <text x={PAD.l + iW / 2} y={16} textAnchor="middle"
+          fill={C.textDim} fontSize={9} fontFamily={mono}>
+          {endVar} vs {endVar} instrumented (X̂)
+        </text>
+
+        {/* grid */}
+        {ticks.map((t, i) => (
+          <g key={i}>
+            <line x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t + iH}
+              stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+            <line x1={PAD.l} x2={PAD.l + iW} y1={sy(t)} y2={sy(t)}
+              stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+          </g>
+        ))}
+
+        {/* 45° reference */}
+        <line x1={sx(vLo)} y1={sy(vLo)} x2={sx(vHi)} y2={sy(vHi)}
+          stroke={C.border2} strokeWidth={1.5} strokeDasharray="5 3" />
+
+        {/* scatter */}
+        {pts.map((p, i) => (
+          <circle key={i} cx={sx(p.xh)} cy={sy(p.x)} r={2.5}
+            fill={C.teal} opacity={0.4} />
+        ))}
+
+        {/* F-stat badge */}
+        <rect x={PAD.l + iW - 92} y={PAD.t + 4} width={88} height={22}
+          fill={weak ? "#100505" : "#050f08"}
+          stroke={fColor + "40"} rx={3} />
+        <text x={PAD.l + iW - 48} y={PAD.t + 14} textAnchor="middle"
+          fill={fColor} fontSize={8} fontFamily={mono}>
+          F = {Fstat != null && isFinite(Fstat) ? Fstat.toFixed(2) : "—"}
+        </text>
+        <text x={PAD.l + iW - 48} y={PAD.t + 23} textAnchor="middle"
+          fill={weak ? C.red : C.textMuted} fontSize={7} fontFamily={mono}>
+          {weak ? "⚠ weak (F<10)" : "✓ relevant"}
+        </text>
+
+        {/* axes */}
+        {ticks.map((t, i) => (
+          <g key={i}>
+            <line x1={sx(t)} x2={sx(t)} y1={PAD.t + iH} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
+            <text x={sx(t)} y={PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+            <line x1={PAD.l - 4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
+            <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        <line x1={PAD.l} x2={PAD.l + iW} y1={PAD.t + iH} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+
+        <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle"
+          fill={C.textDim} fontSize={9} fontFamily={mono}>X̂ (instrumented)</text>
+        <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
+          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          {endVar} (observed)
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+// ─── ENDOGENEITY CHECK PLOT (2SLS) ────────────────────────────────────────────
+// Scatter of first-stage residuals vs second-stage residuals.
+// If the instrument is valid and endogeneity was real:
+//   - first-stage residuals (ν̂) correlate with second-stage residuals (ê)
+//   - this confirms the endogeneity problem and the instrument's relevance
+// A flat cloud = no endogeneity (OLS would have been fine).
+// Props:
+//   residFirst  — first-stage residuals (fs.resid from engine)
+//   residSecond — second-stage residuals (second.resid)
+//   endVar      — endogenous variable name (for axis label)
+export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", svgIdSuffix = "" }) {
+  if (!residFirst?.length || !residSecond?.length) return null;
+
+  const n = Math.min(residFirst.length, residSecond.length);
+  const pts = Array.from({ length: n }, (_, i) => ({
+    x: residFirst[i], y: residSecond[i],
+  })).filter(p => isFinite(p.x) && isFinite(p.y));
+  if (pts.length < 4) return null;
+
+  const W = 480, H = 300;
+  const PAD = { l: 58, r: 24, t: 28, b: 48 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  const xVals = pts.map(p => p.x), yVals = pts.map(p => p.y);
+  const xMin = Math.min(...xVals), xMax = Math.max(...xVals);
+  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const xPad = (xMax - xMin) * 0.05 || 1;
+  const yPad = (yMax - yMin) * 0.08 || 1;
+  const xLo = xMin - xPad, xHi = xMax + xPad;
+  const yLo = yMin - yPad, yHi = yMax + yPad;
+
+  const sx = v => PAD.l + ((v - xLo) / (xHi - xLo)) * iW;
+  const sy = v => PAD.t + iH - ((v - yLo) / (yHi - yLo)) * iH;
+
+  const xTicks = niceTicks(xLo, xHi, 5);
+  const yTicks = niceTicks(yLo, yHi, 5);
+
+  // Pearson correlation for annotation
+  const xm  = xVals.reduce((s, v) => s + v, 0) / pts.length;
+  const ym  = yVals.reduce((s, v) => s + v, 0) / pts.length;
+  const sxx = xVals.reduce((s, v) => s + (v - xm) ** 2, 0);
+  const syy = yVals.reduce((s, v) => s + (v - ym) ** 2, 0);
+  const sxy = xVals.reduce((s, v, i) => s + (v - xm) * (yVals[i] - ym), 0);
+  const corr = (sxx > 0 && syy > 0) ? sxy / Math.sqrt(sxx * syy) : 0;
+
+  // OLS fit line through residuals
+  const slope = sxx > 0 ? sxy / sxx : 0;
+  const intcp = ym - slope * xm;
+  const hasCorr = Math.abs(corr) > 0.05;
+  const lColor  = hasCorr ? C.red : C.green;
+
+  const svgId = `endogeneity${svgIdSuffix}`;
+
+  return (
+    <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto" }}>
+      <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", minWidth: 300, display: "block", fontFamily: mono }}>
+        <rect width={W} height={H} fill={C.bg} />
+
+        {/* title */}
+        <text x={PAD.l + iW / 2} y={16} textAnchor="middle"
+          fill={C.textDim} fontSize={9} fontFamily={mono}>
+          Endogeneity check — first vs second stage residuals
+        </text>
+
+        {/* grid */}
+        {xTicks.map((t, i) => (
+          <line key={`gx${i}`} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t + iH}
+            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+        ))}
+        {yTicks.map((t, i) => (
+          <line key={`gy${i}`} x1={PAD.l} x2={PAD.l + iW} y1={sy(t)} y2={sy(t)}
+            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+        ))}
+
+        {/* zero lines */}
+        {xLo < 0 && xHi > 0 && <line x1={sx(0)} x2={sx(0)} y1={PAD.t} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />}
+        {yLo < 0 && yHi > 0 && <line x1={PAD.l} x2={PAD.l + iW} y1={sy(0)} y2={sy(0)} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />}
+
+        {/* scatter */}
+        {pts.map((p, i) => (
+          <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={2.2}
+            fill={hasCorr ? C.red : C.blue} opacity={0.4} />
+        ))}
+
+        {/* fit line */}
+        <line
+          x1={sx(xLo)} y1={sy(slope * xLo + intcp)}
+          x2={sx(xHi)} y2={sy(slope * xHi + intcp)}
+          stroke={lColor} strokeWidth={1.8} opacity={0.85}
+        />
+
+        {/* correlation annotation */}
+        <rect x={PAD.l + 6} y={PAD.t + 4} width={110} height={22}
+          fill={hasCorr ? "#100505" : "#050f08"}
+          stroke={lColor + "40"} rx={3} />
+        <text x={PAD.l + 61} y={PAD.t + 14} textAnchor="middle"
+          fill={lColor} fontSize={8} fontFamily={mono}>
+          r = {corr.toFixed(3)}
+        </text>
+        <text x={PAD.l + 61} y={PAD.t + 23} textAnchor="middle"
+          fill={lColor} fontSize={7} fontFamily={mono}>
+          {hasCorr ? "⚠ endogeneity confirmed" : "✓ residuals uncorrelated"}
+        </text>
+
+        {/* axes */}
+        {xTicks.map((t, i) => (
+          <g key={i}>
+            <line x1={sx(t)} x2={sx(t)} y1={PAD.t + iH} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
+            <text x={sx(t)} y={PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        {yTicks.map((t, i) => (
+          <g key={i}>
+            <line x1={PAD.l - 4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
+            <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        <line x1={PAD.l} x2={PAD.l + iW} y1={PAD.t + iH} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+
+        <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle"
+          fill={C.textDim} fontSize={9} fontFamily={mono}>
+          ν̂ (first-stage residuals — {endVar})
+        </text>
+        <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
+          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          ê (second-stage residuals)
+        </text>
+      </svg>
+    </div>
+  );
+}

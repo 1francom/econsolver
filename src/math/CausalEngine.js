@@ -94,12 +94,15 @@ export function run2SLS(rows, yCol, endog, exog, instr) {
   // varNames aligned with X2 column order (intercept first)
   const varNames = ["(Intercept)", ...endog, ...exog];
   const beta     = secondRes.beta.slice(0, k);
+  const Yhat2SLS = X2.map(row => row.reduce((s, v, j) => s + v * beta[j], 0));
 
   return {
     firstStages,
     second: {
       beta, se: corrSE, tStats: corrT, pVals: corrP,
       R2, adjR2, n, df, varNames,
+      resid: trueResid,
+      Yhat:  Yhat2SLS,
     },
   };
 }
