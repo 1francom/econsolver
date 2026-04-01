@@ -3,6 +3,9 @@
 // All components are stateless — they receive engine output as props and render.
 //
 // Exports:
+//   PlotSelector         — tabbed shell: renders one plot at a time from a list
+//   YFittedPlot          — Y vs Ŷ scatter with 45° reference line
+//   PartialPlot          — Frisch-Waugh partial regression plot for one regressor
 //   RDDPlot              — binned scatter + local linear fit + cutoff + LATE annotation
 //   DiDPlot              — 2×2 parallel trends + counterfactual + ATT arrow
 //   EventStudyPlot       — per-period means (treated vs control) + treatment line
@@ -11,9 +14,318 @@
 //   RDDCovariateBalance  — covariate means left/right of cutoff (balance check)
 //
 // Depends on: C, mono from ./shared.jsx
-// No React state. No side effects.
+// No React state except PlotSelector (activeId only).
 
+import { useState } from "react";
 import { C, mono } from "./shared.jsx";
+
+// ─── PLOT SELECTOR ────────────────────────────────────────────────────────────
+// Tabbed shell that renders one plot at a time.
+// plots: [{ id, label, node }]  — node is a pre-built React element
+// accentColor: border color for the active tab
+export function PlotSelector({ plots, defaultId, accentColor = C.teal }) {
+  const [activeId, setActiveId] = useState(defaultId ?? plots[0]?.id);
+  if (!plots?.length) return null;
+  const active = plots.find(p => p.id === activeId) ?? plots[0];
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+      {/* tab strip */}
+      <div style={{ display: "flex", overflowX: "auto", background: "#0a0a0a", borderBottom: `1px solid ${C.border}` }}>
+        {plots.map(p => {
+          const isActive = p.id === active.id;
+          return (
+            <button
+              key={p.id}
+              onClick={() => setActiveId(p.id)}
+              style={{
+                flexShrink: 0,
+                padding: "0.42rem 0.85rem",
+                background: isActive ? `${accentColor}12` : "transparent",
+                border: "none",
+                borderBottom: isActive ? `2px solid ${accentColor}` : "2px solid transparent",
+                color: isActive ? accentColor : C.textMuted,
+                cursor: "pointer", fontFamily: mono, fontSize: 10,
+                letterSpacing: "0.08em", transition: "all 0.12s",
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = C.text; }}
+              onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = C.textMuted; }}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+      {/* active plot */}
+      <div style={{ background: C.bg }}>
+        {active.node}
+      </div>
+    </div>
+  );
+}
+
+// ─── Y VS Ŷ SCATTER ──────────────────────────────────────────────────────────
+// Scatter of observed Y vs fitted Ŷ with 45° perfect-fit reference line.
+// Points colored by |standardized residual| — darker = larger deviation.
+// Props: resid, Yhat (both from engine output), yLabel
+export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
+  if (!resid?.length || !Yhat?.length) return null;
+
+  const W = 480, H = 320;
+  const PAD = { l: 58, r: 24, t: 24, b: 48 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  const Y = Yhat.map((yh, i) => yh + resid[i]);
+  const pts = Y.map((y, i) => ({ y, yh: Yhat[i], e: resid[i] }))
+    .filter(p => isFinite(p.y) && isFinite(p.yh));
+  if (pts.length < 3) return null;
+
+  const n    = pts.length;
+  const sd   = (() => { const m = resid.reduce((s,v)=>s+v,0)/n; return Math.sqrt(resid.reduce((s,v)=>s+(v-m)**2,0)/Math.max(1,n-1)); })();
+
+  const allV = [...pts.map(p=>p.y), ...pts.map(p=>p.yh)];
+  const vMin = Math.min(...allV), vMax = Math.max(...allV);
+  const vPad = (vMax - vMin) * 0.06 || 1;
+  const vLo = vMin - vPad, vHi = vMax + vPad;
+
+  const sx = v => PAD.l + ((v - vLo) / (vHi - vLo)) * iW;
+  const sy = v => PAD.t + iH - ((v - vLo) / (vHi - vLo)) * iH; // same scale both axes
+
+  const ticks = niceTicks(vLo, vHi, 6);
+  const svgId = `y-fitted${svgIdSuffix}`;
+
+  return (
+    <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto" }}>
+      <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", minWidth: 300, display: "block", fontFamily: mono }}>
+        <rect width={W} height={H} fill={C.bg} />
+
+        {/* grid */}
+        {ticks.map((t, i) => (
+          <g key={i}>
+            <line x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+            <line x1={PAD.l} x2={PAD.l+iW} y1={sy(t)} y2={sy(t)} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+          </g>
+        ))}
+
+        {/* 45° reference line */}
+        <line x1={sx(vLo)} y1={sy(vLo)} x2={sx(vHi)} y2={sy(vHi)}
+          stroke={C.border2} strokeWidth={1.5} strokeDasharray="5 3" />
+
+        {/* scatter — color by |z-score| */}
+        {pts.map((p, i) => {
+          const z   = sd > 0 ? Math.abs(p.e / sd) : 0;
+          const big = z > 2;
+          return (
+            <circle key={i}
+              cx={sx(p.yh)} cy={sy(p.y)} r={big ? 3.5 : 2.5}
+              fill={big ? C.red : C.green}
+              opacity={big ? 0.8 : 0.45}
+            />
+          );
+        })}
+
+        {/* axes */}
+        {ticks.map((t, i) => (
+          <g key={i}>
+            <line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1} />
+            <text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t)>=1000 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+            <line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
+            <text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t)>=1000 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        <line x1={PAD.l} x2={PAD.l+iW} y1={PAD.t+iH} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
+
+        {/* axis labels */}
+        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          Fitted values (ŷ)
+        </text>
+        <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`}
+          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          Observed ({yLabel})
+        </text>
+
+        {/* legend */}
+        <circle cx={PAD.l+10} cy={PAD.t+12} r={3.5} fill={C.green} opacity={0.6} />
+        <text x={PAD.l+18} y={PAD.t+16} fill={C.textDim} fontSize={8} fontFamily={mono}>|z| ≤ 2</text>
+        <circle cx={PAD.l+70} cy={PAD.t+12} r={3.5} fill={C.red} opacity={0.8} />
+        <text x={PAD.l+78} y={PAD.t+16} fill={C.textDim} fontSize={8} fontFamily={mono}>|z| &gt; 2</text>
+        <line x1={PAD.l+130} x2={PAD.l+148} y1={PAD.t+12} y2={PAD.t+12} stroke={C.border2} strokeWidth={1.5} strokeDasharray="4 2" />
+        <text x={PAD.l+152} y={PAD.t+16} fill={C.textDim} fontSize={8} fontFamily={mono}>perfect fit</text>
+      </svg>
+    </div>
+  );
+}
+
+// ─── PARTIAL REGRESSION PLOT ─────────────────────────────────────────────────
+// Frisch-Waugh partial plot for one regressor Xi.
+// X-axis: residuals of Xi ~ (all other X)
+// Y-axis: residuals of Y  ~ (all other X)
+// Slope of the fitted line = βi exactly.
+//
+// Props:
+//   rows     — original data rows
+//   yCol     — dependent variable name
+//   xCol     — regressor to plot
+//   otherX   — all other regressors (controls)
+//   beta_i   — coefficient of xCol (for annotation)
+//   pVal_i   — p-value of xCol (for significance color)
+//   runOLS   — engine function passed in to avoid circular import
+export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, svgIdSuffix = "" }) {
+  if (!rows?.length || !yCol || !xCol || !runOLS) return null;
+
+  // Frisch-Waugh: regress Y on otherX, take residuals
+  // then regress xCol on otherX, take residuals
+  // scatter those residuals against each other
+  let eY, eX;
+
+  if (otherX.length === 0) {
+    // No other regressors — partial = raw demeaned
+    const yVals = rows.map(r => r[yCol]).filter(v => typeof v === "number" && isFinite(v));
+    const xVals = rows.map(r => r[xCol]).filter(v => typeof v === "number" && isFinite(v));
+    if (yVals.length < 4 || xVals.length < 4) return null;
+    const yMean = yVals.reduce((s,v)=>s+v,0)/yVals.length;
+    const xMean = xVals.reduce((s,v)=>s+v,0)/xVals.length;
+    eY = rows.map(r => (typeof r[yCol]==="number" && isFinite(r[yCol])) ? r[yCol]-yMean : null);
+    eX = rows.map(r => (typeof r[xCol]==="number" && isFinite(r[xCol])) ? r[xCol]-xMean : null);
+  } else {
+    const resY = runOLS(rows, yCol,  otherX);
+    const resX = runOLS(rows, xCol,  otherX);
+    if (!resY || !resX) return null;
+    // runOLS filters to valid rows — we need residuals aligned to the same valid rows
+    const validRows = rows.filter(r =>
+      typeof r[yCol]==="number" && isFinite(r[yCol]) &&
+      typeof r[xCol]==="number" && isFinite(r[xCol]) &&
+      otherX.every(c => typeof r[c]==="number" && isFinite(r[c]))
+    );
+    if (validRows.length < 4) return null;
+    eY = resY.resid;
+    eX = resX.resid;
+  }
+
+  // align — both must be same length
+  const pts = eY.map((y, i) => ({ y, x: eX[i] }))
+    .filter(p => p.y != null && p.x != null && isFinite(p.y) && isFinite(p.x));
+  if (pts.length < 4) return null;
+
+  const W = 480, H = 320;
+  const PAD = { l: 58, r: 24, t: 28, b: 48 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  const xVals = pts.map(p=>p.x), yVals = pts.map(p=>p.y);
+  const xMin = Math.min(...xVals), xMax = Math.max(...xVals);
+  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const xPad = (xMax-xMin)*0.05||1, yPad = (yMax-yMin)*0.08||1;
+  const xLo=xMin-xPad, xHi=xMax+xPad, yLo=yMin-yPad, yHi=yMax+yPad;
+
+  const sx = v => PAD.l + ((v-xLo)/(xHi-xLo))*iW;
+  const sy = v => PAD.t + iH - ((v-yLo)/(yHi-yLo))*iH;
+
+  const xTicks = niceTicks(xLo, xHi, 5);
+  const yTicks = niceTicks(yLo, yHi, 5);
+
+  // fitted line — slope = beta_i
+  const xm  = xVals.reduce((s,v)=>s+v,0)/xVals.length;
+  const ym  = yVals.reduce((s,v)=>s+v,0)/yVals.length;
+  const slope = beta_i ?? (() => {
+    const sxx = xVals.reduce((s,v)=>s+(v-xm)**2,0);
+    const sxy = xVals.reduce((s,v,i)=>s+(v-xm)*(yVals[i]-ym),0);
+    return sxx>0 ? sxy/sxx : 0;
+  })();
+  const intercept = ym - slope * xm;
+  const fitY1 = slope*xLo + intercept;
+  const fitY2 = slope*xHi + intercept;
+
+  const sig   = pVal_i != null && pVal_i < 0.05;
+  const lColor = sig ? C.teal : C.textMuted;
+  const svgId  = `partial-${xCol.replace(/[^a-z0-9]/gi,"-")}${svgIdSuffix}`;
+
+  return (
+    <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto" }}>
+      <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", minWidth: 300, display: "block", fontFamily: mono }}>
+        <rect width={W} height={H} fill={C.bg} />
+
+        {/* title */}
+        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          Partial: {yCol} ~ {xCol} | others
+        </text>
+
+        {/* grid */}
+        {xTicks.map((t,i) => (
+          <line key={`gx${i}`} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t+iH}
+            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+        ))}
+        {yTicks.map((t,i) => (
+          <line key={`gy${i}`} x1={PAD.l} x2={PAD.l+iW} y1={sy(t)} y2={sy(t)}
+            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+        ))}
+
+        {/* zero lines */}
+        {xLo<0&&xHi>0&&<line x1={sx(0)} x2={sx(0)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />}
+        {yLo<0&&yHi>0&&<line x1={PAD.l} x2={PAD.l+iW} y1={sy(0)} y2={sy(0)} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />}
+
+        {/* scatter */}
+        {pts.map((p,i) => (
+          <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={2.5}
+            fill={C.violet} opacity={0.5} />
+        ))}
+
+        {/* partial regression line */}
+        <line x1={sx(xLo)} y1={sy(fitY1)} x2={sx(xHi)} y2={sy(fitY2)}
+          stroke={lColor} strokeWidth={2} opacity={0.9} />
+
+        {/* β annotation */}
+        <text x={PAD.l+iW-4} y={PAD.t+14} textAnchor="end"
+          fill={lColor} fontSize={9} fontFamily={mono}>
+          β = {slope>=0?"+":""}{slope.toFixed(4)}{pVal_i!=null ? (pVal_i<0.01?"***":pVal_i<0.05?"**":pVal_i<0.1?"*":"") : ""}
+        </text>
+        {pVal_i!=null&&(
+          <text x={PAD.l+iW-4} y={PAD.t+25} textAnchor="end"
+            fill={C.textMuted} fontSize={8} fontFamily={mono}>
+            p = {pVal_i<0.001?"<0.001":pVal_i.toFixed(4)}
+          </text>
+        )}
+
+        {/* axes */}
+        {xTicks.map((t,i) => (
+          <g key={i}>
+            <line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1} />
+            <text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        {yTicks.map((t,i) => (
+          <g key={i}>
+            <line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
+            <text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              {Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        <line x1={PAD.l} x2={PAD.l+iW} y1={PAD.t+iH} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
+
+        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          e({xCol} | others)
+        </text>
+        <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`}
+          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          e({yCol} | others)
+        </text>
+      </svg>
+    </div>
+  );
+}
 
 // ─── SHARED SVG HELPERS ───────────────────────────────────────────────────────
 
