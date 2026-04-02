@@ -97,6 +97,7 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
   const svgId = `y-fitted${svgIdSuffix}`;
 
   return (
+    <InlinePlotShell title="Y vs Ŷ — Observed vs Fitted" svgId={svgId} filename={`y_fitted${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
         style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
@@ -161,10 +162,9 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
         <text x={PAD.l+152} y={PAD.t+16} fill={C.textDim} fontSize={8} fontFamily={mono}>perfect fit</text>
       </svg>
     </div>
+    </InlinePlotShell>
   );
 }
-
-// ─── PARTIAL REGRESSION PLOT ─────────────────────────────────────────────────
 // Frisch-Waugh partial plot for one regressor Xi.
 // X-axis: residuals of Xi ~ (all other X)
 // Y-axis: residuals of Y  ~ (all other X)
@@ -249,6 +249,7 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
   const svgId  = `partial-${xCol.replace(/[^a-z0-9]/gi,"-")}${svgIdSuffix}`;
 
   return (
+    <InlinePlotShell title={`Partial: ${yCol} ~ ${xCol} | others`} svgId={svgId} filename={`partial_${xCol.replace(/[^a-z0-9]/gi,"-")}${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
         style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
@@ -324,6 +325,7 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
         </text>
       </svg>
     </div>
+    </InlinePlotShell>
   );
 }
 
@@ -408,6 +410,32 @@ function exportSVG(svgId, filename) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+// ─── INLINE PLOT SHELL ───────────────────────────────────────────────────────
+// Lightweight wrapper for inline plots (no W/H needed — SVG is self-sizing).
+// Adds a thin header with label + ↓ SVG export button.
+function InlinePlotShell({ title, svgId, filename, children }) {
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          {title}
+        </span>
+        <button
+          onClick={() => exportSVG(svgId, filename)}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+        >↓ SVG</button>
+      </div>
+      {children}
+    </div>
+  );
 }
 
 // ─── PLOT WRAPPER ─────────────────────────────────────────────────────────────
@@ -793,6 +821,27 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
   const pts = eventMeans.filter(e => e.ctrl != null || e.trt != null);
   if (pts.length < 2) return null;
 
+  // ── Detect whether we have a real control group ──────────────────────────
+  const hasCtrl = pts.some(e => e.ctrl != null);
+  const hasTrt  = pts.some(e => e.trt  != null);
+
+  // ── Infer treatment period ────────────────────────────────────────────────
+  // Priority: explicit prop → first period where both exist → first trt period
+  const inferredTreat = treatPeriod
+    ?? pts.find(e => e.trt != null && e.ctrl != null)?.t
+    ?? pts.find(e => e.trt != null)?.t
+    ?? null;
+
+  // ── Counterfactual when no control group ─────────────────────────────────
+  // CF_t = trt_t - ATT  (shift post-treatment periods down by ATT)
+  // Only shown post-treatment; labeled clearly as "counterfactual (−ATT)"
+  const attVal = att ?? 0;
+  const cfPts = (!hasCtrl && hasTrt && inferredTreat != null && isFinite(attVal))
+    ? pts
+        .filter(e => e.trt != null && e.t >= inferredTreat)
+        .map(e => ({ t: e.t, cf: e.trt - attVal }))
+    : [];
+
   const W = 620, H = 360;
   const PAD = { l: 60, r: 28, t: 32, b: 52 };
   const iW = W - PAD.l - PAD.r;
@@ -802,7 +851,10 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
   const tMin  = Math.min(...times);
   const tMax  = Math.max(...times);
 
-  const allY  = pts.flatMap(e => [e.ctrl, e.trt].filter(v => v != null));
+  const allY = [
+    ...pts.flatMap(e => [e.ctrl, e.trt].filter(v => v != null)),
+    ...cfPts.map(p => p.cf),
+  ].filter(isFinite);
   const yMin  = Math.min(...allY);
   const yMax  = Math.max(...allY);
   const yPad  = (yMax - yMin) * 0.15 || 1;
@@ -815,32 +867,31 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
   const xTicks = niceTicks(tMin, tMax, Math.min(times.length, 8));
   const yTicks = niceTicks(yLo, yHi, 5);
 
-  // detect treatment period: first period where any unit has trt data and control gaps
-  const inferredTreat = treatPeriod
-    ?? pts.find(e => e.trt != null && e.ctrl != null)?.t
-    ?? null;
-
-  // line paths (skip nulls)
-  function makePath(key, color) {
+  // line paths (skip nulls — handles gaps)
+  function makePath(key, ptArr) {
     const segs = [];
     let cur = null;
-    pts.forEach(e => {
-      if (e[key] != null) {
-        const x = sx(e.t).toFixed(1), y = sy(e[key]).toFixed(1);
+    ptArr.forEach(e => {
+      const val = e[key];
+      if (val != null && isFinite(val)) {
+        const x = sx(e.t).toFixed(1), y = sy(val).toFixed(1);
         if (cur === null) { cur = [`M${x},${y}`]; } else { cur.push(`L${x},${y}`); }
       } else {
-        if (cur) { segs.push({ d: cur.join(" "), color }); cur = null; }
+        if (cur) { segs.push(cur.join(" ")); cur = null; }
       }
     });
-    if (cur) segs.push({ d: cur.join(" "), color });
+    if (cur) segs.push(cur.join(" "));
     return segs;
   }
 
-  const ctrlSegs = makePath("ctrl", C.blue);
-  const trtSegs  = makePath("trt",  C.orange);
+  const ctrlSegs = makePath("ctrl", pts);
+  const trtSegs  = makePath("trt",  pts);
+  const cfPath   = cfPts.length >= 2
+    ? cfPts.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.t).toFixed(1)},${sy(p.cf).toFixed(1)}`).join(" ")
+    : null;
 
-  const attSig   = attP != null && attP < 0.05;
-  const svgId    = "event-study-plot";
+  const attSig = attP != null && attP < 0.05;
+  const svgId  = "event-study-plot";
 
   return (
     <PlotShell
@@ -873,39 +924,51 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
         </g>
       )}
 
-      {/* control line + dots */}
-      {ctrlSegs.map((seg, i) => (
-        <path key={`cs${i}`} d={seg.d} fill="none" stroke={C.blue} strokeWidth={2} opacity={0.85} />
+      {/* counterfactual line (only when no real control group) */}
+      {cfPath && (
+        <path d={cfPath} fill="none" stroke={C.blue}
+          strokeWidth={1.8} strokeDasharray="6 4" opacity={0.75} />
+      )}
+      {cfPts.map((p, i) => (
+        <circle key={`cf${i}`} cx={sx(p.t)} cy={sy(p.cf)} r={3}
+          fill="none" stroke={C.blue} strokeWidth={1.5} opacity={0.8} />
       ))}
-      {pts.filter(e => e.ctrl != null).map((e, i) => (
+
+      {/* control line + dots (real control group) */}
+      {ctrlSegs.map((d, i) => (
+        <path key={`cs${i}`} d={d} fill="none" stroke={C.blue} strokeWidth={2} opacity={0.85} />
+      ))}
+      {hasCtrl && pts.filter(e => e.ctrl != null).map((e, i) => (
         <circle key={`cd${i}`} cx={sx(e.t)} cy={sy(e.ctrl)} r={3.5}
           fill={C.blue} opacity={0.9} />
       ))}
 
       {/* treated line + dots */}
-      {trtSegs.map((seg, i) => (
-        <path key={`ts${i}`} d={seg.d} fill="none" stroke={C.orange} strokeWidth={2} opacity={0.85} />
+      {trtSegs.map((d, i) => (
+        <path key={`ts${i}`} d={d} fill="none" stroke={C.orange} strokeWidth={2} opacity={0.85} />
       ))}
       {pts.filter(e => e.trt != null).map((e, i) => (
         <circle key={`td${i}`} cx={sx(e.t)} cy={sy(e.trt)} r={3.5}
           fill={C.orange} opacity={0.9} />
       ))}
 
-      {/* ATT annotation at last period */}
+      {/* ATT annotation — only when both lines visible at last period */}
       {(() => {
         const last = pts[pts.length - 1];
-        if (last.ctrl == null || last.trt == null) return null;
+        const trtY = last.trt != null ? sy(last.trt) : null;
+        const refY = last.ctrl != null
+          ? sy(last.ctrl)
+          : cfPts.length > 0 ? sy(cfPts[cfPts.length - 1].cf) : null;
+        if (trtY == null || refY == null) return null;
+        if (Math.abs(trtY - refY) < 6) return null;
         const x = sx(last.t);
-        const y1 = sy(last.ctrl);
-        const y2 = sy(last.trt);
-        if (Math.abs(y1 - y2) < 6) return null;
         const color = attSig ? C.teal : C.textMuted;
         return (
           <g>
-            <line x1={x + 12} y1={y1} x2={x + 12} y2={y2} stroke={color} strokeWidth={1.5} />
-            <line x1={x + 8} y1={y1} x2={x + 16} y2={y1} stroke={color} strokeWidth={1} />
-            <line x1={x + 8} y1={y2} x2={x + 16} y2={y2} stroke={color} strokeWidth={1} />
-            <text x={x + 18} y={(y1 + y2) / 2 + 4} fill={color} fontSize={8} fontFamily={mono}>ATT</text>
+            <line x1={x + 12} y1={refY} x2={x + 12} y2={trtY} stroke={color} strokeWidth={1.5} />
+            <line x1={x + 8} y1={refY} x2={x + 16} y2={refY} stroke={color} strokeWidth={1} />
+            <line x1={x + 8} y1={trtY} x2={x + 16} y2={trtY} stroke={color} strokeWidth={1} />
+            <text x={x + 18} y={(refY + trtY) / 2 + 4} fill={color} fontSize={8} fontFamily={mono}>ATT</text>
           </g>
         );
       })()}
@@ -923,12 +986,21 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
         {yLabel}
       </text>
 
-      {/* legend */}
+      {/* legend — adapts to whether we have real control or counterfactual */}
       <g transform={`translate(${PAD.l + 10}, ${PAD.t + 10})`}>
-        <line x1={0} x2={18} y1={5}  y2={5}  stroke={C.blue}   strokeWidth={2} />
-        <text x={22} y={9}  fill={C.textDim} fontSize={8} fontFamily={mono}>Control</text>
-        <line x1={0} x2={18} y1={20} y2={20} stroke={C.orange} strokeWidth={2} />
-        <text x={22} y={24} fill={C.textDim} fontSize={8} fontFamily={mono}>Treated</text>
+        {hasCtrl ? (
+          <>
+            <line x1={0} x2={18} y1={5}  y2={5}  stroke={C.blue}   strokeWidth={2} />
+            <text x={22} y={9}  fill={C.textDim} fontSize={8} fontFamily={mono}>Control</text>
+          </>
+        ) : cfPath ? (
+          <>
+            <line x1={0} x2={18} y1={5} y2={5} stroke={C.blue} strokeWidth={1.8} strokeDasharray="5 3" />
+            <text x={22} y={9} fill={C.textDim} fontSize={8} fontFamily={mono}>Counterfactual (−ATT)</text>
+          </>
+        ) : null}
+        <line x1={0} x2={18} y1={hasCtrl || cfPath ? 20 : 5} y2={hasCtrl || cfPath ? 20 : 5} stroke={C.orange} strokeWidth={2} />
+        <text x={22} y={hasCtrl || cfPath ? 24 : 9} fill={C.textDim} fontSize={8} fontFamily={mono}>Treated</text>
       </g>
     </PlotShell>
   );
@@ -1663,6 +1735,7 @@ export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂"
   const svgId = `y-xhat${svgIdSuffix}`;
 
   return (
+    <InlinePlotShell title={`${yLabel} vs ${xLabel} — IV exogenous variation`} svgId={svgId} filename={`y_xhat${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
         <rect width={W} height={H} fill={C.bg} />
@@ -1681,6 +1754,7 @@ export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂"
         <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>{yLabel}</text>
       </svg>
     </div>
+    </InlinePlotShell>
   );
 }
 
@@ -1706,6 +1780,7 @@ export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" 
   const svgId = `x-xhat${svgIdSuffix}`;
 
   return (
+    <InlinePlotShell title={`${endVar} vs X̂ — instrument relevance`} svgId={svgId} filename={`x_xhat_${endVar}${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 280, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
         <rect width={W} height={H} fill={C.bg} />
@@ -1723,6 +1798,7 @@ export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" 
         <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>{endVar} (observed)</text>
       </svg>
     </div>
+    </InlinePlotShell>
   );
 }
 
@@ -1754,6 +1830,7 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
   const svgId=`endogeneity${svgIdSuffix}`;
 
   return (
+    <InlinePlotShell title={`Endogeneity check — ${endVar}`} svgId={svgId} filename={`endogeneity_${endVar}${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
         <rect width={W} height={H} fill={C.bg} />
@@ -1775,5 +1852,6 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
         <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>ê (second-stage residuals)</text>
       </svg>
     </div>
+    </InlinePlotShell>
   );
 }

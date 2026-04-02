@@ -15,6 +15,46 @@
 
 import { C, mono } from "./shared.jsx";
 
+// ─── EXPORT SVG ───────────────────────────────────────────────────────────────
+function exportSVG(svgId, filename) {
+  const el = document.getElementById(svgId);
+  if (!el) return;
+  let src = new XMLSerializer().serializeToString(el);
+  if (!src.includes('xmlns="http://www.w3.org/2000/svg"'))
+    src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+  src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
+  src = src.replace(/<rect[^>]*fill="#0f0f0f"[^>]*\/>/g, '');
+  src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
+  const blob = new Blob([src], { type: "image/svg+xml;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ─── INLINE PLOT SHELL ────────────────────────────────────────────────────────
+function InlinePlotShell({ title, svgId, filename, children }) {
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          {title}
+        </span>
+        <button
+          onClick={() => exportSVG(svgId, filename)}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+        >↓ SVG</button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ─── SHARED HELPERS ───────────────────────────────────────────────────────────
 
 function niceTicks(lo, hi, n = 5) {
@@ -27,24 +67,6 @@ function niceTicks(lo, hi, n = 5) {
   for (let v = start; v <= hi + nice * 0.01; v += nice)
     out.push(parseFloat(v.toFixed(10)));
   return out.length >= 2 ? out : [lo, hi];
-}
-
-function exportSVG(svgId, filename) {
-  const el = document.getElementById(svgId);
-  if (!el) return;
-  let src = new XMLSerializer().serializeToString(el);
-  if (!src.includes('xmlns="http://www.w3.org/2000/svg"')) {
-    src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
-  }
-  src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
-  src = src.replace(/<rect[^>]*fill="#0f0f0f"[^>]*\/>/g, '');
-  src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
-  const blob = new Blob([src], { type: "image/svg+xml;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
 }
 
 function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
@@ -209,6 +231,7 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
   const svgId = `resid-fitted${svgIdSuffix}`;
 
   return (
+    <InlinePlotShell title="Residuals vs Fitted" svgId={svgId} filename={`residuals_fitted${svgIdSuffix}.svg`}>
     <div style={{ background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
         style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
@@ -274,6 +297,7 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
           fill={C.textDim} fontSize={8} fontFamily={mono}>LOWESS</text>
       </svg>
     </div>
+    </InlinePlotShell>
   );
 }
 
@@ -340,6 +364,7 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
   const svgId = `qq-plot${svgIdSuffix}`;
 
   return (
+    <InlinePlotShell title="Normal Q-Q Plot" svgId={svgId} filename={`qq_plot${svgIdSuffix}.svg`}>
     <div style={{ background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
         style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
@@ -406,6 +431,7 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
           fill={C.textDim} fontSize={8} fontFamily={mono}>95% CI band</text>
       </svg>
     </div>
+    </InlinePlotShell>
   );
 }
 

@@ -277,11 +277,17 @@ export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = []
   const attT   = corrT[1];
   const attP   = corrP[1];
 
+  // Identify ever-treated units (treatCol === 1 in any period)
+  const everTreated = new Set(
+    valid.filter(r => !!r[treatCol]).map(r => r[unitCol])
+  );
+
   // Per-period means for event-study visual
+  // ctrl = units never treated | trt = units ever treated (shown in all periods)
   const eventMeans = times.map(t => {
     const sub  = valid.filter(r => r[timeCol] === t);
-    const ctrl = sub.filter(r => !r[treatCol]);
-    const trt  = sub.filter(r => !!r[treatCol]);
+    const ctrl = sub.filter(r => !everTreated.has(r[unitCol]));
+    const trt  = sub.filter(r =>  everTreated.has(r[unitCol]));
     return {
       t,
       ctrl: ctrl.length > 0 ? ctrl.reduce((s, r) => s + r[yCol], 0) / ctrl.length : null,
