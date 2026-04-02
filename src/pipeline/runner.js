@@ -27,18 +27,86 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
 
     case "filter": {
-      R = rows.filter(r => {
-        const v = r[s.col];
-        if (s.op === "notna") return v !== null && v !== undefined;
-        const n = parseFloat(s.value);
-        if (s.op === "eq")  return String(v) === String(s.value);
-        if (s.op === "neq") return String(v) !== String(s.value);
-        if (s.op === "gt")  return typeof v === "number" && v > n;
-        if (s.op === "lt")  return typeof v === "number" && v < n;
-        if (s.op === "gte") return typeof v === "number" && v >= n;
-        if (s.op === "lte") return typeof v === "number" && v <= n;
+      // ── predicate evaluator ──────────────────────────────────────────────────
+      // Supports two shapes:
+      //   Legacy:   { col, op, value }
+      //   Compound: { predicate: PredicateNode }
+      //
+      // PredicateNode:
+      //   { type:"and"|"or", children: PredicateNode[] }
+      //   { type:"condition", col, op, value, values }
+      //
+      // Operators: notna | isna | eq | neq | gt | gte | lt | lte |
+      //            in | nin | between | contains | startswith | endswith | regex
+
+      function evalPredicate(node, row) {
+        if (node.type === "and") return node.children.every(c => evalPredicate(c, row));
+        if (node.type === "or")  return node.children.some(c  => evalPredicate(c, row));
+
+        // leaf condition
+        const v = row[node.col];
+        const op = node.op;
+
+        if (op === "notna")     return v !== null && v !== undefined;
+        if (op === "isna")      return v === null || v === undefined;
+
+        // For remaining ops null values never match
+        if (v === null || v === undefined) return false;
+
+        const sv = String(v);
+        const nv = typeof v === "number" ? v : parseFloat(v);
+        const val = node.value;
+        const nval = parseFloat(val);
+
+        if (op === "eq")        return sv === String(val);
+        if (op === "neq")       return sv !== String(val);
+        if (op === "gt")        return isFinite(nv) && nv > nval;
+        if (op === "gte")       return isFinite(nv) && nv >= nval;
+        if (op === "lt")        return isFinite(nv) && nv < nval;
+        if (op === "lte")       return isFinite(nv) && nv <= nval;
+
+        // in / nin: node.values is string[]
+        if (op === "in") {
+          const vals = Array.isArray(node.values) ? node.values : [String(val)];
+          return vals.map(String).includes(sv);
+        }
+        if (op === "nin") {
+          const vals = Array.isArray(node.values) ? node.values : [String(val)];
+          return !vals.map(String).includes(sv);
+        }
+
+        // between: node.lo, node.hi (inclusive both ends)
+        if (op === "between") {
+          const lo = parseFloat(node.lo ?? node.value);
+          const hi = parseFloat(node.hi ?? node.value2);
+          return isFinite(nv) && nv >= lo && nv <= hi;
+        }
+
+        // string ops (case-insensitive)
+        const svl = sv.toLowerCase();
+        const vall = String(val ?? "").toLowerCase();
+        if (op === "contains")   return svl.includes(vall);
+        if (op === "startswith") return svl.startsWith(vall);
+        if (op === "endswith")   return svl.endsWith(vall);
+        if (op === "regex") {
+          try { return new RegExp(val, "i").test(sv); } catch { return false; }
+        }
+
         return true;
-      });
+      }
+
+      // Detect shape: compound predicate vs legacy flat
+      if (s.predicate) {
+        R = rows.filter(r => evalPredicate(s.predicate, r));
+      } else {
+        // Legacy flat shape — still fully supported
+        const legacyNode = {
+          type: "condition",
+          col: s.col, op: s.op, value: s.value, values: s.values,
+          lo: s.lo, hi: s.hi,
+        };
+        R = rows.filter(r => evalPredicate(legacyNode, r));
+      }
       break;
     }
 

@@ -204,8 +204,8 @@ export function Grid({headers,rows,hi,max=20,types,onType}){
 }
 function History({pipeline,onRm,onClear}){
   if(!pipeline.length)return null;
-  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_parse:C.gold,date_extract:C.violet,join:C.teal,append:C.violet,mutate:C.green,type_cast:C.teal,arrange:C.blue,fill_na:C.yellow,drop_na:C.red};
-  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_parse:"⟳",date_extract:"📅",join:"⊞",append:"⊕",mutate:"ƒ",type_cast:"⊕",arrange:"↕",fill_na:"□",drop_na:"✗"};
+  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_parse:C.gold,date_extract:C.violet,join:C.teal,append:C.violet,mutate:C.green};
+  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_parse:"⟳",date_extract:"📅",join:"⊞",append:"⊕",mutate:"ƒ"};
   return(
     <div style={{width:230,flexShrink:0,borderLeft:`1px solid ${C.border}`,background:C.surface,overflowY:"auto",padding:"1rem"}}>
       <div style={{display:"flex",alignItems:"center",marginBottom:"0.8rem",gap:6}}>
@@ -720,10 +720,423 @@ function ColCard({h,info,selected,onSel,onAct}){
   );
 }
 
+
+// ─── FILTER BUILDER ───────────────────────────────────────────────────────────
+// Builds a compound predicate tree (AND/OR groups of conditions).
+// Emits a step: { type:"filter", predicate: PredicateNode, desc }
+//
+// Operator catalogue by column type:
+//   numeric:     notna | isna | eq | neq | gt | gte | lt | lte | between | in | nin
+//   categorical: notna | isna | eq | neq | in | nin | contains | startswith | endswith | regex
+//   any:         notna | isna
+//
+// UX: top-level is always AND (most common case). User can add OR groups inside.
+
+const OPS_NUM = [
+  { v:"notna",  l:"is not null" },
+  { v:"isna",   l:"is null" },
+  { v:"eq",     l:"= equals" },
+  { v:"neq",    l:"≠ not equals" },
+  { v:"gt",     l:"> greater than" },
+  { v:"gte",    l:"≥ greater or equal" },
+  { v:"lt",     l:"< less than" },
+  { v:"lte",    l:"≤ less or equal" },
+  { v:"between",l:"between [lo, hi]" },
+  { v:"in",     l:"in list" },
+  { v:"nin",    l:"not in list" },
+];
+const OPS_CAT = [
+  { v:"notna",     l:"is not null" },
+  { v:"isna",      l:"is null" },
+  { v:"eq",        l:"= equals" },
+  { v:"neq",       l:"≠ not equals" },
+  { v:"in",        l:"in list" },
+  { v:"nin",       l:"not in list" },
+  { v:"contains",  l:"contains" },
+  { v:"startswith",l:"starts with" },
+  { v:"endswith",  l:"ends with" },
+  { v:"regex",     l:"regex match" },
+];
+
+function opsFor(col, info) {
+  if (!col || !info[col]) return OPS_CAT;
+  return info[col].isNum ? OPS_NUM : OPS_CAT;
+}
+
+// A single condition row
+function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove }) {
+  const ops = opsFor(cond.col, info);
+  const needsValue = !["notna","isna"].includes(cond.op);
+  const isBetween  = cond.op === "between";
+  const isInList   = cond.op === "in" || cond.op === "nin";
+  const colInfo    = info[cond.col] || {};
+
+  // For categorical in/nin: show unique value chips
+  const uVals = (isInList && colInfo.uVals)
+    ? colInfo.uVals.slice(0, 40).map(v => String(v))
+    : [];
+
+  const inS = {
+    padding:"0.3rem 0.55rem", background:C.surface3, border:`1px solid ${C.border2}`,
+    borderRadius:3, color:C.text, fontFamily:mono, fontSize:11, outline:"none",
+  };
+  const selS = { ...inS, cursor:"pointer" };
+
+  return (
+    <div style={{
+      display:"flex", flexWrap:"wrap", gap:6, alignItems:"flex-start",
+      padding:"0.55rem 0.65rem",
+      background:C.surface2, border:`1px solid ${C.border}`,
+      borderRadius:4, position:"relative",
+    }}>
+      {/* Column selector */}
+      <select value={cond.col} onChange={e => onChange(idx, { col: e.target.value, op:"notna", value:"", values:[], lo:"", hi:"" })}
+        style={{ ...selS, minWidth:110, flex:"1 1 110px" }}>
+        <option value="">— column —</option>
+        {headers.map(h => <option key={h} value={h}>{h}</option>)}
+      </select>
+
+      {/* Operator selector */}
+      {cond.col && (
+        <select value={cond.op} onChange={e => onChange(idx, { op: e.target.value, value:"", values:[], lo:"", hi:"" })}
+          style={{ ...selS, minWidth:140, flex:"1 1 140px" }}>
+          {ops.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+        </select>
+      )}
+
+      {/* Value inputs */}
+      {cond.col && needsValue && !isBetween && !isInList && (
+        <input
+          value={cond.value}
+          onChange={e => onChange(idx, { value: e.target.value })}
+          placeholder="value"
+          style={{ ...inS, minWidth:90, flex:"1 1 90px" }}
+        />
+      )}
+
+      {/* Between: lo + hi */}
+      {cond.col && isBetween && (
+        <>
+          <input value={cond.lo} onChange={e => onChange(idx, { lo: e.target.value })}
+            placeholder="lo" style={{ ...inS, width:70, flex:"0 0 70px" }}/>
+          <span style={{ color:C.textMuted, fontSize:11, alignSelf:"center", fontFamily:mono }}>to</span>
+          <input value={cond.hi} onChange={e => onChange(idx, { hi: e.target.value })}
+            placeholder="hi" style={{ ...inS, width:70, flex:"0 0 70px" }}/>
+        </>
+      )}
+
+      {/* In / Nin: chip list */}
+      {cond.col && isInList && (
+        <div style={{ flex:"1 1 200px", minWidth:0 }}>
+          {/* If categorical: show chips from unique values */}
+          {uVals.length > 0 ? (
+            <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4 }}>
+              {uVals.map(v => {
+                const sel = (cond.values || []).includes(v);
+                return (
+                  <button key={v} onClick={() => {
+                    const prev = cond.values || [];
+                    const next = sel ? prev.filter(x => x !== v) : [...prev, v];
+                    onChange(idx, { values: next, value: next.join(",") });
+                  }} style={{
+                    padding:"2px 7px",
+                    border:`1px solid ${sel ? C.yellow : C.border2}`,
+                    background: sel ? `${C.yellow}18` : "transparent",
+                    color: sel ? C.yellow : C.textDim,
+                    borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                    transition:"all 0.1s",
+                  }}>{sel?"✓ ":""}{v}</button>
+                );
+              })}
+            </div>
+          ) : (
+            /* Numeric or many-valued: free text comma-separated */
+            <input
+              value={cond.value}
+              onChange={e => {
+                const vals = e.target.value.split(",").map(x => x.trim()).filter(Boolean);
+                onChange(idx, { value: e.target.value, values: vals });
+              }}
+              placeholder="val1, val2, val3  (comma-separated)"
+              style={{ ...inS, width:"100%" }}
+            />
+          )}
+          <div style={{ fontSize:9, color:C.textMuted, fontFamily:mono, marginTop:2 }}>
+            {(cond.values || []).length} selected
+          </div>
+        </div>
+      )}
+
+      {/* Remove button */}
+      {canRemove && (
+        <button onClick={() => onRemove(idx)} style={{
+          background:"transparent", border:`1px solid ${C.border2}`,
+          borderRadius:3, color:C.textMuted, cursor:"pointer",
+          fontSize:11, padding:"0.25rem 0.4rem", alignSelf:"center", flexShrink:0,
+        }}>✕</button>
+      )}
+    </div>
+  );
+}
+
+// Preview: how many rows pass the predicate on a sample
+function FilterPreview({ rows, predicate, total }) {
+  const passing = useMemo(() => {
+    if (!predicate) return null;
+    try {
+      // Inline eval — same logic as runner but in-browser for preview
+      function evalP(node, row) {
+        if (node.type === "and") return node.children.every(c => evalP(c, row));
+        if (node.type === "or")  return node.children.some(c  => evalP(c, row));
+        const v = row[node.col];
+        const op = node.op;
+        if (op === "notna") return v !== null && v !== undefined;
+        if (op === "isna")  return v === null || v === undefined;
+        if (v === null || v === undefined) return false;
+        const sv = String(v), nv = parseFloat(v), val = node.value, nval = parseFloat(val);
+        if (op === "eq")        return sv === String(val);
+        if (op === "neq")       return sv !== String(val);
+        if (op === "gt")        return isFinite(nv) && nv > nval;
+        if (op === "gte")       return isFinite(nv) && nv >= nval;
+        if (op === "lt")        return isFinite(nv) && nv < nval;
+        if (op === "lte")       return isFinite(nv) && nv <= nval;
+        if (op === "between")   return isFinite(nv) && nv >= parseFloat(node.lo) && nv <= parseFloat(node.hi);
+        if (op === "in")  { const vals=(Array.isArray(node.values)?node.values:[String(val)]).map(String); return vals.includes(sv); }
+        if (op === "nin") { const vals=(Array.isArray(node.values)?node.values:[String(val)]).map(String); return !vals.includes(sv); }
+        const svl=sv.toLowerCase(), vall=String(val??"").toLowerCase();
+        if (op === "contains")   return svl.includes(vall);
+        if (op === "startswith") return svl.startsWith(vall);
+        if (op === "endswith")   return svl.endsWith(vall);
+        if (op === "regex")      { try { return new RegExp(val,"i").test(sv); } catch { return false; } }
+        return true;
+      }
+      return rows.filter(r => evalP(predicate, r)).length;
+    } catch { return null; }
+  }, [rows, predicate]);
+
+  if (passing === null) return null;
+  const pct = total > 0 ? (passing / total * 100).toFixed(1) : "0.0";
+  const kept = passing;
+  const removed = total - passing;
+  const color = removed > total * 0.5 ? C.red : removed > 0 ? C.yellow : C.green;
+
+  return (
+    <div style={{
+      padding:"0.55rem 0.85rem", background:C.surface, border:`1px solid ${C.border}`,
+      borderRadius:4, marginBottom:"0.8rem",
+      display:"flex", alignItems:"center", gap:12, fontFamily:mono, fontSize:11,
+    }}>
+      <div style={{ flex:1, height:4, background:C.border, borderRadius:2, overflow:"hidden" }}>
+        <div style={{ width:`${pct}%`, height:"100%", background:color, borderRadius:2, transition:"width 0.2s" }}/>
+      </div>
+      <span style={{ color:C.green, whiteSpace:"nowrap" }}>
+        ✓ <span style={{ color:C.text }}>{kept.toLocaleString()}</span> kept
+      </span>
+      <span style={{ color:color, whiteSpace:"nowrap" }}>
+        ✕ <span style={{ color:C.text }}>{removed.toLocaleString()}</span> removed
+      </span>
+      <span style={{ color:C.textMuted, whiteSpace:"nowrap" }}>{pct}%</span>
+    </div>
+  );
+}
+
+// The builder itself
+function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
+  const emptyCondition = () => ({ col:"", op:"notna", value:"", values:[], lo:"", hi:"", _id: Date.now()+Math.random() });
+
+  const [groups, setGroups] = useState([
+    { _id: 1, logic:"and", conditions: [emptyCondition()] }
+  ]);
+  const [topLogic, setTopLogic] = useState("and"); // how groups combine
+
+  function updateCond(gIdx, cIdx, patch) {
+    setGroups(prev => prev.map((g, gi) => gi !== gIdx ? g : {
+      ...g,
+      conditions: g.conditions.map((c, ci) => ci !== cIdx ? c : { ...c, ...patch })
+    }));
+  }
+  function removeCond(gIdx, cIdx) {
+    setGroups(prev => prev.map((g, gi) => gi !== gIdx ? g : {
+      ...g, conditions: g.conditions.filter((_, ci) => ci !== cIdx)
+    }).filter(g => g.conditions.length > 0));
+  }
+  function addCond(gIdx) {
+    setGroups(prev => prev.map((g, gi) => gi !== gIdx ? g : {
+      ...g, conditions: [...g.conditions, emptyCondition()]
+    }));
+  }
+  function addGroup() {
+    setGroups(prev => [...prev, { _id: Date.now(), logic:"or", conditions:[emptyCondition()] }]);
+  }
+  function removeGroup(gIdx) {
+    setGroups(prev => prev.filter((_, i) => i !== gIdx));
+  }
+
+  // Build predicate tree from groups
+  const predicate = useMemo(() => {
+    const validGroups = groups.map(g => {
+      const validConds = g.conditions
+        .filter(c => c.col && c.op)
+        .map(c => ({ type:"condition", col:c.col, op:c.op, value:c.value, values:c.values, lo:c.lo, hi:c.hi }));
+      if (!validConds.length) return null;
+      if (validConds.length === 1) return validConds[0];
+      return { type: g.logic, children: validConds };
+    }).filter(Boolean);
+
+    if (!validGroups.length) return null;
+    if (validGroups.length === 1) return validGroups[0];
+    return { type: topLogic, children: validGroups };
+  }, [groups, topLogic]);
+
+  // Build human-readable description
+  function condDesc(c) {
+    if (c.op === "notna") return `${c.col} is not null`;
+    if (c.op === "isna")  return `${c.col} is null`;
+    if (c.op === "between") return `${c.col} between [${c.lo}, ${c.hi}]`;
+    if (c.op === "in")  return `${c.col} in [${(c.values||[]).join(", ")||c.value}]`;
+    if (c.op === "nin") return `${c.col} not in [${(c.values||[]).join(", ")||c.value}]`;
+    const opStr = {eq:"=",neq:"≠",gt:">",gte:"≥",lt:"<",lte:"≤",contains:"contains",startswith:"starts with",endswith:"ends with",regex:"regex"}[c.op]||c.op;
+    return `${c.col} ${opStr} ${c.value}`;
+  }
+  function buildDesc(pred) {
+    if (!pred) return "no conditions";
+    if (pred.type === "condition") return condDesc(pred);
+    const sep = pred.type === "and" ? " AND " : " OR ";
+    return pred.children.map(c => c.type === "condition" ? condDesc(c) : `(${buildDesc(c)})`).join(sep);
+  }
+
+  function apply() {
+    if (!predicate) return;
+    const desc = `Filter: ${buildDesc(predicate)}`;
+    onAdd({ type:"filter", predicate, desc });
+    onCancel();
+  }
+
+  const canApply = predicate !== null;
+  const groupColors = [C.yellow, C.teal, C.blue, C.orange, C.purple, C.green];
+
+  return (
+    <div style={{ border:`1px solid ${C.yellow}30`, borderRadius:4, padding:"1rem", background:C.surface }}>
+      <div style={{ fontSize:10, color:C.yellow, letterSpacing:"0.18em", textTransform:"uppercase", fontFamily:mono, marginBottom:"0.9rem", display:"flex", alignItems:"center", gap:8 }}>
+        ⊧ Filter Builder
+        <span style={{ fontSize:9, color:C.textMuted, textTransform:"none", letterSpacing:0 }}>— keep rows where conditions are true</span>
+      </div>
+
+      {/* Groups */}
+      {groups.map((group, gIdx) => (
+        <div key={group._id} style={{
+          marginBottom:"0.7rem",
+          border:`1px solid ${groupColors[gIdx % groupColors.length]}30`,
+          borderLeft:`3px solid ${groupColors[gIdx % groupColors.length]}`,
+          borderRadius:4, overflow:"hidden",
+        }}>
+          {/* Group header */}
+          <div style={{
+            display:"flex", alignItems:"center", gap:6, padding:"0.35rem 0.65rem",
+            background:`${groupColors[gIdx % groupColors.length]}08`,
+            borderBottom:`1px solid ${C.border}`,
+          }}>
+            {groups.length > 1 && gIdx > 0 && (
+              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, marginRight:4 }}>
+                {topLogic.toUpperCase()}
+              </span>
+            )}
+            <span style={{ fontSize:9, color:groupColors[gIdx % groupColors.length], fontFamily:mono, letterSpacing:"0.12em", textTransform:"uppercase" }}>
+              Group {gIdx + 1}
+            </span>
+            {group.conditions.length > 1 && (
+              <>
+                <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>combine with:</span>
+                {["and","or"].map(l => (
+                  <button key={l} onClick={() => setGroups(prev => prev.map((g, i) => i === gIdx ? {...g, logic:l} : g))}
+                    style={{
+                      padding:"1px 7px", border:`1px solid ${group.logic===l ? groupColors[gIdx%groupColors.length] : C.border2}`,
+                      background: group.logic===l ? `${groupColors[gIdx%groupColors.length]}18` : "transparent",
+                      color: group.logic===l ? groupColors[gIdx%groupColors.length] : C.textDim,
+                      borderRadius:2, cursor:"pointer", fontSize:9, fontFamily:mono,
+                    }}>{l.toUpperCase()}</button>
+                ))}
+              </>
+            )}
+            {groups.length > 1 && (
+              <button onClick={() => removeGroup(gIdx)} style={{ marginLeft:"auto", background:"transparent", border:"none", color:C.textMuted, cursor:"pointer", fontSize:11, padding:"0 3px" }}>✕</button>
+            )}
+          </div>
+
+          {/* Conditions */}
+          <div style={{ padding:"0.55rem 0.65rem", display:"flex", flexDirection:"column", gap:5 }}>
+            {group.conditions.map((cond, cIdx) => (
+              <div key={cond._id}>
+                {cIdx > 0 && (
+                  <div style={{ fontSize:9, color:C.textMuted, fontFamily:mono, padding:"3px 0 3px 4px" }}>
+                    {group.logic.toUpperCase()}
+                  </div>
+                )}
+                <ConditionRow
+                  cond={cond} idx={cIdx}
+                  headers={headers} info={info}
+                  onChange={(i, patch) => updateCond(gIdx, i, patch)}
+                  onRemove={(i) => removeCond(gIdx, i)}
+                  canRemove={group.conditions.length > 1 || groups.length > 1}
+                />
+              </div>
+            ))}
+            <button onClick={() => addCond(gIdx)} style={{
+              padding:"0.25rem 0.6rem", background:"transparent",
+              border:`1px dashed ${C.border2}`, borderRadius:3,
+              color:C.textMuted, cursor:"pointer", fontSize:10, fontFamily:mono,
+              alignSelf:"flex-start", transition:"all 0.1s",
+            }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = groupColors[gIdx%groupColors.length]; e.currentTarget.style.color = groupColors[gIdx%groupColors.length]; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+            >+ condition</button>
+          </div>
+        </div>
+      ))}
+
+      {/* Add group + top-level logic */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:"0.9rem", flexWrap:"wrap" }}>
+        <button onClick={addGroup} style={{
+          padding:"0.3rem 0.75rem", background:"transparent",
+          border:`1px dashed ${C.border2}`, borderRadius:3,
+          color:C.textMuted, cursor:"pointer", fontSize:10, fontFamily:mono,
+          transition:"all 0.1s",
+        }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+        >+ OR group</button>
+        {groups.length > 1 && (
+          <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.textMuted, fontFamily:mono }}>
+            combine groups with:
+            {["and","or"].map(l => (
+              <button key={l} onClick={() => setTopLogic(l)} style={{
+                padding:"2px 8px", border:`1px solid ${topLogic===l ? C.gold : C.border2}`,
+                background: topLogic===l ? `${C.gold}18` : "transparent",
+                color: topLogic===l ? C.gold : C.textDim,
+                borderRadius:2, cursor:"pointer", fontSize:9, fontFamily:mono,
+              }}>{l.toUpperCase()}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Live preview */}
+      <FilterPreview rows={rows} predicate={predicate} total={rows.length} />
+
+      {/* Actions */}
+      <div style={{ display:"flex", gap:8 }}>
+        <Btn onClick={apply} color={C.yellow} v="solid" dis={!canApply} ch="Add filter step →"/>
+        <Btn onClick={onCancel} ch="Cancel"/>
+      </div>
+    </div>
+  );
+}
+
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
 function CleanTab({rows,headers,info,rawData,onAdd}){
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
-  const [rv,setRv]=useState(""),[fop,setFop]=useState("notna"),[fv,setFv]=useState("");
+  const [rv,setRv]=useState("");
+  const [showFilter,setShowFilter]=useState(false);
   const [aInstr,setAInstr]=useState(""),[aMode,setAMode]=useState("transform");
   const [aSt,setASt]=useState("idle"),[aRes,setARes]=useState(null);
   const [sug,setSug]=useState([]),[aiP,setAiP]=useState([]),[audL,setAudL]=useState(false);
@@ -755,7 +1168,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
   }
   function applyAudit(s){
     if(s.act==="drop")onAdd({type:"drop",col:s.col,desc:`Drop '${s.col}'`});
-    else if(s.act==="filter_na")onAdd({type:"filter",col:s.col,op:"notna",desc:`Remove NAs in '${s.col}'`});
+    else if(s.act==="filter_na")onAdd({type:"filter",predicate:{type:"condition",col:s.col,op:"notna"},desc:`Remove NAs in '${s.col}'`});
     else if(s.act==="winz"){
       const vals=rows.map(r=>r[s.col]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
       const lo=vals[Math.floor(vals.length*.01)]??vals[0],hi=vals[Math.floor(vals.length*.99)]??vals[vals.length-1];
@@ -777,7 +1190,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
     setASt("idle");setARes(null);setAInstr("");
   }
   function doRename(){if(!sel||!rv.trim())return;onAdd({type:"rename",col:sel,newName:rv.trim(),desc:`Rename '${sel}' → '${rv.trim()}'`});setRv("");setAct(null);setSel(null);}
-  function doFilter(){if(!sel)return;onAdd({type:"filter",col:sel,op:fop,value:fv,desc:`Filter '${sel}' ${fop}${fop!=="notna"?" "+fv:""}`});setAct(null);}
+  function doFilter(step){ onAdd(step); setShowFilter(false); setAct(null); }
   function doDrop(){if(!sel)return;onAdd({type:"drop",col:sel,desc:`Drop '${sel}'`});setAct(null);setSel(null);}
 
   const selIsCat=sel&&info[sel]&&!info[sel].isNum&&info[sel].isCat;
@@ -792,7 +1205,29 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
       {/* ─ Standalone Text Normalizer ─ */}
       <NormalizePanel headers={headers} rows={rows} info={info} onAdd={onAdd}/>
       <Auditor sug={sug} aiP={aiP} onApply={applyAudit} onNormalize={s=>openNormDialog(s.col)} loading={audL}/>
-      <Lbl>Columns <span style={{color:C.textMuted}}>({headers.length})</span></Lbl>
+      {/* Standalone filter button */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.9rem"}}>
+        <Lbl mb={0}>Columns <span style={{color:C.textMuted}}>({headers.length})</span></Lbl>
+        <button
+          onClick={()=>{setSel(null);setAct(null);setShowFilter(f=>!f);}}
+          style={{
+            marginLeft:"auto",padding:"0.28rem 0.7rem",
+            border:`1px solid ${showFilter?C.yellow:C.border2}`,
+            background:showFilter?`${C.yellow}12`:"transparent",
+            color:showFilter?C.yellow:C.textDim,
+            borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+            transition:"all 0.12s",
+          }}>
+          ⊧ Filter rows{showFilter?" ▾":" ▸"}
+        </button>
+      </div>
+      {showFilter&&(
+        <div style={{marginBottom:"1.2rem"}}>
+          <FilterBuilder headers={headers} info={info} rows={rows}
+            onAdd={step=>{onAdd(step);setShowFilter(false);}}
+            onCancel={()=>setShowFilter(false)}/>
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"1.2rem"}}>
         {headers.map(h=><ColCard key={h} h={h} info={info} selected={sel===h} onSel={h=>{setSel(h);setAct(null);setARes(null);setASt("idle");}} onAct={(h,a)=>{setSel(h);setAct(a);}}/>)}
       </div>
@@ -843,13 +1278,13 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
             </div>
           )}
           {act==="rename"&&<div><Lbl>New name</Lbl><div style={{display:"flex",gap:8}}><input value={rv} onChange={e=>setRv(e.target.value)} style={{flex:1,...inS}}/><Btn onClick={doRename} color={C.gold} v="solid" ch="Rename"/><Btn onClick={()=>setAct(null)} ch="Cancel"/></div></div>}
-          {act==="filter"&&<div><Lbl>Filter condition</Lbl><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <select value={fop} onChange={e=>setFop(e.target.value)} style={{padding:"0.45rem 0.65rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}>
-              <option value="notna">Remove NAs</option><option value="eq">== eq</option><option value="neq">≠ neq</option><option value="gt">&gt; gt</option><option value="gte">≥ gte</option><option value="lt">&lt; lt</option><option value="lte">≤ lte</option>
-            </select>
-            {fop!=="notna"&&<input value={fv} onChange={e=>setFv(e.target.value)} placeholder="value" style={{width:90,padding:"0.45rem 0.65rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>}
-            <Btn onClick={doFilter} color={C.yellow} v="solid" ch="Apply"/><Btn onClick={()=>setAct(null)} ch="Cancel"/>
-          </div></div>}
+          {act==="filter"&&(
+            <FilterBuilder
+              headers={headers} info={info} rows={rows}
+              onAdd={doFilter}
+              onCancel={()=>setAct(null)}
+            />
+          )}
           {act==="drop"&&<div><div style={{fontSize:12,color:C.red,marginBottom:"0.8rem",fontFamily:mono}}>Drop column '{sel}'?</div><div style={{display:"flex",gap:8}}><Btn onClick={doDrop} color={C.red} v="solid" ch="Confirm Drop"/><Btn onClick={()=>setAct(null)} ch="Cancel"/></div></div>}
         </div>
       )}
@@ -1157,29 +1592,30 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
   const [winzMode,setWinzMode]=useState("inplace");
   // Date extraction state
   const [dateSrc,setDateSrc]=useState("");
-  const [dateParseMode,setDateParseMode]=useState("YYYYMMDD"); // fmt hint for date_parse step
   const [dateParts,setDateParts]=useState({year:false,month:true,day:false,week:false,quarter:false,dow:false,isweekend:false});
   const [dateNames,setDateNames]=useState({year:"",month:"",day:"",week:"",quarter:"",dow:"",isweekend:""});
+  const [dateParseMode,setDateParseMode]=useState("YYYYMMDD");
 
   const numC=headers.filter(h=>info[h]?.isNum);
-  // Date columns: includes string ISO dates AND numeric YYYYMMDD (e.g. 20200101)
+
+  // Detect 8-digit YYYYMMDD integers (e.g. 20200101)
   const isYYYYMMDD = v => {
-    if (typeof v !== "number" && typeof v !== "string") return false;
     const s = String(v).trim();
     if (!/^\d{8}$/.test(s)) return false;
-    const y=+s.slice(0,4),m=+s.slice(4,6),d=+s.slice(6,8);
-    return y>=1000&&y<=9999&&m>=1&&m<=12&&d>=1&&d<=31;
+    const y=+s.slice(0,4), m=+s.slice(4,6), d=+s.slice(6,8);
+    return y>=1000 && y<=9999 && m>=1 && m<=12 && d>=1 && d<=31;
   };
+
+  // Date columns: ISO/parseable strings + numeric YYYYMMDD
   const dateC=headers.filter(h=>{
     const samples=rows.slice(0,20).map(r=>r[h]).filter(v=>v!=null);
     if(!samples.length) return false;
-    // Numeric YYYYMMDD?
     if(info[h]?.isNum) return samples.filter(v=>isYYYYMMDD(v)).length/samples.length>0.7;
-    // String ISO / parseable?
     const strSamples=samples.filter(v=>typeof v==="string");
     if(!strSamples.length) return false;
     return strSamples.filter(v=>!isNaN(new Date(v).getTime())).length/strSamples.length>0.5;
   });
+  // Subset: numeric YYYYMMDD columns that need a parse step first
   const numericDateC=dateC.filter(h=>info[h]?.isNum);
   const isP=panel?.entityCol&&panel?.timeCol;
 
@@ -1207,7 +1643,6 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
       dow:       n.dow       ||`${dateSrc}_dow`,
       isweekend: n.isweekend ||`${dateSrc}_isweekend`,
     }));
-    // Auto-detect numeric YYYYMMDD and pre-select format
     if(numericDateC.includes(dateSrc)) setDateParseMode("YYYYMMDD");
   },[dateSrc]);
 
@@ -1252,17 +1687,16 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
     if(!dateSrc) return;
     const parts=Object.entries(dateParts).filter(([,on])=>on).map(([k])=>k);
     if(!parts.length) return;
+    const needsParse=numericDateC.includes(dateSrc);
+    const srcCol=needsParse?`${dateSrc}_iso`:dateSrc;
     const names={};
-    parts.forEach(p=>{names[p]=dateNames[p]?.trim()||`${dateSrc}_${p}`;});
+    parts.forEach(p=>{names[p]=dateNames[p]?.trim()||`${srcCol}_${p}`;});
     const created=parts.map(p=>names[p]).join(", ");
-    // If source is numeric YYYYMMDD, prepend a date_parse step first
-    const needsParse = numericDateC.includes(dateSrc);
-    const parsedColName = needsParse ? `${dateSrc}_iso` : dateSrc;
     if(needsParse){
-      onAdd({type:"date_parse",col:dateSrc,nn:parsedColName,fmt:dateParseMode,
-        desc:`Parse '${dateSrc}' (${dateParseMode}) → '${parsedColName}'`});
+      onAdd({type:"date_parse",col:dateSrc,nn:srcCol,fmt:dateParseMode,
+        desc:`Parse '${dateSrc}' (${dateParseMode}) → '${srcCol}'`});
     }
-    onAdd({type:"date_extract",col:parsedColName,parts,names,desc:`Date extract '${parsedColName}' → [${created}]`});
+    onAdd({type:"date_extract",col:srcCol,parts,names,desc:`Date extract '${srcCol}' → [${created}]`});
     setDateSrc("");setDateParts({year:false,month:true,day:false,week:false,quarter:false,dow:false,isweekend:false});
     setDateNames({year:"",month:"",day:"",week:"",quarter:"",dow:"",isweekend:""});
   };
@@ -1335,74 +1769,90 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
         </div>
       )}
 
-      {/* ── Date Parsing + Extraction ── */}
+      {/* ── Date Parse + Extraction ── */}
       {vt==="date"&&(
         <div>
-          {/* Info banner */}
+          {/* Info */}
           <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
-            Select a date column and the calendar features to extract. Numeric columns in <span style={{color:C.gold}}>YYYYMMDD</span> format (e.g. <span style={{color:C.gold}}>20200101</span>) are auto-detected and will be parsed to ISO strings first.
+            Extracts calendar features as new numeric columns. Numeric <span style={{color:C.gold}}>YYYYMMDD</span> columns (e.g. <span style={{color:C.gold}}>20200101</span>) are auto-detected and parsed to ISO first.
           </div>
 
-          {/* Source column selector */}
+          {/* Source column */}
           <Lbl color={C.violet}>Date source column</Lbl>
           {dateC.length===0?(
             <div style={{fontSize:11,color:C.orange,fontFamily:mono,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4}}>
-              No date columns detected. Numeric columns with 8-digit YYYYMMDD values and string columns parseable as dates are both supported.
+              No date columns detected. Supports ISO strings ("2021-06-15") and numeric YYYYMMDD integers (20210615).
             </div>
           ):(
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.1rem"}}>
               {dateC.map(h=>(
                 <button key={h} onClick={()=>setDateSrc(h)}
-                  style={{padding:"0.28rem 0.6rem",border:`1px solid ${dateSrc===h?C.violet:C.border2}`,background:dateSrc===h?`${C.violet}18`:"transparent",color:dateSrc===h?C.violet:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s",display:"flex",alignItems:"center",gap:4}}>
+                  style={{display:"flex",alignItems:"center",gap:5,padding:"0.28rem 0.6rem",
+                    border:`1px solid ${dateSrc===h?C.violet:C.border2}`,
+                    background:dateSrc===h?`${C.violet}18`:"transparent",
+                    color:dateSrc===h?C.violet:C.textDim,
+                    borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>
                   {dateSrc===h?"✓ ":""}{h}
-                  {numericDateC.includes(h)&&<span style={{fontSize:8,padding:"1px 4px",background:`${C.gold}22`,border:`1px solid ${C.gold}44`,color:C.gold,borderRadius:2,letterSpacing:"0.08em"}}>NUM</span>}
+                  {numericDateC.includes(h)&&<span style={{fontSize:8,padding:"1px 4px",background:`${C.gold}20`,border:`1px solid ${C.gold}40`,color:C.gold,borderRadius:2}}>NUM</span>}
                 </button>
               ))}
             </div>
           )}
 
-          {/* Parse format selector — only shown for numeric YYYYMMDD columns */}
+          {/* Parse format — only for numeric YYYYMMDD columns */}
           {dateSrc&&numericDateC.includes(dateSrc)&&(
-            <div style={{padding:"0.7rem 0.9rem",background:`${C.gold}08`,border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.2rem"}}>
-              <div style={{fontSize:10,color:C.gold,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:6}}>Numeric date format</div>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {[["YYYYMMDD","YYYYMMDD","e.g. 20200115"],["DDMMYYYY","DDMMYYYY","e.g. 15012020"],["MMDDYYYY","MMDDYYYY","e.g. 01152020"]].map(([k,l,ex])=>(
+            <div style={{padding:"0.7rem 0.9rem",background:`${C.gold}08`,border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.1rem"}}>
+              <div style={{fontSize:10,color:C.gold,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:6,fontFamily:mono}}>Numeric format</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+                {[["YYYYMMDD","YYYYMMDD","20200115"],["DDMMYYYY","DDMMYYYY","15012020"],["MMDDYYYY","MMDDYYYY","01152020"]].map(([k,l,ex])=>(
                   <button key={k} onClick={()=>setDateParseMode(k)}
-                    style={{padding:"0.28rem 0.65rem",border:`1px solid ${dateParseMode===k?C.gold:C.border2}`,background:dateParseMode===k?`${C.gold}18`:"transparent",color:dateParseMode===k?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"}}>
-                    {dateParseMode===k?"✓ ":""}{l}
-                    <span style={{fontSize:8,color:C.textMuted,marginLeft:4}}>{ex}</span>
+                    style={{padding:"0.25rem 0.65rem",border:`1px solid ${dateParseMode===k?C.gold:C.border2}`,
+                      background:dateParseMode===k?`${C.gold}18`:"transparent",
+                      color:dateParseMode===k?C.gold:C.textDim,
+                      borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"}}>
+                    {dateParseMode===k?"✓ ":""}{l}<span style={{fontSize:8,color:C.textMuted,marginLeft:4}}>{ex}</span>
                   </button>
                 ))}
               </div>
-              <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:6}}>
-                A <span style={{color:C.teal}}>date_parse</span> step will be prepended automatically → <span style={{color:C.violet}}>{dateSrc}_iso</span>
+              <div style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+                Adds a <span style={{color:C.teal}}>date_parse</span> step automatically → new column <span style={{color:C.teal}}>{dateSrc}_iso</span>
               </div>
             </div>
           )}
 
           {/* Parts to extract */}
-          <Lbl color={C.violet}>Calendar features to extract</Lbl>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:"1.2rem"}}>
+          <Lbl color={C.violet}>Calendar features</Lbl>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:"1.1rem"}}>
             {[
-              ["year",    "Year",          "e.g. 2020",          "year"],
-              ["month",   "Month",         "Integer 1–12",       "month"],
-              ["day",     "Day of Month",  "Integer 1–31",       "day"],
-              ["week",    "ISO Week",      "Integer 1–53",       "week"],
-              ["quarter", "Quarter",       "Integer 1–4",        "quarter"],
-              ["dow",     "Day of Week",   "0=Sun … 6=Sat",      "dow"],
-              ["isweekend","Is Weekend",   "Binary 0/1",         "isweekend"],
-            ].map(([key,label,hint,nameKey])=>(
-              <div key={key} style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:8,alignItems:"center",padding:"0.45rem 0.65rem",background:dateParts[key]?`${C.violet}08`:C.surface,border:`1px solid ${dateParts[key]?C.violet+"40":C.border}`,borderRadius:4}}>
+              ["year",    "Year",         "e.g. 2020"],
+              ["month",   "Month",        "1–12"],
+              ["day",     "Day of month", "1–31"],
+              ["week",    "ISO Week",     "1–53"],
+              ["quarter", "Quarter",      "1–4"],
+              ["dow",     "Day of week",  "0=Sun … 6=Sat"],
+              ["isweekend","Is Weekend",  "0 / 1"],
+            ].map(([key,label,hint])=>(
+              <div key={key} style={{display:"grid",gridTemplateColumns:"18px 1fr",gap:6,alignItems:"start",
+                padding:"0.45rem 0.65rem",
+                background:dateParts[key]?`${C.violet}08`:C.surface,
+                border:`1px solid ${dateParts[key]?C.violet+"40":C.border}`,borderRadius:4}}>
                 <button onClick={()=>setDateParts(p=>({...p,[key]:!p[key]}))}
-                  style={{width:16,height:16,borderRadius:2,border:`1px solid ${dateParts[key]?C.violet:C.border2}`,background:dateParts[key]?C.violet:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.bg,fontSize:9,flexShrink:0}}>
+                  style={{width:16,height:16,marginTop:1,borderRadius:2,
+                    border:`1px solid ${dateParts[key]?C.violet:C.border2}`,
+                    background:dateParts[key]?C.violet:"transparent",
+                    cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
+                    color:C.bg,fontSize:9,flexShrink:0}}>
                   {dateParts[key]?"✓":""}
                 </button>
-                <div style={{minWidth:0}}>
+                <div>
                   <div style={{fontSize:11,color:dateParts[key]?C.text:C.textDim,fontFamily:mono}}>{label}</div>
                   {dateParts[key]&&dateSrc?(
-                    <input value={dateNames[nameKey]} onChange={e=>setDateNames(n=>({...n,[nameKey]:e.target.value}))}
-                      placeholder={`${dateSrc}_${nameKey}`}
-                      style={{marginTop:3,padding:"0.22rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:2,color:C.text,fontFamily:mono,fontSize:9,outline:"none",width:"100%",boxSizing:"border-box"}}/>
+                    <input value={dateNames[key]} onChange={e=>setDateNames(n=>({...n,[key]:e.target.value}))}
+                      placeholder={`${dateSrc}_${key}`}
+                      style={{marginTop:3,padding:"0.22rem 0.4rem",background:C.surface2,
+                        border:`1px solid ${C.border2}`,borderRadius:2,
+                        color:C.text,fontFamily:mono,fontSize:9,outline:"none",
+                        width:"100%",boxSizing:"border-box"}}/>
                   ):(
                     <div style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{hint}</div>
                   )}
@@ -1411,16 +1861,18 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
             ))}
           </div>
 
-          {/* Preview of what will be created */}
+          {/* Preview */}
           {dateSrc&&canExtract&&(
-            <div style={{padding:"0.55rem 0.85rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.8}}>
-              {numericDateC.includes(dateSrc)&&<div style={{marginBottom:4}}>
-                <span style={{color:C.gold}}>→</span> Parse: <span style={{color:C.gold}}>{dateSrc}</span> <span style={{color:C.textMuted}}>({dateParseMode})</span> → <span style={{color:C.teal}}>{dateSrc}_iso</span>
-              </div>}
+            <div style={{padding:"0.55rem 0.85rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"0.9rem",fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.8}}>
+              {numericDateC.includes(dateSrc)&&(
+                <div><span style={{color:C.gold}}>→</span> Parse: <span style={{color:C.gold}}>{dateSrc}</span> <span style={{color:C.textMuted}}>({dateParseMode})</span> → <span style={{color:C.teal}}>{dateSrc}_iso</span></div>
+              )}
               <div>
                 <span style={{color:C.gold}}>→</span> Extract:{" "}
                 {Object.entries(dateParts).filter(([,on])=>on).map(([k])=>(
-                  <span key={k} style={{color:C.violet,marginRight:8}}>{dateNames[k]?.trim()||(dateSrc+(numericDateC.includes(dateSrc)?"_iso":"")+`_${k}`)}</span>
+                  <span key={k} style={{color:C.violet,marginRight:8}}>
+                    {dateNames[k]?.trim()||(dateSrc+(numericDateC.includes(dateSrc)?"_iso":"")+`_${k}`)}
+                  </span>
                 ))}
               </div>
             </div>
@@ -2023,39 +2475,10 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
     datasets: Object.fromEntries((allDatasets||[]).map(d=>[d.id, d.rawData]))
   }), [allDatasets]);
 
-  // ── Async pipeline execution ─────────────────────────────────────────────────
-  // Runs the pipeline deferred (setTimeout 0) so the browser can paint a
-  // "Computing…" indicator before blocking on heavy computation.
-  // A 250ms debounce prevents redundant re-runs while the user adds steps fast.
-  const [pipelineResult, setPipelineResult] = useState(()=>{
+  const {rows, headers} = useMemo(()=>{
     const init = rawData.rows.map(r=>{const c={};rawData.headers.forEach(h=>{c[h]=r[h]??null;});return c;});
-    return runPipeline(init, rawData.headers, [], {});
-  });
-  const [pipelinePending, setPipelinePending] = useState(false);
-  const debounceRef = useRef(null);
-  const cancelRef = useRef(false);
-
-  useEffect(()=>{
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    const LARGE = 20_000;
-    const delay = rawData.rows.length > LARGE ? 250 : 0;
-
-    debounceRef.current = setTimeout(()=>{
-      cancelRef.current = false;
-      if (rawData.rows.length > LARGE) setPipelinePending(true);
-      // Yield to browser paint, then compute
-      setTimeout(()=>{
-        if (cancelRef.current) return;
-        const init = rawData.rows.map(r=>{const c={};rawData.headers.forEach(h=>{c[h]=r[h]??null;});return c;});
-        const result = runPipeline(init, rawData.headers, pipeline, context);
-        if (!cancelRef.current) { setPipelineResult(result); setPipelinePending(false); }
-      }, 0);
-    }, delay);
-
-    return ()=>{ cancelRef.current = true; if (debounceRef.current) clearTimeout(debounceRef.current); };
+    return runPipeline(init, rawData.headers, pipeline, context);
   }, [rawData, pipeline, context]);
-
-  const {rows, headers} = pipelineResult;
 
   const info = useMemo(()=>buildInfo(headers, rows), [headers, rows]);
 
@@ -2108,12 +2531,9 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
             <div style={{fontSize:19,color:C.text,letterSpacing:"-0.02em",marginBottom:3}}>{filename}</div>
             <div style={{fontSize:11,color:C.textDim}}>
               <span style={{color:C.gold}}>{rawData.rows.length}</span> raw ·{" "}
-              {pipelinePending
-                ? <span style={{color:C.orange,display:"inline-flex",alignItems:"center",gap:4}}><Spin/> computing…</span>
-                : <><span style={{color:C.text}}>{rows.length}</span> current ·{" "}
-                  <span style={{color:headers.length>rawData.headers.length?C.green:C.textMuted}}>{headers.length}</span> cols</>
-              }
-              {!pipelinePending&&naCount>0&&<span style={{color:C.yellow}}> · {naCount} rows with NAs</span>}
+              <span style={{color:C.text}}>{rows.length}</span> current ·{" "}
+              <span style={{color:headers.length>rawData.headers.length?C.green:C.textMuted}}>{headers.length}</span> cols
+              {naCount>0&&<span style={{color:C.yellow}}> · {naCount} rows with NAs</span>}
             </div>
           </div>
           <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
