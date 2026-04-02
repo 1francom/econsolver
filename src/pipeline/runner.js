@@ -262,22 +262,113 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    // ── date_parse ────────────────────────────────────────────────────────────
+    // Converts a raw date column (numeric YYYYMMDD, string YYYYMMDD, or any
+    // JS-parseable string) into a normalised "YYYY-MM-DD" string in-place
+    // (or into a new column if s.nn is set and differs from s.col).
+    //
+    // Supported input formats (auto-detected):
+    //   • integer / string  YYYYMMDD   → "2020-01-01"
+    //   • string  YYYY-MM-DD / YYYY/MM/DD / DD-MM-YYYY / DD/MM/YYYY / MM-DD-YYYY
+    //   • any JS-parseable string (fallback via new Date())
+    //
+    // s.col      – source column
+    // s.nn       – (optional) output column; defaults to s.col (in-place)
+    // s.fmt      – hint: "YYYYMMDD" | "DDMMYYYY" | "MMDDYYYY" | "auto" (default)
+    case "date_parse": {
+      const outCol = s.nn && s.nn !== s.col ? s.nn : s.col;
+      const fmt = s.fmt || "auto";
+
+      const parseToISO = v => {
+        if (v === null || v === undefined) return null;
+        const raw = String(v).trim();
+
+        // ── Numeric / 8-char YYYYMMDD ──────────────────────────────────────
+        if (fmt === "YYYYMMDD" || (fmt === "auto" && /^\d{8}$/.test(raw))) {
+          const yr = raw.slice(0, 4), mo = raw.slice(4, 6), dy = raw.slice(6, 8);
+          const y = +yr, m = +mo, d = +dy;
+          if (y >= 1000 && y <= 9999 && m >= 1 && m <= 12 && d >= 1 && d <= 31)
+            return `${yr}-${mo}-${dy}`;
+          return null;
+        }
+
+        // ── DD-MM-YYYY or DD/MM/YYYY ────────────────────────────────────────
+        if (fmt === "DDMMYYYY") {
+          const m = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+          if (m) return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+          return null;
+        }
+
+        // ── MM-DD-YYYY or MM/DD/YYYY ────────────────────────────────────────
+        if (fmt === "MMDDYYYY") {
+          const m = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+          if (m) return `${m[3]}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
+          return null;
+        }
+
+        // ── auto: try common separators ─────────────────────────────────────
+        // YYYY-MM-DD or YYYY/MM/DD already in ISO form
+        if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(raw)) {
+          const d = new Date(raw.replace(/\//g, "-").slice(0, 10));
+          if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+          return null;
+        }
+
+        // Fallback: JS Date parser (handles "Jan 1 2020", RFC-2822, etc.)
+        const d = new Date(raw);
+        if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+        return null;
+      };
+
+      R = rows.map(r => ({ ...r, [outCol]: parseToISO(r[s.col]) }));
+      if (outCol !== s.col && !H.includes(outCol)) H = [...H, outCol];
+      break;
+    }
+
+    // ── date_extract ──────────────────────────────────────────────────────────
+    // Extracts calendar features from an ISO "YYYY-MM-DD" string column
+    // (run date_parse first if the source is raw numeric YYYYMMDD).
+    //
+    // Supported parts: year | month | day | dow | week | quarter | isweekend
     case "date_extract": {
+      // Robust parser: handles ISO strings ("2020-01-15"), JS Date objects,
+      // and legacy numeric YYYYMMDD integers as a safety net.
       const parseDate = v => {
         if (v == null) return null;
-        const d = new Date(String(v).trim());
+        let s2 = String(v).trim();
+        // Safety net: bare 8-digit number → try YYYYMMDD
+        if (/^\d{8}$/.test(s2))
+          s2 = `${s2.slice(0,4)}-${s2.slice(4,6)}-${s2.slice(6,8)}`;
+        // Use UTC noon to avoid DST boundary issues
+        const d = new Date(`${s2.slice(0,10)}T12:00:00Z`);
         return isNaN(d.getTime()) ? null : d;
       };
+
+      // ISO week number (Mon-based, ISO 8601)
+      const isoWeek = d => {
+        const thu = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+        const dayNum = (thu.getUTCDay() + 6) % 7; // Mon=0
+        thu.setUTCDate(thu.getUTCDate() - dayNum + 3);
+        const firstThu = new Date(Date.UTC(thu.getUTCFullYear(), 0, 4));
+        return 1 + Math.round((thu.getTime() - firstThu.getTime()) / 604800000);
+      };
+
       s.parts.forEach(part => {
         const nn = s.names[part];
         if (!nn) return;
         R = R.map(r => {
           const d = parseDate(r[s.col]);
           if (!d) return { ...r, [nn]: null };
-          if (part === "year")      return { ...r, [nn]: d.getFullYear() };
-          if (part === "month")     return { ...r, [nn]: d.getMonth() + 1 };  // 1–12
-          if (part === "dow")       return { ...r, [nn]: d.getDay() };         // 0=Sun…6=Sat
-          if (part === "isweekend") { const dow = d.getDay(); return { ...r, [nn]: (dow === 0 || dow === 6) ? 1 : 0 }; }
+          if (part === "year")      return { ...r, [nn]: d.getUTCFullYear() };
+          if (part === "month")     return { ...r, [nn]: d.getUTCMonth() + 1 };     // 1–12
+          if (part === "day")       return { ...r, [nn]: d.getUTCDate() };           // 1–31
+          if (part === "dow")       return { ...r, [nn]: d.getUTCDay() };            // 0=Sun…6=Sat
+          if (part === "week")      return { ...r, [nn]: isoWeek(d) };               // ISO week 1–53
+          if (part === "quarter")   return { ...r, [nn]: Math.ceil((d.getUTCMonth() + 1) / 3) }; // 1–4
+          if (part === "isweekend") {
+            const dow = d.getUTCDay();
+            return { ...r, [nn]: (dow === 0 || dow === 6) ? 1 : 0 };
+          }
           return r;
         });
         if (!H.includes(nn)) H = [...H, nn];

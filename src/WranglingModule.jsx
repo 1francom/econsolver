@@ -204,8 +204,8 @@ export function Grid({headers,rows,hi,max=20,types,onType}){
 }
 function History({pipeline,onRm,onClear}){
   if(!pipeline.length)return null;
-  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_extract:C.violet,join:C.teal,append:C.violet,mutate:C.green};
-  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_extract:"📅",join:"⊞",append:"⊕",mutate:"ƒ"};
+  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_parse:C.gold,date_extract:C.violet,join:C.teal,append:C.violet,mutate:C.green,type_cast:C.teal,arrange:C.blue,fill_na:C.yellow,drop_na:C.red};
+  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_parse:"⟳",date_extract:"📅",join:"⊞",append:"⊕",mutate:"ƒ",type_cast:"⊕",arrange:"↕",fill_na:"□",drop_na:"✗"};
   return(
     <div style={{width:230,flexShrink:0,borderLeft:`1px solid ${C.border}`,background:C.surface,overflowY:"auto",padding:"1rem"}}>
       <div style={{display:"flex",alignItems:"center",marginBottom:"0.8rem",gap:6}}>
@@ -1157,17 +1157,30 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
   const [winzMode,setWinzMode]=useState("inplace");
   // Date extraction state
   const [dateSrc,setDateSrc]=useState("");
-  const [dateParts,setDateParts]=useState({month:true,dow:true,isweekend:false});
-  const [dateNames,setDateNames]=useState({month:"",dow:"",isweekend:""});
+  const [dateParseMode,setDateParseMode]=useState("YYYYMMDD"); // fmt hint for date_parse step
+  const [dateParts,setDateParts]=useState({year:false,month:true,day:false,week:false,quarter:false,dow:false,isweekend:false});
+  const [dateNames,setDateNames]=useState({year:"",month:"",day:"",week:"",quarter:"",dow:"",isweekend:""});
 
   const numC=headers.filter(h=>info[h]?.isNum);
-  // Date columns: string/date-typed columns with non-null values that parse as dates
+  // Date columns: includes string ISO dates AND numeric YYYYMMDD (e.g. 20200101)
+  const isYYYYMMDD = v => {
+    if (typeof v !== "number" && typeof v !== "string") return false;
+    const s = String(v).trim();
+    if (!/^\d{8}$/.test(s)) return false;
+    const y=+s.slice(0,4),m=+s.slice(4,6),d=+s.slice(6,8);
+    return y>=1000&&y<=9999&&m>=1&&m<=12&&d>=1&&d<=31;
+  };
   const dateC=headers.filter(h=>{
-    if(info[h]?.isNum) return false;
-    const samples=rows.slice(0,10).map(r=>r[h]).filter(v=>v!=null&&typeof v==="string");
+    const samples=rows.slice(0,20).map(r=>r[h]).filter(v=>v!=null);
     if(!samples.length) return false;
-    return samples.filter(v=>!isNaN(new Date(v).getTime())).length/samples.length>0.5;
+    // Numeric YYYYMMDD?
+    if(info[h]?.isNum) return samples.filter(v=>isYYYYMMDD(v)).length/samples.length>0.7;
+    // String ISO / parseable?
+    const strSamples=samples.filter(v=>typeof v==="string");
+    if(!strSamples.length) return false;
+    return strSamples.filter(v=>!isNaN(new Date(v).getTime())).length/strSamples.length>0.5;
   });
+  const numericDateC=dateC.filter(h=>info[h]?.isNum);
   const isP=panel?.entityCol&&panel?.timeCol;
 
   const suggestName=useCallback((transform,col,col2)=>{
@@ -1186,10 +1199,16 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
   useEffect(()=>{
     if(!dateSrc) return;
     setDateNames(n=>({
-      month:n.month||`${dateSrc}_month`,
-      dow:n.dow||`${dateSrc}_dow`,
-      isweekend:n.isweekend||`${dateSrc}_isweekend`,
+      year:      n.year      ||`${dateSrc}_year`,
+      month:     n.month     ||`${dateSrc}_month`,
+      day:       n.day       ||`${dateSrc}_day`,
+      week:      n.week      ||`${dateSrc}_week`,
+      quarter:   n.quarter   ||`${dateSrc}_quarter`,
+      dow:       n.dow       ||`${dateSrc}_dow`,
+      isweekend: n.isweekend ||`${dateSrc}_isweekend`,
     }));
+    // Auto-detect numeric YYYYMMDD and pre-select format
+    if(numericDateC.includes(dateSrc)) setDateParseMode("YYYYMMDD");
   },[dateSrc]);
 
   function resetQuick(){setNm("");setQc("");setXc2("");prevAutoRef.current="";}
@@ -1236,9 +1255,16 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
     const names={};
     parts.forEach(p=>{names[p]=dateNames[p]?.trim()||`${dateSrc}_${p}`;});
     const created=parts.map(p=>names[p]).join(", ");
-    onAdd({type:"date_extract",col:dateSrc,parts,names,desc:`Date extract '${dateSrc}' → [${created}]`});
-    setDateSrc("");setDateParts({month:true,dow:true,isweekend:false});
-    setDateNames({month:"",dow:"",isweekend:""});
+    // If source is numeric YYYYMMDD, prepend a date_parse step first
+    const needsParse = numericDateC.includes(dateSrc);
+    const parsedColName = needsParse ? `${dateSrc}_iso` : dateSrc;
+    if(needsParse){
+      onAdd({type:"date_parse",col:dateSrc,nn:parsedColName,fmt:dateParseMode,
+        desc:`Parse '${dateSrc}' (${dateParseMode}) → '${parsedColName}'`});
+    }
+    onAdd({type:"date_extract",col:parsedColName,parts,names,desc:`Date extract '${parsedColName}' → [${created}]`});
+    setDateSrc("");setDateParts({year:false,month:true,day:false,week:false,quarter:false,dow:false,isweekend:false});
+    setDateNames({year:"",month:"",day:"",week:"",quarter:"",dow:"",isweekend:""});
   };
   const canExtract=dateSrc&&Object.values(dateParts).some(Boolean);
 
@@ -1309,56 +1335,97 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
         </div>
       )}
 
-      {/* ── Date Extraction ── */}
+      {/* ── Date Parsing + Extraction ── */}
       {vt==="date"&&(
         <div>
+          {/* Info banner */}
           <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
-            Extract calendar features from date columns (format: YYYY-MM-DD or MM/DD/YYYY). Each selected part becomes a new numeric column.
+            Select a date column and the calendar features to extract. Numeric columns in <span style={{color:C.gold}}>YYYYMMDD</span> format (e.g. <span style={{color:C.gold}}>20200101</span>) are auto-detected and will be parsed to ISO strings first.
           </div>
+
+          {/* Source column selector */}
           <Lbl color={C.violet}>Date source column</Lbl>
           {dateC.length===0?(
             <div style={{fontSize:11,color:C.orange,fontFamily:mono,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4}}>
-              No date columns detected. Date columns must contain strings parseable as dates (e.g. "2021-06-15").
+              No date columns detected. Numeric columns with 8-digit YYYYMMDD values and string columns parseable as dates are both supported.
             </div>
           ):(
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.4rem"}}>
-              {dateC.map(h=><button key={h} onClick={()=>setDateSrc(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${dateSrc===h?C.violet:C.border2}`,background:dateSrc===h?`${C.violet}18`:"transparent",color:dateSrc===h?C.violet:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{dateSrc===h?"✓ ":""}{h}</button>)}
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
+              {dateC.map(h=>(
+                <button key={h} onClick={()=>setDateSrc(h)}
+                  style={{padding:"0.28rem 0.6rem",border:`1px solid ${dateSrc===h?C.violet:C.border2}`,background:dateSrc===h?`${C.violet}18`:"transparent",color:dateSrc===h?C.violet:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s",display:"flex",alignItems:"center",gap:4}}>
+                  {dateSrc===h?"✓ ":""}{h}
+                  {numericDateC.includes(h)&&<span style={{fontSize:8,padding:"1px 4px",background:`${C.gold}22`,border:`1px solid ${C.gold}44`,color:C.gold,borderRadius:2,letterSpacing:"0.08em"}}>NUM</span>}
+                </button>
+              ))}
             </div>
           )}
-          <Lbl color={C.violet}>Parts to extract</Lbl>
-          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:"1.2rem"}}>
+
+          {/* Parse format selector — only shown for numeric YYYYMMDD columns */}
+          {dateSrc&&numericDateC.includes(dateSrc)&&(
+            <div style={{padding:"0.7rem 0.9rem",background:`${C.gold}08`,border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.2rem"}}>
+              <div style={{fontSize:10,color:C.gold,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:6}}>Numeric date format</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {[["YYYYMMDD","YYYYMMDD","e.g. 20200115"],["DDMMYYYY","DDMMYYYY","e.g. 15012020"],["MMDDYYYY","MMDDYYYY","e.g. 01152020"]].map(([k,l,ex])=>(
+                  <button key={k} onClick={()=>setDateParseMode(k)}
+                    style={{padding:"0.28rem 0.65rem",border:`1px solid ${dateParseMode===k?C.gold:C.border2}`,background:dateParseMode===k?`${C.gold}18`:"transparent",color:dateParseMode===k?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"}}>
+                    {dateParseMode===k?"✓ ":""}{l}
+                    <span style={{fontSize:8,color:C.textMuted,marginLeft:4}}>{ex}</span>
+                  </button>
+                ))}
+              </div>
+              <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:6}}>
+                A <span style={{color:C.teal}}>date_parse</span> step will be prepended automatically → <span style={{color:C.violet}}>{dateSrc}_iso</span>
+              </div>
+            </div>
+          )}
+
+          {/* Parts to extract */}
+          <Lbl color={C.violet}>Calendar features to extract</Lbl>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:"1.2rem"}}>
             {[
-              ["month","Month","Integer 1–12","month"],
-              ["dow","Day of Week","Integer 0 (Sun) – 6 (Sat)","dow"],
-              ["isweekend","Is Weekend","Binary 0/1","isweekend"],
+              ["year",    "Year",          "e.g. 2020",          "year"],
+              ["month",   "Month",         "Integer 1–12",       "month"],
+              ["day",     "Day of Month",  "Integer 1–31",       "day"],
+              ["week",    "ISO Week",      "Integer 1–53",       "week"],
+              ["quarter", "Quarter",       "Integer 1–4",        "quarter"],
+              ["dow",     "Day of Week",   "0=Sun … 6=Sat",      "dow"],
+              ["isweekend","Is Weekend",   "Binary 0/1",         "isweekend"],
             ].map(([key,label,hint,nameKey])=>(
-              <div key={key} style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:8,alignItems:"center",padding:"0.5rem 0.75rem",background:dateParts[key]?`${C.violet}08`:C.surface,border:`1px solid ${dateParts[key]?C.violet+"40":C.border}`,borderRadius:4}}>
+              <div key={key} style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:8,alignItems:"center",padding:"0.45rem 0.65rem",background:dateParts[key]?`${C.violet}08`:C.surface,border:`1px solid ${dateParts[key]?C.violet+"40":C.border}`,borderRadius:4}}>
                 <button onClick={()=>setDateParts(p=>({...p,[key]:!p[key]}))}
-                  style={{width:18,height:18,borderRadius:3,border:`1px solid ${dateParts[key]?C.violet:C.border2}`,background:dateParts[key]?C.violet:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.bg,fontSize:10,flexShrink:0}}>
+                  style={{width:16,height:16,borderRadius:2,border:`1px solid ${dateParts[key]?C.violet:C.border2}`,background:dateParts[key]?C.violet:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.bg,fontSize:9,flexShrink:0}}>
                   {dateParts[key]?"✓":""}
                 </button>
-                <div>
+                <div style={{minWidth:0}}>
                   <div style={{fontSize:11,color:dateParts[key]?C.text:C.textDim,fontFamily:mono}}>{label}</div>
-                  <div style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{hint}</div>
+                  {dateParts[key]&&dateSrc?(
+                    <input value={dateNames[nameKey]} onChange={e=>setDateNames(n=>({...n,[nameKey]:e.target.value}))}
+                      placeholder={`${dateSrc}_${nameKey}`}
+                      style={{marginTop:3,padding:"0.22rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:2,color:C.text,fontFamily:mono,fontSize:9,outline:"none",width:"100%",boxSizing:"border-box"}}/>
+                  ):(
+                    <div style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{hint}</div>
+                  )}
                 </div>
-                {dateParts[key]&&dateSrc&&(
-                  <input value={dateNames[nameKey]} onChange={e=>setDateNames(n=>({...n,[nameKey]:e.target.value}))}
-                    placeholder={`${dateSrc}_${nameKey}`}
-                    style={{padding:"0.3rem 0.5rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>
-                )}
               </div>
             ))}
           </div>
+
+          {/* Preview of what will be created */}
           {dateSrc&&canExtract&&(
-            <div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
-              Creates:{" "}
-              {Object.entries(dateParts).filter(([,on])=>on).map(([k])=>(
-                <span key={k} style={{color:C.violet,marginRight:8}}>{dateNames[k]?.trim()||`${dateSrc}_${k}`}</span>
-              ))}
-              from <span style={{color:C.gold}}>{dateSrc}</span>
+            <div style={{padding:"0.55rem 0.85rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.8}}>
+              {numericDateC.includes(dateSrc)&&<div style={{marginBottom:4}}>
+                <span style={{color:C.gold}}>→</span> Parse: <span style={{color:C.gold}}>{dateSrc}</span> <span style={{color:C.textMuted}}>({dateParseMode})</span> → <span style={{color:C.teal}}>{dateSrc}_iso</span>
+              </div>}
+              <div>
+                <span style={{color:C.gold}}>→</span> Extract:{" "}
+                {Object.entries(dateParts).filter(([,on])=>on).map(([k])=>(
+                  <span key={k} style={{color:C.violet,marginRight:8}}>{dateNames[k]?.trim()||(dateSrc+(numericDateC.includes(dateSrc)?"_iso":"")+`_${k}`)}</span>
+                ))}
+              </div>
             </div>
           )}
-          <Btn onClick={doDateExtract} color={C.violet} v="solid" dis={!canExtract} ch="Extract date features →"/>
+          <Btn onClick={doDateExtract} color={C.violet} v="solid" dis={!canExtract} ch="Add date steps →"/>
         </div>
       )}
 
@@ -1956,10 +2023,39 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
     datasets: Object.fromEntries((allDatasets||[]).map(d=>[d.id, d.rawData]))
   }), [allDatasets]);
 
-  const {rows, headers} = useMemo(()=>{
+  // ── Async pipeline execution ─────────────────────────────────────────────────
+  // Runs the pipeline deferred (setTimeout 0) so the browser can paint a
+  // "Computing…" indicator before blocking on heavy computation.
+  // A 250ms debounce prevents redundant re-runs while the user adds steps fast.
+  const [pipelineResult, setPipelineResult] = useState(()=>{
     const init = rawData.rows.map(r=>{const c={};rawData.headers.forEach(h=>{c[h]=r[h]??null;});return c;});
-    return runPipeline(init, rawData.headers, pipeline, context);
+    return runPipeline(init, rawData.headers, [], {});
+  });
+  const [pipelinePending, setPipelinePending] = useState(false);
+  const debounceRef = useRef(null);
+  const cancelRef = useRef(false);
+
+  useEffect(()=>{
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const LARGE = 20_000;
+    const delay = rawData.rows.length > LARGE ? 250 : 0;
+
+    debounceRef.current = setTimeout(()=>{
+      cancelRef.current = false;
+      if (rawData.rows.length > LARGE) setPipelinePending(true);
+      // Yield to browser paint, then compute
+      setTimeout(()=>{
+        if (cancelRef.current) return;
+        const init = rawData.rows.map(r=>{const c={};rawData.headers.forEach(h=>{c[h]=r[h]??null;});return c;});
+        const result = runPipeline(init, rawData.headers, pipeline, context);
+        if (!cancelRef.current) { setPipelineResult(result); setPipelinePending(false); }
+      }, 0);
+    }, delay);
+
+    return ()=>{ cancelRef.current = true; if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [rawData, pipeline, context]);
+
+  const {rows, headers} = pipelineResult;
 
   const info = useMemo(()=>buildInfo(headers, rows), [headers, rows]);
 
@@ -2012,9 +2108,12 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
             <div style={{fontSize:19,color:C.text,letterSpacing:"-0.02em",marginBottom:3}}>{filename}</div>
             <div style={{fontSize:11,color:C.textDim}}>
               <span style={{color:C.gold}}>{rawData.rows.length}</span> raw ·{" "}
-              <span style={{color:C.text}}>{rows.length}</span> current ·{" "}
-              <span style={{color:headers.length>rawData.headers.length?C.green:C.textMuted}}>{headers.length}</span> cols
-              {naCount>0&&<span style={{color:C.yellow}}> · {naCount} rows with NAs</span>}
+              {pipelinePending
+                ? <span style={{color:C.orange,display:"inline-flex",alignItems:"center",gap:4}}><Spin/> computing…</span>
+                : <><span style={{color:C.text}}>{rows.length}</span> current ·{" "}
+                  <span style={{color:headers.length>rawData.headers.length?C.green:C.textMuted}}>{headers.length}</span> cols</>
+              }
+              {!pipelinePending&&naCount>0&&<span style={{color:C.yellow}}> · {naCount} rows with NAs</span>}
             </div>
           </div>
           <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
