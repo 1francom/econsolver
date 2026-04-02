@@ -204,8 +204,8 @@ export function Grid({headers,rows,hi,max=20,types,onType}){
 }
 function History({pipeline,onRm,onClear}){
   if(!pipeline.length)return null;
-  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_parse:C.gold,date_extract:C.violet,join:C.teal,append:C.violet,mutate:C.green};
-  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_parse:"⟳",date_extract:"📅",join:"⊞",append:"⊕",mutate:"ƒ"};
+  const typeColor={recode:C.teal,quickclean:C.teal,winz:C.orange,log:C.blue,sq:C.blue,std:C.blue,drop:C.red,filter:C.yellow,ai_tr:C.purple,dummy:C.green,did:C.gold,lag:C.orange,lead:C.orange,diff:C.orange,ix:C.blue,date_parse:C.gold,date_extract:C.violet,join:C.teal,append:C.violet,mutate:C.green,pivot_longer:C.teal,group_summarize:C.orange,fill_na:C.yellow,fill_na_grouped:C.yellow,trim_outliers:C.red,flag_outliers:C.orange};
+  const typeIcon={recode:"⬡",quickclean:"⚡",winz:"~",log:"ln",sq:"x²",std:"z",drop:"✕",filter:"⊧",ai_tr:"✦",dummy:"D",did:"×",lag:"L",lead:"F",diff:"Δ",ix:"×",rename:"↩",date_parse:"⟳",date_extract:"📅",join:"⊞",append:"⊕",mutate:"ƒ",pivot_longer:"⟲",group_summarize:"⊞",fill_na:"□",fill_na_grouped:"◈",trim_outliers:"✂",flag_outliers:"⚑"};
   return(
     <div style={{width:230,flexShrink:0,borderLeft:`1px solid ${C.border}`,background:C.surface,overflowY:"auto",padding:"1rem"}}>
       <div style={{display:"flex",alignItems:"center",marginBottom:"0.8rem",gap:6}}>
@@ -1132,6 +1132,230 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
   );
 }
 
+
+// ─── FILL MISSING SECTION ─────────────────────────────────────────────────────
+// Collapsible panel in CleanTab for all fill strategies including grouped imputation.
+function FillNaSection({ headers, info, rows, onAdd }) {
+  const [open,     setOpen]    = useState(false);
+  const [col,      setCol]     = useState("");
+  const [strat,    setStrat]   = useState("zero");
+  const [constVal, setConstVal]= useState("0");
+  const [groupCols,setGroupCols]= useState([]); // ← now an array
+
+  const colInfo  = col ? info[col] : null;
+  const naCount  = col ? rows.filter(r => r[col] === null || r[col] === undefined).length : 0;
+  const numCols  = headers.filter(h => info[h]?.isNum);
+  const catCols  = headers.filter(h => !info[h]?.isNum && info[h]?.uCount > 0);
+  const needsGroup = strat === "group_mean" || strat === "group_median";
+
+  function toggleGroupCol(h) {
+    setGroupCols(prev => prev.includes(h) ? prev.filter(x => x !== h) : [...prev, h]);
+  }
+
+  const STRATS = [
+    ["zero",         "Fill with 0",          "constant",      "Numeric: replace null → 0"],
+    ["constant",     "Fill with value",       "constant",      "Any column: set a custom constant"],
+    ["mean",         "Global mean",           "mean",          "Numeric: replace null → column mean"],
+    ["median",       "Global median",         "median",        "Numeric: replace null → column median"],
+    ["mode",         "Mode",                  "mode",          "Any: replace null → most frequent value"],
+    ["group_mean",   "Group mean",            "fill_na_grouped","Numeric: replace null → mean within group(s)"],
+    ["group_median", "Group median",          "fill_na_grouped","Numeric: replace null → median within group(s)"],
+    ["forward_fill", "Forward fill (LOCF)",   "forward_fill",  "Panel: carry last observed value forward"],
+    ["backward_fill","Backward fill (NOCB)",  "backward_fill", "Panel: fill from next observed value"],
+  ];
+
+  function apply() {
+    if (!col) return;
+
+    if (strat === "zero") {
+      onAdd({ type:"fill_na", col, strategy:"constant", value:0,
+        desc:`fill_na '${col}' ← 0` });
+    } else if (strat === "constant") {
+      const v = isNaN(parseFloat(constVal)) ? constVal : parseFloat(constVal);
+      onAdd({ type:"fill_na", col, strategy:"constant", value:v,
+        desc:`fill_na '${col}' ← ${constVal}` });
+    } else if (needsGroup) {
+      if (!groupCols.length) return;
+      const s = strat === "group_mean" ? "mean" : "median";
+      const groupLabel = groupCols.join(", ");
+      onAdd({ type:"fill_na_grouped", col, groupCol:groupCols, strategy:s,
+        desc:`fill_na_grouped '${col}' ← group_${s}(${groupLabel})` });
+    } else {
+      onAdd({ type:"fill_na", col, strategy:strat,
+        desc:`fill_na '${col}' ← ${strat}` });
+    }
+    setCol(""); setStrat("zero"); setGroupCols([]);
+  }
+
+  const canApply = col && naCount > 0 &&
+    (!needsGroup || groupCols.length > 0) &&
+    (strat !== "constant" || constVal.trim() !== "");
+
+  return (
+    <div style={{ marginBottom:"1.2rem" }}>
+      {/* Collapsible header */}
+      <button onClick={() => setOpen(o => !o)} style={{
+        width:"100%", display:"flex", alignItems:"center", gap:8,
+        padding:"0.5rem 0.75rem",
+        background: open ? `${C.yellow}08` : C.surface2,
+        border:`1px solid ${open ? C.yellow+"40" : C.border}`,
+        borderRadius: open ? "4px 4px 0 0" : 4,
+        color: open ? C.yellow : C.textDim,
+        cursor:"pointer", fontFamily:mono, fontSize:10,
+        letterSpacing:"0.15em", textTransform:"uppercase", textAlign:"left",
+        transition:"all 0.12s",
+      }}>
+        <span>{open ? "▾" : "▸"}</span>
+        <span>Fill missing values</span>
+        {!open && headers.some(h => (info[h]?.naPct||0) > 0) && (
+          <span style={{ marginLeft:"auto", fontSize:9, color:C.yellow,
+            padding:"1px 6px", border:`1px solid ${C.yellow}40`,
+            borderRadius:2, fontFamily:mono }}>
+            {headers.filter(h=>(info[h]?.naPct||0)>0).length} cols with NAs
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{ padding:"0.9rem 1rem",
+          background:C.surface, border:`1px solid ${C.yellow}30`,
+          borderTop:"none", borderRadius:"0 0 4px 4px" }}>
+
+          {/* Column selector — show NA count per column */}
+          <Lbl color={C.yellow}>Column</Lbl>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:"1rem",
+            maxHeight:120, overflowY:"auto" }}>
+            {headers.map(h => {
+              const na = rows.filter(r => r[h] === null || r[h] === undefined).length;
+              if (na === 0) return null;
+              return (
+                <button key={h} onClick={() => setCol(h)} style={{
+                  padding:"0.25rem 0.6rem",
+                  border:`1px solid ${col===h ? C.yellow : C.border2}`,
+                  background: col===h ? `${C.yellow}18` : "transparent",
+                  color: col===h ? C.yellow : C.textDim,
+                  borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                  transition:"all 0.1s",
+                }}>
+                  {col===h?"✓ ":""}{h}
+                  <span style={{ fontSize:8, color:C.red, marginLeft:4 }}>
+                    {na} NA{na!==1?"s":""}
+                  </span>
+                </button>
+              );
+            })}
+            {headers.every(h => rows.filter(r=>r[h]===null||r[h]===undefined).length===0) && (
+              <div style={{ fontSize:11, color:C.green, fontFamily:mono, padding:"0.3rem 0" }}>
+                ✓ No missing values in current dataset.
+              </div>
+            )}
+          </div>
+
+          {col && (
+            <>
+              {/* Strategy selector */}
+              <Lbl color={C.yellow}>Strategy</Lbl>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4, marginBottom:"1rem" }}>
+                {STRATS.filter(([k]) => {
+                  // Filter strategies by column type
+                  const isNum = colInfo?.isNum;
+                  if (!isNum && ["mean","median","group_mean","group_median","forward_fill","backward_fill"].includes(k)) return false;
+                  return true;
+                }).map(([k, label, , hint]) => (
+                  <button key={k} onClick={() => setStrat(k)} style={{
+                    padding:"0.4rem 0.6rem", textAlign:"left",
+                    border:`1px solid ${strat===k ? C.yellow : C.border2}`,
+                    background: strat===k ? `${C.yellow}12` : "transparent",
+                    color: strat===k ? C.yellow : C.textDim,
+                    borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                    transition:"all 0.1s",
+                  }}>
+                    <div>{strat===k?"✓ ":""}{label}</div>
+                    <div style={{ fontSize:8, color:C.textMuted, marginTop:2 }}>{hint}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Constant value input */}
+              {strat === "constant" && (
+                <div style={{ marginBottom:"0.8rem" }}>
+                  <Lbl color={C.yellow}>Fill value</Lbl>
+                  <input value={constVal} onChange={e => setConstVal(e.target.value)}
+                    placeholder="e.g. 0, -999, unknown"
+                    style={{ width:"100%", boxSizing:"border-box",
+                      padding:"0.38rem 0.6rem", background:C.surface2,
+                      border:`1px solid ${C.border2}`, borderRadius:3,
+                      color:C.text, fontFamily:mono, fontSize:11, outline:"none" }}/>
+                </div>
+              )}
+
+              {/* Group column for grouped imputation */}
+              {needsGroup && (
+                <div style={{ marginBottom:"0.8rem" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
+                    <Lbl mb={0} color={C.yellow}>Group by</Lbl>
+                    <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>
+                      select one or more columns
+                    </span>
+                    {groupCols.length > 0 && (
+                      <button onClick={() => setGroupCols([])}
+                        style={{ marginLeft:"auto", fontSize:9, background:"transparent",
+                          border:"none", color:C.textMuted, cursor:"pointer", fontFamily:mono }}>
+                        clear
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                    {catCols.filter(h => h !== col).map(h => {
+                      const sel = groupCols.includes(h);
+                      return (
+                        <button key={h} onClick={() => toggleGroupCol(h)} style={{
+                          padding:"0.25rem 0.6rem",
+                          border:`1px solid ${sel ? C.teal : C.border2}`,
+                          background: sel ? `${C.teal}18` : "transparent",
+                          color: sel ? C.teal : C.textDim,
+                          borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                          transition:"all 0.1s",
+                        }}>
+                          {sel ? "✓ " : ""}{h}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {groupCols.length > 1 && (
+                    <div style={{ marginTop:5, fontSize:9, color:C.textMuted, fontFamily:mono }}>
+                      Composite key: {groupCols.join(" × ")}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Preview */}
+              <div style={{ padding:"0.45rem 0.75rem", background:C.surface2,
+                border:`1px solid ${C.border}`, borderRadius:3,
+                marginBottom:"0.8rem", fontSize:11, fontFamily:mono, color:C.textDim }}>
+                Fill <span style={{color:C.red}}>{naCount} null{naCount!==1?"s":""}</span> in{" "}
+                <span style={{color:C.yellow}}>{col}</span>
+                {strat==="zero"&&<> ← <span style={{color:C.text}}>0</span></>}
+                {strat==="constant"&&<> ← <span style={{color:C.text}}>{constVal||"?"}</span></>}
+                {strat==="mean"&&<> ← <span style={{color:C.blue}}>μ = {colInfo?.mean?.toFixed(4)}</span></>}
+                {strat==="median"&&<> ← <span style={{color:C.blue}}>median = {colInfo?.median?.toFixed(4)}</span></>}
+                {strat==="mode"&&<> ← <span style={{color:C.blue}}>mode</span></>}
+                {needsGroup&&groupCols.length>0&&<> ← <span style={{color:C.teal}}>group_{strat==="group_mean"?"mean":"median"}({groupCols.join(", ")})</span></>}
+                {strat==="forward_fill"&&<> ← <span style={{color:C.blue}}>LOCF</span></>}
+                {strat==="backward_fill"&&<> ← <span style={{color:C.blue}}>NOCB</span></>}
+              </div>
+
+              <Btn onClick={apply} color={C.yellow} v="solid"
+                dis={!canApply} ch="Fill missing values →"/>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
 function CleanTab({rows,headers,info,rawData,onAdd}){
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
@@ -1288,6 +1512,9 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
           {act==="drop"&&<div><div style={{fontSize:12,color:C.red,marginBottom:"0.8rem",fontFamily:mono}}>Drop column '{sel}'?</div><div style={{display:"flex",gap:8}}><Btn onClick={doDrop} color={C.red} v="solid" ch="Confirm Drop"/><Btn onClick={()=>setAct(null)} ch="Cancel"/></div></div>}
         </div>
       )}
+      {/* ── Fill Missing Values ── */}
+      <FillNaSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
+
       <Lbl>Preview — pipeline output</Lbl>
       <Grid headers={headers} rows={rows} hi={sel} max={8}/>
     </div>
@@ -1582,6 +1809,513 @@ function MutateSubTab({rows, headers, info, onAdd}){
   );
 }
 
+
+// ─── RESHAPE TAB ──────────────────────────────────────────────────────────────
+// pivot_longer (wide→long) + group_summarize (collapse rows).
+// Both are structurally destructive — they change the shape of the dataset,
+// not just add columns. Kept separate from Feature Engineering deliberately.
+function ReshapeTab({ rows, headers, info, onAdd }) {
+  const [sub, setSub] = useState("pivot");
+
+  // ── pivot_longer state ────────────────────────────────────────────────────
+  const [pivCols,  setPivCols]  = useState([]);   // columns to pivot
+  const [namesTo,  setNamesTo]  = useState("variable");
+  const [valuesTo, setValuesTo] = useState("value");
+  // idCols = all non-pivot cols (auto)
+
+  // ── group_summarize state ─────────────────────────────────────────────────
+  const [byCols,   setByCols]   = useState([]);
+  const [aggs,     setAggs]     = useState([]);   // [{col, fn, nn}]
+  const [sumResult,setSumResult]= useState(null); // {rows, headers} after collapse
+  // Tooltip state for unique-value hover on group-by chips
+  const [hoveredCol, setHoveredCol] = useState(null);
+
+  const catC = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && info[h]?.uCount > 0));
+  const numC = headers.filter(h => info[h]?.isNum);
+
+  // ── pivot helpers ─────────────────────────────────────────────────────────
+  const idCols      = headers.filter(h => !pivCols.includes(h));
+  const pivPreview  = pivCols.length > 0
+    ? `${rows.length} rows × ${headers.length} cols  →  ${rows.length * pivCols.length} rows × ${idCols.length + 2} cols`
+    : null;
+
+  function togglePivCol(h) {
+    setPivCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
+  }
+
+  function doPivot() {
+    if (!pivCols.length || !namesTo.trim() || !valuesTo.trim()) return;
+    onAdd({
+      type: "pivot_longer",
+      cols: pivCols, namesTo: namesTo.trim(), valuesTo: valuesTo.trim(), idCols,
+      desc: `Pivot longer: [${pivCols.slice(0,3).join(", ")}${pivCols.length > 3 ? "…" : ""}] → ${namesTo}/${valuesTo}`,
+    });
+    setPivCols([]); setNamesTo("variable"); setValuesTo("value");
+  }
+
+  // ── group_summarize helpers ───────────────────────────────────────────────
+  function addAgg() {
+    setAggs(a => [...a, { col: numC[0] || "", fn: "mean", nn: "" }]);
+  }
+  function updAgg(i, patch) {
+    setAggs(a => a.map((x, j) => j !== i ? x : { ...x, ...patch,
+      nn: patch.col || patch.fn
+        ? `${(patch.fn || x.fn)}_${(patch.col || x.col)}`
+        : x.nn
+    }));
+  }
+  function rmAgg(i) { setAggs(a => a.filter((_, j) => j !== i)); }
+
+  function doSummarize() {
+    if (!byCols.length || !aggs.length) return;
+    const validAggs = aggs.filter(a => a.col && a.fn && a.nn.trim());
+    if (!validAggs.length) return;
+    const step = {
+      type: "group_summarize",
+      by: byCols,
+      aggs: validAggs.map(a => ({ ...a, nn: a.nn.trim() })),
+      desc: `group_by [${byCols.join(", ")}] → summarize (${validAggs.map(a => `${a.fn}(${a.col})`).join(", ")})`,
+    };
+    onAdd(step);
+    // Compute result locally so we can show it inline + enable export
+    // without waiting for the pipeline to re-run
+    const { applyStep } = { applyStep: window.__econApplyStep };
+    // Fallback: derive result from current rows directly
+    const byKey = r => step.by.map(b => String(r[b] ?? "")).join("||");
+    const groups = new Map();
+    rows.forEach(r => {
+      const k = byKey(r);
+      if (!groups.has(k)) groups.set(k, { _first: r, _rows: [] });
+      groups.get(k)._rows.push(r);
+    });
+    const outRows = [];
+    const outHeaders = [...step.by, ...step.aggs.map(a => a.nn)];
+    for (const { _first, _rows } of groups.values()) {
+      const out = {};
+      step.by.forEach(b => { out[b] = _first[b]; });
+      step.aggs.forEach(({ col, fn, nn }) => {
+        const vals = _rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v));
+        if (fn === "count") { out[nn] = _rows.length; return; }
+        if (!vals.length)  { out[nn] = null; return; }
+        if (fn === "sum")    { out[nn] = vals.reduce((a,b)=>a+b,0); return; }
+        if (fn === "min")    { out[nn] = Math.min(...vals); return; }
+        if (fn === "max")    { out[nn] = Math.max(...vals); return; }
+        const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+        if (fn === "mean")   { out[nn] = mean; return; }
+        if (fn === "sd")     { out[nn] = vals.length>1?Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/(vals.length-1)):0; return; }
+        if (fn === "median") { const s=[...vals].sort((a,b)=>a-b),m=Math.floor(s.length/2); out[nn]=s.length%2===0?(s[m-1]+s[m])/2:s[m]; return; }
+        out[nn] = null;
+      });
+      outRows.push(out);
+    }
+    setSumResult({ rows: outRows, headers: outHeaders, by: step.by, aggs: step.aggs });
+    setByCols([]); setAggs([]);
+  }
+
+  const canSummarize = byCols.length > 0 && aggs.some(a => a.col && a.fn && a.nn.trim());
+  const FN_OPTS = [
+    ["mean","Mean (μ)"],["median","Median"],["sum","Sum (Σ)"],
+    ["count","Count (n)"],["min","Min"],["max","Max"],["sd","Std dev (σ)"],
+  ];
+
+  const inS = { padding:"0.38rem 0.6rem", background:C.surface2,
+    border:`1px solid ${C.border2}`, borderRadius:3, color:C.text,
+    fontFamily:mono, fontSize:11, outline:"none" };
+
+  return (
+    <div>
+      <Tabs tabs={[["pivot","⟲ Pivot longer"],["summarize","⊞ Group & summarize"]]}
+        active={sub} set={setSub} accent={C.teal} sm/>
+
+      {/* ══════════════ PIVOT LONGER ══════════════════════════════════════ */}
+      {sub === "pivot" && (
+        <div>
+          <div style={{padding:"0.65rem 1rem",background:C.surface,
+            border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,
+            borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+            Converts <span style={{color:C.gold}}>wide format</span> (one column per period/variable)
+            to <span style={{color:C.teal}}>long format</span> (one row per observation).
+            Equivalent to <code style={{color:C.green}}>tidyr::pivot_longer()</code>.
+          </div>
+
+          {/* Column selector */}
+          <Lbl color={C.teal}>Columns to pivot <span style={{color:C.textMuted}}>(the value columns)</span></Lbl>
+          <div style={{marginBottom:"0.5rem",display:"flex",gap:6,flexWrap:"wrap"}}>
+            <button onClick={()=>setPivCols(numC)}
+              style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
+                background:"transparent",color:C.textDim,borderRadius:2,cursor:"pointer",
+                fontSize:9,fontFamily:mono}}>select all numeric</button>
+            <button onClick={()=>setPivCols([])}
+              style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
+                background:"transparent",color:C.textDim,borderRadius:2,cursor:"pointer",
+                fontSize:9,fontFamily:mono}}>clear</button>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem",
+            maxHeight:160,overflowY:"auto",padding:"0.5rem",
+            background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
+            {headers.map(h => {
+              const sel = pivCols.includes(h);
+              return (
+                <button key={h} onClick={() => togglePivCol(h)} style={{
+                  padding:"0.25rem 0.6rem",
+                  border:`1px solid ${sel ? C.teal : C.border2}`,
+                  background: sel ? `${C.teal}18` : "transparent",
+                  color: sel ? C.teal : info[h]?.isNum ? C.blue : C.textDim,
+                  borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+                  transition:"all 0.1s",
+                }}>
+                  {sel ? "✓ " : ""}{h}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ID columns preview */}
+          {pivCols.length > 0 && (
+            <div style={{padding:"0.5rem 0.75rem",background:C.surface,
+              border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1.2rem",
+              fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.7}}>
+              <span style={{color:C.textDim}}>ID cols kept as-is: </span>
+              {idCols.slice(0,6).map(h => (
+                <span key={h} style={{color:C.gold,marginRight:6}}>{h}</span>
+              ))}
+              {idCols.length > 6 && <span>+{idCols.length - 6} more</span>}
+            </div>
+          )}
+
+          {/* Output column names */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.8rem",marginBottom:"1.2rem"}}>
+            {[
+              ["Key column name", namesTo, setNamesTo, C.violet, "e.g. year, variable, period"],
+              ["Value column name", valuesTo, setValuesTo, C.teal, "e.g. value, gdp, rate"],
+            ].map(([label, val, setter, color, ph]) => (
+              <div key={label}>
+                <Lbl color={color}>{label}</Lbl>
+                <input value={val} onChange={e => setter(e.target.value)}
+                  placeholder={ph}
+                  style={{...inS, width:"100%", boxSizing:"border-box",
+                    border:`1px solid ${C.border2}`}}/>
+              </div>
+            ))}
+          </div>
+
+          {/* Shape preview */}
+          {pivPreview && (
+            <div style={{padding:"0.55rem 0.85rem",background:`${C.teal}08`,
+              border:`1px solid ${C.teal}30`,borderRadius:3,marginBottom:"1rem",
+              fontSize:11,fontFamily:mono,color:C.textDim}}>
+              <span style={{color:C.gold}}>→</span> {pivPreview}
+              <div style={{fontSize:9,color:C.textMuted,marginTop:3}}>
+                Key col: <span style={{color:C.violet}}>{namesTo||"?"}</span>
+                {" · "}Value col: <span style={{color:C.teal}}>{valuesTo||"?"}</span>
+              </div>
+            </div>
+          )}
+
+          <Btn onClick={doPivot} color={C.teal} v="solid"
+            dis={!pivCols.length || !namesTo.trim() || !valuesTo.trim()}
+            ch="Pivot longer →"/>
+        </div>
+      )}
+
+      {/* ══════════════ GROUP & SUMMARIZE ═════════════════════════════════ */}
+      {sub === "summarize" && (
+        <div>
+          <div style={{padding:"0.65rem 1rem",background:C.surface,
+            border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,
+            borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+            Collapses rows to one per group. Equivalent to{" "}
+            <code style={{color:C.green}}>dplyr::group_by() |&gt; summarise()</code>.{" "}
+            <span style={{color:C.red}}>Destructive</span> — original rows are replaced.
+          </div>
+
+          {/* Group by — with unique-value tooltip on hover */}
+          <Lbl color={C.orange}>Group by <span style={{color:C.textMuted}}>(categorical columns)</span></Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"0.5rem"}}>
+            {headers.map(h => {
+              const isCat = !info[h]?.isNum;
+              const sel   = byCols.includes(h);
+              const uVals = info[h]?.uVals?.map(v => String(v)) || [];
+              const isHov = hoveredCol === h;
+              return (
+                <div key={h} style={{position:"relative"}}>
+                  <button
+                    onClick={() => isCat && setByCols(p =>
+                      p.includes(h) ? p.filter(x => x !== h) : [...p, h]
+                    )}
+                    onMouseEnter={() => isCat && setHoveredCol(h)}
+                    onMouseLeave={() => setHoveredCol(null)}
+                    style={{
+                      padding:"0.28rem 0.6rem",
+                      border:`1px solid ${sel ? C.orange : isCat ? C.border2 : C.border}`,
+                      background: sel ? `${C.orange}18` : "transparent",
+                      color: sel ? C.orange : isCat ? C.textDim : C.textMuted,
+                      borderRadius:3, cursor: isCat ? "pointer" : "default",
+                      fontSize:10, fontFamily:mono, opacity: isCat ? 1 : 0.4,
+                      transition:"all 0.1s",
+                    }}>
+                    {sel ? "✓ " : ""}{h}
+                    {isCat && <span style={{fontSize:8,color:C.textMuted,marginLeft:3}}>({info[h]?.uCount})</span>}
+                    {!isCat && <span style={{fontSize:8,marginLeft:3,color:C.textMuted}}>num</span>}
+                  </button>
+                  {/* Unique values tooltip */}
+                  {isHov && uVals.length > 0 && (
+                    <div style={{
+                      position:"absolute", top:"calc(100% + 4px)", left:0,
+                      background:C.surface2, border:`1px solid ${C.border2}`,
+                      borderRadius:4, padding:"0.5rem 0.65rem",
+                      zIndex:50, minWidth:120, maxWidth:220,
+                      boxShadow:"0 6px 20px #000a",
+                      fontSize:10, fontFamily:mono, color:C.textDim,
+                      pointerEvents:"none",
+                    }}>
+                      <div style={{fontSize:9,color:C.orange,letterSpacing:"0.12em",
+                        textTransform:"uppercase",marginBottom:4}}>
+                        {info[h]?.uCount} unique values
+                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                        {uVals.slice(0,12).map(v => (
+                          <span key={v} style={{
+                            padding:"1px 5px",border:`1px solid ${C.border2}`,
+                            borderRadius:2,color:C.text,background:C.surface3,
+                            fontSize:10,
+                          }}>{v}</span>
+                        ))}
+                        {uVals.length > 12 && (
+                          <span style={{color:C.textMuted,fontSize:9}}>+{uVals.length-12} more</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginBottom:"1.2rem"}}>
+            Hover a column to preview its unique values
+          </div>
+
+          {/* Aggregations */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.6rem"}}>
+            <Lbl mb={0} color={C.blue}>Aggregations</Lbl>
+            <button onClick={addAgg} style={{
+              padding:"0.2rem 0.55rem",border:`1px solid ${C.blue}`,
+              background:`${C.blue}10`,color:C.blue,borderRadius:2,
+              cursor:"pointer",fontSize:9,fontFamily:mono,
+            }}>+ add</button>
+          </div>
+
+          {aggs.length === 0 && (
+            <div style={{padding:"0.65rem 1rem",background:C.surface,
+              border:`1px dashed ${C.border2}`,borderRadius:4,
+              fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"1.2rem"}}>
+              Add at least one aggregation function.
+            </div>
+          )}
+
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:"1.2rem"}}>
+            {aggs.map((agg, i) => (
+              <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 140px 1fr auto",
+                gap:6,alignItems:"center",padding:"0.5rem 0.65rem",
+                background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
+                <select value={agg.col}
+                  onChange={e => updAgg(i, { col: e.target.value })}
+                  style={{...inS, width:"100%"}}>
+                  <option value="">— column —</option>
+                  {numC.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <select value={agg.fn}
+                  onChange={e => updAgg(i, { fn: e.target.value })}
+                  style={{...inS}}>
+                  {FN_OPTS.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                <input value={agg.nn}
+                  onChange={e => setAggs(a => a.map((x,j) => j!==i ? x : {...x, nn:e.target.value}))}
+                  placeholder={`${agg.fn}_${agg.col||"col"}`}
+                  style={{...inS, width:"100%", boxSizing:"border-box"}}/>
+                <button onClick={() => rmAgg(i)} style={{
+                  background:"transparent",border:`1px solid ${C.border2}`,
+                  borderRadius:2,color:C.textMuted,cursor:"pointer",
+                  fontSize:11,padding:"0.2rem 0.4rem",
+                }}>✕</button>
+              </div>
+            ))}
+          </div>
+
+          {/* dplyr preview */}
+          {canSummarize && (
+            <div style={{padding:"0.55rem 0.85rem",background:`${C.orange}08`,
+              border:`1px solid ${C.orange}30`,borderRadius:3,marginBottom:"1rem",
+              fontSize:11,fontFamily:mono,color:C.textDim,lineHeight:1.8}}>
+              <span style={{color:C.gold}}>→</span>{" "}
+              group_by [<span style={{color:C.orange}}>{byCols.join(", ")}</span>]{" "}
+              |&gt; summarise(<br/>
+              {aggs.filter(a=>a.col&&a.fn&&a.nn.trim()).map((a,i) => (
+                <span key={i}>
+                  {"  "}<span style={{color:C.teal}}>{a.nn}</span>{" = "}
+                  <span style={{color:C.blue}}>{a.fn}</span>({a.col})
+                  {i < aggs.length-1 ? "," : ""}<br/>
+                </span>
+              ))}
+              )
+            </div>
+          )}
+
+          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:"1.5rem"}}>
+            <Btn onClick={doSummarize} color={C.orange} v="solid"
+              dis={!canSummarize} ch="Collapse rows →"/>
+            {sumResult && (
+              <button onClick={() => setSumResult(null)}
+                style={{background:"transparent",border:"none",
+                  color:C.textMuted,cursor:"pointer",fontSize:10,fontFamily:mono}}>
+                clear result
+              </button>
+            )}
+          </div>
+
+          {/* ── Inline result panel ─────────────────────────────────────── */}
+          {sumResult && (
+            <div style={{border:`1px solid ${C.orange}40`,borderRadius:4,overflow:"hidden"}}>
+              {/* Result header */}
+              <div style={{padding:"0.55rem 0.9rem",background:`${C.orange}0a`,
+                borderBottom:`1px solid ${C.orange}30`,
+                display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:10,color:C.orange,letterSpacing:"0.15em",
+                  textTransform:"uppercase",fontFamily:mono,flex:1}}>
+                  ⊞ Result — {sumResult.rows.length} group{sumResult.rows.length!==1?"s":""}
+                  <span style={{color:C.textMuted,marginLeft:8,fontSize:9}}>
+                    × {sumResult.headers.length} cols
+                  </span>
+                </span>
+                {/* Export buttons */}
+                <button onClick={()=>{
+                  // LaTeX tabular
+                  const cols = sumResult.headers;
+                  const numericCols = new Set(sumResult.aggs.map(a=>a.nn));
+                  const fmt = v => {
+                    if (v === null || v === undefined) return "";
+                    if (typeof v === "number") return v.toFixed(3).replace(/\.?0+$/,"");
+                    return String(v);
+                  };
+                  const colSpec = cols.map(h => numericCols.has(h) ? "r" : "l").join(" ");
+                  const header  = cols.join(" & ") + " \\\\";
+                  const rule    = "\\hline";
+                  const body    = sumResult.rows.map(r =>
+                    cols.map(h => fmt(r[h])).join(" & ") + " \\\\"
+                  ).join("\n");
+                  const latex = [
+                    "\\begin{table}[htbp]",
+                    "  \\centering",
+                    `  \\caption{Summary statistics by ${sumResult.by.join(", ")}}`,
+                    "  \\label{tab:summary}",
+                    `  \\begin{tabular}{${colSpec}}`,
+                    "    \\hline",
+                    `    ${header}`,
+                    "    \\hline",
+                    `    ${body}`,
+                    "    \\hline",
+                    "  \\end{tabular}",
+                    "\\end{table}",
+                  ].join("\n");
+                  const blob = new Blob([latex],{type:"text/plain"});
+                  const a = document.createElement("a");
+                  a.href = URL.createObjectURL(blob);
+                  a.download = `summary_${sumResult.by.join("_")}.tex`;
+                  a.click(); URL.revokeObjectURL(a.href);
+                }} style={{
+                  padding:"0.22rem 0.6rem",background:"transparent",
+                  border:`1px solid ${C.border2}`,borderRadius:2,
+                  color:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono,
+                  transition:"all 0.1s",
+                }}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=C.gold;e.currentTarget.style.color=C.gold;}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+                >↓ LaTeX</button>
+
+                <button onClick={()=>{
+                  const esc = v => {
+                    if(v===null||v===undefined) return "";
+                    const s=String(v);
+                    return s.includes(",")||s.includes('"')||s.includes("\n")?`"${s.replace(/"/g,'""')}"`  :s;
+                  };
+                  const lines = [
+                    sumResult.headers.map(esc).join(","),
+                    ...sumResult.rows.map(r=>sumResult.headers.map(h=>esc(r[h])).join(",")),
+                  ];
+                  const blob = new Blob([lines.join("\r\n")],{type:"text/csv"});
+                  const a = document.createElement("a");
+                  a.href = URL.createObjectURL(blob);
+                  a.download = `summary_${sumResult.by.join("_")}.csv`;
+                  a.click(); URL.revokeObjectURL(a.href);
+                }} style={{
+                  padding:"0.22rem 0.6rem",background:"transparent",
+                  border:`1px solid ${C.border2}`,borderRadius:2,
+                  color:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono,
+                  transition:"all 0.1s",
+                }}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;e.currentTarget.style.color=C.teal;}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+                >↓ CSV</button>
+              </div>
+
+              {/* Result table */}
+              <div style={{overflowX:"auto",maxHeight:340,overflowY:"auto"}}>
+                <table style={{borderCollapse:"collapse",fontSize:11,
+                  width:"100%",fontFamily:mono}}>
+                  <thead>
+                    <tr style={{background:C.surface2,position:"sticky",top:0}}>
+                      {sumResult.headers.map(h => {
+                        const isBy  = sumResult.by.includes(h);
+                        const isAgg = sumResult.aggs.some(a=>a.nn===h);
+                        return (
+                          <th key={h} style={{
+                            padding:"0.4rem 0.75rem",textAlign:"left",
+                            fontWeight:400,fontSize:10,
+                            color: isBy ? C.orange : C.blue,
+                            whiteSpace:"nowrap",
+                            borderBottom:`1px solid ${C.border}`,
+                          }}>
+                            {h}
+                            <span style={{fontSize:8,color:C.textMuted,marginLeft:4}}>
+                              {isBy ? "group" : sumResult.aggs.find(a=>a.nn===h)?.fn}
+                            </span>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sumResult.rows.map((row, i) => (
+                      <tr key={i} style={{background:i%2?C.surface2:C.surface}}>
+                        {sumResult.headers.map(h => {
+                          const v = row[h];
+                          const isNull = v===null||v===undefined;
+                          const isNum  = typeof v==="number";
+                          return (
+                            <td key={h} style={{
+                              padding:"0.32rem 0.75rem",
+                              color: isNull ? C.textMuted : isNum ? C.blue : C.text,
+                              borderBottom:`1px solid ${C.border}`,
+                              whiteSpace:"nowrap",
+                              textAlign: isNum ? "right" : "left",
+                            }}>
+                              {isNull ? "·" : isNum ? v.toFixed(3).replace(/\.?0+$/,"") : String(v)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
   const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
@@ -1590,6 +2324,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
   const [dc,setDc]=useState(""),[dp,setDp]=useState("");
   const [dtc,setDtc]=useState(""),[dpc,setDpc]=useState("");
   const [winzMode,setWinzMode]=useState("inplace");
+  const [dummyRef,setDummyRef]=useState("");
   // Date extraction state
   const [dateSrc,setDateSrc]=useState("");
   const [dateParts,setDateParts]=useState({year:false,month:true,day:false,week:false,quarter:false,dow:false,isweekend:false});
@@ -1706,7 +2441,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
 
   return(
     <div>
-      <Tabs tabs={[["quick","⚡ Transforms"],["mutate","ƒ Mutate"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["did","DiD"]]} active={vt} set={setVt} accent={C.teal} sm/>
+      <Tabs tabs={[["quick","⚡ Transforms"],["mutate","ƒ Mutate"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"]]} active={vt} set={setVt} accent={C.teal} sm/>
 
       {/* ── Variable name input (shared by quick/panel/did) ── */}
       {(vt==="quick"||vt==="panel"||vt==="did")&&(
@@ -1750,20 +2485,50 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
               </button>
             ))}
           </div>
+
+          {/* Source column — always first */}
           <Lbl color={C.teal}>{qt==="ix"?"X₁":"Source column"}</Lbl>
           <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>
             {numC.map(h=><button key={h} onClick={()=>setQc(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${qc===h?C.teal:C.border2}`,background:qc===h?`${C.teal}18`:"transparent",color:qc===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{qc===h?"✓ ":""}{h}</button>)}
           </div>
           {qt==="ix"&&<><Lbl color={C.teal}>X₂</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>{numC.filter(h=>h!==qc).map(h=><button key={h} onClick={()=>setXc2(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${xc2===h?C.teal:C.border2}`,background:xc2===h?`${C.teal}18`:"transparent",color:xc2===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{xc2===h?"✓ ":""}{h}</button>)}</div></>}
+
+          {/* Winsorize options — shown right after column is selected */}
+          {qt==="winz"&&qc&&(()=>{
+            const wVals=rows.map(r=>r[qc]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
+            const wLo=wVals[Math.floor(wVals.length*.01)]??wVals[0];
+            const wHi=wVals[Math.floor(wVals.length*.99)]??wVals[wVals.length-1];
+            const nClipped=wVals.filter(v=>v<wLo||v>wHi).length;
+            return (
+              <div style={{padding:"0.7rem 0.9rem",background:`${C.orange}08`,border:`1px solid ${C.orange}30`,borderLeft:`3px solid ${C.orange}`,borderRadius:4,marginBottom:"1rem"}}>
+                <div style={{display:"flex",gap:4,marginBottom:8}}>
+                  {[["inplace","Overwrite column"],["newcol","New column"]].map(([m,l])=>(
+                    <button key={m} onClick={()=>setWinzMode(m)} style={{padding:"0.25rem 0.7rem",border:`1px solid ${winzMode===m?C.orange:C.border2}`,background:winzMode===m?`${C.orange}18`:"transparent",color:winzMode===m?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"}}>{winzMode===m?"✓ ":""}{l}</button>
+                  ))}
+                </div>
+                {winzMode==="newcol"&&(
+                  <input value={nm} onChange={e=>{setNm(e.target.value);prevAutoRef.current="";}}
+                    placeholder={`winsor_${qc}`}
+                    style={{width:"100%",boxSizing:"border-box",padding:"0.38rem 0.6rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none",marginBottom:8}}/>
+                )}
+                <div style={{fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.8}}>
+                  <div>Clip <span style={{color:C.gold}}>{qc}</span> to [p1={wLo!=null?wLo.toFixed(4):"?"}, p99={wHi!=null?wHi.toFixed(4):"?"}]</div>
+                  <div style={{color:C.textMuted}}>
+                    {nClipped} value{nClipped!==1?"s":""} will be clamped
+                    {" · "}range [{wVals[0]?.toFixed(3)}, {wVals[wVals.length-1]?.toFixed(3)}]
+                    {" → "}[{wLo?.toFixed(3)}, {wHi?.toFixed(3)}]
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Formula preview for non-winz transforms */}
           {qc&&qt!=="winz"&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
             {qt==="log"&&<><span style={{color:C.teal}}>{nm||"?"}</span> = ln(<span style={{color:C.gold}}>{qc}</span>)</>}
             {qt==="sq"&&<><span style={{color:C.teal}}>{nm||"?"}</span> = <span style={{color:C.gold}}>{qc}</span>²</>}
             {qt==="std"&&<><span style={{color:C.teal}}>{nm||"?"}</span> = (<span style={{color:C.gold}}>{qc}</span>−μ)/σ</>}
             {qt==="ix"&&xc2&&<><span style={{color:C.teal}}>{nm||"?"}</span> = <span style={{color:C.gold}}>{qc}</span>×<span style={{color:C.gold}}>{xc2}</span></>}
-          </div>}
-          {qc&&qt==="winz"&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
-            Clamp <span style={{color:C.gold}}>{qc}</span> at [p1, p99] → <span style={{color:C.orange}}>{winzMode==="inplace"?qc:(nm.trim()||`winsor_${qc}`)}</span>
-            {info[qc]?.min!=null&&<span style={{color:C.textMuted}}> · current range [{info[qc].min.toFixed(2)}, {info[qc].max.toFixed(2)}]</span>}
           </div>}
           <Btn onClick={doQ} color={C.teal} v="solid" dis={!canAddQuick} ch={qt==="winz"?`Winsorize ${winzMode==="inplace"?"in-place":"→ new col"}`:"Add variable"}/>
         </div>
@@ -1908,38 +2673,81 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
       )}
 
       {/* ── Dummies ── */}
-      {vt==="dummy"&&(
+      {vt==="dummy"&&(()=>{
+        const dummyCols=headers.filter(h=>info[h]?.isCat||(!info[h]?.isNum&&info[h]?.uCount>0&&info[h]?.uCount<=30));
+        const uVals=dc?(info[dc]?.uVals||[]).map(v=>String(v)):[];
+        // per-category counts for preview
+        const catCounts={};
+        if(dc) rows.forEach(r=>{const v=r[dc];if(v!=null){const s=String(v);catCounts[s]=(catCounts[s]||0)+1;}});
+        return(
         <div>
-          <Lbl>Categorical → dummy set</Lbl>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>{headers.filter(h=>info[h]?.isCat||info[h]?.uCount<=10).map(h=><button key={h} onClick={()=>{setDc(h);setDp(h);}} style={{padding:"0.28rem 0.6rem",border:`1px solid ${dc===h?C.green:C.border2}`,background:dc===h?`${C.green}18`:"transparent",color:dc===h?C.green:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{dc===h?"✓ ":""}{h}</button>)}</div>
-          {dc&&<><Lbl>Prefix</Lbl><div style={{display:"flex",gap:8,marginBottom:"0.8rem"}}><input value={dp} onChange={e=>setDp(e.target.value)} placeholder={dc} style={{flex:1,padding:"0.45rem 0.65rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/></div>
-          <div style={{fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"1rem"}}>Creates: {(info[dc]?.uVals||[]).slice(0,4).map(v=>`${dp||dc}_${v}`).join(", ")}{info[dc]?.uCount>4?"…":""}</div>
-          <Btn onClick={doDummy} color={C.green} v="solid" ch="Create dummies"/></>}
+          <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.green}`,borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+            One-hot encode a categorical column. Choose a <span style={{color:C.red}}>reference category</span> to omit (prevents perfect multicollinearity in OLS).
+          </div>
+
+          <Lbl color={C.green}>Source column</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
+            {dummyCols.map(h=>(
+              <button key={h} onClick={()=>{setDc(h);setDp(h);setDummyRef("");}}
+                style={{padding:"0.28rem 0.6rem",border:`1px solid ${dc===h?C.green:C.border2}`,background:dc===h?`${C.green}18`:"transparent",color:dc===h?C.green:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>
+                {dc===h?"✓ ":""}{h}
+                <span style={{fontSize:9,color:C.textMuted,marginLeft:4}}>({info[h]?.uCount})</span>
+              </button>
+            ))}
+          </div>
+
+          {dc&&(
+            <>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.8rem",marginBottom:"1rem"}}>
+                <div>
+                  <Lbl color={C.green}>Column prefix</Lbl>
+                  <input value={dp} onChange={e=>setDp(e.target.value)} placeholder={dc}
+                    style={{width:"100%",boxSizing:"border-box",padding:"0.38rem 0.6rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+                </div>
+                <div>
+                  <Lbl color={C.red}>Reference category <span style={{color:C.textMuted}}>(omit)</span></Lbl>
+                  <select value={dummyRef} onChange={e=>setDummyRef(e.target.value)}
+                    style={{width:"100%",padding:"0.38rem 0.6rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none",cursor:"pointer"}}>
+                    <option value="">— none (keep all) —</option>
+                    {uVals.map(v=><option key={v} value={v}>{v} ({catCounts[v]||0})</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Category preview with counts */}
+              <Lbl color={C.textMuted}>Categories that will be created</Lbl>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>
+                {uVals.map(v=>{
+                  const isRef=v===dummyRef;
+                  const colName=`${dp||dc}_${v}`;
+                  return(
+                    <div key={v} style={{padding:"0.28rem 0.6rem",border:`1px solid ${isRef?C.red+"40":C.border2}`,background:isRef?`${C.red}08`:"transparent",borderRadius:3,fontSize:10,fontFamily:mono}}>
+                      <span style={{color:isRef?C.red:C.green}}>{isRef?"✕ ":""}{colName}</span>
+                      <span style={{color:C.textMuted,marginLeft:4}}>n={catCounts[v]||0}</span>
+                      {isRef&&<span style={{color:C.red,fontSize:9,marginLeft:3}}>(ref)</span>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:"0.8rem"}}>
+                <Btn onClick={()=>{
+                  const pfx=(dp.trim()||dc).replace(/\s+/g,"_");
+                  const cats=uVals.filter(v=>v!==dummyRef);
+                  onAdd({type:"dummy",col:dc,pfx,refCat:dummyRef||null,
+                    desc:`Dummies '${dc}' → ${pfx}_* (${cats.length} cols${dummyRef?`, ref=${dummyRef}`:""})`});
+                  setDp("");setDc("");setDummyRef("");
+                }} color={C.green} v="solid" ch={`Create ${uVals.filter(v=>v!==dummyRef).length} dummies`}/>
+              </div>
+            </>
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {/* ── Mutate ── */}
       {vt==="mutate"&&<MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>}
 
-      {/* ── DiD ── */}
-      {vt==="did"&&(
-        <div>
-          <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
-            Generates <span style={{color:C.gold}}>Treatment × Post</span> interaction term for DiD identification. Both columns must be binary (0/1).
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1.2rem"}}>
-            {[["Treatment (D)",dtc,setDtc,C.gold],["Post indicator (P)",dpc,setDpc,C.blue]].map(([label,val,setter,color])=>(
-              <div key={label}><Lbl color={color}>{label}</Lbl>
-                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{headers.map(h=><button key={h} onClick={()=>setter(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${val===h?color:C.border2}`,background:val===h?`${color}18`:"transparent",color:val===h?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{val===h?"✓ ":""}{h}</button>)}</div>
-              </div>
-            ))}
-          </div>
-          {dtc&&dpc&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
-            New: <span style={{color:C.gold}}>{nm.trim()||`${dtc}_x_${dpc}`}</span> = <span style={{color:C.gold}}>{dtc}</span> × <span style={{color:C.blue}}>{dpc}</span> — ATT identifier
-          </div>}
-          <Btn onClick={doDiD} color={C.gold} v="solid" dis={!dtc||!dpc} ch="Create DiD interaction"/>
-        </div>
-      )}
     </div>
   );
 }
@@ -2464,6 +3272,104 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   );
 }
 
+
+// ─── EXPORT MENU ─────────────────────────────────────────────────────────────
+// Dropdown for CSV download, pipeline JSON, and subdataset save.
+function ExportMenu({ rows, headers, pipeline, filename }) {
+  const [open, setOpen] = useState(false);
+  const base = filename ? filename.replace(/\.[^.]+$/, "") : "dataset";
+
+  function downloadCSV() {
+    const esc = v => {
+      if (v === null || v === undefined) return "";
+      const s = String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [
+      headers.map(esc).join(","),
+      ...rows.map(r => headers.map(h => esc(r[h])).join(",")),
+    ];
+    const blob = new Blob([lines.join("\r\n")], { type:"text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}_pipeline_output.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+    setOpen(false);
+  }
+
+  function downloadPipeline() {
+    const payload = {
+      version: 1,
+      filename,
+      exportedAt: new Date().toISOString(),
+      steps: pipeline,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}_pipeline.json`;
+    a.click(); URL.revokeObjectURL(a.href);
+    setOpen(false);
+  }
+
+  const menuItems = [
+    { icon:"↓", label:"Download CSV",          hint:"Current pipeline output",   action: downloadCSV },
+    { icon:"{ }", label:"Download pipeline.json", hint:`${pipeline.length} step${pipeline.length!==1?"s":""}`, action: downloadPipeline },
+  ];
+
+  return (
+    <div style={{ position:"relative" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
+          fontFamily:mono, fontSize:10,
+          background: open ? `${C.teal}18` : "transparent",
+          color: open ? C.teal : C.textDim,
+          border:`1px solid ${open ? C.teal : C.border2}`,
+          transition:"all 0.12s",
+        }}>
+        ↓ Export {open ? "▾" : "▸"}
+      </button>
+
+      {open && (
+        <>
+          {/* Backdrop */}
+          <div onClick={() => setOpen(false)}
+            style={{ position:"fixed", inset:0, zIndex:99 }}/>
+          {/* Menu */}
+          <div style={{
+            position:"absolute", right:0, top:"calc(100% + 4px)",
+            background:C.surface2, border:`1px solid ${C.border2}`,
+            borderRadius:4, boxShadow:"0 8px 24px #000a",
+            zIndex:100, minWidth:220, overflow:"hidden",
+          }}>
+            {menuItems.map(({ icon, label, hint, action }) => (
+              <button key={label} onClick={action} style={{
+                width:"100%", display:"flex", flexDirection:"column",
+                padding:"0.6rem 0.85rem",
+                background:"transparent", border:"none",
+                borderBottom:`1px solid ${C.border}`,
+                color:C.textDim, cursor:"pointer", fontFamily:mono,
+                textAlign:"left", transition:"background 0.1s",
+              }}
+                onMouseEnter={e => e.currentTarget.style.background = `${C.teal}0a`}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+              >
+                <span style={{ fontSize:11, color:C.text }}>
+                  <span style={{ color:C.teal, marginRight:6 }}>{icon}</span>{label}
+                </span>
+                <span style={{ fontSize:9, color:C.textMuted, marginTop:2 }}>{hint}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── WRANGLING MODULE ROOT ────────────────────────────────────────────────────
 export default function WranglingModule({rawData, filename, onComplete, pid, allDatasets = []}) {
   const [pipeline, setPipeline] = useState(()=>{try{return lsGet().find(p=>p.id===pid)?.pipeline||[];}catch{return[];}});
@@ -2539,6 +3445,8 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
           <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
             {panel&&<span style={{fontSize:9,padding:"2px 6px",border:`1px solid ${C.blue}`,color:C.blue,borderRadius:2,letterSpacing:"0.1em",fontFamily:mono,whiteSpace:"nowrap"}}>i={panel.entityCol}·t={panel.timeCol}</span>}
             {dataDictionary&&Object.values(dataDictionary).some(v=>v)&&<span style={{fontSize:9,padding:"2px 6px",border:`1px solid ${C.violet}`,color:C.violet,borderRadius:2,letterSpacing:"0.1em",fontFamily:mono,whiteSpace:"nowrap"}}>◈ dict</span>}
+            {/* Export dropdown */}
+            <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}/>
             <button onClick={proceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>Proceed →</button>
           </div>
         </div>
@@ -2547,9 +3455,10 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
           ["clean","⬡ Cleaning"],
           ["quality",`◈ Quality${qualityReport?.flags?.filter(f=>f.severity!=="ok").length>0?` (${qualityReport.flags.filter(f=>f.severity!=="ok").length})`:"  ✓"}`],
           ["structure","⊞ Panel Structure"],
-          ["features","⊕ Feature Engineering"],
-          ["merge","⊕ Merge"],
-          ["dictionary","◈ Data Dictionary"],
+          ["features","⊕ Features"],
+          ["reshape","⟲ Reshape"],
+          ["merge","⊞ Merge"],
+          ["dictionary","◈ Dictionary"],
         ]} active={tab} set={setTab}/>
         {tab==="clean"&&<CleanTab rows={rows} headers={headers} info={info} rawData={rawData} onAdd={addStep}/>}
         {tab==="quality"&&<DataQualityReport
@@ -2566,6 +3475,7 @@ export default function WranglingModule({rawData, filename, onComplete, pid, all
         />}
         {tab==="structure"&&<PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>}
         {tab==="features"&&<FeatureEngineeringTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>}
+        {tab==="reshape"&&<ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>}
         {tab==="merge"&&<MergeTab rows={rows} headers={headers} filename={filename} allDatasets={allDatasets} onAdd={addStep}/>}
         {tab==="dictionary"&&<DataDictionaryTab headers={headers} rows={rows} dict={dataDictionary} setDict={setDataDictionary}/>}
       </div>

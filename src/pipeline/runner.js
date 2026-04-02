@@ -583,37 +583,46 @@ export function applyStep(rows, headers, s, context = {}) {
 
 
     // ── fill_na_grouped ───────────────────────────────────────────────────────
-    // Impute nulls using the within-group mean or median instead of the
-    // global statistic. Equivalent to dplyr group_by(groupCol) |>
-    // mutate(col = ifelse(is.na(col), mean(col, na.rm=TRUE), col)).
+    // Impute nulls using the within-group mean or median.
+    // Equivalent to dplyr group_by(...groupCols) |>
+    //   mutate(col = ifelse(is.na(col), mean(col, na.rm=TRUE), col))
     //
-    // s.col      – column to impute
-    // s.groupCol – column defining groups (e.g. "region", "country")
-    // s.strategy – "mean" | "median"
+    // s.col       – column to impute
+    // s.groupCol  – string OR string[] of grouping columns
+    //               (e.g. "country" or ["country","sector"])
+    // s.strategy  – "mean" | "median"
     case "fill_na_grouped": {
-      const strategy = s.strategy || "mean";
+      const strategy  = s.strategy || "mean";
+      // Normalise groupCol to always be an array
+      const groupCols = Array.isArray(s.groupCol)
+        ? s.groupCol
+        : (s.groupCol ? [s.groupCol] : []);
+
+      if (!groupCols.length) break; // nothing to do
+
+      // Composite key: "valA||valB" for multi-column groups
+      const makeKey = r => groupCols.map(c => String(r[c] ?? "")).join("||");
 
       // 1. Build per-group statistic from non-null values
       const groups = {};
       rows.forEach(r => {
-        const g = r[s.groupCol];
+        const k = makeKey(r);
         const v = r[s.col];
-        if (g == null) return;
-        if (!groups[g]) groups[g] = [];
-        if (typeof v === "number" && isFinite(v)) groups[g].push(v);
+        if (!groups[k]) groups[k] = [];
+        if (typeof v === "number" && isFinite(v)) groups[k].push(v);
       });
 
       const groupStat = {};
-      Object.entries(groups).forEach(([g, vals]) => {
-        if (!vals.length) { groupStat[g] = null; return; }
+      Object.entries(groups).forEach(([k, vals]) => {
+        if (!vals.length) { groupStat[k] = null; return; }
         if (strategy === "median") {
           const sorted = [...vals].sort((a, b) => a - b);
           const mid = Math.floor(sorted.length / 2);
-          groupStat[g] = sorted.length % 2 === 0
+          groupStat[k] = sorted.length % 2 === 0
             ? (sorted[mid - 1] + sorted[mid]) / 2
             : sorted[mid];
         } else {
-          groupStat[g] = vals.reduce((a, b) => a + b, 0) / vals.length;
+          groupStat[k] = vals.reduce((a, b) => a + b, 0) / vals.length;
         }
       });
 
@@ -621,7 +630,7 @@ export function applyStep(rows, headers, s, context = {}) {
       R = rows.map(r => {
         const v = r[s.col];
         if (v !== null && v !== undefined) return r;
-        const fill = groupStat[r[s.groupCol]] ?? null;
+        const fill = groupStat[makeKey(r)] ?? null;
         return { ...r, [s.col]: fill };
       });
       break;
