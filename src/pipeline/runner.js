@@ -581,6 +581,228 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+
+    // ── fill_na_grouped ───────────────────────────────────────────────────────
+    // Impute nulls using the within-group mean or median instead of the
+    // global statistic. Equivalent to dplyr group_by(groupCol) |>
+    // mutate(col = ifelse(is.na(col), mean(col, na.rm=TRUE), col)).
+    //
+    // s.col      – column to impute
+    // s.groupCol – column defining groups (e.g. "region", "country")
+    // s.strategy – "mean" | "median"
+    case "fill_na_grouped": {
+      const strategy = s.strategy || "mean";
+
+      // 1. Build per-group statistic from non-null values
+      const groups = {};
+      rows.forEach(r => {
+        const g = r[s.groupCol];
+        const v = r[s.col];
+        if (g == null) return;
+        if (!groups[g]) groups[g] = [];
+        if (typeof v === "number" && isFinite(v)) groups[g].push(v);
+      });
+
+      const groupStat = {};
+      Object.entries(groups).forEach(([g, vals]) => {
+        if (!vals.length) { groupStat[g] = null; return; }
+        if (strategy === "median") {
+          const sorted = [...vals].sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          groupStat[g] = sorted.length % 2 === 0
+            ? (sorted[mid - 1] + sorted[mid]) / 2
+            : sorted[mid];
+        } else {
+          groupStat[g] = vals.reduce((a, b) => a + b, 0) / vals.length;
+        }
+      });
+
+      // 2. Impute nulls; non-null values untouched
+      R = rows.map(r => {
+        const v = r[s.col];
+        if (v !== null && v !== undefined) return r;
+        const fill = groupStat[r[s.groupCol]] ?? null;
+        return { ...r, [s.col]: fill };
+      });
+      break;
+    }
+
+    // ── trim_outliers ─────────────────────────────────────────────────────────
+    // Row-dropping complement to winsorize. Removes rows where the value lies
+    // outside [lo, hi]. Bounds are stored at step-creation time for full
+    // reproducibility (same semantics as winz).
+    //
+    // s.col  – numeric column
+    // s.lo   – lower bound (e.g. p1 value)
+    // s.hi   – upper bound (e.g. p99 value)
+    case "trim_outliers": {
+      R = rows.filter(r => {
+        const v = r[s.col];
+        if (typeof v !== "number" || !isFinite(v)) return true; // keep NAs
+        return v >= s.lo && v <= s.hi;
+      });
+      break;
+    }
+
+    // ── flag_outliers ─────────────────────────────────────────────────────────
+    // Creates a binary dummy column (0/1) marking IQR or Z-score outliers.
+    // Does NOT remove rows — flags them for researcher inspection.
+    //
+    // s.col    – numeric column to examine
+    // s.nn     – output column name (e.g. "wage_outlier")
+    // s.method – "iqr" (default) | "zscore"
+    //   iqr:    outlier if v < Q1 − 1.5·IQR  or  v > Q3 + 1.5·IQR
+    //   zscore: outlier if |z| > s.threshold (default 3)
+    // s.threshold – Z-score threshold (only used when method="zscore", default 3)
+    case "flag_outliers": {
+      const method = s.method || "iqr";
+      const numVals = rows.map(r => r[s.col])
+        .filter(v => typeof v === "number" && isFinite(v))
+        .sort((a, b) => a - b);
+
+      let isOutlier;
+
+      if (method === "zscore") {
+        const thr = s.threshold ?? 3;
+        const mean = numVals.reduce((a, b) => a + b, 0) / (numVals.length || 1);
+        const sd   = numVals.length > 1
+          ? Math.sqrt(numVals.reduce((s, v) => s + (v - mean) ** 2, 0) / numVals.length)
+          : 0;
+        isOutlier = v => (typeof v === "number" && isFinite(v) && sd > 0)
+          ? Math.abs((v - mean) / sd) > thr
+          : false;
+      } else {
+        // IQR method
+        const q1  = numVals[Math.floor(numVals.length * 0.25)] ?? 0;
+        const q3  = numVals[Math.floor(numVals.length * 0.75)] ?? 0;
+        const iqr = q3 - q1;
+        const lo  = q1 - 1.5 * iqr;
+        const hi  = q3 + 1.5 * iqr;
+        isOutlier = v => (typeof v === "number" && isFinite(v))
+          ? v < lo || v > hi
+          : false;
+      }
+
+      R = rows.map(r => ({ ...r, [s.nn]: isOutlier(r[s.col]) ? 1 : 0 }));
+      if (!H.includes(s.nn)) H = [...H, s.nn];
+      break;
+    }
+
+    // ── extract_regex ─────────────────────────────────────────────────────────
+    // Extracts numeric content from dirty strings and coerces to float.
+    // Handles: thousands separators (. or ,), decimal comma ("1.200,50" → 1200.50),
+    // currency prefixes ("US$ ", "€ ", "R$"), percent suffixes.
+    //
+    // s.col    – source string column
+    // s.nn     – output column name (numeric)
+    // s.regex  – (optional) custom capture group regex; default extracts first number
+    // s.locale – "dot" (1,200.50 → US) | "comma" (1.200,50 → EU) | "auto" (default)
+    case "extract_regex": {
+      const locale   = s.locale || "auto";
+      const customRx = s.regex ? new RegExp(s.regex) : null;
+
+      const toFloat = raw => {
+        if (raw == null) return null;
+        let str = String(raw).trim();
+
+        if (customRx) {
+          const m = str.match(customRx);
+          if (!m) return null;
+          str = m[1] ?? m[0];
+        }
+
+        // Strip non-numeric prefix/suffix (currency symbols, whitespace)
+        str = str.replace(/[^\d.,\-+eE]/g, "");
+        if (!str) return null;
+
+        // Detect decimal convention
+        let det = locale;
+        if (det === "auto") {
+          // If string ends in ",dd" (1-2 digits after comma) → EU decimal
+          det = /,\d{1,2}$/.test(str) ? "comma" : "dot";
+        }
+
+        let normalised;
+        if (det === "comma") {
+          // EU: 1.200,50  → remove dots (thousands), replace comma with dot
+          normalised = str.replace(/\./g, "").replace(",", ".");
+        } else {
+          // US: 1,200.50 → remove commas (thousands)
+          normalised = str.replace(/,/g, "");
+        }
+
+        const n = parseFloat(normalised);
+        return isFinite(n) ? n : null;
+      };
+
+      R = rows.map(r => ({ ...r, [s.nn]: toFloat(r[s.col]) }));
+      if (!H.includes(s.nn)) H = [...H, s.nn];
+      break;
+    }
+
+    // ── pivot_longer ──────────────────────────────────────────────────────────
+    // Wide → Long reshape. Converts multiple value columns into two columns:
+    // one for the former column name (key) and one for the value.
+    // Equivalent to tidyr::pivot_longer() or pandas melt().
+    //
+    // s.cols     – string[] of column names to pivot (the "value" columns)
+    // s.namesTo  – name for the new key column    (e.g. "year")
+    // s.valuesTo – name for the new value column  (e.g. "gdp")
+    // s.idCols   – (optional) columns to keep as-is; defaults to all non-pivot cols
+    //
+    // The result is one row per (original row × pivot column).
+    case "pivot_longer": {
+      const pivotCols = s.cols || [];
+      const namesTo   = s.namesTo  || "name";
+      const valuesTo  = s.valuesTo || "value";
+      const idCols    = s.idCols   || H.filter(h => !pivotCols.includes(h));
+
+      const outRows = [];
+      rows.forEach(r => {
+        pivotCols.forEach(col => {
+          const newRow = {};
+          idCols.forEach(id => { newRow[id] = r[id] ?? null; });
+          newRow[namesTo]  = col;
+          newRow[valuesTo] = r[col] ?? null;
+          outRows.push(newRow);
+        });
+      });
+
+      R = outRows;
+      H = [...idCols, namesTo, valuesTo];
+      // De-duplicate H in case idCols already contained namesTo/valuesTo
+      H = [...new Set(H)];
+      break;
+    }
+
+    // ── factor_interactions ───────────────────────────────────────────────────
+    // Generates the full set of continuous × factor interactions:
+    // for each dummy column in dummyCols, creates contCol × dummy → new column.
+    // Equivalent to R: model.matrix(~ cont_var * factor_var - 1).
+    //
+    // s.contCol   – continuous numeric column
+    // s.dummyCols – string[] of binary (0/1) columns (usually output of "dummy" step)
+    // s.prefix    – (optional) prefix for output columns; default "<contCol>_x_"
+    case "factor_interactions": {
+      const prefix    = s.prefix || `${s.contCol}_x_`;
+      const dummyCols = s.dummyCols || [];
+
+      dummyCols.forEach(dc => {
+        const outCol = `${prefix}${dc}`;
+        R = R.map(r => {
+          const cont  = r[s.contCol];
+          const dummy = r[dc];
+          const val   = (typeof cont === "number" && isFinite(cont) &&
+                         typeof dummy === "number")
+            ? cont * dummy
+            : null;
+          return { ...r, [outCol]: val };
+        });
+        if (!H.includes(outCol)) H = [...H, outCol];
+      });
+      break;
+    }
+
   }
   return { rows: R, headers: H };
 }

@@ -192,6 +192,69 @@ function buildDecision(step, before, after) {
              `${before.rows.length} + ${rowDelta} = ${after.rows.length} rows. ` +
              `${addedCols.length > 0 ? `New columns: [${addedCols.join(", ")}].` : "Schemas matched."}`;
 
+
+    case "fill_na_grouped": {
+      const filled = countNulls(before.rows, step.col) - countNulls(after.rows, step.col);
+      return `Missing values in "${step.col}" were imputed using the within-group ` +
+             `${step.strategy || "mean"} of "${step.groupCol}". ` +
+             `${filled} null value${filled !== 1 ? "s" : ""} filled. ` +
+             `Groups with no observed values retain null.`;
+    }
+
+    case "trim_outliers": {
+      const removed = Math.abs(rowDelta);
+      return `Dropped ${removed} row${removed !== 1 ? "s" : ""} where "${step.col}" ` +
+             `fell outside [${Number(step.lo).toFixed(4)}, ${Number(step.hi).toFixed(4)}]. ` +
+             `${before.rows.length} → ${after.rows.length} observations. ` +
+             `Bounds fixed at step-creation time.`;
+    }
+
+    case "flag_outliers": {
+      const flagged = after.rows.filter(r => r[step.nn] === 1).length;
+      const method  = step.method || "iqr";
+      const detail  = method === "zscore"
+        ? `Z-score method (|z| > ${step.threshold ?? 3})`
+        : "IQR method (Q1 − 1.5·IQR, Q3 + 1.5·IQR)";
+      return `Flagged ${flagged} outlier observation${flagged !== 1 ? "s" : ""} in "${step.col}" ` +
+             `using the ${detail}. ` +
+             `Binary indicator stored in "${step.nn}" (1 = outlier, 0 = inlier). ` +
+             `Rows retained.`;
+    }
+
+    case "extract_regex": {
+      const nullsOut  = countNulls(after.rows, step.nn);
+      const total     = after.rows.length;
+      const parsed    = total - nullsOut;
+      const localeStr = { auto: "auto-detected", dot: "US/UK dot decimal", comma: "EU/LATAM comma decimal" }[step.locale || "auto"] || step.locale;
+      return `Extracted numeric values from string column "${step.col}" → "${step.nn}" ` +
+             `(${localeStr} convention${step.regex ? `, custom regex: /${step.regex}/` : ""}). ` +
+             `${parsed} of ${total} values parsed successfully; ${nullsOut} could not be parsed (→ null).`;
+    }
+
+    case "pivot_longer": {
+      const pivotN = (step.cols || []).length;
+      return `Reshaped from wide to long format. ` +
+             `${pivotN} column${pivotN !== 1 ? "s" : ""} [${(step.cols || []).join(", ")}] pivoted into ` +
+             `key column "${step.namesTo}" and value column "${step.valuesTo}". ` +
+             `${before.rows.length} rows × ${before.headers.length} cols → ` +
+             `${after.rows.length} rows × ${after.headers.length} cols.`;
+    }
+
+    case "factor_interactions": {
+      const n = addedCols.length;
+      return `Generated ${n} factor interaction${n !== 1 ? "s" : ""}: ` +
+             `"${step.contCol}" × [${(step.dummyCols || []).join(", ")}]. ` +
+             `New columns: [${addedCols.join(", ")}]. ` +
+             `Null produced where either factor is null or non-numeric.`;
+    }
+
+    case "date_parse": {
+      const nullsOut = countNulls(after.rows, step.nn || step.col);
+      const parsed   = after.rows.length - nullsOut;
+      return `Parsed "${step.col}" as ${step.fmt || "auto"} date format → "${step.nn || step.col}" (ISO YYYY-MM-DD). ` +
+             `${parsed} values converted; ${nullsOut} could not be parsed (→ null).`;
+    }
+
     default:
       return stepLabel(step);
   }

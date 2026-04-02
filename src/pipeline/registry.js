@@ -445,6 +445,128 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "append", rightId: "" }),
   },
 
+
+  // ── ADVANCED CLEANING ───────────────────────────────────────────────────────
+
+  {
+    type: "fill_na_grouped",
+    label: "Group-mean imputation",
+    category: "cleaning",
+    description: "Fill missing values using the within-group mean or median. " +
+                 "More precise than global imputation when groups differ substantially " +
+                 "(e.g. impute income using the regional mean, not the national mean).",
+    schema: [
+      { key: "col",      type: "col",    label: "Column to impute" },
+      { key: "groupCol", type: "col",    label: "Grouping column (e.g. region, country)" },
+      { key: "strategy", type: "select", label: "Strategy", options: [
+        { value: "mean",   label: "Group mean" },
+        { value: "median", label: "Group median" },
+      ]},
+    ],
+    toLabel: s => `fill_na_grouped ${s.col} ← group_${s.strategy || "mean"}(${s.groupCol})`,
+    defaultStep: () => ({ type: "fill_na_grouped", col: "", groupCol: "", strategy: "mean" }),
+  },
+
+  {
+    type: "trim_outliers",
+    label: "Trim outliers (drop rows)",
+    category: "cleaning",
+    description: "Remove rows where a numeric column falls outside [lo, hi]. " +
+                 "Unlike winsorize, this deletes the observation entirely. " +
+                 "Bounds are fixed at step-creation time for reproducibility.",
+    schema: [
+      { key: "col", type: "col",    label: "Column" },
+      { key: "lo",  type: "number", label: "Lower bound" },
+      { key: "hi",  type: "number", label: "Upper bound" },
+    ],
+    toLabel: s => `trim_outliers ${s.col} outside [${s.lo}, ${s.hi}]`,
+    defaultStep: () => ({ type: "trim_outliers", col: "", lo: 0, hi: 0 }),
+  },
+
+  {
+    type: "flag_outliers",
+    label: "Flag outliers (dummy column)",
+    category: "cleaning",
+    description: "Create a binary 0/1 column marking outlier observations. " +
+                 "IQR method: flags if outside Q1−1.5·IQR or Q3+1.5·IQR. " +
+                 "Z-score method: flags if |z| > threshold (default 3). " +
+                 "Rows are kept — researcher decides what to do with the flag.",
+    schema: [
+      { key: "col",    type: "col",    label: "Column to examine" },
+      { key: "nn",     type: "text",   label: "Output flag column name" },
+      { key: "method", type: "select", label: "Detection method", options: [
+        { value: "iqr",    label: "IQR (Q1−1.5·IQR, Q3+1.5·IQR)" },
+        { value: "zscore", label: "Z-score (|z| > threshold)" },
+      ]},
+      { key: "threshold", type: "number", label: "Z-score threshold (default 3)",
+        when: s => s.method === "zscore" },
+    ],
+    toLabel: s => `flag_outliers ${s.col} [${s.method || "iqr"}] → ${s.nn}`,
+    defaultStep: () => ({ type: "flag_outliers", col: "", nn: "", method: "iqr", threshold: 3 }),
+  },
+
+  {
+    type: "extract_regex",
+    label: "Extract numeric from string",
+    category: "cleaning",
+    description: "Parse a numeric value from a dirty string column. " +
+                 "Handles currency symbols, thousands separators, and decimal conventions " +
+                 "(US dot: 1,200.50 / EU comma: 1.200,50). " +
+                 "Supports a custom capture-group regex for unusual formats.",
+    schema: [
+      { key: "col",    type: "col",    label: "Source string column" },
+      { key: "nn",     type: "text",   label: "Output numeric column name" },
+      { key: "locale", type: "select", label: "Decimal convention", options: [
+        { value: "auto",  label: "Auto-detect" },
+        { value: "dot",   label: "Dot decimal  (1,200.50 — US/UK)" },
+        { value: "comma", label: "Comma decimal (1.200,50 — EU/LATAM)" },
+      ]},
+      { key: "regex", type: "text", label: "Custom regex (optional, use a capture group)" },
+    ],
+    toLabel: s => `extract_regex ${s.col} → ${s.nn} [${s.locale || "auto"}]`,
+    defaultStep: () => ({ type: "extract_regex", col: "", nn: "", locale: "auto", regex: "" }),
+  },
+
+  // ── RESHAPE ──────────────────────────────────────────────────────────────────
+
+  {
+    type: "pivot_longer",
+    label: "Pivot longer (wide → long)",
+    category: "reshape",
+    description: "Reshape a wide dataset to long format. " +
+                 "Selected columns become rows: their names go into a 'key' column " +
+                 "and their values into a 'value' column. " +
+                 "Equivalent to tidyr::pivot_longer() or pandas.melt(). " +
+                 "Essential for converting year-column datasets into panel format.",
+    schema: [
+      { key: "cols",     type: "cols", label: "Columns to pivot (the value columns)" },
+      { key: "namesTo",  type: "text", label: "New key column name (e.g. 'year')" },
+      { key: "valuesTo", type: "text", label: "New value column name (e.g. 'gdp')" },
+      { key: "idCols",   type: "cols", label: "ID columns to keep (leave empty = all others)" },
+    ],
+    toLabel: s => `pivot_longer [${(s.cols || []).slice(0, 3).join(", ")}${(s.cols||[]).length > 3 ? "…" : ""}] → ${s.namesTo}/${s.valuesTo}`,
+    defaultStep: () => ({ type: "pivot_longer", cols: [], namesTo: "name", valuesTo: "value", idCols: [] }),
+  },
+
+  // ── FEATURES ──────────────────────────────────────────────────────────────────
+
+  {
+    type: "factor_interactions",
+    label: "Factor interactions (continuous × dummies)",
+    category: "features",
+    description: "Generate all interactions between a continuous variable and a set of dummy columns. " +
+                 "Creates one new column per dummy: contCol × dummy_k → prefix_dummy_k. " +
+                 "Equivalent to R: model.matrix(~ cont * factor − 1). " +
+                 "Use after a dummy-encode step.",
+    schema: [
+      { key: "contCol",   type: "col",  label: "Continuous column" },
+      { key: "dummyCols", type: "cols", label: "Dummy columns (0/1) to interact with" },
+      { key: "prefix",    type: "text", label: "Output prefix (default: contCol_x_)" },
+    ],
+    toLabel: s => `factor_interactions ${s.contCol} × [${(s.dummyCols || []).slice(0, 3).join(", ")}${(s.dummyCols||[]).length > 3 ? "…" : ""}]`,
+    defaultStep: () => ({ type: "factor_interactions", contCol: "", dummyCols: [], prefix: "" }),
+  },
+
 ];
 
 // ─── LOOKUP HELPERS ───────────────────────────────────────────────────────────
