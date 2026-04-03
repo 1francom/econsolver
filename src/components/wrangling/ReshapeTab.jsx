@@ -10,10 +10,15 @@ function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep }) {
   const [sub, setSub] = useState("pivot");
 
   // ── pivot_longer state ────────────────────────────────────────────────────
-  const [pivCols,  setPivCols]  = useState([]);   // columns to pivot
-  const [namesTo,  setNamesTo]  = useState("variable");
-  const [valuesTo, setValuesTo] = useState("value");
-  // idCols = all non-pivot cols (auto)
+  const [pivMode,   setPivMode]  = useState("multi");  // "simple" | "multi"
+  // Simple mode
+  const [pivCols,   setPivCols]  = useState([]);
+  const [namesTo,   setNamesTo]  = useState("year");
+  const [valuesTo,  setValuesTo] = useState("value");
+  const [namesSep,  setNamesSep] = useState("_");      // extract key from col name
+  // Multi mode
+  const [pivGroups, setPivGroups] = useState([]);      // [{prefix, colName}]
+  const [keyName,   setKeyName]   = useState("year");
 
   // ── group_summarize state ─────────────────────────────────────────────────
   const [byCols,    setByCols]    = useState([]);
@@ -27,24 +32,91 @@ function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep }) {
   const numC = headers.filter(h => info[h]?.isNum);
 
   // ── pivot helpers ─────────────────────────────────────────────────────────
-  const idCols      = headers.filter(h => !pivCols.includes(h));
-  const pivPreview  = pivCols.length > 0
-    ? `${rows.length} rows × ${headers.length} cols  →  ${rows.length * pivCols.length} rows × ${idCols.length + 2} cols`
-    : null;
+  // Simple mode
+  const allPivotColsSimple = pivCols;
+  const idColsSimple = headers.filter(h => !pivCols.includes(h));
+
+  // Multi mode: detect all columns matching any group prefix
+  const allPivotColsMulti = useMemo(() => {
+    const s = new Set();
+    pivGroups.forEach(({ prefix }) => {
+      headers.filter(h => h.startsWith(prefix) && prefix.length > 0).forEach(h => s.add(h));
+    });
+    return [...s];
+  }, [pivGroups, headers]);
+
+  const idColsMulti = headers.filter(h => !allPivotColsMulti.includes(h));
+
+  // Detect unique key values for multi mode preview
+  const multiKeyValues = useMemo(() => {
+    const kvs = new Set();
+    pivGroups.forEach(({ prefix }) => {
+      headers.filter(h => h.startsWith(prefix) && prefix.length > 0)
+        .forEach(h => kvs.add(h.slice(prefix.length)));
+    });
+    return [...kvs].sort();
+  }, [pivGroups, headers]);
+
+  // Auto-detect column groups from headers (e.g. income_2018..2022 → prefix "income_")
+  const detectedGroups = useMemo(() => {
+    // Find columns matching pattern: prefix_suffix where suffix is digits
+    const patMap = {};
+    headers.forEach(h => {
+      const m = h.match(/^(.+?)_(\d+)$/);
+      if (m) {
+        const prefix = m[1] + "_";
+        if (!patMap[prefix]) patMap[prefix] = [];
+        patMap[prefix].push(h);
+      }
+    });
+    // Only suggest prefixes with 2+ columns
+    return Object.entries(patMap)
+      .filter(([, cols]) => cols.length >= 2)
+      .map(([prefix]) => ({ prefix, colName: prefix.replace(/_$/, "") }));
+  }, [headers]);
 
   function togglePivCol(h) {
     setPivCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
   }
 
-  function doPivot() {
-    if (!pivCols.length || !namesTo.trim() || !valuesTo.trim()) return;
-    onAdd({
-      type: "pivot_longer",
-      cols: pivCols, namesTo: namesTo.trim(), valuesTo: valuesTo.trim(), idCols,
-      desc: `Pivot longer: [${pivCols.slice(0,3).join(", ")}${pivCols.length > 3 ? "…" : ""}] → ${namesTo}/${valuesTo}`,
-    });
-    setPivCols([]); setNamesTo("variable"); setValuesTo("value");
+  function addGroup(prefix = "", colName = "") {
+    setPivGroups(p => [...p, { prefix, colName }]);
   }
+  function updateGroup(i, patch) {
+    setPivGroups(p => p.map((g, j) => j !== i ? g : { ...g, ...patch }));
+  }
+  function removeGroup(i) {
+    setPivGroups(p => p.filter((_, j) => j !== i));
+  }
+
+  function doPivot() {
+    if (pivMode === "multi") {
+      const validGroups = pivGroups.filter(g => g.prefix.trim() && g.colName.trim());
+      if (!validGroups.length || !keyName.trim()) return;
+      const idCols = idColsMulti;
+      onAdd({
+        type: "pivot_longer", mode: "multi",
+        groups: validGroups, keyName: keyName.trim(), idCols,
+        desc: `Pivot longer (multi): [${validGroups.map(g => g.colName).join(", ")}] by ${keyName}`,
+      });
+      setPivGroups([]); setKeyName("year");
+    } else {
+      if (!pivCols.length || !namesTo.trim() || !valuesTo.trim()) return;
+      const idCols = idColsSimple;
+      const sep = namesSep.trim() || null;
+      onAdd({
+        type: "pivot_longer", mode: "simple",
+        cols: pivCols, namesTo: namesTo.trim(), valuesTo: valuesTo.trim(),
+        namesSep: sep, idCols,
+        desc: `Pivot longer: [${pivCols.slice(0,3).join(", ")}${pivCols.length > 3 ? "…" : ""}] → ${namesTo}/${valuesTo}`,
+      });
+      setPivCols([]); setNamesTo("year"); setValuesTo("value");
+    }
+  }
+
+  const canPivot = pivMode === "multi"
+    ? pivGroups.some(g => g.prefix.trim() && g.colName.trim()) && keyName.trim()
+    : pivCols.length > 0 && namesTo.trim() && valuesTo.trim();
 
   // ── group_summarize helpers ───────────────────────────────────────────────
   function addAgg(col = "", fn = "mean") {
@@ -177,88 +249,203 @@ function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep }) {
           <div style={{padding:"0.65rem 1rem",background:C.surface,
             border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,
             borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
-            Converts <span style={{color:C.gold}}>wide format</span> (one column per period/variable)
-            to <span style={{color:C.teal}}>long format</span> (one row per observation).
+            Converts <span style={{color:C.gold}}>wide format</span> to{" "}
+            <span style={{color:C.teal}}>long format</span>.
             Equivalent to <code style={{color:C.green}}>tidyr::pivot_longer()</code>.
           </div>
 
-          {/* Column selector */}
-          <Lbl color={C.teal}>Columns to pivot <span style={{color:C.textMuted}}>(the value columns)</span></Lbl>
-          <div style={{marginBottom:"0.5rem",display:"flex",gap:6,flexWrap:"wrap"}}>
-            <button onClick={()=>setPivCols(numC)}
-              style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
-                background:"transparent",color:C.textDim,borderRadius:2,cursor:"pointer",
-                fontSize:9,fontFamily:mono}}>select all numeric</button>
-            <button onClick={()=>setPivCols([])}
-              style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
-                background:"transparent",color:C.textDim,borderRadius:2,cursor:"pointer",
-                fontSize:9,fontFamily:mono}}>clear</button>
-          </div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem",
-            maxHeight:160,overflowY:"auto",padding:"0.5rem",
-            background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
-            {headers.map(h => {
-              const sel = pivCols.includes(h);
-              return (
-                <button key={h} onClick={() => togglePivCol(h)} style={{
-                  padding:"0.25rem 0.6rem",
-                  border:`1px solid ${sel ? C.teal : C.border2}`,
-                  background: sel ? `${C.teal}18` : "transparent",
-                  color: sel ? C.teal : info[h]?.isNum ? C.blue : C.textDim,
-                  borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
-                  transition:"all 0.1s",
-                }}>
-                  {sel ? "✓ " : ""}{h}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* ID columns preview */}
-          {pivCols.length > 0 && (
-            <div style={{padding:"0.5rem 0.75rem",background:C.surface,
-              border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1.2rem",
-              fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.7}}>
-              <span style={{color:C.textDim}}>ID cols kept as-is: </span>
-              {idCols.slice(0,6).map(h => (
-                <span key={h} style={{color:C.gold,marginRight:6}}>{h}</span>
-              ))}
-              {idCols.length > 6 && <span>+{idCols.length - 6} more</span>}
-            </div>
-          )}
-
-          {/* Output column names */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.8rem",marginBottom:"1.2rem"}}>
+          {/* Mode selector */}
+          <div style={{display:"flex",gap:4,marginBottom:"1.2rem"}}>
             {[
-              ["Key column name", namesTo, setNamesTo, C.violet, "e.g. year, variable, period"],
-              ["Value column name", valuesTo, setValuesTo, C.teal, "e.g. value, gdp, rate"],
-            ].map(([label, val, setter, color, ph]) => (
-              <div key={label}>
-                <Lbl color={color}>{label}</Lbl>
-                <input value={val} onChange={e => setter(e.target.value)}
-                  placeholder={ph}
-                  style={{...inS, width:"100%", boxSizing:"border-box",
-                    border:`1px solid ${C.border2}`}}/>
-              </div>
+              ["multi",  "⊞ Multi-variable", "income_2019 + hours_2019 → income, hours per year"],
+              ["simple", "⟲ Simple",         "one group of columns → single key/value pair"],
+            ].map(([k, l, hint]) => (
+              <button key={k} onClick={() => setPivMode(k)} style={{
+                flex:1, padding:"0.5rem 0.75rem", textAlign:"left",
+                border:`1px solid ${pivMode===k ? C.teal : C.border2}`,
+                background: pivMode===k ? `${C.teal}12` : "transparent",
+                color: pivMode===k ? C.teal : C.textDim,
+                borderRadius:4, cursor:"pointer", fontFamily:mono, transition:"all 0.1s",
+              }}>
+                <div style={{fontSize:11, marginBottom:2}}>{pivMode===k ? "✓ " : ""}{l}</div>
+                <div style={{fontSize:9, color:C.textMuted}}>{hint}</div>
+              </button>
             ))}
           </div>
 
-          {/* Shape preview */}
-          {pivPreview && (
-            <div style={{padding:"0.55rem 0.85rem",background:`${C.teal}08`,
-              border:`1px solid ${C.teal}30`,borderRadius:3,marginBottom:"1rem",
-              fontSize:11,fontFamily:mono,color:C.textDim}}>
-              <span style={{color:C.gold}}>→</span> {pivPreview}
-              <div style={{fontSize:9,color:C.textMuted,marginTop:3}}>
-                Key col: <span style={{color:C.violet}}>{namesTo||"?"}</span>
-                {" · "}Value col: <span style={{color:C.teal}}>{valuesTo||"?"}</span>
+          {/* ══ MULTI-VARIABLE MODE ══════════════════════════════════════════ */}
+          {pivMode === "multi" && (
+            <div>
+              {/* Auto-detect banner */}
+              {detectedGroups.length > 0 && pivGroups.length === 0 && (
+                <div style={{padding:"0.6rem 0.9rem",background:`${C.gold}08`,
+                  border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,
+                  borderRadius:4,marginBottom:"1rem",fontSize:10,fontFamily:mono,color:C.textDim}}>
+                  <span style={{color:C.gold}}>Auto-detected {detectedGroups.length} variable group{detectedGroups.length!==1?"s":""}:</span>{" "}
+                  {detectedGroups.map(g => (
+                    <span key={g.prefix} style={{color:C.text,marginRight:6}}>{g.prefix}*</span>
+                  ))}
+                  <button onClick={() => setPivGroups(detectedGroups)}
+                    style={{marginLeft:8,padding:"0.15rem 0.55rem",
+                      border:`1px solid ${C.gold}`,borderRadius:2,
+                      background:"transparent",color:C.gold,cursor:"pointer",
+                      fontSize:9,fontFamily:mono}}>
+                    Use all →
+                  </button>
+                </div>
+              )}
+
+              {/* Key column name */}
+              <div style={{marginBottom:"1rem"}}>
+                <Lbl color={C.violet}>Key column name <span style={{color:C.textMuted}}>(extracted from suffix)</span></Lbl>
+                <input value={keyName} onChange={e => setKeyName(e.target.value)}
+                  placeholder="year"
+                  style={{...inS, width:200, boxSizing:"border-box"}}/>
               </div>
+
+              {/* Variable groups */}
+              <Lbl color={C.teal}>Variable groups</Lbl>
+              {pivGroups.length === 0 && (
+                <div style={{padding:"0.6rem 0.9rem",background:C.surface,
+                  border:`1px dashed ${C.border2}`,borderRadius:4,
+                  fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"0.8rem"}}>
+                  Add one group per variable (e.g. income_ → income, hours_ → hours).
+                </div>
+              )}
+              <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:"0.8rem"}}>
+                {pivGroups.map((g, i) => {
+                  const matchedCols = headers.filter(h => g.prefix && h.startsWith(g.prefix));
+                  return (
+                    <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",
+                      gap:6,alignItems:"center",padding:"0.5rem 0.65rem",
+                      background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
+                      <div>
+                        <input value={g.prefix}
+                          onChange={e => updateGroup(i, { prefix: e.target.value })}
+                          placeholder="column prefix (e.g. income_)"
+                          style={{...inS, width:"100%", boxSizing:"border-box"}}/>
+                        {matchedCols.length > 0 && (
+                          <div style={{fontSize:9,color:C.teal,fontFamily:mono,marginTop:2}}>
+                            matches: {matchedCols.slice(0,4).join(", ")}{matchedCols.length>4?`… +${matchedCols.length-4}`:""}
+                          </div>
+                        )}
+                      </div>
+                      <input value={g.colName}
+                        onChange={e => updateGroup(i, { colName: e.target.value })}
+                        placeholder="output column name (e.g. income)"
+                        style={{...inS, width:"100%", boxSizing:"border-box"}}/>
+                      <button onClick={() => removeGroup(i)} style={{
+                        background:"transparent",border:`1px solid ${C.border2}`,
+                        borderRadius:2,color:C.textMuted,cursor:"pointer",
+                        fontSize:11,padding:"0.2rem 0.4rem"}}>✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <button onClick={() => addGroup()}
+                style={{padding:"0.25rem 0.7rem",border:`1px dashed ${C.teal}`,
+                  background:"transparent",color:C.teal,borderRadius:3,
+                  cursor:"pointer",fontSize:10,fontFamily:mono,marginBottom:"1.2rem"}}>
+                + add variable group
+              </button>
+
+              {/* Multi preview */}
+              {pivGroups.some(g=>g.prefix&&g.colName) && multiKeyValues.length > 0 && (
+                <div style={{padding:"0.55rem 0.85rem",background:`${C.teal}08`,
+                  border:`1px solid ${C.teal}30`,borderRadius:3,marginBottom:"1rem",
+                  fontSize:11,fontFamily:mono,color:C.textDim,lineHeight:1.8}}>
+                  <span style={{color:C.gold}}>→</span>{" "}
+                  {rows.length} rows × {headers.length} cols{" "}
+                  <span style={{color:C.textMuted}}>→</span>{" "}
+                  <span style={{color:C.teal}}>{rows.length * multiKeyValues.length}</span> rows × {idColsMulti.length + 1 + pivGroups.filter(g=>g.colName).length} cols
+                  <div style={{fontSize:9,color:C.textMuted,marginTop:3}}>
+                    Key: <span style={{color:C.violet}}>{keyName||"?"}</span>{" = "}
+                    {multiKeyValues.slice(0,6).map(k=>(
+                      <span key={k} style={{color:C.text,marginRight:4}}>{k}</span>
+                    ))}
+                    {multiKeyValues.length>6 && <span>+{multiKeyValues.length-6} more</span>}
+                  </div>
+                  <div style={{fontSize:9,color:C.textMuted,marginTop:2}}>
+                    Value cols: {pivGroups.filter(g=>g.colName).map(g=>(
+                      <span key={g.colName} style={{color:C.teal,marginRight:4}}>{g.colName}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══ SIMPLE MODE ═════════════════════════════════════════════════ */}
+          {pivMode === "simple" && (
+            <div>
+              <Lbl color={C.teal}>Columns to pivot</Lbl>
+              <div style={{marginBottom:"0.5rem",display:"flex",gap:6}}>
+                <button onClick={()=>setPivCols(numC)}
+                  style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
+                    background:"transparent",color:C.textDim,borderRadius:2,
+                    cursor:"pointer",fontSize:9,fontFamily:mono}}>select all numeric</button>
+                <button onClick={()=>setPivCols([])}
+                  style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
+                    background:"transparent",color:C.textDim,borderRadius:2,
+                    cursor:"pointer",fontSize:9,fontFamily:mono}}>clear</button>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem",
+                maxHeight:140,overflowY:"auto",padding:"0.5rem",
+                background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
+                {headers.map(h => {
+                  const sel = pivCols.includes(h);
+                  return (
+                    <button key={h} onClick={() => togglePivCol(h)} style={{
+                      padding:"0.25rem 0.6rem",
+                      border:`1px solid ${sel ? C.teal : C.border2}`,
+                      background: sel ? `${C.teal}18` : "transparent",
+                      color: sel ? C.teal : info[h]?.isNum ? C.blue : C.textDim,
+                      borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+                      transition:"all 0.1s",
+                    }}>
+                      {sel ? "✓ " : ""}{h}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 100px",gap:"0.8rem",marginBottom:"1rem"}}>
+                {[
+                  ["Key column", namesTo, setNamesTo, C.violet, "e.g. year"],
+                  ["Value column", valuesTo, setValuesTo, C.teal, "e.g. gdp"],
+                  ["Name separator", namesSep, setNamesSep, C.textDim, "e.g. _"],
+                ].map(([label, val, setter, color, ph]) => (
+                  <div key={label}>
+                    <Lbl color={color}>{label}</Lbl>
+                    <input value={val} onChange={e => setter(e.target.value)}
+                      placeholder={ph}
+                      style={{...inS, width:"100%", boxSizing:"border-box"}}/>
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginBottom:"1rem"}}>
+                Separator splits column name to extract key value — e.g.{" "}
+                <span style={{color:C.text}}>income_2019</span> with sep{" "}
+                <span style={{color:C.text}}>_</span> → key={" "}
+                <span style={{color:C.violet}}>2019</span>
+              </div>
+
+              {pivCols.length > 0 && (
+                <div style={{padding:"0.5rem 0.75rem",background:C.surface,
+                  border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",
+                  fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.7}}>
+                  <span style={{color:C.textDim}}>ID cols: </span>
+                  {idColsSimple.slice(0,5).map(h=>(
+                    <span key={h} style={{color:C.gold,marginRight:5}}>{h}</span>
+                  ))}
+                  {idColsSimple.length>5 && <span>+{idColsSimple.length-5} more</span>}
+                </div>
+              )}
             </div>
           )}
 
           <Btn onClick={doPivot} color={C.teal} v="solid"
-            dis={!pivCols.length || !namesTo.trim() || !valuesTo.trim()}
-            ch="Pivot longer →"/>
+            dis={!canPivot} ch="Pivot longer →"/>
         </div>
       )}
 

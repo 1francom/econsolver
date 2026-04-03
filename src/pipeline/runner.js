@@ -750,37 +750,104 @@ export function applyStep(rows, headers, s, context = {}) {
     }
 
     // ── pivot_longer ──────────────────────────────────────────────────────────
-    // Wide → Long reshape. Converts multiple value columns into two columns:
-    // one for the former column name (key) and one for the value.
-    // Equivalent to tidyr::pivot_longer() or pandas melt().
+    // Wide → Long reshape. Two modes:
     //
-    // s.cols     – string[] of column names to pivot (the "value" columns)
-    // s.namesTo  – name for the new key column    (e.g. "year")
-    // s.valuesTo – name for the new value column  (e.g. "gdp")
-    // s.idCols   – (optional) columns to keep as-is; defaults to all non-pivot cols
+    // MODE A — Simple (one group of columns → key/value pair):
+    //   s.mode     – "simple" (default)
+    //   s.cols     – string[] of column names to pivot
+    //   s.namesTo  – name for the new key column  (e.g. "year")
+    //   s.valuesTo – name for the new value column (e.g. "gdp")
+    //   s.idCols   – columns to keep as-is (default: all non-pivot cols)
+    //   s.namesSep – (optional) separator to split col name → extract key value
+    //                e.g. sep="_" on "income_2019" → key="2019", value=income
+    //   s.namesPrefix – (optional) prefix to strip from col name before storing as key
+    //                   e.g. prefix="income_" on "income_2019" → key="2019"
     //
-    // The result is one row per (original row × pivot column).
+    // MODE B — Multi-variable (.value semantics, equiv to R names_to=c(".value","year")):
+    //   s.mode     – "multi"
+    //   s.groups   – [{ prefix, colName }]  e.g. [{prefix:"income_",colName:"income"},
+    //                                              {prefix:"hours_", colName:"hours"}]
+    //   s.keySep   – separator between prefix and key value (e.g. "_")
+    //   s.keyName  – name for the extracted key column (e.g. "year")
+    //   s.idCols   – columns to keep as-is
+    //
+    // Result: one row per (original row × unique key value).
+    // With mode="multi" and groups=[income_,hours_], key="year":
+    //   income_2019, income_2020, hours_2019, hours_2020
+    //   → rows with year=2019: income=..., hours=...
+    //      rows with year=2020: income=..., hours=...
     case "pivot_longer": {
-      const pivotCols = s.cols || [];
-      const namesTo   = s.namesTo  || "name";
-      const valuesTo  = s.valuesTo || "value";
-      const idCols    = s.idCols   || H.filter(h => !pivotCols.includes(h));
+      const mode = s.mode || "simple";
 
-      const outRows = [];
-      rows.forEach(r => {
-        pivotCols.forEach(col => {
-          const newRow = {};
-          idCols.forEach(id => { newRow[id] = r[id] ?? null; });
-          newRow[namesTo]  = col;
-          newRow[valuesTo] = r[col] ?? null;
-          outRows.push(newRow);
+      if (mode === "multi") {
+        // ── Multi-variable pivot (.value semantics) ───────────────────────────
+        const groups  = s.groups  || [];   // [{prefix, colName}]
+        const keySep  = s.keySep  || "_";
+        const keyName = s.keyName || "year";
+        const allPivotCols = new Set(
+          groups.flatMap(g => H.filter(h => h.startsWith(g.prefix)))
+        );
+        const idCols = s.idCols || H.filter(h => !allPivotCols.has(h));
+
+        // Collect all unique key values across all groups
+        const keyValues = new Set();
+        groups.forEach(({ prefix }) => {
+          H.filter(h => h.startsWith(prefix)).forEach(h => {
+            keyValues.add(h.slice(prefix.length));
+          });
         });
-      });
 
-      R = outRows;
-      H = [...idCols, namesTo, valuesTo];
-      // De-duplicate H in case idCols already contained namesTo/valuesTo
-      H = [...new Set(H)];
+        const outRows = [];
+        rows.forEach(r => {
+          for (const kv of keyValues) {
+            const newRow = {};
+            idCols.forEach(id => { newRow[id] = r[id] ?? null; });
+            newRow[keyName] = kv;
+            groups.forEach(({ prefix, colName }) => {
+              newRow[colName] = r[`${prefix}${kv}`] ?? null;
+            });
+            outRows.push(newRow);
+          }
+        });
+
+        const valueColNames = groups.map(g => g.colName);
+        R = outRows;
+        H = [...new Set([...idCols, keyName, ...valueColNames])];
+
+      } else {
+        // ── Simple pivot (original behaviour + optional name extraction) ──────
+        const pivotCols   = s.cols || [];
+        const namesTo     = s.namesTo    || "name";
+        const valuesTo    = s.valuesTo   || "value";
+        const namesSep    = s.namesSep   || null;   // e.g. "_" → split on last "_"
+        const namesPrefix = s.namesPrefix || null;  // e.g. "income_" → strip prefix
+        const idCols      = s.idCols || H.filter(h => !pivotCols.includes(h));
+
+        // Extract the key value from a column name
+        const extractKey = col => {
+          if (namesPrefix && col.startsWith(namesPrefix))
+            return col.slice(namesPrefix.length);
+          if (namesSep) {
+            const idx = col.lastIndexOf(namesSep);
+            if (idx >= 0) return col.slice(idx + namesSep.length);
+          }
+          return col; // fallback: use full column name
+        };
+
+        const outRows = [];
+        rows.forEach(r => {
+          pivotCols.forEach(col => {
+            const newRow = {};
+            idCols.forEach(id => { newRow[id] = r[id] ?? null; });
+            newRow[namesTo]  = extractKey(col);
+            newRow[valuesTo] = r[col] ?? null;
+            outRows.push(newRow);
+          });
+        });
+
+        R = outRows;
+        H = [...new Set([...idCols, namesTo, valuesTo])];
+      }
       break;
     }
 

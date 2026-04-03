@@ -29,7 +29,7 @@ import { lsGet, lsSave } from "./components/wrangling/utils.js";
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
 export { applyStep, runPipeline }     from "./pipeline/runner.js";
 export { fuzzyGroups }                from "./components/wrangling/utils.js";
-export { Grid }                       from "./components/wrangling/shared.js";
+export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [] }) {
