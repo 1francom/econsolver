@@ -3,7 +3,7 @@
 // All UI is delegated to components/wrangling/*.jsx
 // ~110 lines — add features in the tab files, not here.
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { applyStep, runPipeline }  from "./pipeline/runner.js";
 import { validatePanel, buildInfo } from "./pipeline/validator.js";
 import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQuality.js";
@@ -22,8 +22,13 @@ import DataQualityReport from "./components/wrangling/DataQualityReport.jsx";
 // ── Shared atoms ───────────────────────────────────────────────────────────
 import { C, mono, Tabs } from "./components/wrangling/shared.jsx";
 
-// ── Persistence ────────────────────────────────────────────────────────────
-import { lsGet, lsSave } from "./components/wrangling/utils.js";
+// ── Persistence — IndexedDB (replaces localStorage 5MB cap) ───────────────
+import {
+  loadPipeline,
+  savePipeline,
+  saveRawData,
+  migrateFromLocalStorage,
+} from "./services/persistence/indexedDB.js";
 
 // ── Re-exports (consumed by ModelingTab and other modules) ─────────────────
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
@@ -33,16 +38,29 @@ export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [], onSaveSubset }) {
-  const [pipeline, setPipeline] = useState(() => {
-    try { return lsGet().find(p => p.id === pid)?.pipeline || []; } catch { return []; }
-  });
-  const [panel, setPanel] = useState(() => {
-    try { return lsGet().find(p => p.id === pid)?.panel || null; } catch { return null; }
-  });
-  const [dataDictionary, setDataDictionary] = useState(() => {
-    try { return lsGet().find(p => p.id === pid)?.dataDictionary || null; } catch { return null; }
-  });
-  const [tab, setTab] = useState("clean");
+  // State starts empty — IndexedDB load is async (see useEffect below)
+  const [pipeline,       setPipeline]      = useState([]);
+  const [panel,          setPanel]          = useState(null);
+  const [dataDictionary, setDataDictionary] = useState(null);
+  const [tab,            setTab]            = useState("clean");
+  const [idbReady,       setIdbReady]       = useState(false);
+
+  // ── Initial load from IndexedDB ────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await migrateFromLocalStorage();
+      const rec = await loadPipeline(pid);
+      if (cancelled) return;
+      if (rec) {
+        if (rec.pipeline)       setPipeline(rec.pipeline);
+        if (rec.panel)          setPanel(rec.panel);
+        if (rec.dataDictionary) setDataDictionary(rec.dataDictionary);
+      }
+      setIdbReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, [pid]);
 
   const context = useMemo(() => ({
     datasets: Object.fromEntries((allDatasets || []).map(d => [d.id, d.rawData]))
@@ -59,16 +77,93 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   const panelReport = useMemo(() => panel ? validatePanel(rows, panel.entityCol, panel.timeCol) : null, [rows, panel]);
   const qualityReport = useMemo(() => buildDataQualityReport(headers, rows, info, panelReport), [headers, rows, info, panelReport]);
 
+  // ── Persist on every change (debounced 400ms to avoid thrashing IDB) ────────
+  const saveTimer    = useRef(null);
+  const rawDataSaved = useRef(false);   // save rawData only once per session — it never changes
   useEffect(() => {
-    lsSave(pid, { filename, pipeline, panel, dataDictionary,
-      rowCount: rawData.rows.length, colCount: rawData.headers.length,
-      pipelineLength: pipeline.length });
-  }, [pipeline, panel, dataDictionary]);
+    if (!idbReady) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      savePipeline(pid, {
+        filename, pipeline, panel, dataDictionary,
+        rowCount: rawData.rows.length, colCount: rawData.headers.length,
+        pipelineLength: pipeline.length,
+      });
+      // Persist raw dataset once per session (skip if already stored this session)
+      if (!rawDataSaved.current) {
+        saveRawData(pid, rawData).then(({ stored }) => {
+          if (stored) rawDataSaved.current = true;
+        });
+      }
+    }, 400);
+    return () => clearTimeout(saveTimer.current);
+  }, [pipeline, panel, dataDictionary, idbReady]);
 
-  const addStep = useCallback(s => setPipeline(p => [...p, { ...s, id: Date.now() + Math.random() }]), []);
-  const rmStep     = useCallback(i => setPipeline(p => p.filter((_, j) => j !== i)), []);
-  const rmLastStep = useCallback(() => setPipeline(p => p.slice(0, -1)), []);
-  const clear   = useCallback(() => setPipeline([]), []);
+  // ── Undo / Redo stack ──────────────────────────────────────────────────────
+  // Each entry is a full pipeline snapshot (step[]). Present state is NOT in
+  // the stack — it lives in `pipeline`. Undo pushes current to redo stack and
+  // pops from undo stack. Max 40 entries to bound memory.
+  const MAX_UNDO = 40;
+  const undoStack = useRef([]);   // stack of past pipeline states (oldest → newest)
+  const redoStack = useRef([]);   // stack of future pipeline states
+
+  // Snapshot before every mutation
+  const snapshot = useCallback((prev) => {
+    undoStack.current = [...undoStack.current.slice(-MAX_UNDO + 1), prev];
+    redoStack.current = [];       // any new action clears redo
+  }, []);
+
+  const addStep = useCallback(s => {
+    setPipeline(p => {
+      snapshot(p);
+      return [...p, { ...s, id: Date.now() + Math.random() }];
+    });
+  }, [snapshot]);
+
+  const rmStep = useCallback(i => {
+    setPipeline(p => {
+      snapshot(p);
+      return p.filter((_, j) => j !== i);
+    });
+  }, [snapshot]);
+
+  const rmLastStep = useCallback(() => {
+    setPipeline(p => {
+      snapshot(p);
+      return p.slice(0, -1);
+    });
+  }, [snapshot]);
+
+  const clear = useCallback(() => {
+    setPipeline(p => {
+      if (p.length === 0) return p;
+      snapshot(p);
+      return [];
+    });
+  }, [snapshot]);
+
+  const undo = useCallback(() => {
+    if (!undoStack.current.length) return;
+    setPipeline(current => {
+      const prev = undoStack.current[undoStack.current.length - 1];
+      undoStack.current = undoStack.current.slice(0, -1);
+      redoStack.current = [current, ...redoStack.current].slice(0, MAX_UNDO);
+      return prev;
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    if (!redoStack.current.length) return;
+    setPipeline(current => {
+      const next = redoStack.current[0];
+      redoStack.current = redoStack.current.slice(1);
+      undoStack.current = [...undoStack.current.slice(-MAX_UNDO + 1), current];
+      return next;
+    });
+  }, []);
+
+  const canUndo = undoStack.current.length > 0;
+  const canRedo = redoStack.current.length > 0;
 
   // ── Save subset ────────────────────────────────────────────────────────────
   const [showSaveSubset, setShowSaveSubset] = useState(false);
@@ -260,7 +355,15 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         )}
       </div>
 
-      <History pipeline={pipeline} onRm={rmStep} onClear={clear}/>
+      <History
+        pipeline={pipeline}
+        onRm={rmStep}
+        onClear={clear}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+      />
     </div>
   );
 }
