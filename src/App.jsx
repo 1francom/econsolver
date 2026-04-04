@@ -658,12 +658,13 @@ export default function App() {
     }
   };
 
-  // Called by Uploader once file is confirmed
+  // Called by Uploader once file is confirmed.
+  // Always generate a fresh pid — never reuse a previous project's pid,
+  // which would cause the new project to inherit the old pipeline from IDB.
   const handleReady = (data, types, fname) => {
     setRawData(data);
-    setFilename(fname||"dataset.csv");
-    const newPid = pid||`proj_${Date.now()}`;
-    setPid(newPid);
+    setFilename(fname || "dataset.csv");
+    setPid(`proj_${Date.now()}_${Math.random().toString(36).slice(2)}`);
     setScreen("studio");
   };
 
@@ -722,7 +723,7 @@ export default function App() {
       {/* ── Main Content ──────────────────────────────────────────────────── */}
       <div style={{flex:1,minHeight:0,overflowY:["studio","explorer","modeling"].includes(screen)?"hidden":"auto"}}>
         {screen==="dashboard"&&(
-          <Dashboard onNew={()=>setScreen("upload")} onLoad={handleLoad}/>
+          <Dashboard onNew={()=>{ setPid(null); setRawData(null); setOutput(null); setScreen("upload"); }} onLoad={handleLoad}/>
         )}
         {screen==="upload"&&(
           <Uploader onReady={handleReady}/>

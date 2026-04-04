@@ -28,7 +28,7 @@ import {
   savePipeline,
   saveRawData,
   migrateFromLocalStorage,
-} from "./services/persistence/indexedDB.js";
+} from "./services/Persistence/indexedDB.js";
 
 // ── Re-exports (consumed by ModelingTab and other modules) ─────────────────
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
