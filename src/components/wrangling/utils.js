@@ -39,6 +39,18 @@ export function fuzzyGroups(vals, rowsForFreq){
   const freq={};
   if(rowsForFreq){rowsForFreq.forEach(v=>{if(v!=null){const s=String(v);freq[s]=(freq[s]||0)+1;}});}
   const norm=vals.map(normStr);
+
+  // Guard: two strings that share a common alphabetic prefix but differ only in their
+  // trailing numeric component are DISTINCT categories (e.g. "comuna 1" vs "comuna 2",
+  // "region 10" vs "region 11"). Never group them regardless of Levenshtein distance.
+  const trailingNum = s => { const m = s.match(/^(.*\D)\s*(\d+)\s*$/); return m ? [m[1].trim(), m[2]] : null; };
+  const areNumericVariants = (a, b) => {
+    const pa = trailingNum(a), pb = trailingNum(b);
+    if (!pa || !pb) return false;
+    // Same alphabetic prefix, different numbers → distinct categories
+    return pa[0] === pb[0] && pa[1] !== pb[1];
+  };
+
   const visited=new Array(vals.length).fill(false);
   const clusters=[];
   for(let i=0;i<vals.length;i++){
@@ -47,6 +59,8 @@ export function fuzzyGroups(vals, rowsForFreq){
     visited[i]=true;
     for(let j=i+1;j<vals.length;j++){
       if(visited[j]) continue;
+      // Skip numeric variants — "comuna 1" and "comuna 2" are NOT the same
+      if(areNumericVariants(norm[i], norm[j])) continue;
       const isSub=norm[i].includes(norm[j])||norm[j].includes(norm[i]);
       const d=isSub?0:levenshtein(norm[i],norm[j]);
       if(d===0||d<=Math.max(2,Math.floor(norm[i].length*.25))){

@@ -456,24 +456,116 @@ function Auditor({sug,aiP,onApply,onNormalize,loading}){
 }
 
 // ─── COLUMN CARD ──────────────────────────────────────────────────────────────
-function ColCard({h,info,selected,onSel,onAct}){
-  const c=info[h]||{};const[mo,setMo]=useState(false);
+function ColCard({h, info, sug, selected, onSel, onAct}){
+  const c = info[h] || {};
+  const [mo, setMo] = useState(false);
+
+  // Collect issues for this column from audit results
+  const issues = sug ? sug.filter(s => s.col === h) : [];
+  const hasNA      = issues.some(s => s.type === "na");
+  const hasOutlier = issues.some(s => s.type === "outlier");
+  const hasVariant = issues.some(s => s.type === "variant");
+  const isConst    = issues.some(s => s.type === "const");
+  const hasIssue   = hasNA || hasOutlier || hasVariant || isConst;
+
+  // Border color: red if high-sev issue, yellow if medium, teal if selected
+  const highSev = issues.some(s => s.sev === "high");
+  const borderCol = selected ? C.teal : hasIssue ? (highSev ? C.red : C.yellow) : C.border;
+
   return(
-    <div onClick={()=>{onSel(h);setMo(false);}} style={{border:`1px solid ${selected?C.teal:C.border}`,borderRadius:4,padding:"0.5rem 0.55rem",background:selected?`${C.teal}10`:C.surface,cursor:"pointer",position:"relative",transition:"all 0.12s"}}>
+    <div onClick={()=>{onSel(h);setMo(false);}}
+      style={{border:`1px solid ${borderCol}`,borderRadius:4,padding:"0.5rem 0.55rem",
+        background:selected?`${C.teal}10`:hasIssue?`${highSev?C.red:C.yellow}06`:C.surface,
+        cursor:"pointer",position:"relative",transition:"all 0.12s"}}>
       <div style={{display:"flex",alignItems:"flex-start",gap:4,marginBottom:3}}>
-        <span style={{fontFamily:mono,fontSize:11,color:selected?C.teal:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h}</span>
-        <button onClick={e=>{e.stopPropagation();setMo(m=>!m);}} style={{background:"transparent",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textMuted,cursor:"pointer",fontSize:9,padding:"1px 4px",flexShrink:0}}>⋯</button>
+        <span style={{fontFamily:mono,fontSize:11,
+          color:selected?C.teal:C.text,
+          flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h}</span>
+        <button onClick={e=>{e.stopPropagation();setMo(m=>!m);}}
+          style={{background:"transparent",border:`1px solid ${C.border2}`,
+            borderRadius:2,color:C.textMuted,cursor:"pointer",fontSize:9,padding:"1px 4px",flexShrink:0}}>⋯</button>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:4}}>
+      <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
         <Badge ch={c.isNum?"num":"cat"} color={c.isNum?C.blue:C.purple}/>
         <NA pct={c.naPct||0}/>
-        {c.outliers>0&&<Badge ch={`${c.outliers}⚠`} color={C.orange}/>}
+        {isConst    && <Badge ch="const" color={C.red}/>}
+        {hasNA      && <Badge ch={`${(c.naPct*100).toFixed(0)}% NA`} color={highSev?C.red:C.yellow}/>}
+        {hasOutlier && <Badge ch={`${c.outliers}⚠`} color={C.orange}/>}
+        {hasVariant && <Badge ch="variants" color={C.teal}/>}
       </div>
-      {mo&&<div onClick={e=>e.stopPropagation()} style={{position:"absolute",top:"100%",right:0,zIndex:99,background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4,boxShadow:"0 6px 24px #000b",minWidth:140,overflow:"hidden"}}>
+      {mo&&<div onClick={e=>e.stopPropagation()}
+        style={{position:"absolute",top:"100%",right:0,zIndex:99,background:C.surface2,
+          border:`1px solid ${C.border}`,borderRadius:4,boxShadow:"0 6px 24px #000b",
+          minWidth:140,overflow:"hidden"}}>
         {[["rename","Rename"],["filter","Filter"],["drop","Drop"]].map(([a,l])=>(
-          <button key={a} onClick={()=>{onAct(h,a);setMo(false);}} style={{width:"100%",padding:"0.45rem 0.8rem",background:"transparent",border:"none",color:a==="drop"?C.red:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,textAlign:"left"}}>{l}</button>
+          <button key={a} onClick={()=>{onAct(h,a);setMo(false);}}
+            style={{width:"100%",padding:"0.45rem 0.8rem",background:"transparent",border:"none",
+              color:a==="drop"?C.red:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,textAlign:"left"}}>{l}</button>
         ))}
       </div>}
+    </div>
+  );
+}
+
+// ─── COLUMN ISSUE PANEL ───────────────────────────────────────────────────────
+// Shown below the grid when a column with issues is selected.
+// Read-only: describes the issue and suggests where to act. No action buttons.
+function ColIssuePanel({ col, issues }) {
+  if (!issues || !issues.length) return null;
+
+  const TYPE_META = {
+    na:      { icon:"⚠", color: null,    label: "Missing values" },
+    outlier: { icon:"⚠", color: C.orange, label: "Outliers detected" },
+    variant: { icon:"⬡", color: C.teal,   label: "Similar variants" },
+    const:   { icon:"✕", color: C.red,    label: "Constant column" },
+  };
+  const SEV_COLOR = { high: C.red, medium: C.yellow };
+
+  return (
+    <div style={{marginBottom:"1rem",border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden"}}>
+      <div style={{padding:"0.4rem 0.75rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,
+        fontSize:9,color:C.textMuted,letterSpacing:"0.15em",textTransform:"uppercase",fontFamily:mono}}>
+        ⚑ Issues — <span style={{color:C.text}}>{col}</span>
+      </div>
+      {issues.map((s, i) => {
+        const meta = TYPE_META[s.type] || { icon:"·", color: C.textMuted, label: s.type };
+        const sevColor = SEV_COLOR[s.sev] || C.textMuted;
+        const color = meta.color || sevColor;
+
+        // Recommendation text per issue type
+        const recs = {
+          na:      "Consider: Fill NA  (Cleaning tab → Fill missing values)",
+          outlier: "Consider: Winsorize  (Cleaning tab → Winsorize)",
+          variant: "Review variants below — use Normalize text categories if needed",
+          const:   "Consider: Drop column  (use ⋯ menu above)",
+        };
+
+        return (
+          <div key={i} style={{padding:"0.6rem 0.85rem",
+            borderBottom: i < issues.length-1 ? `1px solid ${C.border}` : "none",
+            borderLeft:`3px solid ${color}`,background:`${color}06`}}>
+            <div style={{fontSize:11,color,fontFamily:mono,marginBottom:3,fontWeight:600}}>
+              {meta.icon} {s.title}
+            </div>
+            <div style={{fontSize:11,color:C.textDim,lineHeight:1.6,marginBottom:4}}>{s.detail}</div>
+            <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,fontStyle:"italic"}}>
+              → {recs[s.type] || ""}
+            </div>
+            {/* Variant clusters preview */}
+            {s.type === "variant" && s.clusters && (
+              <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
+                {s.clusters.slice(0,5).map((cl,ci)=>(
+                  <span key={ci} style={{fontSize:9,fontFamily:mono,color:C.textMuted,
+                    padding:"2px 6px",border:`1px solid ${C.border2}`,borderRadius:2}}>
+                    {cl.members.join(" · ")} → <span style={{color:C.gold}}>{cl.canonical}</span>
+                  </span>
+                ))}
+                {s.clusters.length>5&&<span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>+{s.clusters.length-5} more</span>}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -891,6 +983,124 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
 }
 
 
+
+// ─── WINSORIZE SECTION ────────────────────────────────────────────────────────
+// Collapsible panel in CleanTab. Clamps extreme values to [p1, p99] bounds.
+// Moved from Features — conceptually data cleaning, not feature engineering.
+function WinsorizeSection({ headers, info, rows, onAdd }) {
+  const [open,    setOpen]    = useState(false);
+  const [col,     setCol]     = useState("");
+  const [mode,    setMode]    = useState("inplace"); // "inplace" | "newcol"
+  const [newName, setNewName] = useState("");
+
+  const numCols = headers.filter(h => info[h]?.isNum);
+  const colInfo = col ? info[col] : null;
+
+  const wVals = col
+    ? rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v)).sort((a,b)=>a-b)
+    : [];
+  const wLo = wVals[Math.floor(wVals.length * 0.01)] ?? wVals[0];
+  const wHi = wVals[Math.floor(wVals.length * 0.99)] ?? wVals[wVals.length - 1];
+  const nClipped = wVals.filter(v => v < wLo || v > wHi).length;
+  const targetCol = mode === "inplace" ? col : (newName.trim() || `winsor_${col}`);
+
+  function apply() {
+    if (!col) return;
+    onAdd({ type:"winz", col, nn:targetCol, lo:wLo, hi:wHi,
+      desc:`Winsorize '${col}' [p1,p99] → '${targetCol}'${mode==="inplace"?" (in-place)":""}` });
+    setCol(""); setNewName("");
+  }
+
+  return (
+    <div style={{ marginBottom:"1.2rem" }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width:"100%", display:"flex", alignItems:"center", gap:8,
+        padding:"0.5rem 0.75rem",
+        background: open ? `${C.orange}08` : C.surface2,
+        border:`1px solid ${open ? C.orange+"40" : C.border}`,
+        borderRadius: open ? "4px 4px 0 0" : 4,
+        color: open ? C.orange : C.textDim,
+        cursor:"pointer", fontFamily:mono, fontSize:10,
+        letterSpacing:"0.15em", textTransform:"uppercase", textAlign:"left",
+        transition:"all 0.12s",
+      }}>
+        <span>{open ? "▾" : "▸"}</span>
+        <span>Winsorize outliers</span>
+        {!open && numCols.length > 0 && (
+          <span style={{ marginLeft:"auto", fontSize:9, color:C.textMuted, fontFamily:mono }}>
+            clip extreme values to [p1, p99]
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{ padding:"0.9rem 1rem",
+          background:C.surface, border:`1px solid ${C.orange}30`,
+          borderTop:"none", borderRadius:"0 0 4px 4px" }}>
+
+          <Lbl color={C.orange}>Numeric column</Lbl>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:"1rem",
+            maxHeight:100, overflowY:"auto" }}>
+            {numCols.map(h => (
+              <button key={h} onClick={() => { setCol(h); setNewName(""); }} style={{
+                padding:"0.25rem 0.6rem",
+                border:`1px solid ${col===h ? C.orange : C.border2}`,
+                background: col===h ? `${C.orange}18` : "transparent",
+                color: col===h ? C.orange : C.textDim,
+                borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                transition:"all 0.1s",
+              }}>
+                {col===h?"✓ ":""}{h}
+                {info[h]?.outliers > 0 && (
+                  <span style={{fontSize:8,color:C.orange,marginLeft:3}}>⚠{info[h].outliers}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {col && (
+            <>
+              <div style={{ display:"flex", gap:4, marginBottom:8 }}>
+                {[["inplace","Overwrite column"],["newcol","New column"]].map(([m,l])=>(
+                  <button key={m} onClick={() => setMode(m)} style={{
+                    padding:"0.25rem 0.7rem",
+                    border:`1px solid ${mode===m ? C.orange : C.border2}`,
+                    background: mode===m ? `${C.orange}18` : "transparent",
+                    color: mode===m ? C.orange : C.textDim,
+                    borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                  }}>{mode===m?"✓ ":""}{l}</button>
+                ))}
+              </div>
+              {mode === "newcol" && (
+                <input value={newName} onChange={e => setNewName(e.target.value)}
+                  placeholder={`winsor_${col}`}
+                  style={{ width:"100%", boxSizing:"border-box",
+                    padding:"0.38rem 0.6rem", background:C.surface2,
+                    border:`1px solid ${C.border2}`, borderRadius:3,
+                    color:C.text, fontFamily:mono, fontSize:11, outline:"none",
+                    marginBottom:8 }}/>
+              )}
+              <div style={{ padding:"0.5rem 0.75rem", background:C.surface2,
+                border:`1px solid ${C.border}`, borderRadius:3,
+                marginBottom:"0.8rem", fontSize:11, fontFamily:mono, color:C.textDim,
+                lineHeight:1.8 }}>
+                <div>Clip <span style={{color:C.gold}}>{col}</span> to [p1={wLo?.toFixed(3)}, p99={wHi?.toFixed(3)}]</div>
+                <div style={{color:C.textMuted}}>
+                  {nClipped} value{nClipped!==1?"s":""} will be clamped
+                  {" · "}range [{wVals[0]?.toFixed(2)}, {wVals[wVals.length-1]?.toFixed(2)}]
+                </div>
+                <div style={{color:C.textMuted}}>→ output: <span style={{color:C.orange}}>{targetCol}</span></div>
+              </div>
+              <Btn onClick={apply} color={C.orange} v="solid"
+                dis={!col} ch={mode==="inplace"?"Winsorize in-place →":"Winsorize → new col →"}/>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── FILL MISSING SECTION ─────────────────────────────────────────────────────
 // Collapsible panel in CleanTab for all fill strategies including grouped imputation.
 function FillNaSection({ headers, info, rows, onAdd }) {
@@ -1160,7 +1370,6 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
       )}
       {/* ─ Standalone Text Normalizer ─ */}
       <NormalizePanel headers={headers} rows={rows} info={info} onAdd={onAdd}/>
-      <Auditor sug={sug} aiP={aiP} onApply={applyAudit} onNormalize={s=>openNormDialog(s.col)} loading={audL}/>
       {/* Standalone filter button */}
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.9rem"}}>
         <Lbl mb={0}>Columns <span style={{color:C.textMuted}}>({headers.length})</span></Lbl>
@@ -1184,9 +1393,15 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
             onCancel={()=>setShowFilter(false)}/>
         </div>
       )}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"1.2rem"}}>
-        {headers.map(h=><ColCard key={h} h={h} info={info} selected={sel===h} onSel={h=>{setSel(h);setAct(null);setARes(null);setASt("idle");}} onAct={(h,a)=>{setSel(h);setAct(a);}}/>)}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"0.75rem"}}>
+        {headers.map(h=><ColCard key={h} h={h} info={info} sug={sug} selected={sel===h}
+          onSel={h=>{setSel(h);setAct(null);setARes(null);setASt("idle");}}
+          onAct={(h,a)=>{setSel(h);setAct(a);}}/>)}
       </div>
+      {/* Issue panel — shown when a column with issues is selected, before the action panel */}
+      {sel && !act && sug.some(s=>s.col===sel) && (
+        <ColIssuePanel col={sel} issues={sug.filter(s=>s.col===sel)}/>
+      )}
       {sel&&(
         <div style={{border:`1px solid ${C.teal}30`,borderRadius:4,padding:"1rem",background:C.surface,marginBottom:"1.2rem"}}>
           <div style={{fontSize:10,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:"0.8rem"}}>
@@ -1245,6 +1460,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
         </div>
       )}
       {/* ── Fill Missing Values ── */}
+      <WinsorizeSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
       <FillNaSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
 
       <Lbl>Preview — pipeline output</Lbl>

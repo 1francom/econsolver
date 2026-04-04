@@ -241,7 +241,6 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
   const [pop,setPop]=useState("lag"),[pc,setPc]=useState(""),[lagN,setLagN]=useState(1);
   const [dc,setDc]=useState(""),[dp,setDp]=useState("");
   const [dtc,setDtc]=useState(""),[dpc,setDpc]=useState("");
-  const [winzMode,setWinzMode]=useState("inplace");
   const [dummyRef,setDummyRef]=useState("");
   // Date extraction state
   const [dateSrc,setDateSrc]=useState("");
@@ -280,7 +279,6 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
   },[]);
   const prevAutoRef=useRef("");
   useEffect(()=>{
-    if(qt==="winz") return;
     const auto=suggestName(qt,qc,xc2);
     if(nm===""||nm===prevAutoRef.current){setNm(auto);prevAutoRef.current=auto;}
   },[qt,qc,xc2]);
@@ -303,14 +301,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
 
   const doQ=()=>{
     if(!qc) return;
-    if(qt==="winz"){
-      const vals=rows.map(r=>r[qc]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
-      const lo=vals[Math.floor(vals.length*.01)]??vals[0],hi=vals[Math.floor(vals.length*.99)]??vals[vals.length-1];
-      // name optional — default to winsor_col for new-col mode, col itself for in-place
-      const targetCol=winzMode==="inplace"?qc:(nm.trim()||`winsor_${qc}`);
-      onAdd({type:"winz",col:qc,nn:targetCol,lo,hi,desc:`Winsorize '${qc}' [p1,p99] → '${targetCol}'${winzMode==="inplace"?" (in-place)":""}`});
-      resetQuick();return;
-    }
+
     const n=nm.trim();if(!n)return;
     if(qt==="log") onAdd({type:"log",col:qc,nn:n,desc:`ln(${qc}) → ${n}`});
     else if(qt==="sq") onAdd({type:"sq",col:qc,nn:n,desc:`${qc}² → ${n}`});
@@ -323,7 +314,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
     resetQuick();
   };
   // canAddQuick: winz only needs qc; others need qc + non-empty name; ix also needs xc2
-  const canAddQuick=qc&&(qt==="winz"||(nm.trim()&&(qt!=="ix"||(qt==="ix"&&xc2))));
+  const canAddQuick=qc&&(nm.trim()&&(qt!=="ix"||(qt==="ix"&&xc2)));
 
   const doP=()=>{
     const n=nm.trim();if(!n||!pc||!isP) return;
@@ -365,21 +356,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
       {(vt==="quick"||vt==="panel"||vt==="did")&&(
         <div style={{marginBottom:"1.2rem"}}>
           {/* For winz: show mode toggle + optional name only when newcol */}
-          {vt==="quick"&&qt==="winz"?(
-            <>
-              <div style={{display:"flex",gap:4,marginBottom:6}}>
-                {[["inplace","In-place (overwrite)"],["newcol","New column"]].map(([m,l])=>(
-                  <button key={m} onClick={()=>setWinzMode(m)} style={{padding:"0.25rem 0.7rem",border:`1px solid ${winzMode===m?C.orange:C.border2}`,background:winzMode===m?`${C.orange}18`:"transparent",color:winzMode===m?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"}}>{winzMode===m?"✓ ":""}{l}</button>
-                ))}
-              </div>
-              {winzMode==="newcol"&&(
-                <input value={nm} onChange={e=>{setNm(e.target.value);prevAutoRef.current="";}}
-                  placeholder={`(optional) default: winsor_${qc||"col"}`}
-                  style={{...inpS}}/>
-              )}
-            </>
-          ):(
-            <>
+          (<>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
                 <Lbl mb={0}>New variable name</Lbl>
                 {nm&&<span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>← auto-suggested</span>}
@@ -388,7 +365,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
                 placeholder="e.g. log_wage, wage_lag1, treat_x_post"
                 style={{...inpS}}/>
             </>
-          )}
+          )
         </div>
       )}
 
@@ -397,7 +374,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
         <div>
           <Lbl color={C.teal}>Transform</Lbl>
           <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
-            {[["log","ln(x)"],["sq","x²"],["std","z-score"],["ix","x₁×x₂"],["winz","Winsorize p1/p99"]].map(([k,l])=>(
+            {[["log","ln(x)"],["sq","x²"],["std","z-score"],["ix","x₁×x₂"]].map(([k,l])=>(
               <button key={k} onClick={()=>setQt(k)} style={{padding:"0.32rem 0.75rem",border:`1px solid ${qt===k?C.teal:C.border2}`,background:qt===k?`${C.teal}18`:"transparent",color:qt===k?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>
                 {qt===k?"✓ ":""}{l}
               </button>
@@ -411,35 +388,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
           </div>
           {qt==="ix"&&<><Lbl color={C.teal}>X₂</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>{numC.filter(h=>h!==qc).map(h=><button key={h} onClick={()=>setXc2(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${xc2===h?C.teal:C.border2}`,background:xc2===h?`${C.teal}18`:"transparent",color:xc2===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{xc2===h?"✓ ":""}{h}</button>)}</div></>}
 
-          {/* Winsorize options — shown right after column is selected */}
-          {qt==="winz"&&qc&&(()=>{
-            const wVals=rows.map(r=>r[qc]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
-            const wLo=wVals[Math.floor(wVals.length*.01)]??wVals[0];
-            const wHi=wVals[Math.floor(wVals.length*.99)]??wVals[wVals.length-1];
-            const nClipped=wVals.filter(v=>v<wLo||v>wHi).length;
-            return (
-              <div style={{padding:"0.7rem 0.9rem",background:`${C.orange}08`,border:`1px solid ${C.orange}30`,borderLeft:`3px solid ${C.orange}`,borderRadius:4,marginBottom:"1rem"}}>
-                <div style={{display:"flex",gap:4,marginBottom:8}}>
-                  {[["inplace","Overwrite column"],["newcol","New column"]].map(([m,l])=>(
-                    <button key={m} onClick={()=>setWinzMode(m)} style={{padding:"0.25rem 0.7rem",border:`1px solid ${winzMode===m?C.orange:C.border2}`,background:winzMode===m?`${C.orange}18`:"transparent",color:winzMode===m?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"}}>{winzMode===m?"✓ ":""}{l}</button>
-                  ))}
-                </div>
-                {winzMode==="newcol"&&(
-                  <input value={nm} onChange={e=>{setNm(e.target.value);prevAutoRef.current="";}}
-                    placeholder={`winsor_${qc}`}
-                    style={{width:"100%",boxSizing:"border-box",padding:"0.38rem 0.6rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none",marginBottom:8}}/>
-                )}
-                <div style={{fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.8}}>
-                  <div>Clip <span style={{color:C.gold}}>{qc}</span> to [p1={wLo!=null?wLo.toFixed(4):"?"}, p99={wHi!=null?wHi.toFixed(4):"?"}]</div>
-                  <div style={{color:C.textMuted}}>
-                    {nClipped} value{nClipped!==1?"s":""} will be clamped
-                    {" · "}range [{wVals[0]?.toFixed(3)}, {wVals[wVals.length-1]?.toFixed(3)}]
-                    {" → "}[{wLo?.toFixed(3)}, {wHi?.toFixed(3)}]
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
+
 
           {/* Formula preview for non-winz transforms */}
           {qc&&qt!=="winz"&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
@@ -448,7 +397,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
             {qt==="std"&&<><span style={{color:C.teal}}>{nm||"?"}</span> = (<span style={{color:C.gold}}>{qc}</span>−μ)/σ</>}
             {qt==="ix"&&xc2&&<><span style={{color:C.teal}}>{nm||"?"}</span> = <span style={{color:C.gold}}>{qc}</span>×<span style={{color:C.gold}}>{xc2}</span></>}
           </div>}
-          <Btn onClick={doQ} color={C.teal} v="solid" dis={!canAddQuick} ch={qt==="winz"?`Winsorize ${winzMode==="inplace"?"in-place":"→ new col"}`:"Add variable"}/>
+          <Btn onClick={doQ} color={C.teal} v="solid" dis={!canAddQuick} ch="Add variable"/>
         </div>
       )}
 
