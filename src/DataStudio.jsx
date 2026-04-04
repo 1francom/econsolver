@@ -413,6 +413,20 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     setActiveId(prev => prev === id ? primaryId : prev);
   }, [primaryId]);
 
+  // Save a derived dataset (pipeline output or summarize result) into the manager.
+  // Appears immediately in the sidebar with its own empty pipeline.
+  const handleSaveSubset = useCallback((name, rows, headers) => {
+    const id    = genId();
+    const entry = {
+      id,
+      filename: name,
+      rawData:  { rows, headers },
+      origin:   activeId,   // informational — which dataset it came from
+    };
+    setDatasets(prev => [...prev, entry]);
+    setActiveId(id);        // switch to the new subset immediately
+  }, [activeId]);
+
   return (
     <div style={{
       display: "flex", height: "100%", minHeight: 0,
@@ -444,6 +458,7 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
             onComplete={onComplete}
             pid={activeDs.id}
             allDatasets={otherDatasets}
+            onSaveSubset={handleSaveSubset}
           />
         </div>
       )}

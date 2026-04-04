@@ -32,7 +32,7 @@ export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [] }) {
+export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [], onSaveSubset }) {
   const [pipeline, setPipeline] = useState(() => {
     try { return lsGet().find(p => p.id === pid)?.pipeline || []; } catch { return []; }
   });
@@ -69,6 +69,18 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   const rmStep     = useCallback(i => setPipeline(p => p.filter((_, j) => j !== i)), []);
   const rmLastStep = useCallback(() => setPipeline(p => p.slice(0, -1)), []);
   const clear   = useCallback(() => setPipeline([]), []);
+
+  // ── Save subset ────────────────────────────────────────────────────────────
+  const [showSaveSubset, setShowSaveSubset] = useState(false);
+  const [subsetName,     setSubsetName]     = useState("");
+
+  function doSaveSubset() {
+    const name = subsetName.trim() ||
+      (filename ? filename.replace(/\.[^.]+$/, "") + "_subset.csv" : "subset.csv");
+    if (onSaveSubset) onSaveSubset(name, rows, headers);
+    setShowSaveSubset(false);
+    setSubsetName("");
+  }
 
   const naCount = useMemo(() =>
     rows.filter(r => headers.some(h => { const v = r[h]; return v === null || v === undefined; })).length,
@@ -138,6 +150,59 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
               </span>
             )}
             <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}/>
+            {onSaveSubset && (
+              <div style={{ position:"relative" }}>
+                <button
+                  onClick={() => { setShowSaveSubset(o => !o); setSubsetName(""); }}
+                  style={{ padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
+                    fontFamily:mono, fontSize:10, transition:"all 0.12s",
+                    background: showSaveSubset ? `${"#6ec8b4"}18` : "transparent",
+                    color: showSaveSubset ? "#6ec8b4" : "#888",
+                    border:`1px solid ${showSaveSubset ? "#6ec8b4" : "#252525"}` }}>
+                  ⊕ Save as dataset
+                </button>
+                {showSaveSubset && (
+                  <>
+                    <div onClick={() => setShowSaveSubset(false)}
+                      style={{ position:"fixed", inset:0, zIndex:98 }}/>
+                    <div style={{
+                      position:"absolute", right:0, top:"calc(100% + 6px)",
+                      background:"#131313", border:"1px solid #252525",
+                      borderRadius:4, padding:"0.85rem", zIndex:99,
+                      minWidth:280, boxShadow:"0 8px 24px #000c",
+                    }}>
+                      <div style={{ fontSize:9, color:"#6ec8b4", letterSpacing:"0.18em",
+                        textTransform:"uppercase", fontFamily:mono, marginBottom:6 }}>
+                        Save current dataset
+                      </div>
+                      <div style={{ fontSize:10, color:"#888", fontFamily:mono, marginBottom:8, lineHeight:1.5 }}>
+                        {rows.length.toLocaleString()} rows · {headers.length} cols
+                        {pipeline.length > 0 && ` · ${pipeline.length} pipeline step${pipeline.length !== 1 ? "s" : ""} applied`}
+                      </div>
+                      <input
+                        value={subsetName}
+                        onChange={e => setSubsetName(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") doSaveSubset(); if (e.key === "Escape") setShowSaveSubset(false); }}
+                        placeholder={filename ? filename.replace(/\.[^.]+$/, "") + "_subset.csv" : "subset.csv"}
+                        autoFocus
+                        style={{ width:"100%", boxSizing:"border-box",
+                          padding:"0.38rem 0.6rem", background:"#0f0f0f",
+                          border:"1px solid #252525", borderRadius:3,
+                          color:"#ddd8cc", fontFamily:mono, fontSize:11,
+                          outline:"none", marginBottom:8 }}/>
+                      <button onClick={doSaveSubset} style={{
+                        width:"100%", padding:"0.42rem",
+                        background:"#6ec8b4", color:"#080808",
+                        border:"1px solid #6ec8b4", borderRadius:3,
+                        cursor:"pointer", fontFamily:mono, fontSize:11, fontWeight:700,
+                      }}>
+                        Add to Dataset Manager →
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <button onClick={proceed} style={{ padding:"0.28rem 0.65rem", borderRadius:3,
               cursor:"pointer", fontFamily:mono, fontSize:10,
               background:"#c8a96e", color:"#080808",
@@ -183,7 +248,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
           <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>
         )}
         {tab === "reshape" && (
-          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep} onRmLastStep={rmLastStep}/>
+          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep} onRmLastStep={rmLastStep} onSaveSubset={onSaveSubset} filename={filename}/>
         )}
         {tab === "merge" && (
           <MergeTab rows={rows} headers={headers} filename={filename}

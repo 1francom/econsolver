@@ -6,7 +6,7 @@ import { C, mono, Lbl, Tabs, Btn } from "./shared.jsx";
 // pivot_longer (wide→long) + group_summarize (collapse rows).
 // Both are structurally destructive — they change the shape of the dataset,
 // not just add columns. Kept separate from Feature Engineering deliberately.
-function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep }) {
+function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep, onSaveSubset, filename }) {
   const [sub, setSub] = useState("pivot");
 
   // ── pivot_longer state ────────────────────────────────────────────────────
@@ -24,7 +24,9 @@ function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep }) {
   const [byCols,    setByCols]    = useState([]);
   const [aggs,      setAggs]      = useState([]);      // [{col, fn, nn}]
   const [sumResult, setSumResult] = useState(null);    // {rows, headers, by, aggs} after collapse
-  const [latexOpen, setLatexOpen] = useState(false);   // show/hide LaTeX panel
+  const [latexOpen,   setLatexOpen]  = useState(false);   // show/hide LaTeX panel
+  const [showSaveSub, setShowSaveSub]= useState(false);  // save-as-dataset dialog
+  const [subsetName,  setSubsetName] = useState("");
   const [copied,    setCopied]    = useState(false);   // copy feedback
   const [hoveredCol, setHoveredCol] = useState(null);  // tooltip on group-by chips
 
@@ -188,7 +190,7 @@ function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep }) {
       return 0;
     });
     setSumResult({ rows: outRows, headers: outHeaders, by: step.by, aggs: step.aggs });
-    setLatexOpen(false); setCopied(false);
+    setLatexOpen(false); setCopied(false); setShowSaveSub(false); setSubsetName("");
     // Keep byCols/aggs so user can re-run with tweaks — they clear manually
   }
 
@@ -639,6 +641,71 @@ function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep }) {
                   color:latexOpen?C.gold:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono,
                   transition:"all 0.1s",
                 }}>{ } LaTeX {latexOpen?"▾":"▸"}</button>
+
+                {/* Save as dataset */}
+                {onSaveSubset && (
+                  <div style={{position:"relative"}}>
+                    <button onClick={()=>{setShowSaveSub(o=>!o);setSubsetName("");}} style={{
+                      padding:"0.22rem 0.6rem",
+                      background:showSaveSub?`${C.teal}18`:"transparent",
+                      border:`1px solid ${showSaveSub?C.teal:C.border2}`,borderRadius:2,
+                      color:showSaveSub?C.teal:C.textDim,cursor:"pointer",
+                      fontSize:9,fontFamily:mono,transition:"all 0.1s",
+                    }}>⊕ Save</button>
+                    {showSaveSub && (
+                      <>
+                        <div onClick={()=>setShowSaveSub(false)}
+                          style={{position:"fixed",inset:0,zIndex:98}}/>
+                        <div style={{
+                          position:"absolute",right:0,top:"calc(100% + 6px)",
+                          background:C.surface2,border:`1px solid ${C.border2}`,
+                          borderRadius:4,padding:"0.85rem",zIndex:99,
+                          minWidth:260,boxShadow:"0 8px 24px #000c",
+                        }}>
+                          <div style={{fontSize:9,color:C.teal,letterSpacing:"0.18em",
+                            textTransform:"uppercase",fontFamily:mono,marginBottom:6}}>
+                            Save as dataset
+                          </div>
+                          <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,
+                            marginBottom:8,lineHeight:1.5}}>
+                            {sumResult.rows.length} rows · {sumResult.headers.length} cols
+                            {" · "}group_by [{sumResult.by.join(", ")}]
+                          </div>
+                          <input
+                            value={subsetName}
+                            onChange={e=>setSubsetName(e.target.value)}
+                            onKeyDown={e=>{
+                              if(e.key==="Enter"){
+                                const n=subsetName.trim()||`summary_${sumResult.by.join("_")}.csv`;
+                                onSaveSubset(n, sumResult.rows, sumResult.headers);
+                                setShowSaveSub(false);setSubsetName("");
+                              }
+                              if(e.key==="Escape") setShowSaveSub(false);
+                            }}
+                            placeholder={`summary_${sumResult.by.join("_")}.csv`}
+                            autoFocus
+                            style={{width:"100%",boxSizing:"border-box",
+                              padding:"0.38rem 0.6rem",background:C.surface,
+                              border:`1px solid ${C.border2}`,borderRadius:3,
+                              color:C.text,fontFamily:mono,fontSize:11,
+                              outline:"none",marginBottom:8}}/>
+                          <button onClick={()=>{
+                            const n=subsetName.trim()||`summary_${sumResult.by.join("_")}.csv`;
+                            onSaveSubset(n, sumResult.rows, sumResult.headers);
+                            setShowSaveSub(false);setSubsetName("");
+                          }} style={{
+                            width:"100%",padding:"0.42rem",
+                            background:C.teal,color:C.bg,
+                            border:`1px solid ${C.teal}`,borderRadius:3,
+                            cursor:"pointer",fontFamily:mono,fontSize:11,fontWeight:700,
+                          }}>
+                            Add to Dataset Manager →
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {/* CSV download */}
                 <button onClick={()=>{
