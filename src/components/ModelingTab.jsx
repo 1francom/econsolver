@@ -8,7 +8,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import {
-  runOLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
+  runOLS, runWLS,run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
@@ -690,6 +690,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
   const [bwMode,     setBwMode]     = useState("ik");
   const [bwManual,   setBwManual]   = useState("");
   const [kernel,     setKernel]     = useState("triangular");
+  const [weightVar, setWeightVar] = useState([]);
 
   // ── Results state ─────────────────────────────────────────────────────────
   const [result,       setResult]       = useState(null);
@@ -716,12 +717,27 @@ export default function ModelingTab({ cleanedData, onBack }) {
       const allX = [...xVars, ...wVars];
 
       if (model === "OLS") {
-        if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
-        const res = runOLS(rows, y, allX);
-        if (!res) { setErr("Matrix is singular or insufficient data. Check for perfect multicollinearity."); setRunning(false); return; }
-        setResult({ type: "OLS", main: { ...res, varNames: ["(Intercept)", ...allX] } });
-
-      } else if (model === "FE" || model === "FD") {
+      if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
+        const wCol = weightVar[0];
+       let res;
+      if (wCol) {
+       const weights = rows.map(r => {
+       const v = r[wCol];
+       return typeof v === "number" && isFinite(v) && v > 0 ? v : null;
+       });
+      if (weights.every(w => w === null)) {
+        setErr(`Weight column '${wCol}' has no valid positive values.`);
+        setRunning(false); return;
+       }
+        res = runWLS(rows, y, allX, weights);
+      if (res) res.modelLabel = "WLS";
+      } else {
+          res = runOLS(rows, y, allX);
+      }
+      if (!res) { setErr("Matrix is singular or insufficient data."); setRunning(false); return; }
+      setResult({ type: "OLS", main: { ...res, varNames: ["(Intercept)", ...allX] } });
+      }
+       else if (model === "FE" || model === "FD") {
         if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
         const ec = panel.entityCol, tc = panel.timeCol;
         const feRaw = runFE(rows, y, allX, ec, tc);
@@ -771,7 +787,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
       setErr(`Estimation error: ${e.message}`);
     }
     setRunning(false);
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, rows, panel]);
+    } ,[model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel,weightVar, rows, panel]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -864,6 +880,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
             bwMode={bwMode}       setBwMode={setBwMode}
             bwManual={bwManual}   setBwManual={setBwManual}
             kernel={kernel}       setKernel={setKernel}
+            weightVar={weightVar} setWeightVar={setWeightVar}
           />
 
           <button
@@ -917,7 +934,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1.2rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>OLS Results</span>
+                  <span style={{ fontSize: 10, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.modelLabel || "OLS"} Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   <span style={{ fontSize: 12, color: C.textMuted }}>{yVar[0]} ~ {[...xVars, ...wVars].join(" + ")}</span>
                 </div>

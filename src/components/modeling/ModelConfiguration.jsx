@@ -190,6 +190,26 @@ function RDDConfig({
   );
 }
 
+
+// ─── OLS: Survey Weights ──────────────────────────────────────────────────────
+function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
+  const avail = numericCols.filter(
+    h => !yVar.includes(h) && !xVars.includes(h)
+  );
+  return (
+    <VarPanel
+      title="W̃ · Survey Weight (optional)"
+      color="#9e7ec8"
+      vars={avail}
+      selected={weightVar}
+      onToggle={setWeightVar}
+      multi={false}
+      info="Sampling weight column. Activates WLS. Leave empty for OLS."
+    />
+  );
+}
+
+
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export default function ModelConfiguration({
   model,
@@ -205,6 +225,7 @@ export default function ModelConfiguration({
   bwMode,     setBwMode,
   bwManual,   setBwManual,
   kernel,     setKernel,
+  weightVar,  setWeightVar,
 }) {
   if (model === "2SLS") {
     return (

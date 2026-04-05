@@ -117,6 +117,69 @@ export function runOLS(rows, yCol, xCols) {
   return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames };
 }
 
+// ─── WLS ENGINE ──────────────────────────────────────────────────────────────
+// Weighted Least Squares: β = (X'WX)⁻¹X'WY
+// weights: array of non-negative numbers, one per row (e.g. sampling weights).
+// Rows with weight ≤ 0 or non-finite weight are excluded.
+// Returns same shape as runOLS plus { weightCol } for display.
+export function runWLS(rows, yCol, xCols, weights) {
+  const valid = rows
+    .map((r, i) => ({ r, w: weights?.[i] ?? 1 }))
+    .filter(({ r, w }) =>
+      typeof r[yCol] === "number" && isFinite(r[yCol]) &&
+      xCols.every(c => typeof r[c] === "number" && isFinite(r[c])) &&
+      isFinite(w) && w > 0
+    );
+  if (valid.length < xCols.length + 2) return null;
+
+  const n  = valid.length;
+  const Y  = valid.map(({ r }) => r[yCol]);
+  const X  = valid.map(({ r }) => [1, ...xCols.map(c => r[c])]);
+  const W  = valid.map(({ w }) => w);  // raw weights
+
+  // Build X'WX and X'WY
+  const k = X[0].length;
+  const XtWX = Array.from({ length: k }, () => Array(k).fill(0));
+  const XtWY = Array(k).fill(0);
+  for (let i = 0; i < n; i++) {
+    const wi = W[i];
+    for (let j = 0; j < k; j++) {
+      XtWY[j] += wi * X[i][j] * Y[i];
+      for (let l = 0; l < k; l++) XtWX[j][l] += wi * X[i][j] * X[i][l];
+    }
+  }
+
+  const XtWXinv = matInv(XtWX);
+  if (!XtWXinv) return null;
+
+  const beta = XtWXinv.map((row) => row.reduce((s, v, j) => s + v * XtWY[j], 0));
+  const Yhat = X.map(row => row.reduce((s, v, i) => s + v * beta[i], 0));
+  const resid = Y.map((y, i) => y - Yhat[i]);
+
+  // σ² uses UNWEIGHTED SSR / df (HC-consistent; do NOT weight SSR)
+  const SSR = resid.reduce((s, e) => s + e * e, 0);
+  const df  = n - k;
+  const s2  = SSR / Math.max(1, df);
+
+  // Weighted R² — compare weighted SST vs weighted SSR
+  const Yw_mean = W.reduce((s, w, i) => s + w * Y[i], 0) / W.reduce((s, w) => s + w, 0);
+  const SST_w   = Y.reduce((s, y, i) => s + W[i] * (y - Yw_mean) ** 2, 0);
+  const SSR_w   = resid.reduce((s, e, i) => s + W[i] * e * e, 0);
+  const R2      = SST_w > 0 ? 1 - SSR_w / SST_w : 0;
+  const adjR2   = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
+
+  const se     = XtWXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  const tStats = beta.map((b, i) => b / se[i]);
+  const pVals  = tStats.map(t => pValue(t, df));
+  const Fstat  = ((SST_w - SSR_w) / (k - 1)) / (SSR_w / Math.max(1, df));
+  const Fpval  = fCDF(Fstat, k - 1, df);
+  const varNames = ["(Intercept)", ...xCols];
+
+  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames };
+}
+
+
+
 // ─── DIAGNOSTICS ─────────────────────────────────────────────────────────────
 
 // Breusch-Pagan test for heteroskedasticity (H0: homoskedastic)
