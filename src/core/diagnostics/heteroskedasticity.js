@@ -11,7 +11,7 @@
 //
 // X is the design matrix as array of row-arrays (including intercept column).
 
-import { transpose, matMul, matInv } from "../math/LinearEngine.js";
+import { transpose, matMul, matInv } from "../../math/LinearEngine.js";
 
 // ── Internal: OLS on squared residuals ───────────────────────────────────────
 function olsR2(Y, X) {

@@ -22,6 +22,7 @@ import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
 import { C, mono }        from "../components/modeling/shared.jsx";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot } from "../components/modeling/ModelPlots.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
+import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
@@ -341,109 +342,6 @@ function FitBar({ items }) {
   );
 }
 
-// ─── DIAGNOSTICS PANEL ───────────────────────────────────────────────────────
-function DiagnosticsPanel({ olsResult, rows, xCols, panelFE, panelFD, xColsPanel }) {
-  const [open, setOpen] = useState(true);
-
-  const bp = useMemo(() => {
-    if (!olsResult?.resid || !olsResult?.Yhat) return null;
-    return breuschPagan(olsResult.resid, olsResult.Yhat);
-  }, [olsResult]);
-
-  const vif = useMemo(() => {
-    if (!rows || !xCols || xCols.length < 2) return null;
-    return computeVIF(rows, xCols);
-  }, [rows, xCols]);
-
-  const hausman = useMemo(() => {
-    if (!panelFE || !panelFD) return null;
-    return hausmanTest(panelFE, panelFD, xColsPanel || []);
-  }, [panelFE, panelFD, xColsPanel]);
-
-  return (
-    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-      <button
-        onClick={() => setOpen(s => !s)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 10,
-          background: "#0a0a0a", padding: "0.5rem 1rem",
-          border: "none", borderBottom: open ? `1px solid ${C.border}` : "none",
-          cursor: "pointer", fontFamily: mono, color: C.textMuted,
-          fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase",
-        }}
-      >
-        <span style={{ flex: 1, textAlign: "left" }}>◈ Diagnostics</span>
-        <span>{open ? "▲" : "▼"}</span>
-      </button>
-      {open && (
-        <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.8rem", animation: "fadeUp 0.18s ease" }}>
-          {bp && (
-            <div style={{
-              padding: "0.65rem 0.9rem", borderRadius: 4,
-              background: bp.reject ? "#0d0808" : "#080d0a",
-              border: `1px solid ${bp.reject ? C.red + "40" : C.green + "40"}`,
-              borderLeft: `3px solid ${bp.reject ? C.red : C.green}`,
-            }}>
-              <div style={{ fontSize: 9, color: bp.reject ? C.red : C.green, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 4, fontFamily: mono }}>
-                Breusch-Pagan · Heteroskedasticity Test
-              </div>
-              <div style={{ fontFamily: mono, fontSize: 13, color: C.text }}>LM = {bp.LM} · p = {bp.pVal}</div>
-              <div style={{ fontSize: 11, color: C.textDim, marginTop: 4, fontFamily: mono }}>
-                {bp.reject
-                  ? "⚠ Reject H₀: Evidence of heteroskedasticity. Consider robust (HC) standard errors."
-                  : "✓ Fail to reject H₀: No evidence of heteroskedasticity at 5%."}
-              </div>
-            </div>
-          )}
-          {vif && (
-            <div>
-              <Lbl color={C.textMuted}>VIF · Variance Inflation Factors</Lbl>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {vif.map(({ col, vif: v }) => {
-                  const alarm = v > 10, warn = v > 5;
-                  const color = alarm ? C.red : warn ? C.yellow : C.green;
-                  return (
-                    <div key={col} style={{ padding: "0.35rem 0.7rem", background: C.surface2, border: `1px solid ${color}40`, borderRadius: 3, fontFamily: mono }}>
-                      <div style={{ fontSize: 9, color: C.textMuted }}>{col}</div>
-                      <div style={{ fontSize: 13, color }}>{isFinite(v) ? v.toFixed(2) : "∞"}</div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ fontSize: 10, color: C.textMuted, marginTop: 6, fontFamily: mono }}>
-                VIF &gt; 5 → moderate · VIF &gt; 10 → severe multicollinearity
-              </div>
-            </div>
-          )}
-          {hausman && (
-            <div style={{
-              padding: "0.65rem 0.9rem", borderRadius: 4,
-              background: parseFloat(hausman.pVal) < 0.05 ? "#0d0808" : "#080d0a",
-              border: `1px solid ${parseFloat(hausman.pVal) < 0.05 ? C.red + "40" : C.green + "40"}`,
-              borderLeft: `3px solid ${parseFloat(hausman.pVal) < 0.05 ? C.red : C.green}`,
-            }}>
-              <div style={{ fontSize: 9, color: parseFloat(hausman.pVal) < 0.05 ? C.red : C.green, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 4, fontFamily: mono }}>
-                Hausman Test · FE vs FD Consistency
-              </div>
-              <div style={{ fontFamily: mono, fontSize: 13, color: C.text }}>
-                H = {hausman.H} · df = {hausman.df} · p = {hausman.pVal}
-              </div>
-              <div style={{ fontSize: 11, color: C.textDim, marginTop: 4, fontFamily: mono }}>
-                {parseFloat(hausman.pVal) < 0.05
-                  ? "⚠ Reject H₀: FE and FD estimates differ significantly. Check for serial correlation (favors FD)."
-                  : "✓ Fail to reject H₀: FE and FD are consistent. FE preferred (more efficient)."}
-              </div>
-            </div>
-          )}
-          {!bp && !vif && !hausman && (
-            <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>Run a model to see diagnostics.</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── EXPORT BAR ───────────────────────────────────────────────────────────────
 function ExportBar({ yVar, results, model, onReport, rScriptConfig }) {
   const [showLatex, setShowLatex] = useState(false);
@@ -540,7 +438,7 @@ function ExportBar({ yVar, results, model, onReport, rScriptConfig }) {
 
 // ─── PANEL FE/FD RESULTS ─────────────────────────────────────────────────────
 // Must be a named component (not an IIFE) — React Rules of Hooks.
-function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, openReport, baseRConfig }) {
+function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, openReport, baseRConfig }) {
   const [tab, setTab] = useState("fe");
   const fe     = result.fe, fd = result.fd;
   const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
@@ -610,7 +508,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
             : "✓ FE preferred (consistent and more efficient)."}
         </InfoBox>
       )}
-      <DiagnosticsPanel panelFE={panelFE} panelFD={panelFD} xColsPanel={[...xVars, ...wVars]} />
+      <DiagnosticsPanel resid={panelFE?.resid} rows={rows} xCols={[...xVars, ...wVars]} model="FE" panelFE={panelFE} panelFD={panelFD} />
       {active && (
         <ExportBar
           yVar={yVar[0]}
@@ -1070,7 +968,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
-                <DiagnosticsPanel olsResult={r} rows={rows} xCols={diagX} />
+                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model="OLS" />
                 <ExportBar yVar={yVar[0]} results={r} model="OLS"
                   onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                   rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />

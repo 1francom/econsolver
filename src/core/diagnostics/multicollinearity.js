@@ -12,7 +12,7 @@
 // Condition number: ratio of largest to smallest singular value of X.
 //   κ < 10 = acceptable, 10–30 = moderate, > 30 = severe.
 
-import { transpose, matMul, matInv } from "../math/LinearEngine.js";
+import { transpose, matMul, matInv } from "../../math/LinearEngine.js";
 
 // ── Internal OLS R² ───────────────────────────────────────────────────────────
 function olsR2(Y, X) {

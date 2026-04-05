@@ -6,7 +6,7 @@
 //   durbinWatson(resid)              → DWResult | null
 //   breuschGodfrey(resid, X, p?)     → BGResult | null
 
-import { transpose, matMul, matInv } from "../math/LinearEngine.js";
+import { transpose, matMul, matInv } from "../../math/LinearEngine.js";
 
 // ── Chi-squared p-value (Wilson-Hilferty approximation) ──────────────────────
 function chi2pVal(stat, df) {
