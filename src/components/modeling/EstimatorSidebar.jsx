@@ -23,6 +23,8 @@ export const MODELS = [
   { id: "DiD",  label: "DiD 2×2",         color: C.teal,   desc: "Classic Difference-in-Differences" },
   { id: "TWFE", label: "TWFE DiD",        color: C.teal,   desc: "Two-Way Fixed Effects DiD — panel required" },
   { id: "RDD",  label: "Sharp RDD",       color: C.orange, desc: "Regression Discontinuity Design" },
+  { id: "Logit",  label: "Logit",  color: C.violet, desc: "Binary Logistic Regression (MLE)" },
+  { id: "Probit", label: "Probit", color: C.violet, desc: "Probit — Normal Link (MLE)" },
 ];
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────

@@ -8,10 +8,11 @@
 
 import { useState, useMemo, useCallback } from "react";
 import {
-  runOLS, runWLS,run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
+  runOLS, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
+  runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
 } from "../math/index.js";
 import { generateRScript } from "../services/export/rScript.js";
 import ReportingModule from "../ReportingModule.jsx";
@@ -20,7 +21,7 @@ import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
 import { C, mono }        from "../components/modeling/shared.jsx";
-import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot } from "../components/modeling/ModelPlots.jsx";
+import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 
@@ -229,7 +230,7 @@ function ciMultiplier(df) {
   return 1.96;
 }
 
-function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
+function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null }) {
   const [open, setOpen] = useState(null);
   const z    = ciMultiplier(df);
   const COLS = "1.8fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 0.8fr 0.45fr";
@@ -248,7 +249,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
         <div style={{ textAlign: "right" }}>(SE)</div>
         <div style={{ textAlign: "right", color: C.teal + "cc" }}>CI 2.5%</div>
         <div style={{ textAlign: "right", color: C.teal + "cc" }}>CI 97.5%</div>
-        <div style={{ textAlign: "right" }}>t</div>
+        <div style={{ textAlign: "right" }}>{statLabel}</div>
         <div style={{ textAlign: "right" }}>p</div>
         <div style={{ textAlign: "center" }}>sig</div>
       </div>
@@ -293,11 +294,24 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
                 <span style={{ color: C.goldDim, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase" }}>
                   Economic Interpretation ·{" "}
                 </span>
-                A one-unit increase in <span style={{ color: C.text }}>{v}</span> is associated with a{" "}
-                <span style={{ color: b >= 0 ? C.green : C.red }}>
-                  {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "increase" : "decrease"}
-                </span>{" "}
-                in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
+                {meMap?.[v] != null ? (
+                  <>
+                    A one-unit increase in <span style={{ color: C.text }}>{v}</span> is associated with a{" "}
+                    <span style={{ color: meMap[v] >= 0 ? C.green : C.red }}>
+                      {meMap[v] >= 0 ? "+" : ""}{meMap[v].toFixed(4)} change in P(Y=1)
+                    </span>{" "}
+                    at the covariate means (MEM). Latent-index coefficient:{" "}
+                    <span style={{ color: b >= 0 ? C.teal : C.red }}>{b >= 0 ? "+" : ""}{b.toFixed(4)}</span>.{" "}
+                  </>
+                ) : (
+                  <>
+                    A one-unit increase in <span style={{ color: C.text }}>{v}</span> is associated with a{" "}
+                    <span style={{ color: b >= 0 ? C.green : C.red }}>
+                      {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "increase" : "decrease"}
+                    </span>{" "}
+                    in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
+                  </>
+                )}
                 <span style={{ color: C.teal }}>95% CI: [{lo.toFixed(4)}, {hi.toFixed(4)}].</span>{" "}
                 <span style={{ color: p < 0.05 ? C.gold : C.textDim }}>
                   {p < 0.01 ? "Highly significant (p < 0.01)."
@@ -343,11 +357,17 @@ function FitBar({ items }) {
 }
 
 // ─── EXPORT BAR ───────────────────────────────────────────────────────────────
-function ExportBar({ yVar, results, model, onReport, rScriptConfig }) {
+function ExportBar({ yVar, results, model, onReport, rScriptConfig, latexBuilder, csvBuilder }) {
   const [showLatex, setShowLatex] = useState(false);
   const [copied, setCopied]       = useState(false);
-  const latex = useMemo(() => buildLatex(yVar, results?.varNames?.slice(1) || [], results, model), [yVar, results, model]);
-  const csv   = useMemo(() => buildCSVExport(yVar, results), [yVar, results]);
+  const latex = useMemo(
+    () => latexBuilder ? latexBuilder(yVar, results) : buildLatex(yVar, results?.varNames?.slice(1) || [], results, model),
+    [yVar, results, model, latexBuilder]
+  );
+  const csv = useMemo(
+    () => csvBuilder ? csvBuilder(yVar, results) : buildCSVExport(yVar, results),
+    [yVar, results, csvBuilder]
+  );
 
   const handleRScript = () => {
     if (!rScriptConfig) return;
@@ -654,7 +674,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function buildModelAvail(panelOk) {
-  return { OLS: true, FE: panelOk, FD: panelOk, "2SLS": true, DiD: true, TWFE: panelOk, RDD: true };
+  return { OLS: true, FE: panelOk, FD: panelOk, "2SLS": true, DiD: true, TWFE: panelOk, RDD: true, Logit: true, Probit: true };
 }
 function buildModelHint(panel, panelOk) {
   const noPanel = "No panel structure declared — set Entity & Time columns in Wrangling.";
@@ -782,6 +802,17 @@ export default function ModelingTab({ cleanedData, onBack }) {
         const res = runSharpRDD(rows, y, runningVar[0], c0, h, kernel, wVars);
         if (!res) { setErr("RDD failed. Not enough observations within bandwidth."); setRunning(false); return; }
         setResult({ type: "RDD", main: res, h });
+
+      } else if (model === "Logit" || model === "Probit") {
+        if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
+        const fn  = model === "Logit" ? runLogit : runProbit;
+        const res = fn(rows, y, allX);
+        if (!res || res.error) {
+          setErr(res?.error ?? `${model} failed. Ensure Y is binary (0/1) and X columns are numeric.`);
+          setRunning(false); return;
+        }
+        if (!res.converged) console.warn(`${model} did not converge after ${res.iterations} iterations.`);
+        setResult({ type: model, main: res });
       }
     } catch (e) {
       setErr(`Estimation error: ${e.message}`);
@@ -923,7 +954,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 Configure your model specification and click Estimate
               </div>
               <div style={{ fontSize: 10, color: C.textMuted, maxWidth: 420, textAlign: "center", lineHeight: 1.8 }}>
-                Supported estimators: OLS · Fixed Effects · First Differences · 2SLS/IV · DiD 2×2 · TWFE · Sharp RDD
+                Supported estimators: OLS · Fixed Effects · First Differences · 2SLS/IV · DiD 2×2 · TWFE · Sharp RDD · Logit · Probit
               </div>
             </div>
           )}
@@ -1054,6 +1085,150 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   onReport={() => openReport({ ...r, modelLabel: result.type === "DiD" ? "DiD 2×2" : "TWFE DiD", yVar: yVar[0], xVars: [...wVars] })}
                   rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], wVars,
                     postVar: postVar[0], treatVar: treatVar[0] } }}
+                />
+              </div>
+            );
+          })()}
+
+          {/* Logit / Probit */}
+          {(result?.type === "Logit" || result?.type === "Probit") && result.main && (() => {
+            const r      = result.main;
+            const family = r.family;
+            const color  = C.violet;
+            const meMap  = Object.fromEntries((r.marginalEffects ?? []).map(m => [m.variable, m.dy_dx]));
+            const safeF  = (v, d = 4) => (v != null && isFinite(v)) ? v.toFixed(d) : "—";
+            const convergenceWarn = !r.converged;
+            // Y array for the valid rows (matches engine filtering logic)
+            const allX = [...xVars, ...wVars];
+            const validY = rows
+              .filter(row => {
+                const yv = row[yVar[0]];
+                return (yv === 0 || yv === 1) && allX.every(c => typeof row[c] === "number" && isFinite(row[c]));
+              })
+              .map(row => row[yVar[0]]);
+
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                {/* ── Header ── */}
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, color, letterSpacing: "0.24em", textTransform: "uppercase" }}>
+                    {family === "logit" ? "Logistic Regression" : "Probit"} Results
+                  </span>
+                  <Badge label={`n = ${r.n}`}  color={C.textDim} />
+                  <Badge label={`k = ${r.k}`}  color={C.textDim} />
+                  {convergenceWarn && <Badge label={`⚠ did not converge (${r.iterations} iter)`} color={C.red} />}
+                  {r.converged    && <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />}
+                </div>
+
+                {convergenceWarn && (
+                  <InfoBox color={C.red}>
+                    ⚠ IRLS did not converge in {r.iterations} iterations. Results may be unreliable. Check for perfect separation or near-multicollinearity.
+                  </InfoBox>
+                )}
+
+                {/* ── Fit statistics bar ── */}
+                <FitBar items={[
+                  { label: "McFadden R²", value: safeF(r.mcFaddenR2),          color,       hint: "1 − ℓ(β̂)/ℓ₀ — analogous to R² but not directly comparable" },
+                  { label: "Log-lik",     value: safeF(r.logLik, 3),            color: C.gold },
+                  { label: "AIC",         value: safeF(r.AIC, 2),               color: C.textDim },
+                  { label: "BIC",         value: safeF(r.BIC, 2),               color: C.textDim },
+                  { label: "n",           value: r.n,                            color: C.text },
+                  { label: "df",          value: r.df,                           color: C.textDim },
+                ]} />
+
+                {/* ── Coefficient table ── */}
+                <Lbl color={C.textMuted}>Coefficient Table (z-statistics · asymptotic SE)</Lbl>
+                <div style={{ marginBottom: "1.2rem" }}>
+                  <CoeffTable
+                    varNames={r.varNames} beta={r.beta} se={r.se}
+                    tStats={r.zStats} pVals={r.pVals}
+                    yVar={yVar[0]} df={null}
+                    statLabel="z"
+                    meMap={meMap}
+                  />
+                </div>
+
+                {/* ── Marginal Effects at the Mean ── */}
+                {r.marginalEffects?.length > 0 && (
+                  <>
+                    <Lbl color={C.textMuted}>Marginal Effects at the Mean (MEM) · dP(Y=1)/dx</Lbl>
+                    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", background: "#0a0a0a", padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                        <div>Variable</div>
+                        <div style={{ textAlign: "right" }}>dP/dx at x̄</div>
+                      </div>
+                      {r.marginalEffects.map(({ variable, dy_dx }, i) => (
+                        <div key={variable} style={{ display: "grid", gridTemplateColumns: "2fr 1fr", padding: "0.55rem 0.75rem", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: i % 2 === 0 ? C.surface : C.surface2, fontFamily: mono }}>
+                          <div style={{ fontSize: 12, color: C.text }}>{variable}</div>
+                          <div style={{ textAlign: "right", fontSize: 13, color: dy_dx >= 0 ? C.green : C.red, fontFamily: mono }}>
+                            {dy_dx >= 0 ? "+" : ""}{dy_dx.toFixed(4)}
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ padding: "0.35rem 0.75rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                        Evaluated at sample means of all covariates
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* ── Odds Ratios (Logit only) ── */}
+                {family === "logit" && r.oddsRatios?.length > 0 && (
+                  <>
+                    <Lbl color={C.textMuted}>Odds Ratios · exp(β) with 95% CI</Lbl>
+                    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", background: "#0a0a0a", padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                        <div>Variable</div>
+                        <div style={{ textAlign: "right" }}>OR</div>
+                        <div style={{ textAlign: "right" }}>2.5%</div>
+                        <div style={{ textAlign: "right" }}>97.5%</div>
+                      </div>
+                      {r.oddsRatios.map(({ variable, or, ciLo, ciHi }, i) => {
+                        const isRef = variable === "(Intercept)";
+                        return (
+                          <div key={variable} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", padding: "0.55rem 0.75rem", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: i % 2 === 0 ? C.surface : C.surface2, fontFamily: mono }}>
+                            <div style={{ fontSize: 12, color: isRef ? C.textMuted : C.text }}>{variable}</div>
+                            <div style={{ textAlign: "right", fontSize: 13, color: or >= 1 ? C.green : C.red }}>{or.toFixed(4)}</div>
+                            <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{ciLo.toFixed(4)}</div>
+                            <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{ciHi.toFixed(4)}</div>
+                          </div>
+                        );
+                      })}
+                      <div style={{ padding: "0.35rem 0.75rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                        OR &gt; 1 = positive association · OR &lt; 1 = negative association · CI based on ±1.96 × SE
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* ── Plots ── */}
+                <Lbl color={C.textMuted}>Model Diagnostics</Lbl>
+                <PlotSelector
+                  accentColor={color}
+                  defaultId="roc"
+                  plots={[
+                    { id: "roc",  label: "ROC Curve",
+                      node: <ROCCurve fitted={r.fitted} Y={validY} /> },
+                    { id: "hist", label: "Predicted Probabilities",
+                      node: <PredProbHistogram fitted={r.fitted} Y={validY} /> },
+                    { id: "forest", label: "Coefficient plot",
+                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${family}`} filename={`${family}_coefficients.svg`} /> },
+                  ]}
+                />
+
+                {/* ── Significance note ── */}
+                <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
+                  *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · z-statistics · SE from Fisher information matrix
+                </div>
+
+                {/* ── Export ── */}
+                <ExportBar
+                  yVar={yVar[0]}
+                  results={r}
+                  model={family === "logit" ? "Logit" : "Probit"}
+                  latexBuilder={(yv, res) => buildBinaryLatex(yv, res)}
+                  csvBuilder={(yv, res)   => buildBinaryCSV(yv, res)}
+                  onReport={() => openReport({ ...r, modelLabel: family === "logit" ? "Logistic Regression" : "Probit", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                 />
               </div>
             );

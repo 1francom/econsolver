@@ -10,7 +10,7 @@ export {
   tCDF, fCDF, pValue, stars,
   // OLS
   runOLS,
-    runWLS,
+  runWLS,
   // Diagnostics
   breuschPagan, computeVIF, hausmanTest,
   // Export helpers
@@ -32,3 +32,12 @@ export {
   runSharpRDD,
   runMcCrary,
 } from "./CausalEngine.js";
+
+// ── Binary outcome models ─────────────────────────────────────────────────────
+export {
+  runLogit,
+  runProbit,
+  normCDF,
+  buildBinaryLatex,
+  buildBinaryCSV,
+} from "./NonLinearEngine.js";
