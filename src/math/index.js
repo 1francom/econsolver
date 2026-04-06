@@ -10,6 +10,7 @@ export {
   tCDF, fCDF, pValue, stars,
   // OLS
   runOLS,
+    runWLS,
   // Diagnostics
   breuschPagan, computeVIF, hausmanTest,
   // Export helpers
