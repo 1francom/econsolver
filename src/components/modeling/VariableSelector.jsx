@@ -16,10 +16,10 @@
 import { VarPanel, C, mono } from "./shared.jsx";
 
 // Models that expose an X (Features) selector
-const SHOW_X = new Set(["OLS", "FE", "FD", "2SLS", "RDD"]);
+const SHOW_X = new Set(["OLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit"]);
 // Models that expose a W (Controls) selector in this panel
 // DiD/TWFE controls are rendered in ModelConfiguration alongside group selectors
-const SHOW_W = new Set(["OLS", "FE", "FD", "2SLS", "RDD"]);
+const SHOW_W = new Set(["OLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit"]);
 
 export default function VariableSelector({
   model,

@@ -413,6 +413,43 @@ function transpileModel(model) {
       ].join("\n");
     }
 
+    case "Logit":
+    case "Probit": {
+      const link   = type === "Logit" ? "logit" : "probit";
+      const ctrls  = wVars.map(rName).join(" + ");
+      const regs   = xVars.map(rName).join(" + ");
+      const rhs    = [regs, ctrls].filter(Boolean).join(" + ") || "1";
+      return [
+        `# ── ${type} (MLE via glm) ───────────────────────────────────────────`,
+        `fit <- glm(${y} ~ ${rhs},`,
+        `  data   = df,`,
+        `  family = binomial(link = "${link}"))`,
+        ``,
+        `summary(fit)`,
+        ``,
+        `# Marginal effects at the mean (MEM)`,
+        `marginaleffects::avg_slopes(fit)`,
+        ``,
+        `# Odds ratios with 95% CI${type === "Probit" ? " (not meaningful for Probit — skip)" : ""}`,
+        ...(type === "Logit" ? [
+          `exp(cbind(OR = coef(fit), confint(fit)))`,
+        ] : [
+          `# exp(cbind(OR = coef(fit), confint(fit)))  # skipped for Probit`,
+        ]),
+        ``,
+        `# ROC curve and AUC`,
+        `pROC::roc(df$${y}, fitted(fit), plot = TRUE, print.auc = TRUE)`,
+        ``,
+        `# Likelihood-ratio test vs null model`,
+        `lmtest::lrtest(fit)`,
+        ``,
+        `# McFadden pseudo-R²`,
+        `cat("McFadden R2:", 1 - (fit$deviance / fit$null.deviance), "\\n")`,
+        `cat("AIC:", AIC(fit), "\\n")`,
+        `cat("BIC:", BIC(fit), "\\n")`,
+      ].join("\n");
+    }
+
     default:
       return `# Unknown model type: ${type}`;
   }
@@ -518,6 +555,18 @@ export function generateRScript(config) {
       `cat("p:   ", fit$pv[3],   "\n")`,
       ``
     );
+  } else if (model.type === "Logit" || model.type === "Probit") {
+    lines.push(
+      `# modelsummary works with glm objects — exponentiate coefficients for Logit`,
+      `modelsummary::modelsummary(`,
+      `  list(${rStr(model.type)} = fit),`,
+      `  exponentiate = ${model.type === "Logit" ? "TRUE" : "FALSE"},  # TRUE = show odds ratios for Logit`,
+      `  stars        = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
+      `  gof_map      = c("nobs", "logLik", "AIC", "BIC"),`,
+      `  output       = ${rStr(baseName + "_results.docx")}`,
+      `)`,
+      ``
+    );
   } else {
     lines.push(
       `modelsummary::modelsummary(`,
@@ -547,6 +596,12 @@ function buildPackageList(modelType, pipeline) {
   // Model-specific
   if (modelType === "FE" || modelType === "FD") pkgs.add("plm");
   if (modelType === "RDD") { pkgs.add("rdrobust"); pkgs.delete("fixest"); pkgs.delete("modelsummary"); }
+  if (modelType === "Logit" || modelType === "Probit") {
+    pkgs.add("marginaleffects");
+    pkgs.add("pROC");
+    pkgs.add("lmtest");
+    pkgs.delete("fixest");  // base R glm() — no fixest needed
+  }
 
   // Pipeline-specific
   pipeline.forEach(s => {

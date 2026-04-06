@@ -1229,6 +1229,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   latexBuilder={(yv, res) => buildBinaryLatex(yv, res)}
                   csvBuilder={(yv, res)   => buildBinaryCSV(yv, res)}
                   onReport={() => openReport({ ...r, modelLabel: family === "logit" ? "Logistic Regression" : "Probit", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], xVars, wVars } } : null}
                 />
               </div>
             );
