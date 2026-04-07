@@ -691,7 +691,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
       {/* Actions */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {text && !loading && (
-          <CopyBtn text={text} label="⎘ Copy as plain text" successLabel="✓ Copied!" color={C.purple} />
+          <CopyBtn text={text} label="Copy Narrative" successLabel="✓ Copied!" color={C.purple} />
         )}
         <Btn
           onClick={run}
@@ -841,7 +841,6 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
   const tabs = [
     ["forest",    "⬡ Forest Plot"],
     ...(isRDD ? [["rdd", "◉ RDD Scatter"]] : []),
-    ["latex",     "⊞ LaTeX Export"],
   ];
 
   return (
@@ -911,7 +910,15 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
         {/* Tab content */}
         {tab === "forest" && (
           <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <Lbl>Coefficient Estimates · 95% Confidence Intervals</Lbl>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+              <Lbl mb={0}>Coefficient Estimates · 95% Confidence Intervals</Lbl>
+              <CopyBtn
+                text={buildStargazer([{ label: modelLabel, result, yVar }])}
+                label="Copy LaTeX"
+                successLabel="Copied ✓"
+                color={C.gold}
+              />
+            </div>
             <div style={{ marginBottom: "0.8rem", fontSize: 11, color: C.textDim,
                           fontFamily: mono, lineHeight: 1.6 }}>
               <span style={{ color: C.teal }}>◆ Teal</span> = significant at 5% ·{" "}
@@ -941,12 +948,6 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
                           padding: "0.5rem", background: C.bg, marginBottom: "1rem" }}>
               <RDDScatterPlot rddResult={rawResult} />
             </div>
-          </div>
-        )}
-
-        {tab === "latex" && (
-          <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <LatexPanel result={result} modelLabel={modelLabel} yVar={yVar} />
           </div>
         )}
 

@@ -6,7 +6,7 @@
 //   src/components/modeling/ModelConfiguration.jsx
 // Math lives in src/math/index.js (split from the monolithic EconometricsEngine.js).
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   runOLS, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
@@ -14,7 +14,9 @@ import {
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
 } from "../math/index.js";
-import { generateRScript } from "../services/export/rScript.js";
+import { generateRScript }      from "../services/export/rScript.js";
+import { generatePythonScript } from "../services/export/pythonScript.js";
+import { generateStataScript }  from "../services/export/stataScript.js";
 import ReportingModule from "../ReportingModule.jsx";
 
 import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
@@ -24,7 +26,6 @@ import { C, mono }        from "../components/modeling/shared.jsx";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
-import ResearchCoach       from "../components/modeling/ResearchCoach.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
@@ -357,8 +358,90 @@ function FitBar({ items }) {
   );
 }
 
+// ─── REPLICATE DROPDOWN ───────────────────────────────────────────────────────
+function ReplicateDropdown({ replicateConfig, model }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  if (!replicateConfig) return null;
+
+  const stem = (replicateConfig.filename ?? "analysis").replace(/\.[^.]+$/, "");
+
+  const download = (content, ext, color) => {
+    const blob = new Blob([content], { type: "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `${stem}_${model}${ext}`; a.click(); URL.revokeObjectURL(a.href);
+    setOpen(false);
+  };
+
+  const options = [
+    {
+      label: "↓ R Script",
+      color: C.green,
+      action: () => download(generateRScript(replicateConfig), ".R"),
+    },
+    {
+      label: "↓ Python Script",
+      color: C.teal,
+      action: () => download(generatePythonScript(replicateConfig), ".py"),
+    },
+    {
+      label: "↓ Stata Do-file",
+      color: C.blue,
+      action: () => download(generateStataScript(replicateConfig), ".do"),
+    },
+  ];
+
+  return (
+    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          height: "100%", padding: "0.6rem 1rem", background: open ? `${C.gold}14` : C.surface,
+          border: "none", borderLeft: `1px solid ${C.border}`,
+          color: open ? C.gold : C.textDim,
+          cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
+          display: "flex", alignItems: "center", gap: 5, borderRadius: "0 0 4px 0",
+        }}
+        onMouseOver={e => { e.currentTarget.style.background = `${C.gold}14`; e.currentTarget.style.color = C.gold; }}
+        onMouseOut={e =>  { if (!open) { e.currentTarget.style.background = C.surface; e.currentTarget.style.color = C.textDim; } }}
+      >
+        ⟨/⟩ Replicate <span style={{ fontSize: 9 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", bottom: "calc(100% + 6px)", right: 0, zIndex: 200,
+          background: C.surface, border: `1px solid ${C.border2}`,
+          borderRadius: 4, overflow: "hidden", minWidth: 160,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.6)", animation: "fadeUp 0.12s ease",
+        }}>
+          {options.map(({ label, color, action }) => (
+            <button key={label} onClick={action}
+              style={{
+                display: "block", width: "100%", textAlign: "left",
+                padding: "0.55rem 1rem", background: "transparent", border: "none",
+                color, cursor: "pointer", fontFamily: mono, fontSize: 11,
+                transition: "background 0.1s",
+              }}
+              onMouseOver={e => { e.currentTarget.style.background = `${color}14`; }}
+              onMouseOut={e =>  { e.currentTarget.style.background = "transparent"; }}
+            >{label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── EXPORT BAR ───────────────────────────────────────────────────────────────
-function ExportBar({ yVar, results, model, onReport, rScriptConfig, latexBuilder, csvBuilder }) {
+function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuilder, csvBuilder }) {
   const [showLatex, setShowLatex] = useState(false);
   const [copied, setCopied]       = useState(false);
   const latex = useMemo(
@@ -370,66 +453,46 @@ function ExportBar({ yVar, results, model, onReport, rScriptConfig, latexBuilder
     [yVar, results, csvBuilder]
   );
 
-  const handleRScript = () => {
-    if (!rScriptConfig) return;
-    const script = generateRScript(rScriptConfig);
-    const blob   = new Blob([script], { type: "text/plain" });
-    const a      = document.createElement("a");
-    a.href       = URL.createObjectURL(blob);
-    a.download   = `${(rScriptConfig.filename ?? "analysis").replace(/\.[^.]+$/, "")}_${model}.R`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
   return (
-    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-      <div style={{ background: "#0a0a0a", padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: "1.2rem" }}>
+      <div style={{ background: "#0a0a0a", padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono, borderRadius: "4px 4px 0 0" }}>
         Export
       </div>
-      <div style={{ display: "flex", gap: 1, background: C.border }}>
-        {[
-          { label: "LaTeX table",  action: () => setShowLatex(s => !s), active: showLatex },
-          { label: "Download CSV", action: () => downloadText(csv, `${model}_${yVar}.csv`) },
-        ].map(({ label, action, active }) => (
-          <button key={label} onClick={action}
-            style={{
-              flex: 1, padding: "0.6rem 1rem",
-              background: active ? C.goldFaint : C.surface,
-              border: "none", color: active ? C.gold : C.textDim,
-              cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
-            }}
-            onMouseOver={e => { if (!active) e.currentTarget.style.background = "#0e0e0e"; }}
-            onMouseOut={e =>  { if (!active) e.currentTarget.style.background = C.surface; }}
-          >
-            {label}
-          </button>
-        ))}
-        {rScriptConfig && (
-          <button onClick={handleRScript}
-            style={{
-              flex: 1, padding: "0.6rem 1rem", background: C.surface,
-              border: "none", color: C.green, cursor: "pointer", fontFamily: mono,
-              fontSize: 11, transition: "background 0.15s",
-            }}
-            onMouseOver={e => { e.currentTarget.style.background = `${C.green}14`; }}
-            onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
-          >
-            ↓ R Script
-          </button>
-        )}
-        {onReport && (
-          <button onClick={onReport}
-            style={{
-              flex: 1, padding: "0.6rem 1rem", background: C.surface,
-              border: "none", color: C.purple, cursor: "pointer", fontFamily: mono,
-              fontSize: 11, transition: "background 0.15s",
-            }}
-            onMouseOver={e => { e.currentTarget.style.background = `${C.purple}14`; }}
-            onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
-          >
-            ✦ Full Report
-          </button>
-        )}
+      {/* Button row — inner group has overflow:hidden for rounded corners; Replicate sits outside it */}
+      <div style={{ display: "flex", background: C.border, borderRadius: "0 0 4px 4px", gap: 1 }}>
+        <div style={{ display: "flex", flex: 1, gap: 1, overflow: "hidden", borderRadius: "0 0 0 4px" }}>
+          {[
+            { label: "LaTeX table",  action: () => setShowLatex(s => !s), active: showLatex },
+            { label: "Download CSV", action: () => downloadText(csv, `${model}_${yVar}.csv`) },
+          ].map(({ label, action, active }) => (
+            <button key={label} onClick={action}
+              style={{
+                flex: 1, padding: "0.6rem 1rem",
+                background: active ? C.goldFaint : C.surface,
+                border: "none", color: active ? C.gold : C.textDim,
+                cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
+              }}
+              onMouseOver={e => { if (!active) e.currentTarget.style.background = "#0e0e0e"; }}
+              onMouseOut={e =>  { if (!active) e.currentTarget.style.background = C.surface; }}
+            >
+              {label}
+            </button>
+          ))}
+          {onReport && (
+            <button onClick={onReport}
+              style={{
+                flex: 1, padding: "0.6rem 1rem", background: C.surface,
+                border: "none", color: C.purple, cursor: "pointer", fontFamily: mono,
+                fontSize: 11, transition: "background 0.15s",
+              }}
+              onMouseOver={e => { e.currentTarget.style.background = `${C.purple}14`; }}
+              onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
+            >
+              ✦ Full Report
+            </button>
+          )}
+        </div>
+        <ReplicateDropdown replicateConfig={replicateConfig} model={model} />
       </div>
       {showLatex && (
         <div style={{ background: "#080a06", borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
@@ -459,7 +522,7 @@ function ExportBar({ yVar, results, model, onReport, rScriptConfig, latexBuilder
 
 // ─── PANEL FE/FD RESULTS ─────────────────────────────────────────────────────
 // Must be a named component (not an IIFE) — React Rules of Hooks.
-function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, openReport, baseRConfig }) {
+function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, openReport, baseReplicateConfig }) {
   const [tab, setTab] = useState("fe");
   const fe     = result.fe, fd = result.fd;
   const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
@@ -529,7 +592,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
             : "✓ FE preferred (consistent and more efficient)."}
         </InfoBox>
       )}
-      <DiagnosticsPanel resid={panelFE?.resid} rows={rows} xCols={[...xVars, ...wVars]} model="FE" panelFE={panelFE} panelFD={panelFD} onCoachQuery={msg => setCoachPrefill(msg)} />
+      <DiagnosticsPanel resid={panelFE?.resid} rows={rows} xCols={[...xVars, ...wVars]} model="FE" panelFE={panelFE} panelFD={panelFD} />
       {active && (
         <ExportBar
           yVar={yVar[0]}
@@ -542,7 +605,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
             yVar: yVar[0],
             xVars: [...xVars, ...wVars],
           })}
-          rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model,
+          replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model,
             type: tab === "fe" ? "FE" : "FD", yVar: yVar[0], xVars, wVars } } : null}
         />
       )}
@@ -551,7 +614,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
 }
 
 // ─── 2SLS RESULTS ─────────────────────────────────────────────────────────────
-function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseRConfig }) {
+function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
   const [tab, setTab] = useState("second");
   const { firstStages, second } = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
@@ -637,7 +700,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
           <ExportBar
             yVar={yVar[0]} results={second} model="2SLS"
             onReport={() => openReport({ second, firstStages, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
-            rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } } : null}
+            replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } } : null}
           />
         </>
       )}
@@ -720,7 +783,6 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
   const [running,      setRunning]      = useState(false);
   const [err,          setErr]          = useState(null);
   const [reportResult, setReportResult] = useState(null);
-  const [coachPrefill, setCoachPrefill] = useState(null);
 
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
@@ -828,9 +890,9 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
 
-  // ── R Script config — base object shared by all ExportBar callsites ──────────
+  // ── Replicate config — base object shared by all ExportBar callsites ─────────
   // Each callsite merges this with its specific model params.
-  const baseRConfig = useMemo(() => ({
+  const baseReplicateConfig = useMemo(() => ({
     filename:        cleanedData?.filename ?? "dataset.csv",
     pipeline:        cleanedData?.changeLog ?? [],
     dataDictionary:  cleanedData?.dataDictionary ?? null,
@@ -1021,22 +1083,22 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                 <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
-                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model="OLS" onCoachQuery={msg => setCoachPrefill(msg)} />
+                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model="OLS" />
                 <ExportBar yVar={yVar[0]} results={r} model="OLS"
                   onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
-                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />
               </div>
             );
           })()}
 
           {/* Panel FE / FD */}
           {(result?.type === "FE" || result?.type === "FD") && (
-            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseRConfig={baseRConfig} />
+            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* 2SLS */}
           {result?.type === "2SLS" && (
-            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseRConfig={baseRConfig} />
+            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* DiD / TWFE */}
@@ -1088,7 +1150,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                 />
                 <ExportBar yVar={yVar[0]} results={r} model={result.type}
                   onReport={() => openReport({ ...r, modelLabel: result.type === "DiD" ? "DiD 2×2" : "TWFE DiD", yVar: yVar[0], xVars: [...wVars] })}
-                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], wVars,
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: result.type, yVar: yVar[0], wVars,
                     postVar: postVar[0], treatVar: treatVar[0] } }}
                 />
               </div>
@@ -1234,7 +1296,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                   latexBuilder={(yv, res) => buildBinaryLatex(yv, res)}
                   csvBuilder={(yv, res)   => buildBinaryCSV(yv, res)}
                   onReport={() => openReport({ ...r, modelLabel: family === "logit" ? "Logistic Regression" : "Probit", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
-                  rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], xVars, wVars } } : null}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: result.type, yVar: yVar[0], xVars, wVars } } : null}
                 />
               </div>
             );
@@ -1301,21 +1363,12 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                   results={{ ...r, varNames: r.varNames, adjR2: null }}
                   model="RDD"
                   onReport={() => openReport({ ...r, varNames: r.varNames, adjR2: null, modelLabel: "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
-                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "RDD", yVar: yVar[0], wVars,
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "RDD", yVar: yVar[0], wVars,
                     runningVar: runningVar[0], cutoff: parseFloat(cutoff), bandwidth: result.h, kernel } }}
                 />
               </div>
             );
           })()}
-
-          {/* ══ Research Coach ══ */}
-          {result && (
-            <ResearchCoach
-              result={result}
-              dataDictionary={cleanedData?.dataDictionary ?? null}
-              prefillMessage={coachPrefill}
-            />
-          )}
 
         </div>
       </div>
