@@ -8,10 +8,11 @@
 //   Cache TTL: 5 minutes (refreshed on each hit). ~10% of input token cost.
 //
 // Exports:
-//   callClaude({ system, user, messages?, maxTokens, model? })  — shared caller
-//   inferVariableUnits(headers, sampleRows)                     → Promise<Record<string,string>>
-//   interpretRegression(result, dataDictionary)                 → Promise<string>
-//   suggestCleaning(dataQualityReport)                          → Promise<CleaningSuggestion[]>
+//   callClaude({ system, user, messages?, maxTokens, model? })       — shared caller
+//   inferVariableUnits(headers, sampleRows)                          → Promise<Record<string,string>>
+//   interpretRegression(result, dataDictionary)                      → Promise<string>
+//   suggestCleaning(dataQualityReport)                               → Promise<CleaningSuggestion[]>
+//   compareModels(modelA, modelB, dataDictionary?)                   → Promise<string>
 //   researchCoach({ question, modelResult, dataDictionary?, history? }) → Promise<string>
 
 import {
@@ -19,8 +20,9 @@ import {
   INFER_UNITS_PROMPT,
   INTERPRET_REGRESSION_PROMPT,
   CLEANING_SUGGESTIONS_PROMPT,
+  COMPARE_MODELS_PROMPT,
   RESEARCH_COACH_PROMPT,
-} from "./prompts/index.js";
+} from "./Prompts/index.js";
 
 const API_URL   = "https://api.anthropic.com/v1/messages";
 const MODEL     = "claude-sonnet-4-6";        // narratives, cleaning, research coach
@@ -464,7 +466,53 @@ export async function suggestCleaning(dataQualityReport) {
   }
 }
 
-// ─── 4. RESEARCH COACH ────────────────────────────────────────────────────────
+// ─── 4. COMPARE MODELS ───────────────────────────────────────────────────────
+// Statistical and theoretical comparison of two regression results.
+// Returns Promise<string> — three paragraphs of plain text.
+
+export async function compareModels(modelA, modelB, dataDictionary = null) {
+  if (!modelA || !modelB) return "Provide two model results to compare.";
+
+  const formatModel = (label, raw) => {
+    const core = raw.second ?? raw;
+    const {
+      varNames = [], beta = [], se = [], pVals = [],
+      R2, adjR2, n, Fstat, Fpval,
+      modelLabel = "OLS", yVar = "y",
+    } = core;
+
+    const lines = [
+      `${label}: ${modelLabel} | dep.var: ${yVar} | N=${n ?? "?"} | R²=${R2?.toFixed(4) ?? "?"} | Adj.R²=${adjR2?.toFixed(4) ?? "?"}`,
+    ];
+    if (Fstat != null && isFinite(Fstat)) {
+      lines.push(`  F=${Fstat.toFixed(3)} (p=${Fpval != null ? (Fpval < 0.001 ? "<0.001" : Fpval.toFixed(4)) : "?"})`);
+    }
+    lines.push("  Coefficients:");
+    varNames.filter(v => v !== "(Intercept)").forEach(v => {
+      const i = varNames.indexOf(v);
+      const b = beta[i], s = se[i], p = pVals[i];
+      const sig = p == null ? "p=N/A" : p < 0.01 ? "p<0.01***" : p < 0.05 ? "p<0.05**" : p < 0.1 ? "p<0.1*" : `p=${p.toFixed(3)}`;
+      lines.push(`    ${v}: β=${b?.toFixed(4) ?? "N/A"}, SE=${s?.toFixed(4) ?? "N/A"}, ${sig}`);
+    });
+    return lines.join("\n");
+  };
+
+  const dictSection = (dataDictionary && Object.keys(dataDictionary).length)
+    ? `\nDATA DICTIONARY:\n${Object.entries(dataDictionary).map(([k,v]) => `  ${k}: "${v}"`).join("\n")}\n`
+    : "";
+
+  const userPrompt = `${formatModel("Model A", modelA)}\n\n${formatModel("Model B", modelB)}${dictSection}\n\nWrite the three-paragraph comparative analysis now.`;
+
+  try {
+    const taskPrompt = COMPARE_MODELS_PROMPT.replace(SHARED_CONTEXT, "").trim();
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 700 });
+  } catch (err) {
+    console.warn("[AIService] compareModels failed:", err.message);
+    return "Model comparison unavailable — check API key and connection.";
+  }
+}
+
+// ─── 5. RESEARCH COACH ────────────────────────────────────────────────────────
 // Multi-turn conversational advisor. Serialises the active model result into
 // a compact context block, then appends the conversation history + new question.
 //

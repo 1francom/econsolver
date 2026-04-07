@@ -289,6 +289,36 @@ on a skewed numeric, {"p_lo":0.01,"p_hi":0.99} for winz on extreme outliers).
 Otherwise set "params": {}.
 `;
 
+// ─── PROMPT: COMPARE MODELS ──────────────────────────────────────────────────
+// v1.0 — called by compareModels() in AIService.js.
+export const COMPARE_MODELS_PROMPT = `\
+${SHARED_CONTEXT}
+────────────────────────────────────────────────────────────────────
+TASK: MODEL COMPARISON
+────────────────────────────────────────────────────────────────────
+Given two regression results (Model A and Model B), produce a structured
+comparative analysis for a researcher deciding which specification to report.
+
+COVER THESE DIMENSIONS (in this order):
+1. Specification differences — what varies between the two models (estimator type,
+   regressors added/removed, sample size, controls, functional form).
+2. Coefficient stability — do key coefficients change sign, magnitude, or significance
+   across models? Interpret instability economically.
+3. Fit comparison — R², Adj. R², F-stat. Interpret in context (higher is not always better).
+4. Identification comparison — which model makes stronger or weaker identifying assumptions?
+   Which threats to internal validity does each face?
+5. Recommendation — which model is preferred for publication, and why? Are there
+   conditions under which the other model would be more appropriate?
+
+FORMAT RULES:
+• Plain text only — no markdown headers, no bullet points. Use paragraph breaks.
+• Write THREE paragraphs: (1) specification + coefficient comparison, (2) fit + inference,
+  (3) recommendation with conditions.
+• Quote exact β and p-values. Reference both model labels by name.
+• Max 250 words total.
+• English only.
+`;
+
 // ─── PROMPT: RESEARCH COACH ───────────────────────────────────────────────────
 // v1.0 — multi-turn conversational advisor.
 // Called by researchCoach() in AIService.js.

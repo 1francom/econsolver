@@ -529,7 +529,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
             : "✓ FE preferred (consistent and more efficient)."}
         </InfoBox>
       )}
-      <DiagnosticsPanel resid={panelFE?.resid} rows={rows} xCols={[...xVars, ...wVars]} model="FE" panelFE={panelFE} panelFD={panelFD} />
+      <DiagnosticsPanel resid={panelFE?.resid} rows={rows} xCols={[...xVars, ...wVars]} model="FE" panelFE={panelFE} panelFD={panelFD} onCoachQuery={msg => setCoachPrefill(msg)} />
       {active && (
         <ExportBar
           yVar={yVar[0]}
@@ -688,7 +688,7 @@ function buildModelHint(panel, panelOk) {
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function ModelingTab({ cleanedData, onBack }) {
+export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
   const rows    = cleanedData?.cleanRows  ?? [];
   const headers = cleanedData?.headers    ?? [];
   const panel   = cleanedData?.panelIndex ?? null;
@@ -720,6 +720,10 @@ export default function ModelingTab({ cleanedData, onBack }) {
   const [running,      setRunning]      = useState(false);
   const [err,          setErr]          = useState(null);
   const [reportResult, setReportResult] = useState(null);
+  const [coachPrefill, setCoachPrefill] = useState(null);
+
+  // Notify parent when result changes (for global AI sidebar context)
+  useEffect(() => { onResultChange?.(result); }, [result]);
 
   const panelOk    = !!panel && !panel.blockFE;
   const modelAvail = useMemo(() => buildModelAvail(panelOk),        [panelOk]);
@@ -1017,7 +1021,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
-                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model="OLS" />
+                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model="OLS" onCoachQuery={msg => setCoachPrefill(msg)} />
                 <ExportBar yVar={yVar[0]} results={r} model="OLS"
                   onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                   rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />
@@ -1309,6 +1313,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
             <ResearchCoach
               result={result}
               dataDictionary={cleanedData?.dataDictionary ?? null}
+              prefillMessage={coachPrefill}
             />
           )}
 

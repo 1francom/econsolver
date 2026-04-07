@@ -9,7 +9,7 @@
 // Self-contained state: conversation history lives here, resets when result changes.
 
 import { useState, useEffect, useRef } from "react";
-import { researchCoach } from "../../services/AI/AIService.js";
+import { researchCoach as callResearchCoach } from "../../services/AI/AIService.js";
 import { C, mono } from "./shared.jsx";
 
 // ─── STARTER QUESTIONS ────────────────────────────────────────────────────────
@@ -151,9 +151,9 @@ function ThinkingBubble() {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function ResearchCoach({ result, dataDictionary }) {
+export default function ResearchCoach({ result, dataDictionary, prefillMessage }) {
   const [open,     setOpen]     = useState(false);
-  const [history,  setHistory]  = useState([]);   // { role:'user'|'assistant', text }[]
+  const [history,  setHistory]  = useState([]);
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);
   const bottomRef  = useRef(null);
@@ -164,6 +164,14 @@ export default function ResearchCoach({ result, dataDictionary }) {
     setHistory([]);
     setInput("");
   }, [result]);
+
+  // When a diagnostic alert sends a prefill, open + populate the input
+  useEffect(() => {
+    if (!prefillMessage) return;
+    setOpen(true);
+    setInput(prefillMessage);
+    setTimeout(() => inputRef.current?.focus(), 120);
+  }, [prefillMessage]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {

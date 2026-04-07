@@ -836,11 +836,12 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
 
   const { modelLabel = "OLS", yVar = "y" } = result;
 
+  const [narrativeOpen, setNarrativeOpen] = useState(false);
+
   const tabs = [
     ["forest",    "⬡ Forest Plot"],
     ...(isRDD ? [["rdd", "◉ RDD Scatter"]] : []),
     ["latex",     "⊞ LaTeX Export"],
-    ["narrative", "✦ AI Narrative"],
   ];
 
   return (
@@ -949,16 +950,41 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
           </div>
         )}
 
-        {tab === "narrative" && (
-          <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <AINarrative
-              result={result}
-              modelLabel={modelLabel}
-              yVar={yVar}
-              dataDictionary={cleanedData?.dataDictionary ?? null}
-            />
-          </div>
-        )}
+        {/* ── AI Narrative — inline collapsible ── */}
+        <div style={{ marginTop: "1.2rem" }}>
+          <button
+            onClick={() => setNarrativeOpen(o => !o)}
+            style={{
+              width: "100%", display: "flex", alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0.6rem 1rem",
+              background: narrativeOpen ? `${C.purple}0d` : C.surface,
+              border: `1px solid ${narrativeOpen ? C.purple + "50" : C.border}`,
+              borderRadius: narrativeOpen ? "4px 4px 0 0" : 4,
+              cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+            }}
+          >
+            <span style={{ fontSize: 9, color: C.purple, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+              ✦ AI Narrative
+            </span>
+            <span style={{ fontSize: 9, color: C.textMuted }}>{narrativeOpen ? "▲" : "▼"}</span>
+          </button>
+          {narrativeOpen && (
+            <div style={{
+              border: `1px solid ${C.purple}50`, borderTop: "none",
+              borderRadius: "0 0 4px 4px", padding: "1.2rem",
+              background: C.surface, animation: "fadeUp 0.15s ease",
+            }}>
+              <AINarrative
+                result={result}
+                modelLabel={modelLabel}
+                yVar={yVar}
+                dataDictionary={cleanedData?.dataDictionary ?? null}
+              />
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );

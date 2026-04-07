@@ -203,6 +203,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   };
 
   const qualityBadge = qualityReport?.flags?.filter(f => f.severity !== "ok").length;
+  const [aiActionsOpen, setAiActionsOpen] = useState(false);
 
   return (
     <div style={{ display:"flex", height:"100%", minHeight:0,
@@ -244,6 +245,61 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
                 ◈ dict
               </span>
             )}
+            {/* AI Data Actions dropdown */}
+            <div style={{ position:"relative" }}>
+              <button
+                onClick={() => setAiActionsOpen(o => !o)}
+                style={{
+                  padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
+                  fontFamily:mono, fontSize:10, transition:"all 0.12s",
+                  background: aiActionsOpen ? `${"#9e7ec8"}18` : "transparent",
+                  color: aiActionsOpen ? "#9e7ec8" : "#888",
+                  border:`1px solid ${aiActionsOpen ? "#9e7ec8" : "#252525"}`,
+                }}>
+                ✦ AI Actions
+              </button>
+              {aiActionsOpen && (
+                <>
+                  <div onClick={() => setAiActionsOpen(false)}
+                    style={{ position:"fixed", inset:0, zIndex:98 }} />
+                  <div style={{
+                    position:"absolute", right:0, top:"calc(100% + 6px)",
+                    background:"#131313", border:"1px solid #252525",
+                    borderRadius:4, zIndex:99, minWidth:220,
+                    boxShadow:"0 8px 24px #000c", overflow:"hidden",
+                  }}>
+                    <button
+                      onClick={() => { setAiActionsOpen(false); setTab("quality"); }}
+                      style={{
+                        width:"100%", padding:"0.65rem 1rem", textAlign:"left",
+                        background:"transparent", border:"none", borderBottom:"1px solid #1c1c1c",
+                        cursor:"pointer", fontFamily:mono, fontSize:11, color:"#ddd8cc",
+                        transition:"background 0.1s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background="#9e7ec818"}
+                      onMouseLeave={e => e.currentTarget.style.background="transparent"}
+                    >
+                      <div style={{ fontSize:9, color:"#9e7ec8", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:2 }}>Suggest Cleaning</div>
+                      <div style={{ fontSize:9, color:"#888" }}>AI-powered data quality recommendations</div>
+                    </button>
+                    <button
+                      onClick={() => { setAiActionsOpen(false); setTab("dictionary"); }}
+                      style={{
+                        width:"100%", padding:"0.65rem 1rem", textAlign:"left",
+                        background:"transparent", border:"none",
+                        cursor:"pointer", fontFamily:mono, fontSize:11, color:"#ddd8cc",
+                        transition:"background 0.1s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background="#9e7ec818"}
+                      onMouseLeave={e => e.currentTarget.style.background="transparent"}
+                    >
+                      <div style={{ fontSize:9, color:"#9e7ec8", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:2 }}>Generate Data Dictionary</div>
+                      <div style={{ fontSize:9, color:"#888" }}>Infer variable descriptions with AI</div>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}/>
             {onSaveSubset && (
               <div style={{ position:"relative" }}>

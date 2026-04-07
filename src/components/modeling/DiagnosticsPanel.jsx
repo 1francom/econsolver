@@ -117,10 +117,103 @@ function VIFCards({ vifResults }) {
   );
 }
 
+// ── Diagnostic alert builder ──────────────────────────────────────────────────
+// Returns a list of prioritised AI coach prompts derived from test outcomes.
+function buildAlerts(bp, white, dw, bg, vif, hausman) {
+  const alerts = [];
+
+  if (bp?.reject || white?.reject) {
+    const tests = [bp?.reject && "Breusch-Pagan", white?.reject && "White"].filter(Boolean).join(" & ");
+    alerts.push({
+      type: "heteroskedasticity",
+      severity: "high",
+      message: `Heteroskedasticity detected (${tests}).`,
+      coachPrompt: `My ${tests} test(s) reject homoskedasticity (p=${bp?.reject ? bp.pVal?.toFixed(4) : white?.pVal?.toFixed(4)}). Should I switch to HC1 robust standard errors? What are the tradeoffs, and does this affect my coefficient estimates or just my inference?`,
+    });
+  }
+
+  if (dw?.positive || dw?.negative || bg?.reject) {
+    alerts.push({
+      type: "autocorrelation",
+      severity: "medium",
+      message: `Serial correlation detected${bg?.reject ? ` (BG p=${bg.pVal?.toFixed(4)})` : ""}.`,
+      coachPrompt: `My Durbin-Watson / Breusch-Godfrey test suggests serial correlation in the residuals. Should I add a lag of the dependent variable, use HAC standard errors, or switch to a GLS specification? What does this imply for my inference?`,
+    });
+  }
+
+  const severeVIF = vif?.filter(v => v.severity === "severe");
+  const modVIF    = vif?.filter(v => v.severity === "moderate");
+  if (severeVIF?.length) {
+    alerts.push({
+      type: "multicollinearity",
+      severity: "high",
+      message: `Severe multicollinearity: ${severeVIF.map(v => v.col).join(", ")} (VIF > 10).`,
+      coachPrompt: `VIF is above 10 for ${severeVIF.map(v => `${v.col} (VIF=${v.vif?.toFixed(1)})`).join(", ")}. How should I address this? Should I drop a variable, create a composite index, or use ridge regression?`,
+    });
+  } else if (modVIF?.length) {
+    alerts.push({
+      type: "multicollinearity",
+      severity: "low",
+      message: `Moderate multicollinearity: ${modVIF.map(v => v.col).join(", ")} (VIF 5–10).`,
+      coachPrompt: `VIF is between 5 and 10 for ${modVIF.map(v => v.col).join(", ")}. Is this a problem for my interpretation? What does it do to my standard errors?`,
+    });
+  }
+
+  if (hausman && parseFloat(hausman.pVal) < 0.05) {
+    alerts.push({
+      type: "specification",
+      severity: "medium",
+      message: `Hausman test rejects FE/FD consistency (p=${parseFloat(hausman.pVal).toFixed(4)}).`,
+      coachPrompt: `The Hausman test between FE and FD is significant (H=${hausman.H?.toFixed(3)}, p=${parseFloat(hausman.pVal).toFixed(4)}). What does this divergence imply about serial correlation in my panel? Which estimator should I prefer?`,
+    });
+  }
+
+  return alerts;
+}
+
+// ── Alert card ────────────────────────────────────────────────────────────────
+function DiagAlertCard({ alert, onCoachQuery }) {
+  const sevColor = { high: C.red, medium: C.yellow, low: C.textDim };
+  const color = sevColor[alert.severity] ?? C.textDim;
+  return (
+    <div style={{
+      display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+      gap: 12, padding: "0.55rem 0.85rem",
+      background: alert.severity === "high" ? "#0d0808" : "#0c0c08",
+      borderLeft: `3px solid ${color}`,
+      border: `1px solid ${color}25`,
+    }}>
+      <div style={{ flex: 1 }}>
+        <span style={{ fontSize: 9, color, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: mono }}>
+          {alert.severity === "high" ? "⚠ " : "△ "}
+        </span>
+        <span style={{ fontSize: 11, color: C.text, fontFamily: mono }}>{alert.message}</span>
+      </div>
+      {onCoachQuery && (
+        <button
+          onClick={() => onCoachQuery(alert.coachPrompt)}
+          style={{
+            flexShrink: 0, padding: "0.22rem 0.6rem",
+            background: "transparent", border: `1px solid ${color}50`,
+            borderRadius: 3, color, cursor: "pointer",
+            fontFamily: mono, fontSize: 9, whiteSpace: "nowrap",
+            transition: "all 0.12s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = `${color}18`; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+        >
+          Ask Coach →
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function DiagnosticsPanel({
   resid, rows = [], xCols = [], yCol,
   model = "OLS", panelFE, panelFD, panel,
+  onCoachQuery,
 }) {
   const [open, setOpen] = useState(true);
 
@@ -155,6 +248,8 @@ export default function DiagnosticsPanel({
   const hasAny = bp || white || dw || bg || jb || sw || vif || cond || hausman;
   if (!hasAny) return null;
 
+  const alerts = buildAlerts(bp, white, dw, bg, vif, hausman);
+
   return (
     <div style={{
       border: `1px solid ${C.border}`, borderRadius: 4,
@@ -177,6 +272,15 @@ export default function DiagnosticsPanel({
 
       {open && (
         <div style={{ display: "flex", flexDirection: "column", gap: 0, animation: "fadeUp 0.18s ease" }}>
+
+          {/* ── AI Coach Alerts ── */}
+          {alerts.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              {alerts.map((a, i) => (
+                <DiagAlertCard key={i} alert={a} onCoachQuery={onCoachQuery} />
+              ))}
+            </div>
+          )}
 
           {/* ── Heteroskedasticity ── */}
           {(bp || white) && (
