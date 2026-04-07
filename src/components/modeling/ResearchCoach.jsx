@@ -9,7 +9,7 @@
 // Self-contained state: conversation history lives here, resets when result changes.
 
 import { useState, useEffect, useRef } from "react";
-import { researchCoach } from "../../services/ai/AIService.js";
+import { researchCoach } from "../../services/AI/AIService.js";
 import { C, mono } from "./shared.jsx";
 
 // ─── STARTER QUESTIONS ────────────────────────────────────────────────────────
