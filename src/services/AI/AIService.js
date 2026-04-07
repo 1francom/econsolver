@@ -153,6 +153,108 @@ export async function inferVariableUnits(headers, sampleRows) {
 }
 
 // ─── 2. INTERPRET REGRESSION ─────────────────────────────────────────────────
+
+// Classifies each regressor and returns a VARIABLE METADATA block for the prompt.
+// The model reads this block to pick the right natural-language pattern (rule A–G).
+function _classifyVariables(varNames, dataDictionary = {}) {
+  // Common demographic / group dummies: name → { oneLabel, zeroLabel }
+  const DEMO_MAP = {
+    female:   { one: "female",   zero: "male"        },
+    male:     { one: "male",     zero: "female"       },
+    urban:    { one: "urban",    zero: "rural"        },
+    rural:    { one: "rural",    zero: "urban"        },
+    married:  { one: "married",  zero: "unmarried"    },
+    employed: { one: "employed", zero: "unemployed"   },
+    black:    { one: "Black",    zero: "non-Black"    },
+    white:    { one: "White",    zero: "non-White"    },
+    hispanic: { one: "Hispanic", zero: "non-Hispanic" },
+    union:    { one: "union member", zero: "non-union" },
+    migrant:  { one: "migrant", zero: "non-migrant"   },
+    immigrant:{ one: "immigrant", zero: "non-immigrant"},
+    public:   { one: "public sector", zero: "private sector" },
+    private:  { one: "private sector", zero: "public sector" },
+    formal:   { one: "formal sector", zero: "informal sector"},
+  };
+
+  // Treatment / post variable name patterns
+  const TREATMENT_RE = /^(treated?|treatment|D|T|W|assignment|eligible|assigned)$/i;
+  const POST_RE      = /^(post|after|wave\d*|period\d*|t\d+|follow_?up)$/i;
+  // DiD interaction: "treat_post", "D_post", "treat×post", "treated_post", etc.
+  const DID_RE       = /(treat|treated?|D|T)[_×x](post|after|wave|period)|(post|after|wave|period)[_×x](treat|treated?|D|T)/i;
+
+  const lines = [];
+
+  varNames.forEach(v => {
+    if (v === "(Intercept)") return;
+
+    const vl  = v.toLowerCase();
+    const dict = dataDictionary?.[v] ?? "";
+
+    // ── Data dictionary "dummy 1=X" ───────────────────────────────────────
+    const dummyMatch = dict.match(/^dummy\s+1\s*=\s*(.+)$/i);
+    if (dummyMatch) {
+      const oneLabel = dummyMatch[1].trim();
+      lines.push(`  ${v}: binary-dummy | 1="${oneLabel}", 0=reference/comparison group`);
+      return;
+    }
+
+    // ── DiD interaction (check before individual treatment/post) ──────────
+    if (DID_RE.test(v)) {
+      lines.push(`  ${v}: did-interaction | coefficient = ATT under parallel trends`);
+      return;
+    }
+
+    // ── Generic interaction term ──────────────────────────────────────────
+    if (v.includes("×") || /_x_/i.test(v) || /interaction/i.test(dict)) {
+      lines.push(`  ${v}: interaction-term | interpret as conditional/moderation effect`);
+      return;
+    }
+
+    // ── Treatment indicator ───────────────────────────────────────────────
+    if (TREATMENT_RE.test(v)) {
+      lines.push(`  ${v}: treatment-indicator | 1=treated group, 0=control group`);
+      return;
+    }
+
+    // ── Post / time dummy ─────────────────────────────────────────────────
+    if (POST_RE.test(v)) {
+      lines.push(`  ${v}: time-dummy | 1=post-treatment period, 0=pre-treatment period`);
+      return;
+    }
+
+    // ── Known demographic dummies ─────────────────────────────────────────
+    const demoKey = Object.keys(DEMO_MAP).find(k => vl === k || vl === `is_${k}` || vl === `d_${k}`);
+    if (demoKey) {
+      const { one, zero } = DEMO_MAP[demoKey];
+      lines.push(`  ${v}: binary-dummy | 1="${one}", 0="${zero}"`);
+      return;
+    }
+
+    // ── Log-transformed ───────────────────────────────────────────────────
+    if (/^(log_|ln_|log\()/i.test(v) || /^log of/i.test(dict)) {
+      lines.push(`  ${v}: log-var | ${dict || "log-transformed continuous variable"}`);
+      return;
+    }
+
+    // ── Squared term ──────────────────────────────────────────────────────
+    if (/_sq$|_2$|²/.test(v) || /squared/i.test(dict)) {
+      lines.push(`  ${v}: squared-term | non-linear component, interpret jointly with linear term`);
+      return;
+    }
+
+    // ── Continuous with dictionary ────────────────────────────────────────
+    if (dict && !/^entity identifier$/i.test(dict)) {
+      lines.push(`  ${v}: continuous | ${dict}`);
+      return;
+    }
+
+    // ── Fallback — unknown ────────────────────────────────────────────────
+    lines.push(`  ${v}: continuous | (no description available)`);
+  });
+
+  return lines.length ? `VARIABLE METADATA:\n${lines.join("\n")}` : "";
+}
+
 function detectFunctionalForm(yVar = "", xVars = []) {
   const yLog    = /^(log_|ln_|log\()/i.test(yVar);
   const anyXLog = xVars.some(v => /^(log_|ln_|log\()/i.test(v));
@@ -229,9 +331,11 @@ export async function interpretRegression(result, dataDictionary = null) {
       : null,
   ].filter(Boolean).join(", ");
 
-  const funcForm    = detectFunctionalForm(yVar, xVars.length ? xVars : regressors.map(r => r.v));
+  const allXVars    = xVars.length ? xVars : regressors.map(r => r.v);
+  const funcForm    = detectFunctionalForm(yVar, allXVars);
   const coeffLines  = buildCoeffLines(core);
   const dictSection = buildDictionarySection(dataDictionary);
+  const metaBlock   = _classifyVariables(varNames, dataDictionary);
 
   const userPrompt = `\
 REGRESSION OUTPUT
@@ -241,6 +345,7 @@ Functional form: ${funcForm}
 Estimated equation: ${yVar} = ${eqParts.join(" ")}
 Fit statistics: ${fitLines}
 ${dictSection}
+${metaBlock ? metaBlock + "\n" : ""}
 Coefficient details:
 ${coeffLines}
 

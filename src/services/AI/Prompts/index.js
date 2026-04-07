@@ -93,31 +93,65 @@ STRICT RULES:
 `;
 
 // ─── PROMPT: INTERPRET REGRESSION ────────────────────────────────────────────
-// v1.2 — added explicit RDD and 2SLS paragraph-2 guidance
+// v1.3 — variable metadata block + stricter dummy/categorical/interaction rules
 export const INTERPRET_REGRESSION_PROMPT = `\
 ${SHARED_CONTEXT}
 ────────────────────────────────────────────────────────────────────
 TASK: REGRESSION NARRATIVE
 ────────────────────────────────────────────────────────────────────
-Write a results section for a peer-reviewed journal given regression output
-and a data dictionary mapping column names to human-readable descriptions.
+Write a results section for a peer-reviewed journal given regression output,
+a data dictionary, and a VARIABLE METADATA block that classifies each variable.
 
-NATURAL LANGUAGE RULES (MANDATORY):
-1.  NEVER write "a 1 unit increase in [variable]".
-    Use the data dictionary to phrase the change naturally:
-      • Count vars   → "one additional [unit]" (e.g. "one additional year of education")
-      • Continuous   → "a one-[unit] increase" (e.g. "a one-pp rise in unemployment")
-      • Dummies      → discrete group difference ("union members earn … more than non-members")
-      • "dummy 1=X"  → compare X vs. non-X explicitly.
-2.  FUNCTIONAL FORM:
-      • Log-Log   → elasticity: "a 1% increase in X is associated with a β% change in Y."
-      • Log-Level → semi-elasticity: "one additional [unit] is associated with β×100% change in Y."
-      • Level-Log → "a 1% increase in X is associated with a β/100 change in Y [units]."
-      • Level-Level → standard marginal effect with natural units from the dictionary.
-3.  Quote exact β values and p-values. Mention 95% CIs for significant regressors.
-4.  DUMMIES: Never say "a one-unit increase in female." Say "women earn X more/less than men."
+━━━ VARIABLE TYPE RULES (read the VARIABLE METADATA block first) ━━━
 
-FORMAT RULES (mandatory):
+A. BINARY / DUMMY VARIABLES  [metadata tag: binary-dummy]
+   The coefficient is a level difference between the two groups — NEVER a marginal
+   effect of "increasing" the variable. Write as a group comparison:
+   • "dummy 1=female"  →  "Female workers earn β [units] more/less than male workers."
+   • "dummy 1=treated" →  "Treated units exhibit β [units] higher/lower [outcome] than
+                           the control group."
+   • "dummy 1=urban"   →  "Urban households have β [units] higher/lower [outcome] than
+                           rural households."
+   Always name both groups explicitly. Use the label after "1=" for the active group;
+   infer the reference group from context (or call it "the reference group" if unclear).
+
+B. TREATMENT INDICATOR  [metadata tag: treatment-indicator]
+   Same as binary dummy but emphasise the treatment vs. control framing:
+   "Treated observations/units have on average β [units] higher/lower [outcome]
+   compared to untreated/control units."
+
+C. POST-TREATMENT / TIME DUMMY  [metadata tag: time-dummy]
+   "In the post-treatment period, [outcome] is β [units] higher/lower than in the
+   pre-treatment period (holding other covariates constant)."
+
+D. DiD INTERACTION  [metadata tag: did-interaction]
+   This IS the treatment effect under parallel trends:
+   "The DiD estimator (treated × post) implies an average treatment effect on the
+   treated (ATT) of β [units] (p=[p]). Under the parallel trends assumption, this
+   represents the causal effect of the treatment."
+   Never call this a 'marginal effect' or talk about 'increasing' the interaction.
+
+E. LOG-TRANSFORMED VARIABLES  [metadata tag: log-var]
+   Follow the functional form rules for elasticity / semi-elasticity interpretation.
+
+F. SQUARED TERMS  [metadata tag: squared-term]
+   Do not interpret in isolation. State the turning point if possible:
+   "The marginal effect of [X] depends on its level; the relationship peaks/troughs at
+   X = −β_linear / (2·β_sq)."
+
+G. CONTINUOUS VARIABLES  [metadata tag: continuous]
+   Use the natural unit from the data dictionary:
+   "One additional year of education is associated with…"
+   "A one-percentage-point increase in the unemployment rate…"
+   NEVER say "a one-unit increase" if the unit is stated in the dictionary.
+
+━━━ FUNCTIONAL FORM (when no metadata overrides) ━━━
+   • Log-Log   → elasticity: "a 1% increase in X → β% change in Y."
+   • Log-Level → semi-elasticity: "one more [unit] → β×100% change in Y."
+   • Level-Log → "1% increase in X → β/100 [units] change in Y."
+   • Level-Level → standard unit interpretation.
+
+━━━ FORMAT RULES (mandatory) ━━━
 • Write exactly TWO paragraphs in English. Nothing else — no headers, bullets, markdown.
 • Paragraph 1 (4–6 sentences): statistical findings — sign, magnitude, significance of
   each regressor, R², N, which predictors are significant and what CIs imply.
@@ -127,8 +161,10 @@ FORMAT RULES (mandatory):
     – DiD / TWFE: Comment on parallel trends assumption and ATT interpretation.
     – 2SLS / IV: Comment on instrument relevance (first-stage F) and exclusion restriction.
     – RDD: Comment on bandwidth choice, local validity, and continuity assumption.
+    – Logit/Probit: Comment on marginal effects vs. odds ratios, McFadden R², separation risk.
 • Do NOT start with "This study", "The results", or "In this".
 • Do NOT reproduce variable names in ALL-CAPS.
+• Quote exact β values (4 d.p.) and p-values. Mention 95% CIs for significant regressors.
 • Paragraphs separated by exactly one blank line.
 • English only.
 `;
