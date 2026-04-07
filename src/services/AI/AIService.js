@@ -8,19 +8,24 @@
 //   Cache TTL: 5 minutes (refreshed on each hit). ~10% of input token cost.
 //
 // Exports:
-//   callClaude({ system, user, maxTokens })  — shared caller (used by utils.js)
-//   inferVariableUnits(headers, sampleRows)  → Promise<Record<string,string>>
-//   interpretRegression(result, dataDictionary) → Promise<string>
+//   callClaude({ system, user, messages?, maxTokens, model? })  — shared caller
+//   inferVariableUnits(headers, sampleRows)                     → Promise<Record<string,string>>
+//   interpretRegression(result, dataDictionary)                 → Promise<string>
+//   suggestCleaning(dataQualityReport)                          → Promise<CleaningSuggestion[]>
+//   researchCoach({ question, modelResult, dataDictionary?, history? }) → Promise<string>
 
 import {
   SHARED_CONTEXT,
   INFER_UNITS_PROMPT,
   INTERPRET_REGRESSION_PROMPT,
+  CLEANING_SUGGESTIONS_PROMPT,
+  RESEARCH_COACH_PROMPT,
 } from "./prompts/index.js";
 
-const API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL   = "claude-sonnet-4-20250514";
-const MAX_TOK = 700;
+const API_URL   = "https://api.anthropic.com/v1/messages";
+const MODEL     = "claude-sonnet-4-6";        // narratives, cleaning, research coach
+const MODEL_FAST = "claude-haiku-4-5-20251001"; // unit inference — cheap, fast
+const MAX_TOK   = 700;
 
 // ─── MOCK FALLBACKS ───────────────────────────────────────────────────────────
 function mockNarrative(core) {
@@ -62,7 +67,9 @@ function mockNarrative(core) {
 //   ]
 // SHARED_CONTEXT is cached; task-specific prompt is not (may vary per call).
 // If system is falsy, only SHARED_CONTEXT is sent (still cached).
-export async function callClaude({ system, user, maxTokens = MAX_TOK }) {
+// messages: optional array of { role:'user'|'assistant', content: string }
+// If provided, used directly (multi-turn). Otherwise `user` is wrapped as a single turn.
+export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, model = MODEL }) {
   const systemArray = [
     {
       type: "text",
@@ -75,10 +82,10 @@ export async function callClaude({ system, user, maxTokens = MAX_TOK }) {
   }
 
   const body = {
-    model:      MODEL,
+    model,
     max_tokens: maxTokens,
     system:     systemArray,
-    messages:   [{ role: "user", content: user }],
+    messages:   messages ?? [{ role: "user", content: user }],
   };
 
   let res;
@@ -128,7 +135,7 @@ export async function inferVariableUnits(headers, sampleRows) {
 
   let raw;
   try {
-    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 600 });
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 600, model: MODEL_FAST });
   } catch (err) {
     console.warn("[AIService] inferVariableUnits failed:", err.message);
     return identity();
@@ -245,5 +252,224 @@ Write the two-paragraph interpretation now.`;
   } catch (err) {
     console.warn("[AIService] interpretRegression failed:", err.message);
     return mockNarrative(core);
+  }
+}
+
+// ─── 3. SUGGEST CLEANING ──────────────────────────────────────────────────────
+// Accepts the DataQualityReport produced by buildDataQualityReport() and returns
+// an array of prioritised cleaning suggestions with pipeline step types.
+//
+// Returns: Promise<CleaningSuggestion[]>
+//   CleaningSuggestion: { col, issue, suggested_step, params, rationale, severity }
+//   On failure: returns [] (never throws — caller renders empty state gracefully).
+
+function _serializeReport(report) {
+  const { meta, flags, columns, correlations, panelSummary } = report;
+  const lines = [];
+
+  // ── Dataset overview ──────────────────────────────────────────────────────
+  lines.push(
+    `DATASET: N=${meta.nRows.toLocaleString()} rows, K=${meta.nCols} cols, ` +
+    `completeness=${(meta.completeness * 100).toFixed(1)}%, ` +
+    `numeric=${meta.numericCols}, categorical=${meta.categoricalCols}, mixed=${meta.mixedCols}`
+  );
+
+  // ── Panel summary ─────────────────────────────────────────────────────────
+  if (panelSummary) {
+    lines.push(
+      `PANEL: ${panelSummary.balance}, ${panelSummary.nEntities} entities, ` +
+      `${panelSummary.nPeriods} periods, attrition=${(panelSummary.attritionPct * 100).toFixed(1)}%` +
+      (panelSummary.hasDups ? ", DUPLICATE (i,t) PAIRS DETECTED" : "") +
+      (panelSummary.hasGaps ? ", gaps present" : "")
+    );
+  }
+
+  // ── Flags (top-level actionable issues) ───────────────────────────────────
+  const actionableFlags = flags.filter(f => f.severity !== "ok").slice(0, 15);
+  if (actionableFlags.length > 0) {
+    lines.push(`\nFLAGS (${actionableFlags.length}, ordered by severity):`);
+    actionableFlags.forEach(f => {
+      const colLabel = f.col ? `\`${f.col}\`` : "dataset-level";
+      lines.push(`  [${f.severity}] ${colLabel} — ${f.title}`);
+      lines.push(`    ${f.detail}`);
+      if (f.suggestedStep) lines.push(`    Suggested pipeline step: ${f.suggestedStep}`);
+    });
+  }
+
+  // ── Per-column detail for non-ok columns ──────────────────────────────────
+  const problemCols = columns.filter(c => c.severity !== "ok").slice(0, 12);
+  if (problemCols.length > 0) {
+    lines.push(`\nCOLUMN DETAIL:`);
+    problemCols.forEach(c => {
+      const statParts = [];
+      if (c.stats.naPct > 0)    statParts.push(`missing=${(c.stats.naPct * 100).toFixed(1)}%`);
+      if (c.stats.mean != null) statParts.push(`mean=${c.stats.mean.toFixed(3)}, sd=${c.stats.std?.toFixed(3)}`);
+      if (c.stats.uCount != null) statParts.push(`unique=${c.stats.uCount}`);
+      if (c.outlierReport) {
+        statParts.push(`IQR_outliers=${c.outlierReport.iqrCount}(${(c.outlierReport.iqrPct * 100).toFixed(1)}%)`);
+        statParts.push(`skew=${c.outlierReport.skewness.toFixed(2)}(${c.outlierReport.skewLabel})`);
+        if (c.outlierReport.extremeLow?.length)  statParts.push(`min_vals=[${c.outlierReport.extremeLow.join(",")}]`);
+        if (c.outlierReport.extremeHigh?.length) statParts.push(`max_vals=[${c.outlierReport.extremeHigh.join(",")}]`);
+      }
+      if (c.missingPattern?.isSystematic) statParts.push("systematic_missingness=true");
+
+      lines.push(`  \`${c.col}\` [${c.type}, ${c.severity}]: ${statParts.join(", ")}`);
+    });
+  }
+
+  // ── High correlations ─────────────────────────────────────────────────────
+  if (correlations.length > 0) {
+    lines.push(`\nHIGH CORRELATIONS (|r| ≥ 0.85):`);
+    correlations.slice(0, 6).forEach(({ a, b, r }) => {
+      lines.push(`  \`${a}\` ↔ \`${b}\`: r=${r.toFixed(4)}`);
+    });
+  }
+
+  return lines.join("\n");
+}
+
+export async function suggestCleaning(dataQualityReport) {
+  if (!dataQualityReport) return [];
+
+  const reportText  = _serializeReport(dataQualityReport);
+  const taskPrompt  = CLEANING_SUGGESTIONS_PROMPT.replace(SHARED_CONTEXT, "").trim();
+  const userPrompt  = `DATA QUALITY REPORT:\n\n${reportText}\n\nReturn the JSON array now.`;
+
+  let raw;
+  try {
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 1800 });
+  } catch (err) {
+    console.warn("[AIService] suggestCleaning failed:", err.message);
+    return [];
+  }
+
+  const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed)) return [];
+    // Validate shape — drop any suggestion missing required fields
+    return parsed.filter(s =>
+      typeof s.issue === "string" &&
+      typeof s.rationale === "string" &&
+      ["high", "medium", "low"].includes(s.severity)
+    );
+  } catch (err) {
+    console.warn("[AIService] suggestCleaning — JSON parse failed:", err.message);
+    return [];
+  }
+}
+
+// ─── 4. RESEARCH COACH ────────────────────────────────────────────────────────
+// Multi-turn conversational advisor. Serialises the active model result into
+// a compact context block, then appends the conversation history + new question.
+//
+// history: [{ role:'user'|'assistant', text: string }]  (previous turns)
+// Returns: Promise<string>  — the assistant's reply text
+
+function _serializeModelContext(result, dataDictionary) {
+  if (!result) return "No model has been estimated yet.";
+
+  // 2SLS wraps in .second
+  const core = result.second ?? result;
+  const {
+    varNames = [], beta = [], se = [], pVals = [],
+    R2, adjR2, n, Fstat, Fpval,
+    att, attSE, attP,
+    modelLabel = "OLS", yVar = "y", xVars = [],
+  } = core;
+
+  const lines = [];
+  lines.push(`ACTIVE MODEL: ${modelLabel}`);
+  lines.push(`Dependent variable: ${yVar}`);
+
+  const regressors = varNames.filter(v => v !== "(Intercept)");
+  if (regressors.length) lines.push(`Regressors: ${regressors.join(", ")}`);
+
+  // Fit stats
+  const fitParts = [];
+  if (n     != null)                fitParts.push(`N=${n}`);
+  if (R2    != null && isFinite(R2))   fitParts.push(`R²=${R2.toFixed(4)}`);
+  if (adjR2 != null && isFinite(adjR2)) fitParts.push(`Adj.R²=${adjR2.toFixed(4)}`);
+  if (Fstat != null && isFinite(Fstat)) {
+    const fp = Fpval != null ? (Fpval < 0.001 ? "<0.001" : Fpval.toFixed(4)) : "?";
+    fitParts.push(`F=${Fstat.toFixed(2)}(p=${fp})`);
+  }
+  if (att != null && isFinite(att)) {
+    const ap = attP != null ? (attP < 0.001 ? "<0.001" : attP.toFixed(4)) : "?";
+    fitParts.push(`ATT=${att.toFixed(4)}(SE=${attSE?.toFixed(4) ?? "?"},p=${ap})`);
+  }
+  if (fitParts.length) lines.push(`Fit: ${fitParts.join(", ")}`);
+
+  // Coefficients
+  lines.push("Coefficients:");
+  varNames.forEach(v => {
+    const i = varNames.indexOf(v);
+    const b = beta[i], s = se[i], p = pVals[i];
+    const bStr = (b != null && isFinite(b)) ? b.toFixed(4) : "N/A";
+    const sStr = (s != null && isFinite(s)) ? s.toFixed(4) : "N/A";
+    const sig  = p == null ? "p=N/A"
+               : p < 0.01 ? "p<0.01 ***"
+               : p < 0.05 ? "p<0.05 **"
+               : p < 0.1  ? "p<0.1 *"
+               : `p=${p.toFixed(3)} n.s.`;
+    lines.push(`  ${v}: β=${bStr}, SE=${sStr}, ${sig}`);
+  });
+
+  // 2SLS first stage (if present)
+  if (result.firstStages?.length) {
+    result.firstStages.forEach(fs => {
+      if (fs.Fstat != null) {
+        lines.push(`First-stage F (${fs.endogVar ?? "endog"}): ${fs.Fstat.toFixed(2)}`);
+      }
+    });
+  }
+
+  // RDD specifics
+  if (result.type === "RDD" && result.main) {
+    const r = result.main;
+    lines.push(`LATE at cutoff=${r.cutoff}: ${r.late?.toFixed(4) ?? "N/A"} (SE=${r.lateSE?.toFixed(4) ?? "N/A"}, p=${r.lateP?.toFixed(4) ?? "N/A"})`);
+    lines.push(`Bandwidth: ${result.h?.toFixed(4) ?? "N/A"}, Kernel: ${r.kernelType ?? "N/A"}`);
+  }
+
+  // Data dictionary
+  if (dataDictionary && Object.keys(dataDictionary).length) {
+    lines.push("Data dictionary:");
+    Object.entries(dataDictionary).slice(0, 20).forEach(([k, v]) => {
+      lines.push(`  ${k}: "${v}"`);
+    });
+  }
+
+  return lines.join("\n");
+}
+
+export async function researchCoach({ question, modelResult, dataDictionary = null, history = [] }) {
+  if (!question?.trim()) return "";
+
+  const modelContext = _serializeModelContext(modelResult, dataDictionary);
+  const taskPrompt   = RESEARCH_COACH_PROMPT.replace(SHARED_CONTEXT, "").trim();
+
+  // First user message always includes the model context (pinned to the top of the conversation)
+  const contextPrefix = `MODEL CONTEXT:\n${modelContext}\n\n────────────────────────────\n`;
+
+  // Build messages array from history
+  const apiMessages = [];
+  history.forEach((turn, idx) => {
+    const content = (turn.role === "user" && idx === 0)
+      ? contextPrefix + turn.text
+      : turn.text;
+    apiMessages.push({ role: turn.role, content });
+  });
+
+  // New user turn — prepend context only if history is empty (first question)
+  const newContent = apiMessages.length === 0
+    ? contextPrefix + question.trim()
+    : question.trim();
+  apiMessages.push({ role: "user", content: newContent });
+
+  try {
+    return await callClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 500 });
+  } catch (err) {
+    console.warn("[AIService] researchCoach failed:", err.message);
+    return "The research coach is unavailable — check your API key and network connection.";
   }
 }

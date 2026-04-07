@@ -24,6 +24,7 @@ import { C, mono }        from "../components/modeling/shared.jsx";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
+import ResearchCoach       from "../components/modeling/ResearchCoach.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
@@ -1302,6 +1303,14 @@ export default function ModelingTab({ cleanedData, onBack }) {
               </div>
             );
           })()}
+
+          {/* ══ Research Coach ══ */}
+          {result && (
+            <ResearchCoach
+              result={result}
+              dataDictionary={cleanedData?.dataDictionary ?? null}
+            />
+          )}
 
         </div>
       </div>
