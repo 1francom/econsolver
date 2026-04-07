@@ -6,7 +6,7 @@
 //   src/components/modeling/ModelConfiguration.jsx
 // Math lives in src/math/index.js (split from the monolithic EconometricsEngine.js).
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   runOLS, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
