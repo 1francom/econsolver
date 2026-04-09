@@ -18,6 +18,8 @@ import DictionaryTab   from "./components/wrangling/DictionaryTab.jsx";
 import History         from "./components/wrangling/History.jsx";
 import ExportMenu      from "./components/wrangling/ExportMenu.jsx";
 import DataQualityReport from "./components/wrangling/DataQualityReport.jsx";
+import AuditTrail        from "./components/validation/AuditTrail.jsx";
+import { auditPipeline } from "./pipeline/auditor.js";
 
 // ── Shared atoms ───────────────────────────────────────────────────────────
 import { C, mono, Tabs } from "./components/wrangling/shared.jsx";
@@ -44,6 +46,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   const [dataDictionary, setDataDictionary] = useState(null);
   const [tab,            setTab]            = useState("clean");
   const [idbReady,       setIdbReady]       = useState(false);
+  const [auditTrail,     setAuditTrail]     = useState(null);
 
   // ── Initial load from IndexedDB ────────────────────────────────────────────
   useEffect(() => {
@@ -354,6 +357,19 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
                 )}
               </div>
             )}
+            {pipeline.length > 0 && (
+              <button
+                onClick={() => {
+                  const trail = auditPipeline(rawData.rows, rawData.headers, pipeline, context);
+                  setAuditTrail(trail);
+                }}
+                style={{ padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
+                  fontFamily:mono, fontSize:10, transition:"all 0.12s",
+                  background:"transparent", color:"#6ec8b4",
+                  border:"1px solid #6ec8b4" }}>
+                ◈ Audit
+              </button>
+            )}
             <button onClick={proceed} style={{ padding:"0.28rem 0.65rem", borderRadius:3,
               cursor:"pointer", fontFamily:mono, fontSize:10,
               background:"#c8a96e", color:"#080808",
@@ -420,6 +436,14 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         canUndo={canUndo}
         canRedo={canRedo}
       />
+
+      {auditTrail && (
+        <AuditTrail
+          trail={auditTrail}
+          filename={filename}
+          onClose={() => setAuditTrail(null)}
+        />
+      )}
     </div>
   );
 }
