@@ -18,6 +18,7 @@ import {
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
+import { downloadReplicationBundle } from "../services/export/replicationBundle.js";
 import ReportingModule from "../ReportingModule.jsx";
 import * as modelBuffer from "../services/modelBuffer.js";
 import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
@@ -403,6 +404,12 @@ function ReplicateDropdown({ replicateConfig, model }) {
       color: C.blue,
       action: () => download(generateStataScript(replicateConfig), ".do"),
     },
+    {
+      label: "↓ ZIP Bundle  (R + Py + Do)",
+      color: C.teal,
+      action: () => { downloadReplicationBundle(replicateConfig); setOpen(false); },
+      divider: true,
+    },
   ];
 
   return (
@@ -428,17 +435,20 @@ function ReplicateDropdown({ replicateConfig, model }) {
           borderRadius: 4, overflow: "hidden", minWidth: 160,
           boxShadow: "0 4px 16px rgba(0,0,0,0.6)", animation: "fadeUp 0.12s ease",
         }}>
-          {options.map(({ label, color, action }) => (
-            <button key={label} onClick={action}
-              style={{
-                display: "block", width: "100%", textAlign: "left",
-                padding: "0.55rem 1rem", background: "transparent", border: "none",
-                color, cursor: "pointer", fontFamily: mono, fontSize: 11,
-                transition: "background 0.1s",
-              }}
-              onMouseOver={e => { e.currentTarget.style.background = `${color}14`; }}
-              onMouseOut={e =>  { e.currentTarget.style.background = "transparent"; }}
-            >{label}</button>
+          {options.map(({ label, color, action, divider }) => (
+            <div key={label}>
+              {divider && <div style={{ height: 1, background: C.border, margin: "3px 0" }} />}
+              <button onClick={action}
+                style={{
+                  display: "block", width: "100%", textAlign: "left",
+                  padding: "0.55rem 1rem", background: "transparent", border: "none",
+                  color, cursor: "pointer", fontFamily: mono, fontSize: 11,
+                  transition: "background 0.1s",
+                }}
+                onMouseOver={e => { e.currentTarget.style.background = `${color}14`; }}
+                onMouseOut={e =>  { e.currentTarget.style.background = "transparent"; }}
+              >{label}</button>
+            </div>
           ))}
         </div>
       )}
