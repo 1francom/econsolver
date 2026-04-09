@@ -164,7 +164,7 @@ function buildAlerts(bp, white, dw, bg, vif, hausman) {
       type: "specification",
       severity: "medium",
       message: `Hausman test rejects FE/FD consistency (p=${parseFloat(hausman.pVal).toFixed(4)}).`,
-      coachPrompt: `The Hausman test between FE and FD is significant (H=${hausman.H?.toFixed(3)}, p=${parseFloat(hausman.pVal).toFixed(4)}). What does this divergence imply about serial correlation in my panel? Which estimator should I prefer?`,
+      coachPrompt: `The Hausman test between FE and FD is significant (H=${hausman.H}, p=${parseFloat(hausman.pVal).toFixed(4)}). What does this divergence imply about serial correlation in my panel? Which estimator should I prefer?`,
     });
   }
 
