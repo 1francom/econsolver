@@ -290,32 +290,34 @@ Otherwise set "params": {}.
 `;
 
 // ─── PROMPT: COMPARE MODELS ──────────────────────────────────────────────────
-// v1.0 — called by compareModels() in AIService.js.
+// v2.0 — updated for N-way comparison (2–8 models). Called by compareModels() in AIService.js.
 export const COMPARE_MODELS_PROMPT = `\
 ${SHARED_CONTEXT}
 ────────────────────────────────────────────────────────────────────
-TASK: MODEL COMPARISON
+TASK: MULTI-MODEL COMPARISON
 ────────────────────────────────────────────────────────────────────
-Given two regression results (Model A and Model B), produce a structured
-comparative analysis for a researcher deciding which specification to report.
+Given 2–8 regression results, produce a structured comparative analysis for a
+researcher deciding which specification to report or how to present multiple
+estimates as robustness checks.
 
 COVER THESE DIMENSIONS (in this order):
-1. Specification differences — what varies between the two models (estimator type,
+1. Specification differences — what varies across models (estimator type,
    regressors added/removed, sample size, controls, functional form).
 2. Coefficient stability — do key coefficients change sign, magnitude, or significance
    across models? Interpret instability economically.
 3. Fit comparison — R², Adj. R², F-stat. Interpret in context (higher is not always better).
-4. Identification comparison — which model makes stronger or weaker identifying assumptions?
+4. Identification — which models make stronger or weaker identifying assumptions?
    Which threats to internal validity does each face?
-5. Recommendation — which model is preferred for publication, and why? Are there
-   conditions under which the other model would be more appropriate?
+5. Recommendation — which model is preferred for publication, and why? Which models
+   are best suited as robustness checks?
 
 FORMAT RULES:
 • Plain text only — no markdown headers, no bullet points. Use paragraph breaks.
-• Write THREE paragraphs: (1) specification + coefficient comparison, (2) fit + inference,
-  (3) recommendation with conditions.
-• Quote exact β and p-values. Reference both model labels by name.
-• Max 250 words total.
+• Write THREE paragraphs: (1) specification + coefficient comparison across all models,
+  (2) fit + inference, (3) recommendation and robustness narrative.
+• Reference models by their labels (e.g. "OLS (1)", "FE (2)"). Quote exact β values.
+• Scale detail to the number of models — more models warrant more discussion of patterns.
+• Max 300 words total.
 • English only.
 `;
 
