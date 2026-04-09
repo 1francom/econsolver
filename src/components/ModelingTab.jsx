@@ -19,6 +19,9 @@ import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
 import ReportingModule from "../ReportingModule.jsx";
+import * as modelBuffer from "../services/modelBuffer.js";
+import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
+import ModelComparison  from "./modeling/ModelComparison.jsx";
 
 import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
@@ -789,6 +792,12 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
   const [err,          setErr]          = useState(null);
   const [reportResult, setReportResult] = useState(null);
 
+  // ── Model buffer (pinned models) ──────────────────────────────────────────
+  const [bufferVersion, setBufferVersion] = useState(0);
+  const [compareOpen,   setCompareOpen]   = useState(false);
+  const [activeBufferId, setActiveBufferId] = useState(null);
+  const pinnedModels = useMemo(() => modelBuffer.getAll(), [bufferVersion]);
+
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
 
@@ -1032,7 +1041,8 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
           )}
         </div>
 
-        {/* ── RIGHT: Results Panel ── */}
+        {/* ── RIGHT: Results Panel (column flex so buffer bar sticks to bottom) ── */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div style={{ flex: 1, overflowY: "auto", padding: "1.4rem 1.6rem", paddingBottom: "3rem" }}>
 
           {!result && !err && (
@@ -1044,6 +1054,28 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
               <div style={{ fontSize: 10, color: C.textMuted, maxWidth: 420, textAlign: "center", lineHeight: 1.8 }}>
                 Supported estimators: OLS · Fixed Effects · First Differences · 2SLS/IV · DiD 2×2 · TWFE · Sharp RDD · Logit · Probit
               </div>
+            </div>
+          )}
+
+          {/* ── Pin result button ── */}
+          {result && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+              <button
+                onClick={() => {
+                  const id = modelBuffer.add(result);
+                  setActiveBufferId(id);
+                  setBufferVersion(v => v + 1);
+                }}
+                style={{
+                  padding: "3px 12px", borderRadius: 3, cursor: "pointer",
+                  fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
+                  border: `1px solid ${C.border2}`, background: "transparent",
+                  color: C.textDim, transition: "all 0.12s",
+                }}
+                title="Pin this result for comparison"
+              >
+                ⊕ Pin
+              </button>
             </div>
           )}
 
@@ -1415,7 +1447,33 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
           })()}
 
         </div>
-      </div>
+
+        {/* ── Model Buffer Bar ── */}
+        <ModelBufferBar
+          models={pinnedModels}
+          activeId={activeBufferId}
+          onRestore={(id) => {
+            const r = modelBuffer.get(id);
+            if (r) { setResult(r); setActiveBufferId(id); }
+          }}
+          onRemove={(id) => {
+            modelBuffer.remove(id);
+            if (activeBufferId === id) setActiveBufferId(null);
+            setBufferVersion(v => v + 1);
+          }}
+          onCompare={() => setCompareOpen(true)}
+        />
+        </div>{/* closes RIGHT outer column wrapper */}
+      </div>{/* closes body flex */}
+
+      {/* ── Model Comparison Modal ── */}
+      {compareOpen && pinnedModels.length >= 2 && (
+        <ModelComparison
+          models={pinnedModels}
+          dataDictionary={cleanedData?.dataDictionary ?? null}
+          onClose={() => setCompareOpen(false)}
+        />
+      )}
     </div>
   );
 }

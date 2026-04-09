@@ -472,45 +472,65 @@ export async function suggestCleaning(dataQualityReport) {
 }
 
 // ─── 4. COMPARE MODELS ───────────────────────────────────────────────────────
-// Statistical and theoretical comparison of two regression results.
+// Comparative analysis of 2–8 regression results.
+// Accepts either (models: EstimationResult[], dataDictionary?) for N-way,
+// or legacy (modelA, modelB, dataDictionary?) for 2-way.
 // Returns Promise<string> — three paragraphs of plain text.
 
-export async function compareModels(modelA, modelB, dataDictionary = null) {
-  if (!modelA || !modelB) return "Provide two model results to compare.";
+function _formatModelBlock(label, raw) {
+  const {
+    varNames = [], beta = [], se = [], pVals = [],
+    R2, adjR2, n, Fstat, Fpval, att, attP, late, lateP,
+  } = raw;
+  const modelLabel = raw.label ?? raw.modelLabel ?? "OLS";
+  const yVar = raw.spec?.yVar ?? raw.yVar ?? "y";
 
-  const formatModel = (label, raw) => {
-    const {
-      varNames = [], beta = [], se = [], pVals = [],
-      R2, adjR2, n, Fstat, Fpval,
-    } = raw;
-    const modelLabel = raw.label ?? raw.modelLabel ?? "OLS";
-    const yVar = raw.spec?.yVar ?? raw.yVar ?? "y";
+  const lines = [
+    `${label}: ${modelLabel} | dep.var: ${yVar} | N=${n ?? "?"} | R²=${R2?.toFixed(4) ?? "?"} | Adj.R²=${adjR2?.toFixed(4) ?? "?"}`,
+  ];
+  if (Fstat  != null && isFinite(Fstat))  lines.push(`  F=${Fstat.toFixed(3)} (p=${Fpval != null ? (Fpval < 0.001 ? "<0.001" : Fpval.toFixed(4)) : "?"})`);
+  if (att    != null && isFinite(att))    lines.push(`  ATT=${att.toFixed(4)} (p=${attP  != null ? (attP  < 0.001 ? "<0.001" : attP.toFixed(4))  : "?"})`);
+  if (late   != null && isFinite(late))   lines.push(`  LATE=${late.toFixed(4)} (p=${lateP != null ? (lateP < 0.001 ? "<0.001" : lateP.toFixed(4)) : "?"})`);
 
-    const lines = [
-      `${label}: ${modelLabel} | dep.var: ${yVar} | N=${n ?? "?"} | R²=${R2?.toFixed(4) ?? "?"} | Adj.R²=${adjR2?.toFixed(4) ?? "?"}`,
-    ];
-    if (Fstat != null && isFinite(Fstat)) {
-      lines.push(`  F=${Fstat.toFixed(3)} (p=${Fpval != null ? (Fpval < 0.001 ? "<0.001" : Fpval.toFixed(4)) : "?"})`);
-    }
-    lines.push("  Coefficients:");
-    varNames.filter(v => v !== "(Intercept)").forEach(v => {
-      const i = varNames.indexOf(v);
-      const b = beta[i], s = se[i], p = pVals[i];
-      const sig = p == null ? "p=N/A" : p < 0.01 ? "p<0.01***" : p < 0.05 ? "p<0.05**" : p < 0.1 ? "p<0.1*" : `p=${p.toFixed(3)}`;
-      lines.push(`    ${v}: β=${b?.toFixed(4) ?? "N/A"}, SE=${s?.toFixed(4) ?? "N/A"}, ${sig}`);
-    });
-    return lines.join("\n");
-  };
+  lines.push("  Coefficients:");
+  varNames.filter(v => v !== "(Intercept)").forEach(v => {
+    const i = varNames.indexOf(v);
+    const b = beta[i], s = se[i], p = pVals[i];
+    const sig = p == null ? "p=N/A" : p < 0.01 ? "p<0.01***" : p < 0.05 ? "p<0.05**" : p < 0.1 ? "p<0.1*" : `p=${p.toFixed(3)}`;
+    lines.push(`    ${v}: β=${b?.toFixed(4) ?? "N/A"}, SE=${s?.toFixed(4) ?? "N/A"}, ${sig}`);
+  });
+  return lines.join("\n");
+}
+
+export async function compareModels(modelsOrA, dataDictionaryOrB = null, legacyDict = null) {
+  // Normalise overloaded signature
+  let models, dataDictionary;
+  if (Array.isArray(modelsOrA)) {
+    // N-way call: compareModels(models[], dataDictionary?)
+    models        = modelsOrA;
+    dataDictionary = dataDictionaryOrB;
+  } else {
+    // Legacy 2-way call: compareModels(modelA, modelB, dataDictionary?)
+    models        = [modelsOrA, dataDictionaryOrB].filter(Boolean);
+    dataDictionary = legacyDict;
+  }
+
+  if (!models?.length || models.length < 2) return "Provide at least two model results to compare.";
+
+  const modelBlocks = models.map((m, i) => {
+    const label = `${m.label ?? m.type ?? "Model"} (${i+1})`;
+    return _formatModelBlock(label, m);
+  }).join("\n\n");
 
   const dictSection = (dataDictionary && Object.keys(dataDictionary).length)
     ? `\nDATA DICTIONARY:\n${Object.entries(dataDictionary).map(([k,v]) => `  ${k}: "${v}"`).join("\n")}\n`
     : "";
 
-  const userPrompt = `${formatModel("Model A", modelA)}\n\n${formatModel("Model B", modelB)}${dictSection}\n\nWrite the three-paragraph comparative analysis now.`;
+  const userPrompt = `${modelBlocks}${dictSection}\n\nWrite the three-paragraph comparative analysis now.`;
 
   try {
     const taskPrompt = COMPARE_MODELS_PROMPT.replace(SHARED_CONTEXT, "").trim();
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 700 });
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 800 });
   } catch (err) {
     console.warn("[AIService] compareModels failed:", err.message);
     return "Model comparison unavailable — check API key and connection.";
