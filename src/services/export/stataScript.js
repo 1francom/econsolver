@@ -110,10 +110,8 @@ function transpileStep(step) {
           `drop _tmp_grp`,
         ].join("\n");
       }
-      if (mode === "ffill") return `* forward fill
-local obs = _N
-forval i = 2/\`obs' {
-  if missing(${col}[\`i']) replace ${col} = ${col}[\`i'-1] in \`i'
+      if (mode === "ffill") return `* forward fill local obs = _N forval i = 2/\`obs' {
+     if missing(${col}[\`i']) replace ${col} = ${col}[\`i'-1] in \`i'
 }
 `;
       const v = typeof value === "string" ? `"${value}"` : value ?? 0;
