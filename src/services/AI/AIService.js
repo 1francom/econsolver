@@ -22,6 +22,7 @@ import {
   CLEANING_SUGGESTIONS_PROMPT,
   COMPARE_MODELS_PROMPT,
   RESEARCH_COACH_PROMPT,
+  buildMetadataContext,
 } from "./Prompts/index.js";
 
 const API_URL   = "https://api.anthropic.com/v1/messages";
@@ -298,7 +299,7 @@ function buildCoeffLines(result) {
     .join("\n");
 }
 
-export async function interpretRegression(result, dataDictionary = null) {
+export async function interpretRegression(result, dataDictionary = null, metadataReport = null) {
   if (!result) throw new Error("No result object provided.");
 
   const {
@@ -342,6 +343,7 @@ export async function interpretRegression(result, dataDictionary = null) {
   const dictSection = buildDictionarySection(dataDictionary);
   const metaBlock   = _classifyVariables(varNames, dataDictionary);
 
+  const metaCtx = metadataReport ? buildMetadataContext(metadataReport) : "";
   const userPrompt = `\
 REGRESSION OUTPUT
 Model type: ${modelLabel}
@@ -353,7 +355,7 @@ ${dictSection}
 ${metaBlock ? metaBlock + "\n" : ""}
 Coefficient details:
 ${coeffLines}
-
+${metaCtx ? "\n" + metaCtx : ""}
 Write the two-paragraph interpretation now.`;
 
   try {
@@ -598,14 +600,15 @@ function _serializeModelContext(result, dataDictionary) {
   return lines.join("\n");
 }
 
-export async function researchCoach({ question, modelResult, dataDictionary = null, history = [] }) {
+export async function researchCoach({ question, modelResult, dataDictionary = null, history = [], metadataReport = null }) {
   if (!question?.trim()) return "";
 
   const modelContext = _serializeModelContext(modelResult, dataDictionary);
   const taskPrompt   = RESEARCH_COACH_PROMPT.replace(SHARED_CONTEXT, "").trim();
+  const metaCtx      = metadataReport ? "\n" + buildMetadataContext(metadataReport) : "";
 
   // First user message always includes the model context (pinned to the top of the conversation)
-  const contextPrefix = `MODEL CONTEXT:\n${modelContext}\n\n────────────────────────────\n`;
+  const contextPrefix = `MODEL CONTEXT:\n${modelContext}${metaCtx}\n\n────────────────────────────\n`;
 
   // Build messages array from history
   const apiMessages = [];

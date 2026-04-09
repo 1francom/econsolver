@@ -24,6 +24,8 @@ import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
 import { C, mono }        from "../components/modeling/shared.jsx";
+import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
+import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
@@ -794,6 +796,19 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
   const modelAvail = useMemo(() => buildModelAvail(panelOk),        [panelOk]);
   const modelHint  = useMemo(() => buildModelHint(panel, panelOk),  [panel, panelOk]);
 
+  // ── Metadata & coaching signals ──────────────────────────────────────────────
+  const metadataReport = useMemo(
+    () => buildMetadataReport(headers, rows, panel),
+    [headers, rows, panel]
+  );
+  const modelSpec = useMemo(() => ({
+    type: model, yVar: yVar[0], xVars, wVars, zVars,
+  }), [model, yVar, xVars, wVars, zVars]);
+  const coachingSignals = useMemo(
+    () => generateCoachingSignals(metadataReport, result, modelSpec),
+    [metadataReport, result, modelSpec]
+  );
+
   const handleModelSelect = useCallback((id) => {
     setModel(id); setResult(null); setErr(null);
   }, []);
@@ -1028,6 +1043,28 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
               </div>
               <div style={{ fontSize: 10, color: C.textMuted, maxWidth: 420, textAlign: "center", lineHeight: 1.8 }}>
                 Supported estimators: OLS · Fixed Effects · First Differences · 2SLS/IV · DiD 2×2 · TWFE · Sharp RDD · Logit · Probit
+              </div>
+            </div>
+          )}
+
+          {/* ── Coach Insights ── */}
+          {coachingSignals.length > 0 && (
+            <div style={{ marginBottom: "1.2rem" }}>
+              <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 8 }}>
+                Coach Insights
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {coachingSignals.map(s => {
+                  const clr = s.severity === "warn" ? C.gold : s.severity === "suggest" ? C.teal : C.blue;
+                  return (
+                    <div key={s.id} title={s.detail + "\n\n" + s.suggestion}
+                      style={{ fontSize: 10, color: clr, border: `1px solid ${clr}`, borderRadius: 3,
+                               padding: "3px 8px", cursor: "default", fontFamily: mono,
+                               background: clr + "12" }}>
+                      {s.severity === "warn" ? "⚠ " : s.severity === "suggest" ? "→ " : "i "}{s.title}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

@@ -358,3 +358,49 @@ RESPONSE FORMAT:
 - Remaining sentences add nuance, caveats, or next steps.
 - Maximum 180 words unless the question genuinely requires more.
 `;
+
+// ─── METADATA CONTEXT BUILDER ─────────────────────────────────────────────────
+// Serialises a MetadataReport into a compact text block (~150-200 tokens).
+// Appended to the USER message (not system) to preserve SHARED_CONTEXT caching.
+
+export function buildMetadataContext(meta) {
+  if (!meta) return "";
+  const lines = ["[DATASET METADATA]"];
+
+  if (meta.temporal) {
+    const t = meta.temporal;
+    lines.push(`Temporal: ${t.dateCol} — ${t.periodicity}, ${t.minDate} to ${t.maxDate} (${t.span}d span)`);
+  }
+
+  if (meta.panelQuality) {
+    const p = meta.panelQuality;
+    const bal = p.balance ? "balanced" : `unbalanced (T: ${p.tDistribution.min}–${p.tDistribution.max})`;
+    const ws = p.withinShare != null ? `, within-var share=${(p.withinShare * 100).toFixed(0)}%` : "";
+    lines.push(`Panel: ${bal}${ws}`);
+  }
+
+  if (meta.columns?.length) {
+    const notable = meta.columns.filter(c =>
+      (c.skewness != null && Math.abs(c.skewness) > 1.5) ||
+      (c.kurtosis != null && Math.abs(c.kurtosis) > 3) ||
+      c.logFeasible
+    ).slice(0, 6);
+    if (notable.length) {
+      lines.push("Notable columns:");
+      notable.forEach(c => {
+        const parts = [];
+        if (c.skewness != null) parts.push(`skew=${c.skewness.toFixed(2)}`);
+        if (c.kurtosis != null) parts.push(`kurt=${c.kurtosis.toFixed(1)}`);
+        if (c.logFeasible) parts.push("log-feasible");
+        lines.push(`  ${c.col}: ${parts.join(", ")}`);
+      });
+    }
+  }
+
+  if (meta.highCorrelations?.length) {
+    const top = meta.highCorrelations.slice(0, 3);
+    lines.push(`High correlations: ${top.map(({ a, b, r }) => `${a}↔${b}(r=${r})`).join(", ")}`);
+  }
+
+  return lines.join("\n");
+}
