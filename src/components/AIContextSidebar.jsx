@@ -9,8 +9,9 @@
 //   cleanedData    object|null  — pipeline output (headers, rows, pipeline, dict)
 //   modelResult    object|null  — active model result from ModelingTab
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { researchCoach } from "../services/AI/AIService.js";
+import { buildMetadataReport } from "../core/validation/metadataExtractor.js";
 
 const C = {
   bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
@@ -152,6 +153,14 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
 
   const starters = SCREEN_STARTERS[screen] ?? SCREEN_STARTERS.default;
   const contextStr = buildContext(screen, cleanedData, modelResult);
+  const metadataReport = useMemo(
+    () => buildMetadataReport(
+      cleanedData?.headers ?? [],
+      cleanedData?.cleanRows ?? [],
+      cleanedData?.panelIndex ?? null
+    ),
+    [cleanedData]
+  );
 
   async function submit(question) {
     const q = (question ?? input).trim();
@@ -165,6 +174,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
       question: q,
       modelResult,
       dataDictionary: cleanedData?.dataDictionary ?? null,
+      metadataReport,
       history: history.map(h => ({
         role: h.role,
         text: h.role === "user" && history.indexOf(h) === 0

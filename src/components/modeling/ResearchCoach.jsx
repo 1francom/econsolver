@@ -151,7 +151,7 @@ function ThinkingBubble() {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function ResearchCoach({ result, dataDictionary, prefillMessage }) {
+export default function ResearchCoach({ result, dataDictionary, prefillMessage, metadataReport = null }) {
   const [open,     setOpen]     = useState(false);
   const [history,  setHistory]  = useState([]);
   const [input,    setInput]    = useState("");
@@ -197,6 +197,7 @@ export default function ResearchCoach({ result, dataDictionary, prefillMessage }
       modelResult: result,
       dataDictionary,
       history: history,   // previous turns only — researchCoach appends the new question
+      metadataReport,
     });
 
     setHistory(prev => [...prev, { role: "assistant", text: reply }]);
