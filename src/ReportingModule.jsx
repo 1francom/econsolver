@@ -43,29 +43,24 @@ function normaliseResult(raw) {
   // Engine returned an error object — surface it cleanly
   if (raw.error) return { __error: raw.error };
 
-  // 2SLS wraps everything in raw.second
+  // Bridge both old ad-hoc shapes and new canonical EstimationResult shapes.
+  // Old shape: raw.second holds second-stage fields (2SLS), raw.modelLabel set externally.
+  // New canonical shape: fields are at root, label instead of modelLabel, spec.yVar instead of yVar.
   const core = raw.second ?? raw;
-
-  const {
-    varNames = [], beta = [], se = [], tStats = [], pVals = [],
-    R2 = null, adjR2 = null, n = null, df = null,
-    Fstat = null, Fpval = null,
-    att = null, attSE = null, attP = null,
-    modelLabel = "OLS", yVar = "y", xVars = [],
-  } = core;
-
-  // Sanitise every numeric array: replace undefined/null entries with NaN so
-  // downstream guards (isFinite) work uniformly instead of crashing on .toFixed()
   const clean = arr => (arr ?? []).map(v => (v == null ? NaN : v));
 
   return {
-    varNames: varNames ?? [],
-    beta:   clean(beta),
-    se:     clean(se),
-    tStats: clean(tStats),
-    pVals:  clean(pVals),
-    R2, adjR2, n, df, Fstat, Fpval,
-    att, attSE, attP, modelLabel, yVar, xVars,
+    ...core,
+    varNames: core.varNames ?? [],
+    beta:   clean(core.beta),
+    se:     clean(core.se),
+    // canonical uses testStats; old engines used tStats
+    tStats: clean(core.tStats ?? core.testStats ?? []),
+    pVals:  clean(core.pVals ?? []),
+    // canonical uses label; callers may also inject modelLabel directly
+    modelLabel: core.modelLabel ?? core.label ?? "OLS",
+    yVar:   core.yVar   ?? core.spec?.yVar   ?? "y",
+    xVars:  core.xVars  ?? core.spec?.xVars  ?? [],
     firstStages: raw.firstStages ?? null,
   };
 }
@@ -790,8 +785,8 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
 
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
 
-  // Detect Sharp RDD — raw result carries .valid / .leftFit / .rightFit
-  const isRDD = !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
+  // Detect Sharp RDD — canonical shape uses type, legacy shape carries rddData or raw fields
+  const isRDD = rawResult?.type === "RDD" || !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
 
   if (!result) return (
     <div style={{ padding: "2rem", color: C.textMuted, fontFamily: mono, fontSize: 12 }}>
@@ -946,7 +941,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
             </div>
             <div style={{ border: `1px solid ${C.border}`, borderRadius: 4,
                           padding: "0.5rem", background: C.bg, marginBottom: "1rem" }}>
-              <RDDScatterPlot rddResult={rawResult} />
+              <RDDScatterPlot rddResult={rawResult?.rddData ?? rawResult} />
             </div>
           </div>
         )}

@@ -41,3 +41,6 @@ export {
   buildBinaryLatex,
   buildBinaryCSV,
 } from "./NonLinearEngine.js";
+
+// ── Canonical result wrapper ──────────────────────────────────────────────────
+export { wrapResult, getCoeffBlock } from "./EstimationResult.js";

@@ -13,6 +13,7 @@ import {
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
+  wrapResult,
 } from "../math/index.js";
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
@@ -558,15 +559,15 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
             yVar={`${yVar[0]} (within)`}
           />
           <FitBar items={[
-            { label: tab === "fe" ? "R² within"  : "R²",      value: safeR(tab === "fe" ? active.R2_within  : active.R2),    color: C.blue },
-            { label: tab === "fe" ? "R² between" : "Adj. R²", value: safeR(tab === "fe" ? active.R2_between : active.adjR2), color: C.blue },
+            { label: tab === "fe" ? "R² within"  : "R²",      value: safeR(tab === "fe" ? active.R2Within  : active.R2),    color: C.blue },
+            { label: tab === "fe" ? "R² between" : "Adj. R²", value: safeR(tab === "fe" ? active.R2Between : active.adjR2), color: C.blue },
             { label: "n",     value: active.n,     color: C.text },
             { label: "Units", value: active.units, color: C.textDim },
             { label: "df",    value: active.df,    color: C.textDim },
           ]} />
           <Lbl color={C.textMuted}>Coefficient Table — {tab === "fe" ? "FE" : "FD"}</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.tStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
+            <CoeffTable varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.testStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
           </div>
           <PlotSelector
             accentColor={C.blue}
@@ -616,7 +617,9 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
 // ─── 2SLS RESULTS ─────────────────────────────────────────────────────────────
 function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
   const [tab, setTab] = useState("second");
-  const { firstStages, second } = result;
+  // canonical: second-stage fields are at root; firstStages sub-array is engine-shaped
+  const { firstStages } = result;
+  const second = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
 
   return (
@@ -654,7 +657,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
           ]} />
           <Lbl color={C.textMuted}>Second Stage Coefficients</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.tStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
+            <CoeffTable varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.testStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
           </div>
           <PlotSelector
             accentColor={C.gold}
@@ -699,7 +702,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
           />
           <ExportBar
             yVar={yVar[0]} results={second} model="2SLS"
-            onReport={() => openReport({ second, firstStages, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
+            onReport={() => openReport({ ...result, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
             replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } } : null}
           />
         </>
@@ -817,12 +820,12 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
         setRunning(false); return;
        }
         res = runWLS(rows, y, allX, weights);
-      if (res) res.modelLabel = "WLS";
       } else {
           res = runOLS(rows, y, allX);
       }
       if (!res) { setErr("Matrix is singular or insufficient data."); setRunning(false); return; }
-      setResult({ type: "OLS", main: { ...res, varNames: ["(Intercept)", ...allX] } });
+      const olsType = wCol ? "WLS" : "OLS";
+      setResult(wrapResult(olsType, res, { yVar: y, xVars, wVars, weightCol: wCol ?? null }));
       }
        else if (model === "FE" || model === "FD") {
         if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
@@ -831,32 +834,35 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
         const fdRaw = runFD(rows, y, allX, ec, tc);
         const fe = feRaw?.error ? null : feRaw;
         const fd = fdRaw?.error ? null : fdRaw;
-        setPanelFE(fe); setPanelFD(fd);
         if (!fe && !fd) {
           setErr(feRaw?.error ?? fdRaw?.error ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid.");
           setRunning(false); return;
         }
-        setResult({ type: model, fe, fd, y, x: allX });
+        const panelSpec = { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc };
+        const feRes = fe ? wrapResult("FE", fe, panelSpec) : null;
+        const fdRes = fd ? wrapResult("FD", fd, panelSpec) : null;
+        setPanelFE(feRes); setPanelFD(fdRes);
+        setResult({ type: model, fe: feRes, fd: fdRes });
 
       } else if (model === "2SLS") {
         if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
         if (!zVars.length) { setErr("Select at least one instrument (Z)."); setRunning(false); return; }
         const res = run2SLS(rows, y, xVars, wVars, zVars);
         if (!res || res.error) { setErr(res?.error ?? "2SLS failed. Check that instruments are valid (not in X) and data is sufficient."); setRunning(false); return; }
-        setResult({ type: "2SLS", ...res });
+        setResult(wrapResult("2SLS", res, { yVar: y, xVars, wVars, zVars }));
 
       } else if (model === "DiD") {
         if (!postVar[0] || !treatVar[0]) { setErr("Select Post and Treated binary columns for DiD."); setRunning(false); return; }
         const res = run2x2DiD(rows, y, postVar[0], treatVar[0], wVars);
         if (!res) { setErr("DiD failed. Post and Treated must be 0/1 binary variables."); setRunning(false); return; }
-        setResult({ type: "DiD", main: res });
+        setResult(wrapResult("DiD", res, { yVar: y, wVars, postVar: postVar[0], treatVar: treatVar[0] }));
 
       } else if (model === "TWFE") {
         if (!treatVar[0]) { setErr("Select the treatment indicator column."); setRunning(false); return; }
         const ec = panel.entityCol, tc = panel.timeCol;
         const res = runTWFEDiD(rows, y, ec, tc, treatVar[0], wVars);
         if (!res) { setErr("TWFE DiD failed. Check panel structure and treatment variable."); setRunning(false); return; }
-        setResult({ type: "TWFE", main: res });
+        setResult(wrapResult("TWFE", res, { yVar: y, wVars, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }));
 
       } else if (model === "RDD") {
         if (!runningVar[0]) { setErr("Select a running variable."); setRunning(false); return; }
@@ -868,7 +874,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
         if (isNaN(h) || h <= 0) { setErr("Invalid bandwidth."); setRunning(false); return; }
         const res = runSharpRDD(rows, y, runningVar[0], c0, h, kernel, wVars);
         if (!res) { setErr("RDD failed. Not enough observations within bandwidth."); setRunning(false); return; }
-        setResult({ type: "RDD", main: res, h });
+        setResult(wrapResult("RDD", res, { yVar: y, wVars, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }, { h }));
 
       } else if (model === "Logit" || model === "Probit") {
         if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
@@ -879,7 +885,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
           setRunning(false); return;
         }
         if (!res.converged) console.warn(`${model} did not converge after ${res.iterations} iterations.`);
-        setResult({ type: model, main: res });
+        setResult(wrapResult(model, res, { yVar: y, xVars, wVars }));
       }
     } catch (e) {
       setErr(`Estimation error: ${e.message}`);
@@ -1026,13 +1032,13 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
             </div>
           )}
 
-          {/* OLS */}
-          {result?.type === "OLS" && result.main && (() => {
-            const r = result.main;
+          {/* OLS / WLS */}
+          {(result?.type === "OLS" || result?.type === "WLS") && (() => {
+            const r = result;
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1.2rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.modelLabel || "OLS"} Results</span>
+                  <span style={{ fontSize: 10, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.label} Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   <span style={{ fontSize: 12, color: C.textMuted }}>{yVar[0]} ~ {[...xVars, ...wVars].join(" + ")}</span>
                 </div>
@@ -1047,7 +1053,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — 95% Confidence Intervals</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Plot & Diagnostics</Lbl>
                 <PlotSelector
@@ -1083,10 +1089,10 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                 <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
-                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model="OLS" />
-                <ExportBar yVar={yVar[0]} results={r} model="OLS"
-                  onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
-                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />
+                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model={r.type} />
+                <ExportBar yVar={yVar[0]} results={r} model={r.type}
+                  onReport={() => openReport({ ...r, modelLabel: r.label, yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars } }} />
               </div>
             );
           })()}
@@ -1102,8 +1108,8 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
           )}
 
           {/* DiD / TWFE */}
-          {(result?.type === "DiD" || result?.type === "TWFE") && result.main && (() => {
-            const r = result.main;
+          {(result?.type === "DiD" || result?.type === "TWFE") && (() => {
+            const r = result;
             const isATT = r.att != null;
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
@@ -1135,7 +1141,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                 ]} />
                 <Lbl color={C.textMuted}>Full Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <PlotSelector
                   accentColor={C.teal}
@@ -1158,9 +1164,9 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
           })()}
 
           {/* Logit / Probit */}
-          {(result?.type === "Logit" || result?.type === "Probit") && result.main && (() => {
-            const r      = result.main;
-            const family = r.family;
+          {(result?.type === "Logit" || result?.type === "Probit") && (() => {
+            const r      = result;
+            const family = r.type.toLowerCase();
             const color  = C.violet;
             const meMap  = Object.fromEntries((r.marginalEffects ?? []).map(m => [m.variable, m.dy_dx]));
             const safeF  = (v, d = 4) => (v != null && isFinite(v)) ? v.toFixed(d) : "—";
@@ -1208,7 +1214,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable
                     varNames={r.varNames} beta={r.beta} se={r.se}
-                    tStats={r.zStats} pVals={r.pVals}
+                    tStats={r.testStats} pVals={r.pVals}
                     yVar={yVar[0]} df={null}
                     statLabel="z"
                     meMap={meMap}
@@ -1275,9 +1281,9 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                   defaultId="roc"
                   plots={[
                     { id: "roc",  label: "ROC Curve",
-                      node: <ROCCurve fitted={r.fitted} Y={validY} /> },
+                      node: <ROCCurve fitted={r.Yhat} Y={validY} /> },
                     { id: "hist", label: "Predicted Probabilities",
-                      node: <PredProbHistogram fitted={r.fitted} Y={validY} /> },
+                      node: <PredProbHistogram fitted={r.Yhat} Y={validY} /> },
                     { id: "forest", label: "Coefficient plot",
                       node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${family}`} filename={`${family}_coefficients.svg`} /> },
                   ]}
@@ -1303,47 +1309,48 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
           })()}
 
           {/* RDD */}
-          {result?.type === "RDD" && result.main && (() => {
-            const r = result.main;
+          {result?.type === "RDD" && (() => {
+            const r   = result;
+            const rdd = r.rddData ?? {};
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
                   <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Sharp RDD Results</span>
-                  <Badge label={`bw = ${result.h.toFixed(3)}`} color={C.textDim} />
+                  <Badge label={`bw = ${rdd.h?.toFixed(3) ?? "—"}`} color={C.textDim} />
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                 </div>
                 <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#100a04", border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
                   <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
-                    Local Average Treatment Effect (LATE) at cutoff = {r.cutoff}
+                    Local Average Treatment Effect (LATE) at cutoff = {rdd.cutoff}
                   </div>
                   <div style={{ fontSize: 24, color: r.lateP != null && r.lateP < 0.05 ? C.orange : C.textDim }}>
                     {r.late != null && isFinite(r.late) ? (r.late >= 0 ? "+" : "") + r.late.toFixed(4) : "N/A"}{r.lateP != null ? stars(r.lateP) : ""}
                   </div>
                   <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
-                    SE = {r.lateSE != null && isFinite(r.lateSE) ? r.lateSE.toFixed(4) : "N/A"} · p = {r.lateP != null && isFinite(r.lateP) ? (r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)) : "N/A"} · Kernel: {r.kernelType}
+                    SE = {r.lateSE != null && isFinite(r.lateSE) ? r.lateSE.toFixed(4) : "N/A"} · p = {r.lateP != null && isFinite(r.lateP) ? (r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)) : "N/A"} · Kernel: {rdd.kernelType}
                   </div>
                 </div>
                 <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
                   { label: "R²",        value: r.R2?.toFixed(4) ?? "—", color: C.orange },
                   { label: "n in bw",   value: r.n,                     color: C.text },
-                  { label: "cutoff",    value: r.cutoff,                 color: C.textDim },
-                  { label: "bandwidth", value: result.h.toFixed(3),      color: C.textDim },
+                  { label: "cutoff",    value: rdd.cutoff,               color: C.textDim },
+                  { label: "bandwidth", value: rdd.h?.toFixed(3) ?? "—", color: C.textDim },
                 ]} />
                 <Lbl color={C.textMuted}>RDD Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <PlotSelector
                   accentColor={C.orange}
                   defaultId="scatter"
                   plots={[
                     { id: "scatter", label: "Binned scatter",
-                      node: <RDDPlot result={r} yLabel={yVar[0]} xLabel={runningVar[0]} /> },
+                      node: <RDDPlot result={{ ...rdd, late: r.late, lateP: r.lateP }} yLabel={yVar[0]} xLabel={runningVar[0]} /> },
                     { id: "bw",      label: "Bandwidth sensitivity",
                       node: <RDDBandwidthPlot
                         rows={rows} yCol={yVar[0]} runCol={runningVar[0]}
-                        cutoff={parseFloat(cutoff)} optH={result.h}
+                        cutoff={parseFloat(cutoff)} optH={rdd.h}
                         kernel={kernel} controls={wVars} runSharpRDD={runSharpRDD}
                       /> },
                     { id: "mccrary", label: "McCrary density",
@@ -1354,17 +1361,17 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
                     ...wVars.map(xc => ({
                       id: `bal_${xc}`,
                       label: `Balance: ${xc}`,
-                      node: <RDDCovariateBalance result={r} controls={[xc]} rows={rows} />,
+                      node: <RDDCovariateBalance result={rdd} controls={[xc]} rows={rows} />,
                     })),
                   ]}
                 />
                 <ExportBar
                   yVar={yVar[0]}
-                  results={{ ...r, varNames: r.varNames, adjR2: null }}
+                  results={r}
                   model="RDD"
-                  onReport={() => openReport({ ...r, varNames: r.varNames, adjR2: null, modelLabel: "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
+                  onReport={() => openReport({ ...r, modelLabel: "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
                   replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "RDD", yVar: yVar[0], wVars,
-                    runningVar: runningVar[0], cutoff: parseFloat(cutoff), bandwidth: result.h, kernel } }}
+                    runningVar: runningVar[0], cutoff: parseFloat(cutoff), bandwidth: rdd.h, kernel } }}
                 />
               </div>
             );
