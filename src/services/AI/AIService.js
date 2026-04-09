@@ -30,8 +30,10 @@ const MODEL_FAST = "claude-haiku-4-5-20251001"; // unit inference — cheap, fas
 const MAX_TOK   = 700;
 
 // ─── MOCK FALLBACKS ───────────────────────────────────────────────────────────
-function mockNarrative(core) {
-  const { varNames = [], beta = [], pVals = [], R2, n, modelLabel = "OLS", yVar = "y" } = core;
+function mockNarrative(result) {
+  const { varNames = [], beta = [], pVals = [], R2, n } = result;
+  const modelLabel = result.label ?? result.modelLabel ?? "OLS";
+  const yVar = result.spec?.yVar ?? result.yVar ?? "y";
   const regs = varNames
     .filter(v => v !== "(Intercept)")
     .map(v => {
@@ -299,14 +301,15 @@ function buildCoeffLines(result) {
 export async function interpretRegression(result, dataDictionary = null) {
   if (!result) throw new Error("No result object provided.");
 
-  const core = result.second ?? result;
   const {
     varNames = [], beta = [], se = [], pVals = [],
     R2 = null, adjR2 = null, n = null, df = null,
     Fstat = null, Fpval = null,
     att = null, attP = null,
-    modelLabel = "OLS", yVar = "y", xVars = [],
-  } = core;
+  } = result;
+  const modelLabel = result.label ?? result.modelLabel ?? "OLS";
+  const yVar  = result.spec?.yVar  ?? result.yVar  ?? "y";
+  const xVars = result.spec?.xVars ?? result.xVars ?? [];
 
   const b0idx = varNames.indexOf("(Intercept)");
   const b0     = b0idx >= 0 ? beta[b0idx] : null;
@@ -335,7 +338,7 @@ export async function interpretRegression(result, dataDictionary = null) {
 
   const allXVars    = xVars.length ? xVars : regressors.map(r => r.v);
   const funcForm    = detectFunctionalForm(yVar, allXVars);
-  const coeffLines  = buildCoeffLines(core);
+  const coeffLines  = buildCoeffLines(result);
   const dictSection = buildDictionarySection(dataDictionary);
   const metaBlock   = _classifyVariables(varNames, dataDictionary);
 
@@ -358,7 +361,7 @@ Write the two-paragraph interpretation now.`;
     return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: MAX_TOK });
   } catch (err) {
     console.warn("[AIService] interpretRegression failed:", err.message);
-    return mockNarrative(core);
+    return mockNarrative(result);
   }
 }
 
@@ -474,12 +477,12 @@ export async function compareModels(modelA, modelB, dataDictionary = null) {
   if (!modelA || !modelB) return "Provide two model results to compare.";
 
   const formatModel = (label, raw) => {
-    const core = raw.second ?? raw;
     const {
       varNames = [], beta = [], se = [], pVals = [],
       R2, adjR2, n, Fstat, Fpval,
-      modelLabel = "OLS", yVar = "y",
-    } = core;
+    } = raw;
+    const modelLabel = raw.label ?? raw.modelLabel ?? "OLS";
+    const yVar = raw.spec?.yVar ?? raw.yVar ?? "y";
 
     const lines = [
       `${label}: ${modelLabel} | dep.var: ${yVar} | N=${n ?? "?"} | R²=${R2?.toFixed(4) ?? "?"} | Adj.R²=${adjR2?.toFixed(4) ?? "?"}`,
@@ -522,14 +525,14 @@ export async function compareModels(modelA, modelB, dataDictionary = null) {
 function _serializeModelContext(result, dataDictionary) {
   if (!result) return "No model has been estimated yet.";
 
-  // 2SLS wraps in .second
-  const core = result.second ?? result;
   const {
     varNames = [], beta = [], se = [], pVals = [],
     R2, adjR2, n, Fstat, Fpval,
     att, attSE, attP,
-    modelLabel = "OLS", yVar = "y", xVars = [],
-  } = core;
+  } = result;
+  const modelLabel = result.label ?? result.modelLabel ?? "OLS";
+  const yVar  = result.spec?.yVar  ?? result.yVar  ?? "y";
+  const xVars = result.spec?.xVars ?? result.xVars ?? [];
 
   const lines = [];
   lines.push(`ACTIVE MODEL: ${modelLabel}`);
@@ -578,10 +581,10 @@ function _serializeModelContext(result, dataDictionary) {
   }
 
   // RDD specifics
-  if (result.type === "RDD" && result.main) {
-    const r = result.main;
-    lines.push(`LATE at cutoff=${r.cutoff}: ${r.late?.toFixed(4) ?? "N/A"} (SE=${r.lateSE?.toFixed(4) ?? "N/A"}, p=${r.lateP?.toFixed(4) ?? "N/A"})`);
-    lines.push(`Bandwidth: ${result.h?.toFixed(4) ?? "N/A"}, Kernel: ${r.kernelType ?? "N/A"}`);
+  if (result.type === "RDD") {
+    const rdd = result.rddData ?? {};
+    lines.push(`LATE at cutoff=${rdd.cutoff ?? result.spec?.cutoff}: ${result.late?.toFixed(4) ?? "N/A"} (SE=${result.lateSE?.toFixed(4) ?? "N/A"}, p=${result.lateP?.toFixed(4) ?? "N/A"})`);
+    lines.push(`Bandwidth: ${rdd.h?.toFixed(4) ?? "N/A"}, Kernel: ${rdd.kernelType ?? "N/A"}`);
   }
 
   // Data dictionary
