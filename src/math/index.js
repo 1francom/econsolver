@@ -42,5 +42,8 @@ export {
   buildBinaryCSV,
 } from "./NonLinearEngine.js";
 
+// ── IV extensions: GMM and LIML ──────────────────────────────────────────────
+export { runGMM, runLIML } from "./GMMEngine.js";
+
 // ── Canonical result wrapper ──────────────────────────────────────────────────
 export { wrapResult, getCoeffBlock } from "./EstimationResult.js";

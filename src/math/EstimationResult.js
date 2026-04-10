@@ -87,6 +87,8 @@ const ESTIMATOR_META = {
   RDD:    { label: "Sharp RDD",        color: "#c88e6e" },
   Logit:  { label: "Logit",            color: "#9e7ec8" },
   Probit: { label: "Probit",           color: "#9e7ec8" },
+  GMM:    { label: "Two-Step GMM",     color: "#c8a96e" },
+  LIML:   { label: "LIML",            color: "#c8a96e" },
 };
 
 const FAMILY_MAP = {
@@ -96,6 +98,7 @@ const FAMILY_MAP = {
   DiD: "did",    TWFE: "did",
   RDD: "rdd",
   Logit: "binary", Probit: "binary",
+  GMM: "iv",    LIML: "iv",
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -328,6 +331,52 @@ function wrapBinary(type, eng, spec) {
   };
 }
 
+// ─── GMM ─────────────────────────────────────────────────────────────────────
+// eng shape: { varNames, beta, se, tStats, pVals, R2, adjR2, n, df,
+//              jStat, jPval, jDf, resid, Yhat, firstStages }
+function wrapGMM(eng, spec) {
+  return {
+    ...base("GMM", spec),
+    varNames:    eng.varNames    ?? [],
+    beta:        clean(eng.beta),
+    se:          clean(eng.se),
+    testStats:   clean(eng.tStats),
+    pVals:       clean(eng.pVals),
+    R2:          eng.R2          ?? null,
+    adjR2:       eng.adjR2       ?? null,
+    n:           eng.n           ?? 0,
+    df:          eng.df          ?? 0,
+    resid:       eng.resid       ?? [],
+    Yhat:        eng.Yhat        ?? [],
+    firstStages: eng.firstStages ?? null,
+    jStat:       eng.jStat       ?? null,
+    jPval:       eng.jPval       ?? null,
+    jDf:         eng.jDf         ?? null,
+  };
+}
+
+// ─── LIML ────────────────────────────────────────────────────────────────────
+// eng shape: { varNames, beta, se, tStats, pVals, R2, adjR2, n, df,
+//              kappa, resid, Yhat, firstStages }
+function wrapLIML(eng, spec) {
+  return {
+    ...base("LIML", spec),
+    varNames:    eng.varNames    ?? [],
+    beta:        clean(eng.beta),
+    se:          clean(eng.se),
+    testStats:   clean(eng.tStats),
+    pVals:       clean(eng.pVals),
+    R2:          eng.R2          ?? null,
+    adjR2:       eng.adjR2       ?? null,
+    n:           eng.n           ?? 0,
+    df:          eng.df          ?? 0,
+    resid:       eng.resid       ?? [],
+    Yhat:        eng.Yhat        ?? [],
+    firstStages: eng.firstStages ?? null,
+    kappa:       eng.kappa       ?? null,
+  };
+}
+
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
 /**
@@ -351,6 +400,8 @@ export function wrapResult(type, engineOutput, spec, extras = {}) {
     case "RDD":    return wrapRDD(engineOutput, spec, extras.h);
     case "Logit":  return wrapBinary("Logit",  engineOutput, spec);
     case "Probit": return wrapBinary("Probit", engineOutput, spec);
+    case "GMM":    return wrapGMM(engineOutput, spec);
+    case "LIML":   return wrapLIML(engineOutput, spec);
     default:
       console.warn("[EstimationResult] Unknown type:", type);
       return { ...base(type, spec) };
