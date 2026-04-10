@@ -227,7 +227,7 @@ export default function ModelConfiguration({
   kernel,     setKernel,
   weightVar,  setWeightVar,
 }) {
-  if (model === "2SLS") {
+  if (model === "2SLS" || model === "GMM" || model === "LIML") {
     return (
       <InstrumentSelector
         numericCols={numericCols}
