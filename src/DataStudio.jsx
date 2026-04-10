@@ -16,6 +16,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import WranglingModule from "./WranglingModule.jsx";
 import { saveRawData } from "./services/persistence/indexedDB.js";
+import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -156,7 +157,7 @@ async function parseFile(file) {
 }
 
 // ─── DATASET SIDEBAR ──────────────────────────────────────────────────────────
-function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, loadErr, loading }) {
+function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, onFetchWorldBank, loadErr, loading }) {
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
 
@@ -314,6 +315,26 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
           </div>
         )}
 
+        {/* World Bank fetcher button */}
+        <button
+          onClick={onFetchWorldBank}
+          style={{
+            width: "100%", marginTop: 6,
+            padding: "0.42rem 0.5rem",
+            background: "transparent",
+            border: `1px solid ${C.border2}`,
+            borderRadius: 3,
+            color: C.textDim,
+            cursor: "pointer",
+            fontFamily: mono, fontSize: 10,
+            transition: "all 0.12s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+        >
+          ↓ World Bank data
+        </button>
+
         {/* Format hint */}
         <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 6, lineHeight: 1.6 }}>
           CSV · TSV · XLSX · drag & drop supported
@@ -357,6 +378,7 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
   const [activeId, setActiveId]   = useState(primaryId);
   const [loading, setLoading]     = useState(false);
   const [loadErr, setLoadErr]     = useState("");
+  const [wbOpen, setWbOpen]       = useState(false);
 
   // ── Persist primary raw data on first mount ────────────────────────────────
   // This ensures "Open project" works without re-uploading.
@@ -451,6 +473,7 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
         onActivate={setActiveId}
         onRemove={handleRemove}
         onLoadFile={handleLoadFile}
+        onFetchWorldBank={() => setWbOpen(true)}
         loadErr={loadErr}
         loading={loading}
       />
@@ -473,6 +496,14 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
             onSaveSubset={handleSaveSubset}
           />
         </div>
+      )}
+
+      {/* ── World Bank fetcher modal ── */}
+      {wbOpen && (
+        <WorldBankFetcher
+          onLoad={(fname, rows, headers) => handleSaveSubset(fname, rows, headers)}
+          onClose={() => setWbOpen(false)}
+        />
       )}
     </div>
   );
