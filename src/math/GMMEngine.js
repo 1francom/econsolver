@@ -17,40 +17,38 @@
 //   β_LIML = (X′X − κ·X′M_Z X)⁻¹(X′Y − κ·X′M_Z Y)
 
 import { transpose, matMul, matInv, pValue, runOLS, fCDF } from "./LinearEngine.js";
+import { normCDF } from "./NonLinearEngine.js";
 
-// ─── MATH UTILITIES ───────────────────────────────────────────────────────────
+const ERR_UNDERIDENTIFIED = "More endogenous regressors than instruments — model not identified.";
 
-function normalCDF(z) {
-  const t = 1 / (1 + 0.2316419 * Math.abs(z));
-  const poly = t * (0.319381530 + t * (-0.356563782 +
-               t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-  const p = 1 - Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI) * poly;
-  return z >= 0 ? p : 1 - p;
-}
-
-// Wilson-Hilferty approximation for chi-squared tail probability
+// Wilson-Hilferty chi-squared tail probability
 function chiSqPval(chi2, df) {
   if (!isFinite(chi2) || df <= 0 || chi2 < 0) return NaN;
   if (chi2 === 0) return 1;
   const z = (Math.pow(chi2 / df, 1 / 3) - (1 - 2 / (9 * df))) /
             Math.sqrt(2 / (9 * df));
-  return 1 - normalCDF(z);
+  return 1 - normCDF(z);
 }
 
-// Dot product of two 1-D arrays
 function dot(a, b) { return a.reduce((s, v, i) => s + v * b[i], 0); }
 
 // ─── PROJECTION HELPERS ───────────────────────────────────────────────────────
 
-// M_Z v = v − Z(Z′Z)⁻¹Z′v  (annihilate Z on a 1-D vector v)
-function mzVec(Zarr, v) {
-  const Zt      = transpose(Zarr);
-  const ZtZinv  = matInv(matMul(Zt, Zarr));
-  if (!ZtZinv) return null;
-  const Ztv     = Zt.map(row => dot(row, v));              // l-array: Z′v
-  const ZtZiZtv = ZtZinv.map(row => dot(row, Ztv));       // l-array: (Z′Z)⁻¹Z′v
-  const Pzv     = Zarr.map(row => dot(row, ZtZiZtv));     // n-array: P_Z v
+// M_Z v with caller-supplied (Z′Z)⁻¹ and Z′ — avoids repeated matrix inversion
+// when projecting many vectors onto the same Z.
+function mzVecCached(Zarr, ZtZinv, Zt, v) {
+  const Ztv     = Zt.map(row => dot(row, v));
+  const ZtZiZtv = ZtZinv.map(row => dot(row, Ztv));
+  const Pzv     = Zarr.map(row => dot(row, ZtZiZtv));
   return v.map((vi, i) => vi - Pzv[i]);
+}
+
+// M_Z v — computes and inverts (Z′Z) internally; use when projecting a single vector.
+function mzVec(Zarr, v) {
+  const Zt     = transpose(Zarr);
+  const ZtZinv = matInv(matMul(Zt, Zarr));
+  if (!ZtZinv) return null;
+  return mzVecCached(Zarr, ZtZinv, Zt, v);
 }
 
 // ─── DATA EXTRACTION ─────────────────────────────────────────────────────────
@@ -61,22 +59,19 @@ function extractData(rows, yCol, xCols, wCols, zCols) {
     allCols.every(c => typeof r[c] === "number" && isFinite(r[c]))
   );
   if (!valid.length) return null;
-  const n = valid.length;
-  // X = [1, wCols, xCols]   (all regressors)
-  // Z = [1, wCols, zCols]   (full instrument set)
-  // W = [1, wCols]           (exogenous regressors only)
   return {
-    Y:  valid.map(r => r[yCol]),
-    X:  valid.map(r => [1, ...wCols.map(c => r[c]), ...xCols.map(c => r[c])]),
-    Z:  valid.map(r => [1, ...wCols.map(c => r[c]), ...zCols.map(c => r[c])]),
-    Wn: valid.map(r => [1, ...wCols.map(c => r[c])]),
-    n,
+    Y:   valid.map(r => r[yCol]),
+    X:   valid.map(r => [1, ...wCols.map(c => r[c]), ...xCols.map(c => r[c])]),
+    Z:   valid.map(r => [1, ...wCols.map(c => r[c]), ...zCols.map(c => r[c])]),
+    Wn:  valid.map(r => [1, ...wCols.map(c => r[c])]),
+    n:   valid.length,
     valid,
   };
 }
 
-// ─── FIRST STAGES (shared with GMM and LIML) ─────────────────────────────────
-function buildFirstStages(valid, xCols, wCols, zCols, n) {
+// ─── FIRST STAGES (shared by GMM and LIML) ───────────────────────────────────
+function buildFirstStages(valid, xCols, wCols, zCols) {
+  const n = valid.length;
   const instrCols = [...zCols, ...wCols];
   return xCols.map(endVar => {
     const res = runOLS(valid, endVar, instrCols);
@@ -98,45 +93,39 @@ function buildFirstStages(valid, xCols, wCols, zCols, n) {
 // ─── TWO-STEP EFFICIENT GMM ───────────────────────────────────────────────────
 export function runGMM(rows, yCol, xCols, wCols, zCols) {
   const overidDf = zCols.length - xCols.length;
-  if (overidDf < 0)
-    return { error: "More endogenous regressors than instruments — model not identified." };
+  if (overidDf < 0) return { error: ERR_UNDERIDENTIFIED };
 
   const d = extractData(rows, yCol, xCols, wCols, zCols);
   if (!d) return { error: "No complete observations after filtering." };
   const { Y, X, Z, n, valid } = d;
 
-  const k = X[0].length;    // number of parameters (1 + |wCols| + |xCols|)
-  const l = Z[0].length;    // instrument set size  (1 + |wCols| + |zCols|)
+  const k = X[0].length;
+  const l = Z[0].length;
   if (n < l + 2) return { error: "Insufficient observations for GMM estimation." };
 
-  const Xt = transpose(X);   // k×n
-  const Zt = transpose(Z);   // l×n
+  const Xt = transpose(X);
+  const Zt = transpose(Z);
 
-  // X′Z (k×l), Z′X (l×k), Z′Y (l)
   const XtZ = matMul(Xt, Z);
   const ZtX = matMul(Zt, X);
   const ZtY = Zt.map(row => dot(row, Y));
 
-  // (Z′Z)⁻¹
   const ZtZ    = matMul(Zt, Z);
   const ZtZinv = matInv(ZtZ);
   if (!ZtZinv) return { error: "Instrument matrix Z′Z is singular. Check for collinearity among instruments." };
 
   // ── Step 1: 2SLS β̂ ────────────────────────────────────────────────────────
-  // P_Z X = Z(Z′Z)⁻¹Z′X   (n×k)
   const PzX    = matMul(Z, matMul(ZtZinv, ZtX));
   const PzXt   = transpose(PzX);
-  const XtPzX  = matMul(PzXt, X);           // k×k
+  const XtPzX  = matMul(PzXt, X);
   const XtPzXi = matInv(XtPzX);
   if (!XtPzXi) return { error: "2SLS first-step matrix singular — check instrument relevance." };
 
-  // P_Z Y
   const ZtZiZtY = ZtZinv.map(row => dot(row, ZtY));
-  const PzY = Z.map(row => dot(row, ZtZiZtY));
-  const XtPzY = PzXt.map(row => dot(row, PzY));
-  const beta1 = XtPzXi.map(row => dot(row, XtPzY));
-
-  const resid1 = Y.map((y, i) => y - dot(X[i], beta1));
+  const PzY     = Z.map(row => dot(row, ZtZiZtY));
+  const XtPzY   = PzXt.map(row => dot(row, PzY));
+  const beta1   = XtPzXi.map(row => dot(row, XtPzY));
+  const resid1  = Y.map((y, i) => y - dot(X[i], beta1));
 
   // ── Step 2: Ω̂ = (1/n)Z′diag(ε̂²)Z ──────────────────────────────────────────
   const Omega = Array.from({ length: l }, (_, a) =>
@@ -149,48 +138,42 @@ export function runGMM(rows, yCol, xCols, wCols, zCols) {
   const OmegaInv = matInv(Omega);
   if (!OmegaInv) return { error: "GMM weighting matrix Ω̂ is singular. Increase variation in instruments." };
 
-  // ── β_GMM = (X′Z Ω̂⁻¹ Z′X)⁻¹ X′Z Ω̂⁻¹ Z′Y ──────────────────────────────────
-  const XtZ_OI = matMul(XtZ, OmegaInv);                   // k×l
-  const A      = matMul(XtZ_OI, ZtX);                     // k×k
+  // ── β_GMM = (X′ZΩ̂⁻¹Z′X)⁻¹X′ZΩ̂⁻¹Z′Y ────────────────────────────────────────
+  const XtZ_OI = matMul(XtZ, OmegaInv);
+  const A      = matMul(XtZ_OI, ZtX);
   const Ainv   = matInv(A);
   if (!Ainv) return { error: "GMM matrix (X′ZΩ̂⁻¹Z′X) is singular." };
 
-  const bVec = XtZ_OI.map(row => dot(row, ZtY));          // k
-  const beta  = Ainv.map(row => dot(row, bVec));          // k
+  const bVec = XtZ_OI.map(row => dot(row, ZtY));
+  const beta  = Ainv.map(row => dot(row, bVec));
 
-  // ── SE = sqrt(diag(Ainv / n)) ────────────────────────────────────────────────
+  // SE = sqrt(diag(Ainv / n))
   const df     = n - k;
   const se     = Ainv.map((row, i) => Math.sqrt(Math.abs(row[i] / n)));
   const tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
   const pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
 
-  // ── Fit ──────────────────────────────────────────────────────────────────────
-  const resid  = Y.map((y, i) => y - dot(X[i], beta));
-  const Yhat   = Y.map((y, i) => y - resid[i]);
-  const Ym     = Y.reduce((a, b) => a + b, 0) / n;
-  const SST    = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
-  const SSR    = resid.reduce((s, e) => s + e * e, 0);
-  const R2     = SST > 0 ? 1 - SSR / SST : NaN;
-  const adjR2  = isFinite(R2) ? 1 - (1 - R2) * (n - 1) / df : NaN;
+  const resid = Y.map((y, i) => y - dot(X[i], beta));
+  const Yhat  = Y.map((y, i) => y - resid[i]);
+  const Ym    = Y.reduce((a, b) => a + b, 0) / n;
+  const SST   = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
+  const SSR   = resid.reduce((s, e) => s + e * e, 0);
+  const R2    = SST > 0 ? 1 - SSR / SST : NaN;
+  const adjR2 = isFinite(R2) ? 1 - (1 - R2) * (n - 1) / df : NaN;
 
-  // ── J-stat (Hansen overidentification test) ──────────────────────────────────
-  // g = Z′ε̂/n  (l-vector of moment conditions)
+  // ── J-stat (Hansen overidentification test): g = Z′ε̂/n, J = n·g′Ω̂⁻¹g ────────
   const g     = Zt.map(row => dot(row, resid) / n);
   const OIg   = OmegaInv.map(row => dot(row, g));
   const jStat = n * dot(g, OIg);
-  const jDf   = overidDf;
-  const jPval = jDf > 0 ? chiSqPval(jStat, jDf) : NaN;
-
-  // ── First stages ──────────────────────────────────────────────────────────────
-  const firstStages = buildFirstStages(valid, xCols, wCols, zCols, n);
-  const varNames = ["(Intercept)", ...wCols, ...xCols];
+  const jPval = overidDf > 0 ? chiSqPval(jStat, overidDf) : NaN;
 
   return {
-    varNames, beta, se, tStats, pVals,
+    varNames: ["(Intercept)", ...wCols, ...xCols],
+    beta, se, tStats, pVals,
     R2, adjR2, n, df,
-    jStat, jPval, jDf,
+    jStat, jPval, jDf: overidDf,
     resid, Yhat,
-    firstStages,
+    firstStages: buildFirstStages(valid, xCols, wCols, zCols),
   };
 }
 
@@ -200,17 +183,14 @@ export function runGMM(rows, yCol, xCols, wCols, zCols) {
 //   A = [Y,X₁]′ M_Z [Y,X₁]   (M_Z annihilates full instrument set Z=[W,Z₁])
 //   B = [Y,X₁]′ M_W [Y,X₁]   (M_W annihilates exogenous regressors W only)
 //
-// Since M_W ≥ M_Z (M_Z projects out more), B ≥ A, so κ ≥ 1.
-// κ = 1 for exactly-identified (same as 2SLS).
+// Since M_W ≥ M_Z, B ≥ A so κ ≥ 1. κ = 1 for exactly-identified (= 2SLS).
 //
 // β_LIML = (X′X − κ·X′M_Z X)⁻¹(X′Y − κ·X′M_Z Y)
-//
 // SE: σ̂² = ε′ε/(n−k);  Var(β) = σ̂²(X′P_Z X)⁻¹
 //
 export function runLIML(rows, yCol, xCols, wCols, zCols) {
   const overidDf = zCols.length - xCols.length;
-  if (overidDf < 0)
-    return { error: "More endogenous regressors than instruments — model not identified." };
+  if (overidDf < 0) return { error: ERR_UNDERIDENTIFIED };
 
   const d = extractData(rows, yCol, xCols, wCols, zCols);
   if (!d) return { error: "No complete observations after filtering." };
@@ -223,24 +203,23 @@ export function runLIML(rows, yCol, xCols, wCols, zCols) {
   const Xt = transpose(X);
   const Zt = transpose(Z);
 
-  // ── Compute M_Z and M_W residuals for [Y, xCols columns] ────────────────────
-  // We need M_Z y, M_W y, and for each endogenous x1: M_Z x1, M_W x1
-  // For the (k1+1)×(k1+1) matrices A and B (k1 = xCols.length)
+  // Pre-compute (Z′Z)⁻¹ and (W′W)⁻¹ once — reused for every mzVecCached call.
+  const ZtZinv = matInv(matMul(Zt, Z));
+  if (!ZtZinv) return { error: "Instrument matrix Z′Z is singular." };
+  const Wt      = transpose(Wn);
+  const WtWinv  = matInv(matMul(Wt, Wn));
+  if (!WtWinv) return { error: "Exogenous matrix W′W is singular." };
 
-  const m = xCols.length + 1;    // size of generalized eigenvalue problem
-  // vecs[0] = Y, vecs[1..k1] = xCols
+  // ── Build m×m matrices A and B for the generalized eigenvalue problem ─────────
+  const m    = xCols.length + 1;
   const vecs = [Y, ...xCols.map(c => valid.map(r => r[c]))];
 
-  // Compute M_Z and M_W applied to each vector
-  const mzVecs = vecs.map(v => mzVec(Z, v));
-  const mwVecs = vecs.map(v => mzVec(Wn, v));   // M_W = annihilate W (exog only)
-
+  const mzVecs = vecs.map(v => mzVecCached(Z, ZtZinv, Zt, v));
+  const mwVecs = vecs.map(v => mzVecCached(Wn, WtWinv, Wt, v));
   if (mzVecs.some(v => !v) || mwVecs.some(v => !v))
     return { error: "Singular matrix while computing LIML projections." };
 
-  // ── Build m×m matrices A and B ───────────────────────────────────────────────
-  // A[i][j] = mzVecs[i] · mzVecs[j]
-  // B[i][j] = mwVecs[i] · mwVecs[j]
+  // A[i][j] = (M_Z vecs[i])·(M_Z vecs[j]),  B[i][j] = (M_W vecs[i])·(M_W vecs[j])
   const A = Array.from({ length: m }, (_, i) =>
     Array.from({ length: m }, (_, j) => dot(mzVecs[i], mzVecs[j]))
   );
@@ -248,46 +227,31 @@ export function runLIML(rows, yCol, xCols, wCols, zCols) {
     Array.from({ length: m }, (_, j) => dot(mwVecs[i], mwVecs[j]))
   );
 
-  // ── κ = min eigenvalue of A⁻¹B ──────────────────────────────────────────────
-  // Equivalent to max eigenvalue of B⁻¹A, inverted.
-  const kappa = m === 2
-    ? limlKappa2x2(A, B)
-    : limlKappaPower(A, B, m);
-
+  const kappa = m === 2 ? limlKappa2x2(A, B) : limlKappaPower(A, B, m);
   if (!isFinite(kappa)) return { error: "LIML eigenvalue computation failed — check instrument validity." };
 
   // ── β_LIML = (X′X − κ·X′M_Z X)⁻¹(X′Y − κ·X′M_Z Y) ─────────────────────────
-  // MzX[j] = M_Z applied to j-th column of X (n-vector)
-  // MzX[j] = M_Z (j-th column of X); (M_Z X_j)′Y = X_j′ M_Z Y by symmetry of M_Z
-  const MzX  = Array.from({ length: k }, (_, j) => mzVec(Z, X.map(row => row[j])));
+  // Pre-extract X columns to avoid k² repeated X.map(r => r[j]) allocations.
+  const Xcols = Array.from({ length: k }, (_, j) => X.map(r => r[j]));
+  const MzX   = Xcols.map(col => mzVecCached(Z, ZtZinv, Zt, col));
 
   const XtX    = matMul(Xt, X);
-  // (X′M_Z X)[j][l] = (M_Z X_j)′ X_l = dot(MzX[j], X_col_l)
-  const XtMzXc = Array.from({ length: k }, (_, j) =>
-    Array.from({ length: k }, (_, l2) => dot(MzX[j], X.map(r => r[l2])))
+  const XtMzX  = Array.from({ length: k }, (_, j) =>
+    Array.from({ length: k }, (_, l2) => dot(MzX[j], Xcols[l2]))
   );
-
-  const lhsMat = XtX.map((row, i) => row.map((v, j) => v - kappa * XtMzXc[i][j]));
+  const lhsMat = XtX.map((row, i) => row.map((v, j) => v - kappa * XtMzX[i][j]));
   const lhsInv = matInv(lhsMat);
   if (!lhsInv) return { error: "LIML matrix (X′X − κX′M_Z X) is singular." };
 
-  // X′Y − κ X′M_Z Y
-  const XtY    = Xt.map(row => dot(row, Y));
-  const XtMzY  = MzX.map(mzxj => dot(mzxj, Y));
-  const rhsVec = XtY.map((v, j) => v - kappa * XtMzY[j]);
-  const beta   = lhsInv.map(row => dot(row, rhsVec));
+  // (M_Z X_j)′Y = X_j′ M_Z Y by symmetry of M_Z
+  const XtY   = Xt.map(row => dot(row, Y));
+  const XtMzY = MzX.map(mzxj => dot(mzxj, Y));
+  const beta  = lhsInv.map(row => dot(row, XtY.map((v, j) => v - kappa * XtMzY[j])));
 
-  // ── SE: σ̂²(X′P_Z X)⁻¹ ─────────────────────────────────────────────────────
-  const ZtY  = Zt.map(row => dot(row, Y));
-  const ZtX  = matMul(Zt, X);
-  const ZtZinv = matInv(matMul(Zt, Z));
-  if (!ZtZinv) return { error: "Z′Z singular in LIML SE computation." };
-
-  const ZtZiZtX = matMul(ZtZinv, ZtX);
-  const PzX     = matMul(Z, ZtZiZtX);           // n×k
-  const PzXt    = transpose(PzX);
-  const XtPzX   = matMul(PzXt, X);              // k×k
-  const XtPzXi  = matInv(XtPzX);
+  // ── SE: σ̂²(X′P_Z X)⁻¹ — reuse ZtZinv already computed above ──────────────────
+  const ZtX     = matMul(Zt, X);
+  const PzX     = matMul(Z, matMul(ZtZinv, ZtX));
+  const XtPzXi  = matInv(matMul(transpose(PzX), X));
   if (!XtPzXi) return { error: "X′P_Z X singular — weak or missing instruments." };
 
   const df    = n - k;
@@ -304,23 +268,20 @@ export function runLIML(rows, yCol, xCols, wCols, zCols) {
   const R2    = SST > 0 ? 1 - SSR / SST : NaN;
   const adjR2 = isFinite(R2) ? 1 - (1 - R2) * (n - 1) / df : NaN;
 
-  // ── First stages ──────────────────────────────────────────────────────────────
-  const firstStages = buildFirstStages(valid, xCols, wCols, zCols, n);
-  const varNames = ["(Intercept)", ...wCols, ...xCols];
-
   return {
-    varNames, beta, se, tStats, pVals,
+    varNames: ["(Intercept)", ...wCols, ...xCols],
+    beta, se, tStats, pVals,
     R2, adjR2, n, df,
     kappa,
     resid, Yhat,
-    firstStages,
+    firstStages: buildFirstStages(valid, xCols, wCols, zCols),
   };
 }
 
 // ─── LIML EIGENVALUE SOLVERS ─────────────────────────────────────────────────
 
-// Exact min eigenvalue of A⁻¹B for 2×2 symmetric matrices
-// Solves det(B − κA) = 0 → det(A)κ² − c₁κ + det(B) = 0
+// Exact min eigenvalue of A⁻¹B for 2×2 symmetric matrices.
+// Solves det(B − κA) = 0  →  det(A)κ² − c₁κ + det(B) = 0
 function limlKappa2x2(A, B) {
   const [A00, A01, A11] = [A[0][0], A[0][1], A[1][1]];
   const [B00, B01, B11] = [B[0][0], B[0][1], B[1][1]];
@@ -329,18 +290,16 @@ function limlKappa2x2(A, B) {
   const c1   = A00 * B11 + B00 * A11 - 2 * A01 * B01;
   const disc = c1 * c1 - 4 * detA * detB;
   if (disc < 0) return NaN;
-  const sq   = Math.sqrt(disc);
-  const k1   = (c1 - sq) / (2 * detA);
-  const k2   = (c1 + sq) / (2 * detA);
-  return Math.min(k1, k2);
+  const sq = Math.sqrt(disc);
+  return Math.min((c1 - sq) / (2 * detA), (c1 + sq) / (2 * detA));
 }
 
-// Power iteration for min eigenvalue of A⁻¹B (general m×m)
-// Uses inverse power: iterate on M = B⁻¹A (max eigenvalue of M = 1/min of A⁻¹B)
+// Power iteration for min eigenvalue of A⁻¹B (general m×m).
+// Iterates on M = B⁻¹A; max eigenvalue of M = 1/κ_min.
 function limlKappaPower(A, B, m, maxIter = 120) {
   const Binv = matInv(B);
   if (!Binv) return NaN;
-  const M = matMul(Binv, A);  // B⁻¹A; max eigenvalue = 1/κ_min
+  const M = matMul(Binv, A);
 
   let v = Array.from({ length: m }, (_, i) => i === 0 ? 1 : 0.1);
   let lambda = 1;
@@ -349,9 +308,9 @@ function limlKappaPower(A, B, m, maxIter = 120) {
     const Mv   = M.map(row => dot(row, v));
     const norm = Math.sqrt(Mv.reduce((s, x) => s + x * x, 0));
     if (norm < 1e-14) break;
-    v = Mv.map(x => x / norm);
-    const Mv2 = M.map(row => dot(row, v));
-    lambda = dot(v, Mv2);    // Rayleigh quotient: v′(B⁻¹A)v
+    v      = Mv.map(x => x / norm);
+    // Rayleigh quotient on already-normalized v avoids recomputing Mv
+    lambda = dot(v, M.map(row => dot(row, v)));
   }
   return Math.abs(lambda) > 1e-10 ? 1 / lambda : NaN;
 }
