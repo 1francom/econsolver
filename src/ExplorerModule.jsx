@@ -3,6 +3,7 @@
 // Consumes cleanedData emitted by WranglingModule.
 import { useState, useMemo } from "react";
 import { buildInfo } from "./WranglingModule.jsx";
+import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -311,6 +312,110 @@ function DistributionTab({rows,headers,info,panel}){
 // Aggregate Y by a time column (or any numeric column used as time axis),
 // optionally grouped by a categorical variable → one line per group.
 // No dependency on group_summarize pipeline step — computes in-component.
+// ─── ACF / PACF BAR CHART ─────────────────────────────────────────────────────
+function SvgACF({ acf, pacf, n }) {
+  const maxLag = acf.length - 1;
+  const W = 620, H = 260;
+  const PAD = { l: 48, r: 16, t: 20, b: 36 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = (H - PAD.t - PAD.b) / 2 - 8; // half height per chart
+  const conf = 1.96 / Math.sqrt(n);
+
+  function renderBars(vals, offsetY, color, label) {
+    const barW = Math.max(2, iW / (maxLag + 1) - 2);
+    const yMid = offsetY + iH / 2;
+    const scaleY = v => yMid - (v / 1.0) * (iH / 2);
+    return (
+      <g>
+        {/* label */}
+        <text x={PAD.l + 2} y={offsetY + 10} fill={color} fontSize={8} fontFamily="'IBM Plex Mono',monospace" letterSpacing="0.1em">{label}</text>
+        {/* zero line */}
+        <line x1={PAD.l} x2={PAD.l + iW} y1={yMid} y2={yMid} stroke="#252525" strokeWidth={1} />
+        {/* confidence bands */}
+        <line x1={PAD.l} x2={PAD.l + iW} y1={scaleY(conf)}  y2={scaleY(conf)}  stroke="#c47070" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+        <line x1={PAD.l} x2={PAD.l + iW} y1={scaleY(-conf)} y2={scaleY(-conf)} stroke="#c47070" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+        {/* bars (skip lag 0) */}
+        {vals.slice(1).map((v, i) => {
+          const lag = i + 1;
+          const x   = PAD.l + (lag / (maxLag + 1)) * iW;
+          const y0  = yMid;
+          const y1  = scaleY(Math.max(-1, Math.min(1, v)));
+          const ht  = Math.abs(y1 - y0);
+          const sig = Math.abs(v) > conf;
+          return (
+            <g key={lag}>
+              <rect x={x - barW / 2} y={Math.min(y0, y1)} width={barW} height={Math.max(1, ht)}
+                fill={sig ? color : `${color}55`} />
+              {lag % 5 === 0 && (
+                <text x={x} y={offsetY + iH + 14} textAnchor="middle" fill="#444" fontSize={7} fontFamily="'IBM Plex Mono',monospace">{lag}</text>
+              )}
+            </g>
+          );
+        })}
+        {/* y-axis ticks */}
+        {[-1, -0.5, 0, 0.5, 1].map(v => (
+          <g key={v}>
+            <line x1={PAD.l - 3} x2={PAD.l} y1={scaleY(v)} y2={scaleY(v)} stroke="#252525" strokeWidth={1} />
+            <text x={PAD.l - 5} y={scaleY(v) + 3} textAnchor="end" fill="#444" fontSize={7} fontFamily="'IBM Plex Mono',monospace">{v}</text>
+          </g>
+        ))}
+      </g>
+    );
+  }
+
+  const acfOffsetY  = PAD.t;
+  const pacfOffsetY = PAD.t + iH + 24;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, height: "auto", display: "block", fontFamily: "'IBM Plex Mono',monospace" }}>
+      <rect width={W} height={H} fill="#080808" />
+      {renderBars(acf,  acfOffsetY,  "#6ec8b4", "ACF")}
+      {renderBars(pacf, pacfOffsetY, "#c8a96e", "PACF")}
+      {/* conf band legend */}
+      <line x1={PAD.l + iW - 80} x2={PAD.l + iW - 60} y1={H - 10} y2={H - 10} stroke="#c47070" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+      <text x={PAD.l + iW - 56} y={H - 7} fill="#888" fontSize={7} fontFamily="'IBM Plex Mono',monospace">95% CI (±1.96/√n)</text>
+      {/* lag axis label */}
+      <text x={PAD.l + iW / 2} y={H - 1} textAnchor="middle" fill="#444" fontSize={7} fontFamily="'IBM Plex Mono',monospace">Lag</text>
+    </svg>
+  );
+}
+
+// ─── ADF RESULTS PANEL ────────────────────────────────────────────────────────
+function AdfPanel({ results }) {
+  if (!results?.length) return null;
+  const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
+  return (
+    <div style={{ padding: "0.8rem 0.9rem", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>
+        Augmented Dickey-Fuller · H₀: unit root (non-stationary) · constant, no trend
+      </div>
+      {/* header row */}
+      <div style={{ display: "grid", gridTemplateColumns: "3rem 6rem 5rem 6rem 1fr", gap: 8, fontSize: 9, color: "#444", fontFamily: mono, paddingBottom: 4, borderBottom: "1px solid #1c1c1c" }}>
+        <span>Lags</span><span>τ statistic</span><span>p-value</span><span>CV (5%)</span><span>Verdict</span>
+      </div>
+      {results.map(r => {
+        const color = r.stationary ? "#6ec8b4" : "#c47070";
+        const label = r.stationary ? "✓ Stationary" : "✗ Unit root";
+        return (
+          <div key={r.lag} style={{ display: "grid", gridTemplateColumns: "3rem 6rem 5rem 6rem 1fr", gap: 8, alignItems: "center", padding: "0.4rem 0.5rem", background: r.stationary ? "#081008" : "#100808", border: `1px solid ${color}20`, borderLeft: `3px solid ${color}`, borderRadius: 3 }}>
+            <span style={{ fontSize: 12, color: "#888", fontFamily: mono }}>{r.lag}</span>
+            <span style={{ fontSize: 12, color: "#ddd8cc", fontFamily: mono }}>{isFinite(r.stat) ? r.stat.toFixed(4) : "—"}</span>
+            <span style={{ fontSize: 12, color: isFinite(r.pVal) && r.pVal < 0.05 ? "#6ec8b4" : "#888", fontFamily: mono }}>
+              {isFinite(r.pVal) ? (r.pVal <= 0.01 ? "<0.01" : r.pVal.toFixed(3)) : "—"}
+            </span>
+            <span style={{ fontSize: 12, color: "#888", fontFamily: mono }}>{isFinite(r.cv5pct) ? r.cv5pct.toFixed(3) : "—"}</span>
+            <span style={{ fontSize: 10, color, fontFamily: mono, letterSpacing: "0.08em" }}>{label}</span>
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 9, color: "#444", fontFamily: mono, marginTop: 4 }}>
+        Reject H₀ when τ &lt; CV(5%). MacKinnon (1994) response-surface critical values.
+      </div>
+    </div>
+  );
+}
+
+// ─── TIME SERIES TAB ──────────────────────────────────────────────────────────
 function TimeSeriesTab({ rows, headers, info, panel }) {
   const numH = headers.filter(h => info[h]?.isNum);
   const catH = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && headers.includes(h)));
@@ -321,10 +426,35 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
     ...numH.filter(h => h !== panel?.timeCol),
   ];
 
-  const [tCol,  setTCol]  = useState(timeCandidates[0] ?? "");
-  const [yCol,  setYCol]  = useState(numH.find(h => h !== tCol) ?? "");
+  const [tCol,   setTCol]   = useState(timeCandidates[0] ?? "");
+  const [yCol,   setYCol]   = useState(numH.find(h => h !== tCol) ?? "");
   const [grpCol, setGrpCol] = useState(""); // "" = no grouping
-  const [agg,   setAgg]   = useState("mean"); // mean | sum | count | median
+  const [agg,    setAgg]    = useState("mean"); // mean | sum | count | median
+  const [tsView, setTsView] = useState("line"); // "line" | "acf" | "adf"
+
+  // ── Flat sorted series for ACF/ADF (no grouping, mean agg) ──────────────────
+  const flatY = useMemo(() => {
+    if (!tCol || !yCol || !rows.length) return [];
+    const valid = rows.filter(r =>
+      typeof r[tCol] === "number" && isFinite(r[tCol]) &&
+      typeof r[yCol] === "number" && isFinite(r[yCol])
+    );
+    if (!valid.length) return [];
+    const byT = {};
+    valid.forEach(r => {
+      const t = r[tCol];
+      if (!byT[t]) byT[t] = [];
+      byT[t].push(r[yCol]);
+    });
+    return Object.entries(byT)
+      .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
+      .map(([, vals]) => vals.reduce((s, v) => s + v, 0) / vals.length);
+  }, [rows, tCol, yCol]);
+
+  const maxLag   = Math.min(20, Math.floor((flatY.length - 1) / 2));
+  const acfVals  = useMemo(() => flatY.length > 4 ? computeACF(flatY, maxLag)  : [], [flatY, maxLag]);
+  const pacfVals = useMemo(() => acfVals.length > 1 ? computePACF(acfVals, maxLag) : [], [acfVals, maxLag]);
+  const adfRes   = useMemo(() => flatY.length > 8 ? adfTest(flatY, 2)          : [], [flatY]);
 
   // ── Aggregate ───────────────────────────────────────────────────────────────
   const series = useMemo(() => {
@@ -419,6 +549,13 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
 
   return (
     <div>
+      {/* Sub-tab toggle */}
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 3, overflow: "hidden", marginBottom: "1rem", width: "fit-content" }}>
+        {[["line","⬡ Line chart"],["acf","⬡ ACF / PACF"],["adf","⬡ ADF test"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTsView(k)} style={{ padding: "0.3rem 0.9rem", background: tsView === k ? C.surface3 : C.surface, border: "none", borderBottom: tsView === k ? `2px solid ${C.teal}` : "2px solid transparent", color: tsView === k ? C.teal : C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, transition: "all 0.12s" }}>{l}</button>
+        ))}
+      </div>
+
       {/* Controls */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: "1.4rem" }}>
         {/* Time column */}
@@ -457,8 +594,42 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
         </div>
       </div>
 
-      {/* Chart */}
-      {series.length > 0 && chart ? (
+      {/* ACF / PACF panel */}
+      {tsView === "acf" && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+            ACF &amp; PACF · {yCol} · n = {flatY.length} time points · max lag = {maxLag}
+          </div>
+          {acfVals.length > 1 ? (
+            <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center" }}>
+              <SvgACF acf={acfVals} pacf={pacfVals} n={flatY.length} />
+            </div>
+          ) : (
+            <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: 11, fontFamily: mono }}>
+              Need at least 5 time points for ACF.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ADF panel */}
+      {tsView === "adf" && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+            Augmented Dickey-Fuller · {yCol} · n = {flatY.length} time points
+          </div>
+          {adfRes.length > 0 ? (
+            <AdfPanel results={adfRes} />
+          ) : (
+            <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: 11, fontFamily: mono }}>
+              Need at least 9 time points for ADF test.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Line Chart */}
+      {tsView === "line" && series.length > 0 && chart ? (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
           {/* header */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.9rem", background: "#0a0a0a", borderBottom: `1px solid ${C.border}` }}>
