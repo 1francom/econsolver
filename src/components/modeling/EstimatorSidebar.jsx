@@ -25,6 +25,8 @@ export const MODELS = [
   { id: "RDD",  label: "Sharp RDD",       color: C.orange, desc: "Regression Discontinuity Design" },
   { id: "Logit",  label: "Logit",  color: C.violet, desc: "Binary Logistic Regression (MLE)" },
   { id: "Probit", label: "Probit", color: C.violet, desc: "Probit — Normal Link (MLE)" },
+  { id: "GMM",  label: "Two-Step GMM", color: C.gold, desc: "Efficient GMM — HC-robust Ω̂ + J-test" },
+  { id: "LIML", label: "LIML",        color: C.gold, desc: "Limited Info. Max. Likelihood / k-class" },
 ];
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────

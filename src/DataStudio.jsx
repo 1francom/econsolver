@@ -142,6 +142,11 @@ async function parseFile(file) {
   if (["xlsx", "xls"].includes(ext)) {
     return parseExcel(file);
   }
+  if (ext === "dta") {
+    const { parseStata } = await import("./services/data/parsers/stata.js");
+    const buf = await file.arrayBuffer();
+    return parseStata(buf);
+  }
   // Unknown extension: try CSV as fallback
   try {
     const text = await file.text();
@@ -285,7 +290,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.txt"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
         />

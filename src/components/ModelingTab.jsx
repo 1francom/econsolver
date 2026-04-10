@@ -13,6 +13,7 @@ import {
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
+  runGMM, runLIML,
   wrapResult,
 } from "../math/index.js";
 import { generateRScript }      from "../services/export/rScript.js";
@@ -754,9 +755,156 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
   );
 }
 
+// ─── GMM RESULTS ──────────────────────────────────────────────────────────────
+function GMMResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+  const [tab, setTab] = useState("second");
+  const { firstStages } = result;
+  const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
+  const safeJ = v => (v != null && isFinite(v)) ? v.toFixed(3) : "—";
+  const jOk = result.jDf > 0;
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>Two-Step GMM Results</span>
+        <Badge label={`n = ${result.n}`} color={C.textDim} />
+      </div>
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+        {[["second", "Structural Equation"], ...(firstStages ?? []).map((s, i) => [`fs_${i}`, `First Stage: ${s.endVar}`])].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? C.goldFaint : C.surface, border: "none", color: tab === k ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent", transition: "all 0.15s" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {tab === "second" && (
+        <>
+          <RegressionEquation varNames={result.varNames} beta={result.beta} yVar={yVar[0]} />
+          <FitBar items={[
+            { label: "R²",       value: safeR(result.R2),    color: C.gold },
+            { label: "Adj. R²",  value: safeR(result.adjR2), color: C.gold },
+            { label: "n",   value: result.n,  color: C.text },
+            { label: "df",  value: result.df, color: C.textDim },
+          ]} />
+          {jOk && (
+            <div style={{ padding: "0.55rem 0.8rem", background: result.jPval > 0.05 ? `${C.green}10` : `${C.red}10`, border: `1px solid ${result.jPval > 0.05 ? C.green : C.red}40`, borderRadius: 3, marginBottom: "1rem", fontFamily: mono, fontSize: 11, display: "flex", gap: 16 }}>
+              <span style={{ color: C.textMuted }}>Hansen J-stat</span>
+              <span style={{ color: C.text }}>{safeJ(result.jStat)}</span>
+              <span style={{ color: C.textMuted }}>df = {result.jDf}</span>
+              <span style={{ color: C.textMuted }}>p = {safeJ(result.jPval)}</span>
+              <span style={{ color: result.jPval > 0.05 ? C.green : C.red }}>{result.jPval > 0.05 ? "✓ Overid. not rejected" : "⚠ Overid. rejected"}</span>
+            </div>
+          )}
+          <Lbl color={C.textMuted}>GMM Coefficients (HC-robust SE)</Lbl>
+          <div style={{ marginBottom: "1.2rem" }}>
+            <CoeffTable varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
+          </div>
+          <PlotSelector accentColor={C.gold} defaultId="yhat"
+            plots={[
+              { id: "yhat", label: "Y vs Ŷ", node: <YFittedPlot resid={result.resid} Yhat={result.Yhat} yLabel={yVar[0]} svgIdSuffix="-gmm" /> },
+              { id: "forest", label: "Coefficient plot", node: <ForestPlot varNames={result.varNames} beta={result.beta} se={result.se} pVals={result.pVals} svgId="forest-gmm" filename="gmm_coefficients.svg" /> },
+              { id: "resid", label: "Residuals vs Fitted", node: <ResidualVsFitted resid={result.resid} Yhat={result.Yhat} svgIdSuffix="-gmm-resid" /> },
+              { id: "qq", label: "Q-Q", node: <QQPlot resid={result.resid} svgIdSuffix="-gmm-qq" /> },
+            ]} />
+          <ExportBar yVar={yVar[0]} results={result} model="GMM"
+            onReport={() => openReport({ ...result, modelLabel: "Two-Step GMM", yVar: yVar[0], xVars })}
+            replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "GMM", yVar: yVar[0], xVars, wVars, zVars } } : null}
+          />
+        </>
+      )}
+      {(firstStages ?? []).map((fs, i) => tab === `fs_${i}` && (
+        <div key={i}>
+          <FitBar items={[
+            { label: "R²", value: safeR(fs.R2), color: C.gold },
+            { label: "F-stat", value: (fs.Fstat != null && isFinite(fs.Fstat)) ? fs.Fstat.toFixed(3) : "—", color: fs.weak ? C.red : C.green },
+            { label: "Weak?", value: fs.weak ? "YES ⚠" : "No", color: fs.weak ? C.red : C.green },
+            { label: "n", value: fs.n, color: C.text },
+          ]} />
+          {fs.weak && <InfoBox color={C.red}>⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. GMM efficiency gains diminish with weak instruments.</InfoBox>}
+          <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── LIML RESULTS ─────────────────────────────────────────────────────────────
+function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+  const [tab, setTab] = useState("second");
+  const { firstStages } = result;
+  const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>LIML Results</span>
+        <Badge label={`n = ${result.n}`} color={C.textDim} />
+        {result.kappa != null && (
+          <Badge label={`κ = ${result.kappa.toFixed(4)}`} color={Math.abs(result.kappa - 1) < 0.01 ? C.textDim : C.gold} />
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+        {[["second", "Structural Equation"], ...(firstStages ?? []).map((s, i) => [`fs_${i}`, `First Stage: ${s.endVar}`])].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? C.goldFaint : C.surface, border: "none", color: tab === k ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent", transition: "all 0.15s" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {tab === "second" && (
+        <>
+          {result.kappa != null && (
+            <div style={{ padding: "0.45rem 0.8rem", background: `${C.gold}10`, border: `1px solid ${C.gold}40`, borderRadius: 3, marginBottom: "1rem", fontFamily: mono, fontSize: 11, display: "flex", gap: 16 }}>
+              <span style={{ color: C.textMuted }}>k-class κ</span>
+              <span style={{ color: C.gold }}>{result.kappa.toFixed(6)}</span>
+              <span style={{ color: C.textMuted }}>{Math.abs(result.kappa - 1) < 1e-4 ? "(= 1 → exactly identified, same as 2SLS)" : "(> 1 → overidentified, LIML corrects finite-sample bias)"}</span>
+            </div>
+          )}
+          <RegressionEquation varNames={result.varNames} beta={result.beta} yVar={yVar[0]} />
+          <FitBar items={[
+            { label: "R²",      value: safeR(result.R2),    color: C.gold },
+            { label: "Adj. R²", value: safeR(result.adjR2), color: C.gold },
+            { label: "n",  value: result.n,  color: C.text },
+            { label: "df", value: result.df, color: C.textDim },
+          ]} />
+          <Lbl color={C.textMuted}>LIML Coefficients</Lbl>
+          <div style={{ marginBottom: "1.2rem" }}>
+            <CoeffTable varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
+          </div>
+          <PlotSelector accentColor={C.gold} defaultId="yhat"
+            plots={[
+              { id: "yhat", label: "Y vs Ŷ", node: <YFittedPlot resid={result.resid} Yhat={result.Yhat} yLabel={yVar[0]} svgIdSuffix="-liml" /> },
+              { id: "forest", label: "Coefficient plot", node: <ForestPlot varNames={result.varNames} beta={result.beta} se={result.se} pVals={result.pVals} svgId="forest-liml" filename="liml_coefficients.svg" /> },
+              { id: "resid", label: "Residuals vs Fitted", node: <ResidualVsFitted resid={result.resid} Yhat={result.Yhat} svgIdSuffix="-liml-resid" /> },
+              { id: "qq", label: "Q-Q", node: <QQPlot resid={result.resid} svgIdSuffix="-liml-qq" /> },
+            ]} />
+          <ExportBar yVar={yVar[0]} results={result} model="LIML"
+            onReport={() => openReport({ ...result, modelLabel: "LIML / k-class", yVar: yVar[0], xVars })}
+            replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "LIML", yVar: yVar[0], xVars, wVars, zVars } } : null}
+          />
+        </>
+      )}
+      {(firstStages ?? []).map((fs, i) => tab === `fs_${i}` && (
+        <div key={i}>
+          <FitBar items={[
+            { label: "R²", value: safeR(fs.R2), color: C.gold },
+            { label: "F-stat", value: (fs.Fstat != null && isFinite(fs.Fstat)) ? fs.Fstat.toFixed(3) : "—", color: fs.weak ? C.red : C.green },
+            { label: "Weak?", value: fs.weak ? "YES ⚠" : "No", color: fs.weak ? C.red : C.green },
+            { label: "n", value: fs.n, color: C.text },
+          ]} />
+          {fs.weak && <InfoBox color={C.red}>⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. LIML is particularly sensitive to weak instruments.</InfoBox>}
+          <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function buildModelAvail(panelOk) {
-  return { OLS: true, FE: panelOk, FD: panelOk, "2SLS": true, DiD: true, TWFE: panelOk, RDD: true, Logit: true, Probit: true };
+  return { OLS: true, FE: panelOk, FD: panelOk, "2SLS": true, DiD: true, TWFE: panelOk, RDD: true, Logit: true, Probit: true, GMM: true, LIML: true };
 }
 function buildModelHint(panel, panelOk) {
   const noPanel = "No panel structure declared — set Entity & Time columns in Wrangling.";
@@ -920,6 +1068,20 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
         }
         if (!res.converged) console.warn(`${model} did not converge after ${res.iterations} iterations.`);
         setResult(wrapResult(model, res, { yVar: y, xVars, wVars }));
+
+      } else if (model === "GMM") {
+        if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
+        if (!zVars.length) { setErr("Select at least one excluded instrument (Z)."); setRunning(false); return; }
+        const res = runGMM(rows, y, xVars, wVars, zVars);
+        if (!res || res.error) { setErr(res?.error ?? "GMM failed. Check instruments and data."); setRunning(false); return; }
+        setResult(wrapResult("GMM", res, { yVar: y, xVars, wVars, zVars }));
+
+      } else if (model === "LIML") {
+        if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
+        if (!zVars.length) { setErr("Select at least one excluded instrument (Z)."); setRunning(false); return; }
+        const res = runLIML(rows, y, xVars, wVars, zVars);
+        if (!res || res.error) { setErr(res?.error ?? "LIML failed. Check instruments and data."); setRunning(false); return; }
+        setResult(wrapResult("LIML", res, { yVar: y, xVars, wVars, zVars }));
       }
     } catch (e) {
       setErr(`Estimation error: ${e.message}`);
@@ -1184,6 +1346,16 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
           {/* 2SLS */}
           {result?.type === "2SLS" && (
             <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+          )}
+
+          {/* GMM */}
+          {result?.type === "GMM" && (
+            <GMMResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+          )}
+
+          {/* LIML */}
+          {result?.type === "LIML" && (
+            <LIMLResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* DiD / TWFE */}
