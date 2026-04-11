@@ -17,17 +17,18 @@ Stack: React + Vite + JavaScript. No external UI libraries. Styling via inline s
 ```
 src/
 ├── math/
-│   ├── index.js              ← single barrel export for all engines
-│   ├── LinearEngine.js       ← OLS, WLS, matrix algebra, diagnostics, export helpers
-│   ├── PanelEngine.js        ← FE, FD, TWFE, 2x2 DiD
-│   ├── CausalEngine.js       ← 2SLS/IV, Sharp RDD, McCrary density test, IK bandwidth
-│   ├── NonLinearEngine.js    ← Logit/Probit, IRLS/Newton-Raphson MLE, McFadden R², MEM
-│   ├── GMMEngine.js          ← GMM, LIML
-│   ├── timeSeries.js         ← time series utilities
-│   ├── EstimationResult.js   ← shared result type for all engines
+│   ├── index.js                    ← single barrel export for all engines
+│   ├── LinearEngine.js             ← OLS, WLS, matrix algebra, diagnostics, export helpers
+│   ├── PanelEngine.js              ← FE, FD, TWFE, 2x2 DiD, EventStudy, LSDV
+│   ├── CausalEngine.js             ← 2SLS/IV, Sharp RDD, Fuzzy RDD, McCrary density test, IK bandwidth
+│   ├── NonLinearEngine.js          ← Logit/Probit, IRLS/Newton-Raphson MLE, McFadden R², MEM, PoissonFE
+│   ├── GMMEngine.js                ← GMM, LIML
+│   ├── SyntheticControlEngine.js   ← Frank-Wolfe synthetic control, placebo inference
+│   ├── timeSeries.js               ← time series utilities
+│   ├── EstimationResult.js         ← shared result type for all engines
 │   └── __validation__/
 │       ├── README.md
-│       └── engineValidation.js  ← systematic R comparison harness
+│       └── engineValidation.js     ← systematic R comparison harness
 │
 ├── core/
 │   ├── diagnostics/
@@ -36,7 +37,7 @@ src/
 │   │   ├── normality.js            ← Jarque-Bera, Shapiro-Wilk
 │   │   └── multicollinearity.js    ← VIF, condition number
 │   ├── inference/
-│   │   └── robustSE.js             ← HC0/HC1/HC2/HC3, clustered, two-way, Newey-West HAC
+│   │   └── robustSE.js             ← HC0/HC1/HC2/HC3, clustered, two-way CGM, Newey-West HAC
 │   └── validation/
 │       ├── dataQuality.js          ← missing patterns, outlier flags, type consistency
 │       ├── coachingTriggers.js     ← triggers for ResearchCoach suggestions
@@ -66,8 +67,8 @@ src/
 │   │   ├── parsers/
 │   │   │   ├── stata.js          ← .dta parser via readstat-wasm
 │   │   │   ├── excel.js          ← SheetJS (CDN: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs)
-│   │   │   ├── rds.js            ← R data file parser (data.frame, tibble, named list)
-│   │   │   └── shapefile.js      ← Shapefile parser — attribute table as rows, geometry as WKT
+│   │   │   ├── rds.js            ← XDR binary R serialization reader (data.frame, tibble, named list)
+│   │   │   └── shapefile.js      ← dBase III DBF parser + SHP geometry WKT
 │   │   └── fetchers/
 │   │       ├── worldBank.js      ← World Bank API fetcher
 │   │       └── oecd.js           ← OECD API fetcher
@@ -98,7 +99,7 @@ src/
 │   │
 │   ├── modeling/
 │   │   ├── shared.jsx            ← VarPanel, Section, Chip, C, mono (modeling-specific)
-│   │   ├── EstimatorSidebar.jsx
+│   │   ├── EstimatorSidebar.jsx  ← grouped "Choose Model" dropdown
 │   │   ├── VariableSelector.jsx  ← Y, X, W selectors
 │   │   ├── ModelConfiguration.jsx ← estimator-specific config (Z instruments, DiD, RDD, WLS weights)
 │   │   ├── ModelPlots.jsx        ← RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, ROC, etc.
@@ -107,13 +108,15 @@ src/
 │   │   ├── ModelBufferBar.jsx    ← model buffer / compare bar
 │   │   ├── ModelComparison.jsx   ← side-by-side model comparison table
 │   │   ├── ResearchCoach.jsx     ← AI-driven research coaching suggestions
-│   │   ├── InferenceOptions.jsx  ← SE type selector, cluster var, FE type, HAC lag (Phase 8.2)
-│   │   └── CodeEditor.jsx        ← inline replication code editor: R / Python / Stata tabs (Phase 8.3)
+│   │   ├── InferenceOptions.jsx  ← collapsible SE type selector (chips + cluster/lag inputs)
+│   │   └── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
 │   │
+│   ├── AIContextSidebar.jsx      ← AI context panel (sidebar)
+│   ├── ModelingTab.jsx           ← modeling tab root
 │   └── validation/
 │       └── AuditTrail.jsx        ← surfaces auditor.js output, pipeline audit UI
 │
-├── AIContextSidebar.jsx   ← AI context panel (sidebar)
+├── EconometricsEngine.js  ← legacy engine shim
 ├── WranglingModule.jsx    ← root orchestrator, pipeline state, tab router
 ├── ReportingModule.jsx    ← LaTeX Stargazer, forest plots, AI narrative
 ├── ExplorerModule.jsx     ← dataset explorer

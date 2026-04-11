@@ -29,6 +29,7 @@ import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
+import CodeEditor          from "../components/modeling/CodeEditor.jsx";
 import { C, mono }         from "../components/modeling/shared.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
@@ -905,15 +906,25 @@ function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, openReport, base
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function buildModelAvail(panelOk) {
-  return { OLS: true, FE: panelOk, FD: panelOk, "2SLS": true, DiD: true, TWFE: panelOk, RDD: true, Logit: true, Probit: true, GMM: true, LIML: true };
+  return {
+    OLS: true, WLS: true,
+    FE: panelOk, FD: panelOk,
+    LSDV: panelOk, TWFE: panelOk, EventStudy: panelOk,
+    "2SLS": true, RDD: true, FuzzyRDD: true, DiD: true,
+    Logit: true, Probit: true, PoissonFE: true,
+    GMM: true, LIML: true,
+    SyntheticControl: true,
+  };
 }
 function buildModelHint(panel, panelOk) {
   const noPanel = "No panel structure declared — set Entity & Time columns in Wrangling.";
   const dupObs  = "Duplicate observations detected — fix in Wrangling.";
   return {
-    FE:   panelOk ? "" : panel ? dupObs : noPanel,
-    FD:   panelOk ? "" : panel ? dupObs : noPanel,
-    TWFE: panelOk ? "" : noPanel,
+    FE:        panelOk ? "" : panel ? dupObs : noPanel,
+    FD:        panelOk ? "" : panel ? dupObs : noPanel,
+    TWFE:      panelOk ? "" : noPanel,
+    LSDV:      panelOk ? "" : noPanel,
+    EventStudy:panelOk ? "" : noPanel,
   };
 }
 
@@ -1074,7 +1085,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
       } else if (model === "Logit" || model === "Probit") {
         if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
         const fn  = model === "Logit" ? runLogit : runProbit;
-        const res = fn(rows, y, allX);
+        const res = fn(rows, y, allX, seOpts);
         if (!res || res.error) {
           setErr(res?.error ?? `${model} failed. Ensure Y is binary (0/1) and X columns are numeric.`);
           setRunning(false); return;
@@ -1085,16 +1096,30 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
       } else if (model === "GMM") {
         if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
         if (!zVars.length) { setErr("Select at least one excluded instrument (Z)."); setRunning(false); return; }
-        const res = runGMM(rows, y, xVars, wVars, zVars);
+        const res = runGMM(rows, y, xVars, wVars, zVars, seOpts);
         if (!res || res.error) { setErr(res?.error ?? "GMM failed. Check instruments and data."); setRunning(false); return; }
         setResult(wrapResult("GMM", res, { yVar: y, xVars, wVars, zVars }));
 
       } else if (model === "LIML") {
         if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
         if (!zVars.length) { setErr("Select at least one excluded instrument (Z)."); setRunning(false); return; }
-        const res = runLIML(rows, y, xVars, wVars, zVars);
+        const res = runLIML(rows, y, xVars, wVars, zVars, seOpts);
         if (!res || res.error) { setErr(res?.error ?? "LIML failed. Check instruments and data."); setRunning(false); return; }
         setResult(wrapResult("LIML", res, { yVar: y, xVars, wVars, zVars }));
+
+      // ── Planned estimators (stubs) ─────────────────────────────────────────
+      } else if (model === "WLS") {
+        setErr("WLS: select OLS and set a weight variable in Model Configuration.");
+      } else if (model === "LSDV") {
+        setErr("LSDV (Least Squares Dummy Variables) — coming soon.");
+      } else if (model === "EventStudy") {
+        setErr("Event Study / Dynamic DiD — coming soon.");
+      } else if (model === "FuzzyRDD") {
+        setErr("Fuzzy RDD — coming soon.");
+      } else if (model === "PoissonFE") {
+        setErr("Poisson FE — coming soon.");
+      } else if (model === "SyntheticControl") {
+        setErr("Synthetic Control — coming soon.");
       }
     } catch (e) {
       setErr(`Estimation error: ${e.message}`);
@@ -1204,6 +1229,8 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
             clusterVar2={clusterVar2} setClusterVar2={setClusterVar2}
             maxLag={maxLag}           setMaxLag={setMaxLag}
           />
+
+          <CodeEditor result={result} />
 
           <button
             onClick={estimate}

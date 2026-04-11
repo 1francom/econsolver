@@ -23,6 +23,8 @@ export {
   runFD,
   run2x2DiD,
   runTWFEDiD,
+  runEventStudy,
+  runLSDV,
 } from "./PanelEngine.js";
 
 // ── Causal inference estimators ───────────────────────────────────────────────
@@ -30,13 +32,15 @@ export {
   run2SLS,
   ikBandwidth,
   runSharpRDD,
+  runFuzzyRDD,
   runMcCrary,
 } from "./CausalEngine.js";
 
-// ── Binary outcome models ─────────────────────────────────────────────────────
+// ── Binary outcome models + Poisson FE ───────────────────────────────────────
 export {
   runLogit,
   runProbit,
+  runPoissonFE,
   normCDF,
   buildBinaryLatex,
   buildBinaryCSV,
@@ -44,6 +48,9 @@ export {
 
 // ── IV extensions: GMM and LIML ──────────────────────────────────────────────
 export { runGMM, runLIML } from "./GMMEngine.js";
+
+// ── Synthetic Control (Abadie-Diamond-Hainmueller 2010) ──────────────────────
+export { runSyntheticControl } from "./SyntheticControlEngine.js";
 
 // ── Canonical result wrapper ──────────────────────────────────────────────────
 export { wrapResult, getCoeffBlock } from "./EstimationResult.js";

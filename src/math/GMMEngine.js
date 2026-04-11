@@ -18,6 +18,7 @@
 
 import { transpose, matMul, matInv, pValue, runOLS, fCDF } from "./LinearEngine.js";
 import { normCDF } from "./NonLinearEngine.js";
+import { computeRobustSE } from "../core/inference/robustSE.js";
 
 const ERR_UNDERIDENTIFIED = "More endogenous regressors than instruments — model not identified.";
 
@@ -91,7 +92,7 @@ function buildFirstStages(valid, xCols, wCols, zCols) {
 }
 
 // ─── TWO-STEP EFFICIENT GMM ───────────────────────────────────────────────────
-export function runGMM(rows, yCol, xCols, wCols, zCols) {
+export function runGMM(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
   const overidDf = zCols.length - xCols.length;
   if (overidDf < 0) return { error: ERR_UNDERIDENTIFIED };
 
@@ -151,11 +152,21 @@ export function runGMM(rows, yCol, xCols, wCols, zCols) {
   // Derivation: A = X′Z·Ω̂⁻¹·Z′X is O(n²). The asymptotic variance of √n·β̂
   // is (D′Ω̂⁻¹D)⁻¹ where D = (1/n)X′Z, so Var(β̂) = n·A⁻¹.
   const df     = n - k;
-  const se     = Ainv.map((row, i) => Math.sqrt(Math.abs(row[i] * n)));
-  const tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
-  const pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
+  let se     = Ainv.map((row, i) => Math.sqrt(Math.abs(row[i] * n)));
+  let tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
+  let pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
 
   const resid = Y.map((y, i) => y - dot(X[i], beta));
+
+  // ── Robust SE override ─────────────────────────────────────────────────────
+  // Ainv scaled by n serves as the asymptotic variance matrix (Var(β̂) = n·Ainv)
+  const AinvN  = Ainv.map(row => row.map(v => v * n));
+  const robSE  = computeRobustSE(seOpts, AinvN, X, resid, n, k, valid);
+  if (robSE) {
+    se     = robSE;
+    tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
+    pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
+  }
   const Yhat  = Y.map((y, i) => y - resid[i]);
   const Ym    = Y.reduce((a, b) => a + b, 0) / n;
   const SST   = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
@@ -190,7 +201,7 @@ export function runGMM(rows, yCol, xCols, wCols, zCols) {
 // β_LIML = (X′X − κ·X′M_Z X)⁻¹(X′Y − κ·X′M_Z Y)
 // SE: σ̂² = ε′ε/(n−k);  Var(β) = σ̂²(X′P_Z X)⁻¹
 //
-export function runLIML(rows, yCol, xCols, wCols, zCols) {
+export function runLIML(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
   const overidDf = zCols.length - xCols.length;
   if (overidDf < 0) return { error: ERR_UNDERIDENTIFIED };
 
@@ -260,9 +271,19 @@ export function runLIML(rows, yCol, xCols, wCols, zCols) {
   const resid = Y.map((y, i) => y - dot(X[i], beta));
   const SSR   = resid.reduce((s, e) => s + e * e, 0);
   const s2    = SSR / Math.max(1, df);
-  const se    = XtPzXi.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
-  const tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
-  const pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
+  let se    = XtPzXi.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  let tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
+  let pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
+
+  // ── Robust SE override ─────────────────────────────────────────────────────
+  // XtPzXi scaled by s2 is the classical Var(β̂); pass it as the bread matrix.
+  const XtPzXiS2 = XtPzXi.map(row => row.map(v => v * s2));
+  const robSE    = computeRobustSE(seOpts, XtPzXiS2, X, resid, n, k, valid);
+  if (robSE) {
+    se     = robSE;
+    tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
+    pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
+  }
 
   const Yhat  = Y.map((y, i) => y - resid[i]);
   const Ym    = Y.reduce((a, b) => a + b, 0) / n;
