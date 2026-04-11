@@ -24,7 +24,20 @@
 //   bwManual     {string}    setBwManual {fn}
 //   kernel       {string}    setKernel {fn}
 
+import { useMemo } from "react";
 import { VarPanel, Section, Chip, C, mono } from "./shared.jsx";
+
+const INPUT_STYLE = {
+  width: "100%",
+  background: C.surface2,
+  border: `1px solid ${C.border2}`,
+  color: C.text,
+  padding: "0.4rem 0.6rem",
+  fontFamily: mono,
+  fontSize: 12,
+  borderRadius: 3,
+  outline: "none",
+};
 
 // ─── 2SLS: Excluded Instruments ──────────────────────────────────────────────
 function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }) {
@@ -110,18 +123,6 @@ function RDDConfig({
   bwManual, setBwManual,
   kernel, setKernel,
 }) {
-  const inputStyle = {
-    width: "100%",
-    background: C.surface2,
-    border: `1px solid ${C.border2}`,
-    color: C.text,
-    padding: "0.4rem 0.6rem",
-    fontFamily: mono,
-    fontSize: 12,
-    borderRadius: 3,
-    outline: "none",
-  };
-
   return (
     <>
       {/* Running variable */}
@@ -141,7 +142,7 @@ function RDDConfig({
           value={cutoff}
           onChange={e => setCutoff(e.target.value)}
           placeholder="e.g. 0"
-          style={inputStyle}
+          style={INPUT_STYLE}
         />
       </Section>
 
@@ -167,7 +168,7 @@ function RDDConfig({
             value={bwManual}
             onChange={e => setBwManual(e.target.value)}
             placeholder="bandwidth h"
-            style={inputStyle}
+            style={INPUT_STYLE}
           />
         )}
       </Section>
@@ -210,6 +211,106 @@ function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
 }
 
 
+// ─── EventStudy: TreatTime column + window ────────────────────────────────────
+function EventStudyConfig({ numericCols, yVar, treatTimeCol, setTreatTimeCol, kPre, setKPre, kPost, setKPost, wVars, setWVars }) {
+  return (
+    <>
+      <VarPanel
+        title="Treatment Time Column (numeric period)"
+        color={C.teal}
+        vars={numericCols.filter(h => !yVar.includes(h))}
+        selected={treatTimeCol}
+        onToggle={setTreatTimeCol}
+        multi={false}
+        info="Column with the first period unit was treated. Never-treated units should have null/NaN."
+      />
+      <Section title="Pre-Period Window (kPre)" color={C.teal}>
+        <input type="number" min={1} max={20} value={kPre} onChange={e => setKPre(e.target.value)} style={INPUT_STYLE} placeholder="3" />
+      </Section>
+      <Section title="Post-Period Window (kPost)" color={C.teal}>
+        <input type="number" min={1} max={20} value={kPost} onChange={e => setKPost(e.target.value)} style={INPUT_STYLE} placeholder="3" />
+      </Section>
+      <VarPanel
+        title="W · Additional Controls"
+        color={C.blue}
+        vars={numericCols.filter(h => !yVar.includes(h) && !treatTimeCol.includes(h))}
+        selected={wVars}
+        onToggle={setWVars}
+      />
+    </>
+  );
+}
+
+// ─── LSDV: Time FE toggle ─────────────────────────────────────────────────────
+function LSDVConfig({ lsdvTimeFE, setLsdvTimeFE }) {
+  return (
+    <Section title="Time Fixed Effects" color={C.blue}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Chip label="Entity FE only" selected={!lsdvTimeFE} color={C.blue} onClick={() => setLsdvTimeFE(false)} />
+        <Chip label="Entity + Time FE" selected={lsdvTimeFE} color={C.blue} onClick={() => setLsdvTimeFE(true)} />
+      </div>
+    </Section>
+  );
+}
+
+// ─── SyntheticControl: treated unit + treat time + predictors ─────────────────
+function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit, synthTreatTime, setSynthTreatTime, xVars, setXVars, rows, panel }) {
+  const unitCol = panel?.entityCol;
+  const uniqueUnits = useMemo(
+    () => unitCol ? [...new Set(rows.map(r => r[unitCol]).filter(v => v != null))].sort() : [],
+    [rows, unitCol],
+  );
+
+  return (
+    <>
+      <Section title="Treated Unit" color={C.gold}>
+        <select value={treatedUnit} onChange={e => setTreatedUnit(e.target.value)}
+          style={{ ...INPUT_STYLE, cursor: "pointer" }}>
+          <option value="">— select treated unit —</option>
+          {uniqueUnits.map(u => <option key={u} value={u}>{u}</option>)}
+        </select>
+      </Section>
+      <Section title="Treatment Time Period (numeric)" color={C.gold}>
+        <input type="number" value={synthTreatTime} onChange={e => setSynthTreatTime(e.target.value)} placeholder="e.g. 1990" style={INPUT_STYLE} />
+      </Section>
+      <VarPanel
+        title="Predictor Variables (pre-period)"
+        color={C.blue}
+        vars={numericCols.filter(h => !yVar.includes(h))}
+        selected={xVars}
+        onToggle={setXVars}
+        info="Pre-treatment predictors used to find synthetic weights. Optional — if empty, only the outcome (Y) is used."
+      />
+    </>
+  );
+}
+
+// ─── FuzzyRDD: uses RDDConfig + treatVar for D column ────────────────────────
+function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, setRunningVar, cutoff, setCutoff, bwMode, setBwMode, bwManual, setBwManual, kernel, setKernel }) {
+  return (
+    <>
+      <VarPanel
+        title="Treatment Receipt Column D (0/1 take-up)"
+        color={C.teal}
+        vars={numericCols.filter(h => !yVar.includes(h))}
+        selected={treatVar}
+        onToggle={setTreatVar}
+        multi={false}
+        info="Actual treatment receipt (endogenous D). The cutoff indicator Z = 1(X ≥ c) is the instrument."
+      />
+      <RDDConfig
+        numericCols={numericCols.filter(h => !treatVar.includes(h))}
+        yVar={yVar}
+        runningVar={runningVar} setRunningVar={setRunningVar}
+        cutoff={cutoff}         setCutoff={setCutoff}
+        bwMode={bwMode}         setBwMode={setBwMode}
+        bwManual={bwManual}     setBwManual={setBwManual}
+        kernel={kernel}         setKernel={setKernel}
+      />
+    </>
+  );
+}
+
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export default function ModelConfiguration({
   model,
@@ -226,6 +327,15 @@ export default function ModelConfiguration({
   bwManual,   setBwManual,
   kernel,     setKernel,
   weightVar,  setWeightVar,
+  // New estimator props
+  treatTimeCol,   setTreatTimeCol,
+  kPre,           setKPre,
+  kPost,          setKPost,
+  lsdvTimeFE,     setLsdvTimeFE,
+  treatedUnit,    setTreatedUnit,
+  synthTreatTime, setSynthTreatTime,
+  rows,
+  panel,
 }) {
   if (model === "2SLS" || model === "GMM" || model === "LIML") {
     return (
@@ -286,6 +396,22 @@ export default function ModelConfiguration({
         setKernel={setKernel}
       />
     );
+  }
+
+  if (model === "FuzzyRDD") {
+    return <FuzzyRDDConfig numericCols={numericCols} yVar={yVar} treatVar={treatVar} setTreatVar={setTreatVar} runningVar={runningVar} setRunningVar={setRunningVar} cutoff={cutoff} setCutoff={setCutoff} bwMode={bwMode} setBwMode={setBwMode} bwManual={bwManual} setBwManual={setBwManual} kernel={kernel} setKernel={setKernel} />;
+  }
+
+  if (model === "EventStudy") {
+    return <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />;
+  }
+
+  if (model === "LSDV") {
+    return <LSDVConfig lsdvTimeFE={lsdvTimeFE} setLsdvTimeFE={setLsdvTimeFE} />;
+  }
+
+  if (model === "SyntheticControl") {
+    return <SyntheticControlConfig numericCols={numericCols} yVar={yVar} treatedUnit={treatedUnit} setTreatedUnit={setTreatedUnit} synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime} xVars={xVars} setXVars={setXVars} rows={rows} panel={panel} />;
   }
 
   // OLS / FE / FD: no model-specific configuration beyond variable selection

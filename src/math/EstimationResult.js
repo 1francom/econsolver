@@ -89,6 +89,11 @@ const ESTIMATOR_META = {
   Probit: { label: "Probit",           color: "#9e7ec8" },
   GMM:    { label: "Two-Step GMM",     color: "#c8a96e" },
   LIML:   { label: "LIML",            color: "#c8a96e" },
+  FuzzyRDD:        { label: "Fuzzy RDD",          color: "#c88e6e" },
+  EventStudy:      { label: "Event Study",         color: "#6ec8b4" },
+  LSDV:            { label: "Panel LSDV",          color: "#6e9ec8" },
+  PoissonFE:       { label: "Poisson FE",          color: "#9e7ec8" },
+  SyntheticControl:{ label: "Synthetic Control",   color: "#c8b46e" },
 };
 
 const FAMILY_MAP = {
@@ -99,6 +104,11 @@ const FAMILY_MAP = {
   RDD: "rdd",
   Logit: "binary", Probit: "binary",
   GMM: "iv",    LIML: "iv",
+  FuzzyRDD: "rdd",
+  EventStudy: "panel",
+  LSDV: "panel",
+  PoissonFE: "count",
+  SyntheticControl: "sc",
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -377,6 +387,162 @@ function wrapLIML(eng, spec) {
   };
 }
 
+// ─── FUZZY RDD ────────────────────────────────────────────────────────────────
+// eng shape: { late, lateSE, lateT, lateP, firstStageFstat, firstStageJumpD,
+//              firstStageR2, weak, waldRatio, reducedForm,
+//              beta, se, tStats, pVals, R2, varNames, n, df, bandwidth, kernel, cutoff,
+//              leftFit, rightFit, Yhat, valid, xc, D, Y, W, Dhat }
+function wrapFuzzyRDD(eng, spec) {
+  return {
+    ...base("FuzzyRDD", spec),
+    varNames:  eng.varNames ?? [],
+    beta:      clean(eng.beta),
+    se:        clean(eng.se),
+    testStats: clean(eng.tStats),
+    pVals:     clean(eng.pVals),
+    R2:        eng.R2  ?? null,
+    n:         eng.n   ?? 0,
+    df:        eng.df  ?? 0,
+    late:      eng.late   ?? null,
+    lateSE:    eng.lateSE ?? null,
+    lateP:     eng.lateP  ?? null,
+    resid:     [],
+    Yhat:      eng.Yhat   ?? [],
+    // Fuzzy-specific
+    firstStageFstat:  eng.firstStageFstat  ?? null,
+    firstStageJumpD:  eng.firstStageJumpD  ?? null,
+    firstStageR2:     eng.firstStageR2     ?? null,
+    weak:             eng.weak             ?? false,
+    waldRatio:        eng.waldRatio        ?? null,
+    // Plot data (same shape as RDD)
+    rddData: {
+      valid:      eng.valid      ?? [],
+      xc:         eng.xc         ?? [],
+      D:          eng.D          ?? [],
+      Y:          eng.Y          ?? [],
+      W:          eng.W          ?? [],
+      leftFit:    eng.leftFit    ?? [],
+      rightFit:   eng.rightFit   ?? [],
+      cutoff:     eng.cutoff     ?? null,
+      h:          eng.bandwidth  ?? null,
+      kernelType: eng.kernel     ?? null,
+    },
+    Dhat: eng.Dhat ?? [],
+  };
+}
+
+// ─── EVENT STUDY ─────────────────────────────────────────────────────────────
+// eng shape: { eventCoeffs, preTestStat, preTestPval, beta, se, tStats, pVals,
+//              varNames, R2, adjR2, n, df, units, SSR, windowPre, windowPost }
+function wrapEventStudy(eng, spec) {
+  return {
+    ...base("EventStudy", spec),
+    varNames:  eng.varNames ?? [],
+    beta:      clean(eng.beta),
+    se:        clean(eng.se),
+    testStats: clean(eng.tStats),
+    pVals:     clean(eng.pVals),
+    R2:        eng.R2    ?? null,
+    adjR2:     eng.adjR2 ?? null,
+    n:         eng.n     ?? 0,
+    df:        eng.df    ?? 0,
+    units:     eng.units ?? null,
+    resid:     [],
+    Yhat:      [],
+    // Event-study specific
+    eventCoeffs:  eng.eventCoeffs  ?? [],
+    preTestStat:  eng.preTestStat  ?? null,
+    preTestPval:  eng.preTestPval  ?? null,
+    windowPre:    eng.windowPre    ?? null,
+    windowPost:   eng.windowPost   ?? null,
+  };
+}
+
+// ─── PANEL LSDV ──────────────────────────────────────────────────────────────
+// eng shape: { varNames, beta, se, tStats, pVals, R2, adjR2, n, df, Fstat, Fpval,
+//              resid, Yhat, alphas, units, times, timeFE, refUnit }
+function wrapLSDV(eng, spec) {
+  return {
+    ...base("LSDV", spec),
+    varNames:  eng.varNames ?? [],
+    beta:      clean(eng.beta),
+    se:        clean(eng.se),
+    testStats: clean(eng.tStats),
+    pVals:     clean(eng.pVals),
+    R2:        eng.R2    ?? null,
+    adjR2:     eng.adjR2 ?? null,
+    n:         eng.n     ?? 0,
+    df:        eng.df    ?? 0,
+    units:     eng.units?.length ?? null,
+    Fstat:     eng.Fstat ?? null,
+    Fpval:     eng.Fpval ?? null,
+    resid:     eng.resid ?? [],
+    Yhat:      eng.Yhat  ?? [],
+    alphas:    eng.alphas ?? null,
+    // LSDV-specific
+    timeFE:    eng.timeFE ?? false,
+    refUnit:   eng.refUnit ?? null,
+  };
+}
+
+// ─── POISSON FE ──────────────────────────────────────────────────────────────
+// eng shape: { beta, se, zStats, pVals, varNames, n, k, df, logLik, nullLogLik,
+//              McFaddenR2, AIC, BIC, alphas, fitted, resid, converged, iterations }
+function wrapPoissonFE(eng, spec) {
+  return {
+    ...base("PoissonFE", spec),
+    varNames:       eng.varNames       ?? [],
+    beta:           clean(eng.beta),
+    se:             clean(eng.se),
+    testStats:      clean(eng.zStats),
+    testStatLabel:  "z",
+    pVals:          clean(eng.pVals),
+    n:              eng.n              ?? 0,
+    df:             eng.df             ?? 0,
+    logLik:         eng.logLik         ?? null,
+    mcFaddenR2:     eng.McFaddenR2     ?? null,
+    AIC:            eng.AIC            ?? null,
+    BIC:            eng.BIC            ?? null,
+    resid:          eng.resid          ?? [],
+    Yhat:           eng.fitted         ?? [],
+    alphas:         eng.alphas         ?? null,
+    converged:      eng.converged      ?? false,
+    iterations:     eng.iterations     ?? null,
+    // IRR: exp(beta)
+    IRR:            (eng.beta ?? []).map(b => Math.exp(b)),
+  };
+}
+
+// ─── SYNTHETIC CONTROL ───────────────────────────────────────────────────────
+// eng shape: { weights, preFit, postGap, rmspe_pre, rmspe_post,
+//              placebos, pValue, donors, treatedUnit, treatTime }
+function wrapSyntheticControl(eng, spec) {
+  return {
+    ...base("SyntheticControl", spec),
+    // No coefficient block for SC — set all to empty
+    varNames:  [],
+    beta:      [],
+    se:        [],
+    testStats: [],
+    pVals:     [],
+    n:         (eng.preFit?.length ?? 0) + (eng.postGap?.length ?? 0),
+    df:        0,
+    resid:     [],
+    Yhat:      [],
+    // SC-specific
+    scWeights:    eng.weights   ?? {},
+    scPreFit:     eng.preFit    ?? [],
+    scPostGap:    eng.postGap   ?? [],
+    scRmspePre:   eng.rmspe_pre  ?? null,
+    scRmspePost:  eng.rmspe_post ?? null,
+    scPlacebos:   eng.placebos  ?? [],
+    scPValue:     eng.pValue    ?? null,
+    scDonors:     eng.donors    ?? [],
+    scTreatedUnit: eng.treatedUnit ?? null,
+    scTreatTime:  eng.treatTime ?? null,
+  };
+}
+
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
 /**
@@ -402,6 +568,11 @@ export function wrapResult(type, engineOutput, spec, extras = {}) {
     case "Probit": return wrapBinary("Probit", engineOutput, spec);
     case "GMM":    return wrapGMM(engineOutput, spec);
     case "LIML":   return wrapLIML(engineOutput, spec);
+    case "FuzzyRDD":        return wrapFuzzyRDD(engineOutput, spec);
+    case "EventStudy":      return wrapEventStudy(engineOutput, spec);
+    case "LSDV":            return wrapLSDV(engineOutput, spec);
+    case "PoissonFE":       return wrapPoissonFE(engineOutput, spec);
+    case "SyntheticControl":return wrapSyntheticControl(engineOutput, spec);
     default:
       console.warn("[EstimationResult] Unknown type:", type);
       return { ...base(type, spec) };
