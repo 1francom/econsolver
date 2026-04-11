@@ -2,6 +2,8 @@
 // Pure math. No React. No side effects.
 // Owns: matrix algebra, core statistics, OLS engine, diagnostics, export helpers.
 
+import { computeRobustSE } from "../core/inference/robustSE.js";
+
 // ─── MATRIX ALGEBRA ──────────────────────────────────────────────────────────
 export function transpose(M) {
   return M[0].map((_, c) => M.map(r => r[c]));
@@ -86,7 +88,8 @@ export function stars(p) {
 // ─── OLS ENGINE ───────────────────────────────────────────────────────────────
 // Returns { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat,
 //           Fstat, Fpval, varNames }
-export function runOLS(rows, yCol, xCols) {
+// seOpts (optional): { seType, clusterVar, clusterVar2, timeVar, maxLag }
+export function runOLS(rows, yCol, xCols, seOpts = {}) {
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     xCols.every(c => typeof r[c] === "number" && isFinite(r[c]))
@@ -102,13 +105,19 @@ export function runOLS(rows, yCol, xCols) {
   const Yhat = X.map(row => row.reduce((s, v, i) => s + v * beta[i], 0));
   const resid = Y.map((y, i) => y - Yhat[i]);
   const SSR = resid.reduce((s, e) => s + e * e, 0);
-  const df = n - xCols.length - 1;
+  const k = xCols.length + 1; // number of parameters (incl. intercept)
+  const df = n - k;
   const s2 = SSR / Math.max(1, df);
   const Ym = Y.reduce((a, b) => a + b, 0) / n;
   const SST = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
   const R2 = 1 - SSR / SST;
   const adjR2 = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
-  const se = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+
+  // Robust SE — falls back to classical when seType is "classical" or absent
+  let se = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  const robustSe = computeRobustSE(seOpts, XtXinv, X, resid, n, k, valid);
+  if (robustSe) se = robustSe;
+
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals = tStats.map(t => pValue(t, df));
   const Fstat = ((SST - SSR) / xCols.length) / s2;

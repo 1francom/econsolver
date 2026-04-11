@@ -6,6 +6,7 @@ import {
   transpose, matMul, matInv,
   runOLS, pValue, fCDF, stars,
 } from "./LinearEngine.js";
+import { computeRobustSE } from "../core/inference/robustSE.js";
 
 // ─── INTERNAL HELPERS ────────────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ function prepPanel(rows, yCol, xCols, unitCol, timeCol) {
 }
 
 // ─── FIXED EFFECTS (WITHIN) ──────────────────────────────────────────────────
-export function runFE(rows, yCol, xCols, unitCol, timeCol) {
+export function runFE(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
   const { valid, units } = prepPanel(rows, yCol, xCols, unitCol, timeCol);
   if (valid.length < xCols.length + 3 || units.length < 2)
     return { error: "Insufficient observations or units for Fixed Effects estimation." };
@@ -79,7 +80,9 @@ export function runFE(rows, yCol, xCols, unitCol, timeCol) {
   const rawSE  = XtXinv
     ? XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2_fe)))
     : res.se;
-  const corrSE = rawSE.map(v => (isFinite(v) ? v : NaN));
+  // demeaned rows retain original columns via ...r spread, so cluster col is accessible
+  const robustSe = XtXinv ? computeRobustSE(seOpts, XtXinv, Xmat, res.resid, valid.length, xCols.length + 1, demeaned) : null;
+  const corrSE = (robustSe ?? rawSE).map(v => (isFinite(v) ? v : NaN));
   const corrT  = res.beta.map((b, i) => (isFinite(corrSE[i]) ? b / corrSE[i] : NaN));
   const corrP  = corrT.map(t => (isFinite(t) ? pValue(t, df_fe) : NaN));
 
@@ -127,7 +130,7 @@ export function runFE(rows, yCol, xCols, unitCol, timeCol) {
 }
 
 // ─── FIRST DIFFERENCES ───────────────────────────────────────────────────────
-export function runFD(rows, yCol, xCols, unitCol, timeCol) {
+export function runFD(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
   const { valid, units } = prepPanel(rows, yCol, xCols, unitCol, timeCol);
   if (valid.length < xCols.length + 3 || units.length < 2) return null;
 
@@ -145,6 +148,10 @@ export function runFD(rows, yCol, xCols, unitCol, timeCol) {
       [yCol, ...xCols].forEach(c => {
         d[`__fd_${c}`] = sub[i][c] - sub[i - 1][c];
       });
+      // Carry cluster/time columns for robust SE
+      if (seOpts?.clusterVar)  d[seOpts.clusterVar]  = sub[i][seOpts.clusterVar];
+      if (seOpts?.clusterVar2) d[seOpts.clusterVar2] = sub[i][seOpts.clusterVar2];
+      if (seOpts?.timeVar)     d[seOpts.timeVar]     = sub[i][seOpts.timeVar];
       diffRows.push(d);
     }
   });
@@ -152,7 +159,7 @@ export function runFD(rows, yCol, xCols, unitCol, timeCol) {
   if (diffRows.length < xCols.length + 2) return null;
   const fdY = `__fd_${yCol}`;
   const fdX = xCols.map(c => `__fd_${c}`);
-  const res = runOLS(diffRows, fdY, fdX);
+  const res = runOLS(diffRows, fdY, fdX, seOpts);
   if (!res) return null;
 
   return {
@@ -175,7 +182,7 @@ export function runFD(rows, yCol, xCols, unitCol, timeCol) {
 }
 
 // ─── DiD 2×2 ─────────────────────────────────────────────────────────────────
-export function run2x2DiD(rows, yCol, postCol, treatCol, controls = []) {
+export function run2x2DiD(rows, yCol, postCol, treatCol, controls = [], seOpts = {}) {
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     (r[postCol]  === 0 || r[postCol]  === 1) &&
@@ -185,7 +192,7 @@ export function run2x2DiD(rows, yCol, postCol, treatCol, controls = []) {
 
   const aug   = valid.map(r => ({ ...r, __did_inter: r[postCol] * r[treatCol] }));
   const xCols = [postCol, treatCol, "__did_inter", ...controls];
-  const res   = runOLS(aug, yCol, xCols);
+  const res   = runOLS(aug, yCol, xCols, seOpts);
   if (!res) return null;
 
   const varNames = ["(Intercept)", "Post", "Treated", "Post × Treated (ATT)", ...controls];
@@ -211,7 +218,7 @@ export function run2x2DiD(rows, yCol, postCol, treatCol, controls = []) {
 }
 
 // ─── TWFE DiD (Two-Way Fixed Effects) ────────────────────────────────────────
-export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = []) {
+export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = [], seOpts = {}) {
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     r[unitCol] != null && r[timeCol] != null
@@ -245,7 +252,10 @@ export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = []
   });
 
   const demeaned = valid.map(r => {
-    const d = {};
+    const d = { [unitCol]: r[unitCol], [timeCol]: r[timeCol] };
+    if (seOpts?.clusterVar)  d[seOpts.clusterVar]  = r[seOpts.clusterVar];
+    if (seOpts?.clusterVar2) d[seOpts.clusterVar2] = r[seOpts.clusterVar2];
+    if (seOpts?.timeVar)     d[seOpts.timeVar]     = r[seOpts.timeVar];
     varCols.forEach(c => {
       d[c] = (r[c] ?? 0)
         - (unitMeans[r[unitCol]][c] ?? 0)
@@ -265,9 +275,14 @@ export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = []
   const Xmat  = demeaned.map(r => [1, r[treatCol], ...controls.map(c => r[c])]);
   const Xt    = transpose(Xmat);
   const XtXinv = matInv(matMul(Xt, Xmat));
-  const corrSE = XtXinv
+  const classicalSE = XtXinv
     ? XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2_fe)))
     : res.se;
+  const twfeK    = 1 + controls.length + 1; // intercept + treatCol + controls
+  const robustSe = XtXinv
+    ? computeRobustSE(seOpts, XtXinv, Xmat, res.resid, valid.length, twfeK, demeaned)
+    : null;
+  const corrSE = robustSe ?? classicalSE;
   const corrT  = res.beta.map((b, i) => b / corrSE[i]);
   const corrP  = corrT.map(t => pValue(t, df_fe));
 
