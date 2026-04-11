@@ -424,3 +424,100 @@ placebos[]        — jackknife gap series per donor unit
 | `src/math/index.js` | Re-export all 5 new functions + `SyntheticControlEngine` |
 | `src/components/modeling/ModelConfiguration.jsx` | Fuzzy RDD treatment selector, Event Study time selectors, Synthetic Control config |
 | `src/components/modeling/ModelPlots.jsx` | Compliance plot, donor weights bar, gap plot, placebo overlay, Poisson diagnostics, LSDV heatmap |
+
+---
+
+## Phase 6: Robust Standard Errors (MOST URGENT)
+
+Add a `src/core/inference/robustSE.js` pure-JS module exporting:
+
+- `hcSE(X, e, n, k, variant)` — HC0/HC1/HC2/HC3 sandwich estimator. HC1 is the default (matches R `vcovHC`). Formula: `V = (X'X)^{-1} B (X'X)^{-1}` where `B = Σ h_i² x_i x_i'` and h_i is the leverage-adjusted residual per variant.
+- `clusteredSE(X, e, clusters, n, k)` — one-way clustered SE. Groups residuals by cluster variable, computes `B = Σ_g X_g' e_g e_g' X_g`, applies small-sample correction `G/(G-1) * (n-1)/(n-k)`.
+- `twowayClusteredSE(X, e, clusters1, clusters2, n, k)` — Cameron-Gelbach-Miller two-way clustering (entity + time). `V = V_1 + V_2 - V_12`.
+- `neweyWestSE(X, e, t_index, maxLag, n, k)` — HAC Newey-West with Bartlett kernel. For panel/time-series with autocorrelation.
+
+Wire into ALL engines: LinearEngine, PanelEngine, CausalEngine, NonLinearEngine, GMMEngine. Each engine receives an optional `seType` argument: `"classical" | "HC1" | "HC2" | "HC3" | "clustered" | "twoway" | "HAC"` plus `clusterVar` and `timeVar`. Default remains classical for backward compatibility.
+
+UI changes:
+- Add SE type selector to `ModelConfiguration.jsx` — radio group: Classical / HC1 (Robust) / HC3 / Clustered / Two-Way / HAC (Newey-West)
+- Cluster variable selector appears conditionally when Clustered or Two-Way selected
+- Max lag input appears for HAC
+- Display chosen SE type in CoeffTable header and in replication scripts
+
+Validation: compare HC1 and clustered SE against R `sandwich::vcovHC` and `lmtest::coeftest` to 4 decimal places.
+
+### Phase 6 New Files Summary (1)
+
+| File | Purpose |
+|------|---------|
+| `src/core/inference/robustSE.js` | HC0-HC3 sandwich, one-way clustered, two-way (CGM), Newey-West HAC |
+
+### Phase 6 Modified Files Summary (6)
+
+| File | Changes |
+|------|---------|
+| `src/math/LinearEngine.js` | Accept `seType`, `clusterVar`, `timeVar`; delegate to `robustSE.js` |
+| `src/math/PanelEngine.js` | Same SE wiring |
+| `src/math/CausalEngine.js` | Same SE wiring |
+| `src/math/NonLinearEngine.js` | Same SE wiring |
+| `src/math/GMMEngine.js` | Same SE wiring |
+| `src/components/modeling/ModelConfiguration.jsx` | SE type radio group, cluster var selector, max lag input |
+
+---
+
+## Phase 7: New File Format Support
+
+### .rds (R Data Files)
+Add `src/services/data/parsers/rds.js`. Use the `r-data.js` npm package (or implement subset parser for common RDS types: data.frame, tibble, named list). Falls back gracefully if unsupported RDS type detected. Wire into DataStudio file upload alongside existing CSV/Excel parsers.
+
+### .shp (Shapefiles)
+Add `src/services/data/parsers/shapefile.js`. Use `shapefile` npm package (pure JS). Reads the attribute table (DBF component) as the data frame — geometry columns stored as WKT strings for potential future map viz. Wire into DataStudio file upload. Show a note in the UI: "Geometry columns detected — spatial join and choropleth map coming soon."
+
+Both parsers must return `{ headers: string[], rows: object[] }` — same shape as CSV/Excel parsers so the pipeline is format-agnostic.
+
+### Phase 7 New Files Summary (2)
+
+| File | Purpose |
+|------|---------|
+| `src/services/data/parsers/rds.js` | R data file parser (data.frame, tibble, named list) |
+| `src/services/data/parsers/shapefile.js` | Shapefile attribute table parser, geometry as WKT |
+
+### Phase 7 Modified Files Summary (1)
+
+| File | Changes |
+|------|---------|
+| `src/DataStudio.jsx` | Register rds.js and shapefile.js in file upload handler; show geometry note |
+
+---
+
+## Phase 8: Modeling UI Overhaul
+
+Three independent improvements to `src/components/ModelingTab.jsx` and `src/components/modeling/`:
+
+### 8.1 — "Choose Model" selector
+Replace the current `EstimatorSidebar.jsx` vertical list with a compact primary button "Choose Model ▾" that opens a grouped dropdown/popover panel. Groups: Linear (OLS, WLS), Panel (FE, FD, TWFE, LSDV), Causal (2SLS, DiD, RDD, Fuzzy RDD, Event Study), Count (Poisson FE), Binary (Logit, Probit), Advanced (GMM, LIML, Synthetic Control). Selected model shown as a badge next to the button. Saves vertical space for results.
+
+### 8.2 — SE & Options Visual Panel
+Add `src/components/modeling/InferenceOptions.jsx`. A compact collapsible panel below the variable selectors showing:
+- SE type: radio chips (Classical · Robust HC1 · HC3 · Clustered · Two-Way · HAC)
+- Cluster variable: dropdown (appears when Clustered or Two-Way selected)
+- FE type: for panel models — entity only / time only / two-way
+- Max lag: number input (appears for HAC)
+- All options feed into the `estimate()` call in ModelingTab
+
+### 8.3 — Inline Code Editor
+Add `src/components/modeling/CodeEditor.jsx`. A collapsible panel with three tabs: R / Python / Stata. Uses a `<textarea>` with monospace styling (no external editor dependency). Pre-populates with the replication script for the active model. User can edit and copy. Diff-highlighting optional (post-MVP). Wire into the existing `generateRScript` / `generatePythonScript` / `generateStataScript` exports — edits are local state only, not fed back into the engine.
+
+### Phase 8 New Files Summary (2)
+
+| File | Purpose |
+|------|---------|
+| `src/components/modeling/InferenceOptions.jsx` | Collapsible SE type / cluster / FE type / HAC lag options panel |
+| `src/components/modeling/CodeEditor.jsx` | Inline R/Python/Stata replication script viewer with textarea editing |
+
+### Phase 8 Modified Files Summary (2)
+
+| File | Changes |
+|------|---------|
+| `src/components/modeling/EstimatorSidebar.jsx` | Replace vertical list with grouped "Choose Model" dropdown/popover |
+| `src/components/ModelingTab.jsx` | Wire InferenceOptions props into estimate(); render CodeEditor panel |
