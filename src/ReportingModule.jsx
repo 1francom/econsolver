@@ -35,33 +35,15 @@ function safeNum(val, dp = 4) {
 }
 
 // ─── RESULT NORMALISER ────────────────────────────────────────────────────────
-// Different estimators return slightly different shapes. This gives us one
-// consistent object the rest of the module can rely on.
 function normaliseResult(raw) {
   if (!raw) return null;
-
-  // Engine returned an error object — surface it cleanly
   if (raw.error) return { __error: raw.error };
-
-  // Bridge both old ad-hoc shapes and new canonical EstimationResult shapes.
-  // Old shape: raw.second holds second-stage fields (2SLS), raw.modelLabel set externally.
-  // New canonical shape: fields are at root, label instead of modelLabel, spec.yVar instead of yVar.
-  const core = raw.second ?? raw;
-  const clean = arr => (arr ?? []).map(v => (v == null ? NaN : v));
-
   return {
-    ...core,
-    varNames: core.varNames ?? [],
-    beta:   clean(core.beta),
-    se:     clean(core.se),
-    // canonical uses testStats; old engines used tStats
-    tStats: clean(core.tStats ?? core.testStats ?? []),
-    pVals:  clean(core.pVals ?? []),
-    // canonical uses label; callers may also inject modelLabel directly
-    modelLabel: core.modelLabel ?? core.label ?? "OLS",
-    yVar:   core.yVar   ?? core.spec?.yVar   ?? "y",
-    xVars:  core.xVars  ?? core.spec?.xVars  ?? [],
-    firstStages: raw.firstStages ?? null,
+    ...raw,
+    modelLabel: raw.label      ?? raw.modelLabel ?? "OLS",
+    yVar:       raw.spec?.yVar ?? raw.yVar        ?? "y",
+    xVars:      raw.spec?.xVars ?? raw.xVars      ?? [],
+    tStats:     raw.testStats  ?? raw.tStats       ?? [],
   };
 }
 
