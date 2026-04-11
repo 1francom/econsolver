@@ -147,6 +147,24 @@ async function parseFile(file) {
     const buf = await file.arrayBuffer();
     return parseStata(buf);
   }
+  if (ext === "rds") {
+    const { parseRDS } = await import("./services/data/parsers/rds.js");
+    const buf = await file.arrayBuffer();
+    return parseRDS(buf);
+  }
+  if (ext === "dbf") {
+    const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
+    const buf = await file.arrayBuffer();
+    return parseShapefile(buf, null);
+  }
+  if (ext === "shp") {
+    // User uploaded the .shp directly — we can only extract geometry without a .dbf.
+    // Advise them to upload the .dbf instead for the attribute table.
+    throw new Error(
+      "Upload the .dbf file (not .shp) to load shapefile attributes. " +
+      "The .dbf contains the data table. The .shp geometry will be omitted."
+    );
+  }
   // Unknown extension: try CSV as fallback
   try {
     const text = await file.text();
@@ -290,7 +308,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
         />
@@ -339,7 +357,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
 
         {/* Format hint */}
         <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 6, lineHeight: 1.6 }}>
-          CSV · TSV · XLSX · drag & drop supported
+          CSV · TSV · XLSX · DTA · RDS · DBF · drag & drop supported
           <br/>
           Loaded datasets available for JOIN / APPEND in the Merge tab.
         </div>

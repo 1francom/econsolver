@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git:*)",
       "Bash(Rscript validation/GMM_check.R)",
-      "Bash(/c/Program Files/R/R-4.4.1/bin/Rscript.exe:*)"
+      "Bash(/c/Program Files/R/R-4.4.1/bin/Rscript.exe:*)",
+      "Bash(npx vite:*)"
     ]
   }
 }

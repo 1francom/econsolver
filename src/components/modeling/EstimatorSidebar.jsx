@@ -1,5 +1,5 @@
 // ─── ECON STUDIO · src/components/modeling/EstimatorSidebar.jsx ───────────────
-// Vertical sidebar for choosing the empirical strategy.
+// Grouped "Choose Model" dropdown — Phase 8.1.
 // Pure presentation: receives model state, emits onSelect.
 // Props:
 //   model         {string}   – currently selected model ID
@@ -10,24 +10,39 @@
 //   rows          {number}   – observation count (for status line)
 //   numericCols   {string[]} – column count (for status line)
 
-import { C, mono, Section, ModelBtn, InfoBox } from "./shared.jsx";
+import { useState, useEffect, useRef } from "react";
+import { C, mono, Section, InfoBox } from "./shared.jsx";
 
 // ─── MODEL REGISTRY ───────────────────────────────────────────────────────────
 // Single source of truth for all estimator metadata.
-// Order here determines sidebar order.
+// Groups determine dropdown sections.
 export const MODELS = [
-  { id: "OLS",  label: "OLS",             color: C.green,  desc: "Ordinary Least Squares" },
-  { id: "FE",   label: "Fixed Effects",   color: C.blue,   desc: "Within estimator — panel required" },
-  { id: "FD",   label: "First Differences", color: C.blue, desc: "FD estimator — panel required" },
-  { id: "2SLS", label: "2SLS / IV",       color: C.gold,   desc: "Two-Stage Least Squares" },
-  { id: "DiD",  label: "DiD 2×2",         color: C.teal,   desc: "Classic Difference-in-Differences" },
-  { id: "TWFE", label: "TWFE DiD",        color: C.teal,   desc: "Two-Way Fixed Effects DiD — panel required" },
-  { id: "RDD",  label: "Sharp RDD",       color: C.orange, desc: "Regression Discontinuity Design" },
-  { id: "Logit",  label: "Logit",  color: C.violet, desc: "Binary Logistic Regression (MLE)" },
-  { id: "Probit", label: "Probit", color: C.violet, desc: "Probit — Normal Link (MLE)" },
-  { id: "GMM",  label: "Two-Step GMM", color: C.gold, desc: "Efficient GMM — HC-robust Ω̂ + J-test" },
-  { id: "LIML", label: "LIML",        color: C.gold, desc: "Limited Info. Max. Likelihood / k-class" },
+  // Linear
+  { id: "OLS",             label: "OLS",                group: "Linear",            desc: "Ordinary Least Squares",                       color: C.green  },
+  { id: "WLS",             label: "WLS",                group: "Linear",            desc: "Weighted Least Squares",                        color: C.green  },
+  // Panel
+  { id: "FE",              label: "FE / FD",            group: "Panel",             desc: "Within estimator — panel required",             color: C.blue   },
+  { id: "LSDV",            label: "LSDV",               group: "Panel",             desc: "Least Squares Dummy Variables — panel required", color: C.blue   },
+  { id: "TWFE",            label: "TWFE DiD",           group: "Panel",             desc: "Two-Way Fixed Effects DiD — panel required",    color: C.teal   },
+  { id: "EventStudy",      label: "Event Study",        group: "Panel",             desc: "Dynamic DiD / event study — panel required",   color: C.teal   },
+  // Causal
+  { id: "2SLS",            label: "2SLS / IV",          group: "Causal",            desc: "Two-Stage Least Squares",                       color: C.gold   },
+  { id: "RDD",             label: "Sharp RDD",          group: "Causal",            desc: "Regression Discontinuity Design",               color: C.orange },
+  { id: "FuzzyRDD",        label: "Fuzzy RDD",          group: "Causal",            desc: "Fuzzy Regression Discontinuity (planned)",      color: C.orange },
+  { id: "DiD",             label: "DiD 2×2",            group: "Causal",            desc: "Classic Difference-in-Differences",             color: C.teal   },
+  // Limited Dependent
+  { id: "Logit",           label: "Logit",              group: "Limited Dependent", desc: "Binary Logistic Regression (MLE)",              color: C.violet },
+  { id: "Probit",          label: "Probit",             group: "Limited Dependent", desc: "Probit — Normal Link (MLE)",                    color: C.violet },
+  { id: "PoissonFE",       label: "Poisson FE",         group: "Limited Dependent", desc: "Poisson with Fixed Effects (planned)",          color: C.violet },
+  // IV / GMM
+  { id: "GMM",             label: "Two-Step GMM",       group: "IV/GMM",            desc: "Efficient GMM — HC-robust Ω̂ + J-test",         color: C.gold   },
+  { id: "LIML",            label: "LIML",               group: "IV/GMM",            desc: "Limited Info. Max. Likelihood / k-class",       color: C.gold   },
+  // Synthetic
+  { id: "SyntheticControl",label: "Synthetic Control",  group: "Synthetic",         desc: "Synthetic control method (planned)",            color: C.blue   },
 ];
+
+// ordered group list (controls render order)
+const GROUP_ORDER = ["Linear", "Panel", "Causal", "Limited Dependent", "IV/GMM", "Synthetic"];
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function EstimatorSidebar({
@@ -37,22 +52,147 @@ export default function EstimatorSidebar({
   modelHint,
   panel,
 }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  // Click-outside to close
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const selected = MODELS.find(m => m.id === model) ?? MODELS[0];
+
+  // Group models by group key
+  const grouped = GROUP_ORDER.map(g => ({
+    group: g,
+    items: MODELS.filter(m => m.group === g),
+  }));
+
   return (
     <>
-      {/* ── Model picker ── */}
+      {/* ── Choose Model dropdown ── */}
       <Section title="Strategy · Empirical Model" color={C.gold}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {MODELS.map(m => (
-            <ModelBtn
-              key={m.id}
-              model={`${m.label} — ${m.desc}`}
-              selected={model === m.id}
-              disabled={!modelAvail[m.id]}
-              onClick={() => onSelect(m.id)}
-              color={m.color}
-              hint={modelHint[m.id] || ""}
-            />
-          ))}
+        <div ref={wrapRef} style={{ position: "relative" }}>
+
+          {/* ── Trigger button ── */}
+          <button
+            onClick={() => setOpen(v => !v)}
+            style={{
+              width: "100%",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "0.65rem 0.9rem",
+              background: C.surface2,
+              border: `1px solid ${C.gold}`,
+              borderRadius: 4,
+              color: selected.color,
+              cursor: "pointer",
+              fontFamily: mono, fontSize: 13,
+              letterSpacing: "0.06em",
+              transition: "border-color 0.13s",
+            }}
+          >
+            <span>
+              <span style={{ color: C.gold, marginRight: 7 }}>●</span>
+              {selected.label}
+            </span>
+            <span style={{ fontSize: 10, color: C.textMuted }}>
+              {open ? "▲" : "▼"}
+            </span>
+          </button>
+
+          {/* ── Dropdown panel ── */}
+          {open && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                left: 0, right: 0,
+                zIndex: 50,
+                background: C.surface,
+                border: `1px solid ${C.border2}`,
+                borderRadius: 4,
+                maxHeight: 420,
+                overflowY: "auto",
+                boxShadow: "0 8px 24px #00000080",
+              }}
+            >
+              {grouped.map(({ group, items }) => (
+                <div key={group}>
+                  {/* Group header */}
+                  <div style={{
+                    padding: "5px 10px 3px",
+                    fontSize: 9, letterSpacing: "0.22em",
+                    textTransform: "uppercase",
+                    color: C.textMuted,
+                    fontFamily: mono,
+                    borderBottom: `1px solid ${C.border}`,
+                    background: C.surface2,
+                    position: "sticky", top: 0,
+                  }}>
+                    {group}
+                  </div>
+
+                  {/* Estimator rows */}
+                  {items.map(m => {
+                    const avail  = modelAvail[m.id] !== false;
+                    const isSelected = model === m.id;
+                    const hint   = modelHint?.[m.id] ?? "";
+                    return (
+                      <button
+                        key={m.id}
+                        disabled={!avail}
+                        title={!avail ? hint : m.desc}
+                        onClick={() => { onSelect(m.id); setOpen(false); }}
+                        style={{
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "baseline",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          padding: "7px 12px",
+                          background: isSelected ? `${m.color}14` : "transparent",
+                          border: "none",
+                          borderLeft: `3px solid ${isSelected ? m.color : "transparent"}`,
+                          borderBottom: `1px solid ${C.border}`,
+                          color: !avail ? C.textMuted : isSelected ? m.color : C.textDim,
+                          cursor: !avail ? "not-allowed" : "pointer",
+                          fontFamily: mono, fontSize: 12,
+                          textAlign: "left",
+                          opacity: !avail ? 0.45 : 1,
+                          transition: "background 0.1s",
+                        }}
+                        onMouseEnter={e => { if (avail && !isSelected) e.currentTarget.style.background = `${C.border}50`; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = isSelected ? `${m.color}14` : "transparent"; }}
+                      >
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {!avail && <span style={{ fontSize: 9 }}>🔒</span>}
+                          {isSelected && <span style={{ color: m.color, fontSize: 10 }}>●</span>}
+                          {m.label}
+                        </span>
+                        <span style={{
+                          fontSize: 9, color: C.textMuted,
+                          letterSpacing: "0.04em",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          maxWidth: 140,
+                        }}>
+                          {m.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Section>
 
@@ -64,7 +204,7 @@ export default function EstimatorSidebar({
       )}
       {panel && panel.blockFE && (
         <InfoBox color={C.red}>
-          ⚠ Panel has duplicate observations — Fixed Effects blocked. Fix in Wrangling.
+          Panel has duplicate observations — Fixed Effects blocked. Fix in Wrangling.
         </InfoBox>
       )}
     </>
