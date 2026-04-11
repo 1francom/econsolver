@@ -127,7 +127,12 @@ src/
 | Sharp RDD | CausalEngine.js | ✓ IK bandwidth, triangular/epanechnikov/uniform kernel |
 | McCrary density test | CausalEngine.js | ✓ |
 | Logit / Probit | NonLinearEngine.js | ✓ IRLS/Newton-Raphson MLE — McFadden R², AIC/BIC, MEM, odds ratios |
-| GMM / LIML | GMMEngine.js | ⚠ not yet validated |
+| GMM / LIML | GMMEngine.js | ✓ validated vs R (6dp coef, 4dp SE) — SE bug fixed: was /n, now ×n |
+| Fuzzy RDD | CausalEngine.js | planned |
+| Event Study | PanelEngine.js | planned |
+| Panel LSDV | PanelEngine.js | planned |
+| Poisson FE | NonLinearEngine.js | planned |
+| Synthetic Control | SyntheticControlEngine.js | planned |
 
 ## Pipeline step types (runner.js) — 23 total
 Cleaning: `rename, drop, filter, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr`

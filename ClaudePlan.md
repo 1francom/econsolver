@@ -235,3 +235,192 @@ Thread `metadataReport` to all consumers. Display coaching signals in results pa
 3. **MODELS metadata duplicated in EstimationResult.js** — avoids circular dependency with EstimatorSidebar.jsx. Just `{ id, label, color }` per estimator (~15 lines).
 4. **Metadata computed at ModelingTab level** — uses final cleaned rows (post-pipeline), not intermediate wrangling state.
 5. **Non-destructive multi-model exports** — new `generateMultiModelScript` functions alongside existing single-model ones.
+
+---
+
+## Phase 5: New Estimators
+
+Five new estimators in implementation order. Each section specifies the target file, function signature, algorithm, output contract, and UI touch-points.
+
+---
+
+### 5.1 Fuzzy RDD
+
+**Target file:** `src/math/CausalEngine.js` (extends existing file)
+
+**Signature:**
+```js
+runFuzzyRDD(rows, yCol, treatCol, runningCol, cutoff, { bandwidth, kernel, controls })
+```
+
+**Algorithm:**
+Two-stage least squares where the sharp cutoff indicator `Z = 1(X >= c)` is the instrument and `D` (actual treatment receipt) is the endogenous variable. LATE is estimated as the ratio of the Y-discontinuity to the P(D=1)-discontinuity at the cutoff. Uses the existing `runWLS` kernel-weighting infrastructure for both stages.
+
+- Stage 1: regress `D` on `Z`, controls, within bandwidth — produces `firstStageDisc` and `complianceRate`
+- Stage 2: regress `Y` on `D_hat`, controls, within bandwidth — produces the fuzzy LATE
+- SE via delta method propagating both stage variances
+- Reuses `ikBandwidth`, kernel weight helpers already in `CausalEngine.js`
+
+**New output fields:**
+```
+complianceRate     — P(D=1|X>=c) - P(D=1|X<c)
+firstStageDisc     — first-stage discontinuity coefficient
+LATE               — local average treatment effect
+lateSE             — SE of LATE
+```
+
+**UI changes:**
+- `ModelConfiguration.jsx` — add treatment-receipt variable selector (separate from running variable)
+- `ModelPlots.jsx` — add compliance plot (P(D=1) vs running variable with cutoff line) and fuzzy scatter (Y vs X, colored by treatment receipt)
+
+---
+
+### 5.2 Event Study
+
+**Target file:** `src/math/PanelEngine.js` (extends existing file)
+
+**Signature:**
+```js
+runEventStudy(rows, yCol, xCols, unitCol, timeCol, treatVar, treatTimeCol, { kPre, kPost })
+```
+
+**Algorithm:**
+TWFE regression with relative-time dummies `D_it^k = 1(t - treat_time_i = k)` for `k` in `[-kPre, kPost]`, omitting `k = -1` as the reference period. Coefficient vector maps one-to-one to event-time periods. Pre-trend F-test: joint significance of all lead coefficients (`k < -1`).
+
+- Build relative-time column per unit from `treatTimeCol`
+- Construct dummy matrix, drop `k = -1`
+- Run within (FE) regression via existing `runFE` demeaning
+- Extract `eventCoeffs` with 95% CI per period
+- Compute `preTrendF` and `preTrendP` via Wald test on lead sub-vector
+
+**New output fields:**
+```
+eventCoeffs[]   — [{ k, coeff, se, ciLow, ciHigh }]
+preTrendF       — F-statistic on pre-period leads
+preTrendP       — p-value for pre-trend test
+```
+
+**UI changes:**
+- `EstimatorSidebar.jsx` — expose Event Study as a named estimator option
+- `ModelConfiguration.jsx` — add `treatTimeCol` selector and `kPre`/`kPost` numeric inputs
+- `ModelPlots.jsx` — `EventStudyPlot` component already exists; wire it to the formal `runEventStudy` output (currently only a stub/plot shell)
+
+---
+
+### 5.3 Panel LSDV
+
+**Target file:** `src/math/PanelEngine.js` (extends existing file)
+
+**Signature:**
+```js
+runLSDV(rows, yCol, xCols, unitCol, timeCol, { timeFE })
+```
+
+**Algorithm:**
+OLS on the augmented design matrix that includes entity dummy columns (and optionally time dummy columns). Mathematically equivalent to the within estimator but explicitly recovers entity fixed effects `alpha_i` and, when `timeFE: true`, time fixed effects `lambda_t`. Uses the existing OLS path in `LinearEngine.js` after constructing the dummy matrix.
+
+- Construct entity dummy matrix (drop one for identification)
+- Optionally append time dummy matrix
+- Call `runOLS` on the full design matrix
+- Partition coefficient vector: `beta` (structural), `alphas` (entity dummies), `lambdas` (time dummies)
+
+**New output fields:**
+```
+alphas    — { [unit]: coeff }   entity fixed effects
+lambdas   — { [time]: coeff }   time fixed effects (null if timeFE: false)
+```
+
+**UI changes:**
+- `ModelPlots.jsx` — heatmap of entity-by-time fixed effects (entity on y-axis, time on x-axis, alpha_i + lambda_t fill color)
+
+---
+
+### 5.4 Poisson FE
+
+**Target file:** `src/math/NonLinearEngine.js` (extends existing file)
+
+**Signature:**
+```js
+runPoissonFE(rows, yCol, xCols, unitCol, timeCol?)
+```
+
+**Algorithm:**
+Poisson pseudo-maximum likelihood (PPML) with entity fixed effects via iterative demeaning (Guimaraes-Portugal 2010). Avoids inverting the full entity-dummy design matrix, which is infeasible for large `N`.
+
+- Initialize `mu_it = Y_it` or uniform starting values
+- IRLS outer loop (same skeleton as `runLogit`/`runProbit`): working weights `W = diag(mu)`, working response `z = eta + (Y - mu)/mu`
+- Inner demeaning step per IRLS iteration: subtract entity means from `z` and `X` (within transform on working variables)
+- Convergence: `||beta_new - beta_old||_inf < 1e-8` or 200 iterations
+- Overdispersion check: Pearson chi-squared / df — flag if > 1.5
+
+**New output fields:**
+```
+IRR[]          — exp(beta) per covariate, incidence rate ratios
+pseudoR2       — 1 - logLik_full / logLik_null
+overdispersion — Pearson chi-sq / df
+entityAlphas   — { [unit]: alpha_i } (recovered post-convergence)
+```
+
+**UI changes:**
+- `EstimatorSidebar.jsx` — add Poisson FE as estimator option (family: Panel)
+- `ModelPlots.jsx` — predicted vs actual count scatter, Pearson residual histogram
+
+---
+
+### 5.5 Synthetic Control
+
+**Target file:** `src/math/SyntheticControlEngine.js` (new file)
+
+**Signature:**
+```js
+runSyntheticControl(rows, yCol, unitCol, timeCol, treatUnit, preperiods, predictors[])
+```
+
+**Algorithm:**
+Convex optimization: find donor weights `W` (W >= 0, sum(W) = 1) minimizing `||X1 - X0'W||^2_V` where `X1` is the treated unit's pre-period predictor vector, `X0` is the donor matrix, and `V` is a diagonal predictor-importance matrix (initialized as identity; optionally learned by outer loop minimizing pre-period MSPE).
+
+Implemented via Frank-Wolfe projected gradient descent in pure JS — no external solver dependency:
+1. Initialize `W = 1/n_donors` (uniform)
+2. Gradient step: `g = -2 * X0 * V * (X1 - X0'W)`
+3. Frank-Wolfe update: move weight toward donor `argmin g'e_j`
+4. Project onto simplex: clip negatives, renormalize
+5. Repeat until `||delta W||_inf < 1e-9` or 2000 iterations
+
+Synthetic outcome series: `Y_synthetic[t] = W' * Y_donors[t]` for all `t`. Gap series: `gap[t] = Y_treat[t] - Y_synthetic[t]`. In-space placebo: jackknife leave-one-out — repeat optimization treating each donor as the "treated" unit, collect gap distributions for inference.
+
+**New output fields:**
+```
+weights[]         — [{ unit, weight }] sorted descending, donors with w > 0.01
+syntheticSeries[] — [{ time, synthetic }]
+gapSeries[]       — [{ time, gap }]
+preMSPE           — mean squared prediction error in pre-period
+postMSPE          — mean squared prediction error in post-period (placebo benchmark)
+placebos[]        — jackknife gap series per donor unit
+```
+
+**UI changes:**
+- `EstimatorSidebar.jsx` — add Synthetic Control as estimator (family: Causal)
+- `ModelConfiguration.jsx` — treated unit selector (dropdown of unique unit values), pre-period boundary input, predictor variable multi-select
+- `ModelPlots.jsx` — three new plot components:
+  - `SyntheticGapPlot` — gap series with zero line and pre/post shading
+  - `SyntheticDonorWeights` — horizontal bar chart of donor weights
+  - `SyntheticPlaceboPlot` — donor placebo gaps overlaid as grey lines, treated gap as colored foreground
+
+---
+
+## Phase 5 New Files Summary (1)
+
+| File | Purpose |
+|------|---------|
+| `src/math/SyntheticControlEngine.js` | Frank-Wolfe convex optimization for synthetic control weights and gap series |
+
+## Phase 5 Modified Files Summary (6)
+
+| File | Changes |
+|------|---------|
+| `src/math/CausalEngine.js` | Add `runFuzzyRDD` |
+| `src/math/PanelEngine.js` | Add `runEventStudy`, `runLSDV` |
+| `src/math/NonLinearEngine.js` | Add `runPoissonFE` |
+| `src/math/index.js` | Re-export all 5 new functions + `SyntheticControlEngine` |
+| `src/components/modeling/ModelConfiguration.jsx` | Fuzzy RDD treatment selector, Event Study time selectors, Synthetic Control config |
+| `src/components/modeling/ModelPlots.jsx` | Compliance plot, donor weights bar, gap plot, placebo overlay, Poisson diagnostics, LSDV heatmap |
