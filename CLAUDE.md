@@ -19,7 +19,14 @@ src/
 │   ├── index.js              ← single barrel export for all engines
 │   ├── LinearEngine.js       ← OLS, WLS, matrix algebra, diagnostics, export helpers
 │   ├── PanelEngine.js        ← FE, FD, TWFE, 2x2 DiD
-│   └── CausalEngine.js       ← 2SLS/IV, Sharp RDD, McCrary density test, IK bandwidth
+│   ├── CausalEngine.js       ← 2SLS/IV, Sharp RDD, McCrary density test, IK bandwidth
+│   ├── NonLinearEngine.js    ← Logit/Probit, IRLS/Newton-Raphson MLE, McFadden R², MEM
+│   ├── GMMEngine.js          ← GMM, LIML
+│   ├── timeSeries.js         ← time series utilities
+│   ├── EstimationResult.js   ← shared result type for all engines
+│   └── __validation__/
+│       ├── README.md
+│       └── engineValidation.js  ← systematic R comparison harness
 │
 ├── core/
 │   ├── diagnostics/
@@ -28,7 +35,9 @@ src/
 │   │   ├── normality.js            ← Jarque-Bera, Shapiro-Wilk
 │   │   └── multicollinearity.js    ← VIF, condition number
 │   └── validation/
-│       └── dataQuality.js          ← missing patterns, outlier flags, type consistency
+│       ├── dataQuality.js          ← missing patterns, outlier flags, type consistency
+│       ├── coachingTriggers.js     ← triggers for ResearchCoach suggestions
+│       └── metadataExtractor.js    ← extracts variable metadata for AI context
 │
 ├── pipeline/
 │   ├── runner.js       ← applyStep + runPipeline — 23 step types
@@ -37,24 +46,34 @@ src/
 │   └── auditor.js      ← auditPipeline → AuditTrail + markdown
 │
 ├── services/
-│   ├── ai/
+│   ├── AI/
 │   │   ├── AIService.js          ← callClaude (exported), inferVariableUnits, interpretRegression
-│   │   └── prompts/
+│   │   ├── LocalAI.js            ← local/offline AI fallback
+│   │   └── Prompts/
 │   │       └── index.js          ← SHARED_CONTEXT, INFER_UNITS_PROMPT, INTERPRET_REGRESSION_PROMPT,
 │   │                                WRANGLING_TRANSFORM_PROMPT, WRANGLING_QUERY_PROMPT,
 │   │                                CLEANING_SUGGESTIONS_PROMPT
-│   ├── geo/
-│   │   └── photon.js             ← Geocoding Photon/Komoot
+│   ├── Privacy/
+│   │   ├── index.js              ← privacy module barrel export
+│   │   ├── anonymizer.js         ← data anonymization utilities
+│   │   ├── piiDetector.js        ← PII detection
+│   │   ├── privacyFilter.js      ← filter sensitive data before AI calls
+│   │   └── PrivacyConfigPanel.jsx ← privacy settings UI
 │   ├── data/
-│   │   └── parsers/
-│   │       ├── csv.js
-│   │       └── excel.js          ← SheetJS (CDN: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs)
+│   │   ├── parsers/
+│   │   │   ├── stata.js          ← .dta parser via readstat-wasm
+│   │   │   └── excel.js          ← SheetJS (CDN: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs)
+│   │   └── fetchers/
+│   │       ├── worldBank.js      ← World Bank API fetcher
+│   │       └── oecd.js           ← OECD API fetcher
 │   ├── export/
-│   │   ├── latex.js              ← Stargazer-style tables
-│   │   ├── csv.js
-│   │   └── rScript.js            ← pipeline + model → R script (fixest/modelsummary)
-│   └── persistence/
-│       └── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage
+│   │   ├── rScript.js            ← pipeline + model → R script (fixest/modelsummary)
+│   │   ├── stataScript.js        ← pipeline + model → Stata do-file
+│   │   ├── pythonScript.js       ← pipeline + model → Python script
+│   │   └── replicationBundle.js  ← ZIP bundle (R + Stata + Python scripts + data)
+│   ├── Persistence/
+│   │   └── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage
+│   └── modelBuffer.js            ← model buffer state management
 │
 ├── components/
 │   ├── wrangling/
@@ -68,18 +87,27 @@ src/
 │   │   ├── ReshapeTab.jsx        ← pivot_longer, group_summarize
 │   │   ├── DictionaryTab.jsx     ← AI inference + manual edit
 │   │   ├── MergeTab.jsx          ← LEFT/INNER JOIN + APPEND
-│   │   └── DataQualityReport.jsx
+│   │   ├── DataQualityReport.jsx
+│   │   ├── WorldBankFetcher.jsx  ← World Bank data fetch UI
+│   │   └── OECDFetcher.jsx       ← OECD data fetch UI
 │   │
-│   └── modeling/
-│       ├── shared.jsx            ← VarPanel, Section, Chip, C, mono (modeling-specific)
-│       ├── EstimatorSidebar.jsx
-│       ├── VariableSelector.jsx  ← Y, X, W selectors
-│       ├── ModelConfiguration.jsx ← estimator-specific config (Z instruments, DiD, RDD, WLS weights)
-│       ├── ModelPlots.jsx        ← RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, etc.
-│       └── ResidualPlots.jsx     ← ResidualVsFitted, QQPlot
+│   ├── modeling/
+│   │   ├── shared.jsx            ← VarPanel, Section, Chip, C, mono (modeling-specific)
+│   │   ├── EstimatorSidebar.jsx
+│   │   ├── VariableSelector.jsx  ← Y, X, W selectors
+│   │   ├── ModelConfiguration.jsx ← estimator-specific config (Z instruments, DiD, RDD, WLS weights)
+│   │   ├── ModelPlots.jsx        ← RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, ROC, etc.
+│   │   ├── ResidualPlots.jsx     ← ResidualVsFitted, QQPlot
+│   │   ├── DiagnosticsPanel.jsx  ← heteroskedasticity, autocorrelation, normality tests UI
+│   │   ├── ModelBufferBar.jsx    ← model buffer / compare bar
+│   │   ├── ModelComparison.jsx   ← side-by-side model comparison table
+│   │   └── ResearchCoach.jsx     ← AI-driven research coaching suggestions
+│   │
+│   └── validation/
+│       └── AuditTrail.jsx        ← surfaces auditor.js output, pipeline audit UI
 │
+├── AIContextSidebar.jsx   ← AI context panel (sidebar)
 ├── WranglingModule.jsx    ← root orchestrator, pipeline state, tab router
-├── ModelingTab.jsx        ← modeling orchestrator, estimate(), all model state
 ├── ReportingModule.jsx    ← LaTeX Stargazer, forest plots, AI narrative
 ├── ExplorerModule.jsx     ← dataset explorer
 ├── App.jsx                ← top-level router
@@ -99,6 +127,7 @@ src/
 | Sharp RDD | CausalEngine.js | ✓ IK bandwidth, triangular/epanechnikov/uniform kernel |
 | McCrary density test | CausalEngine.js | ✓ |
 | Logit / Probit | NonLinearEngine.js | ✓ IRLS/Newton-Raphson MLE — McFadden R², AIC/BIC, MEM, odds ratios |
+| GMM / LIML | GMMEngine.js | ⚠ not yet validated |
 
 ## Pipeline step types (runner.js) — 23 total
 Cleaning: `rename, drop, filter, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr`
@@ -119,24 +148,18 @@ Merge: `join, append`
 ## AI service details
 - Model for narratives: `claude-sonnet-4-20250514`
 - Model for unit inference: `claude-haiku-4-5-20251001` (fast, cheap)
-- All prompts live in `services/ai/prompts/index.js`
+- All prompts live in `services/AI/Prompts/index.js`
 - `SHARED_CONTEXT` (~800 tokens) is the cached block — always > 1024 tokens combined with any task prompt
 - `callClaude({ system, user, maxTokens })` strips `SHARED_CONTEXT` from exported prompts before sending (it adds it as the cached block automatically)
 
 ## Pending (ordered by priority)
-1. **Logit/Probit UI** — wire `NonLinearEngine.js` into `ModelingTab.jsx` + `EstimatorSidebar.jsx` + plots (ROC, confusion matrix, predicted probability histogram).
-2. **Replication Package** — R script (started), Stata do-file, ZIP bundle UI.
-3. **AuditTrail UI** — `components/validation/AuditTrail.jsx`, surfaces `auditor.js` output.
-4. **Estimator validation vs R** — systematic benchmark: RDD (rdrobust), Panel FE (fixest), 2SLS (AER), Logit/Probit (base R `glm`).
-5. **DuckDB-WASM** — final compute target for datasets > 50k rows.
+1. **Estimator validation vs R** — systematic benchmark: RDD (rdrobust), Panel FE (fixest), 2SLS (AER), Logit/Probit (base R `glm`), GMM. Harness in `math/__validation__/engineValidation.js`.
+2. **DuckDB-WASM** — final compute target for datasets > 50k rows.
 
 ## Reserved (post-MVP)
-- `core/math/gmm/` — GMM, LIML
-- `core/math/ml/` — DML, Lasso, Ridge, Forest
-- `core/math/bayes/` — MCMC
-- `services/data/stata.js` — .dta parser via readstat-wasm
-- `services/data/fetchers/` — World Bank, OECD APIs
-- `services/ai/agents/` — DataAgent, CausalAgent, WritingAgent
+- `math/ml/` — DML, Lasso, Ridge, Forest
+- `math/bayes/` — MCMC
+- `services/AI/agents/` — DataAgent, CausalAgent, WritingAgent
 - Tauri desktop packaging — defer until feature-complete
 - Cloud sync — defer; IndexedDB solves the immediate problem
 
