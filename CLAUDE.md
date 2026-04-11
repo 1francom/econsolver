@@ -11,6 +11,7 @@ Stack: React + Vite + JavaScript. No external UI libraries. Styling via inline s
 - **Single API egress choke point**: all Anthropic calls go through `AIService.js`. Never add raw `fetch` to the Anthropic API elsewhere.
 - **Prompt caching**: `callClaude()` in `AIService.js` sends `SHARED_CONTEXT` as a cached block (`cache_control: {type:"ephemeral"}`). Header `"anthropic-beta": "prompt-caching-2024-07-31"` must be present on every call.
 - **IndexedDB, not localStorage**: persistence is in `services/persistence/indexedDB.js`. localStorage is deprecated for pipeline/data storage.
+- **SE type is always passed explicitly to engines — never hardcoded inside engine functions**: every engine accepts an optional `seType` argument (`"classical" | "HC1" | "HC2" | "HC3" | "clustered" | "twoway" | "HAC"`). The default is `"classical"` for backward compatibility. Engines must not assume a SE variant internally.
 
 ## File structure (current state)
 ```
@@ -34,6 +35,8 @@ src/
 │   │   ├── autocorrelation.js      ← Durbin-Watson, Breusch-Godfrey
 │   │   ├── normality.js            ← Jarque-Bera, Shapiro-Wilk
 │   │   └── multicollinearity.js    ← VIF, condition number
+│   ├── inference/
+│   │   └── robustSE.js             ← HC0/HC1/HC2/HC3, clustered, two-way, Newey-West HAC
 │   └── validation/
 │       ├── dataQuality.js          ← missing patterns, outlier flags, type consistency
 │       ├── coachingTriggers.js     ← triggers for ResearchCoach suggestions
@@ -62,7 +65,9 @@ src/
 │   ├── data/
 │   │   ├── parsers/
 │   │   │   ├── stata.js          ← .dta parser via readstat-wasm
-│   │   │   └── excel.js          ← SheetJS (CDN: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs)
+│   │   │   ├── excel.js          ← SheetJS (CDN: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs)
+│   │   │   ├── rds.js            ← R data file parser (data.frame, tibble, named list)
+│   │   │   └── shapefile.js      ← Shapefile parser — attribute table as rows, geometry as WKT
 │   │   └── fetchers/
 │   │       ├── worldBank.js      ← World Bank API fetcher
 │   │       └── oecd.js           ← OECD API fetcher
@@ -101,7 +106,9 @@ src/
 │   │   ├── DiagnosticsPanel.jsx  ← heteroskedasticity, autocorrelation, normality tests UI
 │   │   ├── ModelBufferBar.jsx    ← model buffer / compare bar
 │   │   ├── ModelComparison.jsx   ← side-by-side model comparison table
-│   │   └── ResearchCoach.jsx     ← AI-driven research coaching suggestions
+│   │   ├── ResearchCoach.jsx     ← AI-driven research coaching suggestions
+│   │   ├── InferenceOptions.jsx  ← SE type selector, cluster var, FE type, HAC lag (Phase 8.2)
+│   │   └── CodeEditor.jsx        ← inline replication code editor: R / Python / Stata tabs (Phase 8.3)
 │   │
 │   └── validation/
 │       └── AuditTrail.jsx        ← surfaces auditor.js output, pipeline audit UI
@@ -160,6 +167,9 @@ Merge: `join, append`
 ## Pending (ordered by priority)
 1. **Estimator validation vs R** — systematic benchmark: RDD (rdrobust), Panel FE (fixest), 2SLS (AER), Logit/Probit (base R `glm`), GMM. Harness in `math/__validation__/engineValidation.js`.
 2. **DuckDB-WASM** — final compute target for datasets > 50k rows.
+3. **Phase 6 — Robust Standard Errors** — `src/core/inference/robustSE.js` with HC0/HC1/HC2/HC3, clustered, two-way (Cameron-Gelbach-Miller), Newey-West HAC. Wire `seType` arg into all engines. Add SE type radio group + cluster/lag selectors to `ModelConfiguration.jsx`. Validate HC1 and clustered SE against R `sandwich::vcovHC` and `lmtest::coeftest` to 4dp.
+4. **Phase 7 — New File Format Support** — `src/services/data/parsers/rds.js` (.rds via r-data.js) and `src/services/data/parsers/shapefile.js` (.shp via shapefile npm). Both return `{ headers, rows }` shape identical to CSV/Excel parsers.
+5. **Phase 8 — Modeling UI Overhaul** — 8.1: grouped "Choose Model" dropdown replacing EstimatorSidebar vertical list. 8.2: `InferenceOptions.jsx` collapsible SE/FE options panel. 8.3: `CodeEditor.jsx` inline R/Python/Stata replication script viewer with textarea editing.
 
 ## Reserved (post-MVP)
 - `math/ml/` — DML, Lasso, Ridge, Forest
