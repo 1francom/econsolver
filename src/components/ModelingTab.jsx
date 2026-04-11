@@ -27,8 +27,9 @@ import ModelComparison  from "./modeling/ModelComparison.jsx";
 
 import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
-import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
-import { C, mono }        from "../components/modeling/shared.jsx";
+import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
+import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
+import { C, mono }         from "../components/modeling/shared.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
@@ -942,6 +943,18 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const [kernel,     setKernel]     = useState("triangular");
   const [weightVar, setWeightVar] = useState([]);
 
+  // ── Inference / SE options ────────────────────────────────────────────────
+  const [seType,      setSeType]      = useState("classical");
+  const [clusterVar,  setClusterVar]  = useState(null);
+  const [clusterVar2, setClusterVar2] = useState(null);
+  const [maxLag,      setMaxLag]      = useState(null);
+
+  const seOpts = useMemo(() => ({
+    seType, clusterVar, clusterVar2,
+    timeVar: panel?.timeCol ?? null,
+    maxLag: maxLag ? parseInt(maxLag) : null,
+  }), [seType, clusterVar, clusterVar2, maxLag, panel]);
+
   // ── Results state ─────────────────────────────────────────────────────────
   const [result,       setResult]       = useState(null);
   const [panelFE,      setPanelFE]      = useState(null);
@@ -977,7 +990,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   );
 
   const handleModelSelect = useCallback((id) => {
-    setModel(id); setResult(null); setErr(null);
+    setModel(id); setResult(null); setErr(null); setSeType("classical");
   }, []);
 
   // ── ESTIMATE ────────────────────────────────────────────────────────────────
@@ -1003,7 +1016,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
        }
         res = runWLS(rows, y, allX, weights);
       } else {
-          res = runOLS(rows, y, allX);
+          res = runOLS(rows, y, allX, seOpts);
       }
       if (!res) { setErr("Matrix is singular or insufficient data."); setRunning(false); return; }
       const olsType = wCol ? "WLS" : "OLS";
@@ -1012,8 +1025,8 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
        else if (model === "FE" || model === "FD") {
         if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
         const ec = panel.entityCol, tc = panel.timeCol;
-        const feRaw = runFE(rows, y, allX, ec, tc);
-        const fdRaw = runFD(rows, y, allX, ec, tc);
+        const feRaw = runFE(rows, y, allX, ec, tc, seOpts);
+        const fdRaw = runFD(rows, y, allX, ec, tc, seOpts);
         const fe = feRaw?.error ? null : feRaw;
         const fd = fdRaw?.error ? null : fdRaw;
         if (!fe && !fd) {
@@ -1029,20 +1042,20 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
       } else if (model === "2SLS") {
         if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
         if (!zVars.length) { setErr("Select at least one instrument (Z)."); setRunning(false); return; }
-        const res = run2SLS(rows, y, xVars, wVars, zVars);
+        const res = run2SLS(rows, y, xVars, wVars, zVars, seOpts);
         if (!res || res.error) { setErr(res?.error ?? "2SLS failed. Check that instruments are valid (not in X) and data is sufficient."); setRunning(false); return; }
         setResult(wrapResult("2SLS", res, { yVar: y, xVars, wVars, zVars }));
 
       } else if (model === "DiD") {
         if (!postVar[0] || !treatVar[0]) { setErr("Select Post and Treated binary columns for DiD."); setRunning(false); return; }
-        const res = run2x2DiD(rows, y, postVar[0], treatVar[0], wVars);
+        const res = run2x2DiD(rows, y, postVar[0], treatVar[0], wVars, seOpts);
         if (!res) { setErr("DiD failed. Post and Treated must be 0/1 binary variables."); setRunning(false); return; }
         setResult(wrapResult("DiD", res, { yVar: y, wVars, postVar: postVar[0], treatVar: treatVar[0] }));
 
       } else if (model === "TWFE") {
         if (!treatVar[0]) { setErr("Select the treatment indicator column."); setRunning(false); return; }
         const ec = panel.entityCol, tc = panel.timeCol;
-        const res = runTWFEDiD(rows, y, ec, tc, treatVar[0], wVars);
+        const res = runTWFEDiD(rows, y, ec, tc, treatVar[0], wVars, seOpts);
         if (!res) { setErr("TWFE DiD failed. Check panel structure and treatment variable."); setRunning(false); return; }
         setResult(wrapResult("TWFE", res, { yVar: y, wVars, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }));
 
@@ -1087,7 +1100,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
       setErr(`Estimation error: ${e.message}`);
     }
     setRunning(false);
-    } ,[model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel,weightVar, rows, panel]);
+    } ,[model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, rows, panel]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -1181,6 +1194,15 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
             bwManual={bwManual}   setBwManual={setBwManual}
             kernel={kernel}       setKernel={setKernel}
             weightVar={weightVar} setWeightVar={setWeightVar}
+          />
+
+          <InferenceOptions
+            modelType={model}
+            headers={headers}
+            seType={seType}           setSeType={setSeType}
+            clusterVar={clusterVar}   setClusterVar={setClusterVar}
+            clusterVar2={clusterVar2} setClusterVar2={setClusterVar2}
+            maxLag={maxLag}           setMaxLag={setMaxLag}
           />
 
           <button

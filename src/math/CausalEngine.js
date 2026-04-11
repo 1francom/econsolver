@@ -6,10 +6,11 @@ import {
   transpose, matMul, matInv,
   runOLS, pValue, fCDF,
 } from "./LinearEngine.js";
+import { computeRobustSE } from "../core/inference/robustSE.js";
 
 // ─── 2SLS / IV ───────────────────────────────────────────────────────────────
 // endog: endogenous regressors  |  exog: exogenous controls  |  instr: excluded instruments
-export function run2SLS(rows, yCol, endog, exog, instr) {
+export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     [...endog, ...exog, ...instr].every(c => typeof r[c] === "number" && isFinite(r[c]))
@@ -76,10 +77,12 @@ export function run2SLS(rows, yCol, endog, exog, instr) {
   if (!XtXinv)
     return { error: "Matrix is singular (check for perfect collinearity or weak instruments)." };
 
-  const corrSE = XtXinv.map((row, i) => {
+  const classicalSE = XtXinv.map((row, i) => {
     const v = row[i] * trueS2;
     return isFinite(v) && v >= 0 ? Math.sqrt(v) : NaN;
   });
+  const robustSe = computeRobustSE(seOpts, XtXinv, X2, trueResid, n, k, valid);
+  const corrSE   = robustSe ?? classicalSE;
   const corrT = secondRes.beta.map((b, i) => {
     const s = corrSE[i];
     return isFinite(b) && isFinite(s) && s > 0 ? b / s : NaN;
