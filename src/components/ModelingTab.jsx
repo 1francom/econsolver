@@ -917,7 +917,7 @@ function buildModelHint(panel, panelOk) {
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
+export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoachQuestion }) {
   const rows    = cleanedData?.cleanRows  ?? [];
   const headers = cleanedData?.headers    ?? [];
   const panel   = cleanedData?.panelIndex ?? null;
@@ -1260,13 +1260,18 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange }) {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {coachingSignals.map(s => {
                   const clr = s.severity === "warn" ? C.gold : s.severity === "suggest" ? C.teal : C.blue;
+                  const clickable = !!onCoachQuestion && !!s.question;
                   return (
-                    <div key={s.id} title={s.detail + "\n\n" + s.suggestion}
+                    <button key={s.id} title={s.detail + "\n\n" + s.suggestion + (clickable ? "\n\nClick to ask the AI coach" : "")}
+                      onClick={clickable ? () => onCoachQuestion(s.question) : undefined}
                       style={{ fontSize: 10, color: clr, border: `1px solid ${clr}`, borderRadius: 3,
-                               padding: "3px 8px", cursor: "default", fontFamily: mono,
-                               background: clr + "12" }}>
+                               padding: "3px 8px", cursor: clickable ? "pointer" : "default", fontFamily: mono,
+                               background: clr + "12", transition: "opacity 0.12s" }}
+                      onMouseEnter={e => { if (clickable) e.currentTarget.style.opacity = "0.75"; }}
+                      onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
+                    >
                       {s.severity === "warn" ? "⚠ " : s.severity === "suggest" ? "→ " : "i "}{s.title}
-                    </div>
+                    </button>
                   );
                 })}
               </div>

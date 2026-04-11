@@ -134,7 +134,7 @@ function ThinkingBubble() {
   );
 }
 
-export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult }) {
+export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null }) {
   const [history,  setHistory]  = useState([]);
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);
@@ -143,6 +143,13 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
 
   // Clear conversation when screen changes
   useEffect(() => { setHistory([]); setInput(""); }, [screen]);
+
+  useEffect(() => {
+    if (!prefillMessage?.q) return;
+    setInput(prefillMessage.q);
+    const t = setTimeout(() => inputRef.current?.focus(), 120);
+    return () => clearTimeout(t);
+  }, [prefillMessage]);
 
   useEffect(() => {
     if (isOpen) {

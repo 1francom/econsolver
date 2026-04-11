@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(Rscript validation/GMM_check.R)",
+      "Bash(/c/Program Files/R/R-4.4.1/bin/Rscript.exe:*)"
     ]
   }
 }

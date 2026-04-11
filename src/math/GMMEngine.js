@@ -147,9 +147,11 @@ export function runGMM(rows, yCol, xCols, wCols, zCols) {
   const bVec = XtZ_OI.map(row => dot(row, ZtY));
   const beta  = Ainv.map(row => dot(row, bVec));
 
-  // SE = sqrt(diag(Ainv / n))
+  // SE = sqrt(diag(n · Ainv))
+  // Derivation: A = X′Z·Ω̂⁻¹·Z′X is O(n²). The asymptotic variance of √n·β̂
+  // is (D′Ω̂⁻¹D)⁻¹ where D = (1/n)X′Z, so Var(β̂) = n·A⁻¹.
   const df     = n - k;
-  const se     = Ainv.map((row, i) => Math.sqrt(Math.abs(row[i] / n)));
+  const se     = Ainv.map((row, i) => Math.sqrt(Math.abs(row[i] * n)));
   const tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
   const pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
 

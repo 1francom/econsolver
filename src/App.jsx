@@ -631,6 +631,8 @@ export default function App() {
   const [output,       setOutput]       = useState(null);
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const [activeResult, setActiveResult] = useState(null);
+  const [coachPrefill, setCoachPrefill] = useState(null);
+  const coachSeqRef = useRef(0);
 
   // Load a saved project from the dashboard
   const handleLoad = async p => {
@@ -778,6 +780,7 @@ export default function App() {
               cleanedData={output}
               onBack={()=>setScreen("explorer")}
               onResultChange={r=>setActiveResult(r)}
+              onCoachQuestion={q => { setSidebarOpen(true); setCoachPrefill({ q, seq: ++coachSeqRef.current }); }}
             />
           </div>
         )}
@@ -789,6 +792,7 @@ export default function App() {
         screen={screen}
         cleanedData={output}
         modelResult={activeResult}
+        prefillMessage={coachPrefill}
       />
     </div>
   );
