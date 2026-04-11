@@ -14,6 +14,7 @@ import {
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
   runGMM, runLIML,
+  runFuzzyRDD, runEventStudy, runLSDV, runPoissonFE, runSyntheticControl,
   wrapResult,
 } from "../math/index.js";
 import { generateRScript }      from "../services/export/rScript.js";
@@ -33,7 +34,7 @@ import CodeEditor          from "../components/modeling/CodeEditor.jsx";
 import { C, mono }         from "../components/modeling/shared.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
-import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
+import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 
@@ -954,6 +955,14 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const [kernel,     setKernel]     = useState("triangular");
   const [weightVar, setWeightVar] = useState([]);
 
+  // ── New estimator state ───────────────────────────────────────────────────
+  const [treatTimeCol,   setTreatTimeCol]   = useState([]);
+  const [kPre,           setKPre]           = useState(3);
+  const [kPost,          setKPost]          = useState(3);
+  const [lsdvTimeFE,     setLsdvTimeFE]     = useState(false);
+  const [treatedUnit,    setTreatedUnit]    = useState("");
+  const [synthTreatTime, setSynthTreatTime] = useState("");
+
   // ── Inference / SE options ────────────────────────────────────────────────
   const [seType,      setSeType]      = useState("classical");
   const [clusterVar,  setClusterVar]  = useState(null);
@@ -1111,15 +1120,49 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
       } else if (model === "WLS") {
         setErr("WLS: select OLS and set a weight variable in Model Configuration.");
       } else if (model === "LSDV") {
-        setErr("LSDV (Least Squares Dummy Variables) — coming soon.");
+        if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
+        const ec = panel.entityCol, tc = panel.timeCol;
+        const res = runLSDV(rows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts);
+        if (!res || res.error) { setErr(res?.error ?? "LSDV failed. Check panel structure."); setRunning(false); return; }
+        setResult(wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc }));
+
       } else if (model === "EventStudy") {
-        setErr("Event Study / Dynamic DiD — coming soon.");
+        if (!treatTimeCol[0]) { setErr("Select the treatment time column (period when each unit was first treated)."); setRunning(false); return; }
+        const ec = panel.entityCol, tc = panel.timeCol;
+        const pre  = Math.max(1, kPre  || 3);
+        const post = Math.max(1, kPost || 3);
+        const res = runEventStudy(rows, y, ec, tc, treatTimeCol[0], pre, post, wVars, seOpts);
+        if (!res || res.error) { setErr(res?.error ?? "Event Study failed. Check panel structure and treatment time column."); setRunning(false); return; }
+        setResult(wrapResult("EventStudy", res, { yVar: y, xVars, wVars, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }));
+
       } else if (model === "FuzzyRDD") {
-        setErr("Fuzzy RDD — coming soon.");
+        if (!treatVar[0])  { setErr("Select the treatment receipt column (D: actual 0/1 take-up)."); setRunning(false); return; }
+        if (!runningVar[0]){ setErr("Select a running variable."); setRunning(false); return; }
+        const c0 = parseFloat(cutoff);
+        if (isNaN(c0)) { setErr("Enter a valid cutoff value."); setRunning(false); return; }
+        const runVals = rows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
+        const yVals   = rows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
+        const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
+        if (isNaN(h) || h <= 0) { setErr("Invalid bandwidth."); setRunning(false); return; }
+        const res = runFuzzyRDD(rows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts });
+        if (!res || res.error) { setErr(res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth."); setRunning(false); return; }
+        setResult(wrapResult("FuzzyRDD", res, { yVar: y, wVars, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }));
+
       } else if (model === "PoissonFE") {
-        setErr("Poisson FE — coming soon.");
+        if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
+        const ec = panel.entityCol;
+        const res = runPoissonFE(rows, y, allX, ec, seOpts);
+        if (!res || res.error) { setErr(res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable."); setRunning(false); return; }
+        setResult(wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars, entityCol: ec }));
+
       } else if (model === "SyntheticControl") {
-        setErr("Synthetic Control — coming soon.");
+        if (!treatedUnit) { setErr("Select the treated unit."); setRunning(false); return; }
+        const synthTime = parseFloat(synthTreatTime);
+        if (isNaN(synthTime)) { setErr("Enter a valid treatment time period (numeric)."); setRunning(false); return; }
+        const ec = panel.entityCol, tc = panel.timeCol;
+        const predictors = xVars.length ? xVars : [];
+        const res = runSyntheticControl(rows, y, ec, tc, treatedUnit, synthTime, { predictorCols: predictors });
+        setResult(wrapResult("SyntheticControl", res, { yVar: y, xVars, entityCol: ec, timeCol: tc, treatedUnit, treatTime: synthTime }));
       }
     } catch (e) {
       setErr(`Estimation error: ${e.message}`);
@@ -1208,7 +1251,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
             model={model}
             numericCols={numericCols}
             yVar={yVar}
-            xVars={xVars}
+            xVars={xVars}         setXVars={setXVars}
             wVars={wVars}         setWVars={setWVars}
             zVars={zVars}         setZVars={setZVars}
             treatVar={treatVar}   setTreatVar={setTreatVar}
@@ -1219,6 +1262,14 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
             bwManual={bwManual}   setBwManual={setBwManual}
             kernel={kernel}       setKernel={setKernel}
             weightVar={weightVar} setWeightVar={setWeightVar}
+            treatTimeCol={treatTimeCol}     setTreatTimeCol={setTreatTimeCol}
+            kPre={kPre}                     setKPre={setKPre}
+            kPost={kPost}                   setKPost={setKPost}
+            lsdvTimeFE={lsdvTimeFE}         setLsdvTimeFE={setLsdvTimeFE}
+            treatedUnit={treatedUnit}       setTreatedUnit={setTreatedUnit}
+            synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime}
+            rows={rows}
+            panel={panel}
           />
 
           <InferenceOptions
@@ -1411,6 +1462,181 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
           {result?.type === "LIML" && (
             <LIMLResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
+
+          {/* Fuzzy RDD */}
+          {result?.type === "FuzzyRDD" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Fuzzy RDD Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.weak && <Badge label="⚠ Weak instrument (F < 10)" color={C.red} />}
+                </div>
+                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#0d0a08", border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
+                  <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Local Average Treatment Effect (LATE)</div>
+                  <div style={{ fontSize: 24, color: r.lateP < 0.05 ? C.orange : C.textDim, fontFamily: mono }}>
+                    {r.late >= 0 ? "+" : ""}{r.late?.toFixed(4) ?? "—"}{stars(r.lateP)}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+                    SE = {r.lateSE?.toFixed(4) ?? "—"} · p = {r.lateP < 0.001 ? "<0.001" : r.lateP?.toFixed(4) ?? "—"}
+                  </div>
+                  <div style={{ fontSize: 10, color: C.textMuted, marginTop: 8 }}>
+                    Compliance (first-stage jump): {r.firstStageJumpD?.toFixed(4) ?? "—"} · F = {r.firstStageFstat?.toFixed(2) ?? "—"} · Wald ratio: {r.waldRatio?.toFixed(4) ?? "—"}
+                  </div>
+                </div>
+                <FitBar items={[
+                  { label: "n (bw)", value: r.n, color: C.text },
+                  { label: "df",     value: r.df, color: C.textDim },
+                  { label: "R²",     value: r.R2?.toFixed(4) ?? "—", color: C.orange },
+                  { label: "FS-F",   value: r.firstStageFstat?.toFixed(2) ?? "—", color: r.weak ? C.red : C.gold },
+                ]} />
+                <Lbl color={C.textMuted}>Second-Stage Coefficient Table</Lbl>
+                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <PlotSelector accentColor={C.orange} defaultId="rdd" plots={[
+                  { id: "rdd", label: "RDD Plot", node: <RDDPlot result={r.rddData ?? {}} yLabel={yVar[0]} /> },
+                  { id: "forest", label: "Coefficient plot",
+                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
+                ]} />
+              </div>
+            );
+          })()}
+
+          {/* Event Study */}
+          {result?.type === "EventStudy" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Event Study Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  <Badge label={`${r.units ?? "?"} units`} color={C.textDim} />
+                </div>
+                {r.preTestStat != null && (
+                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: "#081210", border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
+                    <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                      Pre-trend F-test: F = {r.preTestStat?.toFixed(3) ?? "—"} · p = {r.preTestPval < 0.001 ? "<0.001" : r.preTestPval?.toFixed(4) ?? "—"}
+                      {r.preTestPval < 0.05
+                        ? <span style={{ color: C.red }}> ⚠ Pre-trend detected</span>
+                        : <span style={{ color: C.teal }}> ✓ No pre-trend</span>}
+                    </div>
+                  </div>
+                )}
+                <FitBar items={[
+                  { label: "R²",      value: r.R2?.toFixed(4)    ?? "—", color: C.teal },
+                  { label: "Adj. R²", value: r.adjR2?.toFixed(4) ?? "—", color: C.teal },
+                  { label: "n",       value: r.n,                         color: C.text },
+                  { label: "units",   value: r.units ?? "—",              color: C.textDim },
+                ]} />
+                <Lbl color={C.textMuted}>Event-Time Coefficient Plot</Lbl>
+                <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
+                <Lbl color={C.textMuted}>Coefficient Table</Lbl>
+                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+              </div>
+            );
+          })()}
+
+          {/* Panel LSDV */}
+          {result?.type === "LSDV" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>Panel LSDV Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.units != null && <Badge label={`${r.units} units`} color={C.textDim} />}
+                  {r.timeFE && <Badge label="Time FE included" color={C.blue} />}
+                </div>
+                <FitBar items={[
+                  { label: "R²",      value: r.R2?.toFixed(4)    ?? "—", color: C.blue },
+                  { label: "Adj. R²", value: r.adjR2?.toFixed(4) ?? "—", color: C.blue },
+                  { label: "F-stat",  value: r.Fstat?.toFixed(3) ?? "—", color: C.gold },
+                  { label: "n",       value: r.n,                         color: C.text },
+                ]} />
+                <Lbl color={C.textMuted}>Structural Coefficient Table (excl. dummies)</Lbl>
+                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <PlotSelector accentColor={C.blue} defaultId="forest" plots={[
+                  { id: "forest", label: "Coefficient plot",
+                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
+                  { id: "resid", label: "Residuals", node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
+                ]} />
+              </div>
+            );
+          })()}
+
+          {/* Poisson FE */}
+          {result?.type === "PoissonFE" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson FE Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
+                               : <Badge label="⚠ did not converge" color={C.red} />}
+                </div>
+                <FitBar items={[
+                  { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: "#9e7ec8" },
+                  { label: "Log-lik", value: r.logLik?.toFixed(3)     ?? "—", color: C.textDim },
+                  { label: "AIC",     value: r.AIC?.toFixed(1)         ?? "—", color: C.textDim },
+                  { label: "BIC",     value: r.BIC?.toFixed(1)         ?? "—", color: C.textDim },
+                  { label: "n",       value: r.n,                              color: C.text },
+                ]} />
+                <Lbl color={C.textMuted}>Coefficient Table (log-linear, with IRR)</Lbl>
+                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                {r.IRR?.length > 0 && (
+                  <div style={{ marginTop: "1rem" }}>
+                    <Lbl color={C.textMuted}>Incidence Rate Ratios (IRR = exp(β))</Lbl>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {r.varNames.map((v, i) => (
+                        <div key={v} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                          {v}: <span style={{ color: C.text }}>{r.IRR[i]?.toFixed(4) ?? "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <PlotSelector accentColor={"#9e7ec8"} defaultId="forest" plots={[
+                  { id: "forest", label: "Coefficient plot",
+                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poissonfe" filename="poissonfe_coefficients.svg" /> },
+                ]} />
+              </div>
+            );
+          })()}
+
+          {/* Synthetic Control */}
+          {result?.type === "SyntheticControl" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>Synthetic Control Results</span>
+                  <Badge label={`treated: ${r.scTreatedUnit}`} color={C.gold} />
+                  <Badge label={`T* = ${r.scTreatTime}`} color={C.textDim} />
+                </div>
+                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#0d0c08", border: `1px solid ${C.gold}30`, borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
+                  <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Fit Quality & Inference</div>
+                  <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono }}>
+                    Pre-RMSPE: {r.scRmspePre?.toFixed(6) ?? "—"} · Post-RMSPE: {r.scRmspePost?.toFixed(6) ?? "—"}
+                    {r.scPValue != null && <span> · Placebo p-value: {r.scPValue?.toFixed(3)}</span>}
+                  </div>
+                </div>
+                <Lbl color={C.textMuted}>Donor Weights</Lbl>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: "1.2rem" }}>
+                  {Object.entries(r.scWeights ?? {})
+                    .sort(([, a], [, b]) => b - a)
+                    .filter(([, w]) => w > 0.001)
+                    .map(([unit, w]) => (
+                      <div key={unit} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 10px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                        {unit}: <span style={{ color: C.gold }}>{(w * 100).toFixed(1)}%</span>
+                      </div>
+                    ))}
+                </div>
+                <Lbl color={C.textMuted}>Outcome Trajectory (Pre + Post)</Lbl>
+                <SyntheticGapPlot preFit={r.scPreFit} postGap={r.scPostGap} treatTime={r.scTreatTime} yLabel={yVar[0]} />
+              </div>
+            );
+          })()}
 
           {/* DiD / TWFE */}
           {(result?.type === "DiD" || result?.type === "TWFE") && (() => {

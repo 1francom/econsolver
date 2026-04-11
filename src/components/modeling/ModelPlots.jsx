@@ -2031,3 +2031,126 @@ export function PredProbHistogram({ fitted, Y }) {
     </div>
   );
 }
+
+// ─── EVENT STUDY COEFFICIENT PLOT ────────────────────────────────────────────
+// eventCoeffs: [{ k, beta, se, t, p, isRef? }] — from runEventStudy
+export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
+  if (!eventCoeffs?.length) return null;
+
+  const sorted = [...eventCoeffs].sort((a, b) => a.k - b.k);
+  const ciLow  = e => (e.isRef ? 0 : (e.beta ?? 0) - 1.96 * (e.se ?? 0));
+  const ciHigh = e => (e.isRef ? 0 : (e.beta ?? 0) + 1.96 * (e.se ?? 0));
+
+  const allVals = sorted.flatMap(e => [ciLow(e), ciHigh(e), 0]);
+  const yMin = Math.min(...allVals.filter(isFinite));
+  const yMax = Math.max(...allVals.filter(isFinite));
+  const yPad = Math.max((yMax - yMin) * 0.15, 0.01);
+
+  const W = 560, H = 280;
+  const PAD = { t: 20, b: 40, l: 52, r: 20 };
+  const pw = W - PAD.l - PAD.r;
+  const ph = H - PAD.t - PAD.b;
+
+  const n = sorted.length;
+  const xScale = i => PAD.l + (i / (n - 1)) * pw;
+  const yScale = v => PAD.t + ph - ((v - (yMin - yPad)) / (yMax - yMin + 2 * yPad)) * ph;
+
+  const y0 = yScale(0);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+      <rect width={W} height={H} fill={C.bg} />
+      {/* Zero line */}
+      <line x1={PAD.l} x2={W - PAD.r} y1={y0} y2={y0} stroke={C.textMuted} strokeWidth={1} strokeDasharray="4 3" />
+      {/* Treatment line at k=0 */}
+      {sorted.findIndex(e => e.k === 0) >= 0 && (
+        <line x1={xScale(sorted.findIndex(e => e.k === 0))} x2={xScale(sorted.findIndex(e => e.k === 0))}
+              y1={PAD.t} y2={H - PAD.b} stroke={C.gold} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />
+      )}
+      {/* CI ribbons */}
+      {sorted.map((e, i) => {
+        if (e.isRef) return null;
+        const x = xScale(i);
+        const y1 = yScale(ciLow(e));
+        const y2 = yScale(ciHigh(e));
+        return <line key={`ci-${i}`} x1={x} x2={x} y1={y1} y2={y2} stroke={C.teal} strokeWidth={3} strokeLinecap="round" opacity={0.4} />;
+      })}
+      {/* Points */}
+      {sorted.map((e, i) => {
+        const x = xScale(i);
+        const y = yScale(e.beta ?? 0);
+        const sig = e.p != null && e.p < 0.05;
+        const clr = e.isRef ? C.textMuted : sig ? C.teal : C.textDim;
+        return <circle key={`pt-${i}`} cx={x} cy={y} r={e.isRef ? 3 : 5} fill={clr} stroke={C.bg} strokeWidth={1.5} />;
+      })}
+      {/* X axis labels */}
+      {sorted.map((e, i) => (
+        <text key={`xl-${i}`} x={xScale(i)} y={H - PAD.b + 14} textAnchor="middle" fill={C.textDim} fontSize={9}>
+          {e.k === -1 ? "−1" : e.k >= 0 ? `+${e.k}` : `${e.k}`}
+        </text>
+      ))}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Event time (periods relative to treatment)</text>
+      <text x={PAD.l - 6} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+            transform={`rotate(-90, ${PAD.l - 6}, ${PAD.t + ph / 2})`}>
+        {yLabel}
+      </text>
+    </svg>
+  );
+}
+
+// ─── SYNTHETIC CONTROL GAP PLOT ───────────────────────────────────────────────
+// preFit:  [{ t, actual, synthetic }]
+// postGap: [{ t, actual, synthetic, gap }]
+export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel = "Y" }) {
+  const allPoints = [
+    ...preFit.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
+    ...postGap.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
+  ].sort((a, b) => a.t - b.t);
+
+  if (!allPoints.length) return null;
+
+  const times    = allPoints.map(d => d.t);
+  const allY     = allPoints.flatMap(d => [d.actual, d.synthetic]).filter(isFinite);
+  const tMin     = Math.min(...times), tMax = Math.max(...times);
+  const yMin     = Math.min(...allY),  yMax = Math.max(...allY);
+  const yPad     = (yMax - yMin) * 0.12 || 0.01;
+
+  const W = 560, H = 280;
+  const PAD = { t: 20, b: 40, l: 58, r: 20 };
+  const pw = W - PAD.l - PAD.r;
+  const ph = H - PAD.t - PAD.b;
+
+  const xS = t  => PAD.l + ((t - tMin) / Math.max(tMax - tMin, 1)) * pw;
+  const yS = v  => PAD.t + ph - ((v - (yMin - yPad)) / (yMax - yMin + 2 * yPad)) * ph;
+
+  const actualPath    = allPoints.map((d, i) => `${i === 0 ? "M" : "L"}${xS(d.t)},${yS(d.actual)}`).join(" ");
+  const syntheticPath = allPoints.map((d, i) => `${i === 0 ? "M" : "L"}${xS(d.t)},${yS(d.synthetic)}`).join(" ");
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+      <rect width={W} height={H} fill={C.bg} />
+      {/* Treatment line */}
+      {treatTime != null && (
+        <line x1={xS(treatTime)} x2={xS(treatTime)} y1={PAD.t} y2={H - PAD.b}
+              stroke={C.gold} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.8} />
+      )}
+      {/* Synthetic path (dashed) */}
+      <path d={syntheticPath} stroke={C.teal} strokeWidth={1.5} strokeDasharray="5 4" fill="none" opacity={0.8} />
+      {/* Actual path (solid) */}
+      <path d={actualPath} stroke={C.gold} strokeWidth={2} fill="none" />
+      {/* Points */}
+      {allPoints.map((d, i) => (
+        <circle key={i} cx={xS(d.t)} cy={yS(d.actual)} r={3} fill={C.gold} opacity={0.7} />
+      ))}
+      {/* Axis labels */}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Time</text>
+      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+            transform={`rotate(-90, ${PAD.l - 8}, ${PAD.t + ph / 2})`}>{yLabel}</text>
+      {/* Legend */}
+      <line x1={W - 130} x2={W - 110} y1={PAD.t + 10} y2={PAD.t + 10} stroke={C.gold} strokeWidth={2} />
+      <text x={W - 106} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Treated unit</text>
+      <line x1={W - 130} x2={W - 110} y1={PAD.t + 24} y2={PAD.t + 24} stroke={C.teal} strokeWidth={1.5} strokeDasharray="5 4" />
+      <text x={W - 106} y={PAD.t + 28} fill={C.textDim} fontSize={9}>Synthetic</text>
+    </svg>
+  );
+}
