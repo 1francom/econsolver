@@ -170,7 +170,8 @@ Merge: `join, append`
 
 ## Pending (ordered by priority)
 1. **Estimator validation vs R** — systematic benchmark: RDD (rdrobust), Panel FE (fixest), 2SLS (AER), Logit/Probit (base R `glm`), GMM, Synthetic Control. Harness in `math/__validation__/engineValidation.js`.
-2. **DuckDB-WASM** — final compute target for datasets > 50k rows.
+2. **Excel (.xlsx) support** — `src/services/data/parsers/excel.js` via SheetJS (CDN: `https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs`). Must return `{ headers, rows }` identical to CSV parser. Wire into `DataStudio.jsx` file accept list (`.xlsx,.xls`).
+3. **DuckDB-WASM** — final compute target for datasets > 50k rows.
 3. ~~**Phase 6 — Robust Standard Errors**~~ — `src/core/inference/robustSE.js` implemented with HC0/HC1/HC2/HC3, clustered, two-way (Cameron-Gelbach-Miller), Newey-West HAC. `seType` wired into engines. `InferenceOptions.jsx` SE type selector implemented. Validation vs R `sandwich::vcovHC` still pending.
 4. ~~**Phase 7 — New File Format Support**~~ — `src/services/data/parsers/rds.js` and `src/services/data/parsers/shapefile.js` implemented. Note: `excel.js` not yet committed to repo.
 5. ~~**Phase 8 — Modeling UI Overhaul**~~ — `EstimatorSidebar.jsx` grouped dropdown, `InferenceOptions.jsx`, and `CodeEditor.jsx` all implemented.
