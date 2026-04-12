@@ -316,7 +316,7 @@ export default function ModelConfiguration({
   model,
   numericCols,
   yVar,
-  xVars,
+  xVars,      setXVars,
   wVars,      setWVars,
   zVars,      setZVars,
   treatVar,   setTreatVar,

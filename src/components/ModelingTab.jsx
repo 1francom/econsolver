@@ -1170,7 +1170,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
       setErr(`Estimation error: ${e.message}`);
     }
     setRunning(false);
-    } ,[model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, rows, panel]);
+    } ,[model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, rows, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
