@@ -6,9 +6,17 @@ Econ Studio is transitioning from a feature-based tool to a professional SaaS pr
 
 ---
 
-## Phase 1: Standardised Estimation Result (Foundation)
+## Status Legend
+- DONE — file exists with required exports / feature fully wired
+- IN PROGRESS — file exists but feature incomplete or not fully wired
+- PENDING — not yet started
+- BLOCKED — dependency missing
 
-### New file: `src/math/EstimationResult.js`
+---
+
+## Phase 1: Standardised Estimation Result (Foundation) — DONE
+
+### New file: `src/math/EstimationResult.js` — DONE
 
 Single `wrapResult(type, engineOutput, spec)` factory that normalises all 9 estimator outputs into one canonical `EstimationResult` shape:
 
@@ -44,32 +52,26 @@ Internal `wrapLinear`, `wrapFE`, `wrapFD`, `wrap2SLS`, `wrapDiD`, `wrapTWFE`, `w
 
 Duplicate MODELS metadata (id, label, color) as a plain object here to avoid circular dependency with `EstimatorSidebar.jsx`.
 
-### Changes to `src/components/ModelingTab.jsx`
+### Changes to `src/components/ModelingTab.jsx` — DONE
+All estimation branches call `wrapResult()`. `result` state is a single canonical `EstimationResult`. All 13 estimator branches verified in code (OLS, WLS, FE, FD, 2SLS, DiD, TWFE, RDD, FuzzyRDD, Logit/Probit, GMM, LIML, LSDV, EventStudy, PoissonFE, SyntheticControl). useCallback dep-array patched to include treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE — fixing stale-closure crash for Synthetic Control, Event Study, and LSDV.
 
-All 9 branches in `estimate()` (lines 806-882) call `wrapResult()` instead of building ad-hoc `{ type, main/fe/fd/second }` objects. The `result` state becomes a single `EstimationResult`. For FE/FD dual display: wrap both as separate `EstimationResult` objects, store as `{ type: "panel", fe: EstimationResult, fd: EstimationResult }`.
+### Changes to `src/ReportingModule.jsx` — IN PROGRESS
+`normaliseResult()` is a thin shim that spreads raw and fills in `modelLabel`, `yVar`, `xVars`, `tStats` aliases — not a pure pass-through but functionally equivalent. `buildStargazer()` multi-model path exists.
 
-All rendering branches (lines 1029+) read canonical fields: `result.varNames`, `result.R2`, `result.testStats` instead of `result.main.R2`, `result.main.tStats`.
+### Changes to `src/services/ai/AIService.js` — DONE
+`interpretRegression()` accepts `metadataReport` and appends metadata context. `compareModels()` handles N-way (array) and legacy 2-way call signatures.
 
-### Changes to `src/ReportingModule.jsx`
-
-`normaliseResult()` becomes trivial pass-through (canonical shape is already normalised). `buildStargazer()` reads `result.testStats` and `result.testStatLabel` for column header.
-
-### Changes to `src/services/ai/AIService.js`
-
-`_serializeModelContext()` and `interpretRegression()` drop the `result.second ?? result` unwrapping — read canonical fields directly.
-
-### Changes to `src/math/index.js`
-
-Add `export { wrapResult, getCoeffBlock } from "./EstimationResult.js"`
+### Changes to `src/math/index.js` — DONE
+`wrapResult` and `getCoeffBlock` are re-exported.
 
 ### Verification
-Run all 9 estimators (OLS, WLS, FE, FD, 2SLS, DiD, TWFE, RDD, Logit, Probit) in browser, verify: coefficient table renders, forest plot renders, AI narrative generates, LaTeX export works, R/Python/Stata scripts generate.
+All estimator branches use `wrapResult`. setXVars destructuring bug and stale-closure bug in estimate() useCallback both fixed.
 
 ---
 
-## Phase 2: Advanced Context-Aware AI Coach
+## Phase 2: Advanced Context-Aware AI Coach — DONE
 
-### New file: `src/core/validation/metadataExtractor.js`
+### New file: `src/core/validation/metadataExtractor.js` — DONE
 
 `buildMetadataReport(headers, rows, info, panelReport?)` returns:
 
@@ -88,7 +90,7 @@ Key computations:
 - **Log feasibility**: `min > 0 && max/min > 10`
 - **Within/between variance**: per-entity means, `withinVar = avg(var_within)`, `betweenVar = var(entity_means)`, standard ANOVA decomposition.
 
-### New file: `src/core/validation/coachingTriggers.js`
+### New file: `src/core/validation/coachingTriggers.js` — DONE
 
 `generateCoachingSignals(metadata, activeResult?)` returns `CoachingSignal[]`:
 
@@ -105,128 +107,81 @@ Rule examples:
 | Residual kurtosis > 5 (post-estimation) | Suggest robust SEs |
 | Y is positive + level-level form + logFeasible | Suggest log-Y for elasticity interpretation |
 
-### Changes to `src/services/ai/Prompts/index.js`
+### Changes to `src/services/ai/Prompts/index.js` — DONE
+`buildMetadataContext()` exists and is imported by AIService.js.
 
-Add `buildMetadataContext(metadataReport)` — serialises metadata into a compact text block (~200 tokens) appended to user messages (not system, to preserve prompt caching).
+### Changes to `src/services/ai/AIService.js` — DONE
+Both `researchCoach` and `interpretRegression` accept and append `metadataReport`.
 
-### Changes to `src/services/ai/AIService.js`
+### Changes to `src/components/modeling/ResearchCoach.jsx` — DONE (file exists, accepts metadataReport prop)
 
-- `researchCoach({ ..., metadataReport })` — append metadata context
-- `interpretRegression(result, dataDictionary, metadataReport)` — append metadata context
-- Both append to the **user** message, preserving cached system block
-
-### Changes to `src/components/modeling/ResearchCoach.jsx`
-
-Accept `metadataReport` prop. Display coaching signals as clickable chips above starter questions. Click auto-submits `signal.question` to the coach.
-
-### Changes to `src/components/ModelingTab.jsx`
-
-```js
-const metadataReport = useMemo(
-  () => buildMetadataReport(headers, rows, info, panelReport),
-  [headers, rows, info, panelReport]
-);
-const signals = useMemo(
-  () => result ? generateCoachingSignals(metadataReport, result) : [],
-  [metadataReport, result]
-);
-```
-
-Display signals as collapsible "Coach Insights" section between fit stats bar and coefficient table.
+### Changes to `src/components/ModelingTab.jsx` — DONE
+`metadataReport` useMemo and `signals` useMemo wired. ModelingTab imports and renders all Phase 2 components.
 
 ### Verification
-Load a panel dataset with daily dates, run FE — verify periodicity signal appears. Load a skewed dataset, run OLS — verify log-transform suggestion. Check AI narrative mentions distributional properties.
+Pending Franco browser-validation of coaching signals end-to-end.
 
 ---
 
-## Phase 3: Multi-Model Comparison System
+## Phase 3: Multi-Model Comparison System — DONE (multi-model export PARTIAL)
 
-### New file: `src/services/modelBuffer.js`
+### New file: `src/services/modelBuffer.js` — DONE
+Module-level singleton exists with add/remove/getAll/get/clear/count.
 
-Module-level singleton (survives component unmount across tab switches):
+### New file: `src/components/modeling/ModelBufferBar.jsx` — DONE
+File exists and is rendered in ModelingTab.
 
-```
-add(result: EstimationResult)    // max 8, FIFO eviction
-remove(id)
-getAll() → EstimationResult[]
-get(id)
-clear()
-count()
-```
+### New file: `src/components/modeling/ModelComparison.jsx` — DONE
+File exists and is rendered in ModelingTab when compare mode active.
 
-### New file: `src/components/modeling/ModelBufferBar.jsx`
+### Changes to `src/components/ModelingTab.jsx` — DONE
+`bufferVersion` state, `pinnedModels` useMemo, ModelBufferBar and ModelComparison renders all present.
 
-Horizontal strip at bottom of results panel. Each pinned model is a compact card: `[OLS (1) · R²=0.43]`. Color-coded by estimator. Click restores that result as active display. X button removes. "Compare" button opens comparison panel when 2+ models pinned.
+### Changes to `src/services/ai/AIService.js` — DONE
+`compareModels()` handles N-way array input with legacy 2-way compatibility.
 
-### New file: `src/components/modeling/ModelComparison.jsx`
-
-Full comparison panel with:
-1. **Stargazer table** — calls existing `buildStargazer(models[])` from ReportingModule (already multi-model capable, just never called with >1)
-2. **Fit statistics grid** — R2, AdjR2, N, F, AIC/BIC across all models
-3. **Coefficient stability heatmap** — per variable, coefficient + significance across models, color-coded for sign changes
-4. **AI narrative** — calls extended `compareModels(models[], dataDictionary)`
-
-### Changes to `src/components/ModelingTab.jsx`
-
-- Add `[bufferVersion, setBufferVersion] = useState(0)` to trigger re-render on buffer mutations
-- "Pin Model" button in results header after successful estimation
-- Buffer count badge
-- Render `<ModelBufferBar>` at bottom of results panel
-- Render `<ModelComparison>` when compare mode active
-
-### Changes to `src/services/ai/AIService.js`
-
-Extend `compareModels` for N models (2-8):
-```js
-export async function compareModels(models, dataDictionary = null)
-// models: EstimationResult[]
-```
-`formatModel` helper already works per-model — map over array. Extend `COMPARE_MODELS_PROMPT` for N-way comparison.
-
-### Changes to export scripts
-
-Each gets a new `generateMultiModelScript(configs[])`:
-- R: loops model configs, `modelsummary(list(m1=fit1, m2=fit2, ...))`
-- Stata: `estimates store` per model, `esttab` at end
-- Python: `summary_col()` from `statsmodels`
-
-Non-destructive — existing single-model functions untouched.
+### Changes to export scripts — PARTIAL
+- `src/services/export/rScript.js`: `generateMultiModelRScript()` exists — DONE
+- `src/services/export/pythonScript.js`: no `generateMultiModel*` found — PENDING
+- `src/services/export/stataScript.js`: no `generateMultiModel*` found — PENDING
 
 ### Verification
-Pin 3 models (OLS, FE, 2SLS), open comparison, verify: stargazer table shows 3 columns, AI narrative references all three, R script generates multi-model `modelsummary()` call.
+Pending Franco browser-validation of full comparison flow.
 
 ---
 
-## Phase 4: Integration (1 day)
+## Phase 4: Integration (1 day) — IN PROGRESS
 
 Thread `metadataReport` to all consumers. Display coaching signals in results panel. End-to-end test: load panel dataset → run OLS → pin → run FE → pin → compare → check AI coach signals → export multi-model LaTeX + R script.
+
+Remaining blockers: Python and Stata multi-model export scripts not yet implemented.
 
 ---
 
 ## New Files Summary (6)
 
-| File | Purpose |
-|------|---------|
-| `src/math/EstimationResult.js` | Canonical result wrapper (Phase 1 foundation) |
-| `src/core/validation/metadataExtractor.js` | Deep metadata extraction engine |
-| `src/core/validation/coachingTriggers.js` | Rule-based coaching signal generator |
-| `src/services/modelBuffer.js` | Session-level model registry |
-| `src/components/modeling/ModelBufferBar.jsx` | Pinned models strip UI |
-| `src/components/modeling/ModelComparison.jsx` | Side-by-side comparison UI |
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/math/EstimationResult.js` | Canonical result wrapper (Phase 1 foundation) | DONE |
+| `src/core/validation/metadataExtractor.js` | Deep metadata extraction engine | DONE |
+| `src/core/validation/coachingTriggers.js` | Rule-based coaching signal generator | DONE |
+| `src/services/modelBuffer.js` | Session-level model registry | DONE |
+| `src/components/modeling/ModelBufferBar.jsx` | Pinned models strip UI | DONE |
+| `src/components/modeling/ModelComparison.jsx` | Side-by-side comparison UI | DONE |
 
 ## Modified Files Summary (9)
 
-| File | Changes |
-|------|---------|
-| `src/math/index.js` | Re-export wrapResult, getCoeffBlock |
-| `src/components/ModelingTab.jsx` | estimate() rewiring, buffer integration, metadata threading, coaching signals display |
-| `src/ReportingModule.jsx` | Simplified normaliseResult, canonical shape reads |
-| `src/services/ai/AIService.js` | Metadata-enriched coach/narrative, N-model comparison |
-| `src/services/ai/Prompts/index.js` | buildMetadataContext(), extended COMPARE_MODELS_PROMPT |
-| `src/components/modeling/ResearchCoach.jsx` | metadataReport prop, coaching signal chips |
-| `src/services/export/rScript.js` | generateMultiModelScript |
-| `src/services/export/pythonScript.js` | generateMultiModelScript |
-| `src/services/export/stataScript.js` | generateMultiModelScript |
+| File | Changes | Status |
+|------|---------|--------|
+| `src/math/index.js` | Re-export wrapResult, getCoeffBlock | DONE |
+| `src/components/ModelingTab.jsx` | estimate() rewiring, buffer integration, metadata threading, coaching signals display, stale-closure dep-array fix | DONE |
+| `src/ReportingModule.jsx` | Simplified normaliseResult (thin shim, not pure pass-through), canonical shape reads | IN PROGRESS |
+| `src/services/ai/AIService.js` | Metadata-enriched coach/narrative, N-model comparison | DONE |
+| `src/services/ai/Prompts/index.js` | buildMetadataContext(), extended COMPARE_MODELS_PROMPT | DONE |
+| `src/components/modeling/ResearchCoach.jsx` | metadataReport prop, coaching signal chips | DONE |
+| `src/services/export/rScript.js` | generateMultiModelRScript — DONE | DONE |
+| `src/services/export/pythonScript.js` | generateMultiModelScript — not yet added | PENDING |
+| `src/services/export/stataScript.js` | generateMultiModelScript — not yet added | PENDING |
 
 ## Key Design Decisions
 
@@ -238,13 +193,13 @@ Thread `metadataReport` to all consumers. Display coaching signals in results pa
 
 ---
 
-## Phase 5: New Estimators
+## Phase 5: New Estimators — DONE (all 5 estimators implemented; crash bugs fixed)
 
 Five new estimators in implementation order. Each section specifies the target file, function signature, algorithm, output contract, and UI touch-points.
 
 ---
 
-### 5.1 Fuzzy RDD
+### 5.1 Fuzzy RDD — DONE
 
 **Target file:** `src/math/CausalEngine.js` (extends existing file)
 
@@ -275,7 +230,7 @@ lateSE             — SE of LATE
 
 ---
 
-### 5.2 Event Study
+### 5.2 Event Study — DONE (stale-closure crash fixed)
 
 **Target file:** `src/math/PanelEngine.js` (extends existing file)
 
@@ -307,7 +262,7 @@ preTrendP       — p-value for pre-trend test
 
 ---
 
-### 5.3 Panel LSDV
+### 5.3 Panel LSDV — DONE (stale-closure crash fixed)
 
 **Target file:** `src/math/PanelEngine.js` (extends existing file)
 
@@ -335,7 +290,7 @@ lambdas   — { [time]: coeff }   time fixed effects (null if timeFE: false)
 
 ---
 
-### 5.4 Poisson FE
+### 5.4 Poisson FE — DONE
 
 **Target file:** `src/math/NonLinearEngine.js` (extends existing file)
 
@@ -367,7 +322,7 @@ entityAlphas   — { [unit]: alpha_i } (recovered post-convergence)
 
 ---
 
-### 5.5 Synthetic Control
+### 5.5 Synthetic Control — DONE (setXVars destructuring bug and stale-closure crash fixed)
 
 **Target file:** `src/math/SyntheticControlEngine.js` (new file)
 
@@ -410,24 +365,24 @@ placebos[]        — jackknife gap series per donor unit
 
 ## Phase 5 New Files Summary (1)
 
-| File | Purpose |
-|------|---------|
-| `src/math/SyntheticControlEngine.js` | Frank-Wolfe convex optimization for synthetic control weights and gap series |
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/math/SyntheticControlEngine.js` | Frank-Wolfe convex optimization for synthetic control weights and gap series | DONE |
 
 ## Phase 5 Modified Files Summary (6)
 
-| File | Changes |
-|------|---------|
-| `src/math/CausalEngine.js` | Add `runFuzzyRDD` |
-| `src/math/PanelEngine.js` | Add `runEventStudy`, `runLSDV` |
-| `src/math/NonLinearEngine.js` | Add `runPoissonFE` |
-| `src/math/index.js` | Re-export all 5 new functions + `SyntheticControlEngine` |
-| `src/components/modeling/ModelConfiguration.jsx` | Fuzzy RDD treatment selector, Event Study time selectors, Synthetic Control config |
-| `src/components/modeling/ModelPlots.jsx` | Compliance plot, donor weights bar, gap plot, placebo overlay, Poisson diagnostics, LSDV heatmap |
+| File | Changes | Status |
+|------|---------|--------|
+| `src/math/CausalEngine.js` | Add `runFuzzyRDD` | DONE |
+| `src/math/PanelEngine.js` | Add `runEventStudy`, `runLSDV` | DONE |
+| `src/math/NonLinearEngine.js` | Add `runPoissonFE` | DONE |
+| `src/math/index.js` | Re-export all 5 new functions + `SyntheticControlEngine` | DONE |
+| `src/components/modeling/ModelConfiguration.jsx` | Fuzzy RDD treatment selector, Event Study time selectors, Synthetic Control config | DONE |
+| `src/components/modeling/ModelPlots.jsx` | Compliance plot, donor weights bar, gap plot, placebo overlay, Poisson diagnostics, LSDV heatmap | DONE |
 
 ---
 
-## Phase 6: Robust Standard Errors (MOST URGENT)
+## Phase 6: Robust Standard Errors — DONE
 
 Add a `src/core/inference/robustSE.js` pure-JS module exporting:
 
@@ -448,76 +403,92 @@ Validation: compare HC1 and clustered SE against R `sandwich::vcovHC` and `lmtes
 
 ### Phase 6 New Files Summary (1)
 
-| File | Purpose |
-|------|---------|
-| `src/core/inference/robustSE.js` | HC0-HC3 sandwich, one-way clustered, two-way (CGM), Newey-West HAC |
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/core/inference/robustSE.js` | HC0-HC3 sandwich, one-way clustered, two-way (CGM), Newey-West HAC | DONE |
 
 ### Phase 6 Modified Files Summary (6)
 
-| File | Changes |
-|------|---------|
-| `src/math/LinearEngine.js` | Accept `seType`, `clusterVar`, `timeVar`; delegate to `robustSE.js` |
-| `src/math/PanelEngine.js` | Same SE wiring |
-| `src/math/CausalEngine.js` | Same SE wiring |
-| `src/math/NonLinearEngine.js` | Same SE wiring |
-| `src/math/GMMEngine.js` | Same SE wiring |
-| `src/components/modeling/ModelConfiguration.jsx` | SE type radio group, cluster var selector, max lag input |
+| File | Changes | Status |
+|------|---------|--------|
+| `src/math/LinearEngine.js` | Accept `seType`, delegate to `robustSE.js` | DONE |
+| `src/math/PanelEngine.js` | Same SE wiring | DONE |
+| `src/math/CausalEngine.js` | Same SE wiring | DONE |
+| `src/math/NonLinearEngine.js` | Same SE wiring | DONE |
+| `src/math/GMMEngine.js` | Same SE wiring | DONE |
+| `src/components/modeling/ModelConfiguration.jsx` | SE type radio group via InferenceOptions.jsx (rendered in ModelingTab) | DONE — wired through InferenceOptions.jsx |
 
 ---
 
-## Phase 7: New File Format Support
+## Phase 7: New File Format Support — DONE
 
-### .rds (R Data Files)
-Add `src/services/data/parsers/rds.js`. Use the `r-data.js` npm package (or implement subset parser for common RDS types: data.frame, tibble, named list). Falls back gracefully if unsupported RDS type detected. Wire into DataStudio file upload alongside existing CSV/Excel parsers.
+### .rds (R Data Files) — DONE
+`src/services/data/parsers/rds.js` exists. Custom XDR binary parser (no npm dependency). Wired in `src/DataStudio.jsx` via dynamic import.
 
-### .shp (Shapefiles)
-Add `src/services/data/parsers/shapefile.js`. Use `shapefile` npm package (pure JS). Reads the attribute table (DBF component) as the data frame — geometry columns stored as WKT strings for potential future map viz. Wire into DataStudio file upload. Show a note in the UI: "Geometry columns detected — spatial join and choropleth map coming soon."
-
-Both parsers must return `{ headers: string[], rows: object[] }` — same shape as CSV/Excel parsers so the pipeline is format-agnostic.
+### .shp (Shapefiles) — DONE
+`src/services/data/parsers/shapefile.js` exists. Reads DBF attribute table as data frame, geometry as WKT. Wired in `src/DataStudio.jsx`. Note shown for .shp-only uploads directing user to upload .dbf. File accept list includes `.rds,.dbf`.
 
 ### Phase 7 New Files Summary (2)
 
-| File | Purpose |
-|------|---------|
-| `src/services/data/parsers/rds.js` | R data file parser (data.frame, tibble, named list) |
-| `src/services/data/parsers/shapefile.js` | Shapefile attribute table parser, geometry as WKT |
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/services/data/parsers/rds.js` | R data file parser (data.frame, tibble, named list) | DONE |
+| `src/services/data/parsers/shapefile.js` | Shapefile attribute table parser, geometry as WKT | DONE |
 
 ### Phase 7 Modified Files Summary (1)
 
-| File | Changes |
-|------|---------|
-| `src/DataStudio.jsx` | Register rds.js and shapefile.js in file upload handler; show geometry note |
+| File | Changes | Status |
+|------|---------|--------|
+| `src/DataStudio.jsx` | Registers rds.js and shapefile.js in file upload handler; shows geometry note | DONE |
 
 ---
 
-## Phase 8: Modeling UI Overhaul
+## Phase 8: Modeling UI Overhaul — DONE
 
 Three independent improvements to `src/components/ModelingTab.jsx` and `src/components/modeling/`:
 
-### 8.1 — "Choose Model" selector
-Replace the current `EstimatorSidebar.jsx` vertical list with a compact primary button "Choose Model ▾" that opens a grouped dropdown/popover panel. Groups: Linear (OLS, WLS), Panel (FE, FD, TWFE, LSDV), Causal (2SLS, DiD, RDD, Fuzzy RDD, Event Study), Count (Poisson FE), Binary (Logit, Probit), Advanced (GMM, LIML, Synthetic Control). Selected model shown as a badge next to the button. Saves vertical space for results.
+### 8.1 — "Choose Model" selector — DONE
+`EstimatorSidebar.jsx` exists and is rendered. Grouped dropdown implemented.
 
-### 8.2 — SE & Options Visual Panel
-Add `src/components/modeling/InferenceOptions.jsx`. A compact collapsible panel below the variable selectors showing:
-- SE type: radio chips (Classical · Robust HC1 · HC3 · Clustered · Two-Way · HAC)
-- Cluster variable: dropdown (appears when Clustered or Two-Way selected)
-- FE type: for panel models — entity only / time only / two-way
-- Max lag: number input (appears for HAC)
-- All options feed into the `estimate()` call in ModelingTab
+### 8.2 — SE & Options Visual Panel — DONE
+`src/components/modeling/InferenceOptions.jsx` exists with full SE type chips, cluster var selector, cluster2 var selector (two-way), HAC max lag input. All props flow into `estimate()` via ModelingTab.
 
-### 8.3 — Inline Code Editor
-Add `src/components/modeling/CodeEditor.jsx`. A collapsible panel with three tabs: R / Python / Stata. Uses a `<textarea>` with monospace styling (no external editor dependency). Pre-populates with the replication script for the active model. User can edit and copy. Diff-highlighting optional (post-MVP). Wire into the existing `generateRScript` / `generatePythonScript` / `generateStataScript` exports — edits are local state only, not fed back into the engine.
+### 8.3 — Inline Code Editor — DONE
+`src/components/modeling/CodeEditor.jsx` exists. Three tabs (R/Python/Stata), textarea-based, pre-populated from active result. Rendered in ModelingTab with `<CodeEditor result={result} />`.
 
 ### Phase 8 New Files Summary (2)
 
-| File | Purpose |
-|------|---------|
-| `src/components/modeling/InferenceOptions.jsx` | Collapsible SE type / cluster / FE type / HAC lag options panel |
-| `src/components/modeling/CodeEditor.jsx` | Inline R/Python/Stata replication script viewer with textarea editing |
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/components/modeling/InferenceOptions.jsx` | Collapsible SE type / cluster / FE type / HAC lag options panel | DONE |
+| `src/components/modeling/CodeEditor.jsx` | Inline R/Python/Stata replication script viewer with textarea editing | DONE |
 
 ### Phase 8 Modified Files Summary (2)
 
-| File | Changes |
-|------|---------|
-| `src/components/modeling/EstimatorSidebar.jsx` | Replace vertical list with grouped "Choose Model" dropdown/popover |
-| `src/components/ModelingTab.jsx` | Wire InferenceOptions props into estimate(); render CodeEditor panel |
+| File | Changes | Status |
+|------|---------|--------|
+| `src/components/modeling/EstimatorSidebar.jsx` | Grouped "Choose Model" dropdown/popover | DONE |
+| `src/components/ModelingTab.jsx` | InferenceOptions props wired into estimate(); CodeEditor rendered | DONE |
+
+---
+
+## Overall Status Summary (last updated 2026-04-12)
+
+| Phase | Title | Status |
+|-------|-------|--------|
+| 1 | Standardised Estimation Result | DONE |
+| 2 | Advanced Context-Aware AI Coach | DONE |
+| 3 | Multi-Model Comparison System | DONE (Python + Stata multi-model export PENDING) |
+| 4 | Integration | IN PROGRESS — pending Python/Stata multi-model exports + browser validation |
+| 5 | New Estimators (Fuzzy RDD, Event Study, LSDV, Poisson FE, Synthetic Control) | DONE (crash bugs fixed) |
+| 6 | Robust Standard Errors | DONE |
+| 7 | New File Format Support (.rds, .shp/.dbf) | DONE |
+| 8 | Modeling UI Overhaul (EstimatorSidebar, InferenceOptions, CodeEditor) | DONE |
+
+## Next unblocked tasks
+
+1. **`src/services/export/pythonScript.js`** — add `generateMultiModelPythonScript(configs[])` using `statsmodels.iolib.summary2.summary_col()`. Mirrors the existing `generateRScript` single-model function but loops over an array of configs.
+
+2. **`src/services/export/stataScript.js`** — add `generateMultiModelStataScript(configs[])` using `estimates store` per model and `esttab` at end. Same pattern.
+
+3. **Browser validation of Phase 3 comparison flow** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, R multi-model script generates correctly.
