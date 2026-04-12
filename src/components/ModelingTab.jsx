@@ -1034,7 +1034,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
         setErr(`Weight column '${wCol}' has no valid positive values.`);
         setRunning(false); return;
        }
-        res = runWLS(rows, y, allX, weights);
+        res = runWLS(rows, y, allX, weights, seOpts);
       } else {
           res = runOLS(rows, y, allX, seOpts);
       }
@@ -1150,12 +1150,14 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
 
       } else if (model === "PoissonFE") {
         if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
+        if (!panel?.entityCol) { setErr("Declare a panel structure (Entity column) in Wrangling before running Poisson FE."); setRunning(false); return; }
         const ec = panel.entityCol;
         const res = runPoissonFE(rows, y, allX, ec, seOpts);
         if (!res || res.error) { setErr(res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable."); setRunning(false); return; }
         setResult(wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars, entityCol: ec }));
 
       } else if (model === "SyntheticControl") {
+        if (!panel?.entityCol || !panel?.timeCol) { setErr("Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control."); setRunning(false); return; }
         if (!treatedUnit) { setErr("Select the treated unit."); setRunning(false); return; }
         const synthTime = parseFloat(synthTreatTime);
         if (isNaN(synthTime)) { setErr("Enter a valid treatment time period (numeric)."); setRunning(false); return; }
@@ -1390,10 +1392,10 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
                 </div>
                 <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
-                  { label: "R²",     value: r.R2.toFixed(4),     color: C.green },
-                  { label: "Adj. R²",value: r.adjR2.toFixed(4),  color: C.green },
+                  { label: "R²",     value: r.R2?.toFixed(4)    ?? "—", color: C.green },
+                  { label: "Adj. R²",value: r.adjR2?.toFixed(4) ?? "—", color: C.green },
                   { label: "F-stat", value: r.Fstat?.toFixed(3) ?? "—", color: C.gold },
-                  { label: "p(F)",   value: r.Fpval != null ? (r.Fpval < 0.001 ? "<0.001" : r.Fpval.toFixed(4)) : "—", color: r.Fpval < 0.05 ? C.gold : C.textMuted },
+                  { label: "p(F)",   value: r.Fpval != null ? (r.Fpval < 0.001 ? "<0.001" : r.Fpval.toFixed(4)) : "—", color: r.Fpval != null && r.Fpval < 0.05 ? C.gold : C.textMuted },
                   { label: "n", value: r.n, color: C.text },
                   { label: "df",value: r.df, color: C.textDim },
                 ]} />

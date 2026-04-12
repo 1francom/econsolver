@@ -131,7 +131,7 @@ export function runOLS(rows, yCol, xCols, seOpts = {}) {
 // weights: array of non-negative numbers, one per row (e.g. sampling weights).
 // Rows with weight ≤ 0 or non-finite weight are excluded.
 // Returns same shape as runOLS plus { weightCol } for display.
-export function runWLS(rows, yCol, xCols, weights) {
+export function runWLS(rows, yCol, xCols, weights, seOpts = {}) {
   const valid = rows
     .map((r, i) => ({ r, w: weights?.[i] ?? 1 }))
     .filter(({ r, w }) =>
@@ -177,7 +177,9 @@ export function runWLS(rows, yCol, xCols, weights) {
   const R2      = SST_w > 0 ? 1 - SSR_w / SST_w : 0;
   const adjR2   = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
 
-  const se     = XtWXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  let se       = XtWXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  const robustSe = computeRobustSE(seOpts, XtWXinv, X, resid, n, k, valid);
+  if (robustSe) se = robustSe;
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals  = tStats.map(t => pValue(t, df));
   const Fstat  = ((SST_w - SSR_w) / (k - 1)) / (SSR_w / Math.max(1, df));
