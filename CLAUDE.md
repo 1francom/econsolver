@@ -66,7 +66,6 @@ src/
 │   ├── data/
 │   │   ├── parsers/
 │   │   │   ├── stata.js          ← .dta parser via readstat-wasm
-│   │   │   ├── excel.js          ← SheetJS (CDN: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs)
 │   │   │   ├── rds.js            ← XDR binary R serialization reader (data.frame, tibble, named list)
 │   │   │   └── shapefile.js      ← dBase III DBF parser + SHP geometry WKT
 │   │   └── fetchers/
@@ -101,7 +100,7 @@ src/
 │   │   ├── shared.jsx            ← VarPanel, Section, Chip, C, mono (modeling-specific)
 │   │   ├── EstimatorSidebar.jsx  ← grouped "Choose Model" dropdown
 │   │   ├── VariableSelector.jsx  ← Y, X, W selectors
-│   │   ├── ModelConfiguration.jsx ← estimator-specific config (Z instruments, DiD, RDD, WLS weights)
+│   │   ├── ModelConfiguration.jsx ← estimator-specific config (Z instruments, DiD, RDD, WLS weights, SC config); setXVars destructured in props
 │   │   ├── ModelPlots.jsx        ← RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, ROC, etc.
 │   │   ├── ResidualPlots.jsx     ← ResidualVsFitted, QQPlot
 │   │   ├── DiagnosticsPanel.jsx  ← heteroskedasticity, autocorrelation, normality tests UI
@@ -112,7 +111,7 @@ src/
 │   │   └── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
 │   │
 │   ├── AIContextSidebar.jsx      ← AI context panel (sidebar)
-│   ├── ModelingTab.jsx           ← modeling tab root
+│   ├── ModelingTab.jsx           ← modeling tab root; estimate useCallback dep array includes SC/EventStudy/LSDV state
 │   └── validation/
 │       └── AuditTrail.jsx        ← surfaces auditor.js output, pipeline audit UI
 │
@@ -142,7 +141,7 @@ src/
 | Event Study | PanelEngine.js | planned |
 | Panel LSDV | PanelEngine.js | planned |
 | Poisson FE | NonLinearEngine.js | planned |
-| Synthetic Control | SyntheticControlEngine.js | planned |
+| Synthetic Control | SyntheticControlEngine.js | ⚠ not yet validated |
 
 ## Pipeline step types (runner.js) — 23 total
 Cleaning: `rename, drop, filter, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr`
@@ -159,6 +158,8 @@ Merge: `join, append`
 - **Lag/lead panel ops**: must group by entity before sorting to prevent cross-unit contamination.
 - **Winsorize**: computes p1/p99 at step-creation time, not at runtime.
 - **Fuzzy groups**: numeric variants like "comuna 1" vs "comuna 2" must never be grouped regardless of Levenshtein distance.
+- **SyntheticControl crash on predictor click**: `setXVars` was not destructured in `ModelConfiguration` props — passed as `undefined` to `SyntheticControlConfig`, crashing on any variable toggle.
+- **Stale closure in estimate() for SC/EventStudy/LSDV**: `treatedUnit`, `synthTreatTime`, `treatTimeCol`, `kPre`, `kPost`, `lsdvTimeFE` were missing from `estimate` useCallback dep array — estimation always saw initial empty state.
 
 ## AI service details
 - Model for narratives: `claude-sonnet-4-20250514`
@@ -168,11 +169,11 @@ Merge: `join, append`
 - `callClaude({ system, user, maxTokens })` strips `SHARED_CONTEXT` from exported prompts before sending (it adds it as the cached block automatically)
 
 ## Pending (ordered by priority)
-1. **Estimator validation vs R** — systematic benchmark: RDD (rdrobust), Panel FE (fixest), 2SLS (AER), Logit/Probit (base R `glm`), GMM. Harness in `math/__validation__/engineValidation.js`.
+1. **Estimator validation vs R** — systematic benchmark: RDD (rdrobust), Panel FE (fixest), 2SLS (AER), Logit/Probit (base R `glm`), GMM, Synthetic Control. Harness in `math/__validation__/engineValidation.js`.
 2. **DuckDB-WASM** — final compute target for datasets > 50k rows.
-3. **Phase 6 — Robust Standard Errors** — `src/core/inference/robustSE.js` with HC0/HC1/HC2/HC3, clustered, two-way (Cameron-Gelbach-Miller), Newey-West HAC. Wire `seType` arg into all engines. Add SE type radio group + cluster/lag selectors to `ModelConfiguration.jsx`. Validate HC1 and clustered SE against R `sandwich::vcovHC` and `lmtest::coeftest` to 4dp.
-4. **Phase 7 — New File Format Support** — `src/services/data/parsers/rds.js` (.rds via r-data.js) and `src/services/data/parsers/shapefile.js` (.shp via shapefile npm). Both return `{ headers, rows }` shape identical to CSV/Excel parsers.
-5. **Phase 8 — Modeling UI Overhaul** — 8.1: grouped "Choose Model" dropdown replacing EstimatorSidebar vertical list. 8.2: `InferenceOptions.jsx` collapsible SE/FE options panel. 8.3: `CodeEditor.jsx` inline R/Python/Stata replication script viewer with textarea editing.
+3. ~~**Phase 6 — Robust Standard Errors**~~ — `src/core/inference/robustSE.js` implemented with HC0/HC1/HC2/HC3, clustered, two-way (Cameron-Gelbach-Miller), Newey-West HAC. `seType` wired into engines. `InferenceOptions.jsx` SE type selector implemented. Validation vs R `sandwich::vcovHC` still pending.
+4. ~~**Phase 7 — New File Format Support**~~ — `src/services/data/parsers/rds.js` and `src/services/data/parsers/shapefile.js` implemented. Note: `excel.js` not yet committed to repo.
+5. ~~**Phase 8 — Modeling UI Overhaul**~~ — `EstimatorSidebar.jsx` grouped dropdown, `InferenceOptions.jsx`, and `CodeEditor.jsx` all implemented.
 
 ## Reserved (post-MVP)
 - `math/ml/` — DML, Lasso, Ridge, Forest
