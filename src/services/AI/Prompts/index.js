@@ -93,7 +93,7 @@ STRICT RULES:
 `;
 
 // ─── PROMPT: INTERPRET REGRESSION ────────────────────────────────────────────
-// v1.3 — variable metadata block + stricter dummy/categorical/interaction rules
+// v1.4 — rules H (standardized) + I (lag/lead); value-based binary detection via rows
 export const INTERPRET_REGRESSION_PROMPT = `\
 ${SHARED_CONTEXT}
 ────────────────────────────────────────────────────────────────────
@@ -144,6 +144,19 @@ G. CONTINUOUS VARIABLES  [metadata tag: continuous]
    "One additional year of education is associated with…"
    "A one-percentage-point increase in the unemployment rate…"
    NEVER say "a one-unit increase" if the unit is stated in the dictionary.
+
+H. STANDARDIZED VARIABLES  [metadata tag: standardized]
+   The coefficient is in SD units — NEVER say "one unit increase":
+   "A one-standard-deviation increase in [base variable] is associated with β [units of Y]."
+   This framing makes the effect size comparable across variables with different natural scales.
+   If the base variable name is identifiable (e.g. gdp_std → gdp), use it.
+
+I. LAGGED / LEADING VARIABLES  [metadata tag: lag-var | lead-var]
+   The effect operates with temporal delay — state this explicitly:
+   "A one-unit increase in [X] in the previous period is associated with β [units] change
+   in [Y] in the current period."
+   For leads: "...in the following period..."
+   Never omit the temporal structure — it is essential for causal interpretation.
 
 ━━━ FUNCTIONAL FORM (when no metadata overrides) ━━━
    • Log-Log   → elasticity: "a 1% increase in X → β% change in Y."

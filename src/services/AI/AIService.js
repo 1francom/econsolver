@@ -161,7 +161,18 @@ export async function inferVariableUnits(headers, sampleRows) {
 
 // Classifies each regressor and returns a VARIABLE METADATA block for the prompt.
 // The model reads this block to pick the right natural-language pattern (rule A–G).
-function _classifyVariables(varNames, dataDictionary = {}) {
+function _classifyVariables(varNames, dataDictionary = {}, rows = null) {
+  // Value-based binary detection: if every non-null value is 0 or 1 → binary.
+  // Uses Number() coercion to handle string "0"/"1" and boolean true/false from pipeline steps.
+  const isBinaryInData = v => {
+    if (!rows?.length) return false;
+    const vals = rows.map(r => r[v]).filter(x => x !== null && x !== undefined);
+    return vals.length > 0 && vals.every(x => {
+      const n = Number(x);
+      return (n === 0 || n === 1) && !isNaN(n);
+    });
+  };
+
   // Common demographic / group dummies: name → { oneLabel, zeroLabel }
   const DEMO_MAP = {
     female:   { one: "female",   zero: "male"        },
@@ -241,6 +252,30 @@ function _classifyVariables(varNames, dataDictionary = {}) {
       return;
     }
 
+    // ── Standardized (z-score) ────────────────────────────────────────────
+    if (/_std$|_z$|_zscore$/i.test(v) || /standardized/i.test(dict)) {
+      const base = v.replace(/_std$|_z$|_zscore$/i, "");
+      lines.push(`  ${v}: standardized | one SD increase in "${base}" — do NOT say "one unit increase"`);
+      return;
+    }
+
+    // ── Lagged / leading variable ─────────────────────────────────────────
+    if (/_lag\d*$|_l\d+$|_lead\d*$/i.test(v) || /lagged/i.test(dict)) {
+      const isLead = /_lead/i.test(v);
+      lines.push(`  ${v}: ${isLead ? "lead" : "lag"}-var | effect operates with temporal delay — state the lag explicitly`);
+      return;
+    }
+
+    // ── Generic binary: value-check OR suffix ─────────────────────────────
+    if (isBinaryInData(v) ||
+        /_d$|_dummy$|_bin$|_flag$|_indicator$|_eligible$|_treat$|_control$/i.test(v)) {
+      const dictLabel = dict && !/^entity identifier$/i.test(dict) ? dict : null;
+      lines.push(dictLabel
+        ? `  ${v}: binary-dummy | 1="${dictLabel}", 0=reference/comparison group`
+        : `  ${v}: binary-dummy | binary indicator — name the active group (1=?) and reference group (0=?)`);
+      return;
+    }
+
     // ── Squared term ──────────────────────────────────────────────────────
     if (/_sq$|_2$|²/.test(v) || /squared/i.test(dict)) {
       lines.push(`  ${v}: squared-term | non-linear component, interpret jointly with linear term`);
@@ -299,7 +334,7 @@ function buildCoeffLines(result) {
     .join("\n");
 }
 
-export async function interpretRegression(result, dataDictionary = null, metadataReport = null) {
+export async function interpretRegression(result, dataDictionary = null, metadataReport = null, rows = null) {
   if (!result) throw new Error("No result object provided.");
 
   const {
@@ -341,7 +376,7 @@ export async function interpretRegression(result, dataDictionary = null, metadat
   const funcForm    = detectFunctionalForm(yVar, allXVars);
   const coeffLines  = buildCoeffLines(result);
   const dictSection = buildDictionarySection(dataDictionary);
-  const metaBlock   = _classifyVariables(varNames, dataDictionary);
+  const metaBlock   = _classifyVariables(varNames, dataDictionary, rows);
 
   const metaCtx = metadataReport ? buildMetadataContext(metadataReport) : "";
   const userPrompt = `\
