@@ -528,7 +528,7 @@ function NarrativeSkeleton() {
   );
 }
 
-function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
+function AINarrative({ result, modelLabel, yVar, dataDictionary, rows }) {
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
@@ -549,7 +549,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
     setError("");
 
     try {
-      const out = await interpretRegression(result, hasDictionary ? dataDictionary : null);
+      const out = await interpretRegression(result, hasDictionary ? dataDictionary : null, null, rows);
       if (abortRef.current === token) {
         setText(out.trim());
       }
@@ -958,6 +958,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
                 modelLabel={modelLabel}
                 yVar={yVar}
                 dataDictionary={cleanedData?.dataDictionary ?? null}
+                rows={cleanedData?.cleanRows ?? null}
               />
             </div>
           )}
