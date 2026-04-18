@@ -98,34 +98,49 @@ function parseCSV(text, delimiter = ",") {
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
 // Excel parser — loads SheetJS from CDN (same pattern as App.jsx, avoids Vite bare-module error)
 async function parseExcel(file) {
-  try {
-    const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
-    const buf  = await file.arrayBuffer();
-    const wb   = read(buf, { type: "array", cellDates: true });
-    const ws   = wb.Sheets[wb.SheetNames[0]];
-    const data = utils.sheet_to_json(ws, { defval: null, raw: false });
-    if (!data.length) return null;
+  const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+  const buf = await file.arrayBuffer();
+  const wb  = read(buf, { type: "array", cellDates: true });
+  const ws  = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error("Excel file has no sheets.");
+  const data = utils.sheet_to_json(ws, { defval: null, raw: false });
+  if (!data.length) throw new Error("Excel sheet is empty — no rows found.");
 
-    const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
-    const headers = Object.keys(data[0]);
-    const rows = data.map(r => {
-      const row = {};
-      headers.forEach(h => {
-        const v = r[h];
-        if (v === null || v === undefined) { row[h] = null; return; }
-        if (typeof v === "number") { row[h] = v; return; }
-        const t = String(v).trim();
-        if (!t || NA_PAT.test(t)) { row[h] = null; return; }
-        const n = Number(t.replace(/,(?=\d{3})/g, ""));
-        row[h] = isNaN(n) ? t : n;
-      });
-      return row;
+  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+  const headers = Object.keys(data[0]);
+  const rows = data.map(r => {
+    const row = {};
+    headers.forEach(h => {
+      const v = r[h];
+      if (v === null || v === undefined) { row[h] = null; return; }
+      if (typeof v === "number") { row[h] = v; return; }
+      const t = String(v).trim();
+      if (!t || NA_PAT.test(t)) { row[h] = null; return; }
+      const n = Number(t.replace(/,(?=\d{3})/g, ""));
+      row[h] = isNaN(n) ? t : n;
     });
-    return { headers, rows };
-  } catch (e) {
-    console.error("Excel parse failed:", e);
-    return null;
-  }
+    return row;
+  });
+  return { headers, rows };
+}
+
+// ─── DELIMITER DETECTION ─────────────────────────────────────────────────────
+// Samples up to 5 non-empty lines and picks the most frequent candidate delimiter.
+// Handles comma, semicolon, tab, pipe — covers sep=",", sep=";", sep="\t", sep="|".
+function detectDelimiter(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 5);
+  if (!lines.length) return ",";
+  let tabs = 0, commas = 0, semis = 0, pipes = 0;
+  lines.forEach(l => {
+    tabs  += (l.match(/\t/g)  || []).length;
+    commas += (l.match(/,/g)  || []).length;
+    semis  += (l.match(/;/g)  || []).length;
+    pipes  += (l.match(/\|/g) || []).length;
+  });
+  if (tabs  > commas && tabs  > semis && tabs  > pipes) return "\t";
+  if (semis > commas && semis > pipes && semis > tabs)  return ";";
+  if (pipes > commas && pipes > semis && pipes > tabs)  return "|";
+  return ",";
 }
 
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
@@ -133,7 +148,7 @@ async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   if (["csv", "txt"].includes(ext)) {
     const text = await file.text();
-    return parseCSV(text, ",");
+    return parseCSV(text, detectDelimiter(text));
   }
   if (ext === "tsv") {
     const text = await file.text();
@@ -165,18 +180,10 @@ async function parseFile(file) {
       "The .dbf contains the data table. The .shp geometry will be omitted."
     );
   }
-  // Unknown extension: try CSV as fallback
+  // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
     const text = await file.text();
-    // Detect delimiter heuristically from first line
-    const first = text.split("\n")[0];
-    const tabs   = (first.match(/\t/g) || []).length;
-    const commas = (first.match(/,/g)  || []).length;
-    const semis  = (first.match(/;/g)  || []).length;
-    const delim  = tabs > commas && tabs > semis ? "\t"
-                 : semis > commas ? ";"
-                 : ",";
-    return parseCSV(text, delim);
+    return parseCSV(text, detectDelimiter(text));
   } catch { return null; }
 }
 
