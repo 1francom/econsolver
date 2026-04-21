@@ -4,6 +4,7 @@
 import { useState, useMemo } from "react";
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
+import PlotBuilder from "./components/PlotBuilder.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -806,7 +807,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
         <AIInsights rows={rows} headers={headers} info={info} panel={panel}/>
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-          {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"]].map(([k,l])=>(
+          {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"]].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"0.6rem 0.7rem",background:tab===k?C.goldFaint:C.surface,border:"none",color:tab===k?C.gold:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,borderBottom:tab===k?`2px solid ${C.gold}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>
           ))}
         </div>
@@ -821,6 +822,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={rows} headers={headers} info={info} panel={panel}/>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={rows} style={{marginTop:"0.25rem"}}/>}
       </div>
     </div>
   );
