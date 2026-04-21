@@ -94,7 +94,8 @@ src/
 │   │   ├── MergeTab.jsx          ← LEFT/INNER JOIN + APPEND
 │   │   ├── DataQualityReport.jsx
 │   │   ├── WorldBankFetcher.jsx  ← World Bank data fetch UI
-│   │   └── OECDFetcher.jsx       ← OECD data fetch UI
+│   │   ├── OECDFetcher.jsx       ← OECD data fetch UI
+│   │   └── SubsetManager.jsx     ← multi-subset workflow UI
 │   │
 │   ├── modeling/
 │   │   ├── shared.jsx            ← VarPanel, Section, Chip, C, mono (modeling-specific)
@@ -112,13 +113,14 @@ src/
 │   │
 │   ├── AIContextSidebar.jsx      ← AI context panel (sidebar)
 │   ├── ModelingTab.jsx           ← modeling tab root; estimate useCallback dep array includes SC/EventStudy/LSDV state
+│   ├── PlotBuilder.jsx           ← G1+G2+G8: layer-based plot builder (Observable Plot 0.6 CDN); point/line/bar/histogram/density geoms; aesthetic mappings (x, y, color); labels panel; ResizeObserver responsive; dark theme patched
 │   └── validation/
 │       └── AuditTrail.jsx        ← surfaces auditor.js output, pipeline audit UI
 │
 ├── EconometricsEngine.js  ← legacy engine shim
 ├── WranglingModule.jsx    ← root orchestrator, pipeline state, tab router
 ├── ReportingModule.jsx    ← LaTeX Stargazer, forest plots, AI narrative
-├── ExplorerModule.jsx     ← dataset explorer
+├── ExplorerModule.jsx     ← dataset explorer; G11: "◈ Plot Builder" tab renders PlotBuilder in free mode
 ├── App.jsx                ← top-level router
 └── DataStudio.jsx         ← project shell (pid-scoped, IndexedDB)
 ```
