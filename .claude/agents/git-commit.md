@@ -24,7 +24,7 @@ You are a git automation agent for EconSolver (repo: 1francom/econsolver).
    ```
 5. Run `git add -A` (or targeted `git add` for specific files).
 6. Run `git commit -m "..."`.
-7. Run `git push origin main`.
+7. Run `git push origin HEAD` (never hardcode a branch name — push the current branch to its remote tracking ref).
 8. If any new files were added to `src/`, update the file structure section in `CLAUDE.md`.
 
 ## Commit message rules

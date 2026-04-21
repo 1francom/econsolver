@@ -20,13 +20,15 @@ First, classify the symptom:
 ## Workflow
 
 1. Get symptom from user. Check known patterns above first.
-2. `get_minimal_context(task="<symptom>")` if code-review-graph available.
+2. **ALWAYS start with code-review-graph** (per CLAUDE.md invariant — faster and cheaper than file scanning):
+   - `semantic_search_nodes` to find the crashed function.
+   - `query_graph pattern="callers_of" node="<crashed function>"` to trace trigger.
+   - `detect_changes` if crash appeared recently.
+   - `get_impact_radius` to understand blast radius before touching anything.
 3. Open DevTools Console mentally — ask user for the FIRST red error if not provided.
-4. `query_graph pattern="callers_of" node="<crashed function>"` to trace trigger.
-5. `detect_changes` if crash appeared recently.
-6. Read ONLY the file containing the root cause — not the whole component.
-7. Apply `str_replace` fix. State: file, lines affected, what's removed, what's added.
-8. List any other files that need the same fix (blast radius).
+4. Read ONLY the file containing the root cause — not the whole component.
+5. Apply `str_replace` fix. State: file, lines affected, what's removed, what's added.
+6. List any other files that need the same fix (blast radius).
 
 ## Fix conventions
 - Hooks in conditionals → move to top level unconditionally.

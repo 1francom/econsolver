@@ -31,6 +31,7 @@ import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
+import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
 import { C, mono }         from "../components/modeling/shared.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
@@ -983,6 +984,9 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const [err,          setErr]          = useState(null);
   const [reportResult, setReportResult] = useState(null);
 
+  // ── Subsets ───────────────────────────────────────────────────────────────
+  const [subsets, setSubsets] = useState([]);
+
   // ── Model buffer (pinned models) ──────────────────────────────────────────
   const [bufferVersion, setBufferVersion] = useState(0);
   const [compareOpen,   setCompareOpen]   = useState(false);
@@ -1013,164 +1017,191 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
     setModel(id); setResult(null); setErr(null); setSeType("classical");
   }, []);
 
-  // ── ESTIMATE ────────────────────────────────────────────────────────────────
-  const estimate = useCallback(() => {
-    setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
+  // ── PURE ESTIMATION HELPER (no setState) ────────────────────────────────────
+  // Returns { result, panelFE, panelFD } on success, { error } on failure.
+  // dataRows is passed explicitly so runAllSubsets can call it on filtered data.
+  const _runEstimation = useCallback((dataRows) => {
     const y = yVar[0];
-    if (!y) { setErr("Select a dependent variable (Y)."); setRunning(false); return; }
+    if (!y) return { error: "Select a dependent variable (Y)." };
     try {
       const allX = [...xVars, ...wVars];
 
       if (model === "OLS") {
-      if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
+        if (!allX.length) return { error: "Select at least one regressor." };
         const wCol = weightVar[0];
-       let res;
-      if (wCol) {
-       const weights = rows.map(r => {
-       const v = r[wCol];
-       return typeof v === "number" && isFinite(v) && v > 0 ? v : null;
-       });
-      if (weights.every(w => w === null)) {
-        setErr(`Weight column '${wCol}' has no valid positive values.`);
-        setRunning(false); return;
-       }
-        res = runWLS(rows, y, allX, weights, seOpts);
-      } else {
-          res = runOLS(rows, y, allX, seOpts);
-      }
-      if (!res) { setErr("Matrix is singular or insufficient data."); setRunning(false); return; }
-      const olsType = wCol ? "WLS" : "OLS";
-      setResult(wrapResult(olsType, res, { yVar: y, xVars, wVars, weightCol: wCol ?? null }));
-      }
-       else if (model === "FE" || model === "FD") {
-        if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
+        let res;
+        if (wCol) {
+          const weights = dataRows.map(r => {
+            const v = r[wCol];
+            return typeof v === "number" && isFinite(v) && v > 0 ? v : null;
+          });
+          if (weights.every(w => w === null))
+            return { error: `Weight column '${wCol}' has no valid positive values.` };
+          res = runWLS(dataRows, y, allX, weights, seOpts);
+        } else {
+          res = runOLS(dataRows, y, allX, seOpts);
+        }
+        if (!res) return { error: "Matrix is singular or insufficient data." };
+        const olsType = wCol ? "WLS" : "OLS";
+        return { result: wrapResult(olsType, res, { yVar: y, xVars, wVars, weightCol: wCol ?? null }), panelFE: null, panelFD: null };
+
+      } else if (model === "FE" || model === "FD") {
+        if (!allX.length) return { error: "Select at least one regressor." };
         const ec = panel.entityCol, tc = panel.timeCol;
-        const feRaw = runFE(rows, y, allX, ec, tc, seOpts);
-        const fdRaw = runFD(rows, y, allX, ec, tc, seOpts);
+        const feRaw = runFE(dataRows, y, allX, ec, tc, seOpts);
+        const fdRaw = runFD(dataRows, y, allX, ec, tc, seOpts);
         const fe = feRaw?.error ? null : feRaw;
         const fd = fdRaw?.error ? null : fdRaw;
-        if (!fe && !fd) {
-          setErr(feRaw?.error ?? fdRaw?.error ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid.");
-          setRunning(false); return;
-        }
+        if (!fe && !fd)
+          return { error: feRaw?.error ?? fdRaw?.error ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid." };
         const panelSpec = { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc };
         const feRes = fe ? wrapResult("FE", fe, panelSpec) : null;
         const fdRes = fd ? wrapResult("FD", fd, panelSpec) : null;
-        setPanelFE(feRes); setPanelFD(fdRes);
-        setResult({ type: model, fe: feRes, fd: fdRes });
+        return { result: { type: model, fe: feRes, fd: fdRes }, panelFE: feRes, panelFD: fdRes };
 
       } else if (model === "2SLS") {
-        if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
-        if (!zVars.length) { setErr("Select at least one instrument (Z)."); setRunning(false); return; }
-        const res = run2SLS(rows, y, xVars, wVars, zVars, seOpts);
-        if (!res || res.error) { setErr(res?.error ?? "2SLS failed. Check that instruments are valid (not in X) and data is sufficient."); setRunning(false); return; }
-        setResult(wrapResult("2SLS", res, { yVar: y, xVars, wVars, zVars }));
+        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!zVars.length) return { error: "Select at least one instrument (Z)." };
+        const res = run2SLS(dataRows, y, xVars, wVars, zVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "2SLS failed. Check that instruments are valid (not in X) and data is sufficient." };
+        return { result: wrapResult("2SLS", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
 
       } else if (model === "DiD") {
-        if (!postVar[0] || !treatVar[0]) { setErr("Select Post and Treated binary columns for DiD."); setRunning(false); return; }
-        const res = run2x2DiD(rows, y, postVar[0], treatVar[0], wVars, seOpts);
-        if (!res) { setErr("DiD failed. Post and Treated must be 0/1 binary variables."); setRunning(false); return; }
-        setResult(wrapResult("DiD", res, { yVar: y, wVars, postVar: postVar[0], treatVar: treatVar[0] }));
+        if (!postVar[0] || !treatVar[0]) return { error: "Select Post and Treated binary columns for DiD." };
+        const res = run2x2DiD(dataRows, y, postVar[0], treatVar[0], wVars, seOpts);
+        if (!res) return { error: "DiD failed. Post and Treated must be 0/1 binary variables." };
+        return { result: wrapResult("DiD", res, { yVar: y, wVars, postVar: postVar[0], treatVar: treatVar[0] }), panelFE: null, panelFD: null };
 
       } else if (model === "TWFE") {
-        if (!treatVar[0]) { setErr("Select the treatment indicator column."); setRunning(false); return; }
+        if (!treatVar[0]) return { error: "Select the treatment indicator column." };
         const ec = panel.entityCol, tc = panel.timeCol;
-        const res = runTWFEDiD(rows, y, ec, tc, treatVar[0], wVars, seOpts);
-        if (!res) { setErr("TWFE DiD failed. Check panel structure and treatment variable."); setRunning(false); return; }
-        setResult(wrapResult("TWFE", res, { yVar: y, wVars, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }));
+        const res = runTWFEDiD(dataRows, y, ec, tc, treatVar[0], wVars, seOpts);
+        if (!res) return { error: "TWFE DiD failed. Check panel structure and treatment variable." };
+        return { result: wrapResult("TWFE", res, { yVar: y, wVars, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }), panelFE: null, panelFD: null };
 
       } else if (model === "RDD") {
-        if (!runningVar[0]) { setErr("Select a running variable."); setRunning(false); return; }
+        if (!runningVar[0]) return { error: "Select a running variable." };
         const c0 = parseFloat(cutoff);
-        if (isNaN(c0)) { setErr("Enter a valid cutoff value."); setRunning(false); return; }
-        const runVals = rows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
-        const yVals   = rows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
+        if (isNaN(c0)) return { error: "Enter a valid cutoff value." };
+        const runVals = dataRows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
+        const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
         const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
-        if (isNaN(h) || h <= 0) { setErr("Invalid bandwidth."); setRunning(false); return; }
-        const res = runSharpRDD(rows, y, runningVar[0], c0, h, kernel, wVars);
-        if (!res) { setErr("RDD failed. Not enough observations within bandwidth."); setRunning(false); return; }
-        setResult(wrapResult("RDD", res, { yVar: y, wVars, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }, { h }));
+        if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
+        const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, wVars);
+        if (!res) return { error: "RDD failed. Not enough observations within bandwidth." };
+        return { result: wrapResult("RDD", res, { yVar: y, wVars, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }, { h }), panelFE: null, panelFD: null };
 
       } else if (model === "Logit" || model === "Probit") {
-        if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
+        if (!allX.length) return { error: "Select at least one regressor (X)." };
         const fn  = model === "Logit" ? runLogit : runProbit;
-        const res = fn(rows, y, allX, seOpts);
-        if (!res || res.error) {
-          setErr(res?.error ?? `${model} failed. Ensure Y is binary (0/1) and X columns are numeric.`);
-          setRunning(false); return;
-        }
+        const res = fn(dataRows, y, allX, seOpts);
+        if (!res || res.error) return { error: res?.error ?? `${model} failed. Ensure Y is binary (0/1) and X columns are numeric.` };
         if (!res.converged) console.warn(`${model} did not converge after ${res.iterations} iterations.`);
-        setResult(wrapResult(model, res, { yVar: y, xVars, wVars }));
+        return { result: wrapResult(model, res, { yVar: y, xVars, wVars }), panelFE: null, panelFD: null };
 
       } else if (model === "GMM") {
-        if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
-        if (!zVars.length) { setErr("Select at least one excluded instrument (Z)."); setRunning(false); return; }
-        const res = runGMM(rows, y, xVars, wVars, zVars, seOpts);
-        if (!res || res.error) { setErr(res?.error ?? "GMM failed. Check instruments and data."); setRunning(false); return; }
-        setResult(wrapResult("GMM", res, { yVar: y, xVars, wVars, zVars }));
+        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!zVars.length) return { error: "Select at least one excluded instrument (Z)." };
+        const res = runGMM(dataRows, y, xVars, wVars, zVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "GMM failed. Check instruments and data." };
+        return { result: wrapResult("GMM", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
 
       } else if (model === "LIML") {
-        if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
-        if (!zVars.length) { setErr("Select at least one excluded instrument (Z)."); setRunning(false); return; }
-        const res = runLIML(rows, y, xVars, wVars, zVars, seOpts);
-        if (!res || res.error) { setErr(res?.error ?? "LIML failed. Check instruments and data."); setRunning(false); return; }
-        setResult(wrapResult("LIML", res, { yVar: y, xVars, wVars, zVars }));
+        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!zVars.length) return { error: "Select at least one excluded instrument (Z)." };
+        const res = runLIML(dataRows, y, xVars, wVars, zVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "LIML failed. Check instruments and data." };
+        return { result: wrapResult("LIML", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
 
-      // ── Planned estimators (stubs) ─────────────────────────────────────────
       } else if (model === "WLS") {
-        setErr("WLS: select OLS and set a weight variable in Model Configuration.");
+        return { error: "WLS: select OLS and set a weight variable in Model Configuration." };
+
       } else if (model === "LSDV") {
-        if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
+        if (!allX.length) return { error: "Select at least one regressor (X)." };
         const ec = panel.entityCol, tc = panel.timeCol;
-        const res = runLSDV(rows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts);
-        if (!res || res.error) { setErr(res?.error ?? "LSDV failed. Check panel structure."); setRunning(false); return; }
-        setResult(wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc }));
+        const res = runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };
+        return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc }), panelFE: null, panelFD: null };
 
       } else if (model === "EventStudy") {
-        if (!treatTimeCol[0]) { setErr("Select the treatment time column (period when each unit was first treated)."); setRunning(false); return; }
+        if (!treatTimeCol[0]) return { error: "Select the treatment time column (period when each unit was first treated)." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const pre  = Math.max(1, kPre  || 3);
         const post = Math.max(1, kPost || 3);
-        const res = runEventStudy(rows, y, ec, tc, treatTimeCol[0], pre, post, wVars, seOpts);
-        if (!res || res.error) { setErr(res?.error ?? "Event Study failed. Check panel structure and treatment time column."); setRunning(false); return; }
-        setResult(wrapResult("EventStudy", res, { yVar: y, xVars, wVars, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }));
+        const res = runEventStudy(dataRows, y, ec, tc, treatTimeCol[0], pre, post, wVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "Event Study failed. Check panel structure and treatment time column." };
+        return { result: wrapResult("EventStudy", res, { yVar: y, xVars, wVars, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }), panelFE: null, panelFD: null };
 
       } else if (model === "FuzzyRDD") {
-        if (!treatVar[0])  { setErr("Select the treatment receipt column (D: actual 0/1 take-up)."); setRunning(false); return; }
-        if (!runningVar[0]){ setErr("Select a running variable."); setRunning(false); return; }
+        if (!treatVar[0])   return { error: "Select the treatment receipt column (D: actual 0/1 take-up)." };
+        if (!runningVar[0]) return { error: "Select a running variable." };
         const c0 = parseFloat(cutoff);
-        if (isNaN(c0)) { setErr("Enter a valid cutoff value."); setRunning(false); return; }
-        const runVals = rows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
-        const yVals   = rows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
+        if (isNaN(c0)) return { error: "Enter a valid cutoff value." };
+        const runVals = dataRows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
+        const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
         const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
-        if (isNaN(h) || h <= 0) { setErr("Invalid bandwidth."); setRunning(false); return; }
-        const res = runFuzzyRDD(rows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts });
-        if (!res || res.error) { setErr(res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth."); setRunning(false); return; }
-        setResult(wrapResult("FuzzyRDD", res, { yVar: y, wVars, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }));
+        if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
+        const res = runFuzzyRDD(dataRows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts });
+        if (!res || res.error) return { error: res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth." };
+        return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }), panelFE: null, panelFD: null };
 
       } else if (model === "PoissonFE") {
-        if (!allX.length) { setErr("Select at least one regressor (X)."); setRunning(false); return; }
-        if (!panel?.entityCol) { setErr("Declare a panel structure (Entity column) in Wrangling before running Poisson FE."); setRunning(false); return; }
+        if (!allX.length) return { error: "Select at least one regressor (X)." };
+        if (!panel?.entityCol) return { error: "Declare a panel structure (Entity column) in Wrangling before running Poisson FE." };
         const ec = panel.entityCol;
-        const res = runPoissonFE(rows, y, allX, ec, seOpts);
-        if (!res || res.error) { setErr(res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable."); setRunning(false); return; }
-        setResult(wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars, entityCol: ec }));
+        const res = runPoissonFE(dataRows, y, allX, ec, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
+        return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars, entityCol: ec }), panelFE: null, panelFD: null };
 
       } else if (model === "SyntheticControl") {
-        if (!panel?.entityCol || !panel?.timeCol) { setErr("Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control."); setRunning(false); return; }
-        if (!treatedUnit) { setErr("Select the treated unit."); setRunning(false); return; }
+        if (!panel?.entityCol || !panel?.timeCol) return { error: "Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control." };
+        if (!treatedUnit) return { error: "Select the treated unit." };
         const synthTime = parseFloat(synthTreatTime);
-        if (isNaN(synthTime)) { setErr("Enter a valid treatment time period (numeric)."); setRunning(false); return; }
+        if (isNaN(synthTime)) return { error: "Enter a valid treatment time period (numeric)." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const predictors = xVars.length ? xVars : [];
-        const res = runSyntheticControl(rows, y, ec, tc, treatedUnit, synthTime, { predictorCols: predictors });
-        setResult(wrapResult("SyntheticControl", res, { yVar: y, xVars, entityCol: ec, timeCol: tc, treatedUnit, treatTime: synthTime }));
+        const res = runSyntheticControl(dataRows, y, ec, tc, treatedUnit, synthTime, { predictorCols: predictors });
+        return { result: wrapResult("SyntheticControl", res, { yVar: y, xVars, entityCol: ec, timeCol: tc, treatedUnit, treatTime: synthTime }), panelFE: null, panelFD: null };
       }
+
+      return { error: `Unknown estimator: ${model}` };
     } catch (e) {
-      setErr(`Estimation error: ${e.message}`);
+      return { error: `Estimation error: ${e.message}` };
+    }
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+
+  // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
+  const estimate = useCallback(() => {
+    setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
+    const out = _runEstimation(rows);
+    if (out.error) { setErr(out.error); }
+    else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
+    setRunning(false);
+  }, [rows, _runEstimation]);
+
+  // ── RUN ALL SUBSETS ───────────────────────────────────────────────────────────
+  const runAllSubsets = useCallback(() => {
+    if (!subsets.length) return;
+    setRunning(true);
+    // Full sample
+    const fullOut = _runEstimation(rows);
+    if (!fullOut.error && fullOut.result) {
+      const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
+      modelBuffer.add(r);
+      setBufferVersion(v => v + 1);
+    }
+    // Each named subset
+    for (const s of subsets) {
+      const filtered = applySubsetFilter(rows, s.filters);
+      const out = _runEstimation(filtered);
+      if (!out.error && out.result) {
+        const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
+        modelBuffer.add(r);
+        setBufferVersion(v => v + 1);
+      }
     }
     setRunning(false);
-    } ,[model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, rows, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+  }, [subsets, rows, _runEstimation]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -1284,6 +1315,15 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
           />
 
           <CodeEditor result={result} />
+
+          <SubsetManager
+            headers={headers}
+            rows={rows}
+            subsets={subsets}
+            onChange={setSubsets}
+            onRunAll={runAllSubsets}
+            running={running}
+          />
 
           <button
             onClick={estimate}
