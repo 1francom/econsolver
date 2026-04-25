@@ -1,10 +1,11 @@
 // ─── ECON STUDIO · App.jsx ────────────────────────────────────────────────────
 // Root orchestrator. Manages global state and screen routing.
 // All heavy logic lives in the module files — this file should stay thin.
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import DataStudio from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
-import ModelingTab from './ModelingTab';
+import ModelingTab from './components/ModelingTab.jsx';
+import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from "./services/persistence/indexedDB.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -259,57 +260,363 @@ function OutputReview({result, onBack, onExplore}) {
 }
 
 // ─── PROJECT DASHBOARD ────────────────────────────────────────────────────────
+// Reads from IndexedDB (async). Layout: project list left, actions right.
+// Mirrors R/Gretl workspace model — projects are first-class, datasets are children.
+
 function Dashboard({onNew, onLoad}) {
-  const projects = lsGet();
-  const fmt = ts=>ts?new Date(ts).toLocaleDateString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"—";
-  return(
-    <div style={{maxWidth:780,margin:"0 auto",padding:"2.5rem 2rem"}}>
-      <div style={{marginBottom:"2rem"}}>
-        <div style={{fontSize:9,color:C.teal,letterSpacing:"0.28em",textTransform:"uppercase",marginBottom:5,fontFamily:mono}}>LMU Munich · Econometrics</div>
-        <div style={{fontSize:26,color:C.text,letterSpacing:"-0.02em",marginBottom:4}}>Econ Studio</div>
-        <div style={{fontSize:12,color:C.textDim,fontFamily:mono}}>Non-destructive data preparation · OLS · 2SLS · Panel FE/FD · RDD · DiD</div>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1.5rem"}}>
-        <div onClick={onNew} style={{border:`1px solid ${C.border2}`,borderRadius:6,padding:"1.4rem",background:C.goldFaint,cursor:"pointer",textAlign:"center",transition:"background 0.15s"}}
-          onMouseOver={e=>e.currentTarget.style.background="#201808"} onMouseOut={e=>e.currentTarget.style.background=C.goldFaint}>
-          <div style={{fontSize:22,marginBottom:8}}>⊕</div>
-          <div style={{fontSize:14,color:C.gold,marginBottom:4}}>New Project</div>
-          <div style={{fontSize:11,color:C.goldDim,fontFamily:mono}}>Upload CSV / XLSX / Stata .dta or load demo</div>
+  const [projects, setProjects]   = useState([]);
+  const [expanded, setExpanded]   = useState({});
+  const [loading,  setLoading]    = useState(true);
+  const [selected, setSelected]   = useState(null);
+
+  const fmt = ts => ts
+    ? new Date(ts).toLocaleDateString("en-GB", {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})
+    : "—";
+
+  useEffect(() => {
+    listPipelines()
+      .then(list => { setProjects(list); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  async function handleDelete(pid, e) {
+    e.stopPropagation();
+    await deletePipeline(pid);
+    setProjects(p => p.filter(x => x.id !== pid));
+    if (selected === pid) setSelected(null);
+  }
+
+  async function handleClearAll() {
+    await clearAllPipelines();
+    setProjects([]);
+    setSelected(null);
+  }
+
+  const selProject = projects.find(p => p.id === selected);
+
+  // ── Layout: two-panel like RStudio/Gretl ──────────────────────────────────
+  return (
+    <div style={{
+      display: "flex", height: "100%", minHeight: 0,
+      background: C.bg, fontFamily: mono, overflow: "hidden",
+    }}>
+
+      {/* ── LEFT: Project list ── */}
+      <div style={{
+        width: 340, flexShrink: 0,
+        borderRight: `1px solid ${C.border}`,
+        display: "flex", flexDirection: "column",
+        background: C.surface, overflow: "hidden",
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: "1rem 1rem 0.7rem",
+          borderBottom: `1px solid ${C.border}`,
+          flexShrink: 0,
+        }}>
+          <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
+            Econ Studio
+          </div>
+          <div style={{fontSize:15,color:C.text,letterSpacing:"-0.01em",marginBottom:1}}>
+            Projects
+          </div>
+          <div style={{fontSize:10,color:C.textMuted}}>
+            {loading ? "Loading…" : `${projects.length} saved`}
+          </div>
         </div>
-        <div style={{border:`1px solid ${C.border}`,borderRadius:6,padding:"1.4rem",background:C.surface}}>
-          <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily:mono}}>Engine Compatibility</div>
-          {["OLS","2SLS","FE / FD Panel","RDD","DiD 2×2 / TWFE"].map(m=><div key={m} style={{fontSize:11,color:C.green,fontFamily:mono,marginBottom:3}}>✓ {m}</div>)}
-        </div>
-      </div>
-      <div style={{marginBottom:"1.5rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:4,fontSize:10,color:C.textMuted,fontFamily:mono,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        {["Dashboard","Upload","Wrangling","Evidence Explorer","Modeling"].map((s,i,arr)=>(
-          <span key={s} style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{color:i===0?C.gold:C.textMuted}}>{s}</span>
-            {i<arr.length-1&&<span style={{color:C.border2}}>→</span>}
-          </span>
-        ))}
-      </div>
-      {projects.length>0&&(
-        <>
-          <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily:mono}}>Recent Projects</div>
-          <div style={{display:"flex",flexDirection:"column",gap:1,background:C.border,borderRadius:4,overflow:"hidden"}}>
-            {projects.map((p)=>(
-              <div key={p.id} onClick={()=>onLoad(p)} style={{padding:"0.65rem 1rem",background:C.surface,cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"background 0.12s"}}
-                onMouseOver={e=>e.currentTarget.style.background=C.surface2} onMouseOut={e=>e.currentTarget.style.background=C.surface}>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,color:C.text,fontFamily:mono}}>{p.filename||"Unnamed"}</div>
-                  <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginTop:2}}>{p.rowCount||"?"} rows · {p.colCount||"?"} cols · {p.pipelineLength||0} steps · {fmt(p.ts)}</div>
+
+        {/* Project list */}
+        <div style={{flex:1, overflowY:"auto"}}>
+          {!loading && projects.length === 0 && (
+            <div style={{
+              padding: "2rem 1rem", textAlign:"center",
+              fontSize:11, color:C.textMuted, lineHeight:1.8,
+            }}>
+              No saved projects.<br/>
+              <span style={{color:C.gold}}>Create one →</span>
+            </div>
+          )}
+
+          {projects.map(p => {
+            const isSel = p.id === selected;
+            const isExp = expanded[p.id];
+            // Infer subdatasets from pipeline steps of type join/append
+            const mergeSteps = (p.pipeline||[]).filter(s => ["join","append"].includes(s.type));
+
+            return (
+              <div key={p.id}>
+                {/* ── Project row ── */}
+                <div
+                  onClick={() => {
+                    setSelected(p.id);
+                    if (mergeSteps.length) setExpanded(x => ({...x, [p.id]: !x[p.id]}));
+                  }}
+                  style={{
+                    display: "flex", alignItems: "flex-start", gap: 8,
+                    padding: "0.7rem 1rem",
+                    background: isSel ? `${C.teal}0d` : "transparent",
+                    borderLeft: `2px solid ${isSel ? C.teal : "transparent"}`,
+                    borderBottom: `1px solid ${C.border}`,
+                    cursor: "pointer", transition: "background 0.1s",
+                  }}
+                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = C.surface2; }}
+                  onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = "transparent"; }}
+                >
+                  {/* Expand toggle */}
+                  <span style={{
+                    fontSize:9, color: C.textMuted, marginTop:3, flexShrink:0, width:10,
+                    opacity: mergeSteps.length ? 1 : 0,
+                  }}>
+                    {isExp ? "▾" : "▸"}
+                  </span>
+
+                  {/* Info */}
+                  <div style={{flex:1, minWidth:0}}>
+                    <div style={{
+                      fontSize:12, color: isSel ? C.text : C.textDim,
+                      fontWeight: isSel ? 600 : 400,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                    }}>
+                      {p.filename || "Unnamed"}
+                    </div>
+                    <div style={{fontSize:9, color:C.textMuted, marginTop:2, display:"flex", gap:8, flexWrap:"wrap"}}>
+                      <span>{(p.rowCount||"?").toLocaleString()} rows</span>
+                      <span>{p.colCount||"?"} cols</span>
+                      {p.pipelineLength > 0 && <span style={{color:C.gold}}>{p.pipelineLength} steps</span>}
+                      {p.panel && <span style={{color:C.blue}}>Panel</span>}
+                    </div>
+                    <div style={{fontSize:9, color:C.border2, marginTop:2}}>{fmt(p.ts)}</div>
+                  </div>
+
+                  {/* Delete */}
+                  <button
+                    onClick={e => handleDelete(p.id, e)}
+                    title="Delete project"
+                    style={{
+                      background:"transparent", border:"none",
+                      color:C.textMuted, cursor:"pointer",
+                      fontSize:13, padding:"0 2px", flexShrink:0, marginTop:1,
+                      transition:"color 0.1s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = C.red}
+                    onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                  >
+                    ×
+                  </button>
                 </div>
-                {p.panel&&<Badge ch="Panel" color={C.blue}/>}
-                <span style={{color:C.textMuted,fontSize:12}}>→</span>
+
+                {/* ── Subdatasets (merge steps) ── */}
+                {isExp && mergeSteps.map((s, i) => (
+                  <div key={i} style={{
+                    display:"flex", alignItems:"center", gap:6,
+                    padding:"0.4rem 1rem 0.4rem 2.2rem",
+                    background:`${C.teal}05`,
+                    borderBottom:`1px solid ${C.border}`,
+                    fontSize:10, color:C.textMuted,
+                  }}>
+                    <span style={{color:s.type==="join"?C.teal:C.violet, fontSize:9}}>
+                      {s.type==="join"?"⊞":"⊕"}
+                    </span>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {s.filename || s.desc || s.type}
+                    </span>
+                    <span style={{
+                      marginLeft:"auto", fontSize:8, padding:"1px 5px",
+                      border:`1px solid ${C.border2}`, borderRadius:2, color:C.border2,
+                      flexShrink:0,
+                    }}>
+                      {s.type}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
+            );
+          })}
+        </div>
+
+        {/* Footer: clear all */}
+        {projects.length > 0 && (
+          <div style={{
+            padding:"0.6rem 1rem",
+            borderTop:`1px solid ${C.border}`,
+            flexShrink:0,
+          }}>
+            <button
+              onClick={handleClearAll}
+              style={{
+                background:"transparent", border:"none",
+                color:C.textMuted, cursor:"pointer",
+                fontFamily:mono, fontSize:9,
+                transition:"color 0.1s",
+              }}
+              onMouseEnter={e=>e.currentTarget.style.color=C.red}
+              onMouseLeave={e=>e.currentTarget.style.color=C.textMuted}
+            >
+              Clear all projects
+            </button>
           </div>
-          <div style={{marginTop:"0.8rem",display:"flex",justifyContent:"flex-end"}}>
-            <Btn onClick={()=>{lsSet([]);window.location.reload();}} color={C.red} v="ghost" sm ch="Clear saved projects"/>
+        )}
+      </div>
+
+      {/* ── RIGHT: Actions + project detail ── */}
+      <div style={{
+        flex:1, minWidth:0, overflowY:"auto",
+        padding:"1.4rem 1.8rem",
+        display:"flex", flexDirection:"column", gap:"1.2rem",
+      }}>
+
+        {/* Brand */}
+        <div>
+          <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
+            LMU Munich · Econometrics
           </div>
-        </>
-      )}
+          <div style={{fontSize:22,color:C.text,letterSpacing:"-0.02em",marginBottom:4}}>
+            Econ Studio
+          </div>
+          <div style={{fontSize:11,color:C.textMuted}}>
+            Non-destructive pipeline · OLS · 2SLS · Panel FE/FD · RDD · DiD
+          </div>
+        </div>
+
+        {/* ── New project card ── */}
+        <div
+          onClick={onNew}
+          style={{
+            border:`1px solid ${C.border2}`,
+            borderRadius:5, padding:"1.2rem 1.4rem",
+            background:C.goldFaint, cursor:"pointer",
+            display:"flex", alignItems:"center", gap:14,
+            transition:"background 0.15s, border-color 0.15s",
+          }}
+          onMouseEnter={e=>{e.currentTarget.style.background="#201808";e.currentTarget.style.borderColor=C.goldDim;}}
+          onMouseLeave={e=>{e.currentTarget.style.background=C.goldFaint;e.currentTarget.style.borderColor=C.border2;}}
+        >
+          <span style={{fontSize:22, color:C.gold, flexShrink:0}}>⊕</span>
+          <div>
+            <div style={{fontSize:13,color:C.gold,marginBottom:3}}>New Project</div>
+            <div style={{fontSize:10,color:C.goldDim}}>
+              Upload CSV · XLSX · Stata .dta · or load demo dataset
+            </div>
+          </div>
+        </div>
+
+        {/* ── Selected project detail ── */}
+        {selProject ? (
+          <div style={{
+            border:`1px solid ${C.border}`,
+            borderRadius:5, overflow:"hidden",
+          }}>
+            {/* Project header */}
+            <div style={{
+              padding:"0.85rem 1rem",
+              background:C.surface2,
+              borderBottom:`1px solid ${C.border}`,
+              display:"flex", alignItems:"center", gap:10,
+            }}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,color:C.text,marginBottom:2}}>
+                  {selProject.filename || "Unnamed"}
+                </div>
+                <div style={{fontSize:10,color:C.textMuted}}>
+                  Last modified {fmt(selProject.ts)}
+                </div>
+              </div>
+              {selProject.panel && (
+                <Badge ch={`Panel · i=${selProject.panel.entityCol} · t=${selProject.panel.timeCol}`} color={C.blue}/>
+              )}
+            </div>
+
+            {/* Stats grid */}
+            <div style={{
+              display:"grid", gridTemplateColumns:"repeat(4,1fr)",
+              gap:1, background:C.border,
+            }}>
+              {[
+                {l:"Rows",     v:(selProject.rowCount||"—").toLocaleString(), c:C.text},
+                {l:"Columns",  v:selProject.colCount||"—",                    c:C.text},
+                {l:"Pipeline", v:`${selProject.pipelineLength||0} steps`,     c:selProject.pipelineLength?C.gold:C.textMuted},
+                {l:"Datasets", v:1 + (selProject.pipeline||[]).filter(s=>["join","append"].includes(s.type)).length, c:C.teal},
+              ].map(s=>(
+                <div key={s.l} style={{background:C.surface,padding:"0.6rem 0.8rem"}}>
+                  <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:3}}>{s.l}</div>
+                  <div style={{fontSize:14,color:s.c,fontFamily:mono}}>{s.v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Pipeline steps preview */}
+            {selProject.pipeline?.length > 0 && (
+              <div style={{padding:"0.7rem 1rem", borderTop:`1px solid ${C.border}`, background:C.surface}}>
+                <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>
+                  Pipeline steps
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                  {selProject.pipeline.slice(0,5).map((s,i)=>(
+                    <div key={i} style={{fontSize:10,color:C.textDim,display:"flex",gap:6}}>
+                      <span style={{color:C.border2,flexShrink:0}}>{i+1}.</span>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        [{s.type}] {s.desc||""}
+                      </span>
+                    </div>
+                  ))}
+                  {selProject.pipeline.length > 5 && (
+                    <div style={{fontSize:10,color:C.textMuted}}>
+                      … {selProject.pipeline.length - 5} more steps
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Open button */}
+            <div style={{
+              padding:"0.8rem 1rem",
+              borderTop:`1px solid ${C.border}`,
+              background:C.surface2,
+              display:"flex", justifyContent:"flex-end",
+            }}>
+              <button
+                onClick={() => onLoad(selProject)}
+                style={{
+                  padding:"0.42rem 1.1rem",
+                  background:C.teal, color:C.bg,
+                  border:`1px solid ${C.teal}`, borderRadius:3,
+                  cursor:"pointer", fontFamily:mono, fontSize:11, fontWeight:700,
+                }}
+              >
+                Open project →
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            fontSize:11, color:C.textMuted,
+            padding:"1rem 0", lineHeight:1.8,
+          }}>
+            {projects.length > 0
+              ? "← Select a project to open or continue working."
+              : "Create a new project to get started."}
+          </div>
+        )}
+
+        {/* Workflow hint */}
+        <div style={{
+          marginTop:"auto",
+          padding:"0.65rem 0.85rem",
+          background:C.surface,
+          border:`1px solid ${C.border}`,
+          borderRadius:4,
+          fontSize:10, color:C.textMuted,
+          display:"flex", gap:8, alignItems:"center", flexWrap:"wrap",
+        }}>
+          {["Upload","Wrangling","Evidence Explorer","Modeling"].map((s,i,arr)=>(
+            <span key={s} style={{display:"flex",alignItems:"center",gap:8}}>
+              <span>{s}</span>
+              {i<arr.length-1&&<span style={{color:C.border}}>→</span>}
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -323,27 +630,41 @@ export default function App() {
   const [output, setOutput] = useState(null);
 
   // Load a saved project from the dashboard
-  const handleLoad = p => {
-    setFilename(p.filename||"project");
+  const handleLoad = async p => {
+    setFilename(p.filename || "project");
     setPid(p.id);
-    if(p.filename==="wages_panel_demo.csv"){
-      const{headers,rows}=parseCSV(DEMO_CSV);
-      const types={};
-      headers.forEach(h=>{types[h]=detectType(rows.slice(0,50).map(r=>r[h]));});
-      const coerced=rows.map(r=>{const o={};headers.forEach(h=>{o[h]=coerce(r[h],types[h]);});return o;});
-      setRawData({headers,rows:coerced});
+
+    // Demo dataset — reconstruct from embedded CSV
+    if (p.filename === "wages_panel_demo.csv") {
+      const { headers, rows } = parseCSV(DEMO_CSV);
+      const types = {};
+      headers.forEach(h => { types[h] = detectType(rows.slice(0, 50).map(r => r[h])); });
+      const coerced = rows.map(r => {
+        const o = {}; headers.forEach(h => { o[h] = coerce(r[h], types[h]); }); return o;
+      });
+      setRawData({ headers, rows: coerced });
+      setScreen("studio");
+      return;
+    }
+
+    // Try to load raw data from IndexedDB
+    const stored = await loadRawData(p.id);
+    if (stored && stored.rows?.length) {
+      setRawData(stored);
       setScreen("studio");
     } else {
+      // Raw data not in IDB (>100MB or first time) — ask user to re-upload
       setScreen("upload");
     }
   };
 
-  // Called by Uploader once file is confirmed
+  // Called by Uploader once file is confirmed.
+  // Always generate a fresh pid — never reuse a previous project's pid,
+  // which would cause the new project to inherit the old pipeline from IDB.
   const handleReady = (data, types, fname) => {
     setRawData(data);
-    setFilename(fname||"dataset.csv");
-    const newPid = pid||`proj_${Date.now()}`;
-    setPid(newPid);
+    setFilename(fname || "dataset.csv");
+    setPid(`proj_${Date.now()}_${Math.random().toString(36).slice(2)}`);
     setScreen("studio");
   };
 
@@ -402,13 +723,14 @@ export default function App() {
       {/* ── Main Content ──────────────────────────────────────────────────── */}
       <div style={{flex:1,minHeight:0,overflowY:["studio","explorer","modeling"].includes(screen)?"hidden":"auto"}}>
         {screen==="dashboard"&&(
-          <Dashboard onNew={()=>setScreen("upload")} onLoad={handleLoad}/>
+          <Dashboard onNew={()=>{ setPid(null); setRawData(null); setOutput(null); setScreen("upload"); }} onLoad={handleLoad}/>
         )}
         {screen==="upload"&&(
           <Uploader onReady={handleReady}/>
         )}
         {screen==="studio"&&rawData&&(
         <DataStudio
+         key={pid}
          rawData={rawData}
          filename={filename}
          pid={pid}

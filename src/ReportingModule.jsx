@@ -10,8 +10,8 @@
 //   <ReportingModule result={activeResult} onClose={...} />
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { stars, buildLatex } from "./EconometricsEngine.js";
-import { interpretRegression } from "./AIService.js";
+import { stars, buildLatex } from "./math/index.js";
+import { interpretRegression } from "./services/ai/AIService.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {

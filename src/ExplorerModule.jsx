@@ -307,7 +307,268 @@ function DistributionTab({rows,headers,info,panel}){
   );
 }
 
-// ─── AI INSIGHTS ──────────────────────────────────────────────────────────────
+// ─── TIME SERIES TAB ──────────────────────────────────────────────────────────
+// Aggregate Y by a time column (or any numeric column used as time axis),
+// optionally grouped by a categorical variable → one line per group.
+// No dependency on group_summarize pipeline step — computes in-component.
+function TimeSeriesTab({ rows, headers, info, panel }) {
+  const numH = headers.filter(h => info[h]?.isNum);
+  const catH = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && headers.includes(h)));
+
+  // Candidate time columns: panel timeCol first, then integer/year-like numerics
+  const timeCandidates = [
+    ...(panel?.timeCol ? [panel.timeCol] : []),
+    ...numH.filter(h => h !== panel?.timeCol),
+  ];
+
+  const [tCol,  setTCol]  = useState(timeCandidates[0] ?? "");
+  const [yCol,  setYCol]  = useState(numH.find(h => h !== tCol) ?? "");
+  const [grpCol, setGrpCol] = useState(""); // "" = no grouping
+  const [agg,   setAgg]   = useState("mean"); // mean | sum | count | median
+
+  // ── Aggregate ───────────────────────────────────────────────────────────────
+  const series = useMemo(() => {
+    if (!tCol || !yCol || !rows.length) return [];
+    const valid = rows.filter(r =>
+      typeof r[tCol] === "number" && isFinite(r[tCol]) &&
+      (agg === "count" || (typeof r[yCol] === "number" && isFinite(r[yCol])))
+    );
+    if (!valid.length) return [];
+
+    const groups = grpCol
+      ? [...new Set(valid.map(r => String(r[grpCol] ?? "")))]
+      : ["_all_"];
+
+    return groups.map(grp => {
+      const subset = grpCol ? valid.filter(r => String(r[grpCol] ?? "") === grp) : valid;
+
+      // group by time value
+      const byT = {};
+      subset.forEach(r => {
+        const t = r[tCol];
+        if (!byT[t]) byT[t] = [];
+        if (agg !== "count") byT[t].push(r[yCol]);
+        else byT[t].push(1);
+      });
+
+      const pts = Object.entries(byT)
+        .map(([t, vals]) => {
+          const tv = parseFloat(t);
+          let y;
+          if (agg === "mean")   y = vals.reduce((s, v) => s + v, 0) / vals.length;
+          if (agg === "sum")    y = vals.reduce((s, v) => s + v, 0);
+          if (agg === "count")  y = vals.length;
+          if (agg === "median") { const s = [...vals].sort((a,b)=>a-b); y = s[Math.floor(s.length/2)]; }
+          return { t: tv, y };
+        })
+        .sort((a, b) => a.t - b.t);
+
+      return { grp, pts };
+    }).filter(s => s.pts.length > 0);
+  }, [rows, tCol, yCol, grpCol, agg]);
+
+  // ── SVG ─────────────────────────────────────────────────────────────────────
+  const W = 620, H = 300;
+  const PAD = { l: 62, r: 24, t: 24, b: 44 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  const COLORS = [C.teal, C.orange, C.violet, C.green, C.red, C.blue, C.gold, C.purple];
+
+  const chart = useMemo(() => {
+    if (!series.length) return null;
+    const allT = series.flatMap(s => s.pts.map(p => p.t));
+    const allY = series.flatMap(s => s.pts.map(p => p.y));
+    const tMin = Math.min(...allT), tMax = Math.max(...allT);
+    const yMin = Math.min(...allY), yMax = Math.max(...allY);
+    const yPad = (yMax - yMin) * 0.1 || 1;
+    const yLo = yMin - yPad, yHi = yMax + yPad;
+    const sx = t => PAD.l + ((t - tMin) / (tMax - tMin || 1)) * iW;
+    const sy = v => PAD.t + iH - ((v - yLo) / (yHi - yLo)) * iH;
+
+    // ticks
+    function niceTicks(lo, hi, n = 5) {
+      const range = hi - lo; if (!range) return [lo];
+      const step = Math.pow(10, Math.floor(Math.log10(range / n)));
+      const nice = [1,2,2.5,5,10].find(s => range/(s*step) <= n) * step;
+      const start = Math.ceil(lo / nice) * nice;
+      const out = [];
+      for (let v = start; v <= hi + nice*0.01; v += nice) out.push(parseFloat(v.toFixed(10)));
+      return out.length >= 2 ? out : [lo, hi];
+    }
+    const xTicks = niceTicks(tMin, tMax, 6);
+    const yTicks = niceTicks(yLo, yHi, 5);
+
+    return { sx, sy, xTicks, yTicks, yLo, yHi, tMin, tMax };
+  }, [series]);
+
+  const svgId = "ts-plot";
+
+  const handleExport = () => {
+    const el = document.getElementById(svgId);
+    if (!el) return;
+    let src = new XMLSerializer().serializeToString(el);
+    if (!src.includes('xmlns="http://www.w3.org/2000/svg"'))
+      src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+    src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
+    src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml;charset=utf-8" }));
+    a.download = `trend_${yCol}_by_${tCol}.svg`; a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <div>
+      {/* Controls */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: "1.4rem" }}>
+        {/* Time column */}
+        <div>
+          <Lbl>Time axis</Lbl>
+          <select value={tCol} onChange={e => setTCol(e.target.value)}
+            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+            {timeCandidates.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+        {/* Y variable */}
+        <div>
+          <Lbl>Variable (Y)</Lbl>
+          <select value={yCol} onChange={e => setYCol(e.target.value)}
+            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+            {numH.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+        {/* Aggregation */}
+        <div>
+          <Lbl>Aggregation</Lbl>
+          <select value={agg} onChange={e => setAgg(e.target.value)}
+            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+            {[["mean","Mean"],["sum","Sum"],["median","Median"],["count","Count"]].map(([v,l]) =>
+              <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        {/* Group by */}
+        <div>
+          <Lbl>Group by (optional)</Lbl>
+          <select value={grpCol} onChange={e => setGrpCol(e.target.value)}
+            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+            <option value="">— none —</option>
+            {headers.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Chart */}
+      {series.length > 0 && chart ? (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
+          {/* header */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.9rem", background: "#0a0a0a", borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+              {agg.charAt(0).toUpperCase()+agg.slice(1)} of {yCol} by {tCol}
+              {grpCol ? ` · grouped by ${grpCol}` : ""}
+            </span>
+            <button onClick={handleExport}
+              style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+            >↓ SVG</button>
+          </div>
+          <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center" }}>
+            <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+              style={{ width: "100%", maxWidth: 700, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+              <rect width={W} height={H} fill={C.bg} />
+
+              {/* grid */}
+              {chart.xTicks.map((t, i) => (
+                <line key={`gx${i}`} x1={chart.sx(t)} x2={chart.sx(t)} y1={PAD.t} y2={PAD.t+iH}
+                  stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+              ))}
+              {chart.yTicks.map((t, i) => (
+                <line key={`gy${i}`} x1={PAD.l} x2={PAD.l+iW} y1={chart.sy(t)} y2={chart.sy(t)}
+                  stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+              ))}
+
+              {/* zero line */}
+              {chart.yLo < 0 && chart.yHi > 0 && (
+                <line x1={PAD.l} x2={PAD.l+iW} y1={chart.sy(0)} y2={chart.sy(0)}
+                  stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />
+              )}
+
+              {/* series lines */}
+              {series.map((s, si) => {
+                const col = COLORS[si % COLORS.length];
+                const d = s.pts.map((p, i) =>
+                  `${i === 0 ? "M" : "L"}${chart.sx(p.t).toFixed(1)},${chart.sy(p.y).toFixed(1)}`
+                ).join(" ");
+                return (
+                  <g key={s.grp}>
+                    <path d={d} fill="none" stroke={col} strokeWidth={2} opacity={0.9} />
+                    {s.pts.map((p, i) => (
+                      <circle key={i} cx={chart.sx(p.t)} cy={chart.sy(p.y)} r={3}
+                        fill={col} opacity={0.85} />
+                    ))}
+                  </g>
+                );
+              })}
+
+              {/* axes */}
+              {chart.xTicks.map((t, i) => (
+                <g key={i}>
+                  <line x1={chart.sx(t)} x2={chart.sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1} />
+                  <text x={chart.sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+                    {Number.isInteger(t) ? t : t.toFixed(1)}
+                  </text>
+                </g>
+              ))}
+              {chart.yTicks.map((t, i) => (
+                <g key={i}>
+                  <line x1={PAD.l-4} x2={PAD.l} y1={chart.sy(t)} y2={chart.sy(t)} stroke={C.border2} strokeWidth={1} />
+                  <text x={PAD.l-8} y={chart.sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+                    {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
+                  </text>
+                </g>
+              ))}
+              <line x1={PAD.l} x2={PAD.l+iW} y1={PAD.t+iH} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
+              <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
+
+              {/* axis labels */}
+              <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+                {tCol}
+              </text>
+              <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+                {agg}({yCol})
+              </text>
+
+              {/* legend — only when grouped */}
+              {grpCol && series.length <= 8 && (
+                <g transform={`translate(${PAD.l + 10}, ${PAD.t + 6})`}>
+                  {series.map((s, si) => (
+                    <g key={s.grp} transform={`translate(0, ${si * 14})`}>
+                      <line x1={0} x2={14} y1={5} y2={5} stroke={COLORS[si % COLORS.length]} strokeWidth={2} />
+                      <text x={18} y={9} fill={C.textDim} fontSize={8} fontFamily={mono}>
+                        {String(s.grp).length > 16 ? String(s.grp).slice(0,15)+"…" : String(s.grp)}
+                      </text>
+                    </g>
+                  ))}
+                </g>
+              )}
+            </svg>
+          </div>
+
+          {/* footer stats */}
+          <div style={{ padding: "0.35rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", gap: 16 }}>
+            <span>{series.length} serie{series.length !== 1 ? "s" : ""}</span>
+            <span>{series[0]?.pts.length} time points</span>
+            <span>n = {rows.length} observations</span>
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: 11, fontFamily: mono }}>
+          {!tCol || !yCol ? "Select a time column and a variable." : "No valid data for selected columns."}
+        </div>
+      )}
+    </div>
+  );
+}
 function AIInsights({rows,headers,info,panel}){
   const [text,setText]=useState(""),[loading,setLoading]=useState(false),[done,setDone]=useState(false);
   const ran = { current: false };
@@ -374,7 +635,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
         <AIInsights rows={rows} headers={headers} info={info} panel={panel}/>
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-          {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"]].map(([k,l])=>(
+          {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"]].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"0.6rem 0.7rem",background:tab===k?C.goldFaint:C.surface,border:"none",color:tab===k?C.gold:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,borderBottom:tab===k?`2px solid ${C.gold}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>
           ))}
         </div>
@@ -388,6 +649,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
             <CorrHeatmap headers={headers} rows={rows} info={info}/>
           </div>
         )}
+        {tab==="timeseries"&&<TimeSeriesTab rows={rows} headers={headers} info={info} panel={panel}/>}
       </div>
     </div>
   );

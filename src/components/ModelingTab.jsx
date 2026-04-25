@@ -8,17 +8,21 @@
 
 import { useState, useMemo, useCallback } from "react";
 import {
-  runOLS, run2SLS, runFE, runFD, runSharpRDD,
+  runOLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
-} from "./src/math/index.js";
-import ReportingModule from "./src";
+} from "../math/index.js";
+import { generateRScript } from "../services/export/rScript.js";
+import ReportingModule from "../ReportingModule.jsx";
 
-import EstimatorSidebar   from "./src/components/modeling/EstimatorSidebar.jsx";
-import VariableSelector   from "./src/components/modeling/VariableSelector.jsx";
-import ModelConfiguration from "./src/components/modeling/ModelConfiguration.jsx";
-import { C, mono }        from "./src/components/modeling/shared.jsx";
+import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
+import VariableSelector   from "../components/modeling/VariableSelector.jsx";
+import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
+import { C, mono }        from "../components/modeling/shared.jsx";
+import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot } from "../components/modeling/ModelPlots.jsx";
+import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
+import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES ─────────────────────────────────────────────────
 // Result-rendering atoms — kept here because they depend on result shapes,
@@ -98,7 +102,7 @@ function RegressionEquation({ varNames, beta, yVar }) {
 }
 
 // ─── FOREST PLOT ─────────────────────────────────────────────────────────────
-function ForestPlot({ varNames, beta, se, pVals }) {
+function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename = "coefficient_plot.svg" }) {
   const items = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
     .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s));
@@ -115,62 +119,93 @@ function ForestPlot({ varNames, beta, se, pVals }) {
   const zero = sx(0);
   const ticks = Array.from({ length: 5 }, (_, i) => lo + (range * i) / 4);
 
+  const handleExport = () => {
+    const el = document.getElementById(svgId);
+    if (!el) return;
+    let src = new XMLSerializer().serializeToString(el);
+    if (!src.includes('xmlns="http://www.w3.org/2000/svg"'))
+      src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+    src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
+    src = src.replace(/<rect[^>]*fill="#0f0f0f"[^>]*\/>/g, '');
+    src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml;charset=utf-8" }));
+    a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+  };
+
   return (
-    <div style={{ overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", minWidth: 360, display: "block", fontFamily: mono }}>
-        <rect width={W} height={H} fill={C.bg} />
-        {items.map((_, i) => (
-          <rect key={i} x={PAD.l} y={PAD.t + i * rowH} width={iW} height={rowH}
-            fill={i % 2 === 0 ? C.surface : C.surface2} opacity={0.7} />
-        ))}
-        {ticks.map((t, i) => (
-          <line key={i} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={H - PAD.b}
-            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" />
-        ))}
-        {zero >= PAD.l && zero <= PAD.l + iW && (
-          <line x1={zero} x2={zero} y1={PAD.t} y2={H - PAD.b}
-            stroke={C.border2} strokeWidth={1.5} strokeDasharray="4 3" />
-        )}
-        {items.map((d, i) => {
-          const cy = PAD.t + i * rowH + rowH / 2;
-          const cx = sx(d.b);
-          const ciLo = sx(d.b - 1.96 * d.s), ciHi = sx(d.b + 1.96 * d.s);
-          const sig = d.p < 0.05;
-          const dot = sig ? C.teal : C.textMuted;
-          const lbl = sig ? C.text : C.textDim;
-          const CAP = 5;
-          const ciLoC = Math.max(PAD.l, ciLo), ciHiC = Math.min(PAD.l + iW, ciHi);
-          return (
-            <g key={d.v}>
-              <text x={PAD.l - 10} y={cy + 4} textAnchor="end" fill={lbl} fontSize={10.5}>
-                {d.v.length > 18 ? d.v.slice(0, 17) + "…" : d.v}
-              </text>
-              <line x1={ciLoC} x2={ciHiC} y1={cy} y2={cy} stroke={dot} strokeWidth={sig ? 1.6 : 1.1} opacity={sig ? 0.85 : 0.45} />
-              <line x1={ciLo} x2={ciLo} y1={cy - CAP} y2={cy + CAP} stroke={dot} strokeWidth={1} opacity={0.65} />
-              <line x1={ciHi} x2={ciHi} y1={cy - CAP} y2={cy + CAP} stroke={dot} strokeWidth={1} opacity={0.65} />
-              <rect x={cx - 5} y={cy - 5} width={10} height={10}
-                fill={sig ? dot : "transparent"} stroke={dot}
-                strokeWidth={sig ? 0 : 1.5} opacity={sig ? 0.95 : 0.55}
-                transform={`rotate(45,${cx},${cy})`} />
-              <text x={PAD.l + iW + 8} y={cy + 3} textAnchor="start" fill={dot} fontSize={10}>
-                {d.b > 0 ? "+" : ""}{d.b.toFixed(3)}{stars(d.p)}
-              </text>
-              <text x={PAD.l + iW + 8} y={cy + 14} textAnchor="start" fill={C.textMuted} fontSize={8}>
-                p={d.p < 0.001 ? "<.001" : d.p.toFixed(3)}
-              </text>
-            </g>
-          );
-        })}
-        <line x1={PAD.l} x2={PAD.l + iW} y1={H - PAD.b} y2={H - PAD.b} stroke={C.border2} strokeWidth={1} />
-        {ticks.map((t, i) => (
-          <text key={i} x={sx(t)} y={H - PAD.b + 13} textAnchor="middle" fill={C.textMuted} fontSize={8}>
-            {t === 0 ? "0" : Math.abs(t) < 0.01 ? t.toExponential(1) : t.toFixed(2)}
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        borderBottom: `1px solid ${C.border}`,
+      }}>
+        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          Coefficient plot · 95% CI
+        </span>
+        <button onClick={handleExport}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+        >↓ SVG</button>
+      </div>
+      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
+        <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+          style={{ width: "100%", maxWidth: 700, minWidth: 360, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+          <rect width={W} height={H} fill={C.bg} />
+          {items.map((_, i) => (
+            <rect key={i} x={PAD.l} y={PAD.t + i * rowH} width={iW} height={rowH}
+              fill={i % 2 === 0 ? C.surface : C.surface2} opacity={0.7} />
+          ))}
+          {ticks.map((t, i) => (
+            <line key={i} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={H - PAD.b}
+              stroke={C.border} strokeWidth={1} strokeDasharray="3 3" />
+          ))}
+          {zero >= PAD.l && zero <= PAD.l + iW && (
+            <line x1={zero} x2={zero} y1={PAD.t} y2={H - PAD.b}
+              stroke={C.border2} strokeWidth={1.5} strokeDasharray="4 3" />
+          )}
+          {items.map((d, i) => {
+            const cy = PAD.t + i * rowH + rowH / 2;
+            const cx = sx(d.b);
+            const ciLo = sx(d.b - 1.96 * d.s), ciHi = sx(d.b + 1.96 * d.s);
+            const sig = d.p < 0.05;
+            const dot = sig ? C.teal : C.textMuted;
+            const lbl = sig ? C.text : C.textDim;
+            const CAP = 5;
+            const ciLoC = Math.max(PAD.l, ciLo), ciHiC = Math.min(PAD.l + iW, ciHi);
+            return (
+              <g key={d.v}>
+                <text x={PAD.l - 10} y={cy + 4} textAnchor="end" fill={lbl} fontSize={10.5}>
+                  {d.v.length > 18 ? d.v.slice(0, 17) + "…" : d.v}
+                </text>
+                <line x1={ciLoC} x2={ciHiC} y1={cy} y2={cy} stroke={dot} strokeWidth={sig ? 1.6 : 1.1} opacity={sig ? 0.85 : 0.45} />
+                <line x1={ciLo} x2={ciLo} y1={cy - CAP} y2={cy + CAP} stroke={dot} strokeWidth={1} opacity={0.65} />
+                <line x1={ciHi} x2={ciHi} y1={cy - CAP} y2={cy + CAP} stroke={dot} strokeWidth={1} opacity={0.65} />
+                <rect x={cx - 5} y={cy - 5} width={10} height={10}
+                  fill={sig ? dot : "transparent"} stroke={dot}
+                  strokeWidth={sig ? 0 : 1.5} opacity={sig ? 0.95 : 0.55}
+                  transform={`rotate(45,${cx},${cy})`} />
+                <text x={PAD.l + iW + 8} y={cy + 3} textAnchor="start" fill={dot} fontSize={10}>
+                  {d.b > 0 ? "+" : ""}{d.b.toFixed(3)}{stars(d.p)}
+                </text>
+                <text x={PAD.l + iW + 8} y={cy + 14} textAnchor="start" fill={C.textMuted} fontSize={8}>
+                  p={d.p < 0.001 ? "<.001" : d.p.toFixed(3)}
+                </text>
+              </g>
+            );
+          })}
+          <line x1={PAD.l} x2={PAD.l + iW} y1={H - PAD.b} y2={H - PAD.b} stroke={C.border2} strokeWidth={1} />
+          {ticks.map((t, i) => (
+            <text key={i} x={sx(t)} y={H - PAD.b + 13} textAnchor="middle" fill={C.textMuted} fontSize={8}>
+              {t === 0 ? "0" : Math.abs(t) < 0.01 ? t.toExponential(1) : t.toFixed(2)}
+            </text>
+          ))}
+          <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textMuted} fontSize={8}>
+            Coefficient estimate · 95% CI · ◆ p&lt;0.05 (teal) · ◇ n.s. (grey)
           </text>
-        ))}
-        <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textMuted} fontSize={8}>
-          Coefficient estimate · 95% CI · ◆ p&lt;0.05 (teal) · ◇ n.s. (grey)
-        </text>
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -307,115 +342,23 @@ function FitBar({ items }) {
   );
 }
 
-// ─── DIAGNOSTICS PANEL ───────────────────────────────────────────────────────
-function DiagnosticsPanel({ olsResult, rows, xCols, panelFE, panelFD, xColsPanel }) {
-  const [open, setOpen] = useState(true);
-
-  const bp = useMemo(() => {
-    if (!olsResult?.resid || !olsResult?.Yhat) return null;
-    return breuschPagan(olsResult.resid, olsResult.Yhat);
-  }, [olsResult]);
-
-  const vif = useMemo(() => {
-    if (!rows || !xCols || xCols.length < 2) return null;
-    return computeVIF(rows, xCols);
-  }, [rows, xCols]);
-
-  const hausman = useMemo(() => {
-    if (!panelFE || !panelFD) return null;
-    return hausmanTest(panelFE, panelFD, xColsPanel || []);
-  }, [panelFE, panelFD, xColsPanel]);
-
-  return (
-    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-      <button
-        onClick={() => setOpen(s => !s)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 10,
-          background: "#0a0a0a", padding: "0.5rem 1rem",
-          border: "none", borderBottom: open ? `1px solid ${C.border}` : "none",
-          cursor: "pointer", fontFamily: mono, color: C.textMuted,
-          fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase",
-        }}
-      >
-        <span style={{ flex: 1, textAlign: "left" }}>◈ Diagnostics</span>
-        <span>{open ? "▲" : "▼"}</span>
-      </button>
-      {open && (
-        <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.8rem", animation: "fadeUp 0.18s ease" }}>
-          {bp && (
-            <div style={{
-              padding: "0.65rem 0.9rem", borderRadius: 4,
-              background: bp.reject ? "#0d0808" : "#080d0a",
-              border: `1px solid ${bp.reject ? C.red + "40" : C.green + "40"}`,
-              borderLeft: `3px solid ${bp.reject ? C.red : C.green}`,
-            }}>
-              <div style={{ fontSize: 9, color: bp.reject ? C.red : C.green, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 4, fontFamily: mono }}>
-                Breusch-Pagan · Heteroskedasticity Test
-              </div>
-              <div style={{ fontFamily: mono, fontSize: 13, color: C.text }}>LM = {bp.LM} · p = {bp.pVal}</div>
-              <div style={{ fontSize: 11, color: C.textDim, marginTop: 4, fontFamily: mono }}>
-                {bp.reject
-                  ? "⚠ Reject H₀: Evidence of heteroskedasticity. Consider robust (HC) standard errors."
-                  : "✓ Fail to reject H₀: No evidence of heteroskedasticity at 5%."}
-              </div>
-            </div>
-          )}
-          {vif && (
-            <div>
-              <Lbl color={C.textMuted}>VIF · Variance Inflation Factors</Lbl>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {vif.map(({ col, vif: v }) => {
-                  const alarm = v > 10, warn = v > 5;
-                  const color = alarm ? C.red : warn ? C.yellow : C.green;
-                  return (
-                    <div key={col} style={{ padding: "0.35rem 0.7rem", background: C.surface2, border: `1px solid ${color}40`, borderRadius: 3, fontFamily: mono }}>
-                      <div style={{ fontSize: 9, color: C.textMuted }}>{col}</div>
-                      <div style={{ fontSize: 13, color }}>{isFinite(v) ? v.toFixed(2) : "∞"}</div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ fontSize: 10, color: C.textMuted, marginTop: 6, fontFamily: mono }}>
-                VIF &gt; 5 → moderate · VIF &gt; 10 → severe multicollinearity
-              </div>
-            </div>
-          )}
-          {hausman && (
-            <div style={{
-              padding: "0.65rem 0.9rem", borderRadius: 4,
-              background: parseFloat(hausman.pVal) < 0.05 ? "#0d0808" : "#080d0a",
-              border: `1px solid ${parseFloat(hausman.pVal) < 0.05 ? C.red + "40" : C.green + "40"}`,
-              borderLeft: `3px solid ${parseFloat(hausman.pVal) < 0.05 ? C.red : C.green}`,
-            }}>
-              <div style={{ fontSize: 9, color: parseFloat(hausman.pVal) < 0.05 ? C.red : C.green, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 4, fontFamily: mono }}>
-                Hausman Test · FE vs FD Consistency
-              </div>
-              <div style={{ fontFamily: mono, fontSize: 13, color: C.text }}>
-                H = {hausman.H} · df = {hausman.df} · p = {hausman.pVal}
-              </div>
-              <div style={{ fontSize: 11, color: C.textDim, marginTop: 4, fontFamily: mono }}>
-                {parseFloat(hausman.pVal) < 0.05
-                  ? "⚠ Reject H₀: FE and FD estimates differ significantly. Check for serial correlation (favors FD)."
-                  : "✓ Fail to reject H₀: FE and FD are consistent. FE preferred (more efficient)."}
-              </div>
-            </div>
-          )}
-          {!bp && !vif && !hausman && (
-            <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>Run a model to see diagnostics.</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── EXPORT BAR ───────────────────────────────────────────────────────────────
-function ExportBar({ yVar, results, model, onReport }) {
+function ExportBar({ yVar, results, model, onReport, rScriptConfig }) {
   const [showLatex, setShowLatex] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied]       = useState(false);
   const latex = useMemo(() => buildLatex(yVar, results?.varNames?.slice(1) || [], results, model), [yVar, results, model]);
   const csv   = useMemo(() => buildCSVExport(yVar, results), [yVar, results]);
+
+  const handleRScript = () => {
+    if (!rScriptConfig) return;
+    const script = generateRScript(rScriptConfig);
+    const blob   = new Blob([script], { type: "text/plain" });
+    const a      = document.createElement("a");
+    a.href       = URL.createObjectURL(blob);
+    a.download   = `${(rScriptConfig.filename ?? "analysis").replace(/\.[^.]+$/, "")}_${model}.R`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
@@ -440,6 +383,19 @@ function ExportBar({ yVar, results, model, onReport }) {
             {label}
           </button>
         ))}
+        {rScriptConfig && (
+          <button onClick={handleRScript}
+            style={{
+              flex: 1, padding: "0.6rem 1rem", background: C.surface,
+              border: "none", color: C.green, cursor: "pointer", fontFamily: mono,
+              fontSize: 11, transition: "background 0.15s",
+            }}
+            onMouseOver={e => { e.currentTarget.style.background = `${C.green}14`; }}
+            onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
+          >
+            ↓ R Script
+          </button>
+        )}
         {onReport && (
           <button onClick={onReport}
             style={{
@@ -482,7 +438,7 @@ function ExportBar({ yVar, results, model, onReport }) {
 
 // ─── PANEL FE/FD RESULTS ─────────────────────────────────────────────────────
 // Must be a named component (not an IIFE) — React Rules of Hooks.
-function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, openReport }) {
+function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, openReport, baseRConfig }) {
   const [tab, setTab] = useState("fe");
   const fe     = result.fe, fd = result.fd;
   const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
@@ -512,6 +468,11 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
       </div>
       {active && (
         <>
+          <RegressionEquation
+            varNames={["(Intercept)", ...(active.varNames || xVars)]}
+            beta={[null, ...active.beta]}
+            yVar={`${yVar[0]} (within)`}
+          />
           <FitBar items={[
             { label: tab === "fe" ? "R² within"  : "R²",      value: safeR(tab === "fe" ? active.R2_within  : active.R2),    color: C.blue },
             { label: tab === "fe" ? "R² between" : "Adj. R²", value: safeR(tab === "fe" ? active.R2_between : active.adjR2), color: C.blue },
@@ -523,9 +484,20 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
           <div style={{ marginBottom: "1.2rem" }}>
             <CoeffTable varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.tStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
           </div>
-          <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem", background: C.bg }}>
-            <ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} />
-          </div>
+          <PlotSelector
+            accentColor={C.blue}
+            defaultId="yhat"
+            plots={[
+              { id: "yhat",   label: "Y vs Ŷ",
+                node: <YFittedPlot resid={active.resid} Yhat={active.Yhat} yLabel={yVar[0]} svgIdSuffix={`-${tab}`} /> },
+              { id: "forest", label: "Coefficient plot",
+                node: <ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} svgId={`forest-${tab}`} filename={`${tab}_coefficients.svg`} /> },
+              { id: "resid",  label: "Residuals vs Fitted",
+                node: <ResidualVsFitted resid={active.resid} Yhat={active.Yhat} svgIdSuffix={`-${tab}-rv`} /> },
+              { id: "qq",     label: "Q-Q",
+                node: <QQPlot resid={active.resid} svgIdSuffix={`-${tab}-qq`} /> },
+            ]}
+          />
         </>
       )}
       {hausman && (
@@ -536,7 +508,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
             : "✓ FE preferred (consistent and more efficient)."}
         </InfoBox>
       )}
-      <DiagnosticsPanel panelFE={panelFE} panelFD={panelFD} xColsPanel={[...xVars, ...wVars]} />
+      <DiagnosticsPanel resid={panelFE?.resid} rows={rows} xCols={[...xVars, ...wVars]} model="FE" panelFE={panelFE} panelFD={panelFD} />
       {active && (
         <ExportBar
           yVar={yVar[0]}
@@ -549,6 +521,8 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
             yVar: yVar[0],
             xVars: [...xVars, ...wVars],
           })}
+          rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model,
+            type: tab === "fe" ? "FE" : "FD", yVar: yVar[0], xVars, wVars } } : null}
         />
       )}
     </div>
@@ -556,7 +530,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, ope
 }
 
 // ─── 2SLS RESULTS ─────────────────────────────────────────────────────────────
-function TwoSLSResults({ result, yVar, xVars, openReport }) {
+function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseRConfig }) {
   const [tab, setTab] = useState("second");
   const { firstStages, second } = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
@@ -587,6 +561,7 @@ function TwoSLSResults({ result, yVar, xVars, openReport }) {
       </div>
       {tab === "second" && (
         <>
+          <RegressionEquation varNames={second.varNames} beta={second.beta} yVar={yVar[0]} />
           <FitBar items={[
             { label: "R²",      value: safeR(second.R2),    color: C.gold },
             { label: "Adj. R²", value: safeR(second.adjR2), color: C.gold },
@@ -597,12 +572,51 @@ function TwoSLSResults({ result, yVar, xVars, openReport }) {
           <div style={{ marginBottom: "1.2rem" }}>
             <CoeffTable varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.tStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
           </div>
-          <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem" }}>
-            <ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} />
-          </div>
+          <PlotSelector
+            accentColor={C.gold}
+            defaultId="yhat"
+            plots={[
+              { id: "yhat",   label: "Y vs Ŷ",
+                node: <YFittedPlot resid={second.resid} Yhat={second.Yhat} yLabel={yVar[0]} svgIdSuffix="-2sls" /> },
+              ...xVars.map((xc, i) => {
+                const fs   = firstStages[i];
+                const idx  = second.varNames.indexOf(xc);
+                return {
+                  id: `yxhat_${xc}`,
+                  label: `Y vs ${xc}̂`,
+                  node: <YXhatPlot
+                    Y={second.Yhat?.map((yh, j) => yh + (second.resid?.[j] ?? 0))}
+                    Xhat={fs?.Yhat}
+                    beta_iv={idx >= 0 ? second.beta[idx] : null}
+                    pVal={idx >= 0 ? second.pVals[idx] : null}
+                    yLabel={yVar[0]} xLabel={xc}
+                    resid2={second.resid}
+                    svgIdSuffix={`-${i}`}
+                  />,
+                };
+              }),
+              { id: "forest", label: "Coefficient plot",
+                node: <ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} svgId="forest-2sls-second" filename="2sls_second_stage_coefficients.svg" /> },
+              { id: "resid",  label: "Residuals vs Fitted",
+                node: <ResidualVsFitted resid={second.resid} Yhat={second.Yhat} svgIdSuffix="-2sls-resid" /> },
+              { id: "qq",     label: "Q-Q",
+                node: <QQPlot resid={second.resid} svgIdSuffix="-2sls-qq" /> },
+              ...firstStages.map((fs, i) => ({
+                id: `endog_${i}`,
+                label: `Endogeneity: ${fs.endVar}`,
+                node: <EndogeneityPlot
+                  residFirst={fs.resid}
+                  residSecond={second.resid}
+                  endVar={fs.endVar}
+                  svgIdSuffix={`-${i}`}
+                />,
+              })),
+            ]}
+          />
           <ExportBar
             yVar={yVar[0]} results={second} model="2SLS"
             onReport={() => openReport({ second, firstStages, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
+            rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } } : null}
           />
         </>
       )}
@@ -620,6 +634,18 @@ function TwoSLSResults({ result, yVar, xVars, openReport }) {
             </InfoBox>
           )}
           <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+          <PlotSelector
+            accentColor={C.gold}
+            defaultId="xhat"
+            plots={[
+              { id: "xhat",   label: `${fs.endVar} vs X̂`,
+                node: <XvsXhatPlot rows={rows} endVar={fs.endVar} Xhat={fs.Yhat} Fstat={fs.Fstat} weak={fs.weak} svgIdSuffix={`-fs${i}`} /> },
+              { id: "scatter", label: "Instrument scatter",
+                node: <FirstStagePlot firstStages={[fs]} rows={rows} instrVars={zVars} endogVars={[fs.endVar]} /> },
+              { id: "forest", label: "Coefficient plot",
+                node: <ForestPlot varNames={fs.varNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId={`forest-2sls-fs${i}`} filename={`2sls_first_stage_${fs.endVar}_coefficients.svg`} /> },
+            ]}
+          />
         </div>
       ))}
     </div>
@@ -749,6 +775,19 @@ export default function ModelingTab({ cleanedData, onBack }) {
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
+
+  // ── R Script config — base object shared by all ExportBar callsites ──────────
+  // Each callsite merges this with its specific model params.
+  const baseRConfig = useMemo(() => ({
+    filename:        cleanedData?.filename ?? "dataset.csv",
+    pipeline:        cleanedData?.changeLog ?? [],
+    dataDictionary:  cleanedData?.dataDictionary ?? null,
+    auditTrail:      null,  // auditor runs on-demand inside generateRScript
+    model: {
+      entityCol: panel?.entityCol ?? null,
+      timeCol:   panel?.timeCol   ?? null,
+    },
+  }), [cleanedData, panel]);
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
   return (
@@ -895,29 +934,56 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
-                <Lbl color={C.textMuted}>Coefficient Plot (95% CI)</Lbl>
-                <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.5rem", marginBottom: "1.2rem", background: C.bg }}>
-                  <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} />
-                </div>
+                <Lbl color={C.textMuted}>Coefficient Plot & Diagnostics</Lbl>
+                <PlotSelector
+                  accentColor={C.green}
+                  defaultId="yhat"
+                  plots={[
+                    { id: "yhat",  label: "Y vs Ŷ",
+                      node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={yVar[0]} /> },
+                    ...[...xVars, ...wVars].map((xc, i) => {
+                      const idx = r.varNames.indexOf(xc);
+                      return {
+                        id: `partial_${xc}`,
+                        label: `Y ~ ${xc}`,
+                        node: <PartialPlot
+                          rows={rows} yCol={yVar[0]} xCol={xc}
+                          otherX={[...xVars, ...wVars].filter(x => x !== xc)}
+                          beta_i={idx >= 0 ? r.beta[idx] : null}
+                          pVal_i={idx >= 0 ? r.pVals[idx] : null}
+                          runOLS={runOLS}
+                          svgIdSuffix={`-${i}`}
+                        />,
+                      };
+                    }),
+                    { id: "forest", label: "Coefficient plot",
+                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-ols" filename="ols_coefficients.svg" /> },
+                    { id: "resid",  label: "Residuals vs Fitted",
+                      node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
+                    { id: "qq",     label: "Q-Q",
+                      node: <QQPlot resid={r.resid} /> },
+                  ]}
+                />
                 <Lbl color={C.textMuted}>Note on Significance</Lbl>
                 <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
-                <DiagnosticsPanel olsResult={r} rows={rows} xCols={diagX} />
+                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model="OLS" />
                 <ExportBar yVar={yVar[0]} results={r} model="OLS"
-                  onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })} />
+                  onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />
               </div>
             );
           })()}
 
           {/* Panel FE / FD */}
           {(result?.type === "FE" || result?.type === "FD") && (
-            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} />
+            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseRConfig={baseRConfig} />
           )}
 
           {/* 2SLS */}
           {result?.type === "2SLS" && (
-            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} openReport={openReport} />
+            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseRConfig={baseRConfig} />
           )}
 
           {/* DiD / TWFE */}
@@ -945,6 +1011,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                     </div>
                   </div>
                 )}
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
                   { label: "R²",     value: r.R2?.toFixed(4)    ?? "—", color: C.teal },
                   { label: "Adj. R²",value: r.adjR2?.toFixed(4) ?? "—", color: C.teal },
@@ -955,8 +1022,21 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
+                <PlotSelector
+                  accentColor={C.teal}
+                  defaultId="main"
+                  plots={[
+                    result.type === "DiD"
+                      ? { id: "main", label: "Parallel trends", node: <DiDPlot result={r} yLabel={yVar[0]} /> }
+                      : { id: "main", label: "Event study",     node: <EventStudyPlot result={r} yLabel={yVar[0]} /> },
+                    { id: "forest", label: "Coefficient plot",
+                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${result.type.toLowerCase()}`} filename={`${result.type.toLowerCase()}_coefficients.svg`} /> },
+                  ]}
+                />
                 <ExportBar yVar={yVar[0]} results={r} model={result.type}
                   onReport={() => openReport({ ...r, modelLabel: result.type === "DiD" ? "DiD 2×2" : "TWFE DiD", yVar: yVar[0], xVars: [...wVars] })}
+                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], wVars,
+                    postVar: postVar[0], treatVar: treatVar[0] } }}
                 />
               </div>
             );
@@ -983,6 +1063,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                     SE = {r.lateSE != null && isFinite(r.lateSE) ? r.lateSE.toFixed(4) : "N/A"} · p = {r.lateP != null && isFinite(r.lateP) ? (r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)) : "N/A"} · Kernel: {r.kernelType}
                   </div>
                 </div>
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
                   { label: "R²",        value: r.R2?.toFixed(4) ?? "—", color: C.orange },
                   { label: "n in bw",   value: r.n,                     color: C.text },
@@ -993,11 +1074,37 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
+                <PlotSelector
+                  accentColor={C.orange}
+                  defaultId="scatter"
+                  plots={[
+                    { id: "scatter", label: "Binned scatter",
+                      node: <RDDPlot result={r} yLabel={yVar[0]} xLabel={runningVar[0]} /> },
+                    { id: "bw",      label: "Bandwidth sensitivity",
+                      node: <RDDBandwidthPlot
+                        rows={rows} yCol={yVar[0]} runCol={runningVar[0]}
+                        cutoff={parseFloat(cutoff)} optH={result.h}
+                        kernel={kernel} controls={wVars} runSharpRDD={runSharpRDD}
+                      /> },
+                    { id: "mccrary", label: "McCrary density",
+                      node: <McCraryPlot
+                        result={runMcCrary(rows, runningVar[0], parseFloat(cutoff))}
+                        xLabel={runningVar[0]}
+                      /> },
+                    ...wVars.map(xc => ({
+                      id: `bal_${xc}`,
+                      label: `Balance: ${xc}`,
+                      node: <RDDCovariateBalance result={r} controls={[xc]} rows={rows} />,
+                    })),
+                  ]}
+                />
                 <ExportBar
                   yVar={yVar[0]}
                   results={{ ...r, varNames: r.varNames, adjR2: null }}
                   model="RDD"
                   onReport={() => openReport({ ...r, varNames: r.varNames, adjR2: null, modelLabel: "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
+                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "RDD", yVar: yVar[0], wVars,
+                    runningVar: runningVar[0], cutoff: parseFloat(cutoff), bandwidth: result.h, kernel } }}
                 />
               </div>
             );
