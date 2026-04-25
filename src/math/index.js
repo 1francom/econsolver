@@ -29,4 +29,5 @@ export {
   run2SLS,
   ikBandwidth,
   runSharpRDD,
+  runMcCrary,
 } from "./CausalEngine.js";

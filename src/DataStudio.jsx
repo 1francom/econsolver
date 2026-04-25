@@ -15,6 +15,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import WranglingModule from "./WranglingModule.jsx";
+import { saveRawData } from "./services/persistence/indexedDB.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -325,19 +326,20 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
 }
 
 // ─── SESSION STORAGE — secondary datasets persist across navigation ───────────
-// Primary dataset comes from App.jsx (rawData prop) and is never stored here.
-// Secondary datasets are serialized to sessionStorage so a round-trip through
-// Output/Explorer/Modeling and back to Wrangling doesn't break join context.
-const SS_KEY = "econ_studio_secondary_ds";
-function ssRead() {
-  try { return JSON.parse(sessionStorage.getItem(SS_KEY) || "[]"); } catch { return []; }
+// Scoped by pid so datasets from project A never appear in project B.
+const SS_PREFIX = "econ_studio_secondary_ds_";
+function ssKey(pid) { return SS_PREFIX + pid; }
+function ssRead(pid) {
+  try { return JSON.parse(sessionStorage.getItem(ssKey(pid)) || "[]"); } catch { return []; }
 }
-function ssWrite(secondaryDatasets) {
+function ssWrite(pid, secondaryDatasets) {
   try {
-    // Guard against very large datasets — skip sessionStorage silently if > 8MB
     const s = JSON.stringify(secondaryDatasets);
-    if (s.length < 8 * 1024 * 1024) sessionStorage.setItem(SS_KEY, s);
+    if (s.length < 8 * 1024 * 1024) sessionStorage.setItem(ssKey(pid), s);
   } catch { /* quota exceeded — non-fatal */ }
+}
+function ssClear(pid) {
+  try { sessionStorage.removeItem(ssKey(pid)); } catch {}
 }
 
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
@@ -345,8 +347,8 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
   const primaryId = pid || genId();
 
   const [datasets, setDatasets] = useState(() => {
-    // Restore secondary datasets from sessionStorage on mount
-    const secondary = ssRead();
+    // Secondary datasets scoped to this project's pid — no cross-project leakage
+    const secondary = ssRead(primaryId);
     return [
       { id: primaryId, filename: filename || "dataset.csv", rawData },
       ...secondary,
@@ -355,6 +357,14 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
   const [activeId, setActiveId]   = useState(primaryId);
   const [loading, setLoading]     = useState(false);
   const [loadErr, setLoadErr]     = useState("");
+
+  // ── Persist primary raw data on first mount ────────────────────────────────
+  // This ensures "Open project" works without re-uploading.
+  useEffect(() => {
+    if (rawData && primaryId) {
+      saveRawData(primaryId, rawData);
+    }
+  }, [primaryId]); // only on mount — rawData ref won't change for same project
 
   // Keep primary rawData in sync if parent re-loads a new file.
   // If rawData actually changed (new file), clear secondary datasets — they
@@ -367,7 +377,7 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
       // New primary file loaded — drop secondary datasets and clear sessionStorage
       setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData }]);
       setActiveId(primaryId);
-      ssWrite([]);
+      ssClear(primaryId);
     } else {
       // Same file, just sync props (e.g. filename rename)
       setDatasets(prev => prev.map(ds =>
@@ -379,7 +389,7 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
   // Persist secondary datasets to sessionStorage whenever the list changes
   useEffect(() => {
     const secondary = datasets.filter(d => d.id !== primaryId);
-    ssWrite(secondary);
+    ssWrite(primaryId, secondary);
   }, [datasets, primaryId]);
 
   const activeDs       = datasets.find(d => d.id === activeId) || datasets[0];
@@ -395,10 +405,12 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
         setLoadErr("Could not parse file. Check format (CSV, TSV, XLSX).");
         return;
       }
-      const id = genId();
+      const id    = genId();
       const entry = { id, filename: file.name, rawData: parsed };
       setDatasets(prev => [...prev, entry]);
       setActiveId(id);
+      // Persist so this secondary dataset survives a reload if promoted to primary
+      saveRawData(id, parsed);
     } catch (e) {
       setLoadErr("Parse error: " + (e?.message || "unknown"));
     } finally {
@@ -412,6 +424,20 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     // If we were viewing the removed dataset, fall back to primary
     setActiveId(prev => prev === id ? primaryId : prev);
   }, [primaryId]);
+
+  // Save a derived dataset (pipeline output or summarize result) into the manager.
+  // Appears immediately in the sidebar with its own empty pipeline.
+  const handleSaveSubset = useCallback((name, rows, headers) => {
+    const id    = genId();
+    const entry = {
+      id,
+      filename: name,
+      rawData:  { rows, headers },
+      origin:   activeId,   // informational — which dataset it came from
+    };
+    setDatasets(prev => [...prev, entry]);
+    setActiveId(id);        // switch to the new subset immediately
+  }, [activeId]);
 
   return (
     <div style={{
@@ -444,6 +470,7 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
             onComplete={onComplete}
             pid={activeDs.id}
             allDatasets={otherDatasets}
+            onSaveSubset={handleSaveSubset}
           />
         </div>
       )}
