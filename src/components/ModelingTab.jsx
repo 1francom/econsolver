@@ -20,7 +20,7 @@ import {
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
-import { downloadReplicationBundle } from "../services/export/replicationBundle.js";
+import { downloadReplicationBundle, downloadMultiSubsetBundle } from "../services/export/replicationBundle.js";
 import ReportingModule from "../ReportingModule.jsx";
 import * as modelBuffer from "../services/modelBuffer.js";
 import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
@@ -1010,6 +1010,47 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const [activeBufferId, setActiveBufferId] = useState(null);
   const pinnedModels = useMemo(() => modelBuffer.getAll(), [bufferVersion]);
 
+  // ── H8: Specification curve ────────────────────────────────────────────────
+  const [specOpen,   setSpecOpen]   = useState(false);
+  const [specConfig, setSpecConfig] = useState({ col: "", op: ">=", start: "", end: "", step: "", coefVar: "" });
+  const [specRows,   setSpecRows]   = useState([]);
+  const [specRunning, setSpecRunning] = useState(false);
+
+  const runSpecCurve = useCallback(() => {
+    const { col, op, start, end, step, coefVar } = specConfig;
+    if (!col || !coefVar || start === "" || end === "" || step === "") return;
+    const s = Math.abs(Number(step)) || 1;
+    const pts = [];
+    setSpecRunning(true);
+    try {
+      for (let t = Number(start); t <= Number(end) + 1e-9; t += s) {
+        const filtered = (rows ?? []).filter(row => {
+          const v = Number(row[col]);
+          switch (op) {
+            case ">=": return !isNaN(v) && v >= t;
+            case "<=": return !isNaN(v) && v <= t;
+            case ">":  return !isNaN(v) && v > t;
+            case "<":  return !isNaN(v) && v < t;
+            default:   return String(row[col]) === String(t);
+          }
+        });
+        if (filtered.length < 5) continue; // skip tiny samples
+        const out = _runEstimation(filtered);
+        if (out.result && !out.error) {
+          const idx = (out.result.varNames ?? []).indexOf(coefVar);
+          if (idx >= 0) {
+            const b = out.result.beta[idx];
+            const se = out.result.se[idx];
+            pts.push({ threshold: +t.toFixed(6), estimate: b, se, ciLow: b - 1.96 * se, ciHigh: b + 1.96 * se, n: filtered.length });
+          }
+        }
+      }
+    } finally {
+      setSpecRunning(false);
+    }
+    setSpecRows(pts);
+  }, [specConfig, rows, _runEstimation]);
+
   // ── G12: Plot Builder panel ───────────────────────────────────────────────
   const [plotOpen,        setPlotOpen]        = useState(false);
   const [plotTemplateKey, setPlotTemplateKey]  = useState(0);
@@ -1403,6 +1444,146 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
             onRunAll={runAllSubsets}
             running={running}
           />
+
+          {/* ── H7: Download multi-subset bundle ── */}
+          {subsets.length > 0 && (
+            <button
+              onClick={() => {
+                const sharedSteps  = branchPointIdx !== null ? fullPipeline.slice(0, branchPointIdx + 1) : fullPipeline;
+                const perSubSteps  = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1
+                  ? fullPipeline.slice(branchPointIdx + 1) : [];
+                downloadMultiSubsetBundle({
+                  filename:       cleanedData?.filename       ?? "dataset.csv",
+                  pipeline:       sharedSteps,
+                  perSubsetSteps: perSubSteps,
+                  subsets,
+                  model: {
+                    type: estimator, yVar: yVar[0] ?? "", xVars, wVars,
+                    entityCol: panel?.entityCol ?? null,
+                    timeCol:   panel?.timeCol   ?? null,
+                  },
+                  dataDictionary: cleanedData?.dataDictionary ?? null,
+                });
+              }}
+              style={{
+                width: "100%", marginTop: 6, padding: "4px 0",
+                background: "none", border: `1px solid ${C.border2}`,
+                borderRadius: 3, cursor: "pointer",
+                fontFamily: mono, fontSize: 9, color: C.textMuted,
+                letterSpacing: "0.1em",
+              }}
+            >
+              ↓ Download subset bundle (.zip)
+            </button>
+          )}
+
+          {/* ── H8: Specification curve ── */}
+          {result && headers?.length > 0 && (
+            <div style={{ marginTop: "0.75rem" }}>
+              <button
+                onClick={() => setSpecOpen(v => !v)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center",
+                  justifyContent: "space-between", padding: "0.5rem 0.75rem",
+                  background: specOpen ? `${C.blue}0d` : C.surface,
+                  border: `1px solid ${specOpen ? C.blue + "50" : C.border}`,
+                  borderRadius: specOpen ? "4px 4px 0 0" : 4,
+                  cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+                }}
+              >
+                <span style={{ fontSize: 9, color: C.blue, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+                  ◈ Spec Curve {specRows.length > 0 ? `(${specRows.length} pts)` : ""}
+                </span>
+                <span style={{ fontSize: 9, color: C.textMuted }}>{specOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {specOpen && (
+                <div style={{
+                  border: `1px solid ${C.blue}50`, borderTop: "none",
+                  borderRadius: "0 0 4px 4px", padding: "0.85rem 0.75rem",
+                  background: C.surface,
+                }}>
+                  <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 8, lineHeight: 1.6 }}>
+                    Vary a threshold and plot how the coefficient of interest changes.
+                  </div>
+                  {/* Threshold column + op */}
+                  <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+                    <select
+                      value={specConfig.col}
+                      onChange={e => setSpecConfig(c => ({ ...c, col: e.target.value }))}
+                      style={{ flex: 3, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                    >
+                      <option value="">— threshold column —</option>
+                      {(headers ?? []).map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                    <select
+                      value={specConfig.op}
+                      onChange={e => setSpecConfig(c => ({ ...c, op: e.target.value }))}
+                      style={{ flex: 1, background: C.bg, color: C.teal, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                    >
+                      {[">=", "<=", ">", "<"].map(op => <option key={op} value={op}>{op}</option>)}
+                    </select>
+                  </div>
+                  {/* Range inputs */}
+                  <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+                    {[["start", "from"], ["end", "to"], ["step", "step"]].map(([k, lbl]) => (
+                      <input
+                        key={k}
+                        type="number"
+                        value={specConfig[k]}
+                        onChange={e => setSpecConfig(c => ({ ...c, [k]: e.target.value }))}
+                        placeholder={lbl}
+                        style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px", color: C.text, outline: "none" }}
+                      />
+                    ))}
+                  </div>
+                  {/* Coefficient of interest */}
+                  <select
+                    value={specConfig.coefVar}
+                    onChange={e => setSpecConfig(c => ({ ...c, coefVar: e.target.value }))}
+                    style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px", marginBottom: 8 }}
+                  >
+                    <option value="">— coefficient of interest —</option>
+                    {(result?.varNames ?? []).filter(v => v !== "(Intercept)").map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <button
+                    onClick={runSpecCurve}
+                    disabled={specRunning || !specConfig.col || !specConfig.coefVar}
+                    style={{
+                      width: "100%", padding: "5px 0", borderRadius: 3,
+                      background: specRunning ? "transparent" : `${C.blue}15`,
+                      border: `1px solid ${specRunning ? C.border : C.blue + "60"}`,
+                      color: specRunning ? C.textMuted : C.blue,
+                      fontFamily: mono, fontSize: 9, cursor: "pointer", letterSpacing: "0.12em",
+                    }}
+                  >
+                    {specRunning ? "◌ running…" : "▶ Run spec curve"}
+                  </button>
+
+                  {/* Inline chart */}
+                  {specRows.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <PlotBuilder
+                        key={specRows.length}
+                        headers={["threshold", "estimate", "se", "ciLow", "ciHigh", "n"]}
+                        rows={specRows}
+                        initialLayers={[
+                          { id: "sc_a", geom: "ribbon",   aes: { x: "threshold", y: "", color: "", yMin: "ciLow", yMax: "ciHigh" }, value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_b", geom: "line",     aes: { x: "threshold", y: "estimate", color: "", yMin: "", yMax: "" },     value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_c", geom: "point",    aes: { x: "threshold", y: "estimate", color: "", yMin: "", yMax: "" },     value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_d", geom: "hline",    aes: { x: "", y: "", color: "", yMin: "", yMax: "" },                      value: "0", position: "identity", fill: C.textDim, visible: true },
+                        ]}
+                        style={{ minHeight: 260 }}
+                      />
+                      <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 4, textAlign: "center" }}>
+                        {specConfig.col} {specConfig.op} threshold → coef({specConfig.coefVar}) · {specRows.length} pts
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <button
             onClick={estimate}
