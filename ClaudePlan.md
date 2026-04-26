@@ -140,10 +140,10 @@ File exists and is rendered in ModelingTab when compare mode active.
 ### Changes to `src/services/ai/AIService.js` — DONE
 `compareModels()` handles N-way array input with legacy 2-way compatibility.
 
-### Changes to export scripts — PARTIAL
+### Changes to export scripts — DONE
 - `src/services/export/rScript.js`: `generateMultiModelRScript()` exists — DONE
-- `src/services/export/pythonScript.js`: no `generateMultiModel*` found — PENDING
-- `src/services/export/stataScript.js`: no `generateMultiModel*` found — PENDING
+- `src/services/export/pythonScript.js`: `generateMultiModelPythonScript()` — DONE (wired in ModelComparison.jsx)
+- `src/services/export/stataScript.js`: `generateMultiModelStataScript()` — DONE (wired in ModelComparison.jsx)
 
 ### Verification
 Pending Franco browser-validation of full comparison flow.
@@ -154,7 +154,7 @@ Pending Franco browser-validation of full comparison flow.
 
 Thread `metadataReport` to all consumers. Display coaching signals in results panel. End-to-end test: load panel dataset → run OLS → pin → run FE → pin → compare → check AI coach signals → export multi-model LaTeX + R script.
 
-Remaining blockers: Python and Stata multi-model export scripts not yet implemented.
+All multi-model export scripts (R, Python, Stata) are implemented and wired into ModelComparison.jsx. Remaining: browser validation of full Phase 3 comparison flow.
 
 ---
 
@@ -180,8 +180,8 @@ Remaining blockers: Python and Stata multi-model export scripts not yet implemen
 | `src/services/ai/Prompts/index.js` | buildMetadataContext(), extended COMPARE_MODELS_PROMPT | DONE |
 | `src/components/modeling/ResearchCoach.jsx` | metadataReport prop, coaching signal chips | DONE |
 | `src/services/export/rScript.js` | generateMultiModelRScript — DONE | DONE |
-| `src/services/export/pythonScript.js` | generateMultiModelScript — not yet added | PENDING |
-| `src/services/export/stataScript.js` | generateMultiModelScript — not yet added | PENDING |
+| `src/services/export/pythonScript.js` | `generateMultiModelPythonScript` — implemented + wired | DONE |
+| `src/services/export/stataScript.js` | `generateMultiModelStataScript` — implemented + wired | DONE |
 
 ## Key Design Decisions
 
@@ -478,8 +478,8 @@ Three independent improvements to `src/components/ModelingTab.jsx` and `src/comp
 |-------|-------|--------|
 | 1 | Standardised Estimation Result | DONE |
 | 2 | Advanced Context-Aware AI Coach | DONE |
-| 3 | Multi-Model Comparison System | DONE (Python + Stata multi-model export PENDING) |
-| 4 | Integration | IN PROGRESS — pending Python/Stata multi-model exports + browser validation |
+| 3 | Multi-Model Comparison System | DONE |
+| 4 | Integration | IN PROGRESS — pending browser validation of full comparison flow |
 | 5 | New Estimators (Fuzzy RDD, Event Study, LSDV, Poisson FE, Synthetic Control) | DONE (crash bugs fixed) |
 | 6 | Robust Standard Errors | DONE |
 | 7 | New File Format Support (.rds, .shp/.dbf) | DONE |
@@ -487,8 +487,6 @@ Three independent improvements to `src/components/ModelingTab.jsx` and `src/comp
 
 ## Next unblocked tasks
 
-1. **`src/services/export/pythonScript.js`** — add `generateMultiModelPythonScript(configs[])` using `statsmodels.iolib.summary2.summary_col()`. Mirrors the existing `generateRScript` single-model function but loops over an array of configs.
+1. **Browser validation of Phase 3 comparison flow** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, all three multi-model export scripts (R/Python/Stata) generate correctly.
 
-2. **`src/services/export/stataScript.js`** — add `generateMultiModelStataScript(configs[])` using `estimates store` per model and `esttab` at end. Same pattern.
-
-3. **Browser validation of Phase 3 comparison flow** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, R multi-model script generates correctly.
+2. **CLAUDE.md pending list** — mark off Python/Stata multi-model exports as done; they were already implemented and wired.
