@@ -1458,7 +1458,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
                   perSubsetSteps: perSubSteps,
                   subsets,
                   model: {
-                    type: estimator, yVar: yVar[0] ?? "", xVars, wVars,
+                    type: model, yVar: yVar[0] ?? "", xVars, wVars,
                     entityCol: panel?.entityCol ?? null,
                     timeCol:   panel?.timeCol   ?? null,
                   },
