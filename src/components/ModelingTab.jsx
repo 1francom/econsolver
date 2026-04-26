@@ -1031,6 +1031,36 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
     return [...(headers ?? []), "__resid__", "__yhat__"];
   }, [result, headers]);
 
+  // G13 — multi-model comparison rows (one row per variable × model)
+  const [plotDataMode, setPlotDataMode] = useState("result"); // "result" | "comparison"
+
+  const compRows = useMemo(() => {
+    if (pinnedModels.length < 2) return [];
+    return pinnedModels.flatMap(m =>
+      (m.varNames ?? [])
+        .filter(v => v !== "(Intercept)")
+        .map(v => {
+          const i = (m.varNames ?? []).indexOf(v);
+          const b = m.beta?.[i] ?? 0;
+          const s = m.se?.[i]  ?? 0;
+          return {
+            variable: v,
+            estimate: b,
+            se:       s,
+            ciLow:    b - 1.96 * s,
+            ciHigh:   b + 1.96 * s,
+            pVal:     m.pVals?.[i] ?? 1,
+            model:    m.label ?? m.type ?? "Model",
+          };
+        })
+    );
+  }, [pinnedModels]);
+
+  const compHeaders = ["variable", "estimate", "se", "ciLow", "ciHigh", "pVal", "model"];
+
+  const activePlotRows    = plotDataMode === "comparison" ? compRows    : resultRows;
+  const activePlotHeaders = plotDataMode === "comparison" ? compHeaders : resultHeaders;
+
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
 
@@ -2021,6 +2051,27 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
 
             {plotOpen && (
               <div style={{ padding: "0 0.75rem 0.75rem" }}>
+
+                {/* G13 — data mode toggle (only when 2+ models pinned) */}
+                {pinnedModels.length >= 2 && (
+                  <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                    {["result", "comparison"].map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => { setPlotDataMode(mode); setPlotTemplateKey(k => k + 1); setPlotInitLayers([]); }}
+                        style={{
+                          padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer", borderRadius: 3,
+                          background: plotDataMode === mode ? `${C.teal}18` : "none",
+                          border: `1px solid ${plotDataMode === mode ? C.teal + "60" : C.border}`,
+                          color: plotDataMode === mode ? C.teal : C.textMuted,
+                        }}
+                      >
+                        {mode === "result" ? "Result data" : `Comparison (${pinnedModels.length} models)`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {/* G10 — Estimator templates */}
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
                   <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center", marginRight: 2 }}>
@@ -2052,16 +2103,29 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
                     },
                     ...(xVars[0] ? [{
                       label: `Y vs ${xVars[0]}`,
+                      mode: "result",
                       layers: [
                         { id: "g10_f", geom: "point",  aes: { x: xVars[0], y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.blue, visible: true },
                         { id: "g10_g", geom: "smooth", aes: { x: xVars[0], y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.blue, visible: true },
                       ],
                       xLabel: xVars[0], yLabel: yVar[0] || "Y", title: `${yVar[0] || "Y"} vs ${xVars[0]}`,
                     }] : []),
+                    // G13 — multi-model coefficient comparison template
+                    ...(pinnedModels.length >= 2 ? [{
+                      label: "Coef comparison",
+                      mode: "comparison",
+                      layers: [
+                        { id: "g13_a", geom: "point",    aes: { x: "variable", y: "estimate", color: "model", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal, visible: true },
+                        { id: "g13_b", geom: "errorbar", aes: { x: "variable", y: "", color: "model", yMin: "ciLow", yMax: "ciHigh" }, value: "", position: "identity", fill: C.teal, visible: true },
+                        { id: "g13_c", geom: "hline",    aes: { x: "", y: "", color: "", yMin: "", yMax: "" }, value: "0", position: "identity", fill: C.textDim, visible: true },
+                      ],
+                      xLabel: "Variable", yLabel: "Estimate", title: "Coefficient comparison",
+                    }] : []),
                   ].map(tmpl => (
                     <button
                       key={tmpl.label}
                       onClick={() => {
+                        if (tmpl.mode) setPlotDataMode(tmpl.mode);
                         setPlotInitLayers(tmpl.layers);
                         setPlotTemplateKey(k => k + 1);
                       }}
@@ -2074,11 +2138,11 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
                   ))}
                 </div>
 
-                {/* PlotBuilder — key resets when template applied */}
+                {/* PlotBuilder — key resets when template applied (G12+G13) */}
                 <PlotBuilder
                   key={plotTemplateKey}
-                  headers={resultHeaders}
-                  rows={resultRows}
+                  headers={activePlotHeaders}
+                  rows={activePlotRows}
                   initialLayers={plotInitLayers}
                   style={{ minHeight: 340 }}
                 />
