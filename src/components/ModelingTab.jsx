@@ -474,6 +474,17 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
     [yVar, results, csvBuilder]
   );
 
+  const handleRScript = () => {
+    if (!rScriptConfig) return;
+    const script = generateRScript(rScriptConfig);
+    const blob   = new Blob([script], { type: "text/plain" });
+    const a      = document.createElement("a");
+    a.href       = URL.createObjectURL(blob);
+    a.download   = `${(rScriptConfig.filename ?? "analysis").replace(/\.[^.]+$/, "")}_${model}.R`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: "1.2rem" }}>
       <div style={{ background: "#0a0a0a", padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono, borderRadius: "4px 4px 0 0" }}>

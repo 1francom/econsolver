@@ -416,6 +416,14 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     }
   }, [primaryId]); // only on mount — rawData ref won't change for same project
 
+  // ── Persist primary raw data on first mount ────────────────────────────────
+  // This ensures "Open project" works without re-uploading.
+  useEffect(() => {
+    if (rawData && primaryId) {
+      saveRawData(primaryId, rawData);
+    }
+  }, [primaryId]); // only on mount — rawData ref won't change for same project
+
   // Keep primary rawData in sync if parent re-loads a new file.
   // If rawData actually changed (new file), clear secondary datasets — they
   // belonged to the previous project and would produce stale join results.
