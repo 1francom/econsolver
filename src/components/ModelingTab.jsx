@@ -1010,46 +1010,11 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const [activeBufferId, setActiveBufferId] = useState(null);
   const pinnedModels = useMemo(() => modelBuffer.getAll(), [bufferVersion]);
 
-  // ── H8: Specification curve ────────────────────────────────────────────────
-  const [specOpen,   setSpecOpen]   = useState(false);
-  const [specConfig, setSpecConfig] = useState({ col: "", op: ">=", start: "", end: "", step: "", coefVar: "" });
-  const [specRows,   setSpecRows]   = useState([]);
+  // ── H8: Specification curve (state only — callback defined after _runEstimation) ──
+  const [specOpen,    setSpecOpen]    = useState(false);
+  const [specConfig,  setSpecConfig]  = useState({ col: "", op: ">=", start: "", end: "", step: "", coefVar: "" });
+  const [specRows,    setSpecRows]    = useState([]);
   const [specRunning, setSpecRunning] = useState(false);
-
-  const runSpecCurve = useCallback(() => {
-    const { col, op, start, end, step, coefVar } = specConfig;
-    if (!col || !coefVar || start === "" || end === "" || step === "") return;
-    const s = Math.abs(Number(step)) || 1;
-    const pts = [];
-    setSpecRunning(true);
-    try {
-      for (let t = Number(start); t <= Number(end) + 1e-9; t += s) {
-        const filtered = (rows ?? []).filter(row => {
-          const v = Number(row[col]);
-          switch (op) {
-            case ">=": return !isNaN(v) && v >= t;
-            case "<=": return !isNaN(v) && v <= t;
-            case ">":  return !isNaN(v) && v > t;
-            case "<":  return !isNaN(v) && v < t;
-            default:   return String(row[col]) === String(t);
-          }
-        });
-        if (filtered.length < 5) continue; // skip tiny samples
-        const out = _runEstimation(filtered);
-        if (out.result && !out.error) {
-          const idx = (out.result.varNames ?? []).indexOf(coefVar);
-          if (idx >= 0) {
-            const b = out.result.beta[idx];
-            const se = out.result.se[idx];
-            pts.push({ threshold: +t.toFixed(6), estimate: b, se, ciLow: b - 1.96 * se, ciHigh: b + 1.96 * se, n: filtered.length });
-          }
-        }
-      }
-    } finally {
-      setSpecRunning(false);
-    }
-    setSpecRows(pts);
-  }, [specConfig, rows, _runEstimation]);
 
   // ── G12: Plot Builder panel ───────────────────────────────────────────────
   const [plotOpen,        setPlotOpen]        = useState(false);
@@ -1278,6 +1243,42 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
       return { error: `Estimation error: ${e.message}` };
     }
   }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+
+  // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
+  const runSpecCurve = useCallback(() => {
+    const { col, op, start, end, step, coefVar } = specConfig;
+    if (!col || !coefVar || start === "" || end === "" || step === "") return;
+    const s = Math.abs(Number(step)) || 1;
+    const pts = [];
+    setSpecRunning(true);
+    try {
+      for (let t = Number(start); t <= Number(end) + 1e-9; t += s) {
+        const filtered = (rows ?? []).filter(row => {
+          const v = Number(row[col]);
+          switch (op) {
+            case ">=": return !isNaN(v) && v >= t;
+            case "<=": return !isNaN(v) && v <= t;
+            case ">":  return !isNaN(v) && v > t;
+            case "<":  return !isNaN(v) && v < t;
+            default:   return String(row[col]) === String(t);
+          }
+        });
+        if (filtered.length < 5) continue;
+        const out = _runEstimation(filtered);
+        if (out.result && !out.error) {
+          const idx = (out.result.varNames ?? []).indexOf(coefVar);
+          if (idx >= 0) {
+            const b = out.result.beta[idx];
+            const se = out.result.se[idx];
+            pts.push({ threshold: +t.toFixed(6), estimate: b, se, ciLow: b - 1.96 * se, ciHigh: b + 1.96 * se, n: filtered.length });
+          }
+        }
+      }
+    } finally {
+      setSpecRunning(false);
+    }
+    setSpecRows(pts);
+  }, [specConfig, rows, _runEstimation]);
 
   // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
   const estimate = useCallback(() => {
