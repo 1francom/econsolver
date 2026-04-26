@@ -1,20 +1,43 @@
 // ─── ECON STUDIO · AIService.js ───────────────────────────────────────────────
 // Centralised LLM service layer. All Anthropic API calls live here.
+//
+// PROMPT CACHING:
+//   Anthropic caches blocks marked cache_control: {type:"ephemeral"}.
+//   SHARED_CONTEXT is the cached block — prepended automatically in callClaude.
+//   Header required: "anthropic-beta": "prompt-caching-2024-07-31"
+//   Cache TTL: 5 minutes (refreshed on each hit). ~10% of input token cost.
+//
 // Exports:
-//   inferVariableUnits(headers, sampleRows)  → Promise<Record<string,string>>
-//   interpretRegression(result, dataDictionary) → Promise<string>
+//   callClaude({ system, user, messages?, maxTokens, model? })       — shared caller
+//   inferVariableUnits(headers, sampleRows)                          → Promise<Record<string,string>>
+//   interpretRegression(result, dataDictionary)                      → Promise<string>
+//   suggestCleaning(dataQualityReport)                               → Promise<CleaningSuggestion[]>
+//   compareModels(modelA, modelB, dataDictionary?)                   → Promise<string>
+//   researchCoach({ question, modelResult, dataDictionary?, history? }) → Promise<string>
+
+import {
+  SHARED_CONTEXT,
+  INFER_UNITS_PROMPT,
+  INTERPRET_REGRESSION_PROMPT,
+  CLEANING_SUGGESTIONS_PROMPT,
+  COMPARE_MODELS_PROMPT,
+  RESEARCH_COACH_PROMPT,
+  buildMetadataContext,
+} from "./Prompts/index.js";
 
 const API_URL   = "https://api.anthropic.com/v1/messages";
-const MODEL     = "claude-sonnet-4-20250514";
+const MODEL     = "claude-sonnet-4-6";        // narratives, cleaning, research coach
+const MODEL_FAST = "claude-haiku-4-5-20251001"; // unit inference — cheap, fast
 const MAX_TOK   = 700;
 
 // ─── MOCK FALLBACKS ───────────────────────────────────────────────────────────
-// Used when the API key is absent or the network call fails (CORS in dev, etc.)
-function mockNarrative(core) {
-  const { varNames = [], beta = [], pVals = [], R2, n, modelLabel = "OLS", yVar = "y" } = core;
+function mockNarrative(result) {
+  const { varNames = [], beta = [], pVals = [], R2, n } = result;
+  const modelLabel = result.label ?? result.modelLabel ?? "OLS";
+  const yVar = result.spec?.yVar ?? result.yVar ?? "y";
   const regs = varNames
     .filter(v => v !== "(Intercept)")
-    .map((v, _) => {
+    .map(v => {
       const i = varNames.indexOf(v);
       const b = beta[i], p = pVals[i];
       if (b == null || !isFinite(b)) return null;
@@ -41,23 +64,46 @@ function mockNarrative(core) {
 }
 
 // ─── SHARED CALLER ────────────────────────────────────────────────────────────
-async function callClaude({ system, user, maxTokens = MAX_TOK }) {
+// system: string — task-specific prompt (WITHOUT SHARED_CONTEXT — added here).
+// The API receives system as an array:
+//   [
+//     { type:"text", text: SHARED_CONTEXT, cache_control:{type:"ephemeral"} },
+//     { type:"text", text: system }
+//   ]
+// SHARED_CONTEXT is cached; task-specific prompt is not (may vary per call).
+// If system is falsy, only SHARED_CONTEXT is sent (still cached).
+// messages: optional array of { role:'user'|'assistant', content: string }
+// If provided, used directly (multi-turn). Otherwise `user` is wrapped as a single turn.
+export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, model = MODEL }) {
+  const systemArray = [
+    {
+      type: "text",
+      text: SHARED_CONTEXT,
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+  if (system) {
+    systemArray.push({ type: "text", text: system });
+  }
+
   const body = {
-    model: MODEL,
+    model,
     max_tokens: maxTokens,
-    messages: [{ role: "user", content: user }],
+    system:     systemArray,
+    messages:   messages ?? [{ role: "user", content: user }],
   };
-  if (system) body.system = system;
 
   let res;
   try {
     res = await fetch(API_URL, {
       method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(body),
+      headers: {
+        "Content-Type":   "application/json",
+        "anthropic-beta": "prompt-caching-2024-07-31",
+      },
+      body: JSON.stringify(body),
     });
   } catch (networkErr) {
-    // CORS pre-flight failures or offline — surface a clear error
     throw new Error(`Network error: ${networkErr.message ?? "could not reach Anthropic API"}`);
   }
 
@@ -73,36 +119,9 @@ async function callClaude({ system, user, maxTokens = MAX_TOK }) {
 }
 
 // ─── 1. INFER VARIABLE UNITS ─────────────────────────────────────────────────
-// Sends column headers + up to 3 sample rows to the model.
-// Returns a plain JS object: { colName: "human-readable description", … }
-//
-// Example output:
-//   { wage: "hourly wage in USD", educ: "years of education",
-//     female: "dummy 1=female", country: "country of residence" }
-
-const INFER_SYSTEM = `\
-You are a senior econometrician at LMU Munich specialising in dataset curation.
-Your job: given column headers and sample values from a CSV, infer a concise,
-human-readable description for each variable — the kind you would write in a
-paper's "Variable Definitions" table.
-
-STRICT RULES:
-1. Return ONLY a valid JSON object. No markdown fences, no preamble, no trailing text.
-2. Every header must appear as a key in the JSON.
-3. Values must be short strings (≤ 10 words).
-4. For binary/dummy columns (values are 0 and 1 only), begin the description with
-   "dummy 1=" followed by what 1 represents (e.g. "dummy 1=female", "dummy 1=union member").
-5. For counts, include the unit (e.g. "number of schools in grid cell").
-6. For monetary values, include the currency if inferable (e.g. "hourly wage in USD").
-7. For log-transformed columns (name starts with log_ or ln_), prefix with "log of".
-8. For squared columns (name ends with _sq or _2), include "squared" in description.
-9. For identifiers (id, entity_id, etc.), write "entity identifier".
-10. Use English only.`;
-
 export async function inferVariableUnits(headers, sampleRows) {
   if (!headers?.length) return {};
 
-  // Build a compact sample table (max 3 rows)
   const sample = sampleRows.slice(0, 3);
   const sampleText = [
     headers.join(" | "),
@@ -114,27 +133,22 @@ export async function inferVariableUnits(headers, sampleRows) {
 
   const userPrompt = `Headers and sample data:\n\n${sampleText}\n\nReturn the JSON object now.`;
 
-  const identity = () => {
-    const fb = {};
-    headers.forEach(h => { fb[h] = h; });
-    return fb;
-  };
+  const identity = () => { const fb = {}; headers.forEach(h => { fb[h] = h; }); return fb; };
+
+  // Strip SHARED_CONTEXT from the exported prompt (callClaude adds it as cached block)
+  const taskPrompt = INFER_UNITS_PROMPT.replace(SHARED_CONTEXT, "").trim();
 
   let raw;
   try {
-    raw = await callClaude({ system: INFER_SYSTEM, user: userPrompt, maxTokens: 600 });
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 600, model: MODEL_FAST });
   } catch (err) {
-    // Network error or missing API key — return identity map silently
     console.warn("[AIService] inferVariableUnits failed:", err.message);
     return identity();
   }
 
-  // Strip accidental markdown fences just in case
   const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-
   try {
     const parsed = JSON.parse(cleaned);
-    // Guarantee every header has an entry (fallback to the header name itself)
     const result = {};
     headers.forEach(h => { result[h] = parsed[h] ?? h; });
     return result;
@@ -144,16 +158,145 @@ export async function inferVariableUnits(headers, sampleRows) {
 }
 
 // ─── 2. INTERPRET REGRESSION ─────────────────────────────────────────────────
-// Generates a two-paragraph academic narrative for a regression result.
-// dataDictionary: Record<string,string>  (may be null/undefined — handled gracefully)
-//
-// Functional form detection (from yVar / xVar names):
-//   log(y) ~ log(x) → log-log → elasticity interpretation
-//   log(y) ~ x      → log-level → semi-elasticity (β×100 % change)
-//   y ~ log(x)      → level-log → (β/100) unit change per 1% change in x
+
+// Classifies each regressor and returns a VARIABLE METADATA block for the prompt.
+// The model reads this block to pick the right natural-language pattern (rule A–G).
+function _classifyVariables(varNames, dataDictionary = {}, rows = null) {
+  // Value-based binary detection: if every non-null value is 0 or 1 → binary.
+  // Uses Number() coercion to handle string "0"/"1" and boolean true/false from pipeline steps.
+  const isBinaryInData = v => {
+    if (!rows?.length) return false;
+    const vals = rows.map(r => r[v]).filter(x => x !== null && x !== undefined);
+    return vals.length > 0 && vals.every(x => {
+      const n = Number(x);
+      return (n === 0 || n === 1) && !isNaN(n);
+    });
+  };
+
+  // Common demographic / group dummies: name → { oneLabel, zeroLabel }
+  const DEMO_MAP = {
+    female:   { one: "female",   zero: "male"        },
+    male:     { one: "male",     zero: "female"       },
+    urban:    { one: "urban",    zero: "rural"        },
+    rural:    { one: "rural",    zero: "urban"        },
+    married:  { one: "married",  zero: "unmarried"    },
+    employed: { one: "employed", zero: "unemployed"   },
+    black:    { one: "Black",    zero: "non-Black"    },
+    white:    { one: "White",    zero: "non-White"    },
+    hispanic: { one: "Hispanic", zero: "non-Hispanic" },
+    union:    { one: "union member", zero: "non-union" },
+    migrant:  { one: "migrant", zero: "non-migrant"   },
+    immigrant:{ one: "immigrant", zero: "non-immigrant"},
+    public:   { one: "public sector", zero: "private sector" },
+    private:  { one: "private sector", zero: "public sector" },
+    formal:   { one: "formal sector", zero: "informal sector"},
+  };
+
+  // Treatment / post variable name patterns
+  const TREATMENT_RE = /^(treated?|treatment|D|T|W|assignment|eligible|assigned)$/i;
+  const POST_RE      = /^(post|after|wave\d*|period\d*|t\d+|follow_?up)$/i;
+  // DiD interaction: "treat_post", "D_post", "treat×post", "treated_post", etc.
+  const DID_RE       = /(treat|treated?|D|T)[_×x](post|after|wave|period)|(post|after|wave|period)[_×x](treat|treated?|D|T)/i;
+
+  const lines = [];
+
+  varNames.forEach(v => {
+    if (v === "(Intercept)") return;
+
+    const vl  = v.toLowerCase();
+    const dict = dataDictionary?.[v] ?? "";
+
+    // ── Data dictionary "dummy 1=X" ───────────────────────────────────────
+    const dummyMatch = dict.match(/^dummy\s+1\s*=\s*(.+)$/i);
+    if (dummyMatch) {
+      const oneLabel = dummyMatch[1].trim();
+      lines.push(`  ${v}: binary-dummy | 1="${oneLabel}", 0=reference/comparison group`);
+      return;
+    }
+
+    // ── DiD interaction (check before individual treatment/post) ──────────
+    if (DID_RE.test(v)) {
+      lines.push(`  ${v}: did-interaction | coefficient = ATT under parallel trends`);
+      return;
+    }
+
+    // ── Generic interaction term ──────────────────────────────────────────
+    if (v.includes("×") || /_x_/i.test(v) || /interaction/i.test(dict)) {
+      lines.push(`  ${v}: interaction-term | interpret as conditional/moderation effect`);
+      return;
+    }
+
+    // ── Treatment indicator ───────────────────────────────────────────────
+    if (TREATMENT_RE.test(v)) {
+      lines.push(`  ${v}: treatment-indicator | 1=treated group, 0=control group`);
+      return;
+    }
+
+    // ── Post / time dummy ─────────────────────────────────────────────────
+    if (POST_RE.test(v)) {
+      lines.push(`  ${v}: time-dummy | 1=post-treatment period, 0=pre-treatment period`);
+      return;
+    }
+
+    // ── Known demographic dummies ─────────────────────────────────────────
+    const demoKey = Object.keys(DEMO_MAP).find(k => vl === k || vl === `is_${k}` || vl === `d_${k}`);
+    if (demoKey) {
+      const { one, zero } = DEMO_MAP[demoKey];
+      lines.push(`  ${v}: binary-dummy | 1="${one}", 0="${zero}"`);
+      return;
+    }
+
+    // ── Log-transformed ───────────────────────────────────────────────────
+    if (/^(log_|ln_|log\()/i.test(v) || /^log of/i.test(dict)) {
+      lines.push(`  ${v}: log-var | ${dict || "log-transformed continuous variable"}`);
+      return;
+    }
+
+    // ── Standardized (z-score) ────────────────────────────────────────────
+    if (/_std$|_z$|_zscore$/i.test(v) || /standardized/i.test(dict)) {
+      const base = v.replace(/_std$|_z$|_zscore$/i, "");
+      lines.push(`  ${v}: standardized | one SD increase in "${base}" — do NOT say "one unit increase"`);
+      return;
+    }
+
+    // ── Lagged / leading variable ─────────────────────────────────────────
+    if (/_lag\d*$|_l\d+$|_lead\d*$/i.test(v) || /lagged/i.test(dict)) {
+      const isLead = /_lead/i.test(v);
+      lines.push(`  ${v}: ${isLead ? "lead" : "lag"}-var | effect operates with temporal delay — state the lag explicitly`);
+      return;
+    }
+
+    // ── Generic binary: value-check OR suffix ─────────────────────────────
+    if (isBinaryInData(v) ||
+        /_d$|_dummy$|_bin$|_flag$|_indicator$|_eligible$|_treat$|_control$/i.test(v)) {
+      const dictLabel = dict && !/^entity identifier$/i.test(dict) ? dict : null;
+      lines.push(dictLabel
+        ? `  ${v}: binary-dummy | 1="${dictLabel}", 0=reference/comparison group`
+        : `  ${v}: binary-dummy | binary indicator — name the active group (1=?) and reference group (0=?)`);
+      return;
+    }
+
+    // ── Squared term ──────────────────────────────────────────────────────
+    if (/_sq$|_2$|²/.test(v) || /squared/i.test(dict)) {
+      lines.push(`  ${v}: squared-term | non-linear component, interpret jointly with linear term`);
+      return;
+    }
+
+    // ── Continuous with dictionary ────────────────────────────────────────
+    if (dict && !/^entity identifier$/i.test(dict)) {
+      lines.push(`  ${v}: continuous | ${dict}`);
+      return;
+    }
+
+    // ── Fallback — unknown ────────────────────────────────────────────────
+    lines.push(`  ${v}: continuous | (no description available)`);
+  });
+
+  return lines.length ? `VARIABLE METADATA:\n${lines.join("\n")}` : "";
+}
 
 function detectFunctionalForm(yVar = "", xVars = []) {
-  const yLog  = /^(log_|ln_|log\()/i.test(yVar);
+  const yLog    = /^(log_|ln_|log\()/i.test(yVar);
   const anyXLog = xVars.some(v => /^(log_|ln_|log\()/i.test(v));
   if (yLog && anyXLog)  return "log-log";
   if (yLog && !anyXLog) return "log-level";
@@ -173,97 +316,49 @@ function buildCoeffLines(result) {
   const { varNames = [], beta = [], se = [], pVals = [] } = result;
   return varNames
     .filter(v => v !== "(Intercept)")
-    .map((v, _) => {
+    .map(v => {
       const i = varNames.indexOf(v);
-      const b  = beta[i];
-      const s  = se[i];
-      const p  = pVals[i];
+      const b = beta[i], s = se[i], p = pVals[i];
       if (b == null || !isFinite(b) || s == null || !isFinite(s)) {
         return `  ${v}: β=N/A, SE=N/A, 95%CI=[N/A,N/A], p=N/A`;
       }
       const ci_lo = (b - 1.96 * s).toFixed(4);
       const ci_hi = (b + 1.96 * s).toFixed(4);
-      const sig = p == null ? "p=N/A" : p < 0.01 ? "p<0.01 ***" : p < 0.05 ? "p<0.05 **" : p < 0.1 ? "p<0.1 *" : `p=${p.toFixed(3)} n.s.`;
+      const sig = p == null ? "p=N/A"
+        : p < 0.01 ? "p<0.01 ***"
+        : p < 0.05 ? "p<0.05 **"
+        : p < 0.1  ? "p<0.1 *"
+        : `p=${p.toFixed(3)} n.s.`;
       return `  ${v}: β=${b.toFixed(4)}, SE=${s.toFixed(4)}, 95%CI=[${ci_lo},${ci_hi}], ${sig}`;
     })
     .join("\n");
 }
 
-const INTERPRET_SYSTEM = `\
-You are a senior econometrician at LMU Munich writing a results section for a
-peer-reviewed journal. You receive a regression output and a data dictionary that
-maps column names to human-readable descriptions with units.
-
-────────────────────────────────────────────────────────────────────
-NATURAL LANGUAGE RULES (MANDATORY — violations will be rejected):
-────────────────────────────────────────────────────────────────────
-1. NEVER write "a 1 unit increase in [variable]".
-   Instead, use the data dictionary to phrase the change naturally:
-     • Count variables  → "one additional [unit]" (e.g. "one additional year of education")
-     • Continuous vars  → "a one-[unit] increase" (e.g. "a one-percentage-point rise in the
-       unemployment rate")
-     • Dummy variables  → interpret as a discrete group difference
-       (e.g. "union members earn ... more than non-union workers")
-     • If the dictionary says "dummy 1=X", phrase it as comparing X vs. non-X.
-
-2. FUNCTIONAL FORM RULES:
-     • Log-Log  → interpret β as an elasticity: "a 1% increase in [X] is associated
-       with a β% change in [Y]."
-     • Log-Level → semi-elasticity: "one additional [unit of X] is associated with a
-       β×100 percent change in [Y]."
-     • Level-Log → "a 1% increase in [X] is associated with a β/100 change in [Y] [units]."
-     • Level-Level → standard marginal effect with natural units from the dictionary.
-
-3. Quote exact β values and p-values. Mention 95% CIs for significant regressors.
-
-4. DUMMIES: Never say "a one-unit increase in female." Say "women earn X more/less than men."
-
-────────────────────────────────────────────────────────────────────
-FORMAT RULES (also mandatory):
-────────────────────────────────────────────────────────────────────
-• Write exactly TWO paragraphs in English. Nothing else — no headers, bullets, markdown.
-• Paragraph 1 (4–6 sentences): statistical findings — sign, magnitude, significance of
-  each regressor, R², N, which predictors are significant and what CIs imply.
-• Paragraph 2 (4–6 sentences): economic plausibility, model reliability — are magnitudes
-  sensible? R² in context? Flag unexpected signs, possible OVB, multicollinearity risk
-  (large SE relative to β). For DiD: parallel trends. For 2SLS: instrument validity.
-• Do NOT start with "This study", "The results", or "In this".
-• Do NOT reproduce variable names in ALL-CAPS.
-• Paragraphs separated by exactly one blank line.
-• English only.`;
-
-export async function interpretRegression(result, dataDictionary = null) {
+export async function interpretRegression(result, dataDictionary = null, metadataReport = null, rows = null) {
   if (!result) throw new Error("No result object provided.");
 
-  // Resolve the core result object (2SLS wraps in .second)
-  const core = result.second ?? result;
   const {
     varNames = [], beta = [], se = [], pVals = [],
     R2 = null, adjR2 = null, n = null, df = null,
     Fstat = null, Fpval = null,
     att = null, attP = null,
-    modelLabel = "OLS", yVar = "y", xVars = [],
-  } = core;
+  } = result;
+  const modelLabel = result.label ?? result.modelLabel ?? "OLS";
+  const yVar  = result.spec?.yVar  ?? result.yVar  ?? "y";
+  const xVars = result.spec?.xVars ?? result.xVars ?? [];
 
-  // Intercept
   const b0idx = varNames.indexOf("(Intercept)");
   const b0     = b0idx >= 0 ? beta[b0idx] : null;
   const regressors = varNames
     .filter(v => v !== "(Intercept)")
-    .map(v => {
-      const i = varNames.indexOf(v);
-      return { v, b: beta[i], s: se[i], p: pVals[i] };
-    });
+    .map(v => { const i = varNames.indexOf(v); return { v, b: beta[i], s: se[i], p: pVals[i] }; });
 
-  // Estimated equation — guard NaN/undefined betas (e.g. FE result without intercept)
   const eqParts = (b0 != null && isFinite(b0)) ? [b0.toFixed(4)] : [];
   regressors.forEach(({ v, b }) => {
     if (b == null || !isFinite(b)) { eqParts.push(`[N/A]·${v}`); return; }
     eqParts.push(`${b >= 0 ? "+ " : "– "}${Math.abs(b).toFixed(4)}·${v}`);
   });
-  const equation = `${yVar} = ${eqParts.join(" ")}`;
 
-  // Fit summary
   const fitLines = [
     `R² = ${R2?.toFixed(4) ?? "n/a"}`,
     `Adj. R² = ${adjR2?.toFixed(4) ?? "n/a"}`,
@@ -277,32 +372,318 @@ export async function interpretRegression(result, dataDictionary = null) {
       : null,
   ].filter(Boolean).join(", ");
 
-  const funcForm     = detectFunctionalForm(yVar, xVars.length ? xVars : regressors.map(r => r.v));
-  const coeffLines   = buildCoeffLines(core);
-  const dictSection  = buildDictionarySection(dataDictionary);
+  const allXVars    = xVars.length ? xVars : regressors.map(r => r.v);
+  const funcForm    = detectFunctionalForm(yVar, allXVars);
+  const coeffLines  = buildCoeffLines(result);
+  const dictSection = buildDictionarySection(dataDictionary);
+  const metaBlock   = _classifyVariables(varNames, dataDictionary, rows);
 
+  const metaCtx = metadataReport ? buildMetadataContext(metadataReport) : "";
   const userPrompt = `\
 REGRESSION OUTPUT
 Model type: ${modelLabel}
 Dependent variable: ${yVar}
 Functional form: ${funcForm}
-Estimated equation: ${equation}
+Estimated equation: ${yVar} = ${eqParts.join(" ")}
 Fit statistics: ${fitLines}
 ${dictSection}
+${metaBlock ? metaBlock + "\n" : ""}
 Coefficient details:
 ${coeffLines}
-
+${metaCtx ? "\n" + metaCtx : ""}
 Write the two-paragraph interpretation now.`;
 
   try {
-    return await callClaude({
-      system:    INTERPRET_SYSTEM,
-      user:      userPrompt,
-      maxTokens: MAX_TOK,
-    });
+    const taskPrompt = INTERPRET_REGRESSION_PROMPT.replace(SHARED_CONTEXT, "").trim();
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: MAX_TOK });
   } catch (err) {
-    // No API key, CORS in dev, or network failure → return mock so UI stays functional
     console.warn("[AIService] interpretRegression failed:", err.message);
-    return mockNarrative(core);
+    return mockNarrative(result);
+  }
+}
+
+// ─── 3. SUGGEST CLEANING ──────────────────────────────────────────────────────
+// Accepts the DataQualityReport produced by buildDataQualityReport() and returns
+// an array of prioritised cleaning suggestions with pipeline step types.
+//
+// Returns: Promise<CleaningSuggestion[]>
+//   CleaningSuggestion: { col, issue, suggested_step, params, rationale, severity }
+//   On failure: returns [] (never throws — caller renders empty state gracefully).
+
+function _serializeReport(report) {
+  const { meta, flags, columns, correlations, panelSummary } = report;
+  const lines = [];
+
+  // ── Dataset overview ──────────────────────────────────────────────────────
+  lines.push(
+    `DATASET: N=${meta.nRows.toLocaleString()} rows, K=${meta.nCols} cols, ` +
+    `completeness=${(meta.completeness * 100).toFixed(1)}%, ` +
+    `numeric=${meta.numericCols}, categorical=${meta.categoricalCols}, mixed=${meta.mixedCols}`
+  );
+
+  // ── Panel summary ─────────────────────────────────────────────────────────
+  if (panelSummary) {
+    lines.push(
+      `PANEL: ${panelSummary.balance}, ${panelSummary.nEntities} entities, ` +
+      `${panelSummary.nPeriods} periods, attrition=${(panelSummary.attritionPct * 100).toFixed(1)}%` +
+      (panelSummary.hasDups ? ", DUPLICATE (i,t) PAIRS DETECTED" : "") +
+      (panelSummary.hasGaps ? ", gaps present" : "")
+    );
+  }
+
+  // ── Flags (top-level actionable issues) ───────────────────────────────────
+  const actionableFlags = flags.filter(f => f.severity !== "ok").slice(0, 15);
+  if (actionableFlags.length > 0) {
+    lines.push(`\nFLAGS (${actionableFlags.length}, ordered by severity):`);
+    actionableFlags.forEach(f => {
+      const colLabel = f.col ? `\`${f.col}\`` : "dataset-level";
+      lines.push(`  [${f.severity}] ${colLabel} — ${f.title}`);
+      lines.push(`    ${f.detail}`);
+      if (f.suggestedStep) lines.push(`    Suggested pipeline step: ${f.suggestedStep}`);
+    });
+  }
+
+  // ── Per-column detail for non-ok columns ──────────────────────────────────
+  const problemCols = columns.filter(c => c.severity !== "ok").slice(0, 12);
+  if (problemCols.length > 0) {
+    lines.push(`\nCOLUMN DETAIL:`);
+    problemCols.forEach(c => {
+      const statParts = [];
+      if (c.stats.naPct > 0)    statParts.push(`missing=${(c.stats.naPct * 100).toFixed(1)}%`);
+      if (c.stats.mean != null) statParts.push(`mean=${c.stats.mean.toFixed(3)}, sd=${c.stats.std?.toFixed(3)}`);
+      if (c.stats.uCount != null) statParts.push(`unique=${c.stats.uCount}`);
+      if (c.outlierReport) {
+        statParts.push(`IQR_outliers=${c.outlierReport.iqrCount}(${(c.outlierReport.iqrPct * 100).toFixed(1)}%)`);
+        statParts.push(`skew=${c.outlierReport.skewness.toFixed(2)}(${c.outlierReport.skewLabel})`);
+        if (c.outlierReport.extremeLow?.length)  statParts.push(`min_vals=[${c.outlierReport.extremeLow.join(",")}]`);
+        if (c.outlierReport.extremeHigh?.length) statParts.push(`max_vals=[${c.outlierReport.extremeHigh.join(",")}]`);
+      }
+      if (c.missingPattern?.isSystematic) statParts.push("systematic_missingness=true");
+
+      lines.push(`  \`${c.col}\` [${c.type}, ${c.severity}]: ${statParts.join(", ")}`);
+    });
+  }
+
+  // ── High correlations ─────────────────────────────────────────────────────
+  if (correlations.length > 0) {
+    lines.push(`\nHIGH CORRELATIONS (|r| ≥ 0.85):`);
+    correlations.slice(0, 6).forEach(({ a, b, r }) => {
+      lines.push(`  \`${a}\` ↔ \`${b}\`: r=${r.toFixed(4)}`);
+    });
+  }
+
+  return lines.join("\n");
+}
+
+export async function suggestCleaning(dataQualityReport) {
+  if (!dataQualityReport) return [];
+
+  const reportText  = _serializeReport(dataQualityReport);
+  const taskPrompt  = CLEANING_SUGGESTIONS_PROMPT.replace(SHARED_CONTEXT, "").trim();
+  const userPrompt  = `DATA QUALITY REPORT:\n\n${reportText}\n\nReturn the JSON array now.`;
+
+  let raw;
+  try {
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 1800 });
+  } catch (err) {
+    console.warn("[AIService] suggestCleaning failed:", err.message);
+    return [];
+  }
+
+  const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed)) return [];
+    // Validate shape — drop any suggestion missing required fields
+    return parsed.filter(s =>
+      typeof s.issue === "string" &&
+      typeof s.rationale === "string" &&
+      ["high", "medium", "low"].includes(s.severity)
+    );
+  } catch (err) {
+    console.warn("[AIService] suggestCleaning — JSON parse failed:", err.message);
+    return [];
+  }
+}
+
+// ─── 4. COMPARE MODELS ───────────────────────────────────────────────────────
+// Comparative analysis of 2–8 regression results.
+// Accepts either (models: EstimationResult[], dataDictionary?) for N-way,
+// or legacy (modelA, modelB, dataDictionary?) for 2-way.
+// Returns Promise<string> — three paragraphs of plain text.
+
+function _formatModelBlock(label, raw) {
+  const {
+    varNames = [], beta = [], se = [], pVals = [],
+    R2, adjR2, n, Fstat, Fpval, att, attP, late, lateP,
+  } = raw;
+  const modelLabel = raw.label ?? raw.modelLabel ?? "OLS";
+  const yVar = raw.spec?.yVar ?? raw.yVar ?? "y";
+
+  const lines = [
+    `${label}: ${modelLabel} | dep.var: ${yVar} | N=${n ?? "?"} | R²=${R2?.toFixed(4) ?? "?"} | Adj.R²=${adjR2?.toFixed(4) ?? "?"}`,
+  ];
+  if (Fstat  != null && isFinite(Fstat))  lines.push(`  F=${Fstat.toFixed(3)} (p=${Fpval != null ? (Fpval < 0.001 ? "<0.001" : Fpval.toFixed(4)) : "?"})`);
+  if (att    != null && isFinite(att))    lines.push(`  ATT=${att.toFixed(4)} (p=${attP  != null ? (attP  < 0.001 ? "<0.001" : attP.toFixed(4))  : "?"})`);
+  if (late   != null && isFinite(late))   lines.push(`  LATE=${late.toFixed(4)} (p=${lateP != null ? (lateP < 0.001 ? "<0.001" : lateP.toFixed(4)) : "?"})`);
+
+  lines.push("  Coefficients:");
+  varNames.filter(v => v !== "(Intercept)").forEach(v => {
+    const i = varNames.indexOf(v);
+    const b = beta[i], s = se[i], p = pVals[i];
+    const sig = p == null ? "p=N/A" : p < 0.01 ? "p<0.01***" : p < 0.05 ? "p<0.05**" : p < 0.1 ? "p<0.1*" : `p=${p.toFixed(3)}`;
+    lines.push(`    ${v}: β=${b?.toFixed(4) ?? "N/A"}, SE=${s?.toFixed(4) ?? "N/A"}, ${sig}`);
+  });
+  return lines.join("\n");
+}
+
+export async function compareModels(modelsOrA, dataDictionaryOrB = null, legacyDict = null) {
+  // Normalise overloaded signature
+  let models, dataDictionary;
+  if (Array.isArray(modelsOrA)) {
+    // N-way call: compareModels(models[], dataDictionary?)
+    models        = modelsOrA;
+    dataDictionary = dataDictionaryOrB;
+  } else {
+    // Legacy 2-way call: compareModels(modelA, modelB, dataDictionary?)
+    models        = [modelsOrA, dataDictionaryOrB].filter(Boolean);
+    dataDictionary = legacyDict;
+  }
+
+  if (!models?.length || models.length < 2) return "Provide at least two model results to compare.";
+
+  const modelBlocks = models.map((m, i) => {
+    const label = `${m.label ?? m.type ?? "Model"} (${i+1})`;
+    return _formatModelBlock(label, m);
+  }).join("\n\n");
+
+  const dictSection = (dataDictionary && Object.keys(dataDictionary).length)
+    ? `\nDATA DICTIONARY:\n${Object.entries(dataDictionary).map(([k,v]) => `  ${k}: "${v}"`).join("\n")}\n`
+    : "";
+
+  const userPrompt = `${modelBlocks}${dictSection}\n\nWrite the three-paragraph comparative analysis now.`;
+
+  try {
+    const taskPrompt = COMPARE_MODELS_PROMPT.replace(SHARED_CONTEXT, "").trim();
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 800 });
+  } catch (err) {
+    console.warn("[AIService] compareModels failed:", err.message);
+    return "Model comparison unavailable — check API key and connection.";
+  }
+}
+
+// ─── 5. RESEARCH COACH ────────────────────────────────────────────────────────
+// Multi-turn conversational advisor. Serialises the active model result into
+// a compact context block, then appends the conversation history + new question.
+//
+// history: [{ role:'user'|'assistant', text: string }]  (previous turns)
+// Returns: Promise<string>  — the assistant's reply text
+
+function _serializeModelContext(result, dataDictionary) {
+  if (!result) return "No model has been estimated yet.";
+
+  const {
+    varNames = [], beta = [], se = [], pVals = [],
+    R2, adjR2, n, Fstat, Fpval,
+    att, attSE, attP,
+  } = result;
+  const modelLabel = result.label ?? result.modelLabel ?? "OLS";
+  const yVar  = result.spec?.yVar  ?? result.yVar  ?? "y";
+  const xVars = result.spec?.xVars ?? result.xVars ?? [];
+
+  const lines = [];
+  lines.push(`ACTIVE MODEL: ${modelLabel}`);
+  lines.push(`Dependent variable: ${yVar}`);
+
+  const regressors = varNames.filter(v => v !== "(Intercept)");
+  if (regressors.length) lines.push(`Regressors: ${regressors.join(", ")}`);
+
+  // Fit stats
+  const fitParts = [];
+  if (n     != null)                fitParts.push(`N=${n}`);
+  if (R2    != null && isFinite(R2))   fitParts.push(`R²=${R2.toFixed(4)}`);
+  if (adjR2 != null && isFinite(adjR2)) fitParts.push(`Adj.R²=${adjR2.toFixed(4)}`);
+  if (Fstat != null && isFinite(Fstat)) {
+    const fp = Fpval != null ? (Fpval < 0.001 ? "<0.001" : Fpval.toFixed(4)) : "?";
+    fitParts.push(`F=${Fstat.toFixed(2)}(p=${fp})`);
+  }
+  if (att != null && isFinite(att)) {
+    const ap = attP != null ? (attP < 0.001 ? "<0.001" : attP.toFixed(4)) : "?";
+    fitParts.push(`ATT=${att.toFixed(4)}(SE=${attSE?.toFixed(4) ?? "?"},p=${ap})`);
+  }
+  if (fitParts.length) lines.push(`Fit: ${fitParts.join(", ")}`);
+
+  // Coefficients
+  lines.push("Coefficients:");
+  varNames.forEach(v => {
+    const i = varNames.indexOf(v);
+    const b = beta[i], s = se[i], p = pVals[i];
+    const bStr = (b != null && isFinite(b)) ? b.toFixed(4) : "N/A";
+    const sStr = (s != null && isFinite(s)) ? s.toFixed(4) : "N/A";
+    const sig  = p == null ? "p=N/A"
+               : p < 0.01 ? "p<0.01 ***"
+               : p < 0.05 ? "p<0.05 **"
+               : p < 0.1  ? "p<0.1 *"
+               : `p=${p.toFixed(3)} n.s.`;
+    lines.push(`  ${v}: β=${bStr}, SE=${sStr}, ${sig}`);
+  });
+
+  // 2SLS first stage (if present)
+  if (result.firstStages?.length) {
+    result.firstStages.forEach(fs => {
+      if (fs.Fstat != null) {
+        lines.push(`First-stage F (${fs.endogVar ?? "endog"}): ${fs.Fstat.toFixed(2)}`);
+      }
+    });
+  }
+
+  // RDD specifics
+  if (result.type === "RDD") {
+    const rdd = result.rddData ?? {};
+    lines.push(`LATE at cutoff=${rdd.cutoff ?? result.spec?.cutoff}: ${result.late?.toFixed(4) ?? "N/A"} (SE=${result.lateSE?.toFixed(4) ?? "N/A"}, p=${result.lateP?.toFixed(4) ?? "N/A"})`);
+    lines.push(`Bandwidth: ${rdd.h?.toFixed(4) ?? "N/A"}, Kernel: ${rdd.kernelType ?? "N/A"}`);
+  }
+
+  // Data dictionary
+  if (dataDictionary && Object.keys(dataDictionary).length) {
+    lines.push("Data dictionary:");
+    Object.entries(dataDictionary).slice(0, 20).forEach(([k, v]) => {
+      lines.push(`  ${k}: "${v}"`);
+    });
+  }
+
+  return lines.join("\n");
+}
+
+export async function researchCoach({ question, modelResult, dataDictionary = null, history = [], metadataReport = null }) {
+  if (!question?.trim()) return "";
+
+  const modelContext = _serializeModelContext(modelResult, dataDictionary);
+  const taskPrompt   = RESEARCH_COACH_PROMPT.replace(SHARED_CONTEXT, "").trim();
+  const metaCtx      = metadataReport ? "\n" + buildMetadataContext(metadataReport) : "";
+
+  // First user message always includes the model context (pinned to the top of the conversation)
+  const contextPrefix = `MODEL CONTEXT:\n${modelContext}${metaCtx}\n\n────────────────────────────\n`;
+
+  // Build messages array from history
+  const apiMessages = [];
+  history.forEach((turn, idx) => {
+    const content = (turn.role === "user" && idx === 0)
+      ? contextPrefix + turn.text
+      : turn.text;
+    apiMessages.push({ role: turn.role, content });
+  });
+
+  // New user turn — prepend context only if history is empty (first question)
+  const newContent = apiMessages.length === 0
+    ? contextPrefix + question.trim()
+    : question.trim();
+  apiMessages.push({ role: "user", content: newContent });
+
+  try {
+    return await callClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 500 });
+  } catch (err) {
+    console.warn("[AIService] researchCoach failed:", err.message);
+    return "The research coach is unavailable — check your API key and network connection.";
   }
 }

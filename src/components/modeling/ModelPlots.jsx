@@ -1855,3 +1855,302 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
     </InlinePlotShell>
   );
 }
+
+// ─── ROC CURVE ───────────────────────────────────────────────────────────────
+// Receiver Operating Characteristic curve for binary models.
+// Props: fitted {number[]} — P̂(Y=1), Y {number[]} — actual 0/1 labels
+// Returns an SVG with the ROC curve, diagonal reference, and AUC annotation.
+export function ROCCurve({ fitted, Y }) {
+  if (!fitted?.length || !Y?.length || fitted.length !== Y.length) return null;
+  const nPos = Y.reduce((s, y) => s + y, 0);
+  const nNeg = fitted.length - nPos;
+  if (nPos === 0 || nNeg === 0) return null;
+
+  // Sort by descending predicted probability to walk the ROC curve
+  const pairs = fitted
+    .map((p, i) => ({ p, y: Y[i] }))
+    .sort((a, b) => b.p - a.p);
+
+  let tp = 0, fp = 0;
+  const pts = [{ fpr: 0, tpr: 0 }];
+  for (const { y } of pairs) {
+    if (y === 1) tp++; else fp++;
+    pts.push({ fpr: fp / nNeg, tpr: tp / nPos });
+  }
+
+  // AUC via trapezoid rule
+  let auc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    auc += (pts[i].fpr - pts[i - 1].fpr) * (pts[i].tpr + pts[i - 1].tpr) / 2;
+  }
+
+  const W = 420, H = 360;
+  const PAD = { l: 50, r: 24, t: 24, b: 50 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+  const sx = v => PAD.l + v * iW;
+  const sy = v => PAD.t + (1 - v) * iH;
+
+  // Downsample to max 400 points for SVG performance
+  const step  = Math.max(1, Math.floor(pts.length / 400));
+  const sampled = pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
+  const pathD = sampled.map((p, i) =>
+    `${i === 0 ? "M" : "L"}${sx(p.fpr).toFixed(1)},${sy(p.tpr).toFixed(1)}`
+  ).join(" ");
+
+  const aucColor = auc >= 0.8 ? C.teal : auc >= 0.7 ? C.gold : C.red;
+  const ticks    = [0, 0.2, 0.4, 0.6, 0.8, 1.0];
+
+  return (
+    <div style={{ background: C.bg, padding: "0.5rem 0.5rem 0", display: "flex", justifyContent: "center" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 480, height: "auto", display: "block", fontFamily: mono }}>
+        <rect width={W} height={H} fill={C.bg} />
+        {/* grid */}
+        {ticks.map(v => (
+          <g key={v}>
+            <line x1={sx(v)} y1={PAD.t} x2={sx(v)} y2={PAD.t + iH} stroke={C.border} strokeWidth={1} strokeDasharray="3 4" />
+            <line x1={PAD.l} y1={sy(v)} x2={PAD.l + iW} y2={sy(v)} stroke={C.border} strokeWidth={1} strokeDasharray="3 4" />
+          </g>
+        ))}
+        {/* diagonal reference */}
+        <line x1={sx(0)} y1={sy(0)} x2={sx(1)} y2={sy(1)}
+          stroke={C.border2} strokeWidth={1.5} strokeDasharray="5 4" opacity={0.7} />
+        {/* ROC curve */}
+        <path d={pathD} fill="none" stroke={aucColor} strokeWidth={2.2} opacity={0.92} />
+        {/* AUC annotation */}
+        <text x={sx(0.55)} y={sy(0.22)} fill={aucColor} fontSize={14} fontFamily={mono} fontWeight="bold">
+          AUC = {auc.toFixed(4)}
+        </text>
+        <text x={sx(0.55)} y={sy(0.22) + 16} fill={C.textMuted} fontSize={9} fontFamily={mono}>
+          {auc >= 0.9 ? "Excellent" : auc >= 0.8 ? "Good" : auc >= 0.7 ? "Fair" : "Poor"} discrimination
+        </text>
+        {/* axes */}
+        <line x1={PAD.l} y1={PAD.t + iH} x2={PAD.l + iW} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} y1={PAD.t}       x2={PAD.l}       y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+        {/* axis ticks + labels */}
+        {ticks.map(v => (
+          <g key={v}>
+            <line x1={sx(v)} y1={PAD.t + iH} x2={sx(v)} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
+            <text x={sx(v)} y={PAD.t + iH + 15} textAnchor="middle" fill={C.textMuted} fontSize={8}>{v.toFixed(1)}</text>
+            <line x1={PAD.l - 4} y1={sy(v)} x2={PAD.l} y2={sy(v)} stroke={C.border2} strokeWidth={1} />
+            <text x={PAD.l - 8} y={sy(v) + 3} textAnchor="end" fill={C.textMuted} fontSize={8}>{v.toFixed(1)}</text>
+          </g>
+        ))}
+        <text x={PAD.l + iW / 2} y={H - 6} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          False Positive Rate (1 − Specificity)
+        </text>
+        <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
+          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          True Positive Rate (Sensitivity)
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+// ─── PREDICTED PROBABILITY HISTOGRAM ─────────────────────────────────────────
+// Overlaid histogram of P̂(Y=1) split by actual outcome.
+// Red bars = Y=0, teal bars = Y=1.
+// Props: fitted {number[]} — P̂(Y=1), Y {number[]} — actual 0/1 labels
+export function PredProbHistogram({ fitted, Y }) {
+  if (!fitted?.length || !Y?.length || fitted.length !== Y.length) return null;
+
+  const nBins = 20;
+  const bins0 = Array(nBins).fill(0);
+  const bins1 = Array(nBins).fill(0);
+  fitted.forEach((p, i) => {
+    const bin = Math.min(nBins - 1, Math.floor(p * nBins));
+    if (Y[i] === 0) bins0[bin]++; else bins1[bin]++;
+  });
+  const maxCount = Math.max(...bins0, ...bins1, 1);
+
+  const W = 460, H = 280;
+  const PAD = { l: 48, r: 20, t: 24, b: 50 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+  const bw  = iW / nBins;
+
+  const sx  = v => PAD.l + v * iW;
+  const sy  = v => PAD.t + (1 - v / maxCount) * iH;
+
+  // y-axis ticks
+  const yStep = maxCount <= 5 ? 1 : Math.ceil(maxCount / 5);
+  const yTicks = Array.from({ length: Math.floor(maxCount / yStep) + 1 }, (_, i) => i * yStep).filter(t => t <= maxCount);
+
+  return (
+    <div style={{ background: C.bg, padding: "0.5rem 0.5rem 0", display: "flex", justifyContent: "center" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 520, height: "auto", display: "block", fontFamily: mono }}>
+        <rect width={W} height={H} fill={C.bg} />
+        {/* grid */}
+        {yTicks.map(t => (
+          <line key={t} x1={PAD.l} y1={sy(t)} x2={PAD.l + iW} y2={sy(t)}
+            stroke={C.border} strokeWidth={1} strokeDasharray="3 4" />
+        ))}
+        {/* bars */}
+        {Array.from({ length: nBins }, (_, i) => {
+          const x  = PAD.l + i * bw;
+          const h0 = Math.max(0, (bins0[i] / maxCount) * iH);
+          const h1 = Math.max(0, (bins1[i] / maxCount) * iH);
+          const hw = bw / 2 - 1;
+          return (
+            <g key={i}>
+              <rect x={x + 0.5} y={PAD.t + iH - h0} width={hw} height={h0} fill={C.red}  opacity={0.7} />
+              <rect x={x + hw + 1} y={PAD.t + iH - h1} width={hw} height={h1} fill={C.teal} opacity={0.7} />
+            </g>
+          );
+        })}
+        {/* axes */}
+        <line x1={PAD.l} y1={PAD.t + iH} x2={PAD.l + iW} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+        <line x1={PAD.l} y1={PAD.t}       x2={PAD.l}       y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+        {/* x-axis ticks */}
+        {[0, 0.2, 0.4, 0.6, 0.8, 1.0].map(v => (
+          <g key={v}>
+            <line x1={sx(v)} y1={PAD.t + iH} x2={sx(v)} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
+            <text x={sx(v)} y={PAD.t + iH + 15} textAnchor="middle" fill={C.textMuted} fontSize={8}>{v.toFixed(1)}</text>
+          </g>
+        ))}
+        {/* y-axis ticks */}
+        {yTicks.map(t => (
+          <g key={t}>
+            <line x1={PAD.l - 4} y1={sy(t)} x2={PAD.l} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
+            <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8}>{t}</text>
+          </g>
+        ))}
+        {/* legend */}
+        <rect x={PAD.l + iW - 90} y={PAD.t + 6} width={9} height={9} fill={C.red}  opacity={0.7} />
+        <text x={PAD.l + iW - 78} y={PAD.t + 14} fill={C.textMuted} fontSize={9} fontFamily={mono}>Y = 0</text>
+        <rect x={PAD.l + iW - 40} y={PAD.t + 6} width={9} height={9} fill={C.teal} opacity={0.7} />
+        <text x={PAD.l + iW - 28} y={PAD.t + 14} fill={C.textMuted} fontSize={9} fontFamily={mono}>Y = 1</text>
+        {/* axis labels */}
+        <text x={PAD.l + iW / 2} y={H - 6} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          P̂(Y = 1)
+        </text>
+        <text transform={`translate(10, ${PAD.t + iH / 2}) rotate(-90)`}
+          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>Count</text>
+      </svg>
+    </div>
+  );
+}
+
+// ─── EVENT STUDY COEFFICIENT PLOT ────────────────────────────────────────────
+// eventCoeffs: [{ k, beta, se, t, p, isRef? }] — from runEventStudy
+export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
+  if (!eventCoeffs?.length) return null;
+
+  const sorted = [...eventCoeffs].sort((a, b) => a.k - b.k);
+  const ciLow  = e => (e.isRef ? 0 : (e.beta ?? 0) - 1.96 * (e.se ?? 0));
+  const ciHigh = e => (e.isRef ? 0 : (e.beta ?? 0) + 1.96 * (e.se ?? 0));
+
+  const allVals = sorted.flatMap(e => [ciLow(e), ciHigh(e), 0]);
+  const yMin = Math.min(...allVals.filter(isFinite));
+  const yMax = Math.max(...allVals.filter(isFinite));
+  const yPad = Math.max((yMax - yMin) * 0.15, 0.01);
+
+  const W = 560, H = 280;
+  const PAD = { t: 20, b: 40, l: 52, r: 20 };
+  const pw = W - PAD.l - PAD.r;
+  const ph = H - PAD.t - PAD.b;
+
+  const n = sorted.length;
+  const xScale = i => PAD.l + (i / (n - 1)) * pw;
+  const yScale = v => PAD.t + ph - ((v - (yMin - yPad)) / (yMax - yMin + 2 * yPad)) * ph;
+
+  const y0 = yScale(0);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+      <rect width={W} height={H} fill={C.bg} />
+      {/* Zero line */}
+      <line x1={PAD.l} x2={W - PAD.r} y1={y0} y2={y0} stroke={C.textMuted} strokeWidth={1} strokeDasharray="4 3" />
+      {/* Treatment line at k=0 */}
+      {sorted.findIndex(e => e.k === 0) >= 0 && (
+        <line x1={xScale(sorted.findIndex(e => e.k === 0))} x2={xScale(sorted.findIndex(e => e.k === 0))}
+              y1={PAD.t} y2={H - PAD.b} stroke={C.gold} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />
+      )}
+      {/* CI ribbons */}
+      {sorted.map((e, i) => {
+        if (e.isRef) return null;
+        const x = xScale(i);
+        const y1 = yScale(ciLow(e));
+        const y2 = yScale(ciHigh(e));
+        return <line key={`ci-${i}`} x1={x} x2={x} y1={y1} y2={y2} stroke={C.teal} strokeWidth={3} strokeLinecap="round" opacity={0.4} />;
+      })}
+      {/* Points */}
+      {sorted.map((e, i) => {
+        const x = xScale(i);
+        const y = yScale(e.beta ?? 0);
+        const sig = e.p != null && e.p < 0.05;
+        const clr = e.isRef ? C.textMuted : sig ? C.teal : C.textDim;
+        return <circle key={`pt-${i}`} cx={x} cy={y} r={e.isRef ? 3 : 5} fill={clr} stroke={C.bg} strokeWidth={1.5} />;
+      })}
+      {/* X axis labels */}
+      {sorted.map((e, i) => (
+        <text key={`xl-${i}`} x={xScale(i)} y={H - PAD.b + 14} textAnchor="middle" fill={C.textDim} fontSize={9}>
+          {e.k === -1 ? "−1" : e.k >= 0 ? `+${e.k}` : `${e.k}`}
+        </text>
+      ))}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Event time (periods relative to treatment)</text>
+      <text x={PAD.l - 6} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+            transform={`rotate(-90, ${PAD.l - 6}, ${PAD.t + ph / 2})`}>
+        {yLabel}
+      </text>
+    </svg>
+  );
+}
+
+// ─── SYNTHETIC CONTROL GAP PLOT ───────────────────────────────────────────────
+// preFit:  [{ t, actual, synthetic }]
+// postGap: [{ t, actual, synthetic, gap }]
+export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel = "Y" }) {
+  const allPoints = [
+    ...preFit.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
+    ...postGap.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
+  ].sort((a, b) => a.t - b.t);
+
+  if (!allPoints.length) return null;
+
+  const times    = allPoints.map(d => d.t);
+  const allY     = allPoints.flatMap(d => [d.actual, d.synthetic]).filter(isFinite);
+  const tMin     = Math.min(...times), tMax = Math.max(...times);
+  const yMin     = Math.min(...allY),  yMax = Math.max(...allY);
+  const yPad     = (yMax - yMin) * 0.12 || 0.01;
+
+  const W = 560, H = 280;
+  const PAD = { t: 20, b: 40, l: 58, r: 20 };
+  const pw = W - PAD.l - PAD.r;
+  const ph = H - PAD.t - PAD.b;
+
+  const xS = t  => PAD.l + ((t - tMin) / Math.max(tMax - tMin, 1)) * pw;
+  const yS = v  => PAD.t + ph - ((v - (yMin - yPad)) / (yMax - yMin + 2 * yPad)) * ph;
+
+  const actualPath    = allPoints.map((d, i) => `${i === 0 ? "M" : "L"}${xS(d.t)},${yS(d.actual)}`).join(" ");
+  const syntheticPath = allPoints.map((d, i) => `${i === 0 ? "M" : "L"}${xS(d.t)},${yS(d.synthetic)}`).join(" ");
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+      <rect width={W} height={H} fill={C.bg} />
+      {/* Treatment line */}
+      {treatTime != null && (
+        <line x1={xS(treatTime)} x2={xS(treatTime)} y1={PAD.t} y2={H - PAD.b}
+              stroke={C.gold} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.8} />
+      )}
+      {/* Synthetic path (dashed) */}
+      <path d={syntheticPath} stroke={C.teal} strokeWidth={1.5} strokeDasharray="5 4" fill="none" opacity={0.8} />
+      {/* Actual path (solid) */}
+      <path d={actualPath} stroke={C.gold} strokeWidth={2} fill="none" />
+      {/* Points */}
+      {allPoints.map((d, i) => (
+        <circle key={i} cx={xS(d.t)} cy={yS(d.actual)} r={3} fill={C.gold} opacity={0.7} />
+      ))}
+      {/* Axis labels */}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Time</text>
+      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+            transform={`rotate(-90, ${PAD.l - 8}, ${PAD.t + ph / 2})`}>{yLabel}</text>
+      {/* Legend */}
+      <line x1={W - 130} x2={W - 110} y1={PAD.t + 10} y2={PAD.t + 10} stroke={C.gold} strokeWidth={2} />
+      <text x={W - 106} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Treated unit</text>
+      <line x1={W - 130} x2={W - 110} y1={PAD.t + 24} y2={PAD.t + 24} stroke={C.teal} strokeWidth={1.5} strokeDasharray="5 4" />
+      <text x={W - 106} y={PAD.t + 28} fill={C.textDim} fontSize={9}>Synthetic</text>
+    </svg>
+  );
+}

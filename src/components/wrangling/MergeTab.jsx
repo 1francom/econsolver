@@ -1,6 +1,6 @@
 // ─── ECON STUDIO · components/wrangling/MergeTab.jsx ───────────────────────
 import { useState, useMemo } from "react";
-import { C, mono, Lbl, Tabs, Btn } from "./shared.jsx";
+import { C, mono, Lbl, Tabs, Btn, Grid } from "./shared.jsx";
 
 // ─── MERGE TAB ───────────────────────────────────────────────────────────────
 // JOIN and APPEND operations against other loaded datasets.

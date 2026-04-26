@@ -129,15 +129,26 @@ export async function aiAuditScan(sug,rows,info){
 }
 
 // ─── AI HELPER ────────────────────────────────────────────────────────────────
-export async function callAI(instruction,col,sample,mode){
-  const isQ=mode==="query";
-  const prompt=isQ
-    ?`You are a data analysis assistant. Column: "${col}". Sample (8 vals): ${sample.map((v,i)=>`${i+1}.${JSON.stringify(v)}`).join(",")}. Question: "${instruction}". Respond ONLY JSON (no markdown): {"answer":"2-3 sentence answer","stat":"key finding","statLabel":"label"}`
-    :`You are a data-cleaning assistant for an econometrics tool. Column: "${col}". Sample (5 vals): ${sample.slice(0,5).map((v,i)=>`${i+1}.${JSON.stringify(v)}`).join(",")}. Instruction: "${instruction}". Respond ONLY JSON (no markdown): {"description":"one sentence","preview":[5 transformed values],"js":"arrow-fn body (value,rowIndex)=>newValue. Vanilla JS only."}`;
-  try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
-    const d=await r.json();
-    const t=d.content?.find(b=>b.type==="text")?.text||"";
-    return JSON.parse(t.replace(/```json|```/g,"").trim());
-  }catch{return null;}
+// Delegates to callClaude (AIService.js) — benefits from prompt caching on
+// SHARED_CONTEXT. Task-specific system prompts imported from prompts/index.js.
+import { callClaude } from "../../services/ai/AIService.js";
+import {
+  WRANGLING_TRANSFORM_PROMPT,
+  WRANGLING_QUERY_PROMPT,
+} from "../../services/ai/prompts/index.js";
+
+export async function callAI(instruction, col, sample, mode) {
+  const isQ = mode === "query";
+  const system = isQ ? WRANGLING_QUERY_PROMPT : WRANGLING_TRANSFORM_PROMPT;
+
+  const user = isQ
+    ? `Column: "${col}". Sample (8 vals): ${sample.map((v,i)=>`${i+1}.${JSON.stringify(v)}`).join(", ")}. Question: "${instruction}". Return JSON now.`
+    : `Column: "${col}". Sample (5 vals): ${sample.slice(0,5).map((v,i)=>`${i+1}.${JSON.stringify(v)}`).join(", ")}. Instruction: "${instruction}". Return JSON now.`;
+
+  try {
+    const raw = await callClaude({ system, user, maxTokens: 1000 });
+    return JSON.parse(raw.replace(/```json\s*/gi,"").replace(/```\s*/g,"").trim());
+  } catch {
+    return null;
+  }
 }

@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import DataStudio from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './components/ModelingTab.jsx';
+import AIContextSidebar from './components/AIContextSidebar.jsx';
 import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from "./services/persistence/indexedDB.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
@@ -623,11 +624,15 @@ function Dashboard({onNew, onLoad}) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [screen, setScreen] = useState("dashboard");
-  const [rawData, setRawData] = useState(null);
-  const [filename, setFilename] = useState("");
-  const [pid, setPid] = useState(null);
-  const [output, setOutput] = useState(null);
+  const [screen,       setScreen]       = useState("dashboard");
+  const [rawData,      setRawData]      = useState(null);
+  const [filename,     setFilename]     = useState("");
+  const [pid,          setPid]          = useState(null);
+  const [output,       setOutput]       = useState(null);
+  const [sidebarOpen,  setSidebarOpen]  = useState(false);
+  const [activeResult, setActiveResult] = useState(null);
+  const [coachPrefill, setCoachPrefill] = useState(null);
+  const coachSeqRef = useRef(0);
 
   // Load a saved project from the dashboard
   const handleLoad = async p => {
@@ -718,6 +723,19 @@ export default function App() {
             ◈ MODELING LAB · {output.cleanRows.length} obs
           </span>
         )}
+        {inFlow&&(
+          <button
+            onClick={()=>setSidebarOpen(o=>!o)}
+            style={{
+              marginLeft:"auto", padding:"0.22rem 0.65rem",
+              background: sidebarOpen ? `${"#9e7ec8"}18` : "transparent",
+              border:`1px solid ${sidebarOpen ? "#9e7ec8" : C.border2}`,
+              borderRadius:3, color: sidebarOpen ? "#9e7ec8" : C.textMuted,
+              cursor:"pointer", fontFamily:mono, fontSize:9,
+              letterSpacing:"0.12em", transition:"all 0.13s",
+            }}
+          >✦ AI Coach</button>
+        )}
       </div>
 
       {/* ── Main Content ──────────────────────────────────────────────────── */}
@@ -752,10 +770,6 @@ export default function App() {
           />
         )}
         {screen==="modeling"&&output&&(
-          // ModelingTab uses minHeight:100vh internally which escapes a flex
-          // parent and hides the Estimate button below the viewport.
-          // This wrapper gives it an explicit height so both its internal
-          // panels (left spec + right results) scroll independently.
           <div style={{
             height:"calc(100vh - 38px)",
             display:"flex",
@@ -765,10 +779,21 @@ export default function App() {
             <ModelingTab
               cleanedData={output}
               onBack={()=>setScreen("explorer")}
+              onResultChange={r=>setActiveResult(r)}
+              onCoachQuestion={q => { setSidebarOpen(true); setCoachPrefill({ q, seq: ++coachSeqRef.current }); }}
             />
           </div>
         )}
       </div>
+
+      <AIContextSidebar
+        isOpen={sidebarOpen}
+        onClose={()=>setSidebarOpen(false)}
+        screen={screen}
+        cleanedData={output}
+        modelResult={activeResult}
+        prefillMessage={coachPrefill}
+      />
     </div>
   );
 }

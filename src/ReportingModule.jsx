@@ -35,38 +35,15 @@ function safeNum(val, dp = 4) {
 }
 
 // ─── RESULT NORMALISER ────────────────────────────────────────────────────────
-// Different estimators return slightly different shapes. This gives us one
-// consistent object the rest of the module can rely on.
 function normaliseResult(raw) {
   if (!raw) return null;
-
-  // Engine returned an error object — surface it cleanly
   if (raw.error) return { __error: raw.error };
-
-  // 2SLS wraps everything in raw.second
-  const core = raw.second ?? raw;
-
-  const {
-    varNames = [], beta = [], se = [], tStats = [], pVals = [],
-    R2 = null, adjR2 = null, n = null, df = null,
-    Fstat = null, Fpval = null,
-    att = null, attSE = null, attP = null,
-    modelLabel = "OLS", yVar = "y", xVars = [],
-  } = core;
-
-  // Sanitise every numeric array: replace undefined/null entries with NaN so
-  // downstream guards (isFinite) work uniformly instead of crashing on .toFixed()
-  const clean = arr => (arr ?? []).map(v => (v == null ? NaN : v));
-
   return {
-    varNames: varNames ?? [],
-    beta:   clean(beta),
-    se:     clean(se),
-    tStats: clean(tStats),
-    pVals:  clean(pVals),
-    R2, adjR2, n, df, Fstat, Fpval,
-    att, attSE, attP, modelLabel, yVar, xVars,
-    firstStages: raw.firstStages ?? null,
+    ...raw,
+    modelLabel: raw.label      ?? raw.modelLabel ?? "OLS",
+    yVar:       raw.spec?.yVar ?? raw.yVar        ?? "y",
+    xVars:      raw.spec?.xVars ?? raw.xVars      ?? [],
+    tStats:     raw.testStats  ?? raw.tStats       ?? [],
   };
 }
 
@@ -551,7 +528,7 @@ function NarrativeSkeleton() {
   );
 }
 
-function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
+function AINarrative({ result, modelLabel, yVar, dataDictionary, rows }) {
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
@@ -572,7 +549,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
     setError("");
 
     try {
-      const out = await interpretRegression(result, hasDictionary ? dataDictionary : null);
+      const out = await interpretRegression(result, hasDictionary ? dataDictionary : null, null, rows);
       if (abortRef.current === token) {
         setText(out.trim());
       }
@@ -691,7 +668,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
       {/* Actions */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {text && !loading && (
-          <CopyBtn text={text} label="⎘ Copy as plain text" successLabel="✓ Copied!" color={C.purple} />
+          <CopyBtn text={text} label="Copy Narrative" successLabel="✓ Copied!" color={C.purple} />
         )}
         <Btn
           onClick={run}
@@ -790,8 +767,8 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
 
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
 
-  // Detect Sharp RDD — raw result carries .valid / .leftFit / .rightFit
-  const isRDD = !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
+  // Detect Sharp RDD — canonical shape uses type, legacy shape carries rddData or raw fields
+  const isRDD = rawResult?.type === "RDD" || !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
 
   if (!result) return (
     <div style={{ padding: "2rem", color: C.textMuted, fontFamily: mono, fontSize: 12 }}>
@@ -836,11 +813,11 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
 
   const { modelLabel = "OLS", yVar = "y" } = result;
 
+  const [narrativeOpen, setNarrativeOpen] = useState(false);
+
   const tabs = [
     ["forest",    "⬡ Forest Plot"],
     ...(isRDD ? [["rdd", "◉ RDD Scatter"]] : []),
-    ["latex",     "⊞ LaTeX Export"],
-    ["narrative", "✦ AI Narrative"],
   ];
 
   return (
@@ -910,7 +887,15 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
         {/* Tab content */}
         {tab === "forest" && (
           <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <Lbl>Coefficient Estimates · 95% Confidence Intervals</Lbl>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+              <Lbl mb={0}>Coefficient Estimates · 95% Confidence Intervals</Lbl>
+              <CopyBtn
+                text={buildStargazer([{ label: modelLabel, result, yVar }])}
+                label="Copy LaTeX"
+                successLabel="Copied ✓"
+                color={C.gold}
+              />
+            </div>
             <div style={{ marginBottom: "0.8rem", fontSize: 11, color: C.textDim,
                           fontFamily: mono, lineHeight: 1.6 }}>
               <span style={{ color: C.teal }}>◆ Teal</span> = significant at 5% ·{" "}
@@ -938,27 +923,47 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
             </div>
             <div style={{ border: `1px solid ${C.border}`, borderRadius: 4,
                           padding: "0.5rem", background: C.bg, marginBottom: "1rem" }}>
-              <RDDScatterPlot rddResult={rawResult} />
+              <RDDScatterPlot rddResult={rawResult?.rddData ?? rawResult} />
             </div>
           </div>
         )}
 
-        {tab === "latex" && (
-          <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <LatexPanel result={result} modelLabel={modelLabel} yVar={yVar} />
-          </div>
-        )}
+        {/* ── AI Narrative — inline collapsible ── */}
+        <div style={{ marginTop: "1.2rem" }}>
+          <button
+            onClick={() => setNarrativeOpen(o => !o)}
+            style={{
+              width: "100%", display: "flex", alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0.6rem 1rem",
+              background: narrativeOpen ? `${C.purple}0d` : C.surface,
+              border: `1px solid ${narrativeOpen ? C.purple + "50" : C.border}`,
+              borderRadius: narrativeOpen ? "4px 4px 0 0" : 4,
+              cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+            }}
+          >
+            <span style={{ fontSize: 9, color: C.purple, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+              ✦ AI Narrative
+            </span>
+            <span style={{ fontSize: 9, color: C.textMuted }}>{narrativeOpen ? "▲" : "▼"}</span>
+          </button>
+          {narrativeOpen && (
+            <div style={{
+              border: `1px solid ${C.purple}50`, borderTop: "none",
+              borderRadius: "0 0 4px 4px", padding: "1.2rem",
+              background: C.surface, animation: "fadeUp 0.15s ease",
+            }}>
+              <AINarrative
+                result={result}
+                modelLabel={modelLabel}
+                yVar={yVar}
+                dataDictionary={cleanedData?.dataDictionary ?? null}
+                rows={cleanedData?.cleanRows ?? null}
+              />
+            </div>
+          )}
+        </div>
 
-        {tab === "narrative" && (
-          <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <AINarrative
-              result={result}
-              modelLabel={modelLabel}
-              yVar={yVar}
-              dataDictionary={cleanedData?.dataDictionary ?? null}
-            />
-          </div>
-        )}
       </div>
     </div>
   );
