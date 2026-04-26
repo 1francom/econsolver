@@ -171,9 +171,9 @@ Merge: `join, append`
 - `callClaude({ system, user, maxTokens })` strips `SHARED_CONTEXT` from exported prompts before sending (it adds it as the cached block automatically)
 
 ## Pending (ordered by priority)
-1. **Estimator validation vs R** — systematic benchmark: RDD (rdrobust), Panel FE (fixest), 2SLS (AER), Logit/Probit (base R `glm`), GMM, Synthetic Control. Harness in `math/__validation__/engineValidation.js`.
+1. ~~**Estimator validation vs R**~~ — FE (fixest), RDD (rdrobust), 2SLS (AER), Logit/Probit (glm), GMM/LIML, Synthetic Control (Synth) — all validated with hard benchmarks in `engineValidation.js`.
 2. **DuckDB-WASM** — final compute target for datasets > 50k rows.
-3. **PlotBuilder — remaining G-track** — G3 (errorbar, ribbon, boxplot, violin, smooth), G5 (position: dodge/stack/jitter), G6 (reference lines hline/vline), G7 (color palettes), G9 (export SVG/PNG), G10 (estimator templates), G12 (guided mode in ModelingTab), G13 (multi-model overlay). G1+G2+G8+G11 done.
+3. **PlotBuilder — remaining G-track** — G10 (estimator templates), G12 (guided mode in ModelingTab), G13 (multi-model overlay). ~~G3~~ (smooth, boxplot, errorbar, ribbon), ~~G5~~ (stack/jitter via stackY+dodgeX), ~~G6~~ (hline/vline), ~~G7~~ (palette presets), ~~G9~~ (SVG/PNG export) done. G1+G2+G4+G8+G11 also done.
 4. **Multi-subset workflow — remaining H-track** — H5 (pipeline branch point UI), H6–H10 (replication code, session export bundle, specification curve, buffer metadata, script overhaul). H1–H4 done.
 5. **Contextual export architecture (I-track)** — I1–I7: pipeline export in CleanTab, dataset export in Explorer, comparison export in ModelComparison, auto-detect map vs separate, refactor export services, LaTeX table from comparison.
 6. ~~**Phase 6 — Robust Standard Errors**~~ — `src/core/inference/robustSE.js` implemented with HC0/HC1/HC2/HC3, clustered, two-way (Cameron-Gelbach-Miller), Newey-West HAC. `seType` wired into engines. `InferenceOptions.jsx` SE type selector implemented. Validation vs R `sandwich::vcovHC` still pending.
