@@ -32,6 +32,7 @@ import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
 import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
+import { runPipeline } from "../pipeline/runner.js";
 import { C, mono }         from "../components/modeling/shared.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
@@ -947,6 +948,10 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const headers = cleanedData?.headers    ?? [];
   const panel   = cleanedData?.panelIndex ?? null;
 
+  const fullPipeline    = cleanedData?.pipeline          ?? [];
+  const branchPointIdx  = cleanedData?.branchPointIndex  ?? null;
+  const pipelineCtx     = cleanedData?.context           ?? {};
+
   const numericCols = useMemo(
     () => headers.filter(h => rows.some(r => typeof r[h] === "number" && isFinite(r[h]))),
     [headers, rows]
@@ -1194,17 +1199,28 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const runAllSubsets = useCallback(() => {
     if (!subsets.length) return;
     setRunning(true);
-    // Full sample
-    const fullOut = _runEstimation(rows);
+
+    const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
+    const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
+
+    // Full sample (with per-subset steps applied if a branch point is set)
+    const fullRows = hasSubsetSteps
+      ? (runPipeline(rows, headers, perSubsetSteps, pipelineCtx)?.rows ?? rows)
+      : rows;
+    const fullOut = _runEstimation(fullRows);
     if (!fullOut.error && fullOut.result) {
       const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
       modelBuffer.add(r);
       setBufferVersion(v => v + 1);
     }
+
     // Each named subset
     for (const s of subsets) {
       const filtered = applySubsetFilter(rows, s.filters);
-      const out = _runEstimation(filtered);
+      const subsetRows = hasSubsetSteps
+        ? (runPipeline(filtered, headers, perSubsetSteps, pipelineCtx)?.rows ?? filtered)
+        : filtered;
+      const out = _runEstimation(subsetRows);
       if (!out.error && out.result) {
         const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
         modelBuffer.add(r);
@@ -1212,7 +1228,7 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
       }
     }
     setRunning(false);
-  }, [subsets, rows, _runEstimation]);
+  }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];

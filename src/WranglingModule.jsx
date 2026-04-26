@@ -41,12 +41,13 @@ export { Grid }                       from "./components/wrangling/shared.jsx";
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [], onSaveSubset }) {
   // State starts empty — IndexedDB load is async (see useEffect below)
-  const [pipeline,       setPipeline]      = useState([]);
-  const [panel,          setPanel]          = useState(null);
-  const [dataDictionary, setDataDictionary] = useState(null);
-  const [tab,            setTab]            = useState("clean");
-  const [idbReady,       setIdbReady]       = useState(false);
-  const [auditTrail,     setAuditTrail]     = useState(null);
+  const [pipeline,         setPipeline]        = useState([]);
+  const [panel,            setPanel]            = useState(null);
+  const [dataDictionary,   setDataDictionary]   = useState(null);
+  const [tab,              setTab]              = useState("clean");
+  const [idbReady,         setIdbReady]         = useState(false);
+  const [auditTrail,       setAuditTrail]       = useState(null);
+  const [branchPointIndex, setBranchPointIndex] = useState(null);
 
   // ── Initial load from IndexedDB ────────────────────────────────────────────
   useEffect(() => {
@@ -56,9 +57,10 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
       const rec = await loadPipeline(pid);
       if (cancelled) return;
       if (rec) {
-        if (rec.pipeline)       setPipeline(rec.pipeline);
-        if (rec.panel)          setPanel(rec.panel);
-        if (rec.dataDictionary) setDataDictionary(rec.dataDictionary);
+        if (rec.pipeline)            setPipeline(rec.pipeline);
+        if (rec.panel)               setPanel(rec.panel);
+        if (rec.dataDictionary)      setDataDictionary(rec.dataDictionary);
+        if (rec.branchPointIndex != null) setBranchPointIndex(rec.branchPointIndex);
       }
       setIdbReady(true);
     })();
@@ -88,7 +90,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       savePipeline(pid, {
-        filename, pipeline, panel, dataDictionary,
+        filename, pipeline, panel, dataDictionary, branchPointIndex,
         rowCount: rawData.rows.length, colCount: rawData.headers.length,
         pipelineLength: pipeline.length,
       });
@@ -101,6 +103,13 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     }, 400);
     return () => clearTimeout(saveTimer.current);
   }, [pipeline, panel, dataDictionary, idbReady]);
+
+  // ── Auto-clamp branchPointIndex when pipeline shrinks ─────────────────────
+  useEffect(() => {
+    if (branchPointIndex !== null && branchPointIndex >= pipeline.length) {
+      setBranchPointIndex(pipeline.length > 0 ? pipeline.length - 1 : null);
+    }
+  }, [pipeline.length, branchPointIndex]);
 
   // ── Undo / Redo stack ──────────────────────────────────────────────────────
   // Each entry is a full pipeline snapshot (step[]). Present state is NOT in
@@ -143,6 +152,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
       snapshot(p);
       return [];
     });
+    setBranchPointIndex(null);
   }, [snapshot]);
 
   const undo = useCallback(() => {
@@ -167,6 +177,10 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
 
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;
+
+  const setBranchPoint = useCallback(i => {
+    setBranchPointIndex(prev => prev === i ? null : i);
+  }, []);
 
   // ── Save subset ────────────────────────────────────────────────────────────
   const [showSaveSubset, setShowSaveSubset] = useState(false);
@@ -202,6 +216,9 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         type: s.type, description: s.desc,
         col: s.col || s.c1 || s.nn || "", map: s.map || null,
       })),
+      pipeline,
+      branchPointIndex,
+      context,
     });
   };
 
@@ -435,6 +452,8 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         onRedo={redo}
         canUndo={canUndo}
         canRedo={canRedo}
+        branchPointIndex={branchPointIndex}
+        onSetBranch={setBranchPoint}
       />
 
       {auditTrail && (

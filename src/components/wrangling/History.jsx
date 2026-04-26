@@ -63,7 +63,7 @@ function UndoBtn({ label, title, onClick, enabled }) {
   );
 }
 
-function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo }) {
+function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch }) {
   if (!pipeline.length && !canUndo && !canRedo) return null;
 
   return (
@@ -104,6 +104,16 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo }) 
 
       {/* ── Step list ── */}
       <div style={{ flex: 1, overflowY: "auto", padding: "0.6rem 1rem" }}>
+        {branchPointIndex !== null && (
+          <div style={{
+            fontSize: 9, color: C.gold, fontFamily: mono, lineHeight: 1.6,
+            padding: "4px 6px", marginBottom: 4,
+            background: `${C.gold}0d`, borderRadius: 3, border: `1px solid ${C.gold}30`,
+          }}>
+            Shared: {branchPointIndex + 1} step{branchPointIndex !== 0 ? "s" : ""}<br/>
+            Per-subset: {pipeline.length - branchPointIndex - 1} step{pipeline.length - branchPointIndex - 1 !== 1 ? "s" : ""}
+          </div>
+        )}
         {pipeline.length === 0 ? (
           <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono,
             textAlign: "center", paddingTop: "1rem", lineHeight: 1.8 }}>
@@ -115,43 +125,67 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo }) 
             {pipeline.map((s, i) => {
               const col = TYPE_COLOR[s.type] || C.textMuted;
               const ico = TYPE_ICON[s.type]  || "·";
+              const isActiveBranch = branchPointIndex === i;
               return (
-                <div key={s.id || i} style={{
-                  display: "flex", alignItems: "center", gap: 4,
-                  padding: "0.35rem 0.5rem",
-                  background: C.surface2, borderRadius: 3,
-                  border: `1px solid ${C.border}`,
-                  borderLeft: `2px solid ${col}`,
-                }}>
-                  <span style={{
-                    fontSize: 8, color: C.textMuted, fontFamily: mono,
-                    flexShrink: 0, minWidth: 12, textAlign: "right",
+                <div key={s.id || i}>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 4,
+                    padding: "0.35rem 0.5rem",
+                    background: C.surface2, borderRadius: 3,
+                    border: `1px solid ${C.border}`,
+                    borderLeft: `2px solid ${col}`,
                   }}>
-                    {i + 1}
-                  </span>
-                  <span style={{
-                    fontSize: 8, color: col, fontFamily: mono,
-                    flexShrink: 0, minWidth: 14, textAlign: "center",
-                  }}>
-                    {ico}
-                  </span>
-                  <span style={{
-                    flex: 1, fontSize: 10, color: C.textDim, fontFamily: mono,
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {s.desc || s.type}
-                  </span>
-                  <button
-                    onClick={() => onRm(i)}
-                    title={`Remove step ${i + 1}`}
+                    <span style={{
+                      fontSize: 8, color: C.textMuted, fontFamily: mono,
+                      flexShrink: 0, minWidth: 12, textAlign: "right",
+                    }}>
+                      {i + 1}
+                    </span>
+                    <span style={{
+                      fontSize: 8, color: col, fontFamily: mono,
+                      flexShrink: 0, minWidth: 14, textAlign: "center",
+                    }}>
+                      {ico}
+                    </span>
+                    <span style={{
+                      flex: 1, fontSize: 10, color: C.textDim, fontFamily: mono,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {s.desc || s.type}
+                    </span>
+                    <button
+                      onClick={() => onRm(i)}
+                      title={`Remove step ${i + 1}`}
+                      style={{
+                        background: "transparent", border: "none",
+                        color: C.textMuted, cursor: "pointer",
+                        fontSize: 11, padding: "0 2px", flexShrink: 0,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {/* Branch point marker — click to set/clear */}
+                  <div
+                    onClick={() => onSetBranch && onSetBranch(i)}
+                    title={isActiveBranch ? "Click to remove branch point" : "Set branch point here"}
+                    onMouseEnter={e => { e.currentTarget.style.opacity = "1"; }}
+                    onMouseLeave={e => { e.currentTarget.style.opacity = isActiveBranch ? "1" : "0"; }}
                     style={{
-                      background: "transparent", border: "none",
-                      color: C.textMuted, cursor: "pointer",
-                      fontSize: 11, padding: "0 2px", flexShrink: 0,
+                      display: "flex", alignItems: "center", gap: 4,
+                      margin: "1px 0", cursor: "pointer", padding: "2px 4px",
+                      borderRadius: 2, opacity: isActiveBranch ? 1 : 0,
                     }}
                   >
-                    ×
-                  </button>
+                    <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : "#555" }} />
+                    <span style={{
+                      fontSize: 8, color: isActiveBranch ? C.gold : "#888",
+                      fontFamily: mono, letterSpacing: "0.1em", flexShrink: 0,
+                    }}>
+                      {isActiveBranch ? "⊣ branch" : "⊣"}
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : "#555" }} />
+                  </div>
                 </div>
               );
             })}
@@ -166,7 +200,10 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo }) 
           fontSize: 9, color: C.textMuted, fontFamily: mono,
           flexShrink: 0,
         }}>
-          {pipeline.length} step{pipeline.length !== 1 ? "s" : ""} · IDB ✓
+          {branchPointIndex !== null
+            ? `${branchPointIndex + 1} shared · ${pipeline.length - branchPointIndex - 1} per-subset · IDB ✓`
+            : `${pipeline.length} step${pipeline.length !== 1 ? "s" : ""} · IDB ✓`
+          }
         </div>
       )}
     </div>
