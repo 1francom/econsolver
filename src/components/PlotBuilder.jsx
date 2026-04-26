@@ -479,9 +479,9 @@ function LayerEditor({ layer, onChange, headers }) {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function PlotBuilder({ headers = [], rows = [], style }) {
-  const [layers,   setLayers]   = useState([]);
-  const [activeId, setActiveId] = useState(null);
+export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [] }) {
+  const [layers,   setLayers]   = useState(initialLayers);
+  const [activeId, setActiveId] = useState(initialLayers[0]?.id ?? null);
   const [title,    setTitle]    = useState("");
   const [xLabel,   setXLabel]   = useState("");
   const [yLabel,   setYLabel]   = useState("");

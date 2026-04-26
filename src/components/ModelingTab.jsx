@@ -34,6 +34,7 @@ import CodeEditor          from "../components/modeling/CodeEditor.jsx";
 import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
 import { runPipeline } from "../pipeline/runner.js";
 import { C, mono }         from "../components/modeling/shared.jsx";
+import PlotBuilder          from "./PlotBuilder.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
@@ -1009,6 +1010,27 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const [activeBufferId, setActiveBufferId] = useState(null);
   const pinnedModels = useMemo(() => modelBuffer.getAll(), [bufferVersion]);
 
+  // ── G12: Plot Builder panel ───────────────────────────────────────────────
+  const [plotOpen,        setPlotOpen]        = useState(false);
+  const [plotTemplateKey, setPlotTemplateKey]  = useState(0);
+  const [plotInitLayers,  setPlotInitLayers]   = useState([]);
+
+  // Result-augmented rows: append __resid__ and __yhat__ columns (G12)
+  const resultRows = useMemo(() => {
+    if (!result?.resid?.length || !rows?.length) return rows ?? [];
+    const n = Math.min(result.resid.length, rows.length);
+    return rows.slice(0, n).map((row, i) => ({
+      ...row,
+      __resid__: result.resid[i],
+      __yhat__:  result.Yhat[i],
+    }));
+  }, [result, rows]);
+
+  const resultHeaders = useMemo(() => {
+    if (!result?.resid?.length) return headers ?? [];
+    return [...(headers ?? []), "__resid__", "__yhat__"];
+  }, [result, headers]);
+
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
 
@@ -1978,6 +2000,92 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
           })()}
 
         </div>
+
+        {/* ── G12: Plot Builder panel ── */}
+        {result && (
+          <div style={{ borderTop: `1px solid ${C.border}`, background: C.surface }}>
+            {/* Toggle header */}
+            <button
+              onClick={() => setPlotOpen(v => !v)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 8,
+                padding: "0.55rem 1rem", background: "none", border: "none",
+                cursor: "pointer", fontFamily: mono, fontSize: 10, color: C.textMuted,
+                textAlign: "left",
+              }}
+            >
+              <span style={{ color: C.teal, fontSize: 11 }}>◈</span>
+              <span>Plot Builder</span>
+              <span style={{ marginLeft: "auto", fontSize: 9 }}>{plotOpen ? "▲" : "▼"}</span>
+            </button>
+
+            {plotOpen && (
+              <div style={{ padding: "0 0.75rem 0.75rem" }}>
+                {/* G10 — Estimator templates */}
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                  <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center", marginRight: 2 }}>
+                    Templates:
+                  </span>
+                  {[
+                    {
+                      label: "Resid vs Fitted",
+                      layers: [
+                        { id: "g10_a", geom: "point",  aes: { x: "__yhat__", y: "__resid__", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal,    visible: true },
+                        { id: "g10_b", geom: "hline",  aes: { x: "", y: "", color: "", yMin: "", yMax: "" },                  value: "0", position: "identity", fill: C.textDim, visible: true },
+                      ],
+                      xLabel: "Fitted values", yLabel: "Residuals", title: "Residuals vs Fitted",
+                    },
+                    {
+                      label: "Resid distribution",
+                      layers: [
+                        { id: "g10_c", geom: "histogram", aes: { x: "__resid__", y: "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal, visible: true },
+                      ],
+                      xLabel: "Residuals", yLabel: "Count", title: "Residual distribution",
+                    },
+                    {
+                      label: "Actual vs Fitted",
+                      layers: [
+                        { id: "g10_d", geom: "point", aes: { x: "__yhat__", y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.gold, visible: true },
+                        { id: "g10_e", geom: "smooth", aes: { x: "__yhat__", y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.gold, visible: true },
+                      ],
+                      xLabel: "Fitted values", yLabel: yVar[0] || "Y", title: "Actual vs Fitted",
+                    },
+                    ...(xVars[0] ? [{
+                      label: `Y vs ${xVars[0]}`,
+                      layers: [
+                        { id: "g10_f", geom: "point",  aes: { x: xVars[0], y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.blue, visible: true },
+                        { id: "g10_g", geom: "smooth", aes: { x: xVars[0], y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.blue, visible: true },
+                      ],
+                      xLabel: xVars[0], yLabel: yVar[0] || "Y", title: `${yVar[0] || "Y"} vs ${xVars[0]}`,
+                    }] : []),
+                  ].map(tmpl => (
+                    <button
+                      key={tmpl.label}
+                      onClick={() => {
+                        setPlotInitLayers(tmpl.layers);
+                        setPlotTemplateKey(k => k + 1);
+                      }}
+                      style={{
+                        padding: "3px 8px", fontFamily: mono, fontSize: 9,
+                        background: "none", border: `1px solid ${C.border2}`,
+                        borderRadius: 3, color: C.textDim, cursor: "pointer",
+                      }}
+                    >{tmpl.label}</button>
+                  ))}
+                </div>
+
+                {/* PlotBuilder — key resets when template applied */}
+                <PlotBuilder
+                  key={plotTemplateKey}
+                  headers={resultHeaders}
+                  rows={resultRows}
+                  initialLayers={plotInitLayers}
+                  style={{ minHeight: 340 }}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Model Buffer Bar ── */}
         <ModelBufferBar
