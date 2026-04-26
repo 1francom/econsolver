@@ -16,6 +16,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import WranglingModule from "./WranglingModule.jsx";
 import { saveRawData } from "./services/persistence/indexedDB.js";
+import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
+import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -96,34 +98,49 @@ function parseCSV(text, delimiter = ",") {
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
 // Excel parser — loads SheetJS from CDN (same pattern as App.jsx, avoids Vite bare-module error)
 async function parseExcel(file) {
-  try {
-    const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
-    const buf  = await file.arrayBuffer();
-    const wb   = read(buf, { type: "array", cellDates: true });
-    const ws   = wb.Sheets[wb.SheetNames[0]];
-    const data = utils.sheet_to_json(ws, { defval: null, raw: false });
-    if (!data.length) return null;
+  const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+  const buf = await file.arrayBuffer();
+  const wb  = read(buf, { type: "array", cellDates: true });
+  const ws  = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error("Excel file has no sheets.");
+  const data = utils.sheet_to_json(ws, { defval: null, raw: false });
+  if (!data.length) throw new Error("Excel sheet is empty — no rows found.");
 
-    const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
-    const headers = Object.keys(data[0]);
-    const rows = data.map(r => {
-      const row = {};
-      headers.forEach(h => {
-        const v = r[h];
-        if (v === null || v === undefined) { row[h] = null; return; }
-        if (typeof v === "number") { row[h] = v; return; }
-        const t = String(v).trim();
-        if (!t || NA_PAT.test(t)) { row[h] = null; return; }
-        const n = Number(t.replace(/,(?=\d{3})/g, ""));
-        row[h] = isNaN(n) ? t : n;
-      });
-      return row;
+  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+  const headers = Object.keys(data[0]);
+  const rows = data.map(r => {
+    const row = {};
+    headers.forEach(h => {
+      const v = r[h];
+      if (v === null || v === undefined) { row[h] = null; return; }
+      if (typeof v === "number") { row[h] = v; return; }
+      const t = String(v).trim();
+      if (!t || NA_PAT.test(t)) { row[h] = null; return; }
+      const n = Number(t.replace(/,(?=\d{3})/g, ""));
+      row[h] = isNaN(n) ? t : n;
     });
-    return { headers, rows };
-  } catch (e) {
-    console.error("Excel parse failed:", e);
-    return null;
-  }
+    return row;
+  });
+  return { headers, rows };
+}
+
+// ─── DELIMITER DETECTION ─────────────────────────────────────────────────────
+// Samples up to 5 non-empty lines and picks the most frequent candidate delimiter.
+// Handles comma, semicolon, tab, pipe — covers sep=",", sep=";", sep="\t", sep="|".
+function detectDelimiter(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 5);
+  if (!lines.length) return ",";
+  let tabs = 0, commas = 0, semis = 0, pipes = 0;
+  lines.forEach(l => {
+    tabs  += (l.match(/\t/g)  || []).length;
+    commas += (l.match(/,/g)  || []).length;
+    semis  += (l.match(/;/g)  || []).length;
+    pipes  += (l.match(/\|/g) || []).length;
+  });
+  if (tabs  > commas && tabs  > semis && tabs  > pipes) return "\t";
+  if (semis > commas && semis > pipes && semis > tabs)  return ";";
+  if (pipes > commas && pipes > semis && pipes > tabs)  return "|";
+  return ",";
 }
 
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
@@ -131,7 +148,7 @@ async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   if (["csv", "txt"].includes(ext)) {
     const text = await file.text();
-    return parseCSV(text, ",");
+    return parseCSV(text, detectDelimiter(text));
   }
   if (ext === "tsv") {
     const text = await file.text();
@@ -140,23 +157,38 @@ async function parseFile(file) {
   if (["xlsx", "xls"].includes(ext)) {
     return parseExcel(file);
   }
-  // Unknown extension: try CSV as fallback
+  if (ext === "dta") {
+    const { parseStata } = await import("./services/data/parsers/stata.js");
+    const buf = await file.arrayBuffer();
+    return parseStata(buf);
+  }
+  if (ext === "rds") {
+    const { parseRDS } = await import("./services/data/parsers/rds.js");
+    const buf = await file.arrayBuffer();
+    return parseRDS(buf);
+  }
+  if (ext === "dbf") {
+    const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
+    const buf = await file.arrayBuffer();
+    return parseShapefile(buf, null);
+  }
+  if (ext === "shp") {
+    // User uploaded the .shp directly — we can only extract geometry without a .dbf.
+    // Advise them to upload the .dbf instead for the attribute table.
+    throw new Error(
+      "Upload the .dbf file (not .shp) to load shapefile attributes. " +
+      "The .dbf contains the data table. The .shp geometry will be omitted."
+    );
+  }
+  // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
     const text = await file.text();
-    // Detect delimiter heuristically from first line
-    const first = text.split("\n")[0];
-    const tabs   = (first.match(/\t/g) || []).length;
-    const commas = (first.match(/,/g)  || []).length;
-    const semis  = (first.match(/;/g)  || []).length;
-    const delim  = tabs > commas && tabs > semis ? "\t"
-                 : semis > commas ? ";"
-                 : ",";
-    return parseCSV(text, delim);
+    return parseCSV(text, detectDelimiter(text));
   } catch { return null; }
 }
 
 // ─── DATASET SIDEBAR ──────────────────────────────────────────────────────────
-function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, loadErr, loading }) {
+function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, onFetchWorldBank, onFetchOECD, loadErr, loading }) {
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
 
@@ -283,7 +315,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.txt"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
         />
@@ -314,9 +346,25 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
           </div>
         )}
 
+        {/* World Bank fetcher button */}
+        <button
+          onClick={onFetchWorldBank}
+          style={{ width:"100%", marginTop:6, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:10, transition:"all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+        >↓ World Bank data</button>
+
+        {/* OECD fetcher button */}
+        <button
+          onClick={onFetchOECD}
+          style={{ width:"100%", marginTop:4, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:10, transition:"all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.color = C.blue; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+        >↓ OECD data</button>
+
         {/* Format hint */}
         <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 6, lineHeight: 1.6 }}>
-          CSV · TSV · XLSX · drag & drop supported
+          CSV · TSV · XLSX · DTA · RDS · DBF · drag & drop supported
           <br/>
           Loaded datasets available for JOIN / APPEND in the Merge tab.
         </div>
@@ -357,6 +405,16 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
   const [activeId, setActiveId]   = useState(primaryId);
   const [loading, setLoading]     = useState(false);
   const [loadErr, setLoadErr]     = useState("");
+  const [wbOpen,   setWbOpen]     = useState(false);
+  const [oecdOpen, setOecdOpen]   = useState(false);
+
+  // ── Persist primary raw data on first mount ────────────────────────────────
+  // This ensures "Open project" works without re-uploading.
+  useEffect(() => {
+    if (rawData && primaryId) {
+      saveRawData(primaryId, rawData);
+    }
+  }, [primaryId]); // only on mount — rawData ref won't change for same project
 
   // ── Persist primary raw data on first mount ────────────────────────────────
   // This ensures "Open project" works without re-uploading.
@@ -451,6 +509,8 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
         onActivate={setActiveId}
         onRemove={handleRemove}
         onLoadFile={handleLoadFile}
+        onFetchWorldBank={() => setWbOpen(true)}
+        onFetchOECD={() => setOecdOpen(true)}
         loadErr={loadErr}
         loading={loading}
       />
@@ -473,6 +533,22 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
             onSaveSubset={handleSaveSubset}
           />
         </div>
+      )}
+
+      {/* ── World Bank fetcher modal ── */}
+      {wbOpen && (
+        <WorldBankFetcher
+          onLoad={(fname, rows, headers) => handleSaveSubset(fname, rows, headers)}
+          onClose={() => setWbOpen(false)}
+        />
+      )}
+
+      {/* ── OECD fetcher modal ── */}
+      {oecdOpen && (
+        <OECDFetcher
+          onLoad={(fname, rows, headers) => handleSaveSubset(fname, rows, headers)}
+          onClose={() => setOecdOpen(false)}
+        />
       )}
     </div>
   );
