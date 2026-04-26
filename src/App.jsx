@@ -624,14 +624,15 @@ function Dashboard({onNew, onLoad}) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [screen,       setScreen]       = useState("dashboard");
-  const [rawData,      setRawData]      = useState(null);
-  const [filename,     setFilename]     = useState("");
-  const [pid,          setPid]          = useState(null);
-  const [output,       setOutput]       = useState(null);
-  const [sidebarOpen,  setSidebarOpen]  = useState(false);
-  const [activeResult, setActiveResult] = useState(null);
-  const [coachPrefill, setCoachPrefill] = useState(null);
+  const [screen,             setScreen]             = useState("dashboard");
+  const [rawData,            setRawData]            = useState(null);
+  const [filename,           setFilename]           = useState("");
+  const [pid,                setPid]                = useState(null);
+  const [output,             setOutput]             = useState(null);
+  const [sidebarOpen,        setSidebarOpen]        = useState(false);
+  const [activeResult,       setActiveResult]       = useState(null);
+  const [coachPrefill,       setCoachPrefill]       = useState(null);
+  const [availableDatasets,  setAvailableDatasets]  = useState([]);
   const coachSeqRef = useRef(0);
 
   // Load a saved project from the dashboard
@@ -753,6 +754,7 @@ export default function App() {
          filename={filename}
          pid={pid}
           onComplete={r=>{setOutput(r);setScreen("output");}}
+          onDatasetsChange={setAvailableDatasets}
           />
           )}
         {screen==="output"&&output&&(
@@ -778,6 +780,7 @@ export default function App() {
           }}>
             <ModelingTab
               cleanedData={output}
+              availableDatasets={availableDatasets}
               onBack={()=>setScreen("explorer")}
               onResultChange={r=>setActiveResult(r)}
               onCoachQuestion={q => { setSidebarOpen(true); setCoachPrefill({ q, seq: ++coachSeqRef.current }); }}

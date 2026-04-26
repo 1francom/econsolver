@@ -391,7 +391,7 @@ function ssClear(pid) {
 }
 
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
-export default function DataStudio({ rawData, filename, onComplete, pid }) {
+export default function DataStudio({ rawData, filename, onComplete, pid, onDatasetsChange }) {
   const primaryId = pid || genId();
 
   const [datasets, setDatasets] = useState(() => {
@@ -449,6 +449,16 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     const secondary = datasets.filter(d => d.id !== primaryId);
     ssWrite(primaryId, secondary);
   }, [datasets, primaryId]);
+
+  // Expose slim dataset list to parent (for Modeling Lab dataset picker)
+  useEffect(() => {
+    onDatasetsChange?.(datasets.map(d => ({
+      id:       d.id,
+      filename: d.filename,
+      rows:     d.rawData?.rows    ?? [],
+      headers:  d.rawData?.headers ?? [],
+    })));
+  }, [datasets]);
 
   const activeDs       = datasets.find(d => d.id === activeId) || datasets[0];
   // Other datasets — passed to WranglingModule for join/append context
