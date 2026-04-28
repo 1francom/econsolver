@@ -21,6 +21,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
   const dispatch = useSessionDispatch();
   const [open, setOpen] = useState(false);
   const [interactionsOpen, setInteractionsOpen] = useState(true);
+  const [pendingGDelete, setPendingGDelete] = useState(null); // { step } | null
   const ref = useRef();
 
   // Close on outside click
@@ -242,50 +243,92 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
                   const leftName  = datasets[g.leftDatasetId]?.name  ?? g.leftDatasetId;
                   const rightName = datasets[g.rightDatasetId]?.name ?? g.rightDatasetId ?? "?";
                   return (
-                    <div
-                      key={g.id}
-                      style={{
+                    <div key={g.id}>
+                      {/* G-step row */}
+                      <div style={{
                         display: "flex",
                         alignItems: "center",
                         gap: 6,
                         padding: "0.3rem 0.85rem",
                         borderTop: `1px solid ${C.border}`,
                         fontFamily: mono,
-                      }}
-                    >
-                      {/* G-step index badge */}
-                      <span style={{
-                        fontSize: 8, padding: "1px 4px",
-                        border: `1px solid ${C.border2}`,
-                        borderRadius: 2, color: C.textMuted,
-                        flexShrink: 0,
+                        background: pendingGDelete?.step.id === g.id ? "#1a0808" : "transparent",
                       }}>
-                        G{i + 1}
-                      </span>
-
-                      {/* Step description */}
-                      <span style={{ fontSize: 9, color: C.textDim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        <span style={{ color: C.teal }}>{g.opType}</span>
-                        {" "}
-                        <span style={{ color: C.textMuted }}>
-                          {leftName} ← {rightName}
-                          {g.params?.leftKey ? ` on ${g.params.leftKey}` : ""}
+                        {/* G-step index badge */}
+                        <span style={{
+                          fontSize: 8, padding: "1px 4px",
+                          border: `1px solid ${C.border2}`,
+                          borderRadius: 2, color: C.textMuted,
+                          flexShrink: 0,
+                        }}>
+                          G{i + 1}
                         </span>
-                      </span>
 
-                      {/* Remove G-step */}
-                      <button
-                        onClick={() => dispatch({ type: "REMOVE_GLOBAL_STEP", id: g.id })}
-                        title="Remove interaction"
-                        style={{
-                          background: "transparent", border: "none",
-                          color: C.textMuted, cursor: "pointer",
-                          fontSize: 11, padding: "0 2px", flexShrink: 0,
-                          fontFamily: mono, lineHeight: 1,
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.color = "#c47070"}
-                        onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
-                      >×</button>
+                        {/* Step description */}
+                        <span style={{ fontSize: 9, color: C.textDim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ color: C.teal }}>{g.opType}</span>
+                          {" "}
+                          <span style={{ color: C.textMuted }}>
+                            {leftName} ← {rightName}
+                            {g.params?.leftKey ? ` on ${g.params.leftKey}` : ""}
+                          </span>
+                        </span>
+
+                        {/* Remove G-step — requires confirmation */}
+                        <button
+                          onClick={() => setPendingGDelete(pendingGDelete?.step.id === g.id ? null : { step: g })}
+                          title="Remove interaction"
+                          style={{
+                            background: "transparent", border: "none",
+                            color: pendingGDelete?.step.id === g.id ? "#c47070" : C.textMuted,
+                            cursor: "pointer",
+                            fontSize: 11, padding: "0 2px", flexShrink: 0,
+                            fontFamily: mono, lineHeight: 1,
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.color = "#c47070"}
+                          onMouseLeave={e => {
+                            if (pendingGDelete?.step.id !== g.id)
+                              e.currentTarget.style.color = C.textMuted;
+                          }}
+                        >×</button>
+                      </div>
+
+                      {/* Inline G-step deletion confirmation */}
+                      {pendingGDelete?.step.id === g.id && (
+                        <div style={{
+                          padding: "0.45rem 0.85rem",
+                          background: "#1a0808",
+                          borderBottom: `1px solid ${C.border}`,
+                          fontFamily: mono,
+                        }}>
+                          <div style={{ fontSize: 9, color: "#c47070", marginBottom: 6 }}>
+                            Remove from registry? Local pipeline steps are unaffected.
+                          </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              onClick={() => {
+                                dispatch({ type: "REMOVE_GLOBAL_STEP", id: g.id });
+                                setPendingGDelete(null);
+                              }}
+                              style={{
+                                padding: "0.22rem 0.6rem", background: "#2a0808",
+                                border: "1px solid #c47070", borderRadius: 3,
+                                color: "#c47070", cursor: "pointer",
+                                fontFamily: mono, fontSize: 9, fontWeight: 700,
+                              }}
+                            >Remove</button>
+                            <button
+                              onClick={() => setPendingGDelete(null)}
+                              style={{
+                                padding: "0.22rem 0.6rem", background: "transparent",
+                                border: `1px solid ${C.border2}`, borderRadius: 3,
+                                color: C.textMuted, cursor: "pointer",
+                                fontFamily: mono, fontSize: 9,
+                              }}
+                            >Cancel</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

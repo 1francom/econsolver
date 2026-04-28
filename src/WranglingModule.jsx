@@ -54,6 +54,8 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   const [idbReady,         setIdbReady]         = useState(false);
   const [auditTrail,       setAuditTrail]       = useState(null);
   const [branchPointIndex, setBranchPointIndex] = useState(null);
+  // pendingDelete: { index, downstreamCount } — set when deleting a non-last step
+  const [pendingDelete,    setPendingDelete]    = useState(null);
 
   // ── Initial load from IndexedDB ────────────────────────────────────────────
   useEffect(() => {
@@ -163,11 +165,28 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   }, [snapshot, pid, sessionDispatch]);
 
   const rmStep = useCallback(i => {
+    // Deleting the last step needs no warning — nothing downstream.
+    if (i >= pipeline.length - 1) {
+      setPipeline(p => { snapshot(p); return p.filter((_, j) => j !== i); });
+      return;
+    }
+    // Mid-pipeline delete — warn the user about downstream steps.
+    setPendingDelete({ index: i, downstreamCount: pipeline.length - 1 - i });
+  }, [snapshot, pipeline.length]);
+
+  // "Delete this step only" — leaves downstream steps (they may silently degrade).
+  // "cascade" — removes this step and everything after it (clean slate from that point).
+  const confirmDeleteStep = useCallback(mode => {
+    if (!pendingDelete) return;
+    const i = pendingDelete.index;
     setPipeline(p => {
       snapshot(p);
-      return p.filter((_, j) => j !== i);
+      return mode === "cascade" ? p.slice(0, i) : p.filter((_, j) => j !== i);
     });
-  }, [snapshot]);
+    setPendingDelete(null);
+  }, [pendingDelete, snapshot]);
+
+  const cancelDelete = useCallback(() => setPendingDelete(null), []);
 
   const rmLastStep = useCallback(() => {
     setPipeline(p => {
@@ -484,6 +503,9 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         canRedo={canRedo}
         branchPointIndex={branchPointIndex}
         onSetBranch={setBranchPoint}
+        pendingDelete={pendingDelete}
+        onConfirmDelete={confirmDeleteStep}
+        onCancelDelete={cancelDelete}
       />
 
       {auditTrail && (
