@@ -32,6 +32,9 @@ import {
   migrateFromLocalStorage,
 } from "./services/Persistence/indexedDB.js";
 
+// ── Session state — two-tier pipeline registry ─────────────────────────────
+import { useSessionDispatch } from "./services/session/sessionState.jsx";
+
 // ── Re-exports (consumed by ModelingTab and other modules) ─────────────────
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
 export { applyStep, runPipeline }     from "./pipeline/runner.js";
@@ -40,6 +43,9 @@ export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [], onSaveSubset }) {
+  // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
+  const sessionDispatch = useSessionDispatch();
+
   // State starts empty — IndexedDB load is async (see useEffect below)
   const [pipeline,         setPipeline]        = useState([]);
   const [panel,            setPanel]            = useState(null);
@@ -126,11 +132,35 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   }, []);
 
   const addStep = useCallback(s => {
+    const stepId = Date.now() + Math.random();
+
+    // Every step is tagged with its owner dataset (for export DAG traversal).
+    // Cross-dataset steps (join/append) also register a G-step in the global
+    // pipeline so the exporter can build the dependency graph.
+    let gStepId = null;
+    if (sessionDispatch && (s.type === "join" || s.type === "append")) {
+      gStepId = `G_${stepId}`;
+      sessionDispatch({
+        type: "ADD_GLOBAL_STEP",
+        step: {
+          id:              gStepId,
+          localStepId:     stepId,
+          opType:          s.type === "join" ? `${s.how || "left"}_join` : "append",
+          leftDatasetId:   pid,
+          rightDatasetId:  s.rightId,
+          outputDatasetId: pid,         // result stays in the left dataset's pipeline
+          params:          s.type === "join"
+            ? { leftKey: s.leftKey, rightKey: s.rightKey, suffix: s.suffix }
+            : {},
+        },
+      });
+    }
+
     setPipeline(p => {
       snapshot(p);
-      return [...p, { ...s, id: Date.now() + Math.random() }];
+      return [...p, { ...s, id: stepId, datasetId: pid, ...(gStepId ? { gStepId } : {}) }];
     });
-  }, [snapshot]);
+  }, [snapshot, pid, sessionDispatch]);
 
   const rmStep = useCallback(i => {
     setPipeline(p => {
