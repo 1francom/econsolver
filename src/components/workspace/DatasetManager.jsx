@@ -5,7 +5,7 @@
 // Reads from sessionState — mounted inside SessionStateProvider.
 
 import { useState, useRef, useEffect } from "react";
-import { useSessionState } from "../../services/session/sessionState.jsx";
+import { useSessionState, useSessionDispatch } from "../../services/session/sessionState.jsx";
 
 const C = {
   bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
@@ -17,8 +17,10 @@ const C = {
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
-  const { datasets, primaryDatasetId } = useSessionState();
+  const { datasets, primaryDatasetId, globalPipeline } = useSessionState();
+  const dispatch = useSessionDispatch();
   const [open, setOpen] = useState(false);
+  const [interactionsOpen, setInteractionsOpen] = useState(true);
   const ref = useRef();
 
   // Close on outside click
@@ -204,14 +206,91 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
             })}
           </div>
 
-          {/* Footer hint */}
-          <div style={{
-            padding: "0.4rem 0.85rem",
-            borderTop: `1px solid ${C.border}`,
-            fontSize: 9,
-            color: C.textMuted,
-          }}>
-            Multi-dataset support in phase 9.3
+          {/* ── Interaction log (global pipeline G-steps) ── */}
+          <div style={{ borderTop: `1px solid ${C.border}` }}>
+            <button
+              onClick={() => setInteractionsOpen(o => !o)}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0.4rem 0.85rem",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                fontFamily: mono,
+              }}
+            >
+              <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                Interactions
+              </span>
+              <span style={{ fontSize: 8, color: C.textMuted }}>
+                {globalPipeline.length > 0 ? `${globalPipeline.length} step${globalPipeline.length > 1 ? "s" : ""}` : "none"}
+                {" "}{interactionsOpen ? "▲" : "▼"}
+              </span>
+            </button>
+
+            {interactionsOpen && (
+              <div style={{ maxHeight: 120, overflowY: "auto" }}>
+                {globalPipeline.length === 0 && (
+                  <div style={{ padding: "0.35rem 0.85rem 0.55rem", fontSize: 9, color: C.border2, fontFamily: mono }}>
+                    No cross-dataset operations yet.
+                  </div>
+                )}
+                {globalPipeline.map((g, i) => {
+                  const leftName  = datasets[g.leftDatasetId]?.name  ?? g.leftDatasetId;
+                  const rightName = datasets[g.rightDatasetId]?.name ?? g.rightDatasetId ?? "?";
+                  return (
+                    <div
+                      key={g.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "0.3rem 0.85rem",
+                        borderTop: `1px solid ${C.border}`,
+                        fontFamily: mono,
+                      }}
+                    >
+                      {/* G-step index badge */}
+                      <span style={{
+                        fontSize: 8, padding: "1px 4px",
+                        border: `1px solid ${C.border2}`,
+                        borderRadius: 2, color: C.textMuted,
+                        flexShrink: 0,
+                      }}>
+                        G{i + 1}
+                      </span>
+
+                      {/* Step description */}
+                      <span style={{ fontSize: 9, color: C.textDim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ color: C.teal }}>{g.opType}</span>
+                        {" "}
+                        <span style={{ color: C.textMuted }}>
+                          {leftName} ← {rightName}
+                          {g.params?.leftKey ? ` on ${g.params.leftKey}` : ""}
+                        </span>
+                      </span>
+
+                      {/* Remove G-step */}
+                      <button
+                        onClick={() => dispatch({ type: "REMOVE_GLOBAL_STEP", id: g.id })}
+                        title="Remove interaction"
+                        style={{
+                          background: "transparent", border: "none",
+                          color: C.textMuted, cursor: "pointer",
+                          fontSize: 11, padding: "0 2px", flexShrink: 0,
+                          fontFamily: mono, lineHeight: 1,
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#c47070"}
+                        onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                      >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
