@@ -57,6 +57,8 @@ src/
 │   │       └── index.js          ← SHARED_CONTEXT, INFER_UNITS_PROMPT, INTERPRET_REGRESSION_PROMPT,
 │   │                                WRANGLING_TRANSFORM_PROMPT, WRANGLING_QUERY_PROMPT,
 │   │                                CLEANING_SUGGESTIONS_PROMPT
+│   ├── session/
+│   │   └── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
 │   ├── Privacy/
 │   │   ├── index.js              ← privacy module barrel export
 │   │   ├── anonymizer.js         ← data anonymization utilities
@@ -111,6 +113,9 @@ src/
 │   │   ├── InferenceOptions.jsx  ← collapsible SE type selector (chips + cluster/lag inputs)
 │   │   └── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
 │   │
+│   ├── workspace/
+│   │   ├── WorkspaceBar.jsx      ← 7-tab nav bar (Data/Clean/Explore/Model/Simulate/Calculate/Report) + DatasetManager toggle
+│   │   └── DatasetManager.jsx    ← collapsible D·N dataset button + dropdown panel showing all session datasets
 │   ├── AIContextSidebar.jsx      ← AI context panel (sidebar)
 │   ├── ModelingTab.jsx           ← modeling tab root; estimate useCallback dep array includes SC/EventStudy/LSDV state
 │   ├── PlotBuilder.jsx           ← G1+G2+G8: layer-based plot builder (Observable Plot 0.6 CDN); point/line/bar/histogram/density geoms; aesthetic mappings (x, y, color); labels panel; ResizeObserver responsive; dark theme patched

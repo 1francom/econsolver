@@ -512,20 +512,8 @@ export default function DataStudio({ rawData, filename, onComplete, pid, onDatas
       display: "flex", height: "100%", minHeight: 0,
       background: C.bg, overflow: "hidden",
     }}>
-      {/* ── Left sidebar: dataset list ── */}
-      <DatasetSidebar
-        datasets={datasets}
-        activeId={activeId}
-        onActivate={setActiveId}
-        onRemove={handleRemove}
-        onLoadFile={handleLoadFile}
-        onFetchWorldBank={() => setWbOpen(true)}
-        onFetchOECD={() => setOecdOpen(true)}
-        loadErr={loadErr}
-        loading={loading}
-      />
-
       {/* ── Main panel: WranglingModule for active dataset ── */}
+      {/* DatasetSidebar removed — dataset management lives in WorkspaceBar DatasetManager */}
       {activeDs && (
         <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
           {/*
