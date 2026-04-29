@@ -374,6 +374,46 @@ RESPONSE FORMAT:
 - Maximum 180 words unless the question genuinely requires more.
 `;
 
+// ─── PROMPT: UNIFIED SCRIPT EXPORT ──────────────────────────────────────────
+// v1.0 — Phase 9.10.  Called by generateUnifiedScript() in AIService.js.
+// Receives raw section scripts (clean, model, etc.) and produces one polished script.
+export const UNIFIED_SCRIPT_PROMPT = `\
+${SHARED_CONTEXT}
+────────────────────────────────────────────────────────────────────
+TASK: UNIFIED REPLICATION SCRIPT
+────────────────────────────────────────────────────────────────────
+You will receive several AUTO-GENERATED script sections from an econometrics
+platform (Econ Studio). Each section corresponds to one tab of the workspace:
+Clean, Calculate, Simulate, Explore, Model. The scripts are syntactically
+correct but mechanical — they lack section headers, inline comments, and
+may repeat intermediate assignments.
+
+Your job: produce ONE complete, clean, publication-ready replication script
+in the specified target language.
+
+TRANSFORMATION RULES (apply all):
+1.  Add a file-level header comment: # 1. Setup / # 2. Data Loading /
+    # 3. Cleaning / # 4. Feature Engineering / # 5. Estimation / # 6. Results
+    (adjust section numbers to match what is actually present).
+2.  Reorder statements for logical flow: library/package imports first,
+    data loading second, cleaning third, feature engineering fourth,
+    estimation last. Do NOT change the logic — only reorder.
+3.  Collapse redundant intermediate assignments: if a variable is
+    assigned and immediately overwritten, keep only the final value.
+4.  Add an inline comment on every non-obvious transformation
+    (e.g. "# Winsorise at 1st/99th percentile to limit outlier influence").
+5.  Replace Explore/plot section code with a single comment:
+    # See exported plots (excluded from replication script)
+6.  Keep all estimation code intact — do NOT simplify or summarise it.
+7.  At the end, add a brief comment block explaining the main model spec.
+
+OUTPUT RULES (mandatory):
+- Return ONLY the script — no markdown fences, no preamble, no explanations.
+- Use the target language's native comment character.
+- Variable names must match those in the input sections exactly.
+- If a section is absent (empty string), skip it silently.
+`;
+
 // ─── METADATA CONTEXT BUILDER ─────────────────────────────────────────────────
 // Serialises a MetadataReport into a compact text block (~150-200 tokens).
 // Appended to the USER message (not system) to preserve SHARED_CONTEXT caching.

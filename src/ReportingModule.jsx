@@ -11,7 +11,11 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { stars, buildLatex } from "./math/index.js";
-import { interpretRegression } from "./services/ai/AIService.js";
+import { interpretRegression, generateUnifiedScript } from "./services/ai/AIService.js";
+import { generateCleanScript } from "./pipeline/exporter.js";
+import { generateRScript }     from "./services/export/rScript.js";
+import { generatePythonScript } from "./services/export/pythonScript.js";
+import { generateStataScript } from "./services/export/stataScript.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -758,6 +762,210 @@ function SigCallout({ result }) {
   );
 }
 
+// ─── AI UNIFIED SCRIPT ───────────────────────────────────────────────────────
+// Phase 9.10 — generates a polished, combined replication script via Claude.
+// Props:
+//   result       — normalised EstimationResult (for model section)
+//   cleanedData  — { cleanRows, headers, pipeline, dataDictionary, filename }
+function AIUnifiedScript({ result, cleanedData }) {
+  const [open,     setOpen]     = useState(false);
+  const [lang,     setLang]     = useState("r");
+  const [loading,  setLoading]  = useState(false);
+  const [script,   setScript]   = useState("");
+  const [error,    setError]    = useState("");
+  const [copied,   setCopied]   = useState(false);
+
+  const LANGS = [
+    { id: "r",      label: "R" },
+    { id: "python", label: "Python" },
+    { id: "stata",  label: "Stata" },
+  ];
+
+  function _buildModelScript(language) {
+    if (!result) return "";
+    const spec = result.spec ?? {};
+    const config = {
+      filename:       spec.filename       ?? cleanedData?.filename ?? "dataset.csv",
+      pipeline:       spec.pipeline       ?? cleanedData?.pipeline ?? [],
+      dataDictionary: spec.dataDictionary ?? cleanedData?.dataDictionary ?? null,
+      model: {
+        type:       result.type     ?? "OLS",
+        yVar:       spec.yVar       ?? "",
+        xVars:      spec.xVars      ?? [],
+        wVars:      spec.wVars      ?? [],
+        zVars:      spec.zVars      ?? [],
+        entityCol:  spec.entityCol  ?? null,
+        timeCol:    spec.timeCol    ?? null,
+        postVar:    spec.postVar    ?? null,
+        treatVar:   spec.treatVar   ?? null,
+        runningVar: spec.runningVar ?? null,
+        cutoff:     spec.cutoff     ?? null,
+        bandwidth:  spec.bandwidth  ?? null,
+        kernel:     spec.kernel     ?? "triangular",
+      },
+    };
+    try {
+      if (language === "r")      return generateRScript(config);
+      if (language === "python") return generatePythonScript(config);
+      if (language === "stata")  return generateStataScript(config);
+    } catch { return ""; }
+    return "";
+  }
+
+  async function generate() {
+    setLoading(true);
+    setError("");
+    setScript("");
+    try {
+      const dsName  = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
+      const cleanSc = generateCleanScript({
+        language,
+        datasetName: dsName,
+        filename:    cleanedData?.filename ?? "dataset.csv",
+        pipeline:    cleanedData?.pipeline ?? [],
+        allDatasets: {},
+      });
+      const modelSc = _buildModelScript(lang);
+      const dict    = cleanedData?.dataDictionary ?? null;
+      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict);
+      setScript(out);
+    } catch (e) {
+      setError(e.message ?? "Generation failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function download() {
+    const ext = lang === "stata" ? "do" : lang;
+    const blob = new Blob([script], { type: "text/plain" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `replication.${ext}`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ marginTop: "1.2rem" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0.6rem 1rem",
+          background: open ? `${C.gold}0d` : C.surface,
+          border: `1px solid ${open ? C.gold + "50" : C.border}`,
+          borderRadius: open ? "4px 4px 0 0" : 4,
+          cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+        }}
+      >
+        <span style={{ fontSize: 9, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+          ✦ AI Unified Script Export
+        </span>
+        <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div style={{
+          border: `1px solid ${C.gold}50`, borderTop: "none",
+          borderRadius: "0 0 4px 4px", padding: "1.2rem",
+          background: C.surface, animation: "fadeUp 0.15s ease",
+        }}>
+          <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.6, marginBottom: "1rem" }}>
+            Generates one complete, documented replication script combining your
+            pipeline + model. Claude restructures, comments, and deduplicates the
+            auto-generated code.
+          </div>
+
+          {/* Language selector */}
+          <div style={{ display: "flex", gap: 4, marginBottom: "1rem" }}>
+            {LANGS.map(l => (
+              <button key={l.id} onClick={() => setLang(l.id)}
+                style={{
+                  padding: "0.3rem 0.8rem", borderRadius: 3, cursor: "pointer",
+                  fontFamily: mono, fontSize: 11, transition: "all 0.12s",
+                  background:  lang === l.id ? `${C.gold}18` : "transparent",
+                  border:      `1px solid ${lang === l.id ? C.gold : C.border2}`,
+                  color:       lang === l.id ? C.gold : C.textDim,
+                }}>
+                {l.label}
+              </button>
+            ))}
+            <div style={{ flex: 1 }} />
+            <button onClick={generate} disabled={loading}
+              style={{
+                padding: "0.3rem 0.9rem", borderRadius: 3, cursor: loading ? "not-allowed" : "pointer",
+                fontFamily: mono, fontSize: 11, opacity: loading ? 0.5 : 1,
+                background: `${C.gold}18`, border: `1px solid ${C.gold}`,
+                color: C.gold, fontWeight: 700,
+              }}>
+              {loading ? "Generating…" : script ? "↻ Regenerate" : "✦ Generate"}
+            </button>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div style={{ fontSize: 11, color: C.red, fontFamily: mono, marginBottom: "0.8rem",
+                          padding: "0.5rem 0.8rem", border: `1px solid ${C.red}40`, borderRadius: 3 }}>
+              ⚠ {error}
+            </div>
+          )}
+
+          {/* Loading skeleton */}
+          {loading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8,
+                          color: C.gold, fontSize: 11, fontFamily: mono, marginBottom: "0.8rem" }}>
+              <div style={{ width: 12, height: 12, border: `2px solid ${C.border2}`,
+                            borderTopColor: C.gold, borderRadius: "50%",
+                            animation: "spin 0.7s linear infinite" }} />
+              <span>Claude is writing your script…</span>
+            </div>
+          )}
+
+          {/* Script output */}
+          {script && !loading && (
+            <>
+              <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, flex: 1 }}>
+                  {script.split("\n").length} lines
+                </span>
+                <button onClick={() => {
+                  navigator.clipboard.writeText(script).then(() => {
+                    setCopied(true); setTimeout(() => setCopied(false), 2000);
+                  });
+                }}
+                  style={{ padding: "0.22rem 0.6rem", borderRadius: 3, cursor: "pointer",
+                           fontFamily: mono, fontSize: 10,
+                           border: `1px solid ${copied ? C.teal : C.border2}`,
+                           background: copied ? `${C.teal}18` : "transparent",
+                           color: copied ? C.teal : C.textDim }}>
+                  {copied ? "Copied ✓" : "Copy"}
+                </button>
+                <button onClick={download}
+                  style={{ padding: "0.22rem 0.6rem", borderRadius: 3, cursor: "pointer",
+                           fontFamily: mono, fontSize: 10,
+                           border: `1px solid ${C.border2}`, background: "transparent", color: C.textDim }}>
+                  ↓ Download
+                </button>
+              </div>
+              <textarea
+                readOnly
+                value={script}
+                style={{
+                  width: "100%", minHeight: 280, padding: "0.8rem",
+                  background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
+                  fontFamily: mono, fontSize: 10.5, color: C.text, lineHeight: 1.55,
+                  resize: "vertical", boxSizing: "border-box",
+                }}
+              />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function ReportingModule({ result: rawResult, cleanedData, onClose }) {
   const [tab, setTab] = useState("forest");
@@ -963,6 +1171,9 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
             </div>
           )}
         </div>
+
+        {/* ── AI Unified Script Export — Phase 9.10 ── */}
+        <AIUnifiedScript result={result} cleanedData={cleanedData} />
 
       </div>
     </div>
