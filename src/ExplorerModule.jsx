@@ -777,11 +777,115 @@ function AIInsights({rows,headers,info,panel}){
   );
 }
 
+// ─── EXPLORE SCRIPT GENERATORS ────────────────────────────────────────────────
+
+function generateExploreScript(language, { headers, info, filename }) {
+  const numCols = headers.filter(h => info[h]?.isNum);
+  const base    = filename ? filename.replace(/\.[^.]+$/, "") : "dataset";
+  const df      = "df_" + base.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^[0-9]/, "_");
+
+  if (language === "r") {
+    const lines = [
+      `# ${"─".repeat(70)}`,
+      `# Econ Studio — Explore Script (R)`,
+      `# Dataset: ${base}`,
+      `# Generated: ${new Date().toISOString().slice(0,10)}`,
+      `# ${"─".repeat(70)}`,
+      ``,
+      `library(dplyr)`,
+      `library(ggplot2)`,
+      ``,
+      `${df} <- readr::read_csv("${filename || `${base}.csv`}")`,
+      ``,
+      `# ── Overview ──`,
+      `dplyr::glimpse(${df})`,
+      ``,
+      `# ── Summary statistics ──`,
+      `summary(${df})`,
+      ``,
+    ];
+    if (numCols.length > 1) {
+      lines.push(`# ── Correlation matrix (numeric columns) ──`);
+      lines.push(`cor(${df}[, c(${numCols.map(c => `"${c}"`).join(", ")})], use = "complete.obs")`);
+      lines.push(``);
+    }
+    return lines.join("\n");
+  }
+
+  if (language === "stata") {
+    const lines = [
+      `* ${"─".repeat(70)}`,
+      `* Econ Studio — Explore Script (Stata)`,
+      `* Dataset: ${base}`,
+      `* Generated: ${new Date().toISOString().slice(0,10)}`,
+      `* ${"─".repeat(70)}`,
+      ``,
+      `version 17`,
+      `set more off`,
+      ``,
+      `import delimited "${filename || `${base}.csv`}", clear`,
+      ``,
+      `* ── Overview ──`,
+      `describe`,
+      ``,
+      `* ── Summary statistics ──`,
+      `summarize`,
+      ``,
+    ];
+    if (numCols.length > 1) {
+      lines.push(`* ── Correlation matrix ──`);
+      lines.push(`correlate ${numCols.join(" ")}`);
+      lines.push(``);
+    }
+    return lines.join("\n");
+  }
+
+  if (language === "python") {
+    const lines = [
+      `# ${"─".repeat(70)}`,
+      `# Econ Studio — Explore Script (Python)`,
+      `# Dataset: ${base}`,
+      `# Generated: ${new Date().toISOString().slice(0,10)}`,
+      `# ${"─".repeat(70)}`,
+      ``,
+      `import pandas as pd`,
+      `import numpy as np`,
+      ``,
+      `${df} = pd.read_csv("${filename || `${base}.csv`}")`,
+      ``,
+      `# ── Overview ──`,
+      `print(${df}.info())`,
+      ``,
+      `# ── Summary statistics ──`,
+      `print(${df}.describe(include="all"))`,
+      ``,
+    ];
+    if (numCols.length > 1) {
+      lines.push(`# ── Correlation matrix ──`);
+      lines.push(`print(${df}[[${numCols.map(c => `"${c}"`).join(", ")}]].corr())`);
+      lines.push(``);
+    }
+    return lines.join("\n");
+  }
+  return "";
+}
+
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
 export default function ExplorerModule({cleanedData, onBack, onProceed}) {
-  const {headers, cleanRows:rows, panelIndex:panel} = cleanedData;
+  const {headers, cleanRows:rows, panelIndex:panel, filename} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
+
+  function downloadExploreScript(language) {
+    const ext    = { r: "R", stata: "do", python: "py" }[language];
+    const base   = (filename || "dataset").replace(/\.[^.]+$/, "");
+    const script = generateExploreScript(language, { headers, info, filename });
+    const blob   = new Blob([script], { type: "text/plain" });
+    const a      = document.createElement("a");
+    a.href       = URL.createObjectURL(blob);
+    a.download   = `${base}_explore.${ext}`;
+    a.click(); URL.revokeObjectURL(a.href);
+  }
 
   return(
     <div style={{display:"flex",height:"100%",minHeight:0,background:C.bg,color:C.text,fontFamily:mono,overflow:"hidden"}}>
@@ -799,6 +903,21 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
             </div>
           </div>
           <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+            {["R","Stata","py"].map((lbl, i) => {
+              const lang = ["r","stata","python"][i];
+              return (
+                <button key={lang} onClick={() => downloadExploreScript(lang)} style={{
+                  padding:"0.28rem 0.55rem", borderRadius:3, cursor:"pointer",
+                  fontFamily:mono, fontSize:10, background:"transparent",
+                  border:`1px solid ${C.border2}`, color:C.textDim,
+                  transition:"all 0.12s",
+                }}
+                  title={`Export Explore script (${lbl})`}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;e.currentTarget.style.color=C.teal;}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+                >↓{lbl}</button>
+              );
+            })}
             <button onClick={onBack} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:"transparent",border:`1px solid ${C.border2}`,color:C.textDim}}>← Wrangling</button>
             <button onClick={onProceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>→ Modeling</button>
           </div>

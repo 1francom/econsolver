@@ -255,6 +255,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     });
     onComplete({
       headers, cleanRows: rows, colInfo: ci,
+      filename,
       issues: [], removed: naCount,
       dataDictionary: dataDictionary || {},
       panelIndex: panel
@@ -369,7 +370,9 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
                 </>
               )}
             </div>
-            <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}/>
+            <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}
+              datasetName={filename ? filename.replace(/\.[^.]+$/, "") : "dataset"}
+              allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}/>
             {onSaveSubset && (
               <div style={{ position:"relative" }}>
                 <button
