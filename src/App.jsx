@@ -11,6 +11,8 @@ import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from "./services/persistence/indexedDB.js";
+import CalculateTab  from './components/tabs/CalculateTab.jsx';
+import SimulateTab   from './components/tabs/SimulateTab.jsx';
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -989,12 +991,26 @@ export default function App() {
                   }
                 </div>
 
-                {/* SIMULATE, CALCULATE, REPORT — stubs (phases 9.7, 9.6, future) */}
-                {["simulate","calculate","report"].map(t=>(
-                  <div key={t} style={{...tabPanel, display: activeTab===t ? "flex" : "none"}}>
-                    <ComingSoon tab={t}/>
-                  </div>
-                ))}
+                {/* SIMULATE — Phase 9.8 */}
+                <div style={{...tabPanel, display: activeTab==="simulate" ? "flex" : "none", flexDirection:"column"}}>
+                  <SimulateTab
+                    onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                  />
+                </div>
+
+                {/* REPORT — stub */}
+                <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
+                  <ComingSoon tab="report"/>
+                </div>
+
+                {/* CALCULATE — Phase 9.7 */}
+                <div style={{...tabPanel, display: activeTab==="calculate" ? "flex" : "none", flexDirection:"column"}}>
+                  <CalculateTab
+                    rows={output?.cleanRows ?? rawData?.rows ?? []}
+                    headers={output?.headers ?? rawData?.headers ?? []}
+                    onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                  />
+                </div>
 
               </div>
             </div>
