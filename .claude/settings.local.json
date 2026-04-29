@@ -4,7 +4,14 @@
       "Bash(git:*)",
       "Bash(Rscript validation/GMM_check.R)",
       "Bash(/c/Program Files/R/R-4.4.1/bin/Rscript.exe:*)",
-      "Bash(npx vite:*)"
+      "Bash(npx vite:*)",
+      "Bash(Rscript:*)",
+      "Bash(node:*)",
+      "Bash(C:/Program Files/R/R-4.4.3/bin/Rscript.exe:*)",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"install.packages\\('rdrobust', repos='https://cloud.r-project.org'\\)\")",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" r_validation/RDD_check.R)",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"install.packages\\('AER', repos='https://cloud.r-project.org'\\)\")",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" r_validation/TSLS_check.R)"
     ]
   }
 }

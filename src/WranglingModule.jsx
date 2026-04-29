@@ -32,6 +32,9 @@ import {
   migrateFromLocalStorage,
 } from "./services/Persistence/indexedDB.js";
 
+// ── Session state — two-tier pipeline registry ─────────────────────────────
+import { useSessionDispatch } from "./services/session/sessionState.jsx";
+
 // ── Re-exports (consumed by ModelingTab and other modules) ─────────────────
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
 export { applyStep, runPipeline }     from "./pipeline/runner.js";
@@ -40,13 +43,19 @@ export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [], onSaveSubset }) {
+  // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
+  const sessionDispatch = useSessionDispatch();
+
   // State starts empty — IndexedDB load is async (see useEffect below)
-  const [pipeline,       setPipeline]      = useState([]);
-  const [panel,          setPanel]          = useState(null);
-  const [dataDictionary, setDataDictionary] = useState(null);
-  const [tab,            setTab]            = useState("clean");
-  const [idbReady,       setIdbReady]       = useState(false);
-  const [auditTrail,     setAuditTrail]     = useState(null);
+  const [pipeline,         setPipeline]        = useState([]);
+  const [panel,            setPanel]            = useState(null);
+  const [dataDictionary,   setDataDictionary]   = useState(null);
+  const [tab,              setTab]              = useState("clean");
+  const [idbReady,         setIdbReady]         = useState(false);
+  const [auditTrail,       setAuditTrail]       = useState(null);
+  const [branchPointIndex, setBranchPointIndex] = useState(null);
+  // pendingDelete: { index, downstreamCount } — set when deleting a non-last step
+  const [pendingDelete,    setPendingDelete]    = useState(null);
 
   // ── Initial load from IndexedDB ────────────────────────────────────────────
   useEffect(() => {
@@ -56,9 +65,10 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
       const rec = await loadPipeline(pid);
       if (cancelled) return;
       if (rec) {
-        if (rec.pipeline)       setPipeline(rec.pipeline);
-        if (rec.panel)          setPanel(rec.panel);
-        if (rec.dataDictionary) setDataDictionary(rec.dataDictionary);
+        if (rec.pipeline)            setPipeline(rec.pipeline);
+        if (rec.panel)               setPanel(rec.panel);
+        if (rec.dataDictionary)      setDataDictionary(rec.dataDictionary);
+        if (rec.branchPointIndex != null) setBranchPointIndex(rec.branchPointIndex);
       }
       setIdbReady(true);
     })();
@@ -88,7 +98,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       savePipeline(pid, {
-        filename, pipeline, panel, dataDictionary,
+        filename, pipeline, panel, dataDictionary, branchPointIndex,
         rowCount: rawData.rows.length, colCount: rawData.headers.length,
         pipelineLength: pipeline.length,
       });
@@ -101,6 +111,13 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     }, 400);
     return () => clearTimeout(saveTimer.current);
   }, [pipeline, panel, dataDictionary, idbReady]);
+
+  // ── Auto-clamp branchPointIndex when pipeline shrinks ─────────────────────
+  useEffect(() => {
+    if (branchPointIndex !== null && branchPointIndex >= pipeline.length) {
+      setBranchPointIndex(pipeline.length > 0 ? pipeline.length - 1 : null);
+    }
+  }, [pipeline.length, branchPointIndex]);
 
   // ── Undo / Redo stack ──────────────────────────────────────────────────────
   // Each entry is a full pipeline snapshot (step[]). Present state is NOT in
@@ -117,18 +134,59 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   }, []);
 
   const addStep = useCallback(s => {
+    const stepId = Date.now() + Math.random();
+
+    // Every step is tagged with its owner dataset (for export DAG traversal).
+    // Cross-dataset steps (join/append) also register a G-step in the global
+    // pipeline so the exporter can build the dependency graph.
+    let gStepId = null;
+    if (sessionDispatch && (s.type === "join" || s.type === "append")) {
+      gStepId = `G_${stepId}`;
+      sessionDispatch({
+        type: "ADD_GLOBAL_STEP",
+        step: {
+          id:              gStepId,
+          localStepId:     stepId,
+          opType:          s.type === "join" ? `${s.how || "left"}_join` : "append",
+          leftDatasetId:   pid,
+          rightDatasetId:  s.rightId,
+          outputDatasetId: pid,         // result stays in the left dataset's pipeline
+          params:          s.type === "join"
+            ? { leftKey: s.leftKey, rightKey: s.rightKey, suffix: s.suffix }
+            : {},
+        },
+      });
+    }
+
     setPipeline(p => {
       snapshot(p);
-      return [...p, { ...s, id: Date.now() + Math.random() }];
+      return [...p, { ...s, id: stepId, datasetId: pid, ...(gStepId ? { gStepId } : {}) }];
     });
-  }, [snapshot]);
+  }, [snapshot, pid, sessionDispatch]);
 
   const rmStep = useCallback(i => {
+    // Deleting the last step needs no warning — nothing downstream.
+    if (i >= pipeline.length - 1) {
+      setPipeline(p => { snapshot(p); return p.filter((_, j) => j !== i); });
+      return;
+    }
+    // Mid-pipeline delete — warn the user about downstream steps.
+    setPendingDelete({ index: i, downstreamCount: pipeline.length - 1 - i });
+  }, [snapshot, pipeline.length]);
+
+  // "Delete this step only" — leaves downstream steps (they may silently degrade).
+  // "cascade" — removes this step and everything after it (clean slate from that point).
+  const confirmDeleteStep = useCallback(mode => {
+    if (!pendingDelete) return;
+    const i = pendingDelete.index;
     setPipeline(p => {
       snapshot(p);
-      return p.filter((_, j) => j !== i);
+      return mode === "cascade" ? p.slice(0, i) : p.filter((_, j) => j !== i);
     });
-  }, [snapshot]);
+    setPendingDelete(null);
+  }, [pendingDelete, snapshot]);
+
+  const cancelDelete = useCallback(() => setPendingDelete(null), []);
 
   const rmLastStep = useCallback(() => {
     setPipeline(p => {
@@ -143,6 +201,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
       snapshot(p);
       return [];
     });
+    setBranchPointIndex(null);
   }, [snapshot]);
 
   const undo = useCallback(() => {
@@ -168,6 +227,10 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;
 
+  const setBranchPoint = useCallback(i => {
+    setBranchPointIndex(prev => prev === i ? null : i);
+  }, []);
+
   // ── Save subset ────────────────────────────────────────────────────────────
   const [showSaveSubset, setShowSaveSubset] = useState(false);
   const [subsetName,     setSubsetName]     = useState("");
@@ -192,6 +255,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     });
     onComplete({
       headers, cleanRows: rows, colInfo: ci,
+      filename,
       issues: [], removed: naCount,
       dataDictionary: dataDictionary || {},
       panelIndex: panel
@@ -202,6 +266,9 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         type: s.type, description: s.desc,
         col: s.col || s.c1 || s.nn || "", map: s.map || null,
       })),
+      pipeline,
+      branchPointIndex,
+      context,
     });
   };
 
@@ -303,7 +370,9 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
                 </>
               )}
             </div>
-            <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}/>
+            <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}
+              datasetName={filename ? filename.replace(/\.[^.]+$/, "") : "dataset"}
+              allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}/>
             {onSaveSubset && (
               <div style={{ position:"relative" }}>
                 <button
@@ -435,6 +504,11 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         onRedo={redo}
         canUndo={canUndo}
         canRedo={canRedo}
+        branchPointIndex={branchPointIndex}
+        onSetBranch={setBranchPoint}
+        pendingDelete={pendingDelete}
+        onConfirmDelete={confirmDeleteStep}
+        onCancelDelete={cancelDelete}
       />
 
       {auditTrail && (
