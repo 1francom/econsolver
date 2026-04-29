@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { stars, buildLatex } from "./math/index.js";
-import { interpretRegression, generateUnifiedScript } from "./services/ai/AIService.js";
+import { interpretRegression, generateUnifiedScript } from "./services/AI/AIService.js";
 import { generateCleanScript } from "./pipeline/exporter.js";
 import { generateRScript }     from "./services/export/rScript.js";
 import { generatePythonScript } from "./services/export/pythonScript.js";
