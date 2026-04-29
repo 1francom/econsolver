@@ -1325,6 +1325,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         setBufferVersion(v => v + 1);
       }
     }
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+
+  // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
+  const estimate = useCallback(() => {
+    setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
+    const out = _runEstimation(rows);
+    if (out.error) { setErr(out.error); }
+    else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
     setRunning(false);
   }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
