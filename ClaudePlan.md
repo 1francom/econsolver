@@ -595,7 +595,7 @@ After all G-steps:
 
 ---
 
-### 9.6 — Per-Tab Section Exports — PENDING
+### 9.6 — Per-Tab Section Exports — DONE
 
 Every tab gets a consistent export bar (top-right of the tab content area) with three buttons: **R**, **Stata**, **Python**. Each exports only the content of that tab as a standalone, runnable script.
 
@@ -776,7 +776,7 @@ Steps must be done in this order — each unlocks the next:
 
 ---
 
-## Overall Status Summary (last updated 2026-04-28)
+## Overall Status Summary (last updated 2026-04-29)
 
 | Phase | Title | Status |
 |-------|-------|--------|

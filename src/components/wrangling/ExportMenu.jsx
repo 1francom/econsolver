@@ -1,19 +1,22 @@
 // ─── ECON STUDIO · components/wrangling/ExportMenu.jsx ───────────────────────
-// Header export dropdown. Currently: CSV + pipeline JSON.
-// Grows here as formats are added (Stata .do, R script, replication package).
+// Header export dropdown: CSV, pipeline JSON, R/Stata/Python scripts.
 //
 // Props:
-//   rows     — current pipeline output rows
-//   headers  — current pipeline output headers
-//   pipeline — step[] (for JSON export)
-//   filename — original filename (used as base for download names)
+//   rows        — current pipeline output rows
+//   headers     — current pipeline output headers
+//   pipeline    — step[] (for JSON export and script generation)
+//   filename    — original filename (used as base for download names)
+//   datasetName — human-readable name for the active dataset
+//   allDatasets — { id: { name, filename } } — for resolving join/append names
 
 import { useState } from "react";
 import { C, mono } from "./shared.jsx";
+import { generateCleanScript } from "../../pipeline/exporter.js";
 
-function ExportMenu({ rows, headers, pipeline, filename }) {
+function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDatasets = {} }) {
   const [open, setOpen] = useState(false);
-  const base = filename ? filename.replace(/\.[^.]+$/, "") : "dataset";
+  const base        = filename ? filename.replace(/\.[^.]+$/, "") : "dataset";
+  const dsName      = datasetName || base;
 
   function downloadCSV() {
     const esc = v => {
@@ -30,6 +33,23 @@ function ExportMenu({ rows, headers, pipeline, filename }) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `${base}_pipeline_output.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+    setOpen(false);
+  }
+
+  function downloadScript(language) {
+    const ext    = { r: "R", stata: "do", python: "py" }[language];
+    const script = generateCleanScript({
+      language,
+      datasetName: dsName,
+      filename,
+      pipeline,
+      allDatasets,
+    });
+    const blob = new Blob([script], { type: "text/plain" });
+    const a    = document.createElement("a");
+    a.href     = URL.createObjectURL(blob);
+    a.download = `${base}_clean.${ext}`;
     a.click(); URL.revokeObjectURL(a.href);
     setOpen(false);
   }
@@ -54,6 +74,12 @@ function ExportMenu({ rows, headers, pipeline, filename }) {
       action: downloadCSV },
     { icon:"{ }", label:"Download pipeline.json",  hint:`${pipeline.length} step${pipeline.length !== 1 ? "s" : ""}`,
       action: downloadPipeline },
+    { icon:"R",   label:"Export R script",         hint:"dplyr pipeline · runnable",
+      action: () => downloadScript("r") },
+    { icon:"▶",   label:"Export Stata do-file",    hint:"Full pipeline · .do",
+      action: () => downloadScript("stata") },
+    { icon:"py",  label:"Export Python script",    hint:"pandas pipeline · runnable",
+      action: () => downloadScript("python") },
   ];
 
   return (

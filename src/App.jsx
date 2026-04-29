@@ -7,6 +7,8 @@ import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './components/ModelingTab.jsx';
 import AIContextSidebar from './components/AIContextSidebar.jsx';
 import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
+import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
+import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from "./services/persistence/indexedDB.js";
 
@@ -236,16 +238,38 @@ function NeedsOutput({ onGoToClean }) {
   );
 }
 
-// Data tab — shows loaded datasets, accepted file formats, and load entry points.
-// Full DataTab.jsx (with World Bank / OECD / drag-drop) comes in phase 9.5.
-function DataTab({ filename, rawData }) {
-  const formats = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP"];
+// ─── DATA TAB ─────────────────────────────────────────────────────────────────
+// Dataset overview + load controls (file upload, World Bank, OECD).
+// studioRef.current.addFile(file) / addApiData(fname, rows, headers)
+// forward the loaded data into DataStudio's dataset registry.
+function DataTab({ filename, rawData, studioRef }) {
+  const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP"];
+  const fileRef  = useRef();
+  const [loading,   setLoading]   = useState(false);
+  const [err,       setErr]       = useState("");
+  const [success,   setSuccess]   = useState("");
+  const [wbOpen,    setWbOpen]    = useState(false);
+  const [oecdOpen,  setOecdOpen]  = useState(false);
+  const [dragOver,  setDragOver]  = useState(false);
+
+  async function handleFile(file) {
+    if (!file) return;
+    setLoading(true); setErr(""); setSuccess("");
+    try {
+      await studioRef.current?.addFile(file);
+      setSuccess(`"${file.name}" loaded — visible in Dataset Manager.`);
+    } catch (e) {
+      setErr("Parse error: " + (e?.message || "unknown"));
+    }
+    setLoading(false);
+  }
+
   return (
-    <div style={{padding:"2rem 2.4rem",fontFamily:mono,maxWidth:720,color:C.text}}>
+    <div style={{padding:"2rem 2.4rem",fontFamily:mono,maxWidth:720,color:C.text,overflowY:"auto",height:"100%"}}>
       <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:4}}>Data</div>
       <div style={{fontSize:18,color:C.text,marginBottom:"1.6rem",letterSpacing:"-0.01em"}}>Dataset Overview</div>
 
-      {/* Active dataset card */}
+      {/* Primary dataset card */}
       {rawData && (
         <div style={{border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden",marginBottom:"1.8rem"}}>
           <div style={{background:C.surface2,padding:"0.6rem 0.9rem",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${C.border}`}}>
@@ -292,25 +316,86 @@ function DataTab({ filename, rawData }) {
         </div>
       </div>
 
-      {/* Load buttons — full implementation in phase 9.5 */}
-      <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.16em",textTransform:"uppercase",marginBottom:8}}>Load data</div>
-      <div style={{display:"flex",flexDirection:"column",gap:6,maxWidth:280}}>
+      {/* Load controls */}
+      <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.16em",textTransform:"uppercase",marginBottom:10}}>Load data</div>
+
+      {/* File upload drop zone */}
+      <div
+        onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+        onDragLeave={()=>setDragOver(false)}
+        onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+        onClick={()=>fileRef.current?.click()}
+        style={{
+          border:`2px dashed ${dragOver ? C.gold : C.border2}`,
+          borderRadius:4, padding:"1.2rem 1rem",
+          textAlign:"center", cursor:"pointer",
+          background: dragOver ? C.goldFaint : C.surface,
+          transition:"all 0.15s", marginBottom:10,
+        }}>
+        <input ref={fileRef} type="file"
+          accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp"
+          onChange={e=>handleFile(e.target.files[0])}
+          style={{display:"none"}}/>
+        {loading
+          ? <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>Parsing…</div>
+          : <>
+              <div style={{fontSize:11,color:C.text,marginBottom:3}}>+ Load dataset</div>
+              <div style={{fontSize:9,color:C.textMuted}}>Drop file here or click to browse</div>
+            </>
+        }
+      </div>
+
+      {/* API fetchers */}
+      <div style={{display:"flex",flexDirection:"column",gap:6,maxWidth:280,marginBottom:12}}>
         {[
-          {label:"+ Load dataset",   color:C.gold,  note:"file upload, coming in phase 9.5"},
-          {label:"↓ World Bank data",color:C.teal,  note:"API fetcher"},
-          {label:"↓ OECD data",      color:C.blue,  note:"API fetcher"},
-        ].map(({label,color,note})=>(
-          <div key={label} style={{display:"flex",alignItems:"center",gap:10}}>
-            <button disabled style={{
-              flex:1,padding:"0.42rem 0.75rem",background:"transparent",
-              border:`1px solid ${C.border2}`,borderRadius:3,
-              color:C.textMuted,cursor:"not-allowed",fontFamily:mono,fontSize:10,
-              textAlign:"left",opacity:0.5,
-            }}>{label}</button>
-            <span style={{fontSize:9,color:C.border2}}>{note}</span>
-          </div>
+          {label:"↓ World Bank data", color:C.teal, action:()=>setWbOpen(true)},
+          {label:"↓ OECD data",       color:C.blue, action:()=>setOecdOpen(true)},
+        ].map(({label,color,action})=>(
+          <button key={label} onClick={action} style={{
+            padding:"0.42rem 0.75rem",background:"transparent",
+            border:`1px solid ${C.border2}`,borderRadius:3,
+            color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,
+            textAlign:"left",transition:"all 0.12s",
+          }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.color=color;}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+          >{label}</button>
         ))}
       </div>
+
+      {/* Status messages */}
+      {success && (
+        <div style={{fontSize:10,color:C.green,fontFamily:mono,padding:"0.5rem 0.75rem",border:`1px solid ${C.green}40`,borderRadius:3,marginBottom:8}}>
+          ✓ {success}
+        </div>
+      )}
+      {err && (
+        <div style={{fontSize:10,color:C.red,fontFamily:mono,padding:"0.5rem 0.75rem",border:`1px solid ${C.red}40`,borderRadius:3,marginBottom:8}}>
+          {err}
+        </div>
+      )}
+
+      {/* Modals */}
+      {wbOpen && (
+        <WorldBankFetcher
+          onLoad={(fname, rows, headers) => {
+            studioRef.current?.addApiData(fname, rows, headers);
+            setWbOpen(false);
+            setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
+          }}
+          onClose={() => setWbOpen(false)}
+        />
+      )}
+      {oecdOpen && (
+        <OECDFetcher
+          onLoad={(fname, rows, headers) => {
+            studioRef.current?.addApiData(fname, rows, headers);
+            setOecdOpen(false);
+            setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
+          }}
+          onClose={() => setOecdOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -725,7 +810,8 @@ export default function App() {
   const [activeResult,       setActiveResult]      = useState(null);
   const [coachPrefill,       setCoachPrefill]      = useState(null);
   const [availableDatasets,  setAvailableDatasets] = useState([]);
-  const coachSeqRef = useRef(0);
+  const coachSeqRef  = useRef(0);
+  const studioRef    = useRef(null);
 
   // ── Load a saved project from the dashboard ──────────────────────────────
   const handleLoad = async p => {
@@ -852,26 +938,28 @@ export default function App() {
                 onTabChange={setActiveTab}
                 hasOutput={!!output}
                 activeDatasetId={activeDatasetId}
-                onSelectDataset={setActiveDatasetId}
+                onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
               />
 
               {/* ── Tab panels — kept mounted via display:none to preserve state ── */}
               <div style={{flex:1,minHeight:0,position:"relative"}}>
 
-                {/* DATA — overview + format notes; full load UI in phase 9.5 */}
-                <div style={{...tabPanel, display: activeTab==="data" ? "block" : "none", overflowY:"auto"}}>
-                  <DataTab filename={filename} rawData={rawData}/>
+                {/* DATA — dataset overview + file upload + WB/OECD fetchers */}
+                <div style={{...tabPanel, display: activeTab==="data" ? "flex" : "none", flexDirection:"column"}}>
+                  <DataTab filename={filename} rawData={rawData} studioRef={studioRef}/>
                 </div>
 
                 {/* CLEAN — DataStudio always mounted; never remounts on tab switch */}
                 <div style={{...tabPanel, display: activeTab==="clean" ? "flex" : "none", flexDirection:"column"}}>
                   <DataStudio
+                    ref={studioRef}
                     key={pid}
                     rawData={rawData}
                     filename={filename}
                     pid={pid}
                     onComplete={handleComplete}
                     onDatasetsChange={setAvailableDatasets}
+                    activeDatasetId={activeDatasetId}
                   />
                 </div>
 
