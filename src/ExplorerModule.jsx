@@ -1,10 +1,11 @@
 // ─── ECON STUDIO · ExplorerModule.jsx ────────────────────────────────────────
 // Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
 // Consumes cleanedData emitted by WranglingModule.
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
+import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -875,6 +876,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
   const {headers, cleanRows:rows, panelIndex:panel, filename} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
+  const corrRef = useRef(null);
 
   function downloadExploreScript(language) {
     const ext    = { r: "R", stata: "do", python: "py" }[language];
@@ -937,7 +939,12 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
             <div style={{fontSize:11,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
               Pearson correlation between all numeric variables. Red = negative, Teal = positive.
             </div>
-            <CorrHeatmap headers={headers} rows={rows} info={info}/>
+            <div ref={corrRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
+              <div style={{padding:"0.5rem"}}>
+                <CorrHeatmap headers={headers} rows={rows} info={info}/>
+              </div>
+              <PlotExportBar getEl={() => corrRef.current} filename="correlation_heatmap" />
+            </div>
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={rows} headers={headers} info={info} panel={panel}/>}

@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { C, mono } from "./modeling/shared.jsx";
+import PlotExportBar from "./shared/PlotExportBar.jsx";
 
 // ─── OBSERVABLE PLOT — CACHED CDN SINGLETON ───────────────────────────────────
 let _plt = null;
@@ -210,42 +211,7 @@ function patchDarkTheme(el) {
   });
 }
 
-// ─── SVG EXPORT (G9) ─────────────────────────────────────────────────────────
-function exportSVG(containerEl, filename = "plot.svg") {
-  const svg = containerEl?.querySelector("svg");
-  if (!svg) return;
-  const clone = svg.cloneNode(true);
-  // Embed white background for standalone SVG
-  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  const blob = new Blob([clone.outerHTML], { type: "image/svg+xml" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
-
-function exportPNG(containerEl, filename = "plot.png") {
-  const svg = containerEl?.querySelector("svg");
-  if (!svg) return;
-  const { width, height } = svg.getBoundingClientRect();
-  const blob  = new Blob([svg.outerHTML], { type: "image/svg+xml" });
-  const url   = URL.createObjectURL(blob);
-  const img   = new Image();
-  img.onload  = () => {
-    const canvas = document.createElement("canvas");
-    canvas.width  = width  * 2;   // 2× for retina
-    canvas.height = height * 2;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(2, 2);
-    ctx.fillStyle = "#080808";
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(img, 0, 0, width, height);
-    URL.revokeObjectURL(url);
-    const a = document.createElement("a");
-    a.href = canvas.toDataURL("image/png"); a.download = filename; a.click();
-  };
-  img.src = url;
-}
+// ─── SVG EXPORT (G9) — delegated to PlotExportBar + plotExporter.js ──────────
 
 // ─── PLOT CANVAS ──────────────────────────────────────────────────────────────
 function PlotCanvas({ layers, rows, xLabel, yLabel, width, scheme, canvasRef }) {
@@ -632,26 +598,11 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             {title}
           </span>
           {layers.length > 0 && (
-            <div style={{ display: "flex", gap: 5 }}>
-              <button
-                onClick={() => exportSVG(canvasRef.current, (title || "plot") + ".svg")}
-                title="Download SVG"
-                style={{
-                  padding: "2px 8px", fontFamily: mono, fontSize: 9, cursor: "pointer",
-                  background: "none", border: `1px solid ${C.border}`, borderRadius: 3,
-                  color: C.textMuted,
-                }}
-              >SVG</button>
-              <button
-                onClick={() => exportPNG(canvasRef.current, (title || "plot") + ".png")}
-                title="Download PNG"
-                style={{
-                  padding: "2px 8px", fontFamily: mono, fontSize: 9, cursor: "pointer",
-                  background: "none", border: `1px solid ${C.border}`, borderRadius: 3,
-                  color: C.textMuted,
-                }}
-              >PNG</button>
-            </div>
+            <PlotExportBar
+              getEl={() => canvasRef.current}
+              filename={title || "plot"}
+              style={{ border: "none", padding: "0 0.35rem", background: "transparent", borderTop: "none" }}
+            />
           )}
         </div>
 
