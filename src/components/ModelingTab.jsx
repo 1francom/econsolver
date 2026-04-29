@@ -20,7 +20,7 @@ import {
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
-import { downloadReplicationBundle } from "../services/export/replicationBundle.js";
+import { downloadReplicationBundle, downloadMultiSubsetBundle } from "../services/export/replicationBundle.js";
 import ReportingModule from "../ReportingModule.jsx";
 import * as modelBuffer from "../services/modelBuffer.js";
 import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
@@ -32,7 +32,9 @@ import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
 import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
+import { runPipeline } from "../pipeline/runner.js";
 import { C, mono }         from "../components/modeling/shared.jsx";
+import PlotBuilder          from "./PlotBuilder.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
@@ -942,10 +944,18 @@ function buildModelHint(panel, panelOk) {
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoachQuestion }) {
-  const rows    = cleanedData?.cleanRows  ?? [];
-  const headers = cleanedData?.headers    ?? [];
+export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion }) {
+  // ── Dataset override (data= picker) ─────────────────────────────────────────
+  // null = use cleanedData (default). Set to a dataset entry to model on it.
+  const [overrideDataset, setOverrideDataset] = useState(null);
+
+  const rows    = overrideDataset?.rows    ?? cleanedData?.cleanRows ?? [];
+  const headers = overrideDataset?.headers ?? cleanedData?.headers   ?? [];
   const panel   = cleanedData?.panelIndex ?? null;
+
+  const fullPipeline    = cleanedData?.pipeline          ?? [];
+  const branchPointIdx  = cleanedData?.branchPointIndex  ?? null;
+  const pipelineCtx     = cleanedData?.context           ?? {};
 
   const numericCols = useMemo(
     () => headers.filter(h => rows.some(r => typeof r[h] === "number" && isFinite(r[h]))),
@@ -1003,6 +1013,63 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const [compareOpen,   setCompareOpen]   = useState(false);
   const [activeBufferId, setActiveBufferId] = useState(null);
   const pinnedModels = useMemo(() => modelBuffer.getAll(), [bufferVersion]);
+
+  // ── H8: Specification curve (state only — callback defined after _runEstimation) ──
+  const [specOpen,    setSpecOpen]    = useState(false);
+  const [specConfig,  setSpecConfig]  = useState({ col: "", op: ">=", start: "", end: "", step: "", coefVar: "" });
+  const [specRows,    setSpecRows]    = useState([]);
+  const [specRunning, setSpecRunning] = useState(false);
+
+  // ── G12: Plot Builder panel ───────────────────────────────────────────────
+  const [plotOpen,        setPlotOpen]        = useState(false);
+  const [plotTemplateKey, setPlotTemplateKey]  = useState(0);
+  const [plotInitLayers,  setPlotInitLayers]   = useState([]);
+
+  // Result-augmented rows: append __resid__ and __yhat__ columns (G12)
+  const resultRows = useMemo(() => {
+    if (!result?.resid?.length || !rows?.length) return rows ?? [];
+    const n = Math.min(result.resid.length, rows.length);
+    return rows.slice(0, n).map((row, i) => ({
+      ...row,
+      __resid__: result.resid[i],
+      __yhat__:  result.Yhat[i],
+    }));
+  }, [result, rows]);
+
+  const resultHeaders = useMemo(() => {
+    if (!result?.resid?.length) return headers ?? [];
+    return [...(headers ?? []), "__resid__", "__yhat__"];
+  }, [result, headers]);
+
+  // G13 — multi-model comparison rows (one row per variable × model)
+  const [plotDataMode, setPlotDataMode] = useState("result"); // "result" | "comparison"
+
+  const compRows = useMemo(() => {
+    if (pinnedModels.length < 2) return [];
+    return pinnedModels.flatMap(m =>
+      (m.varNames ?? [])
+        .filter(v => v !== "(Intercept)")
+        .map(v => {
+          const i = (m.varNames ?? []).indexOf(v);
+          const b = m.beta?.[i] ?? 0;
+          const s = m.se?.[i]  ?? 0;
+          return {
+            variable: v,
+            estimate: b,
+            se:       s,
+            ciLow:    b - 1.96 * s,
+            ciHigh:   b + 1.96 * s,
+            pVal:     m.pVals?.[i] ?? 1,
+            model:    m.label ?? m.type ?? "Model",
+          };
+        })
+    );
+  }, [pinnedModels]);
+
+  const compHeaders = ["variable", "estimate", "se", "ciLow", "ciHigh", "pVal", "model"];
+
+  const activePlotRows    = plotDataMode === "comparison" ? compRows    : resultRows;
+  const activePlotHeaders = plotDataMode === "comparison" ? compHeaders : resultHeaders;
 
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
@@ -1181,6 +1248,42 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
     }
   }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
 
+  // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
+  const runSpecCurve = useCallback(() => {
+    const { col, op, start, end, step, coefVar } = specConfig;
+    if (!col || !coefVar || start === "" || end === "" || step === "") return;
+    const s = Math.abs(Number(step)) || 1;
+    const pts = [];
+    setSpecRunning(true);
+    try {
+      for (let t = Number(start); t <= Number(end) + 1e-9; t += s) {
+        const filtered = (rows ?? []).filter(row => {
+          const v = Number(row[col]);
+          switch (op) {
+            case ">=": return !isNaN(v) && v >= t;
+            case "<=": return !isNaN(v) && v <= t;
+            case ">":  return !isNaN(v) && v > t;
+            case "<":  return !isNaN(v) && v < t;
+            default:   return String(row[col]) === String(t);
+          }
+        });
+        if (filtered.length < 5) continue;
+        const out = _runEstimation(filtered);
+        if (out.result && !out.error) {
+          const idx = (out.result.varNames ?? []).indexOf(coefVar);
+          if (idx >= 0) {
+            const b = out.result.beta[idx];
+            const se = out.result.se[idx];
+            pts.push({ threshold: +t.toFixed(6), estimate: b, se, ciLow: b - 1.96 * se, ciHigh: b + 1.96 * se, n: filtered.length });
+          }
+        }
+      }
+    } finally {
+      setSpecRunning(false);
+    }
+    setSpecRows(pts);
+  }, [specConfig, rows, _runEstimation]);
+
   // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
   const estimate = useCallback(() => {
     setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
@@ -1194,25 +1297,44 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
   const runAllSubsets = useCallback(() => {
     if (!subsets.length) return;
     setRunning(true);
-    // Full sample
-    const fullOut = _runEstimation(rows);
+
+    const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
+    const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
+
+    // Full sample (with per-subset steps applied if a branch point is set)
+    const fullRows = hasSubsetSteps
+      ? (runPipeline(rows, headers, perSubsetSteps, pipelineCtx)?.rows ?? rows)
+      : rows;
+    const fullOut = _runEstimation(fullRows);
     if (!fullOut.error && fullOut.result) {
       const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
       modelBuffer.add(r);
       setBufferVersion(v => v + 1);
     }
+
     // Each named subset
     for (const s of subsets) {
       const filtered = applySubsetFilter(rows, s.filters);
-      const out = _runEstimation(filtered);
+      const subsetRows = hasSubsetSteps
+        ? (runPipeline(filtered, headers, perSubsetSteps, pipelineCtx)?.rows ?? filtered)
+        : filtered;
+      const out = _runEstimation(subsetRows);
       if (!out.error && out.result) {
         const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
         modelBuffer.add(r);
         setBufferVersion(v => v + 1);
       }
     }
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+
+  // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
+  const estimate = useCallback(() => {
+    setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
+    const out = _runEstimation(rows);
+    if (out.error) { setErr(out.error); }
+    else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
     setRunning(false);
-  }, [subsets, rows, _runEstimation]);
+  }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -1275,6 +1397,51 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
         {/* ── LEFT: Spec Panel ── */}
         <div style={{ width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`, overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem" }}>
 
+          {/* ── Dataset picker (data= selector) ── */}
+          {availableDatasets.length > 1 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono, marginBottom: 6 }}>
+                Data
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {/* Default: cleanedData */}
+                {[
+                  { id: "__cleaned__", filename: cleanedData?.filename ?? "dataset.csv", rows: cleanedData?.cleanRows ?? [], headers: cleanedData?.headers ?? [] },
+                  ...availableDatasets.filter(d => d.filename !== (cleanedData?.filename ?? "")),
+                ].map(ds => {
+                  const isActive = overrideDataset === null
+                    ? ds.id === "__cleaned__"
+                    : overrideDataset.id === ds.id;
+                  return (
+                    <button
+                      key={ds.id}
+                      onClick={() => {
+                        if (ds.id === "__cleaned__") { setOverrideDataset(null); }
+                        else { setOverrideDataset(ds); }
+                        setResult(null); setErr(null);
+                        setYVar([]); setXVars([]); setWVars([]);
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "5px 8px", borderRadius: 3, cursor: "pointer", textAlign: "left",
+                        background: isActive ? `${C.gold}12` : "transparent",
+                        border: `1px solid ${isActive ? C.gold + "60" : C.border}`,
+                        fontFamily: mono,
+                      }}
+                    >
+                      <span style={{ fontSize: 10, color: isActive ? C.gold : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
+                        {ds.filename}
+                      </span>
+                      <span style={{ fontSize: 9, color: C.textMuted, flexShrink: 0, marginLeft: 6 }}>
+                        {ds.rows.length.toLocaleString()} obs
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <EstimatorSidebar
             model={model}
             onSelect={handleModelSelect}
@@ -1335,6 +1502,146 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
             onRunAll={runAllSubsets}
             running={running}
           />
+
+          {/* ── H7: Download multi-subset bundle ── */}
+          {subsets.length > 0 && (
+            <button
+              onClick={() => {
+                const sharedSteps  = branchPointIdx !== null ? fullPipeline.slice(0, branchPointIdx + 1) : fullPipeline;
+                const perSubSteps  = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1
+                  ? fullPipeline.slice(branchPointIdx + 1) : [];
+                downloadMultiSubsetBundle({
+                  filename:       cleanedData?.filename       ?? "dataset.csv",
+                  pipeline:       sharedSteps,
+                  perSubsetSteps: perSubSteps,
+                  subsets,
+                  model: {
+                    type: model, yVar: yVar[0] ?? "", xVars, wVars,
+                    entityCol: panel?.entityCol ?? null,
+                    timeCol:   panel?.timeCol   ?? null,
+                  },
+                  dataDictionary: cleanedData?.dataDictionary ?? null,
+                });
+              }}
+              style={{
+                width: "100%", marginTop: 6, padding: "4px 0",
+                background: "none", border: `1px solid ${C.border2}`,
+                borderRadius: 3, cursor: "pointer",
+                fontFamily: mono, fontSize: 9, color: C.textMuted,
+                letterSpacing: "0.1em",
+              }}
+            >
+              ↓ Download subset bundle (.zip)
+            </button>
+          )}
+
+          {/* ── H8: Specification curve ── */}
+          {result && headers?.length > 0 && (
+            <div style={{ marginTop: "0.75rem" }}>
+              <button
+                onClick={() => setSpecOpen(v => !v)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center",
+                  justifyContent: "space-between", padding: "0.5rem 0.75rem",
+                  background: specOpen ? `${C.blue}0d` : C.surface,
+                  border: `1px solid ${specOpen ? C.blue + "50" : C.border}`,
+                  borderRadius: specOpen ? "4px 4px 0 0" : 4,
+                  cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+                }}
+              >
+                <span style={{ fontSize: 9, color: C.blue, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+                  ◈ Spec Curve {specRows.length > 0 ? `(${specRows.length} pts)` : ""}
+                </span>
+                <span style={{ fontSize: 9, color: C.textMuted }}>{specOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {specOpen && (
+                <div style={{
+                  border: `1px solid ${C.blue}50`, borderTop: "none",
+                  borderRadius: "0 0 4px 4px", padding: "0.85rem 0.75rem",
+                  background: C.surface,
+                }}>
+                  <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 8, lineHeight: 1.6 }}>
+                    Vary a threshold and plot how the coefficient of interest changes.
+                  </div>
+                  {/* Threshold column + op */}
+                  <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+                    <select
+                      value={specConfig.col}
+                      onChange={e => setSpecConfig(c => ({ ...c, col: e.target.value }))}
+                      style={{ flex: 3, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                    >
+                      <option value="">— threshold column —</option>
+                      {(headers ?? []).map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                    <select
+                      value={specConfig.op}
+                      onChange={e => setSpecConfig(c => ({ ...c, op: e.target.value }))}
+                      style={{ flex: 1, background: C.bg, color: C.teal, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                    >
+                      {[">=", "<=", ">", "<"].map(op => <option key={op} value={op}>{op}</option>)}
+                    </select>
+                  </div>
+                  {/* Range inputs */}
+                  <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+                    {[["start", "from"], ["end", "to"], ["step", "step"]].map(([k, lbl]) => (
+                      <input
+                        key={k}
+                        type="number"
+                        value={specConfig[k]}
+                        onChange={e => setSpecConfig(c => ({ ...c, [k]: e.target.value }))}
+                        placeholder={lbl}
+                        style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px", color: C.text, outline: "none" }}
+                      />
+                    ))}
+                  </div>
+                  {/* Coefficient of interest */}
+                  <select
+                    value={specConfig.coefVar}
+                    onChange={e => setSpecConfig(c => ({ ...c, coefVar: e.target.value }))}
+                    style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px", marginBottom: 8 }}
+                  >
+                    <option value="">— coefficient of interest —</option>
+                    {(result?.varNames ?? []).filter(v => v !== "(Intercept)").map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <button
+                    onClick={runSpecCurve}
+                    disabled={specRunning || !specConfig.col || !specConfig.coefVar}
+                    style={{
+                      width: "100%", padding: "5px 0", borderRadius: 3,
+                      background: specRunning ? "transparent" : `${C.blue}15`,
+                      border: `1px solid ${specRunning ? C.border : C.blue + "60"}`,
+                      color: specRunning ? C.textMuted : C.blue,
+                      fontFamily: mono, fontSize: 9, cursor: "pointer", letterSpacing: "0.12em",
+                    }}
+                  >
+                    {specRunning ? "◌ running…" : "▶ Run spec curve"}
+                  </button>
+
+                  {/* Inline chart */}
+                  {specRows.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <PlotBuilder
+                        key={specRows.length}
+                        headers={["threshold", "estimate", "se", "ciLow", "ciHigh", "n"]}
+                        rows={specRows}
+                        initialLayers={[
+                          { id: "sc_a", geom: "ribbon",   aes: { x: "threshold", y: "", color: "", yMin: "ciLow", yMax: "ciHigh" }, value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_b", geom: "line",     aes: { x: "threshold", y: "estimate", color: "", yMin: "", yMax: "" },     value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_c", geom: "point",    aes: { x: "threshold", y: "estimate", color: "", yMin: "", yMax: "" },     value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_d", geom: "hline",    aes: { x: "", y: "", color: "", yMin: "", yMax: "" },                      value: "0", position: "identity", fill: C.textDim, visible: true },
+                        ]}
+                        style={{ minHeight: 260 }}
+                      />
+                      <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 4, textAlign: "center" }}>
+                        {specConfig.col} {specConfig.op} threshold → coef({specConfig.coefVar}) · {specRows.length} pts
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <button
             onClick={estimate}
@@ -1962,6 +2269,126 @@ export default function ModelingTab({ cleanedData, onBack, onResultChange, onCoa
           })()}
 
         </div>
+
+        {/* ── G12: Plot Builder panel ── */}
+        {result && (
+          <div style={{ borderTop: `1px solid ${C.border}`, background: C.surface }}>
+            {/* Toggle header */}
+            <button
+              onClick={() => setPlotOpen(v => !v)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 8,
+                padding: "0.55rem 1rem", background: "none", border: "none",
+                cursor: "pointer", fontFamily: mono, fontSize: 10, color: C.textMuted,
+                textAlign: "left",
+              }}
+            >
+              <span style={{ color: C.teal, fontSize: 11 }}>◈</span>
+              <span>Plot Builder</span>
+              <span style={{ marginLeft: "auto", fontSize: 9 }}>{plotOpen ? "▲" : "▼"}</span>
+            </button>
+
+            {plotOpen && (
+              <div style={{ padding: "0 0.75rem 0.75rem" }}>
+
+                {/* G13 — data mode toggle (only when 2+ models pinned) */}
+                {pinnedModels.length >= 2 && (
+                  <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                    {["result", "comparison"].map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => { setPlotDataMode(mode); setPlotTemplateKey(k => k + 1); setPlotInitLayers([]); }}
+                        style={{
+                          padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer", borderRadius: 3,
+                          background: plotDataMode === mode ? `${C.teal}18` : "none",
+                          border: `1px solid ${plotDataMode === mode ? C.teal + "60" : C.border}`,
+                          color: plotDataMode === mode ? C.teal : C.textMuted,
+                        }}
+                      >
+                        {mode === "result" ? "Result data" : `Comparison (${pinnedModels.length} models)`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* G10 — Estimator templates */}
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                  <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center", marginRight: 2 }}>
+                    Templates:
+                  </span>
+                  {[
+                    {
+                      label: "Resid vs Fitted",
+                      layers: [
+                        { id: "g10_a", geom: "point",  aes: { x: "__yhat__", y: "__resid__", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal,    visible: true },
+                        { id: "g10_b", geom: "hline",  aes: { x: "", y: "", color: "", yMin: "", yMax: "" },                  value: "0", position: "identity", fill: C.textDim, visible: true },
+                      ],
+                      xLabel: "Fitted values", yLabel: "Residuals", title: "Residuals vs Fitted",
+                    },
+                    {
+                      label: "Resid distribution",
+                      layers: [
+                        { id: "g10_c", geom: "histogram", aes: { x: "__resid__", y: "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal, visible: true },
+                      ],
+                      xLabel: "Residuals", yLabel: "Count", title: "Residual distribution",
+                    },
+                    {
+                      label: "Actual vs Fitted",
+                      layers: [
+                        { id: "g10_d", geom: "point", aes: { x: "__yhat__", y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.gold, visible: true },
+                        { id: "g10_e", geom: "smooth", aes: { x: "__yhat__", y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.gold, visible: true },
+                      ],
+                      xLabel: "Fitted values", yLabel: yVar[0] || "Y", title: "Actual vs Fitted",
+                    },
+                    ...(xVars[0] ? [{
+                      label: `Y vs ${xVars[0]}`,
+                      mode: "result",
+                      layers: [
+                        { id: "g10_f", geom: "point",  aes: { x: xVars[0], y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.blue, visible: true },
+                        { id: "g10_g", geom: "smooth", aes: { x: xVars[0], y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.blue, visible: true },
+                      ],
+                      xLabel: xVars[0], yLabel: yVar[0] || "Y", title: `${yVar[0] || "Y"} vs ${xVars[0]}`,
+                    }] : []),
+                    // G13 — multi-model coefficient comparison template
+                    ...(pinnedModels.length >= 2 ? [{
+                      label: "Coef comparison",
+                      mode: "comparison",
+                      layers: [
+                        { id: "g13_a", geom: "point",    aes: { x: "variable", y: "estimate", color: "model", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal, visible: true },
+                        { id: "g13_b", geom: "errorbar", aes: { x: "variable", y: "", color: "model", yMin: "ciLow", yMax: "ciHigh" }, value: "", position: "identity", fill: C.teal, visible: true },
+                        { id: "g13_c", geom: "hline",    aes: { x: "", y: "", color: "", yMin: "", yMax: "" }, value: "0", position: "identity", fill: C.textDim, visible: true },
+                      ],
+                      xLabel: "Variable", yLabel: "Estimate", title: "Coefficient comparison",
+                    }] : []),
+                  ].map(tmpl => (
+                    <button
+                      key={tmpl.label}
+                      onClick={() => {
+                        if (tmpl.mode) setPlotDataMode(tmpl.mode);
+                        setPlotInitLayers(tmpl.layers);
+                        setPlotTemplateKey(k => k + 1);
+                      }}
+                      style={{
+                        padding: "3px 8px", fontFamily: mono, fontSize: 9,
+                        background: "none", border: `1px solid ${C.border2}`,
+                        borderRadius: 3, color: C.textDim, cursor: "pointer",
+                      }}
+                    >{tmpl.label}</button>
+                  ))}
+                </div>
+
+                {/* PlotBuilder — key resets when template applied (G12+G13) */}
+                <PlotBuilder
+                  key={plotTemplateKey}
+                  headers={activePlotHeaders}
+                  rows={activePlotRows}
+                  initialLayers={plotInitLayers}
+                  style={{ minHeight: 340 }}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Model Buffer Bar ── */}
         <ModelBufferBar

@@ -140,10 +140,10 @@ File exists and is rendered in ModelingTab when compare mode active.
 ### Changes to `src/services/ai/AIService.js` — DONE
 `compareModels()` handles N-way array input with legacy 2-way compatibility.
 
-### Changes to export scripts — PARTIAL
+### Changes to export scripts — DONE
 - `src/services/export/rScript.js`: `generateMultiModelRScript()` exists — DONE
-- `src/services/export/pythonScript.js`: no `generateMultiModel*` found — PENDING
-- `src/services/export/stataScript.js`: no `generateMultiModel*` found — PENDING
+- `src/services/export/pythonScript.js`: `generateMultiModelPythonScript()` — DONE (wired in ModelComparison.jsx)
+- `src/services/export/stataScript.js`: `generateMultiModelStataScript()` — DONE (wired in ModelComparison.jsx)
 
 ### Verification
 Pending Franco browser-validation of full comparison flow.
@@ -154,7 +154,7 @@ Pending Franco browser-validation of full comparison flow.
 
 Thread `metadataReport` to all consumers. Display coaching signals in results panel. End-to-end test: load panel dataset → run OLS → pin → run FE → pin → compare → check AI coach signals → export multi-model LaTeX + R script.
 
-Remaining blockers: Python and Stata multi-model export scripts not yet implemented.
+All multi-model export scripts (R, Python, Stata) are implemented and wired into ModelComparison.jsx. Remaining: browser validation of full Phase 3 comparison flow.
 
 ---
 
@@ -180,8 +180,8 @@ Remaining blockers: Python and Stata multi-model export scripts not yet implemen
 | `src/services/ai/Prompts/index.js` | buildMetadataContext(), extended COMPARE_MODELS_PROMPT | DONE |
 | `src/components/modeling/ResearchCoach.jsx` | metadataReport prop, coaching signal chips | DONE |
 | `src/services/export/rScript.js` | generateMultiModelRScript — DONE | DONE |
-| `src/services/export/pythonScript.js` | generateMultiModelScript — not yet added | PENDING |
-| `src/services/export/stataScript.js` | generateMultiModelScript — not yet added | PENDING |
+| `src/services/export/pythonScript.js` | `generateMultiModelPythonScript` — implemented + wired | DONE |
+| `src/services/export/stataScript.js` | `generateMultiModelStataScript` — implemented + wired | DONE |
 
 ## Key Design Decisions
 
@@ -472,23 +472,326 @@ Three independent improvements to `src/components/ModelingTab.jsx` and `src/comp
 
 ---
 
-## Overall Status Summary (last updated 2026-04-12)
+## Phase 9: Workspace Architecture — PENDING
+
+Complete redesign of the application shell from a linear wizard to a spatial research workspace. Every section lives under the same project and session. All datasets are shared globally.
+
+---
+
+### 9.1 — Shell Restructure — PENDING
+
+Replace the current top-level navigation with a persistent 7-tab workspace bar:
+
+```
+[ Data ]  [ Clean ]  [ Explore ]  [ Model ]  [ Simulate ]  [ Calculate ]  [ Report ]
+```
+
+**`App.jsx` / `DataStudio.jsx` changes:**
+- Render the 7-tab bar at the top of every project view (below the project title bar)
+- Each tab mounts its own module component; all share the same `sessionState` context
+- `sessionState` holds: `datasets{}` registry, `globalPipeline[]`, `calcWorkspace{}`, `pinnedModels[]`
+- The current `WranglingModule` becomes `[ Clean ]`, `ExplorerModule` becomes `[ Explore ]`, `ModelingTab` becomes `[ Model ]`, `ReportingModule` becomes `[ Report ]`
+
+**Tab routing:** shallow hash-based (`#data`, `#clean`, `#explore`, `#model`, `#simulate`, `#calculate`, `#report`) — no full re-mount on tab switch, state preserved
+
+---
+
+### 9.2 — Session Dataset Manager — PENDING
+
+A scrollable dataset registry panel, persistent across all tabs (rendered in every tab's left sidebar or as a collapsible panel).
+
+**Dataset entry:**
+```
+● df_main        1842 × 12    [source: loaded]
+● df_regions      412 × 4     [source: loaded]
+◎ df_merged      1842 × 14    [source: G1 — left_join]
+◎ df_final       1601 × 14    [source: G2 — intersect]
+```
+
+- `●` = source dataset (loaded from file, simulated, or created in Calculate)
+- `◎` = derived dataset (output of a global pipeline step)
+- Click to set as active dataset in the current tab
+- Rename / delete actions per entry (delete warns on derived datasets — see 9.4)
+- Scrollable when > 5 datasets
+
+**World Bank and OECD fetchers** move here from their current locations. `[ Data ]` tab is the canonical place to load external data.
+
+**Global interaction log** — collapsible at the bottom of the manager:
+```
+▾ Interactions
+G1  left_join(df_main, df_regions) → df_merged   [key: region_id]
+G2  intersect(df_merged, df_controls) → df_final
+```
+- Clicking a G-step shows its parameters inline (join type, key columns, selected columns)
+- Add / delete G-steps from here
+
+---
+
+### 9.3 — Two-Tier Pipeline Architecture — PENDING
+
+**Tier 1 — Local pipelines (per-dataset):**
+- Each dataset in the registry carries its own `localPipeline[]` — the existing `runner.js` step array
+- Steps operate on one dataset in isolation
+- Shown in `[ Clean ]` tab when that dataset is active
+- Numbered locally: 1, 2, 3…
+- Implicit rule: **local steps always describe the dataset before it enters any global step**
+
+**Tier 2 — Global pipeline (cross-dataset):**
+- Session-level `globalPipeline[]` of cross-dataset operations
+- Step types: `left_join`, `right_join`, `inner_join`, `append`, `intersect`, `union`, `setdiff`
+- Each step has: `{ id, type, leftDatasetId, rightDatasetId, outputDatasetId, params }`
+- Managed from the Dataset Manager interaction log (9.2), not from Clean tab
+- G-steps numbered globally for export ordering
+
+**Execution order rule:**
+1. All local pipeline steps on source datasets run first
+2. Then the global step runs (producing a derived dataset)
+3. Then local pipeline steps on the derived dataset run (post-merge transformations)
+
+This order is deterministic and matches how `runner.js` already replays steps.
+
+---
+
+### 9.4 — Step Deletion Behavior — PENDING
+
+**Local pipeline step deletion:**
+- Optimistic delete: remove the step and replay the pipeline from `rawData`
+- If downstream steps fail (reference a column that no longer exists), show which steps broke
+- Present two options: *Delete broken steps* or *Undo deletion*
+- No blocking warning before the delete attempt — failure feedback is sufficient
+
+**Global pipeline step deletion:**
+- Blocking warn before delete, showing full cascade:
+  - Derived datasets that will be removed
+  - Downstream G-steps that depend on those datasets
+  - Pinned models that used any of the removed datasets
+- Two options in the warning dialog:
+  - **Save snapshot first** — materializes the derived dataset's current state as a new standalone source dataset (no G-step dependency), then proceeds with the delete
+  - **Delete cascade** — removes the G-step, all downstream G-steps, and orphaned derived datasets
+
+---
+
+### 9.5 — Pipeline Export Architecture — PENDING
+
+**Problem:** the current export scripts emit steps as a flat sequence. With a two-tier pipeline and multiple datasets, the exporter must understand dependency order.
+
+**Solution:** each step in `runner.js` gains a `datasetId` field (which dataset it operates on). The exporter builds a **dependency graph** and does a topological traversal:
+
+```
+For each G-step in global pipeline order:
+  1. Recursively emit local pipeline of left dataset (and its own G-step dependencies)
+  2. Recursively emit local pipeline of right dataset (and its dependencies)
+  3. Emit the join/intersect/append as a named assignment
+After all G-steps:
+  4. Emit any local pipeline steps on derived datasets
+```
+
+**Per-step export methods:** each step type in the registry gets `toR()`, `toStata()`, `toPython()` methods. The exporter calls the appropriate method per step, tracking the current dataset name in scope.
+
+**Language-specific rules:**
+- **R / dplyr:** steps on the same dataset chain with `|>`. A join is an inline `left_join()`. The right-hand dataset is pre-assigned if it has its own local pipeline; otherwise inlined as `right_df |> select(...)`.
+- **Python / pandas:** same chaining logic with `.merge()`. Multi-step chains use intermediate assignments for readability.
+- **Stata:** every intermediate dataset must be pre-materialized as a named `.dta` file. No inline sub-queries. The exporter emits `preserve/restore` or `use/save/merge` blocks sequentially. The right-hand dataset in any merge is always a separate `use ... using "file.dta"` block.
+
+---
+
+### 9.6 — Per-Tab Section Exports — DONE
+
+Every tab gets a consistent export bar (top-right of the tab content area) with three buttons: **R**, **Stata**, **Python**. Each exports only the content of that tab as a standalone, runnable script.
+
+| Tab | What the script contains |
+|-----|--------------------------|
+| Data | Dataset loading code (file paths, read_dta / read.csv calls) |
+| Clean | Full local pipeline for the active dataset (all step types via toR/toStata/toPython) |
+| Explore | Summary stats code + plot code for all plots built in the session |
+| Model | Estimation code for all models run (existing CodeEditor logic, promoted) |
+| Simulate | DGP definition code (set.seed, distributions, variable construction) |
+| Calculate | Variable definitions and computed expressions |
+| Report | Full bundle export (existing) |
+
+These are **deterministic exports** — no AI involved. Fast, always available, free tier.
+
+---
+
+### 9.7 — Calculate Tab — PENDING
+
+A structured **variable workspace** — not a REPL, but a form-based table of named scalar/vector values.
+
+**Variable table:**
+```
+Name              Type        Value
+────────────────────────────────────────────────
+n                 Integer     1000
+discount_rate     Float       0.06
+city              String      "Munich"
+start_date        Date        2020-01-01
+treated           Boolean     TRUE
+coeffs            Vector      1.2, 0.8, -0.3
+```
+
+**Add variable form:**
+- Name field (validates: alphanumeric + underscore, no spaces)
+- Type dropdown: Integer / Float / String / Date / Boolean / Vector
+- Value input adapts to type: number input / text / date picker / toggle / comma-separated
+
+**Computed rows** (separate section, labeled "Computed from dataset"):
+```
+mean_wage         Computed    mean(wage)    [from: df_main]
+n_treated         Computed    sum(treated)  [from: df_main]
+```
+- Expression references active dataset columns
+- Evaluated against current dataset state
+
+**`as.data.frame` creator:**
+- "New dataset from variables" button
+- User selects which vector-type variables become columns, sets `n` (row count)
+- Names the dataset and saves it to the Dataset Manager as a source dataset (`●`)
+
+**Export (R):**
+```r
+n <- 1000L
+discount_rate <- 0.06
+city <- "Munich"
+start_date <- as.Date("2020-01-01")
+treated <- TRUE
+coeffs <- c(1.2, 0.8, -0.3)
+mean_wage <- mean(df$wage)
+```
+
+**Export (Stata):**
+```stata
+scalar n = 1000
+scalar discount_rate = 0.06
+local city "Munich"
+scalar treated = 1
+matrix coeffs = (1.2, 0.8, -0.3)
+summarize wage, meanonly
+scalar mean_wage = r(mean)
+```
+
+Workspace saved per project in IndexedDB alongside the pipeline.
+
+---
+
+### 9.8 — Simulate Tab — PENDING
+
+A **DGP (Data Generating Process) builder** for generating synthetic datasets in the browser.
+
+**Interface:**
+- `n` input (number of observations)
+- `seed` input (for reproducibility)
+- Variable builder table — each row defines one variable:
+  ```
+  Name     Distribution    Parameters           Role
+  ─────────────────────────────────────────────────────
+  X1       Normal          μ=0, σ=1             covariate
+  X2       Uniform         min=0, max=10        covariate
+  eps      Normal          μ=0, σ=0.5           error
+  Y        Expression      2 + 1.5*X1 - 0.8*X2 + eps   outcome
+  ```
+- Distributions: Normal, Uniform, Bernoulli, Poisson, Exponential, t, Chi-squared
+- Expression rows reference previously defined variables (ordered evaluation)
+- "Generate" button → produces a real dataset → saves to Dataset Manager as a source dataset
+- Re-generate re-runs with same seed (deterministic)
+
+**Export** produces `set.seed()` + generation code in R/Python/Stata.
+
+---
+
+### 9.9 — Plot Exports and Style Presets — PENDING
+
+All plots throughout the app (Explore, Model, Report) gain a consistent export button: `.jpg`, `.svg`, `.pdf`.
+
+**Style presets** (selectable before export):
+- Default (current dark theme)
+- Journal (white background, serif axis labels, minimal gridlines — APA/AER style)
+- Presentation (high contrast, larger fonts, bold lines)
+- Minimal (no gridlines, no border, axis lines only)
+
+Presets apply at export time — the in-app dark theme is unchanged.
+
+**Implementation:** export functions render the plot into an offscreen canvas/SVG with the chosen style applied, then trigger a download. No external dependencies.
+
+---
+
+### 9.10 — AI Unified Script Export (Premium) — PENDING
+
+Available only from `[ Report ]` tab. User selects one target language (R, Stata, or Python — not all three simultaneously).
+
+**Input to AI:** deterministic section scripts from all tabs (Clean + Calculate + Explore + Model + Simulate), dataset dictionary, variable units, research question (from project metadata).
+
+**Output:** one complete, documented, runnable script in the chosen language:
+- Section headers (`# 1. Setup`, `# 2. Data Loading`, `# 3. Cleaning`, etc.)
+- Inline comments explaining non-obvious transformations
+- Steps reordered for logical flow (variable definitions before models, cleaning before estimation)
+- Redundant intermediate assignments collapsed
+- Plots excluded (replaced with a comment: `# See exported plots`)
+
+**Model:** `claude-sonnet-4-6` (same as narratives — consistent cost tier). Single API call with all section scripts concatenated as user message. Cached `SHARED_CONTEXT` block applies.
+
+**Premium gating:** the button is visible to all users but triggers an upgrade prompt for free-tier users.
+
+---
+
+### Phase 9 New Files Summary
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/components/workspace/DatasetManager.jsx` | Scrollable session dataset registry, interaction log | PENDING |
+| `src/components/workspace/WorkspaceBar.jsx` | 7-tab top navigation bar | PENDING |
+| `src/components/tabs/DataTab.jsx` | Data loading, external fetchers, dataset preview | PENDING |
+| `src/components/tabs/SimulateTab.jsx` | DGP builder, synthetic dataset generator | PENDING |
+| `src/components/tabs/CalculateTab.jsx` | Variable workspace, as.data.frame creator | PENDING |
+| `src/services/session/sessionState.js` | Session-level dataset registry + global pipeline store | PENDING |
+| `src/pipeline/exporter.js` | Topological DAG traversal, per-step toR/toStata/toPython | PENDING |
+
+### Phase 9 Modified Files Summary
+
+| File | Changes | Status |
+|------|---------|--------|
+| `src/App.jsx` | Mount WorkspaceBar, route 7 tabs, thread sessionState context | PENDING |
+| `src/DataStudio.jsx` | Integrate DatasetManager, move file upload to DataTab | PENDING |
+| `src/pipeline/runner.js` | Add `datasetId` to step schema; expose `localPipeline` per dataset | PENDING |
+| `src/pipeline/registry.js` | Add `toR`, `toStata`, `toPython` method stubs per step type | PENDING |
+| `src/WranglingModule.jsx` | Become `CleanTab` — read active dataset from sessionState | PENDING |
+| `src/ExplorerModule.jsx` | Become `ExploreTab` — read active dataset from sessionState | PENDING |
+| `src/components/ModelingTab.jsx` | Read active dataset from sessionState; add tab-level export bar | PENDING |
+| `src/ReportingModule.jsx` | Add AI unified script export button (premium) | PENDING |
+
+### Phase 9 Build Order
+
+Steps must be done in this order — each unlocks the next:
+
+1. **`sessionState.js`** — dataset registry + global pipeline; the shared state all tabs depend on
+2. **`WorkspaceBar.jsx` + `App.jsx` routing** — shell exists, tabs render existing modules
+3. **`DatasetManager.jsx`** — dataset picker visible everywhere; active dataset selection works
+4. **`runner.js` `datasetId` field** — each step tagged to a dataset; no behavior change yet
+5. **`DataTab.jsx`** — move file upload + World Bank / OECD fetchers here
+6. **`CalculateTab.jsx`** — variable workspace + `as.data.frame` creator
+7. **`SimulateTab.jsx`** — DGP builder
+8. **`exporter.js`** — DAG traversal, per-step export methods, section script generation
+9. **Per-tab export bars** — wire exporter into each tab's R/Stata/Python buttons
+10. **Plot style presets + .jpg/.svg/.pdf export** — last because it's self-contained
+11. **AI unified script export** — depends on exporter (step 8) being complete
+
+---
+
+## Overall Status Summary (last updated 2026-04-29)
 
 | Phase | Title | Status |
 |-------|-------|--------|
 | 1 | Standardised Estimation Result | DONE |
 | 2 | Advanced Context-Aware AI Coach | DONE |
-| 3 | Multi-Model Comparison System | DONE (Python + Stata multi-model export PENDING) |
-| 4 | Integration | IN PROGRESS — pending Python/Stata multi-model exports + browser validation |
+| 3 | Multi-Model Comparison System | DONE |
+| 4 | Integration | IN PROGRESS — pending browser validation of full comparison flow |
 | 5 | New Estimators (Fuzzy RDD, Event Study, LSDV, Poisson FE, Synthetic Control) | DONE (crash bugs fixed) |
 | 6 | Robust Standard Errors | DONE |
 | 7 | New File Format Support (.rds, .shp/.dbf) | DONE |
 | 8 | Modeling UI Overhaul (EstimatorSidebar, InferenceOptions, CodeEditor) | DONE |
+| 9 | Workspace Architecture (7-tab shell, Dataset Manager, two-tier pipeline, Calculate, Simulate, exports) | PENDING |
 
 ## Next unblocked tasks
 
-1. **`src/services/export/pythonScript.js`** — add `generateMultiModelPythonScript(configs[])` using `statsmodels.iolib.summary2.summary_col()`. Mirrors the existing `generateRScript` single-model function but loops over an array of configs.
+1. **Browser validation of Phase 4** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, all three multi-model export scripts (R/Python/Stata) generate correctly.
 
-2. **`src/services/export/stataScript.js`** — add `generateMultiModelStataScript(configs[])` using `estimates store` per model and `esttab` at end. Same pattern.
-
-3. **Browser validation of Phase 3 comparison flow** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, R multi-model script generates correctly.
+2. **Phase 9.1 — Shell restructure** — `sessionState.js` + `WorkspaceBar.jsx` + `App.jsx` routing. This unblocks the entire Phase 9 build.

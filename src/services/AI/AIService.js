@@ -22,6 +22,7 @@ import {
   CLEANING_SUGGESTIONS_PROMPT,
   COMPARE_MODELS_PROMPT,
   RESEARCH_COACH_PROMPT,
+  UNIFIED_SCRIPT_PROMPT,
   buildMetadataContext,
 } from "./Prompts/index.js";
 
@@ -685,5 +686,76 @@ export async function researchCoach({ question, modelResult, dataDictionary = nu
   } catch (err) {
     console.warn("[AIService] researchCoach failed:", err.message);
     return "The research coach is unavailable — check your API key and network connection.";
+  }
+}
+
+// ─── 6. GENERATE UNIFIED SCRIPT ──────────────────────────────────────────────
+// Phase 9.10 — AI-polished, fully-documented replication script.
+//
+// sections: {
+//   clean?:    string  — deterministic script from exporter.js generateCleanScript()
+//   model?:    string  — model spec script (R/Stata/Python from CodeEditor)
+//   calculate?: string — CalculateTab export script (optional)
+//   simulate?:  string — SimulateTab export script (optional)
+// }
+// language: "r" | "stata" | "python"
+// dataDictionary: Record<string,string> | null
+//
+// Returns: Promise<string> — the unified script text (no markdown fences).
+// On failure: returns a fallback that concatenates the sections with headers.
+
+export async function generateUnifiedScript(sections, language, dataDictionary = null) {
+  const langLabel = language === "r" ? "R" : language === "stata" ? "Stata" : "Python";
+  const cmt       = language === "stata" ? "*" : "#";
+
+  const sectionBlocks = [];
+
+  if (sections.clean?.trim()) {
+    sectionBlocks.push(`${cmt} ── SECTION: CLEAN ──\n${sections.clean.trim()}`);
+  }
+  if (sections.calculate?.trim()) {
+    sectionBlocks.push(`${cmt} ── SECTION: CALCULATE ──\n${sections.calculate.trim()}`);
+  }
+  if (sections.simulate?.trim()) {
+    sectionBlocks.push(`${cmt} ── SECTION: SIMULATE ──\n${sections.simulate.trim()}`);
+  }
+  if (sections.model?.trim()) {
+    sectionBlocks.push(`${cmt} ── SECTION: MODEL ──\n${sections.model.trim()}`);
+  }
+
+  if (!sectionBlocks.length) {
+    return `${cmt} No script sections available to unify.`;
+  }
+
+  const dictSection = (dataDictionary && Object.keys(dataDictionary).length)
+    ? `\n\nDATA DICTIONARY:\n${Object.entries(dataDictionary).slice(0, 30).map(([k, v]) => `  ${k}: "${v}"`).join("\n")}`
+    : "";
+
+  const userPrompt = [
+    `TARGET LANGUAGE: ${langLabel}`,
+    dictSection,
+    `\nSECTION SCRIPTS:\n`,
+    sectionBlocks.join("\n\n"),
+    `\nGenerate the unified ${langLabel} replication script now.`,
+  ].join("");
+
+  // Fallback: plain concatenation with headers
+  const fallback = () => {
+    const header = [
+      `${cmt} ${"─".repeat(70)}`,
+      `${cmt} Econ Studio — Unified Replication Script (${langLabel})`,
+      `${cmt} Generated: ${new Date().toISOString().slice(0, 10)}`,
+      `${cmt} ${"─".repeat(70)}`,
+      "",
+    ].join("\n");
+    return header + sectionBlocks.join("\n\n");
+  };
+
+  try {
+    const taskPrompt = UNIFIED_SCRIPT_PROMPT.replace(SHARED_CONTEXT, "").trim();
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 2000 });
+  } catch (err) {
+    console.warn("[AIService] generateUnifiedScript failed:", err.message);
+    return fallback();
   }
 }

@@ -6,7 +6,13 @@ import DataStudio from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './components/ModelingTab.jsx';
 import AIContextSidebar from './components/AIContextSidebar.jsx';
+import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
+import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
+import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
+import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from "./services/persistence/indexedDB.js";
+import CalculateTab  from './components/tabs/CalculateTab.jsx';
+import SimulateTab   from './components/tabs/SimulateTab.jsx';
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -221,43 +227,214 @@ function Uploader({onReady}){
   );
 }
 
-// ─── PIPELINE OUTPUT REVIEW ───────────────────────────────────────────────────
-function OutputReview({result, onBack, onExplore}) {
-  return(
-    <div style={{background:C.bg,color:C.text,fontFamily:mono,minHeight:"100vh",padding:"2rem",maxWidth:860,margin:"0 auto"}}>
-      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:"0.8rem"}}>Pipeline Output — engine-ready object</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.5rem"}}>
-        {[
-          {l:"Clean rows",v:result.cleanRows.length,c:C.green},
-          {l:"Columns",v:result.headers.length,c:C.blue},
-          {l:"Steps",v:result.changeLog.length,c:C.gold},
-          {l:"Panel",v:result.panelIndex?`${result.panelIndex.entityCol}×${result.panelIndex.timeCol}`:"none",c:result.panelIndex?C.teal:C.textMuted},
-          {l:"Balance",v:result.panelIndex?.balance||"—",c:C.text},
-          {l:"FE",v:result.panelIndex?.blockFE?"BLOCKED":"OK",c:result.panelIndex?.blockFE?C.red:C.green},
-        ].map(s=>(
-          <div key={s.l} style={{background:C.surface,padding:"0.6rem 0.85rem"}}>
-            <div style={{fontSize:9,color:C.textMuted,marginBottom:2,letterSpacing:"0.1em",textTransform:"uppercase"}}>{s.l}</div>
-            <div style={{fontSize:15,color:s.c}}>{s.v}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:6,fontFamily:mono}}>Change Log</div>
-      {!result.changeLog.length&&<div style={{fontSize:11,color:C.textMuted,marginBottom:"1.5rem"}}>No transformations applied.</div>}
-      <div style={{marginBottom:"1.5rem"}}>
-        {result.changeLog.map((e,i)=>(
-          <div key={i} style={{fontSize:11,color:C.textDim,padding:"0.28rem 0",borderBottom:`1px solid ${C.border}`}}>
-            <span style={{color:C.gold}}>{i+1}.</span> [{e.type}] {e.description}
-          </div>
-        ))}
-      </div>
-      <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:6,fontFamily:mono}}>First 5 rows</div>
-      <Grid headers={result.headers} rows={result.cleanRows} max={5}/>
-      <div style={{marginTop:"1.5rem",display:"flex",gap:8}}>
-        <Btn onClick={onBack} ch="← Back to Data Studio"/>
-        <Btn onClick={onExplore} color={C.violet} v="solid" ch="⬡ Evidence Explorer →"/>
-      </div>
+// ─── WORKSPACE HELPERS ────────────────────────────────────────────────────────
+// Shown in Explore / Model / Report tabs when no pipeline output exists yet.
+function NeedsOutput({ onGoToClean }) {
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:12,fontFamily:mono}}>
+      <div style={{fontSize:28,color:C.border2}}>⌾</div>
+      <div style={{fontSize:12,color:C.textDim}}>Apply your pipeline first.</div>
+      <div style={{fontSize:10,color:C.textMuted,marginBottom:4}}>Go to Clean → run your steps → click "→ Analyze"</div>
+      <Btn onClick={onGoToClean} v="solid" color={C.teal} ch="← Go to Clean"/>
     </div>
   );
+}
+
+// ─── DATA TAB ─────────────────────────────────────────────────────────────────
+// Dataset overview + load controls (file upload, World Bank, OECD).
+// studioRef.current.addFile(file) / addApiData(fname, rows, headers)
+// forward the loaded data into DataStudio's dataset registry.
+function DataTab({ filename, rawData, studioRef }) {
+  const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP"];
+  const fileRef  = useRef();
+  const [loading,   setLoading]   = useState(false);
+  const [err,       setErr]       = useState("");
+  const [success,   setSuccess]   = useState("");
+  const [wbOpen,    setWbOpen]    = useState(false);
+  const [oecdOpen,  setOecdOpen]  = useState(false);
+  const [dragOver,  setDragOver]  = useState(false);
+
+  async function handleFile(file) {
+    if (!file) return;
+    setLoading(true); setErr(""); setSuccess("");
+    try {
+      await studioRef.current?.addFile(file);
+      setSuccess(`"${file.name}" loaded — visible in Dataset Manager.`);
+    } catch (e) {
+      setErr("Parse error: " + (e?.message || "unknown"));
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{padding:"2rem 2.4rem",fontFamily:mono,maxWidth:720,color:C.text,overflowY:"auto",height:"100%"}}>
+      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:4}}>Data</div>
+      <div style={{fontSize:18,color:C.text,marginBottom:"1.6rem",letterSpacing:"-0.01em"}}>Dataset Overview</div>
+
+      {/* Primary dataset card */}
+      {rawData && (
+        <div style={{border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden",marginBottom:"1.8rem"}}>
+          <div style={{background:C.surface2,padding:"0.6rem 0.9rem",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${C.border}`}}>
+            <span style={{fontSize:9,color:C.teal}}>●</span>
+            <span style={{fontSize:12,color:C.text}}>{filename}</span>
+            <span style={{marginLeft:"auto",fontSize:9,color:C.textMuted,padding:"1px 6px",border:`1px solid ${C.border2}`,borderRadius:2}}>primary</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:1,background:C.border}}>
+            {[
+              {l:"Rows",    v: rawData.rows.length.toLocaleString(), c: C.text},
+              {l:"Columns", v: rawData.headers.length,               c: C.text},
+              {l:"Source",  v: "loaded",                             c: C.textMuted},
+            ].map(s=>(
+              <div key={s.l} style={{background:C.surface,padding:"0.55rem 0.85rem"}}>
+                <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:2}}>{s.l}</div>
+                <div style={{fontSize:13,color:s.c}}>{s.v}</div>
+              </div>
+            ))}
+          </div>
+          {rawData.headers.length > 0 && (
+            <div style={{padding:"0.5rem 0.9rem",background:C.surface,borderTop:`1px solid ${C.border}`}}>
+              <div style={{fontSize:9,color:C.textMuted,marginBottom:4,letterSpacing:"0.1em",textTransform:"uppercase"}}>Columns</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                {rawData.headers.map(h=>(
+                  <span key={h} style={{fontSize:9,padding:"2px 7px",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textDim}}>{h}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Accepted file formats */}
+      <div style={{marginBottom:"1.4rem"}}>
+        <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:8}}>Accepted formats</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {formats.map(f=>(
+            <span key={f} style={{fontSize:10,padding:"3px 9px",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textDim,fontFamily:mono}}>{f}</span>
+          ))}
+        </div>
+        <div style={{fontSize:10,color:C.textMuted,marginTop:8,lineHeight:1.7}}>
+          Drag & drop or click to upload · Auto-delimiter detection (CSV / TSV / pipe)<br/>
+          Additional datasets loaded here are available for JOIN / APPEND in the Clean tab.
+        </div>
+      </div>
+
+      {/* Load controls */}
+      <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.16em",textTransform:"uppercase",marginBottom:10}}>Load data</div>
+
+      {/* File upload drop zone */}
+      <div
+        onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+        onDragLeave={()=>setDragOver(false)}
+        onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+        onClick={()=>fileRef.current?.click()}
+        style={{
+          border:`2px dashed ${dragOver ? C.gold : C.border2}`,
+          borderRadius:4, padding:"1.2rem 1rem",
+          textAlign:"center", cursor:"pointer",
+          background: dragOver ? C.goldFaint : C.surface,
+          transition:"all 0.15s", marginBottom:10,
+        }}>
+        <input ref={fileRef} type="file"
+          accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp"
+          onChange={e=>handleFile(e.target.files[0])}
+          style={{display:"none"}}/>
+        {loading
+          ? <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>Parsing…</div>
+          : <>
+              <div style={{fontSize:11,color:C.text,marginBottom:3}}>+ Load dataset</div>
+              <div style={{fontSize:9,color:C.textMuted}}>Drop file here or click to browse</div>
+            </>
+        }
+      </div>
+
+      {/* API fetchers */}
+      <div style={{display:"flex",flexDirection:"column",gap:6,maxWidth:280,marginBottom:12}}>
+        {[
+          {label:"↓ World Bank data", color:C.teal, action:()=>setWbOpen(true)},
+          {label:"↓ OECD data",       color:C.blue, action:()=>setOecdOpen(true)},
+        ].map(({label,color,action})=>(
+          <button key={label} onClick={action} style={{
+            padding:"0.42rem 0.75rem",background:"transparent",
+            border:`1px solid ${C.border2}`,borderRadius:3,
+            color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,
+            textAlign:"left",transition:"all 0.12s",
+          }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.color=color;}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+          >{label}</button>
+        ))}
+      </div>
+
+      {/* Status messages */}
+      {success && (
+        <div style={{fontSize:10,color:C.green,fontFamily:mono,padding:"0.5rem 0.75rem",border:`1px solid ${C.green}40`,borderRadius:3,marginBottom:8}}>
+          ✓ {success}
+        </div>
+      )}
+      {err && (
+        <div style={{fontSize:10,color:C.red,fontFamily:mono,padding:"0.5rem 0.75rem",border:`1px solid ${C.red}40`,borderRadius:3,marginBottom:8}}>
+          {err}
+        </div>
+      )}
+
+      {/* Modals */}
+      {wbOpen && (
+        <WorldBankFetcher
+          onLoad={(fname, rows, headers) => {
+            studioRef.current?.addApiData(fname, rows, headers);
+            setWbOpen(false);
+            setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
+          }}
+          onClose={() => setWbOpen(false)}
+        />
+      )}
+      {oecdOpen && (
+        <OECDFetcher
+          onLoad={(fname, rows, headers) => {
+            studioRef.current?.addApiData(fname, rows, headers);
+            setOecdOpen(false);
+            setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
+          }}
+          onClose={() => setOecdOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Placeholder for tabs not yet implemented (Simulate, Calculate, Report).
+function ComingSoon({ tab }) {
+  const labels = { simulate:"Simulate", calculate:"Calculate", report:"Report" };
+  const descs  = {
+    simulate:  "Build data generating processes, run Monte Carlo simulations, power analysis.",
+    calculate: "Define scalars, vectors, and expressions. Create datasets from scratch.",
+    report:    "Publication-ready output: LaTeX tables, AI narratives, and unified script export.",
+  };
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:10,fontFamily:mono}}>
+      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase"}}>{labels[tab] || tab}</div>
+      <div style={{fontSize:11,color:C.textDim,maxWidth:360,textAlign:"center",lineHeight:1.7}}>{descs[tab] || "Coming soon."}</div>
+      <div style={{fontSize:9,color:C.textMuted,marginTop:4}}>Phase 9 — in development</div>
+    </div>
+  );
+}
+
+// Thin wrapper that registers the primary dataset in sessionState when workspace mounts.
+function WorkspaceRegistrar({ filename, rawData }) {
+  const dispatch = useSessionDispatch();
+  useEffect(() => {
+    if (!rawData) return;
+    registerDataset(dispatch, {
+      id:       "primary",
+      name:     filename,
+      source:   "loaded",
+      rowCount: rawData.rows.length,
+      colCount: rawData.headers.length,
+      headers:  rawData.headers,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
 }
 
 // ─── PROJECT DASHBOARD ────────────────────────────────────────────────────────
@@ -624,22 +801,27 @@ function Dashboard({onNew, onLoad}) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [screen,       setScreen]       = useState("dashboard");
-  const [rawData,      setRawData]      = useState(null);
-  const [filename,     setFilename]     = useState("");
-  const [pid,          setPid]          = useState(null);
-  const [output,       setOutput]       = useState(null);
-  const [sidebarOpen,  setSidebarOpen]  = useState(false);
-  const [activeResult, setActiveResult] = useState(null);
-  const [coachPrefill, setCoachPrefill] = useState(null);
-  const coachSeqRef = useRef(0);
+  const [screen,             setScreen]            = useState("dashboard");
+  const [rawData,            setRawData]           = useState(null);
+  const [filename,           setFilename]          = useState("");
+  const [pid,                setPid]               = useState(null);
+  const [output,             setOutput]            = useState(null);
+  const [activeTab,          setActiveTab]         = useState("clean");
+  const [activeDatasetId,    setActiveDatasetId]   = useState(null);
+  const [sidebarOpen,        setSidebarOpen]       = useState(false);
+  const [activeResult,       setActiveResult]      = useState(null);
+  const [coachPrefill,       setCoachPrefill]      = useState(null);
+  const [availableDatasets,  setAvailableDatasets] = useState([]);
+  const coachSeqRef  = useRef(0);
+  const studioRef    = useRef(null);
 
-  // Load a saved project from the dashboard
+  // ── Load a saved project from the dashboard ──────────────────────────────
   const handleLoad = async p => {
     setFilename(p.filename || "project");
     setPid(p.id);
+    setOutput(null);
+    setActiveTab("clean");
 
-    // Demo dataset — reconstruct from embedded CSV
     if (p.filename === "wages_panel_demo.csv") {
       const { headers, rows } = parseCSV(DEMO_CSV);
       const types = {};
@@ -648,32 +830,37 @@ export default function App() {
         const o = {}; headers.forEach(h => { o[h] = coerce(r[h], types[h]); }); return o;
       });
       setRawData({ headers, rows: coerced });
-      setScreen("studio");
+      setScreen("workspace");
       return;
     }
 
-    // Try to load raw data from IndexedDB
     const stored = await loadRawData(p.id);
     if (stored && stored.rows?.length) {
       setRawData(stored);
-      setScreen("studio");
+      setScreen("workspace");
     } else {
-      // Raw data not in IDB (>100MB or first time) — ask user to re-upload
       setScreen("upload");
     }
   };
 
-  // Called by Uploader once file is confirmed.
-  // Always generate a fresh pid — never reuse a previous project's pid,
-  // which would cause the new project to inherit the old pipeline from IDB.
+  // ── Called by Uploader once file is confirmed ─────────────────────────────
+  // Always generate a fresh pid — never reuse a previous project's pid.
   const handleReady = (data, types, fname) => {
     setRawData(data);
     setFilename(fname || "dataset.csv");
     setPid(`proj_${Date.now()}_${Math.random().toString(36).slice(2)}`);
-    setScreen("studio");
+    setOutput(null);
+    setActiveTab("clean");
+    setScreen("workspace");
   };
 
-  const inFlow = ["studio","output","explorer","modeling"].includes(screen);
+  // ── Pipeline output — fired by DataStudio when user clicks "→ Analyze" ───
+  const handleComplete = r => {
+    setOutput(r);
+    setActiveTab("explore");
+  };
+
+  const inWorkspace = screen === "workspace";
 
   return(
     <div style={{height:"100vh",background:C.bg,overflow:"hidden",display:"flex",flexDirection:"column"}}>
@@ -688,40 +875,44 @@ export default function App() {
 
       {/* ── Navbar ────────────────────────────────────────────────────────── */}
       <div style={{height:38,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",padding:"0 1.2rem",gap:12,flexShrink:0,background:C.surface}}>
-        <button onClick={()=>setScreen("dashboard")} style={{background:"transparent",border:"none",color:C.gold,cursor:"pointer",fontFamily:mono,fontSize:11,letterSpacing:"0.12em"}}>
+        <button
+          onClick={()=>setScreen("dashboard")}
+          style={{background:"transparent",border:"none",color:C.gold,cursor:"pointer",fontFamily:mono,fontSize:11,letterSpacing:"0.12em"}}
+        >
           ⬡ ECON STUDIO
         </button>
-        <span style={{color:C.border2}}>|</span>
-        {inFlow&&(
-          <div style={{display:"flex",gap:6,alignItems:"center",fontSize:10,fontFamily:mono,color:C.textMuted}}>
-            {[
-              ["studio","Wrangling",C.teal],
-              ["output","Output",C.gold],
-              ["explorer","Evidence Explorer",C.violet],
-              ["modeling","Modeling",C.gold],
-            ].map(([s,label,accent],i,arr)=>(
-              <span key={s} style={{display:"flex",alignItems:"center",gap:6}}>
-                <span
-                  onClick={()=>{
-                    if(s==="studio") setScreen("studio");
-                    else if(output) setScreen(s);
-                  }}
-                  style={{cursor:(s==="studio"||output)?"pointer":"default",color:screen===s?accent:C.textMuted}}>
-                  {label}
-                </span>
-                {i<arr.length-1&&<span style={{color:C.border2}}>→</span>}
+
+        {inWorkspace && filename && (
+          <>
+            <span style={{color:C.border2}}>|</span>
+            <span style={{fontSize:11,color:C.textDim,fontFamily:mono}}>{filename}</span>
+            {output && (
+              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+                · {output.cleanRows.length} obs · {output.headers.length} vars
               </span>
-            ))}
-          </div>
+            )}
+          </>
         )}
-        {["studio","explorer","modeling"].includes(screen)&&filename&&(
-          <span style={{fontSize:11,color:C.textDim,fontFamily:mono,marginLeft:4}}>{filename}</span>
-        )}
-        {screen==="studio"&&<span style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginLeft:"auto"}}>autosaved ✓</span>}
-        {screen==="modeling"&&output&&(
-          <span style={{fontSize:9,color:C.teal,fontFamily:mono,marginLeft:"auto",letterSpacing:"0.12em"}}>
-            ◈ MODELING LAB · {output.cleanRows.length} obs
-          </span>
+
+        {inWorkspace && (
+          <>
+            {!output && (
+              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginLeft:4}}>
+                autosaved ✓
+              </span>
+            )}
+            <button
+              onClick={()=>setSidebarOpen(o=>!o)}
+              style={{
+                marginLeft:"auto", padding:"0.22rem 0.65rem",
+                background: sidebarOpen ? "#9e7ec818" : "transparent",
+                border:`1px solid ${sidebarOpen ? "#9e7ec8" : C.border2}`,
+                borderRadius:3, color: sidebarOpen ? "#9e7ec8" : C.textMuted,
+                cursor:"pointer", fontFamily:mono, fontSize:9,
+                letterSpacing:"0.12em", transition:"all 0.13s",
+              }}
+            >✦ AI Coach</button>
+          </>
         )}
         {inFlow&&(
           <button
@@ -739,57 +930,112 @@ export default function App() {
       </div>
 
       {/* ── Main Content ──────────────────────────────────────────────────── */}
-      <div style={{flex:1,minHeight:0,overflowY:["studio","explorer","modeling"].includes(screen)?"hidden":"auto"}}>
-        {screen==="dashboard"&&(
-          <Dashboard onNew={()=>{ setPid(null); setRawData(null); setOutput(null); setScreen("upload"); }} onLoad={handleLoad}/>
+      <div style={{flex:1,minHeight:0,overflowY:inWorkspace?"hidden":"auto"}}>
+
+        {screen==="dashboard" && (
+          <Dashboard
+            onNew={()=>{ setPid(null); setRawData(null); setOutput(null); setScreen("upload"); }}
+            onLoad={handleLoad}
+          />
         )}
-        {screen==="upload"&&(
+
+        {screen==="upload" && (
           <Uploader onReady={handleReady}/>
         )}
-        {screen==="studio"&&rawData&&(
-        <DataStudio
-         key={pid}
-         rawData={rawData}
-         filename={filename}
-         pid={pid}
-          onComplete={r=>{setOutput(r);setScreen("output");}}
-          />
-          )}
-        {screen==="output"&&output&&(
-          <OutputReview
-            result={output}
-            onBack={()=>setScreen("studio")}
-            onExplore={()=>setScreen("explorer")}
-          />
+
+        {screen==="workspace" && rawData && (
+          <SessionStateProvider key={pid}>
+            <WorkspaceRegistrar filename={filename} rawData={rawData}/>
+
+            <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+              <WorkspaceBar
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                hasOutput={!!output}
+                activeDatasetId={activeDatasetId}
+                onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
+              />
+
+              {/* ── Tab panels — kept mounted via display:none to preserve state ── */}
+              <div style={{flex:1,minHeight:0,position:"relative"}}>
+
+                {/* DATA — dataset overview + file upload + WB/OECD fetchers */}
+                <div style={{...tabPanel, display: activeTab==="data" ? "flex" : "none", flexDirection:"column"}}>
+                  <DataTab filename={filename} rawData={rawData} studioRef={studioRef}/>
+                </div>
+
+                {/* CLEAN — DataStudio always mounted; never remounts on tab switch */}
+                <div style={{...tabPanel, display: activeTab==="clean" ? "flex" : "none", flexDirection:"column"}}>
+                  <DataStudio
+                    ref={studioRef}
+                    key={pid}
+                    rawData={rawData}
+                    filename={filename}
+                    pid={pid}
+                    onComplete={handleComplete}
+                    onDatasetsChange={setAvailableDatasets}
+                    activeDatasetId={activeDatasetId}
+                  />
+                </div>
+
+                {/* EXPLORE */}
+                <div style={{...tabPanel, display: activeTab==="explore" ? "flex" : "none", flexDirection:"column"}}>
+                  {output
+                    ? <ExplorerModule
+                        cleanedData={output}
+                        onBack={()=>setActiveTab("clean")}
+                        onProceed={()=>setActiveTab("model")}
+                      />
+                    : <NeedsOutput onGoToClean={()=>setActiveTab("clean")}/>
+                  }
+                </div>
+
+                {/* MODEL */}
+                <div style={{...tabPanel, display: activeTab==="model" ? "flex" : "none", flexDirection:"column"}}>
+                  {output
+                    ? <ModelingTab
+                        cleanedData={output}
+                        availableDatasets={availableDatasets}
+                        onBack={()=>setActiveTab("explore")}
+                        onResultChange={r=>setActiveResult(r)}
+                        onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
+                      />
+                    : <NeedsOutput onGoToClean={()=>setActiveTab("clean")}/>
+                  }
+                </div>
+
+                {/* SIMULATE — Phase 9.8 */}
+                <div style={{...tabPanel, display: activeTab==="simulate" ? "flex" : "none", flexDirection:"column"}}>
+                  <SimulateTab
+                    onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                  />
+                </div>
+
+                {/* REPORT — stub */}
+                <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
+                  <ComingSoon tab="report"/>
+                </div>
+
+                {/* CALCULATE — Phase 9.7 */}
+                <div style={{...tabPanel, display: activeTab==="calculate" ? "flex" : "none", flexDirection:"column"}}>
+                  <CalculateTab
+                    rows={output?.cleanRows ?? rawData?.rows ?? []}
+                    headers={output?.headers ?? rawData?.headers ?? []}
+                    onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                  />
+                </div>
+
+              </div>
+            </div>
+          </SessionStateProvider>
         )}
-        {screen==="explorer"&&output&&(
-          <ExplorerModule
-            cleanedData={output}
-            onBack={()=>setScreen("studio")}
-            onProceed={()=>setScreen("modeling")}
-          />
-        )}
-        {screen==="modeling"&&output&&(
-          <div style={{
-            height:"calc(100vh - 38px)",
-            display:"flex",
-            flexDirection:"column",
-            overflow:"hidden",
-          }}>
-            <ModelingTab
-              cleanedData={output}
-              onBack={()=>setScreen("explorer")}
-              onResultChange={r=>setActiveResult(r)}
-              onCoachQuestion={q => { setSidebarOpen(true); setCoachPrefill({ q, seq: ++coachSeqRef.current }); }}
-            />
-          </div>
-        )}
+
       </div>
 
       <AIContextSidebar
         isOpen={sidebarOpen}
         onClose={()=>setSidebarOpen(false)}
-        screen={screen}
+        screen={activeTab}
         cleanedData={output}
         modelResult={activeResult}
         prefillMessage={coachPrefill}
@@ -797,3 +1043,10 @@ export default function App() {
     </div>
   );
 }
+
+// Shared panel style — fills the parent, used by every tab panel.
+const tabPanel = {
+  position: "absolute",
+  inset: 0,
+  overflow: "hidden",
+};

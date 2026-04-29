@@ -57,6 +57,8 @@ src/
 │   │       └── index.js          ← SHARED_CONTEXT, INFER_UNITS_PROMPT, INTERPRET_REGRESSION_PROMPT,
 │   │                                WRANGLING_TRANSFORM_PROMPT, WRANGLING_QUERY_PROMPT,
 │   │                                CLEANING_SUGGESTIONS_PROMPT
+│   ├── session/
+│   │   └── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
 │   ├── Privacy/
 │   │   ├── index.js              ← privacy module barrel export
 │   │   ├── anonymizer.js         ← data anonymization utilities
@@ -72,10 +74,10 @@ src/
 │   │       ├── worldBank.js      ← World Bank API fetcher
 │   │       └── oecd.js           ← OECD API fetcher
 │   ├── export/
-│   │   ├── rScript.js            ← pipeline + model → R script (fixest/modelsummary)
-│   │   ├── stataScript.js        ← pipeline + model → Stata do-file
-│   │   ├── pythonScript.js       ← pipeline + model → Python script
-│   │   └── replicationBundle.js  ← ZIP bundle (R + Stata + Python scripts + data)
+│   │   ├── rScript.js            ← pipeline + model → R script (fixest/modelsummary); generateSubsetRScript() for multi-subset lapply export
+│   │   ├── stataScript.js        ← pipeline + model → Stata do-file; generateSubsetStataScript() with preserve/restore blocks
+│   │   ├── pythonScript.js       ← pipeline + model → Python script; generateSubsetPythonScript() dict+comprehension pattern
+│   │   └── replicationBundle.js  ← ZIP bundle (R + Stata + Python scripts + data); buildMultiSubsetBundle() + downloadMultiSubsetBundle()
 │   ├── Persistence/
 │   │   └── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage
 │   └── modelBuffer.js            ← model buffer state management
@@ -111,6 +113,9 @@ src/
 │   │   ├── InferenceOptions.jsx  ← collapsible SE type selector (chips + cluster/lag inputs)
 │   │   └── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
 │   │
+│   ├── workspace/
+│   │   ├── WorkspaceBar.jsx      ← 7-tab nav bar (Data/Clean/Explore/Model/Simulate/Calculate/Report) + DatasetManager toggle
+│   │   └── DatasetManager.jsx    ← collapsible D·N dataset button + dropdown panel showing all session datasets
 │   ├── AIContextSidebar.jsx      ← AI context panel (sidebar)
 │   ├── ModelingTab.jsx           ← modeling tab root; estimate useCallback dep array includes SC/EventStudy/LSDV state
 │   ├── PlotBuilder.jsx           ← G1+G2+G8: layer-based plot builder (Observable Plot 0.6 CDN); point/line/bar/histogram/density geoms; aesthetic mappings (x, y, color); labels panel; ResizeObserver responsive; dark theme patched
@@ -130,20 +135,20 @@ src/
 |-----------|------|--------|
 | OLS | LinearEngine.js | ✓ validated vs R (6 decimal places) |
 | WLS (survey weights) | LinearEngine.js | ✓ runWLS — (X'WX)⁻¹X'WY, unweighted SSR for σ² |
-| FE (within) | PanelEngine.js | ✓ |
+| FE (within) | PanelEngine.js | ✓ validated vs R fixest::feols (6dp coef, 4dp SE) — hard benchmarks in engineValidation.js |
 | FD (first differences) | PanelEngine.js | ✓ |
 | TWFE DiD | PanelEngine.js | ✓ |
 | 2x2 DiD | PanelEngine.js | ✓ |
-| 2SLS / IV | CausalEngine.js | ✓ |
-| Sharp RDD | CausalEngine.js | ✓ IK bandwidth, triangular/epanechnikov/uniform kernel |
+| 2SLS / IV | CausalEngine.js | ✓ validated vs R AER::ivreg (6dp coef, 4dp SE) — hard benchmarks in engineValidation.js |
+| Sharp RDD | CausalEngine.js | ✓ validated vs R rdrobust (LATE 6dp, SE 4dp) — IK bandwidth, triangular kernel; hard benchmarks in engineValidation.js |
 | McCrary density test | CausalEngine.js | ✓ |
-| Logit / Probit | NonLinearEngine.js | ✓ IRLS/Newton-Raphson MLE — McFadden R², AIC/BIC, MEM, odds ratios |
-| GMM / LIML | GMMEngine.js | ✓ validated vs R (6dp coef, 4dp SE) — SE bug fixed: was /n, now ×n |
+| Logit / Probit | NonLinearEngine.js | ✓ validated vs R 4.4.1 glm() (6dp coef, 4dp SE) — IRLS/Newton-Raphson MLE |
+| GMM / LIML | GMMEngine.js | ✓ validated vs R (6dp coef, 4dp SE) — hard benchmarks in engineValidation.js; just-id + overid cases; SE bug fixed: was /n, now ×n |
 | Fuzzy RDD | CausalEngine.js | planned |
 | Event Study | PanelEngine.js | planned |
 | Panel LSDV | PanelEngine.js | planned |
 | Poisson FE | NonLinearEngine.js | planned |
-| Synthetic Control | SyntheticControlEngine.js | ⚠ not yet validated |
+| Synthetic Control | SyntheticControlEngine.js | ✓ validated vs R Synth package (weights 2dp, gaps 2dp) — Frank-Wolfe vs ipop; hard benchmarks in engineValidation.js |
 
 ## Pipeline step types (runner.js) — 23 total
 Cleaning: `rename, drop, filter, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr`
@@ -171,12 +176,16 @@ Merge: `join, append`
 - `callClaude({ system, user, maxTokens })` strips `SHARED_CONTEXT` from exported prompts before sending (it adds it as the cached block automatically)
 
 ## Pending (ordered by priority)
-1. **Estimator validation vs R** — systematic benchmark: RDD (rdrobust), Panel FE (fixest), 2SLS (AER), Logit/Probit (base R `glm`), GMM, Synthetic Control. Harness in `math/__validation__/engineValidation.js`.
-2. **Excel (.xlsx) support** — `src/services/data/parsers/excel.js` via SheetJS (CDN: `https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs`). Must return `{ headers, rows }` identical to CSV parser. Wire into `DataStudio.jsx` file accept list (`.xlsx,.xls`).
-3. **DuckDB-WASM** — final compute target for datasets > 50k rows.
-3. ~~**Phase 6 — Robust Standard Errors**~~ — `src/core/inference/robustSE.js` implemented with HC0/HC1/HC2/HC3, clustered, two-way (Cameron-Gelbach-Miller), Newey-West HAC. `seType` wired into engines. `InferenceOptions.jsx` SE type selector implemented. Validation vs R `sandwich::vcovHC` still pending.
-4. ~~**Phase 7 — New File Format Support**~~ — `src/services/data/parsers/rds.js` and `src/services/data/parsers/shapefile.js` implemented. Note: `excel.js` not yet committed to repo.
-5. ~~**Phase 8 — Modeling UI Overhaul**~~ — `EstimatorSidebar.jsx` grouped dropdown, `InferenceOptions.jsx`, and `CodeEditor.jsx` all implemented.
+1. ~~**Estimator validation vs R**~~ — FE (fixest), RDD (rdrobust), 2SLS (AER), Logit/Probit (glm), GMM/LIML, Synthetic Control (Synth) — all validated with hard benchmarks in `engineValidation.js`.
+2. **DuckDB-WASM** — final compute target for datasets > 50k rows.
+3. ~~**PlotBuilder G-track complete**~~ — G1+G2+G3+G4+G5+G6+G7+G8+G9+G10+G11+G12+G13 all done. PlotBuilder.jsx: 11 geoms (point/line/bar/histogram/density/smooth/boxplot/errorbar/ribbon/hline/vline), stack+jitter positions, palette presets, SVG+PNG export. ModelingTab: collapsible ◈ Plot Builder with result-augmented rows, 4 G10 templates, G13 multi-model coefficient comparison mode (compRows from pinnedModels, mode toggle, "Coef comparison" template).
+4. ~~**Multi-subset workflow H-track**~~ — H1–H10 complete. H6: multi-subset R/Python/Stata replication scripts. H7: "Download subset bundle" button in ModelingTab. H8: Spec Curve collapsible panel (threshold col/op/range/coefVar, runSpecCurve loop, ribbon+line+point+hline chart). H9: buffer metadata. H10: script overhaul. H5: pipeline branch point UI.
+5. **Contextual export architecture (I-track)** — I1–I7: pipeline export in CleanTab, dataset export in Explorer, comparison export in ModelComparison, auto-detect map vs separate, refactor export services, LaTeX table from comparison.
+6. ~~**Phase 6 — Robust Standard Errors**~~ — `src/core/inference/robustSE.js` implemented with HC0/HC1/HC2/HC3, clustered, two-way (Cameron-Gelbach-Miller), Newey-West HAC. `seType` wired into engines. `InferenceOptions.jsx` SE type selector implemented. Validation vs R `sandwich::vcovHC` still pending.
+7. ~~**Phase 7 — New File Format Support**~~ — `.rds`, `.shp/.dbf`, `.xlsx/.xls` (SheetJS CDN in DataStudio.jsx), CSV auto-delimiter detection — all implemented.
+8. ~~**Phase 8 — Modeling UI Overhaul**~~ — `EstimatorSidebar.jsx` grouped dropdown, `InferenceOptions.jsx`, `CodeEditor.jsx` all implemented.
+9. ~~**Multi-subset workflow H1–H4**~~ — `SubsetManager.jsx` (named subsets + filter UI), wired into `ModelingTab.jsx` with `runAllSubsets` → auto-pins results to model buffer with subset labels.
+10. ~~**PlotBuilder G1+G2+G8+G11**~~ — `PlotBuilder.jsx` (Observable Plot 0.6 CDN, layer system, point/line/bar/histogram/density, aesthetic mappings, labels panel, dark theme). Wired into ExplorerModule as "◈ Plot Builder" tab.
 
 ## Reserved (post-MVP)
 - `math/ml/` — DML, Lasso, Ridge, Forest

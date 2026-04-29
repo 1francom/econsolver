@@ -16,8 +16,9 @@
 // Depends on: C, mono from ./shared.jsx
 // No React state except PlotSelector (activeId only).
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { C, mono } from "./shared.jsx";
+import PlotExportBar from "../shared/PlotExportBar.jsx";
 
 // ─── PLOT SELECTOR ────────────────────────────────────────────────────────────
 // Tabbed shell that renders one plot at a time.
@@ -414,10 +415,13 @@ function exportSVG(svgId, filename) {
 
 // ─── INLINE PLOT SHELL ───────────────────────────────────────────────────────
 // Lightweight wrapper for inline plots (no W/H needed — SVG is self-sizing).
-// Adds a thin header with label + ↓ SVG export button.
+// Adds a thin header with label + PlotExportBar (preset + SVG + PNG).
 function InlinePlotShell({ title, svgId, filename, children }) {
+  const wrapRef = useRef(null);
+  // Derive a clean base filename from the passed filename (strip extension)
+  const baseName = filename ? filename.replace(/\.(svg|png)$/i, "") : (svgId || "plot");
   return (
-    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+    <div ref={wrapRef} style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0.35rem 0.9rem", background: "#0a0a0a",
@@ -426,22 +430,22 @@ function InlinePlotShell({ title, svgId, filename, children }) {
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
           {title}
         </span>
-        <button
-          onClick={() => exportSVG(svgId, filename)}
-          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-        >↓ SVG</button>
       </div>
       {children}
+      <PlotExportBar
+        getEl={() => wrapRef.current}
+        filename={baseName}
+      />
     </div>
   );
 }
 
 // ─── PLOT WRAPPER ─────────────────────────────────────────────────────────────
 function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
+  const wrapRef = useRef(null);
+  const baseName = filename ? filename.replace(/\.(svg|png)$/i, "") : (svgId || "plot");
   return (
-    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+    <div ref={wrapRef} style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0.45rem 0.9rem", background: "#0a0a0a",
@@ -457,27 +461,18 @@ function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
             </span>
           )}
         </div>
-        <button
-          onClick={() => exportSVG(svgId, filename)}
-          style={{
-            padding: "0.2rem 0.6rem", background: "transparent",
-            border: `1px solid ${C.border2}`, borderRadius: 3,
-            color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9,
-            transition: "all 0.12s",
-          }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-        >
-          ↓ SVG
-        </button>
       </div>
-      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center", display: "flex", justifyContent: "center" }}>
+      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
         <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
           style={{ width: "100%", maxWidth: 700, minWidth: Math.min(W, 340), height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
           <rect width={W} height={H} fill={C.bg} />
           {children}
         </svg>
       </div>
+      <PlotExportBar
+        getEl={() => wrapRef.current}
+        filename={baseName}
+      />
     </div>
   );
 }

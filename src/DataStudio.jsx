@@ -13,11 +13,12 @@
 // They are kept in component state (not persisted) — equivalent to R's
 // "you must re-run your script to reload data" behavior.
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from "react";
 import WranglingModule from "./WranglingModule.jsx";
 import { saveRawData } from "./services/persistence/indexedDB.js";
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
 import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
+import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
@@ -391,8 +392,9 @@ function ssClear(pid) {
 }
 
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
-export default function DataStudio({ rawData, filename, onComplete, pid }) {
+const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplete, pid, onDatasetsChange, activeDatasetId }, ref) {
   const primaryId = pid || genId();
+  const dispatch = useSessionDispatch();
 
   const [datasets, setDatasets] = useState(() => {
     // Secondary datasets scoped to this project's pid — no cross-project leakage
@@ -450,6 +452,23 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     ssWrite(primaryId, secondary);
   }, [datasets, primaryId]);
 
+  // Expose slim dataset list to parent (for Modeling Lab dataset picker)
+  useEffect(() => {
+    onDatasetsChange?.(datasets.map(d => ({
+      id:       d.id,
+      filename: d.filename,
+      rows:     d.rawData?.rows    ?? [],
+      headers:  d.rawData?.headers ?? [],
+    })));
+  }, [datasets]);
+
+  // Sync external activeDatasetId (from DatasetManager click) into local activeId
+  useEffect(() => {
+    if (activeDatasetId && datasets.some(d => d.id === activeDatasetId)) {
+      setActiveId(activeDatasetId);
+    }
+  }, [activeDatasetId]);
+
   const activeDs       = datasets.find(d => d.id === activeId) || datasets[0];
   // Other datasets — passed to WranglingModule for join/append context
   const otherDatasets  = datasets.filter(d => d.id !== activeId);
@@ -469,6 +488,16 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
       setActiveId(id);
       // Persist so this secondary dataset survives a reload if promoted to primary
       saveRawData(id, parsed);
+      if (dispatch) {
+        registerDataset(dispatch, {
+          id:       entry.id,
+          name:     file.name,
+          source:   "loaded",
+          rowCount: parsed.rows.length,
+          colCount: parsed.headers.length,
+          headers:  parsed.headers,
+        });
+      }
     } catch (e) {
       setLoadErr("Parse error: " + (e?.message || "unknown"));
     } finally {
@@ -495,27 +524,33 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     };
     setDatasets(prev => [...prev, entry]);
     setActiveId(id);        // switch to the new subset immediately
-  }, [activeId]);
+    if (dispatch) {
+      registerDataset(dispatch, {
+        id:       id,
+        name:     name,
+        source:   "derived",
+        rowCount: rows.length,
+        colCount: headers.length,
+        headers:  headers,
+      });
+    }
+  }, [activeId, dispatch]);
+
+  // Expose imperative handles so DataTab can add datasets without prop-drilling.
+  // Must come after handleLoadFile and handleSaveSubset are defined.
+  useImperativeHandle(ref, () => ({
+    addFile:          handleLoadFile,
+    addApiData:       (fname, rows, headers) => handleSaveSubset(fname, rows, headers),
+    switchToDataset:  (id) => setActiveId(id),
+  }), [handleLoadFile, handleSaveSubset]);
 
   return (
     <div style={{
       display: "flex", height: "100%", minHeight: 0,
       background: C.bg, overflow: "hidden",
     }}>
-      {/* ── Left sidebar: dataset list ── */}
-      <DatasetSidebar
-        datasets={datasets}
-        activeId={activeId}
-        onActivate={setActiveId}
-        onRemove={handleRemove}
-        onLoadFile={handleLoadFile}
-        onFetchWorldBank={() => setWbOpen(true)}
-        onFetchOECD={() => setOecdOpen(true)}
-        loadErr={loadErr}
-        loading={loading}
-      />
-
       {/* ── Main panel: WranglingModule for active dataset ── */}
+      {/* DatasetSidebar removed — dataset management lives in WorkspaceBar DatasetManager */}
       {activeDs && (
         <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
           {/*
@@ -552,4 +587,6 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
       )}
     </div>
   );
-}
+});
+
+export default DataStudio;
