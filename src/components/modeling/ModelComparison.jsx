@@ -12,6 +12,7 @@ import { compareModels } from "../../services/AI/AIService.js";
 import { generateMultiModelRScript }     from "../../services/export/rScript.js";
 import { generateMultiModelPythonScript } from "../../services/export/pythonScript.js";
 import { generateMultiModelStataScript }  from "../../services/export/stataScript.js";
+import { buildStargazer }                 from "../../services/export/latexTable.js";
 
 const C = {
   bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
@@ -327,6 +328,13 @@ function ExportBlock({ models, dataDictionary }) {
   const [lang, setLang] = useState("r");
 
   const script = useMemo(() => {
+    if (lang === "latex") {
+      return buildStargazer(models.map((m, i) => ({
+        label:  m.label ?? m.type ?? `M${i + 1}`,
+        result: m,
+        yVar:   m.spec?.yVar ?? m.yVar ?? "y",
+      })));
+    }
     const configs = models.map(m => ({
       model: {
         type: m.type,
@@ -351,18 +359,24 @@ function ExportBlock({ models, dataDictionary }) {
     return "";
   }, [models, dataDictionary, lang]);
 
-  const ext = lang === "r" ? ".R" : lang === "python" ? ".py" : ".do";
+  const ext = lang === "r" ? ".R" : lang === "python" ? ".py" : lang === "stata" ? ".do" : ".tex";
+  const LANGS = [
+    { id: "r",      label: "R" },
+    { id: "python", label: "Python" },
+    { id: "stata",  label: "Stata" },
+    { id: "latex",  label: "LaTeX" },
+  ];
 
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
-        {["r", "python", "stata"].map(l => (
-          <button key={l} onClick={() => setLang(l)}
+        {LANGS.map(({ id, label }) => (
+          <button key={id} onClick={() => setLang(id)}
             style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10,
-                     border: `1px solid ${lang === l ? C.teal : C.border2}`,
-                     background: lang === l ? `${C.teal}14` : "transparent",
-                     color: lang === l ? C.teal : C.textDim, cursor: "pointer" }}>
-            {l === "r" ? "R" : l === "python" ? "Python" : "Stata"}
+                     border: `1px solid ${lang === id ? C.teal : C.border2}`,
+                     background: lang === id ? `${C.teal}14` : "transparent",
+                     color: lang === id ? C.teal : C.textDim, cursor: "pointer" }}>
+            {label}
           </button>
         ))}
         <div style={{ flex: 1 }} />
@@ -381,6 +395,12 @@ function ExportBlock({ models, dataDictionary }) {
           Download
         </button>
       </div>
+      {lang === "latex" && (
+        <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, fontFamily: mono }}>
+          Add <span style={{ color: C.gold }}>{"\\usepackage{booktabs}"}</span> to your preamble if needed.
+          Paste into your <span style={{ color: C.gold }}>\\begin{"{document}"}</span> body.
+        </div>
+      )}
       <pre style={{
         background: C.surface2, border: `1px solid ${C.border}`,
         borderRadius: 4, padding: "0.8rem", fontSize: 9, color: C.textDim,

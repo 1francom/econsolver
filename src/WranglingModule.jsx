@@ -42,7 +42,7 @@ export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [], onSaveSubset }) {
+export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, allDatasets = [], onSaveSubset }) {
   // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
   const sessionDispatch = useSessionDispatch();
 
@@ -111,6 +111,27 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     }, 400);
     return () => clearTimeout(saveTimer.current);
   }, [pipeline, panel, dataDictionary, idbReady]);
+
+  // ── Auto-push output to parent when pipeline finishes loading from IndexedDB ─
+  // This fires once after mount (when idbReady becomes true) so that switching
+  // datasets immediately propagates the current pipeline output to all tabs.
+  useEffect(() => {
+    if (!idbReady || !onReady) return;
+    const ci = {};
+    headers.forEach(h => {
+      const s = rows.find(r => r[h] !== undefined && r[h] !== null);
+      ci[h] = { isNumeric: typeof s?.[h] === "number" };
+    });
+    onReady({
+      headers, cleanRows: rows, colInfo: ci,
+      filename, issues: [], removed: 0,
+      dataDictionary: dataDictionary || {},
+      panelIndex: panel
+        ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
+            balance: panel.validation?.balance, blockFE: panel.validation?.blockFE }
+        : null,
+    });
+  }, [idbReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-clamp branchPointIndex when pipeline shrinks ─────────────────────
   useEffect(() => {

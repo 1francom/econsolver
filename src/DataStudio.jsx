@@ -392,7 +392,7 @@ function ssClear(pid) {
 }
 
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
-const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplete, pid, onDatasetsChange, activeDatasetId }, ref) {
+const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplete, onOutputReady, pid, onDatasetsChange, activeDatasetId }, ref) {
   const primaryId = pid || genId();
   const dispatch = useSessionDispatch();
 
@@ -563,6 +563,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
             rawData={activeDs.rawData}
             filename={activeDs.filename}
             onComplete={onComplete}
+            onReady={r => onOutputReady?.(r, activeDs.id)}
             pid={activeDs.id}
             allDatasets={otherDatasets}
             onSaveSubset={handleSaveSubset}
