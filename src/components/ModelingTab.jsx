@@ -1165,7 +1165,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
         const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
         if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
-        const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, wVars);
+        const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, wVars, seOpts);
         if (!res) return { error: "RDD failed. Not enough observations within bandwidth." };
         return { result: wrapResult("RDD", res, { yVar: y, wVars, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }, { h }), panelFE: null, panelFD: null };
 

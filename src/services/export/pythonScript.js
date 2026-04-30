@@ -47,6 +47,17 @@ export function generatePythonScript(config = {}) {
   lines.push(`# ${"─".repeat(72)}`);
   lines.push("");
 
+  // ── Install hint ─────────────────────────────────────────────────────────────
+  const installPkgs = [];
+  if (pkgs.has("statsmodels"))  installPkgs.push("statsmodels");
+  if (pkgs.has("linearmodels")) installPkgs.push("linearmodels");
+  if (pkgs.has("scipy"))        installPkgs.push("scipy");
+  if (installPkgs.length) {
+    lines.push(`# Install required packages if needed:`);
+    lines.push(`#   pip install ${installPkgs.join(" ")}`);
+    lines.push("");
+  }
+
   // ── Imports ─────────────────────────────────────────────────────────────────
   lines.push("import pandas as pd");
   lines.push("import numpy as np");
@@ -352,11 +363,16 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   lines.push(`# ${"─".repeat(72)}`);
   lines.push("");
 
+  const needsLinear = configs.some(c => ["FE","FD","2SLS","TWFE"].includes(c.model?.type));
+  const installPkgs = ["statsmodels", ...(needsLinear ? ["linearmodels"] : [])];
+  lines.push(`# Install required packages if needed:`);
+  lines.push(`#   pip install ${installPkgs.join(" ")}`);
+  lines.push("");
+
   lines.push("import pandas as pd");
   lines.push("import numpy as np");
   lines.push("import statsmodels.formula.api as smf");
   lines.push("import statsmodels.api as sm");
-  const needsLinear = configs.some(c => ["FE","FD","2SLS","TWFE"].includes(c.model?.type));
   if (needsLinear) lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS");
   lines.push("");
 
