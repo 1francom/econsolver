@@ -11,7 +11,11 @@
       "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"install.packages\\('rdrobust', repos='https://cloud.r-project.org'\\)\")",
       "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" r_validation/RDD_check.R)",
       "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"install.packages\\('AER', repos='https://cloud.r-project.org'\\)\")",
-      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" r_validation/TSLS_check.R)"
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" r_validation/TSLS_check.R)",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(xargs grep:*)",
+      "Bash(npm run:*)"
     ]
   }
 }
