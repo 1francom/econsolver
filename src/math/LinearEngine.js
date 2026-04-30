@@ -177,8 +177,13 @@ export function runWLS(rows, yCol, xCols, weights, seOpts = {}) {
   const R2      = SST_w > 0 ? 1 - SSR_w / SST_w : 0;
   const adjR2   = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
 
+  // For WLS, pass weight-scaled X and residuals so HC meat matches R's sandwich:
+  // meat = Σ w_i² e_i² x_i x_i' = Σ (√w_i e_i)² (√w_i x_i)(√w_i x_i)'
+  const sqW    = W.map(w => Math.sqrt(w));
+  const wX     = X.map((row, i) => row.map(v => v * sqW[i]));
+  const wResid = resid.map((e, i) => e * sqW[i]);
   let se       = XtWXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
-  const robustSe = computeRobustSE(seOpts, XtWXinv, X, resid, n, k, valid);
+  const robustSe = computeRobustSE(seOpts, XtWXinv, wX, wResid, n, k, valid);
   if (robustSe) se = robustSe;
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals  = tStats.map(t => pValue(t, df));
