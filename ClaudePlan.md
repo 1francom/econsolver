@@ -776,7 +776,271 @@ Steps must be done in this order — each unlocks the next:
 
 ---
 
-## Overall Status Summary (last updated 2026-04-29)
+---
+
+## Phase 10: Probability & Simulation Analytics — PENDING
+
+Extends the already-built Calculate and Simulate tabs with probability functions, Monte Carlo, and output visualization. All math stays in `src/math/calcEngine.js` (pure JS, no React).
+
+### Already done (do not re-implement)
+- `solveRoot` (Brent's method), `derivative`, `nthDerivative`, `gradient`, `predict` — all in `calcEngine.js`
+- ForLoop and WhileLoop variable types in `SimulateTab.jsx`
+- Model prediction section (section 6) in `CalculateTab.jsx`
+
+---
+
+### 10.1 — Probability density and distribution functions in `calcEngine.js` — PENDING
+
+Add to `calcEngine.js` (pure JS, no external dependency):
+
+| Function | Signature | Algorithm |
+|----------|-----------|-----------|
+| `dnorm(x, mean, sd)` | PDF | `(1/σ√2π) exp(-½((x-μ)/σ)²)` |
+| `pnorm(x, mean, sd)` | CDF | error function approximation (Abramowitz & Stegun 7.1.26) |
+| `qnorm(p, mean, sd)` | quantile | rational approximation (Peter Acklam's algorithm) |
+| `dt(x, df)` | t PDF | `Γ((ν+1)/2) / (√νπ Γ(ν/2)) (1 + x²/ν)^(-(ν+1)/2)` |
+| `pt(x, df)` | t CDF | regularized incomplete beta: `I(ν/(ν+x²); ν/2, 1/2)` |
+| `qt(p, df)` | t quantile | Newton refinement from rational seed |
+| `dbinom(k, n, p)` | Binomial PMF | `C(n,k) pᵏ (1-p)^(n-k)` |
+| `pbinom(k, n, p)` | Binomial CDF | sum over `j = 0..k` |
+| `dpois(k, lambda)` | Poisson PMF | `λᵏ e^{-λ} / k!` |
+| `ppois(k, lambda)` | Poisson CDF | sum over `j = 0..k` |
+| `dchisq(x, df)` | Chi-sq PDF | gamma distribution special case |
+| `pchisq(x, df)` | Chi-sq CDF | regularized incomplete gamma |
+
+These functions become available as named functions inside **Calculate tab expression rows** (section 1 Expression type) and inside **Simulate tab Expression rows** — no new UI needed, just register them in `buildScope()` in `calcEngine.js`.
+
+**Validation:** Compare to R outputs (`dnorm`, `pnorm`, `qnorm`, `pt`, `pbinom`, `ppois`) at 4 decimal places.
+
+---
+
+### 10.2 — Monte Carlo section in `SimulateTab.jsx` — PENDING
+
+A new collapsible section below the DGP builder: **Monte Carlo Experiment**.
+
+**Interface:**
+```
+Replications    [  1000  ]    Seed  [ 42 ]
+Target variable  [ Y ▾ ]     (any scalar expression variable in the DGP)
+[  Run Monte Carlo  ]
+```
+
+**Algorithm:**
+1. Re-run the entire DGP `R` times, each time advancing the seed by +1
+2. Collect the value of the target variable at each replication → array of length R
+3. Output as a new dataset (rows = replications, columns = target variable + replication index)
+4. Save to Dataset Manager via `onAddDataset`
+
+**Output panel (shown after run):**
+- Mean, SD, min, max, p5, p25, p50, p75, p95 of the collected distribution
+- Inline histogram (50-bin) rendered via Observable Plot (same CDN pattern as PlotBuilder)
+
+**Export:**
+```r
+set.seed(42)
+mc_results <- replicate(1000, { ... dgp code ... })
+hist(mc_results)
+```
+
+---
+
+### 10.3 — Probability calculator panel in `CalculateTab.jsx` — PENDING
+
+A new collapsible section: **Probability Calculator**. Form-based, no expression typing needed.
+
+```
+Distribution  [ Normal ▾ ]    μ = [  0  ]   σ = [  1  ]
+
+P(X ≤ x)    x = [  1.96  ]   →   0.9750
+P(X ≥ x)    x = [  1.96  ]   →   0.0250
+P(a ≤ X ≤ b)  a = [  -1  ]  b = [  1  ]   →   0.6827
+Quantile     p = [  0.95  ]  →   1.6449
+```
+
+Distributions available: Normal, t (df input), Binomial (n, p inputs), Poisson (λ input), Chi-squared (df input).
+
+Updates live as inputs change (no "run" button). Calls the functions from 10.1.
+
+---
+
+### Phase 10 New Files Summary
+
+| File | Purpose | Status |
+|------|---------|--------|
+| — | No new files — all additions extend existing files | — |
+
+### Phase 10 Modified Files Summary
+
+| File | Changes | Status |
+|------|---------|--------|
+| `src/math/calcEngine.js` | Add `dnorm`, `pnorm`, `qnorm`, `dt`, `pt`, `qt`, `dbinom`, `pbinom`, `dpois`, `ppois`, `dchisq`, `pchisq`; register in `buildScope()` | PENDING |
+| `src/components/tabs/SimulateTab.jsx` | Add Monte Carlo section (10.2) | PENDING |
+| `src/components/tabs/CalculateTab.jsx` | Add Probability Calculator section (10.3) | PENDING |
+
+---
+
+## Phase 11: Spatial Analytics — PENDING
+
+Browser-side spatial toolkit for research workflows common in development economics, urban economics, and policy evaluation: geocoding, distance-to-treatment, buffer indicators, grid assignment, and spatial joins.
+
+All math in a new pure-JS engine `src/math/SpatialEngine.js`. Pipeline integration follows the existing runner.js pattern. UI lives in a new **Spatial** section of the wrangling FeatureTab.
+
+---
+
+### 11.1 — `src/math/SpatialEngine.js` — PENDING
+
+Pure JS, no external dependencies. Exports:
+
+**Distance functions:**
+```js
+haversine(lat1, lon1, lat2, lon2)  → distance in km
+euclidean(x1, y1, x2, y2)         → distance in projected units
+```
+Haversine formula: `a = sin²(Δφ/2) + cos φ₁ cos φ₂ sin²(Δλ/2)`, `d = 2R arcsin(√a)`, R = 6371 km.
+
+**Buffer:**
+```js
+isWithinBuffer(lat, lon, centerLat, centerLon, radiusKm)  → boolean
+assignBuffer(rows, latCol, lonCol, centerLat, centerLon, radiusKm, outCol)  → rows[]
+```
+Uses haversine. Output column is 0/1 integer (ready for use as treatment indicator).
+
+**Grid assignment:**
+```js
+assignRectGrid(rows, latCol, lonCol, cellSizeKm, outCol)  → rows[]
+assignH3Grid(rows, latCol, lonCol, resolution, outCol)    → rows[]  // H3-like hex IDs
+```
+Rectangular: floor(lat / latStep) × floor(lon / lonStep) → integer cell ID. H3-like: approximate hexagonal grid using axial coordinates at given resolution.
+
+**Spatial join (point-in-polygon):**
+```js
+pointInPolygon(lat, lon, polygonWKT)  → boolean
+spatialJoin(pointRows, latCol, lonCol, polyRows, wktCol, joinCols[])  → rows[]
+```
+Ray-casting algorithm for WKT polygon strings (from `.shp` parser output). `spatialJoin` does a left join — each point row gets attribute columns from the first matching polygon.
+
+**Nearest neighbor:**
+```js
+nearestNeighbor(rows, latCol, lonCol, referenceRows, refLatCol, refLonCol, outDistCol, outIdCol)  → rows[]
+```
+For each observation finds the closest point in a reference set and returns the distance and ID. Brute-force O(n×m) — acceptable up to ~10k × ~1k.
+
+---
+
+### 11.2 — Geocoding pipeline step — PENDING
+
+New step type `geocode` in `runner.js` and `registry.js`.
+
+**Step schema:**
+```js
+{ type: "geocode", addressCol: string, latOutCol: string, lonOutCol: string, provider: "nominatim" }
+```
+
+**Algorithm:**
+- Calls OpenStreetMap Nominatim API (`https://nominatim.openstreetmap.org/search?q=...&format=json`)
+- Rate-limited: 1 request per second (Nominatim ToS)
+- Results cached in `sessionStorage` keyed by address string — avoids re-fetching on pipeline replay
+- Skips rows where `addressCol` is empty or already geocoded (cache hit)
+- Adds `latOutCol` and `lonOutCol` as new columns (null if geocoding failed)
+
+**UI in FeatureTab (new "Spatial" subsection):**
+```
+Address column  [ country_name ▾ ]
+Lat column name  [ lat ]
+Lon column name  [ lon ]
+Provider  [ OpenStreetMap (free) ]
+[ Geocode column ]   — progress bar during batch geocoding
+```
+
+Warning shown: "Geocoding sends address data to OpenStreetMap. Do not use with sensitive or personal addresses."
+
+---
+
+### 11.3 — Distance, buffer, and grid pipeline steps — PENDING
+
+Four new step types in `runner.js` / `registry.js`:
+
+**`distance` step:**
+```js
+{ type: "distance", latCol, lonCol, refLat: number, refLon: number, outCol, unit: "km"|"m" }
+```
+Computes haversine distance from each row to a fixed reference point (e.g. capital city, policy center). UI: lat/lon inputs for reference point, or "pick from dataset" dropdown to use a filtered row as reference.
+
+**`buffer` step:**
+```js
+{ type: "buffer", latCol, lonCol, refLat: number, refLon: number, radiusKm: number, outCol }
+```
+Outputs 0/1 column. UI: reference point + radius slider (1–500 km).
+
+**`assign_grid` step:**
+```js
+{ type: "assign_grid", latCol, lonCol, gridType: "rectangular"|"hex", cellSizeKm: number, outCol }
+```
+Outputs a string grid cell ID. Suitable as a fixed effect variable. UI: grid type toggle + cell size input + preview count of distinct cells.
+
+**`spatial_join` step:**
+```js
+{ type: "spatial_join", latCol, lonCol, rightDatasetId, wktCol, joinCols: string[] }
+```
+Joins polygon attributes from a shapefile dataset. Right dataset must have a WKT geometry column (from `.shp` parser). UI: polygon dataset dropdown, WKT column auto-detected, columns to join multi-select.
+
+---
+
+### 11.4 — Spatial UI in FeatureTab — PENDING
+
+New collapsible "Spatial" section at the bottom of `FeatureTab.jsx`, below the existing "Interactions" section.
+
+Contains five sub-panels (each collapsed by default):
+1. **Geocode** — address column → lat/lon (wires step 11.2)
+2. **Distance to point** — lat/lon + reference → distance column (wires `distance` step)
+3. **Buffer indicator** — lat/lon + reference + radius → 0/1 column (wires `buffer` step)
+4. **Grid assignment** — lat/lon + cell size → grid ID column (wires `assign_grid` step)
+5. **Spatial join** — lat/lon + polygon dataset → attribute columns (wires `spatial_join` step)
+
+Each sub-panel follows the existing FeatureTab pattern: form inputs → "Add to pipeline" button → step appears in History.jsx.
+
+---
+
+### 11.5 — Map view in PlotBuilder — PENDING
+
+New geom type `map` in `PlotBuilder.jsx`.
+
+When `map` geom is selected:
+- X mapping locked to `lon`, Y mapping locked to `lat`
+- Renders as a scatter plot with aspect ratio locked to `cos(mean_lat)` (Mercator approximation)
+- Color, size aesthetic mappings still available
+- Optional: basemap tiles toggle (uses OpenStreetMap tile CDN `https://tile.openstreetmap.org/{z}/{x}/{y}.png` — shown only if user enables it, with a privacy notice)
+
+No new dependencies — Observable Plot handles the scatter rendering; tile layer is an optional `<img>` underlay positioned via CSS transform if enabled.
+
+---
+
+### Phase 11 New Files Summary
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/math/SpatialEngine.js` | Haversine, buffer, grid, point-in-polygon, nearest neighbor | PENDING |
+
+### Phase 11 Modified Files Summary
+
+| File | Changes | Status |
+|------|---------|--------|
+| `src/pipeline/runner.js` | Add `geocode`, `distance`, `buffer`, `assign_grid`, `spatial_join` step types | PENDING |
+| `src/pipeline/registry.js` | Register 5 new step types with labels and param schemas | PENDING |
+| `src/components/wrangling/FeatureTab.jsx` | Add Spatial section with 5 sub-panels | PENDING |
+| `src/components/PlotBuilder.jsx` | Add `map` geom type with locked lat/lon axes and tile option | PENDING |
+
+### Phase 11 Build Order
+
+1. **`SpatialEngine.js`** — pure math, no UI, validates independently
+2. **`runner.js` + `registry.js`** — wire 4 deterministic steps (distance, buffer, grid, spatial_join) — no network, testable offline
+3. **`FeatureTab.jsx` Spatial section** — UI for all 4 deterministic steps
+4. **Geocode step** — last because it requires network + rate limiting + cache logic
+5. **PlotBuilder `map` geom** — self-contained, can ship independently of geocoding
+
+---
+
+## Overall Status Summary (last updated 2026-05-01)
 
 | Phase | Title | Status |
 |-------|-------|--------|
@@ -788,10 +1052,16 @@ Steps must be done in this order — each unlocks the next:
 | 6 | Robust Standard Errors | DONE |
 | 7 | New File Format Support (.rds, .shp/.dbf) | DONE |
 | 8 | Modeling UI Overhaul (EstimatorSidebar, InferenceOptions, CodeEditor) | DONE |
-| 9 | Workspace Architecture (7-tab shell, Dataset Manager, two-tier pipeline, Calculate, Simulate, exports) | PENDING |
+| 9 | Workspace Architecture (7-tab shell, Dataset Manager, two-tier pipeline, Calculate, Simulate, exports) | IN PROGRESS — shell done, Calculate/Simulate done, cascade delete + runner.js datasetId + AI export pending |
+| 10 | Probability & Simulation Analytics (CDFs/PDFs, Monte Carlo, probability calculator) | PENDING |
+| 11 | Spatial Analytics (geocoding, distance, buffer, grid, spatial join, map geom) | PENDING |
 
 ## Next unblocked tasks
 
 1. **Browser validation of Phase 4** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, all three multi-model export scripts (R/Python/Stata) generate correctly.
 
-2. **Phase 9.1 — Shell restructure** — `sessionState.js` + `WorkspaceBar.jsx` + `App.jsx` routing. This unblocks the entire Phase 9 build.
+2. **Phase 9 remaining** — cascade delete dialog in DatasetManager, `runner.js` datasetId field, AI unified script export in Report tab.
+
+3. **Phase 10.1** — add probability functions (`dnorm`, `pnorm`, `qnorm`, `dt`, `pt`, `qt`, `dbinom`, `pbinom`, `dpois`, `ppois`) to `calcEngine.js` and register in `buildScope()`. Unblocks 10.2 and 10.3.
+
+4. **Phase 11.1** — `SpatialEngine.js` pure math file. Unblocks all spatial pipeline steps.

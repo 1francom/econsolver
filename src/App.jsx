@@ -535,7 +535,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
 }
 
 // Dataset overview + load controls (file upload, World Bank, OECD).
-function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset }) {
+function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset }) {
   const { C } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP"];
   const fileRef  = useRef();
@@ -610,27 +610,44 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
               <div style={{marginBottom:"1.4rem"}}>
                 <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>Session datasets</div>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {availableDatasets.map(ds => {
+                  {availableDatasets.map((ds, idx) => {
                     const isActive = ds.id === activeDatasetId;
+                    const isPrimary = idx === 0;
                     return (
-                      <button key={ds.id} onClick={() => onSelectDataset?.(ds.id)}
-                        style={{display:"flex",alignItems:"center",gap:8,padding:"0.45rem 0.75rem",
-                                background: isActive ? `${C.teal}12` : C.surface,
-                                border:`1px solid ${isActive ? C.teal+"60" : C.border2}`,
-                                borderRadius:3,cursor:"pointer",textAlign:"left",fontFamily:mono,
-                                transition:"all 0.12s"}}>
-                        <span style={{fontSize:9,color: isActive ? C.teal : C.textMuted}}>
-                          {isActive ? "●" : "○"}
-                        </span>
-                        <span style={{fontSize:10,color: isActive ? C.text : C.textDim,flex:1}}>
-                          {ds.filename ?? ds.id}
-                        </span>
-                        {ds.rowCount && (
-                          <span style={{fontSize:9,color:C.textMuted}}>
-                            {ds.rowCount.toLocaleString()} × {ds.colCount ?? "?"}
+                      <div key={ds.id} style={{display:"flex",alignItems:"center",gap:4}}>
+                        <button onClick={() => onSelectDataset?.(ds.id)}
+                          style={{display:"flex",alignItems:"center",gap:8,padding:"0.45rem 0.75rem",
+                                  flex:1,minWidth:0,
+                                  background: isActive ? `${C.teal}12` : C.surface,
+                                  border:`1px solid ${isActive ? C.teal+"60" : C.border2}`,
+                                  borderRadius:3,cursor:"pointer",textAlign:"left",fontFamily:mono,
+                                  transition:"all 0.12s"}}>
+                          <span style={{fontSize:9,color: isActive ? C.teal : C.textMuted}}>
+                            {isActive ? "●" : "○"}
                           </span>
+                          <span style={{fontSize:10,color: isActive ? C.text : C.textDim,flex:1,
+                                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {ds.filename ?? ds.id}
+                          </span>
+                          {ds.rowCount && (
+                            <span style={{fontSize:9,color:C.textMuted,flexShrink:0}}>
+                              {ds.rowCount.toLocaleString()} × {ds.colCount ?? "?"}
+                            </span>
+                          )}
+                        </button>
+                        {!isPrimary && (
+                          <button
+                            onClick={() => onDeleteDataset?.(ds.id)}
+                            title="Remove dataset"
+                            style={{flexShrink:0,width:20,height:20,display:"flex",alignItems:"center",
+                                    justifyContent:"center",background:"transparent",border:"none",
+                                    cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,
+                                    borderRadius:2,transition:"color 0.1s"}}
+                            onMouseEnter={e => e.currentTarget.style.color = C.text}
+                            onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                          >×</button>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -1386,6 +1403,7 @@ export default function App() {
                     availableDatasets={availableDatasets}
                     activeDatasetId={activeDatasetId ?? pid}
                     onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
+                    onDeleteDataset={id => { studioRef.current?.removeDataset(id); }}
                   />
                 </div>
 

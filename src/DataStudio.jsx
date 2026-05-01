@@ -550,7 +550,12 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     addFile:          handleLoadFile,
     addApiData:       (fname, rows, headers) => handleSaveSubset(fname, rows, headers),
     switchToDataset:  (id) => setActiveId(id),
-  }), [handleLoadFile, handleSaveSubset]);
+    removeDataset:    (id) => {
+      if (id === primaryId) return; // never remove primary
+      setDatasets(prev => prev.filter(d => d.id !== id));
+      setActiveId(prev => prev === id ? primaryId : prev);
+    },
+  }), [handleLoadFile, handleSaveSubset, primaryId]);
 
   return (
     <div style={{
