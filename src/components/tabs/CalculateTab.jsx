@@ -12,7 +12,7 @@
 // Props: rows, headers, onAddDataset(name, rows, headers)
 
 import { useState, useMemo } from "react";
-import { evalExpression, buildScope, solveRoot, derivative, nthDerivative, predict } from "../../math/calcEngine.js";
+import { evalExpression, buildScope, solveRoot, solveSystem, derivative, nthDerivative, predict } from "../../math/calcEngine.js";
 import { getAll as getBufferedModels } from "../../services/modelBuffer.js";
 import { interpretMarginalEffects } from "../../services/AI/AIService.js";
 
@@ -169,11 +169,17 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
 
   // ── Equation solver ────────────────────────────────────────────────────────
   const [solverOpen,   setSolverOpen]  = useState(false);
+  const [solverMode,   setSolverMode]  = useState("single"); // "single" | "system"
   const [solExpr,      setSolExpr]     = useState("x**2 - 4");
   const [solA,         setSolA]        = useState("-10");
   const [solB,         setSolB]        = useState("10");
   const [solTol,       setSolTol]      = useState("1e-8");
   const [solResult,    setSolResult]   = useState(null);
+  // System solver state
+  const [sysVarStr,    setSysVarStr]   = useState("x, y");          // comma-sep variable names
+  const [sysGuesses,   setSysGuesses]  = useState({ x: "1", y: "1" });
+  const [sysEqs,       setSysEqs]      = useState(["x + y - 3", "x - y - 1"]); // each fi = 0
+  const [sysResult,    setSysResult]   = useState(null);
 
   // ── Derivatives ───────────────────────────────────────────────────────────
   const [derivOpen,    setDerivOpen]   = useState(false);
@@ -243,6 +249,25 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
       const wrappedFn = x => fn(x, ...Object.values(scope));
       setSolResult(solveRoot(wrappedFn, a, b, tol));
     } catch (e) { setSolResult({ error: `Expression error: ${e.message}` }); }
+  }
+
+  // ── System solver ─────────────────────────────────────────────────────────
+  function runSystem() {
+    const varNames = sysVarStr.split(",").map(s => s.trim()).filter(Boolean);
+    if (varNames.length < 2) { setSysResult({ error: "Define at least 2 variables (comma-separated)." }); return; }
+    if (sysEqs.length < varNames.length) { setSysResult({ error: `Need at least ${varNames.length} equations for ${varNames.length} unknowns.` }); return; }
+    const x0 = varNames.map(n => parseFloat(sysGuesses[n] ?? "0") || 0);
+    try {
+      const fns = sysEqs.map(expr => xVec => {
+        // Build call with positional args matching varNames
+        const fn = new Function(...varNames, ...Object.keys(scope), `"use strict"; return (${expr});`);
+        return fn(...xVec, ...Object.values(scope));
+      });
+      const result = solveSystem(fns, x0);
+      setSysResult({ ...result, varNames });
+    } catch (e) {
+      setSysResult({ error: `Expression error: ${e.message}` });
+    }
   }
 
   // ── Derivatives ───────────────────────────────────────────────────────────
@@ -443,36 +468,169 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
 
       {/* ── 4. Equation Solver ─────────────────────────────────────────────── */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
-        <SectionHeader label="Equation Solver — find x where f(x) = 0" open={solverOpen} onToggle={() => { setSolverOpen(o => !o); setSolResult(null); }} />
+        <SectionHeader
+          label="Equation Solver"
+          open={solverOpen}
+          onToggle={() => { setSolverOpen(o => !o); setSolResult(null); setSysResult(null); }}
+        />
         {solverOpen && (
-          <div style={{ padding: "0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted, whiteSpace: "nowrap" }}>f(x) =</span>
-              <input value={solExpr} onChange={e => setSolExpr(e.target.value)}
-                placeholder="x**2 - 4"
-                style={{ ...fieldStyle(C), flex: 1, minWidth: 180 }} />
+          <div style={{ background: C.surface }}>
+
+            {/* Mode toggle */}
+            <div style={{ display: "flex", borderBottom: `1px solid ${C.border}` }}>
+              {[["single", "Single equation"], ["system", "System of equations"]].map(([id, label]) => (
+                <button key={id} onClick={() => { setSolverMode(id); setSolResult(null); setSysResult(null); }}
+                  style={{
+                    flex: 1, padding: "0.45rem 0.7rem", background: "transparent", border: "none",
+                    borderBottom: solverMode === id ? `2px solid ${C.gold}` : "2px solid transparent",
+                    color: solverMode === id ? C.gold : C.textMuted,
+                    cursor: "pointer", fontFamily: mono, fontSize: 10,
+                    letterSpacing: "0.06em", transition: "all 0.12s",
+                  }}>
+                  {label}
+                </button>
+              ))}
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>interval</span>
-              <input value={solA} onChange={e => setSolA(e.target.value)} placeholder="a" style={{ ...fieldStyle(C), width: 80 }} />
-              <span style={{ color: C.textMuted }}>to</span>
-              <input value={solB} onChange={e => setSolB(e.target.value)} placeholder="b" style={{ ...fieldStyle(C), width: 80 }} />
-              <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>tol</span>
-              <input value={solTol} onChange={e => setSolTol(e.target.value)} style={{ ...fieldStyle(C), width: 90 }} />
-              <Btn ch="Solve" v="solid" color={C.gold} sm onClick={runSolver} />
-            </div>
-            <div style={{ fontSize: 9, color: C.textMuted }}>
-              Variables in scope: {Object.keys(scope).join(", ") || "none (define numeric variables above)"}
-            </div>
-            {solResult && (solResult.error
-              ? <ErrBox msg={solResult.error} />
-              : <ResultBox>
-                  <div><span style={{ color: C.textMuted }}>root </span><span style={{ color: C.gold }}>{fmt(solResult.root, 10)}</span></div>
-                  <div><span style={{ color: C.textMuted }}>f(root) </span><span style={{ color: C.teal, fontSize: 10 }}>≈ 0</span></div>
-                  <div><span style={{ color: C.textMuted }}>iterations </span>{solResult.iter}</div>
-                  {!solResult.converged && <div style={{ color: C.red, fontSize: 10 }}>Warning: did not fully converge — try a tighter bracket.</div>}
-                </ResultBox>
+
+            {/* ── Single equation ── */}
+            {solverMode === "single" && (
+              <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted, whiteSpace: "nowrap" }}>f(x) =</span>
+                  <input value={solExpr} onChange={e => setSolExpr(e.target.value)}
+                    placeholder="x**2 - 4"
+                    style={{ ...fieldStyle(C), flex: 1, minWidth: 180 }} />
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>bracket</span>
+                  <input value={solA} onChange={e => setSolA(e.target.value)} placeholder="a" style={{ ...fieldStyle(C), width: 80 }} />
+                  <span style={{ color: C.textMuted }}>to</span>
+                  <input value={solB} onChange={e => setSolB(e.target.value)} placeholder="b" style={{ ...fieldStyle(C), width: 80 }} />
+                  <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>tol</span>
+                  <input value={solTol} onChange={e => setSolTol(e.target.value)} style={{ ...fieldStyle(C), width: 90 }} />
+                  <Btn ch="Solve" v="solid" color={C.gold} sm onClick={runSolver} />
+                </div>
+                <div style={{ fontSize: 9, color: C.textMuted }}>
+                  Scope: {Object.keys(scope).filter(k => typeof scope[k] !== "function").join(", ") || "none"}
+                  {" · "}pnorm, qnorm, pt, qt, pbinom, ppois, pchisq available
+                </div>
+                {solResult && (solResult.error
+                  ? <ErrBox msg={solResult.error} />
+                  : <ResultBox>
+                      <div><span style={{ color: C.textMuted }}>root </span><span style={{ color: C.gold }}>{fmt(solResult.root, 10)}</span></div>
+                      <div><span style={{ color: C.textMuted }}>f(root) </span><span style={{ color: C.teal, fontSize: 10 }}>≈ 0</span></div>
+                      <div><span style={{ color: C.textMuted }}>iterations </span>{solResult.iter}</div>
+                      {!solResult.converged && <div style={{ color: C.red, fontSize: 10 }}>Warning: did not fully converge — try a tighter bracket.</div>}
+                    </ResultBox>
+                )}
+              </div>
             )}
+
+            {/* ── System of equations ── */}
+            {solverMode === "system" && (() => {
+              const varNames = sysVarStr.split(",").map(s => s.trim()).filter(Boolean);
+              return (
+                <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: 12 }}>
+
+                  {/* Variable names + initial guesses */}
+                  <div>
+                    <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", marginBottom: 6 }}>UNKNOWNS (comma-separated)</div>
+                    <input
+                      value={sysVarStr}
+                      onChange={e => {
+                        setSysVarStr(e.target.value);
+                        setSysResult(null);
+                        // sync guess keys
+                        const names = e.target.value.split(",").map(s => s.trim()).filter(Boolean);
+                        setSysGuesses(prev => {
+                          const next = {};
+                          names.forEach(n => { next[n] = prev[n] ?? "1"; });
+                          return next;
+                        });
+                      }}
+                      placeholder="alpha, beta, lambda"
+                      style={{ ...fieldStyle(C), width: "100%", marginBottom: 8 }}
+                    />
+                    {varNames.length > 0 && (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {varNames.map(n => (
+                          <div key={n} style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 90 }}>
+                            <span style={{ fontSize: 9, color: C.gold, fontFamily: mono }}>{n}₀</span>
+                            <input type="number" step="any"
+                              value={sysGuesses[n] ?? "1"}
+                              onChange={e => setSysGuesses(prev => ({ ...prev, [n]: e.target.value }))}
+                              style={{ ...fieldStyle(C), width: "100%" }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Equation rows */}
+                  <div>
+                    <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", marginBottom: 6 }}>
+                      EQUATIONS — each f&#x1d62;({varNames.join(", ") || "…"}) = 0
+                    </div>
+                    {sysEqs.map((eq, i) => (
+                      <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted, minWidth: 24 }}>f{i + 1}</span>
+                        <input
+                          value={eq}
+                          onChange={e => { const next = [...sysEqs]; next[i] = e.target.value; setSysEqs(next); setSysResult(null); }}
+                          placeholder={`expression in ${varNames.join(", ") || "…"} = 0`}
+                          style={{ ...fieldStyle(C), flex: 1 }}
+                        />
+                        <button
+                          onClick={() => { setSysEqs(sysEqs.filter((_, j) => j !== i)); setSysResult(null); }}
+                          disabled={sysEqs.length <= 1}
+                          style={{ background: "transparent", border: "none", color: C.textMuted, cursor: sysEqs.length <= 1 ? "default" : "pointer", fontFamily: mono, fontSize: 14, opacity: sysEqs.length <= 1 ? 0.3 : 1 }}
+                          onMouseEnter={e => { if (sysEqs.length > 1) e.currentTarget.style.color = C.red; }}
+                          onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                        >×</button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => setSysEqs([...sysEqs, ""])}
+                      style={{ padding: "0.22rem 0.7rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}
+                    >+ Add equation</button>
+                  </div>
+
+                  <div style={{ fontSize: 9, color: C.textMuted }}>
+                    Newton-Raphson · numerical Jacobian · {varNames.length} × {sysEqs.length} system
+                    {" · "}Scope: {Object.keys(scope).filter(k => typeof scope[k] !== "function").join(", ") || "none"}
+                  </div>
+
+                  <Btn ch="Solve system" v="solid" color={C.gold} sm
+                    dis={varNames.length < 2 || sysEqs.filter(e => e.trim()).length < varNames.length}
+                    onClick={runSystem}
+                  />
+
+                  {sysResult && (sysResult.error
+                    ? <ErrBox msg={sysResult.error} />
+                    : <ResultBox color={C.gold}>
+                        <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, letterSpacing: "0.14em" }}>
+                          SOLUTION · {sysResult.iter} iterations · {sysResult.converged ? <span style={{ color: C.teal }}>converged</span> : <span style={{ color: C.red }}>may not have converged</span>}
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "auto auto auto", columnGap: 24, rowGap: 4, alignItems: "baseline" }}>
+                          {(sysResult.varNames ?? []).map((n, i) => (
+                            <>
+                              <span key={`n${i}`} style={{ color: C.gold, fontFamily: mono }}>{n}</span>
+                              <span key={`v${i}`} style={{ color: C.text, fontFamily: mono }}>{fmt(sysResult.solution?.[i], 10)}</span>
+                              <span key={`r${i}`} style={{ fontSize: 9, color: C.textMuted }}>residual: {fmt(sysResult.fVals?.[i], 4)}</span>
+                            </>
+                          ))}
+                        </div>
+                        {!sysResult.converged && (
+                          <div style={{ color: C.red, fontSize: 10, marginTop: 8 }}>
+                            Did not fully converge — try different initial guesses or check that the system has a solution.
+                          </div>
+                        )}
+                      </ResultBox>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
