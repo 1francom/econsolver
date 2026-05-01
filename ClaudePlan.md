@@ -751,7 +751,7 @@ Available only from `[ Report ]` tab. User selects one target language (R, Stata
 |------|---------|--------|
 | `src/App.jsx` | Mount WorkspaceBar, route 7 tabs, thread sessionState context | PENDING |
 | `src/DataStudio.jsx` | Integrate DatasetManager, move file upload to DataTab | PENDING |
-| `src/pipeline/runner.js` | Add `datasetId` to step schema; expose `localPipeline` per dataset | PENDING |
+| `src/pipeline/runner.js` | Add `datasetId` to step schema; expose `localPipeline` per dataset | DONE — field tagged in addStep (WranglingModule), documented in runner.js header |
 | `src/pipeline/registry.js` | Add `toR`, `toStata`, `toPython` method stubs per step type | PENDING |
 | `src/WranglingModule.jsx` | Become `CleanTab` — read active dataset from sessionState | PENDING |
 | `src/ExplorerModule.jsx` | Become `ExploreTab` — read active dataset from sessionState | PENDING |
@@ -1052,15 +1052,15 @@ No new dependencies — Observable Plot handles the scatter rendering; tile laye
 | 6 | Robust Standard Errors | DONE |
 | 7 | New File Format Support (.rds, .shp/.dbf) | DONE |
 | 8 | Modeling UI Overhaul (EstimatorSidebar, InferenceOptions, CodeEditor) | DONE |
-| 9 | Workspace Architecture (7-tab shell, Dataset Manager, two-tier pipeline, Calculate, Simulate, exports) | IN PROGRESS — shell done, Calculate/Simulate done, cascade delete + runner.js datasetId + AI export pending |
-| 10 | Probability & Simulation Analytics (CDFs/PDFs, Monte Carlo, probability calculator) | PENDING |
+| 9 | Workspace Architecture (7-tab shell, Dataset Manager, two-tier pipeline, Calculate, Simulate, exports) | DONE |
+| 10 | Probability & Simulation Analytics (CDFs/PDFs, Monte Carlo, probability calculator) | IN PROGRESS — 10.1 DONE (all 12 functions in calcEngine.js + buildScope); System solver (Newton-Raphson n×n) added to CalculateTab; 10.2 Monte Carlo + 10.3 Prob Calculator pending |
 | 11 | Spatial Analytics (geocoding, distance, buffer, grid, spatial join, map geom) | PENDING |
 
 ## Next unblocked tasks
 
 1. **Browser validation of Phase 4** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, all three multi-model export scripts (R/Python/Stata) generate correctly.
 
-2. **Phase 9 remaining** — cascade delete dialog in DatasetManager, `runner.js` datasetId field, AI unified script export in Report tab.
+2. **Phase 9 remaining** — ~~cascade delete dialog in DatasetManager~~ (DONE), ~~`runner.js` datasetId field~~ (DONE), ~~AI unified script export in Report tab~~ (DONE — `AIUnifiedScript` collapsible in ReportingModule, calls `generateUnifiedScript` via AIService).
 
 3. **Phase 10.1** — add probability functions (`dnorm`, `pnorm`, `qnorm`, `dt`, `pt`, `qt`, `dbinom`, `pbinom`, `dpois`, `ppois`) to `calcEngine.js` and register in `buildScope()`. Unblocks 10.2 and 10.3.
 
