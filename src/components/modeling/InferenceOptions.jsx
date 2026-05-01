@@ -16,7 +16,7 @@
 //   setMaxLag    {fn}
 
 import { useState } from "react";
-import { C, mono, Chip } from "./shared.jsx";
+import { useTheme, mono, Chip } from "./shared.jsx";
 
 // ─── SE type definitions ──────────────────────────────────────────────────────
 const SE_TYPES = [
@@ -33,6 +33,7 @@ const HAC_COMPATIBLE = new Set(["FE", "FD", "TWFE", "DiD", "OLS"]);
 
 // ─── Small styled select ──────────────────────────────────────────────────────
 function ColSelect({ value, onChange, options, placeholder }) {
+  const { C } = useTheme();
   return (
     <select
       value={value ?? ""}
@@ -72,6 +73,7 @@ export default function InferenceOptions({
   maxLag,
   setMaxLag,
 }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(false);
 
   const hacDisabled = !HAC_COMPATIBLE.has(modelType);

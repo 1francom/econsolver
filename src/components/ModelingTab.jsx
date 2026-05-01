@@ -33,7 +33,7 @@ import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
 import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
 import { runPipeline } from "../pipeline/runner.js";
-import { C, mono }         from "../components/modeling/shared.jsx";
+import { useTheme, mono }  from "../components/modeling/shared.jsx";
 import PlotBuilder          from "./PlotBuilder.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
@@ -45,7 +45,9 @@ import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 // Result-rendering atoms — kept here because they depend on result shapes,
 // not on the UI chrome that was extracted.
 
-function Lbl({ children, color = C.textMuted }) {
+function Lbl({ children, color }) {
+  const { C } = useTheme();
+  color = color ?? C.textMuted;
   return (
     <div style={{ fontSize: 9, color, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8, fontFamily: mono }}>
       {children}
@@ -53,13 +55,16 @@ function Lbl({ children, color = C.textMuted }) {
   );
 }
 function Badge({ label, color }) {
+  const { C } = useTheme();
   return (
     <span style={{ fontSize: 9, padding: "2px 7px", border: `1px solid ${color}`, color, borderRadius: 2, letterSpacing: "0.1em", fontFamily: mono }}>
       {label}
     </span>
   );
 }
-function InfoBox({ children, color = C.blue }) {
+function InfoBox({ children, color }) {
+  const { C } = useTheme();
+  color = color ?? C.blue;
   return (
     <div style={{
       padding: "0.65rem 0.9rem", background: `${color}08`,
@@ -74,6 +79,7 @@ function InfoBox({ children, color = C.blue }) {
 
 // ─── REGRESSION EQUATION ──────────────────────────────────────────────────────
 function RegressionEquation({ varNames, beta, yVar }) {
+  const { C } = useTheme();
   if (!varNames.length || !beta.length) return null;
   const interceptIdx = varNames.indexOf("(Intercept)");
   const b0 = interceptIdx >= 0 ? beta[interceptIdx] : null;
@@ -120,6 +126,7 @@ function RegressionEquation({ varNames, beta, yVar }) {
 
 // ─── FOREST PLOT ─────────────────────────────────────────────────────────────
 function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename = "coefficient_plot.svg" }) {
+  const { C } = useTheme();
   const items = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
     .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s));
@@ -247,6 +254,7 @@ function ciMultiplier(df) {
 }
 
 function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(null);
   const z    = ciMultiplier(df);
   const COLS = "1.8fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 0.8fr 0.45fr";
@@ -356,6 +364,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
 
 // ─── FIT STATS BAR ────────────────────────────────────────────────────────────
 function FitBar({ items }) {
+  const { C } = useTheme();
   return (
     <div style={{
       display: "grid", gridTemplateColumns: `repeat(${items.length}, 1fr)`,
@@ -374,6 +383,7 @@ function FitBar({ items }) {
 
 // ─── REPLICATE DROPDOWN ───────────────────────────────────────────────────────
 function ReplicateDropdown({ replicateConfig, model }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -465,6 +475,7 @@ function ReplicateDropdown({ replicateConfig, model }) {
 
 // ─── EXPORT BAR ───────────────────────────────────────────────────────────────
 function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuilder, csvBuilder }) {
+  const { C } = useTheme();
   const [showLatex, setShowLatex] = useState(false);
   const [copied, setCopied]       = useState(false);
   const latex = useMemo(
@@ -557,6 +568,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
 // ─── PANEL FE/FD RESULTS ─────────────────────────────────────────────────────
 // Must be a named component (not an IIFE) — React Rules of Hooks.
 function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("fe");
   const fe     = result.fe, fd = result.fd;
   const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
@@ -649,6 +661,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
 
 // ─── 2SLS RESULTS ─────────────────────────────────────────────────────────────
 function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("second");
   // canonical: second-stage fields are at root; firstStages sub-array is engine-shaped
   const { firstStages } = result;
@@ -774,6 +787,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
 
 // ─── GMM RESULTS ──────────────────────────────────────────────────────────────
 function GMMResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("second");
   const { firstStages } = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
@@ -848,6 +862,7 @@ function GMMResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseR
 
 // ─── LIML RESULTS ─────────────────────────────────────────────────────────────
 function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("second");
   const { firstStages } = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
@@ -945,6 +960,7 @@ function buildModelHint(panel, panelOk) {
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion }) {
+  const { C } = useTheme();
   // ── Dataset override (data= picker) ─────────────────────────────────────────
   // null = use cleanedData (default). Set to a dataset entry to model on it.
   const [overrideDataset, setOverrideDataset] = useState(null);

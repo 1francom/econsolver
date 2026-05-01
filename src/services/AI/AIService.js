@@ -23,6 +23,7 @@ import {
   COMPARE_MODELS_PROMPT,
   RESEARCH_COACH_PROMPT,
   UNIFIED_SCRIPT_PROMPT,
+  INTERPRET_MARGINAL_EFFECTS_PROMPT,
   buildMetadataContext,
 } from "./Prompts/index.js";
 
@@ -689,7 +690,53 @@ export async function researchCoach({ question, modelResult, dataDictionary = nu
   }
 }
 
-// ─── 6. GENERATE UNIFIED SCRIPT ──────────────────────────────────────────────
+// ─── 6. INTERPRET MARGINAL EFFECTS ───────────────────────────────────────────
+// Phase 11.5 — Interprets coefficient table + optional prediction point.
+//
+// model: { varNames, beta, se, pVals, label, spec }  (EstimationResult shape)
+// dataDictionary: Record<string,string> | null
+// prediction: { yhat, se, ciLow, ciHigh, xVec } | null
+//
+// Returns: Promise<string> — 1-2 plain-text paragraphs.
+
+export async function interpretMarginalEffects({ model, dataDictionary = null, prediction = null }) {
+  if (!model) throw new Error("No model provided.");
+
+  const { varNames = [], beta = [], se = [], pVals = [] } = model;
+  const modelLabel = model.label ?? model.modelLabel ?? "OLS";
+  const yVar = model.spec?.yVar ?? model.yVar ?? "y";
+
+  // Build coefficient table
+  const coeffLines = varNames
+    .filter(v => v !== "(Intercept)")
+    .map(v => {
+      const i = varNames.indexOf(v);
+      const b = beta[i], s = se[i], p = pVals[i];
+      const sig = p == null ? "p=N/A" : p < 0.01 ? "p<0.01***" : p < 0.05 ? "p<0.05**" : p < 0.1 ? "p<0.1*" : `p=${p.toFixed(3)} n.s.`;
+      return `  ${v}: β=${b?.toFixed(4) ?? "N/A"}, SE=${s?.toFixed(4) ?? "N/A"}, ${sig}`;
+    })
+    .join("\n");
+
+  const dictLines = (dataDictionary && Object.keys(dataDictionary).length)
+    ? "\nDATA DICTIONARY:\n" + Object.entries(dataDictionary).map(([k, v]) => `  ${k}: "${v}"`).join("\n")
+    : "";
+
+  const predBlock = prediction
+    ? `\nPREDICTION POINT:\n  ŷ = ${prediction.yhat?.toFixed(6) ?? "N/A"}, SE = ${prediction.se?.toFixed(6) ?? "N/A"}, 95% CI = [${prediction.ciLow?.toFixed(4) ?? "N/A"}, ${prediction.ciHigh?.toFixed(4) ?? "N/A"}]`
+    : "";
+
+  const userPrompt = `MODEL: ${modelLabel} | Dependent variable: ${yVar}\n\nCOEFFICIENT TABLE:\n${coeffLines}${dictLines}${predBlock}\n\nWrite the interpretation now.`;
+
+  const taskPrompt = INTERPRET_MARGINAL_EFFECTS_PROMPT.replace(SHARED_CONTEXT, "").trim();
+  try {
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 500 });
+  } catch (err) {
+    console.warn("[AIService] interpretMarginalEffects failed:", err.message);
+    throw err; // let caller show error — no mock needed here
+  }
+}
+
+// ─── 7. GENERATE UNIFIED SCRIPT ──────────────────────────────────────────────
 // Phase 9.10 — AI-polished, fully-documented replication script.
 //
 // sections: {

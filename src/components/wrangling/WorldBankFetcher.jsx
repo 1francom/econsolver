@@ -7,20 +7,13 @@
 //   onClose()                        — close the modal
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { useTheme } from "../../ThemeContext.jsx";
 import {
   POPULAR_INDICATORS,
   searchIndicators,
   fetchMultipleIndicators,
 } from "../../services/data/fetchers/worldBank.js";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070",
-  blue:"#6e9ec8", teal:"#6ec8b4", orange:"#c88e6e",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── QUICK-SELECT REGIONS ─────────────────────────────────────────────────────
@@ -37,7 +30,9 @@ const REGIONS = [
 ];
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
-function Tag({ label, onRemove, color = C.teal }) {
+function Tag({ label, onRemove, color }) {
+  const { C } = useTheme();
+  color = color ?? C.teal;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", background: `${color}18`, border: `1px solid ${color}40`, borderRadius: 3, fontSize: 10, color, fontFamily: mono }}>
       {label}
@@ -47,11 +42,13 @@ function Tag({ label, onRemove, color = C.teal }) {
 }
 
 function Spinner() {
+  const { C } = useTheme();
   return <div style={{ width: 14, height: 14, border: `2px solid ${C.border2}`, borderTopColor: C.gold, borderRadius: "50%", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />;
 }
 
 // ─── MAIN MODAL ───────────────────────────────────────────────────────────────
 export default function WorldBankFetcher({ onLoad, onClose }) {
+  const { C } = useTheme();
   // ── Step state: "indicators" | "options" | "fetching" | "done" | "error"
   const [step,       setStep]       = useState("indicators");
 

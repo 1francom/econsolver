@@ -11,20 +11,11 @@ import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from "./services/persistence/indexedDB.js";
+import { useTheme } from "./ThemeContext.jsx";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
 import SimulateTab      from './components/tabs/SimulateTab.jsx';
 import ReportingModule  from './ReportingModule.jsx';
 
-// ─── THEME ────────────────────────────────────────────────────────────────────
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 const LS_KEY = "econ_wrangle_v2";
 
@@ -105,17 +96,20 @@ function lsGet(){try{return JSON.parse(localStorage.getItem(LS_KEY)||"[]");}catc
 function lsSet(d){try{localStorage.setItem(LS_KEY,JSON.stringify(d));}catch{}}
 
 // ─── SHARED ATOMS ─────────────────────────────────────────────────────────────
-function Btn({onClick,ch,color=C.gold,v="out",dis=false,sm=false}){
+function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
+  const { C } = useTheme();
+  color = color ?? C.gold;
   const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily:mono,fontSize:sm?10:11,transition:"all 0.13s",opacity:dis?0.4:1};
   if(v==="solid")return<button onClick={onClick} disabled={dis} style={{...b,background:color,color:C.bg,border:`1px solid ${color}`,fontWeight:700}}>{ch}</button>;
   if(v==="ghost")return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:"none",color:dis?C.textMuted:color}}>{ch}</button>;
   return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:`1px solid ${C.border2}`,color:dis?C.textMuted:C.textDim}}>{ch}</button>;
 }
-function Badge({ch,color=C.textMuted}){return<span style={{fontSize:9,padding:"2px 6px",border:`1px solid ${color}`,color,borderRadius:2,letterSpacing:"0.1em",fontFamily:mono,whiteSpace:"nowrap"}}>{ch}</span>;}
-function Spin(){return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
+function Badge({ch,color}){const { C } = useTheme(); color = color ?? C.textMuted; return<span style={{fontSize:9,padding:"2px 6px",border:`1px solid ${color}`,color,borderRadius:2,letterSpacing:"0.1em",fontFamily:mono,whiteSpace:"nowrap"}}>{ch}</span>;}
+function Spin(){const { C } = useTheme(); return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
 
 // ─── DATA GRID (shared preview) ───────────────────────────────────────────────
 function Grid({headers,rows,hi,max=20,types,onType}){
+  const { C } = useTheme();
   const vis=rows.slice(0,max);
   if(!headers.length)return null;
   const tc={numeric:C.blue,binary:C.purple,categorical:C.purple,string:C.textMuted,date:C.teal};
@@ -155,6 +149,7 @@ function Grid({headers,rows,hi,max=20,types,onType}){
 
 // ─── UPLOADER ────────────────────────────────────────────────────────────────
 function Uploader({onReady}){
+  const { C } = useTheme();
   const [drag,setDrag]=useState(false),[loading,setLoading]=useState(false),[err,setErr]=useState(""),[pf,setPf]=useState(null);
   const ref=useRef();
   async function handleFile(file){
@@ -231,6 +226,7 @@ function Uploader({onReady}){
 // ─── WORKSPACE HELPERS ────────────────────────────────────────────────────────
 // Shown in Explore / Model / Report tabs when no pipeline output exists yet.
 function NeedsOutput({ onGoToClean }) {
+  const { C } = useTheme();
   return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:12,fontFamily:mono}}>
       <div style={{fontSize:28,color:C.border2}}>⌾</div>
@@ -266,6 +262,7 @@ function colStats(col, rows) {
 }
 
 function DataViewer({ rows, headers, filename }) {
+  const { C } = useTheme();
   const [page,      setPage]      = useState(0);
   const [selCol,    setSelCol]    = useState(null);
   const [colFilter, setColFilter] = useState("");
@@ -437,6 +434,7 @@ function DataViewer({ rows, headers, filename }) {
 // ─── COLUMN META TABLE ────────────────────────────────────────────────────────
 // Renders a compact column-by-column info table: name, type, non-null %, range/top.
 function ColumnMetaTable({ rows, headers, colInfo }) {
+  const { C } = useTheme();
   const [expandedCol, setExpandedCol] = useState(null);
 
   const meta = useMemo(() => headers.map(h => {
@@ -538,6 +536,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
 
 // Dataset overview + load controls (file upload, World Bank, OECD).
 function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset }) {
+  const { C } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP"];
   const fileRef  = useRef();
   const [loading,   setLoading]   = useState(false);
@@ -812,6 +811,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
 
 // Placeholder for tabs not yet implemented (Simulate, Calculate, Report).
 function ComingSoon({ tab }) {
+  const { C } = useTheme();
   const labels = { simulate:"Simulate", calculate:"Calculate", report:"Report" };
   const descs  = {
     simulate:  "Build data generating processes, run Monte Carlo simulations, power analysis.",
@@ -850,6 +850,7 @@ function WorkspaceRegistrar({ filename, rawData }) {
 // Mirrors R/Gretl workspace model — projects are first-class, datasets are children.
 
 function Dashboard({onNew, onLoad}) {
+  const { C } = useTheme();
   const [projects, setProjects]   = useState([]);
   const [expanded, setExpanded]   = useState({});
   const [loading,  setLoading]    = useState(true);
@@ -1209,6 +1210,7 @@ function Dashboard({onNew, onLoad}) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
+  const { C } = useTheme();
   const [screen,             setScreen]            = useState("dashboard");
   const [rawData,            setRawData]           = useState(null);
   const [filename,           setFilename]          = useState("");

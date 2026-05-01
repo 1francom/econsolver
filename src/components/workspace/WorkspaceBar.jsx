@@ -1,17 +1,11 @@
 // ─── ECON STUDIO · WorkspaceBar.jsx ──────────────────────────────────────────
 // 7-tab workspace navigation bar rendered at the top of every project view.
 // Left side: DatasetManager button (always visible in every tab).
-// Right side: 7 tab buttons. Tabs requiring output are locked until pipeline runs.
+// Right side: 7 tab buttons + theme toggle. Tabs requiring output are locked until pipeline runs.
 
 import DatasetManager from "./DatasetManager.jsx";
+import { useTheme } from "../../ThemeContext.jsx";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  teal:"#6ec8b4", violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 const TABS = [
@@ -25,6 +19,8 @@ const TABS = [
 ];
 
 export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, onSelectDataset }) {
+  const { C, theme, setTheme } = useTheme();
+
   return (
     <div style={{
       display: "flex",
@@ -41,13 +37,13 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
       />
 
       {/* ── Separator ── */}
-      <div style={{ width: 1, background: C.border, flexShrink: 0, margin: "6px 0" }}/>
+      <div style={{ width: 1, background: C.border, flexShrink: 0, margin: "6px 0" }} />
 
       {/* ── Tab buttons ── */}
-      <div style={{ display: "flex", alignItems: "stretch", paddingLeft: "0.25rem", overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "stretch", paddingLeft: "0.25rem", overflow: "hidden", flex: 1 }}>
         {TABS.map(tab => {
-          const isActive   = tab.id === activeTab;
-          const isLocked   = tab.requiresOutput && !hasOutput;
+          const isActive = tab.id === activeTab;
+          const isLocked = tab.requiresOutput && !hasOutput;
 
           return (
             <button
@@ -89,6 +85,30 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           );
         })}
       </div>
+
+      {/* ── Theme toggle ── */}
+      <button
+        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 32,
+          flexShrink: 0,
+          background: "transparent",
+          border: "none",
+          borderLeft: `1px solid ${C.border}`,
+          color: C.textMuted,
+          cursor: "pointer",
+          fontSize: 13,
+          transition: "color 0.12s",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+      >
+        {theme === "dark" ? "☀" : "☾"}
+      </button>
     </div>
   );
 }

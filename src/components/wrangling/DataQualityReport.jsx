@@ -8,28 +8,24 @@
 //   onExportMd    fn()                — triggers markdown export
 
 import { useState } from "react";
+import { useTheme } from "../../ThemeContext.jsx";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── SEVERITY PALETTE ─────────────────────────────────────────────────────────
-const SEV = {
-  critical: { color: "#e06c75", bg: "#1a0a0a", border: "#e06c7530", icon: "●" },
-  high:     { color: C.red,     bg: "#120808", border: `${C.red}30`,    icon: "▲" },
-  medium:   { color: C.yellow,  bg: "#12100a", border: `${C.yellow}30`, icon: "◆" },
-  low:      { color: C.blue,    bg: "#080c12", border: `${C.blue}30`,   icon: "○" },
-  ok:       { color: C.green,   bg: C.surface, border: `${C.green}20`,  icon: "✓" },
-};
+function makeSEV(C) {
+  return {
+    critical: { color: "#e06c75", bg: "#1a0a0a", border: "#e06c7530", icon: "●" },
+    high:     { color: C.red,     bg: "#120808", border: `${C.red}30`,    icon: "▲" },
+    medium:   { color: C.yellow,  bg: "#12100a", border: `${C.yellow}30`, icon: "◆" },
+    low:      { color: C.blue,    bg: "#080c12", border: `${C.blue}30`,   icon: "○" },
+    ok:       { color: C.green,   bg: C.surface, border: `${C.green}20`,  icon: "✓" },
+  };
+}
 
 function SevBadge({ sev, sm = false }) {
+  const { C } = useTheme();
+  const SEV = makeSEV(C);
   const s = SEV[sev] || SEV.ok;
   return (
     <span style={{
@@ -46,6 +42,7 @@ function SevBadge({ sev, sm = false }) {
 // ─── MISSING HEATMAP ─────────────────────────────────────────────────────────
 // SVG bar chart: one bar per column showing % missing
 function MissingHeatmap({ columns }) {
+  const { C } = useTheme();
   const cols = columns.filter(c => c.stats.naPct > 0).slice(0, 30);
   if (!cols.length) return (
     <div style={{ fontSize: 11, color: C.green, fontFamily: mono, padding: "0.75rem 0" }}>
@@ -97,6 +94,7 @@ function MissingHeatmap({ columns }) {
 
 // ─── CORRELATION MATRIX ───────────────────────────────────────────────────────
 function CorrelationList({ pairs }) {
+  const { C } = useTheme();
   if (!pairs.length) return (
     <div style={{ fontSize: 11, color: C.green, fontFamily: mono, padding: "0.75rem 0" }}>
       ✓ No high correlations detected (threshold |r| ≥ 0.85)
@@ -142,6 +140,8 @@ function CorrelationList({ pairs }) {
 
 // ─── COLUMN DETAIL CARD ───────────────────────────────────────────────────────
 function ColDetail({ col, onApplyStep }) {
+  const { C } = useTheme();
+  const SEV = makeSEV(C);
   const s   = col.stats;
   const sev = SEV[col.severity] || SEV.ok;
 
@@ -257,6 +257,7 @@ function ColDetail({ col, onApplyStep }) {
 
 // ─── META SUMMARY BAR ─────────────────────────────────────────────────────────
 function MetaBar({ meta, panelSummary }) {
+  const { C } = useTheme();
   const comp     = meta.completeness;
   const compCol  = comp > 0.95 ? C.green : comp > 0.8 ? C.yellow : C.red;
 
@@ -307,7 +308,9 @@ function MetaBar({ meta, panelSummary }) {
 }
 
 // ─── SECTION HEADER ───────────────────────────────────────────────────────────
-function SectionHeader({ title, count, color = C.gold }) {
+function SectionHeader({ title, count, color }) {
+  const { C } = useTheme();
+  color = color ?? C.gold;
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 8,
@@ -328,6 +331,8 @@ function SectionHeader({ title, count, color = C.gold }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function DataQualityReport({ report, onApplyStep, onExportMd }) {
+  const { C } = useTheme();
+  const SEV = makeSEV(C);
   const [section, setSection] = useState("flags");
 
   if (!report) return (

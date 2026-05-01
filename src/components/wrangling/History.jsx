@@ -14,10 +14,10 @@
 //   onConfirmDelete(mode) — "single" | "cascade"
 //   onCancelDelete  — cancel pending delete
 
-import { C, mono, Lbl } from "./shared.jsx";
+import { useTheme, mono, Lbl } from "./shared.jsx";
 
 // ── Step type → accent color ──────────────────────────────────────────────────
-const TYPE_COLOR = {
+const typeColor = C => ({
   recode:C.teal, quickclean:C.teal, winz:C.orange, log:C.blue, sq:C.blue,
   std:C.blue, drop:C.red, filter:C.yellow, ai_tr:C.purple, dummy:C.green,
   did:C.gold, lag:C.orange, lead:C.orange, diff:C.orange, ix:C.blue,
@@ -27,7 +27,7 @@ const TYPE_COLOR = {
   trim_outliers:C.red, flag_outliers:C.orange,
   extract_regex:C.violet, normalize_cats:C.teal, factor_interactions:C.blue,
   arrange:C.textMuted, type_cast:C.orange,
-};
+});
 
 // ── Step type → short icon ────────────────────────────────────────────────────
 const TYPE_ICON = {
@@ -42,6 +42,7 @@ const TYPE_ICON = {
 
 // ── Undo / Redo button ────────────────────────────────────────────────────────
 function UndoBtn({ label, title, onClick, enabled }) {
+  const { C } = useTheme();
   return (
     <button
       onClick={onClick}
@@ -67,6 +68,7 @@ function UndoBtn({ label, title, onClick, enabled }) {
 }
 
 function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete }) {
+  const { C } = useTheme();
   if (!pipeline.length && !canUndo && !canRedo) return null;
 
   return (
@@ -126,7 +128,7 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo, br
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
             {pipeline.map((s, i) => {
-              const col = TYPE_COLOR[s.type] || C.textMuted;
+              const col = typeColor(C)[s.type] || C.textMuted;
               const ico = TYPE_ICON[s.type]  || "·";
               const isActiveBranch = branchPointIndex === i;
 

@@ -6,15 +6,9 @@
 //   onClose()
 
 import { useState, useEffect } from "react";
+import { useTheme } from "../../ThemeContext.jsx";
 import { POPULAR_OECD, OECD_GROUPS, fetchMultipleOECD } from "../../services/data/fetchers/oecd.js";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", blue:"#6e9ec8",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", teal:"#6ec8b4",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // OECD member countries (ISO2 codes)
@@ -34,7 +28,9 @@ const COUNTRY_SETS = [
   { label: "Anglosphere", codes: ["AUS","CAN","IRL","NZL","GBR","USA"] },
 ];
 
-function Tag({ label, onRemove, color = C.blue }) {
+function Tag({ label, onRemove, color }) {
+  const { C } = useTheme();
+  color = color ?? C.blue;
   return (
     <span style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"2px 8px", background:`${color}18`, border:`1px solid ${color}40`, borderRadius:3, fontSize:10, color, fontFamily:mono }}>
       {label}
@@ -44,10 +40,12 @@ function Tag({ label, onRemove, color = C.blue }) {
 }
 
 function Spinner() {
+  const { C } = useTheme();
   return <div style={{ width:14, height:14, border:`2px solid ${C.border2}`, borderTopColor:C.gold, borderRadius:"50%", animation:"spin 0.7s linear infinite", flexShrink:0 }} />;
 }
 
 export default function OECDFetcher({ onLoad, onClose }) {
+  const { C } = useTheme();
   const [selected,   setSelected]   = useState([]);
   const [groupFilter, setGroupFilter] = useState("All");
   const [countrySet, setCountrySet] = useState(0);

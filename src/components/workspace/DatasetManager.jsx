@@ -6,17 +6,12 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSessionState, useSessionDispatch } from "../../services/session/sessionState.jsx";
+import { useTheme } from "../../ThemeContext.jsx";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", teal:"#6ec8b4", violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
+  const { C } = useTheme();
   const { datasets, primaryDatasetId, globalPipeline } = useSessionState();
   const dispatch = useSessionDispatch();
   const [open, setOpen] = useState(false);

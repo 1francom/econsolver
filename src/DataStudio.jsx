@@ -13,7 +13,8 @@
 // They are kept in component state (not persisted) — equivalent to R's
 // "you must re-run your script to reload data" behavior.
 
-import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
+import { useTheme } from "./ThemeContext.jsx";
 import WranglingModule from "./WranglingModule.jsx";
 import { saveRawData } from "./services/persistence/indexedDB.js";
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
@@ -21,15 +22,6 @@ import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── UTILITIES ────────────────────────────────────────────────────────────────
@@ -194,6 +186,7 @@ async function parseFile(file) {
 
 // ─── DATASET SIDEBAR ──────────────────────────────────────────────────────────
 function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, onFetchWorldBank, onFetchOECD, loadErr, loading }) {
+  const { C } = useTheme();
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
 
@@ -397,6 +390,7 @@ function ssClear(pid) {
 
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
 const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplete, onOutputReady, pid, onDatasetsChange, activeDatasetId }, ref) {
+  const { C } = useTheme();
   const primaryId = pid || genId();
   const dispatch = useSessionDispatch();
 
@@ -474,8 +468,13 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
   }, [activeDatasetId]);
 
   const activeDs       = datasets.find(d => d.id === activeId) || datasets[0];
-  // Other datasets — passed to WranglingModule for join/append context
-  const otherDatasets  = datasets.filter(d => d.id !== activeId);
+  // Other datasets — passed to WranglingModule for join/append context.
+  // useMemo so the array reference is stable across re-renders (prevents
+  // context → rows → onReady render loop in WranglingModule).
+  const otherDatasets  = useMemo(
+    () => datasets.filter(d => d.id !== activeId),
+    [datasets, activeId],
+  );
 
   const handleLoadFile = useCallback(async (file) => {
     setLoading(true);
