@@ -13,7 +13,7 @@
 //
 // Depends on: C, mono from ./shared.jsx
 
-import { C, mono } from "./shared.jsx";
+import { useTheme, mono } from "./shared.jsx";
 
 // ─── EXPORT SVG ───────────────────────────────────────────────────────────────
 function exportSVG(svgId, filename) {
@@ -33,6 +33,7 @@ function exportSVG(svgId, filename) {
 
 // ─── INLINE PLOT SHELL ────────────────────────────────────────────────────────
 function InlinePlotShell({ title, svgId, filename, children }) {
+  const { C } = useTheme();
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
@@ -70,6 +71,7 @@ function niceTicks(lo, hi, n = 5) {
 }
 
 function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
+  const { C } = useTheme();
   return (
     <g>
       <line x1={sx(ticks[0])} x2={sx(ticks[ticks.length - 1])}
@@ -87,6 +89,7 @@ function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
 }
 
 function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
+  const { C } = useTheme();
   return (
     <g>
       <line x1={x} x2={x} y1={sy(ticks[0])} y2={sy(ticks[ticks.length - 1])}
@@ -181,6 +184,7 @@ function normalQuantile(p) {
 // - LOWESS smoother to detect non-linearity / heteroskedasticity patterns
 // - Outlier labels for |standardized residual| > 2.5
 export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!resid?.length || !Yhat?.length) return null;
 
   const W = 560, H = 320;
@@ -307,6 +311,7 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
 // - 95% pointwise confidence band (approximate: ±1.36/√n)
 // - Outlier labels for extreme quantiles
 export function QQPlot({ resid, svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!resid?.length) return null;
 
   const W = 560, H = 320;
@@ -440,6 +445,7 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
 // Accepts the raw engine result object — pulls resid and Yhat automatically.
 // modelLabel: shown in the header (e.g. "OLS", "FE", "FD")
 export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) {
+  const { C } = useTheme();
   const resid = result?.resid;
   const Yhat  = result?.Yhat;
   if (!resid?.length || !Yhat?.length) return null;

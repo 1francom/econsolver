@@ -17,7 +17,7 @@
 //   initialLayers array      — optional pre-seeded layers (G10 template mode)
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { C, mono } from "./modeling/shared.jsx";
+import { useTheme, mono } from "./modeling/shared.jsx";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 
 // ─── OBSERVABLE PLOT — CACHED CDN SINGLETON ───────────────────────────────────
@@ -58,7 +58,7 @@ const PALETTE_PRESETS = [
   { id: "accent",       label: "Accent"      },
 ];
 
-const FILLS = [C.teal, C.gold, C.blue, "#c47070", "#a87ec8", "#7ab896", C.orange];
+
 
 const POSITION_OPTIONS = {
   bar:   ["identity", "stack"],
@@ -67,6 +67,7 @@ const POSITION_OPTIONS = {
 
 function genId() { return "ly_" + Math.random().toString(36).slice(2, 8); }
 
+const DEFAULT_FILLS = ["#6ec8b4","#c8a96e","#6e9ec8","#c47070","#a87ec8","#7ab896","#c88e6e"];
 function mkLayer(geom, idx) {
   return {
     id:       genId(),
@@ -74,7 +75,7 @@ function mkLayer(geom, idx) {
     aes:      { x: "", y: "", color: "", yMin: "", yMax: "" },
     value:    "",
     position: "identity",
-    fill:     FILLS[idx % FILLS.length],
+    fill:     DEFAULT_FILLS[idx % DEFAULT_FILLS.length],
     visible:  true,
     opacity:  1.0,   // G10.2 — per-layer alpha (0–1)
     pinned:   false, // G10.4 — included in comparison view
@@ -205,6 +206,7 @@ function patchDarkTheme(el) {
 // ─── PLOT CANVAS — renders one or more layers on a single Observable Plot ─────
 // layers: array of layer objects (for overlay/comparison) OR single-element array
 function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canvasRef }) {
+  const { C } = useTheme();
   const ownRef = useRef(null);
   const ref    = canvasRef ?? ownRef;
   const [Plt, setPlt] = useState(null);
@@ -262,6 +264,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
 
 // ─── AES ROW ─────────────────────────────────────────────────────────────────
 function AesRow({ label, value, onChange, headers, optional }) {
+  const { C } = useTheme();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
       <span style={{ width: 38, fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0, textAlign: "right" }}>
@@ -285,6 +288,7 @@ function AesRow({ label, value, onChange, headers, optional }) {
 
 // ─── LAYER CARD ───────────────────────────────────────────────────────────────
 function LayerCard({ layer, isActive, onSelect, onToggle, onPin, onRemove }) {
+  const { C } = useTheme();
   return (
     <div
       onClick={onSelect}
@@ -335,6 +339,7 @@ function LayerCard({ layer, isActive, onSelect, onToggle, onPin, onRemove }) {
 
 // ─── LAYER EDITOR ─────────────────────────────────────────────────────────────
 function LayerEditor({ layer, onChange, headers }) {
+  const { C } = useTheme();
   const isRefLine    = ["hline", "vline"].includes(layer.geom);
   const needsYMinMax = ["errorbar", "ribbon"].includes(layer.geom);
   const noY          = ["histogram", "density", "hline", "vline"].includes(layer.geom);
@@ -471,6 +476,7 @@ function LayerEditor({ layer, onChange, headers }) {
 // ─── COMPARISON PANEL ─────────────────────────────────────────────────────────
 // Renders pinned layers side-by-side or overlaid
 function ComparisonPanel({ pinnedLayers, rows, xLabel, yLabel, w, scheme, overlayMode }) {
+  const { C } = useTheme();
   const canvasRefs = [useRef(null), useRef(null), useRef(null)];
 
   if (overlayMode) {
@@ -516,6 +522,7 @@ function ComparisonPanel({ pinnedLayers, rows, xLabel, yLabel, w, scheme, overla
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [] }) {
+  const { C } = useTheme();
   const [layers,      setLayers]      = useState(initialLayers);
   const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
   const [title,       setTitle]       = useState("");

@@ -1,9 +1,10 @@
 // ─── ECON STUDIO · components/wrangling/PanelTab.jsx ───────────────────────
 import { useState, useMemo } from "react";
 import { validatePanel } from "../../pipeline/validator.js";
-import { C, mono, Lbl, Btn } from "./shared.jsx";
+import { useTheme, mono, Lbl, Btn } from "./shared.jsx";
 
 function Heatmap({v}){
+  const { C } = useTheme();
   const MAX_E=12,MAX_T=10;
   const ents=v.entities.slice(0,MAX_E),ts=v.times.slice(0,MAX_T);
   return(
@@ -25,6 +26,7 @@ function Heatmap({v}){
 
 // ─── PANEL TAB ────────────────────────────────────────────────────────────────
 function PanelTab({rows,headers,panel,setPanel}){
+  const { C } = useTheme();
   const [ec,setEc]=useState(panel?.entityCol||""),[tc,setTc]=useState(panel?.timeCol||"");
   const v=useMemo(()=>ec&&tc?validatePanel(rows,ec,tc):null,[rows,ec,tc]);
   const bc={strongly_balanced:C.green,unbalanced:C.yellow,gaps:C.orange};

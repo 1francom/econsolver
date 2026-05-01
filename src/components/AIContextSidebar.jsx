@@ -12,13 +12,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { researchCoach } from "../services/AI/AIService.js";
 import { buildMetadataReport } from "../core/validation/metadataExtractor.js";
+import { useTheme } from "../ThemeContext.jsx";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  teal:"#6ec8b4", violet:"#9e7ec8", red:"#c47070",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 const SCREEN_STARTERS = {
@@ -84,6 +79,7 @@ function buildContext(screen, cleanedData, modelResult) {
 }
 
 function Bubble({ role, text }) {
+  const { C } = useTheme();
   const isUser = role === "user";
   return (
     <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 8 }}>
@@ -110,6 +106,7 @@ function Bubble({ role, text }) {
 }
 
 function ThinkingBubble() {
+  const { C } = useTheme();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
       <div style={{
@@ -135,6 +132,7 @@ function ThinkingBubble() {
 }
 
 export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null }) {
+  const { C } = useTheme();
   const [history,  setHistory]  = useState([]);
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);

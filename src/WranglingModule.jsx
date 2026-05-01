@@ -22,7 +22,7 @@ import AuditTrail        from "./components/validation/AuditTrail.jsx";
 import { auditPipeline } from "./pipeline/auditor.js";
 
 // ── Shared atoms ───────────────────────────────────────────────────────────
-import { C, mono, Tabs } from "./components/wrangling/shared.jsx";
+import { useTheme, mono, Tabs } from "./components/wrangling/shared.jsx";
 
 // ── Persistence — IndexedDB (replaces localStorage 5MB cap) ───────────────
 import {
@@ -43,6 +43,7 @@ export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, allDatasets = [], onSaveSubset }) {
+  const { C } = useTheme();
   // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
   const sessionDispatch = useSessionDispatch();
 
@@ -112,9 +113,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     return () => clearTimeout(saveTimer.current);
   }, [pipeline, panel, dataDictionary, idbReady]);
 
-  // ── Auto-push output to parent when pipeline finishes loading from IndexedDB ─
-  // This fires once after mount (when idbReady becomes true) so that switching
-  // datasets immediately propagates the current pipeline output to all tabs.
+  // ── Auto-push output to parent whenever pipeline output changes ──────────────
+  // Fires on initial load (idbReady) AND whenever pipeline changes (user edits a
+  // step), so Explorer, Model, PlotBuilder and Data Viewer always stay in sync.
+  // Depends on `pipeline` (stable state), NOT `rows` (computed from allDatasets
+  // which gets a new array ref every render — would cause an infinite loop).
   useEffect(() => {
     if (!idbReady || !onReady) return;
     const ci = {};
@@ -131,7 +134,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             balance: panel.validation?.balance, blockFE: panel.validation?.blockFE }
         : null,
     });
-  }, [idbReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idbReady, pipeline]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-clamp branchPointIndex when pipeline shrinks ─────────────────────
   useEffect(() => {

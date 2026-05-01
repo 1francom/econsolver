@@ -7,7 +7,7 @@
 //   result  {object}  — active model result (same shape as other modeling components)
 
 import { useState, useEffect, useCallback } from "react";
-import { C, mono }                          from "./shared.jsx";
+import { useTheme, mono }                   from "./shared.jsx";
 import { generateRScript }                  from "../../services/export/rScript.js";
 import { generatePythonScript }             from "../../services/export/pythonScript.js";
 import { generateStataScript }              from "../../services/export/stataScript.js";
@@ -61,6 +61,7 @@ function buildScript(tab, result) {
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export default function CodeEditor({ result }) {
+  const { C } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [tab,     setTab]     = useState("r");
   const [code,    setCode]    = useState("");

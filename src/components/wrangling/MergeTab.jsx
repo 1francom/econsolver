@@ -1,11 +1,12 @@
 // ─── ECON STUDIO · components/wrangling/MergeTab.jsx ───────────────────────
 import { useState, useMemo } from "react";
-import { C, mono, Lbl, Tabs, Btn, Grid } from "./shared.jsx";
+import { useTheme, mono, Lbl, Tabs, Btn, Grid } from "./shared.jsx";
 
 // ─── MERGE TAB ───────────────────────────────────────────────────────────────
 // JOIN and APPEND operations against other loaded datasets.
 // RHS always uses raw (pre-pipeline) data of the referenced dataset.
 function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
+  const { C } = useTheme();
   const [subTab, setSubTab]       = useState("join");
   // JOIN state
   const [rightId, setRightId]     = useState("");

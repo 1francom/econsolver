@@ -10,6 +10,7 @@
 //   <ReportingModule result={activeResult} onClose={...} />
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { useTheme } from "./ThemeContext.jsx";
 import { stars, buildLatex } from "./math/index.js";
 import { interpretRegression, generateUnifiedScript } from "./services/AI/AIService.js";
 import { generateCleanScript } from "./pipeline/exporter.js";
@@ -19,15 +20,6 @@ import { generateStataScript } from "./services/export/stataScript.js";
 import { buildStargazer }      from "./services/export/latexTable.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── SAFE NUMBER FORMATTER ────────────────────────────────────────────────────
@@ -56,7 +48,9 @@ function normaliseResult(raw) {
 // Delegated to AIService.js — interpretRegression() handles prompts + API call.
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
-function Lbl({ children, color = C.textMuted, mb = 6 }) {
+function Lbl({ children, color, mb = 6 }) {
+  const { C } = useTheme();
+  color = color ?? C.textMuted;
   return (
     <div style={{ fontSize: 10, color, letterSpacing: "0.2em", textTransform: "uppercase",
                   marginBottom: mb, fontFamily: mono }}>
@@ -64,7 +58,9 @@ function Lbl({ children, color = C.textMuted, mb = 6 }) {
     </div>
   );
 }
-function Btn({ onClick, ch, color = C.gold, v = "out", dis = false, sm = false }) {
+function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
+  const { C } = useTheme();
+  color = color ?? C.gold;
   const b = { padding: sm ? "0.28rem 0.65rem" : "0.48rem 0.95rem", borderRadius: 3,
                cursor: dis ? "not-allowed" : "pointer", fontFamily: mono,
                fontSize: sm ? 10 : 11, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
@@ -89,13 +85,16 @@ function Btn({ onClick, ch, color = C.gold, v = "out", dis = false, sm = false }
   );
 }
 function Spin() {
+  const { C } = useTheme();
   return (
     <div style={{ width: 14, height: 14, border: `2px solid ${C.border2}`,
                   borderTopColor: C.gold, borderRadius: "50%",
                   animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
   );
 }
-function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color = C.teal }) {
+function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color }) {
+  const { C } = useTheme();
+  color = color ?? C.teal;
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(text).then(() => {
@@ -118,6 +117,7 @@ function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color = C.
 // Teal diamond = significant (p < 0.05), grey = not significant.
 // Each row: label | CI whisker + point | β value
 function ForestPlot({ varNames, beta, se, pVals }) {
+  const { C } = useTheme();
   const items = useMemo(() =>
     varNames
       .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
@@ -246,6 +246,7 @@ function ForestPlot({ varNames, beta, se, pVals }) {
 // buildStargazer is imported from services/export/latexTable.js (shared with ModelComparison).
 
 function LatexPanel({ result, modelLabel, yVar }) {
+  const { C } = useTheme();
   const latex = useMemo(
     () => buildStargazer([{ label: modelLabel, result, yVar }]),
     [result, modelLabel, yVar]
@@ -283,6 +284,7 @@ function LatexPanel({ result, modelLabel, yVar }) {
 // Bins raw data (~20 bins per side) for performance, draws two fitted lines
 // (local linear from engine) that meet/jump at the cutoff threshold.
 function RDDScatterPlot({ rddResult }) {
+  const { C } = useTheme();
   const { valid, xc, D, Y, leftFit, rightFit, cutoff, h, kernelType } = rddResult ?? {};
 
   if (!valid || valid.length < 4) return (
@@ -413,6 +415,7 @@ function RDDScatterPlot({ rddResult }) {
 
 // Loading skeleton — shown while API is generating
 function NarrativeSkeleton() {
+  const { C } = useTheme();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: "1rem" }}>
       {[0, 1].map(i => (
@@ -448,6 +451,7 @@ function NarrativeSkeleton() {
 }
 
 function AINarrative({ result, modelLabel, yVar, dataDictionary, rows }) {
+  const { C } = useTheme();
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
@@ -608,6 +612,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows }) {
 
 // ─── FIT STATS SUMMARY BAR ────────────────────────────────────────────────────
 function FitBar({ result }) {
+  const { C } = useTheme();
   const { R2, adjR2, n, df, Fstat, Fpval, modelLabel } = result;
   const items = [
     { l: "Model",    v: modelLabel ?? "—",               c: C.gold },
@@ -642,6 +647,7 @@ function FitBar({ result }) {
 
 // ─── SIGNIFICANT COEFFICIENTS CALLOUT ────────────────────────────────────────
 function SigCallout({ result }) {
+  const { C } = useTheme();
   const { varNames, beta, se, pVals } = result;
   const sig = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
@@ -683,6 +689,7 @@ function SigCallout({ result }) {
 //   result       — normalised EstimationResult (for model section)
 //   cleanedData  — { cleanRows, headers, pipeline, dataDictionary, filename }
 function AIUnifiedScript({ result, cleanedData }) {
+  const { C } = useTheme();
   const [open,     setOpen]     = useState(false);
   const [lang,     setLang]     = useState("r");
   const [loading,  setLoading]  = useState(false);
@@ -883,6 +890,7 @@ function AIUnifiedScript({ result, cleanedData }) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function ReportingModule({ result: rawResult, cleanedData, onClose }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("forest");
 
   // ── Debug: log raw result so any NaN/undefined shows in console ──────────────

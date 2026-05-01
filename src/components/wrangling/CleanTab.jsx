@@ -2,7 +2,7 @@
 // NormalizePanel, StandardizeDialog, Auditor, ColCard,
 // FilterBuilder (ConditionRow, FilterPreview), FillNaSection, CleanTab.
 import { useState, useEffect, useRef, useMemo } from "react";
-import { C, mono, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.jsx";
+import { useTheme, mono, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 
 // ─── NORMALIZE TEXT CATEGORIES PANEL ─────────────────────────────────────────
@@ -13,6 +13,7 @@ import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./util
 // Algorithm: Levenshtein fuzzy-groups (already in fuzzyGroups()) + frequency-
 // ranked canonical suggestion. The user can override any canonical inline.
 function NormalizePanel({headers, rows, info, onAdd}){
+  const { C } = useTheme();
   const [selCol, setSelCol]     = useState("");
   const [clusters, setClusters] = useState([]);
   const [rawVals, setRawVals]   = useState([]);
@@ -279,6 +280,7 @@ function NormalizePanel({headers, rows, info, onAdd}){
 
 // ─── STANDARDIZE DIALOG ───────────────────────────────────────────────────────
 function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
+  const { C } = useTheme();
   const [clusterState,setClusterState]=useState(()=>clusters.map(cl=>({...cl})));
   const [qcMode,setQcMode]=useState("");
   const currentMap=useMemo(()=>{
@@ -405,6 +407,7 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
 
 // ─── SMART AUDITOR ────────────────────────────────────────────────────────────
 function Auditor({sug,aiP,onApply,onNormalize,loading}){
+  const { C } = useTheme();
   if(!sug.length&&!loading) return null;
   const sc={high:C.red,medium:C.yellow,low:C.blue},sb={high:"#120808",medium:"#12100a",low:"#080c12"};
   return(
@@ -457,6 +460,7 @@ function Auditor({sug,aiP,onApply,onNormalize,loading}){
 
 // ─── COLUMN CARD ──────────────────────────────────────────────────────────────
 function ColCard({h, info, sug, selected, onSel, onAct}){
+  const { C } = useTheme();
   const c = info[h] || {};
   const [mo, setMo] = useState(false);
 
@@ -511,6 +515,7 @@ function ColCard({h, info, sug, selected, onSel, onAct}){
 // Shown below the grid when a column with issues is selected.
 // Read-only: describes the issue and suggests where to act. No action buttons.
 function ColIssuePanel({ col, issues }) {
+  const { C } = useTheme();
   if (!issues || !issues.length) return null;
 
   const TYPE_META = {
@@ -615,6 +620,7 @@ function opsFor(col, info) {
 
 // A single condition row
 function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove }) {
+  const { C } = useTheme();
   const ops = opsFor(cond.col, info);
   const needsValue = !["notna","isna"].includes(cond.op);
   const isBetween  = cond.op === "between";
@@ -731,6 +737,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
 
 // Preview: how many rows pass the predicate on a sample
 function FilterPreview({ rows, predicate, total }) {
+  const { C } = useTheme();
   const passing = useMemo(() => {
     if (!predicate) return null;
     try {
@@ -792,6 +799,7 @@ function FilterPreview({ rows, predicate, total }) {
 
 // The builder itself
 function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
+  const { C } = useTheme();
   const emptyCondition = () => ({ col:"", op:"notna", value:"", values:[], lo:"", hi:"", _id: Date.now()+Math.random() });
 
   const [groups, setGroups] = useState([
@@ -988,6 +996,7 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
 // Collapsible panel in CleanTab. Clamps extreme values to [p1, p99] bounds.
 // Moved from Features — conceptually data cleaning, not feature engineering.
 function WinsorizeSection({ headers, info, rows, onAdd }) {
+  const { C } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [col,     setCol]     = useState("");
   const [mode,    setMode]    = useState("inplace"); // "inplace" | "newcol"
@@ -1104,6 +1113,7 @@ function WinsorizeSection({ headers, info, rows, onAdd }) {
 // ─── FILL MISSING SECTION ─────────────────────────────────────────────────────
 // Collapsible panel in CleanTab for all fill strategies including grouped imputation.
 function FillNaSection({ headers, info, rows, onAdd }) {
+  const { C } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [col,     setCol]     = useState("");
   const [strat,   setStrat]   = useState("zero");
@@ -1300,6 +1310,7 @@ function FillNaSection({ headers, info, rows, onAdd }) {
 
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
 function CleanTab({rows,headers,info,rawData,onAdd}){
+  const { C } = useTheme();
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
   const [rv,setRv]=useState("");
   const [showFilter,setShowFilter]=useState(false);

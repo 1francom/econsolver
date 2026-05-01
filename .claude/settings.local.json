@@ -15,7 +15,12 @@
       "Bash(cmd.exe:*)",
       "Bash(powershell.exe:*)",
       "Bash(xargs grep:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(awk 'NR>=169 && NR<=175' src/ExplorerModule.jsx)",
+      "Bash(awk 'NR>=228 && NR<=234' src/ExplorerModule.jsx)",
+      "Bash(awk 'NR>=317 && NR<=323' src/ExplorerModule.jsx)",
+      "Bash(awk 'NR>=386 && NR<=392' src/ExplorerModule.jsx)",
+      "Bash(awk 'NR>=422 && NR<=428' src/ExplorerModule.jsx)"
     ]
   }
 }
