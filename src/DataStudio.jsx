@@ -168,6 +168,10 @@ async function parseFile(file) {
     const buf = await file.arrayBuffer();
     return parseRDS(buf);
   }
+  if (ext === "parquet") {
+    const { loadParquet } = await import("./services/data/duckdb.js");
+    return loadParquet(file);
+  }
   if (ext === "dbf") {
     const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
     const buf = await file.arrayBuffer();
@@ -316,7 +320,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.parquet"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
         />
@@ -365,7 +369,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
 
         {/* Format hint */}
         <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 6, lineHeight: 1.6 }}>
-          CSV · TSV · XLSX · DTA · RDS · DBF · drag & drop supported
+          CSV · TSV · XLSX · DTA · RDS · DBF · Parquet · drag & drop supported
           <br/>
           Loaded datasets available for JOIN / APPEND in the Merge tab.
         </div>
@@ -479,8 +483,13 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     try {
       const parsed = await parseFile(file);
       if (!parsed || !parsed.rows.length) {
-        setLoadErr("Could not parse file. Check format (CSV, TSV, XLSX).");
+        setLoadErr("Could not parse file. Check format (CSV, TSV, XLSX, Parquet).");
         return;
+      }
+      if (parsed._duckdb?.truncated) {
+        setLoadErr(
+          `Large file: loaded first 500,000 of ${parsed._duckdb.rowCount.toLocaleString()} rows via DuckDB.`
+        );
       }
       const id    = genId();
       const entry = { id, filename: file.name, rawData: parsed };
