@@ -123,7 +123,7 @@ export function runOLS(rows, yCol, xCols, seOpts = {}) {
   const Fstat = ((SST - SSR) / xCols.length) / s2;
   const Fpval = fCDF(Fstat, xCols.length, df);
   const varNames = ["(Intercept)", ...xCols];
-  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames };
+  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames, XtXinv };
 }
 
 // ─── WLS ENGINE ──────────────────────────────────────────────────────────────
@@ -191,7 +191,7 @@ export function runWLS(rows, yCol, xCols, weights, seOpts = {}) {
   const Fpval  = fCDF(Fstat, k - 1, df);
   const varNames = ["(Intercept)", ...xCols];
 
-  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames };
+  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames, XtXinv: XtWXinv };
 }
 
 
