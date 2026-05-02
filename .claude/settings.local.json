@@ -20,7 +20,8 @@
       "Bash(awk 'NR>=228 && NR<=234' src/ExplorerModule.jsx)",
       "Bash(awk 'NR>=317 && NR<=323' src/ExplorerModule.jsx)",
       "Bash(awk 'NR>=386 && NR<=392' src/ExplorerModule.jsx)",
-      "Bash(awk 'NR>=422 && NR<=428' src/ExplorerModule.jsx)"
+      "Bash(awk 'NR>=422 && NR<=428' src/ExplorerModule.jsx)",
+      "mcp__code-review-graph__detect_changes_tool"
     ]
   }
 }
