@@ -122,7 +122,7 @@ function kernelWeights(runningVals, cutoff, h, kernelType) {
   });
 }
 
-function runWLS(xData, yData, weights) {
+function runWLS(xData, yData, weights, seOpts = {}) {
   const sqW = weights.map(w => Math.sqrt(w));
   const wX  = xData.map((row, i) => row.map(v => v * sqW[i]));
   const wY  = yData.map((v, i) => v * sqW[i]);
@@ -143,7 +143,13 @@ function runWLS(xData, yData, weights) {
   const Ym  = yData.reduce((a, b) => a + b, 0) / n;
   const SST = yData.reduce((s, y) => s + (y - Ym) ** 2, 0);
   const R2  = 1 - SSR_uw / SST;
-  const se  = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  // Classical SE as default; computeRobustSE overrides when seType != "classical"
+  // For WLS, pass weight-scaled X and residuals so the HC meat matches R's sandwich:
+  // meat = Σ w_i² e_i² x_i x_i' = Σ (√w_i e_i)² (√w_i x_i)(√w_i x_i)'
+  const wResid = resid.map((e, i) => e * sqW[i]);
+  let se = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  const robustSe = computeRobustSE(seOpts, XtXinv, wX, wResid, n, k, null);
+  if (robustSe) se = robustSe;
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals  = tStats.map(t => pValue(t, df));
   return { beta, se, tStats, pVals, R2, n, df, SSR: SSR_uw, resid, yhat };
@@ -394,7 +400,7 @@ export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
     n,
   };
 }
-export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangular", controls = []) {
+export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangular", controls = [], seOpts = {}) {
   const valid = rows.filter(r =>
     typeof r[yCol]   === "number" && typeof r[runCol] === "number" &&
     isFinite(r[yCol]) && isFinite(r[runCol]) &&
@@ -408,7 +414,7 @@ export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangu
   const W  = kernelWeights(valid.map(r => r[runCol]), cutoff, h, kernelType);
   const X  = valid.map((r, i) => [1, D[i], xc[i], D[i] * xc[i], ...controls.map(c => r[c])]);
 
-  const res = runWLS(X, Y, W);
+  const res = runWLS(X, Y, W, seOpts);
   if (!res) return null;
 
   const varNames  = ["(Intercept)", "D (treatment)", "running − c", "D × (running − c)", ...controls];

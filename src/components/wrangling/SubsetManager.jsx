@@ -9,7 +9,7 @@
 //   SubsetManager (default)                    ← UI component
 
 import { useState } from "react";
-import { C, mono } from "../modeling/shared.jsx";
+import { useTheme, mono } from "../modeling/shared.jsx";
 
 // ─── PURE FILTER FUNCTION ────────────────────────────────────────────────────
 // Apply an array of filter conditions to rows.
@@ -52,6 +52,7 @@ function filterLabel(filters) {
 
 // ─── SUB-COMPONENTS ──────────────────────────────────────────────────────────
 function FilterRow({ filter, headers, onChange, onRemove }) {
+  const { C } = useTheme();
   return (
     <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 4 }}>
       {/* Column */}
@@ -105,6 +106,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
 }
 
 function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
+  const { C } = useTheme();
   const filtered = applySubsetFilter(rows, subset.filters);
   const nLabel   = rows.length ? `n=${filtered.length} / ${rows.length}` : "";
 
@@ -186,6 +188,7 @@ function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
 //   onRunAll     () => void         — "Run all subsets" callback
 //   running      bool               — disable buttons during estimation
 export default function SubsetManager({ headers, rows, subsets, onChange, onRunAll, running }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(false);
 
   const addSubset = () => {

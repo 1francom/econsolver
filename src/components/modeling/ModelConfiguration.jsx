@@ -25,9 +25,9 @@
 //   kernel       {string}    setKernel {fn}
 
 import { useMemo } from "react";
-import { VarPanel, Section, Chip, C, mono } from "./shared.jsx";
+import { VarPanel, Section, Chip, useTheme, mono } from "./shared.jsx";
 
-const INPUT_STYLE = {
+const inputStyle = C => ({
   width: "100%",
   background: C.surface2,
   border: `1px solid ${C.border2}`,
@@ -37,10 +37,11 @@ const INPUT_STYLE = {
   fontSize: 12,
   borderRadius: 3,
   outline: "none",
-};
+});
 
 // ─── 2SLS: Excluded Instruments ──────────────────────────────────────────────
 function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }) {
+  const { C } = useTheme();
   const avail = numericCols.filter(
     h => !yVar.includes(h) && !xVars.includes(h) && !wVars.includes(h)
   );
@@ -58,6 +59,7 @@ function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }
 
 // ─── DiD 2×2: Treated + Post + Controls ──────────────────────────────────────
 function DiDConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, setPostVar, wVars, setWVars }) {
+  const { C } = useTheme();
   return (
     <>
       <VarPanel
@@ -91,6 +93,7 @@ function DiDConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, setPostV
 
 // ─── TWFE: Treatment indicator + Controls ─────────────────────────────────────
 function TWFEConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, wVars, setWVars }) {
+  const { C } = useTheme();
   return (
     <>
       <VarPanel
@@ -123,6 +126,7 @@ function RDDConfig({
   bwManual, setBwManual,
   kernel, setKernel,
 }) {
+  const { C } = useTheme();
   return (
     <>
       {/* Running variable */}
@@ -142,7 +146,7 @@ function RDDConfig({
           value={cutoff}
           onChange={e => setCutoff(e.target.value)}
           placeholder="e.g. 0"
-          style={INPUT_STYLE}
+          style={inputStyle(C)}
         />
       </Section>
 
@@ -168,7 +172,7 @@ function RDDConfig({
             value={bwManual}
             onChange={e => setBwManual(e.target.value)}
             placeholder="bandwidth h"
-            style={INPUT_STYLE}
+            style={inputStyle(C)}
           />
         )}
       </Section>
@@ -194,6 +198,7 @@ function RDDConfig({
 
 // ─── OLS: Survey Weights ──────────────────────────────────────────────────────
 function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
+  const { C } = useTheme();
   const avail = numericCols.filter(
     h => !yVar.includes(h) && !xVars.includes(h)
   );
@@ -213,6 +218,7 @@ function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
 
 // ─── EventStudy: TreatTime column + window ────────────────────────────────────
 function EventStudyConfig({ numericCols, yVar, treatTimeCol, setTreatTimeCol, kPre, setKPre, kPost, setKPost, wVars, setWVars }) {
+  const { C } = useTheme();
   return (
     <>
       <VarPanel
@@ -225,10 +231,10 @@ function EventStudyConfig({ numericCols, yVar, treatTimeCol, setTreatTimeCol, kP
         info="Column with the first period unit was treated. Never-treated units should have null/NaN."
       />
       <Section title="Pre-Period Window (kPre)" color={C.teal}>
-        <input type="number" min={1} max={20} value={kPre} onChange={e => setKPre(e.target.value)} style={INPUT_STYLE} placeholder="3" />
+        <input type="number" min={1} max={20} value={kPre} onChange={e => setKPre(e.target.value)} style={inputStyle(C)} placeholder="3" />
       </Section>
       <Section title="Post-Period Window (kPost)" color={C.teal}>
-        <input type="number" min={1} max={20} value={kPost} onChange={e => setKPost(e.target.value)} style={INPUT_STYLE} placeholder="3" />
+        <input type="number" min={1} max={20} value={kPost} onChange={e => setKPost(e.target.value)} style={inputStyle(C)} placeholder="3" />
       </Section>
       <VarPanel
         title="W · Additional Controls"
@@ -243,6 +249,7 @@ function EventStudyConfig({ numericCols, yVar, treatTimeCol, setTreatTimeCol, kP
 
 // ─── LSDV: Time FE toggle ─────────────────────────────────────────────────────
 function LSDVConfig({ lsdvTimeFE, setLsdvTimeFE }) {
+  const { C } = useTheme();
   return (
     <Section title="Time Fixed Effects" color={C.blue}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -255,6 +262,7 @@ function LSDVConfig({ lsdvTimeFE, setLsdvTimeFE }) {
 
 // ─── SyntheticControl: treated unit + treat time + predictors ─────────────────
 function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit, synthTreatTime, setSynthTreatTime, xVars, setXVars, rows, panel }) {
+  const { C } = useTheme();
   const unitCol = panel?.entityCol;
   const uniqueUnits = useMemo(
     () => unitCol ? [...new Set(rows.map(r => r[unitCol]).filter(v => v != null))].sort() : [],
@@ -271,7 +279,7 @@ function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit
         </select>
       </Section>
       <Section title="Treatment Time Period (numeric)" color={C.gold}>
-        <input type="number" value={synthTreatTime} onChange={e => setSynthTreatTime(e.target.value)} placeholder="e.g. 1990" style={INPUT_STYLE} />
+        <input type="number" value={synthTreatTime} onChange={e => setSynthTreatTime(e.target.value)} placeholder="e.g. 1990" style={inputStyle(C)} />
       </Section>
       <VarPanel
         title="Predictor Variables (pre-period)"
@@ -287,6 +295,7 @@ function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit
 
 // ─── FuzzyRDD: uses RDDConfig + treatVar for D column ────────────────────────
 function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, setRunningVar, cutoff, setCutoff, bwMode, setBwMode, bwManual, setBwManual, kernel, setKernel }) {
+  const { C } = useTheme();
   return (
     <>
       <VarPanel

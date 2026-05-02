@@ -8,6 +8,12 @@
 //
 // context shape: { datasets: { [id]: { rows, headers } } }
 // All steps are plain serialisable JSON — safe for localStorage persistence.
+//
+// Step schema (every step carries these base fields):
+//   { id, type, datasetId, ...typeSpecificFields }
+//   datasetId — ID of the dataset this step belongs to (matches sessionState dataset id / pid).
+//               Used by the exporter (phase 9.5) to build the topological DAG.
+//               runner.js ignores it — behavior is unchanged.
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;

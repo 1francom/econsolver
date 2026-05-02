@@ -11,34 +11,34 @@
 //   numericCols   {string[]} – column count (for status line)
 
 import { useState, useEffect, useRef } from "react";
-import { C, mono, Section, InfoBox } from "./shared.jsx";
+import { useTheme, mono, Section, InfoBox } from "./shared.jsx";
 
 // ─── MODEL REGISTRY ───────────────────────────────────────────────────────────
 // Single source of truth for all estimator metadata.
 // Groups determine dropdown sections.
 export const MODELS = [
   // Linear
-  { id: "OLS",             label: "OLS",                group: "Linear",            desc: "Ordinary Least Squares",                       color: C.green  },
-  { id: "WLS",             label: "WLS",                group: "Linear",            desc: "Weighted Least Squares",                        color: C.green  },
+  { id: "OLS",             label: "OLS",                group: "Linear",            desc: "Ordinary Least Squares",                       color: "#7ab896" },
+  { id: "WLS",             label: "WLS",                group: "Linear",            desc: "Weighted Least Squares",                        color: "#7ab896" },
   // Panel
-  { id: "FE",              label: "FE / FD",            group: "Panel",             desc: "Within estimator — panel required",             color: C.blue   },
-  { id: "LSDV",            label: "LSDV",               group: "Panel",             desc: "Least Squares Dummy Variables — panel required", color: C.blue   },
-  { id: "TWFE",            label: "TWFE DiD",           group: "Panel",             desc: "Two-Way Fixed Effects DiD — panel required",    color: C.teal   },
-  { id: "EventStudy",      label: "Event Study",        group: "Panel",             desc: "Dynamic DiD / event study — panel required",   color: C.teal   },
+  { id: "FE",              label: "FE / FD",            group: "Panel",             desc: "Within estimator — panel required",             color: "#6e9ec8" },
+  { id: "LSDV",            label: "LSDV",               group: "Panel",             desc: "Least Squares Dummy Variables — panel required", color: "#6e9ec8" },
+  { id: "TWFE",            label: "TWFE DiD",           group: "Panel",             desc: "Two-Way Fixed Effects DiD — panel required",    color: "#6ec8b4" },
+  { id: "EventStudy",      label: "Event Study",        group: "Panel",             desc: "Dynamic DiD / event study — panel required",   color: "#6ec8b4" },
   // Causal
-  { id: "2SLS",            label: "2SLS / IV",          group: "Causal",            desc: "Two-Stage Least Squares",                       color: C.gold   },
-  { id: "RDD",             label: "Sharp RDD",          group: "Causal",            desc: "Regression Discontinuity Design",               color: C.orange },
-  { id: "FuzzyRDD",        label: "Fuzzy RDD",          group: "Causal",            desc: "Fuzzy Regression Discontinuity (planned)",      color: C.orange },
-  { id: "DiD",             label: "DiD 2×2",            group: "Causal",            desc: "Classic Difference-in-Differences",             color: C.teal   },
+  { id: "2SLS",            label: "2SLS / IV",          group: "Causal",            desc: "Two-Stage Least Squares",                       color: "#c8a96e" },
+  { id: "RDD",             label: "Sharp RDD",          group: "Causal",            desc: "Regression Discontinuity Design",               color: "#c88e6e" },
+  { id: "FuzzyRDD",        label: "Fuzzy RDD",          group: "Causal",            desc: "Fuzzy Regression Discontinuity (planned)",      color: "#c88e6e" },
+  { id: "DiD",             label: "DiD 2×2",            group: "Causal",            desc: "Classic Difference-in-Differences",             color: "#6ec8b4" },
   // Limited Dependent
-  { id: "Logit",           label: "Logit",              group: "Limited Dependent", desc: "Binary Logistic Regression (MLE)",              color: C.violet },
-  { id: "Probit",          label: "Probit",             group: "Limited Dependent", desc: "Probit — Normal Link (MLE)",                    color: C.violet },
-  { id: "PoissonFE",       label: "Poisson FE",         group: "Limited Dependent", desc: "Poisson with Fixed Effects (planned)",          color: C.violet },
+  { id: "Logit",           label: "Logit",              group: "Limited Dependent", desc: "Binary Logistic Regression (MLE)",              color: "#9e7ec8" },
+  { id: "Probit",          label: "Probit",             group: "Limited Dependent", desc: "Probit — Normal Link (MLE)",                    color: "#9e7ec8" },
+  { id: "PoissonFE",       label: "Poisson FE",         group: "Limited Dependent", desc: "Poisson with Fixed Effects (planned)",          color: "#9e7ec8" },
   // IV / GMM
-  { id: "GMM",             label: "Two-Step GMM",       group: "IV/GMM",            desc: "Efficient GMM — HC-robust Ω̂ + J-test",         color: C.gold   },
-  { id: "LIML",            label: "LIML",               group: "IV/GMM",            desc: "Limited Info. Max. Likelihood / k-class",       color: C.gold   },
+  { id: "GMM",             label: "Two-Step GMM",       group: "IV/GMM",            desc: "Efficient GMM — HC-robust Ω̂ + J-test",         color: "#c8a96e" },
+  { id: "LIML",            label: "LIML",               group: "IV/GMM",            desc: "Limited Info. Max. Likelihood / k-class",       color: "#c8a96e" },
   // Synthetic
-  { id: "SyntheticControl",label: "Synthetic Control",  group: "Synthetic",         desc: "Synthetic control method (planned)",            color: C.blue   },
+  { id: "SyntheticControl",label: "Synthetic Control",  group: "Synthetic",         desc: "Synthetic control method (planned)",            color: "#6e9ec8" },
 ];
 
 // ordered group list (controls render order)
@@ -52,6 +52,7 @@ export default function EstimatorSidebar({
   modelHint,
   panel,
 }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 

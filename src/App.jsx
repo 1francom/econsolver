@@ -1,7 +1,7 @@
 // ─── ECON STUDIO · App.jsx ────────────────────────────────────────────────────
 // Root orchestrator. Manages global state and screen routing.
 // All heavy logic lives in the module files — this file should stay thin.
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo, Fragment } from "react";
 import DataStudio from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './components/ModelingTab.jsx';
@@ -11,19 +11,11 @@ import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from "./services/persistence/indexedDB.js";
-import CalculateTab  from './components/tabs/CalculateTab.jsx';
-import SimulateTab   from './components/tabs/SimulateTab.jsx';
+import { useTheme } from "./ThemeContext.jsx";
+import CalculateTab     from './components/tabs/CalculateTab.jsx';
+import SimulateTab      from './components/tabs/SimulateTab.jsx';
+import ReportingModule  from './ReportingModule.jsx';
 
-// ─── THEME ────────────────────────────────────────────────────────────────────
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 const LS_KEY = "econ_wrangle_v2";
 
@@ -104,17 +96,20 @@ function lsGet(){try{return JSON.parse(localStorage.getItem(LS_KEY)||"[]");}catc
 function lsSet(d){try{localStorage.setItem(LS_KEY,JSON.stringify(d));}catch{}}
 
 // ─── SHARED ATOMS ─────────────────────────────────────────────────────────────
-function Btn({onClick,ch,color=C.gold,v="out",dis=false,sm=false}){
+function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
+  const { C } = useTheme();
+  color = color ?? C.gold;
   const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily:mono,fontSize:sm?10:11,transition:"all 0.13s",opacity:dis?0.4:1};
   if(v==="solid")return<button onClick={onClick} disabled={dis} style={{...b,background:color,color:C.bg,border:`1px solid ${color}`,fontWeight:700}}>{ch}</button>;
   if(v==="ghost")return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:"none",color:dis?C.textMuted:color}}>{ch}</button>;
   return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:`1px solid ${C.border2}`,color:dis?C.textMuted:C.textDim}}>{ch}</button>;
 }
-function Badge({ch,color=C.textMuted}){return<span style={{fontSize:9,padding:"2px 6px",border:`1px solid ${color}`,color,borderRadius:2,letterSpacing:"0.1em",fontFamily:mono,whiteSpace:"nowrap"}}>{ch}</span>;}
-function Spin(){return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
+function Badge({ch,color}){const { C } = useTheme(); color = color ?? C.textMuted; return<span style={{fontSize:9,padding:"2px 6px",border:`1px solid ${color}`,color,borderRadius:2,letterSpacing:"0.1em",fontFamily:mono,whiteSpace:"nowrap"}}>{ch}</span>;}
+function Spin(){const { C } = useTheme(); return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
 
 // ─── DATA GRID (shared preview) ───────────────────────────────────────────────
 function Grid({headers,rows,hi,max=20,types,onType}){
+  const { C } = useTheme();
   const vis=rows.slice(0,max);
   if(!headers.length)return null;
   const tc={numeric:C.blue,binary:C.purple,categorical:C.purple,string:C.textMuted,date:C.teal};
@@ -154,6 +149,7 @@ function Grid({headers,rows,hi,max=20,types,onType}){
 
 // ─── UPLOADER ────────────────────────────────────────────────────────────────
 function Uploader({onReady}){
+  const { C } = useTheme();
   const [drag,setDrag]=useState(false),[loading,setLoading]=useState(false),[err,setErr]=useState(""),[pf,setPf]=useState(null);
   const ref=useRef();
   async function handleFile(file){
@@ -230,6 +226,7 @@ function Uploader({onReady}){
 // ─── WORKSPACE HELPERS ────────────────────────────────────────────────────────
 // Shown in Explore / Model / Report tabs when no pipeline output exists yet.
 function NeedsOutput({ onGoToClean }) {
+  const { C } = useTheme();
   return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:12,fontFamily:mono}}>
       <div style={{fontSize:28,color:C.border2}}>⌾</div>
@@ -241,10 +238,305 @@ function NeedsOutput({ onGoToClean }) {
 }
 
 // ─── DATA TAB ─────────────────────────────────────────────────────────────────
+// ─── DATA VIEWER (R-style View()) ────────────────────────────────────────────
+// Scrollable grid with sticky row-number + header, column stats panel.
+const PAGE_SIZE = 100;
+
+function colStats(col, rows) {
+  const vals = rows.map(r => r[col]).filter(v => v !== null && v !== undefined && v !== "");
+  const nulls = rows.length - vals.length;
+  const nums  = vals.map(v => typeof v === "number" ? v : parseFloat(v)).filter(v => !isNaN(v));
+  if (nums.length > 0) {
+    const sum  = nums.reduce((a, b) => a + b, 0);
+    const mean = sum / nums.length;
+    const min  = Math.min(...nums);
+    const max  = Math.max(...nums);
+    const sd   = Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length);
+    return { type: "numeric", n: vals.length, nulls, mean, min, max, sd };
+  }
+  // Categorical
+  const freq = {};
+  vals.forEach(v => { const k = String(v); freq[k] = (freq[k] || 0) + 1; });
+  const top = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  return { type: "string", n: vals.length, nulls, unique: Object.keys(freq).length, top };
+}
+
+function DataViewer({ rows, headers, filename }) {
+  const { C } = useTheme();
+  const [page,      setPage]      = useState(0);
+  const [selCol,    setSelCol]    = useState(null);
+  const [colFilter, setColFilter] = useState("");
+
+  const visHeaders = colFilter
+    ? headers.filter(h => h.toLowerCase().includes(colFilter.toLowerCase()))
+    : headers;
+  const totalPages = Math.ceil(rows.length / PAGE_SIZE);
+  const pageRows   = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const stats      = selCol ? colStats(selCol, rows) : null;
+  const fmt = v => {
+    if (v === null || v === undefined) return <span style={{color:C.textMuted,fontStyle:"italic"}}>NA</span>;
+    if (typeof v === "number") return <span style={{color:"#9ecff5"}}>{Number.isInteger(v) ? v : v.toFixed(4)}</span>;
+    return String(v);
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
+      {/* Toolbar */}
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"0.5rem 0.9rem",borderBottom:`1px solid ${C.border}`,flexShrink:0,background:C.surface2}}>
+        <span style={{fontSize:10,color:C.text,fontFamily:mono}}>{filename}</span>
+        <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{rows.length.toLocaleString()} × {headers.length}</span>
+        <div style={{flex:1}}/>
+        <input
+          value={colFilter}
+          onChange={e => { setColFilter(e.target.value); setSelCol(null); }}
+          placeholder="Filter columns…"
+          style={{padding:"3px 8px",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,
+                  color:C.text,fontFamily:mono,fontSize:10,width:140,outline:"none"}}
+        />
+        {totalPages > 1 && (
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <button onClick={() => setPage(p => Math.max(0, p-1))} disabled={page===0}
+              style={{padding:"2px 7px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
+                      color: page===0 ? C.textMuted : C.textDim,cursor: page===0 ? "default":"pointer",fontFamily:mono,fontSize:10}}>‹</button>
+            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{page+1}/{totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages-1, p+1))} disabled={page===totalPages-1}
+              style={{padding:"2px 7px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
+                      color: page===totalPages-1 ? C.textMuted : C.textDim,cursor: page===totalPages-1 ? "default":"pointer",fontFamily:mono,fontSize:10}}>›</button>
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"flex",flex:1,minHeight:0}}>
+        {/* Grid */}
+        <div style={{flex:1,overflow:"auto",minHeight:0}}>
+          <table style={{borderCollapse:"collapse",fontFamily:mono,fontSize:10,minWidth:"100%"}}>
+            <thead style={{position:"sticky",top:0,zIndex:2}}>
+              <tr>
+                {/* Row number header */}
+                <th style={{background:C.surface2,padding:"5px 8px",borderRight:`1px solid ${C.border}`,
+                             borderBottom:`1px solid ${C.border2}`,color:C.textMuted,fontWeight:400,
+                             textAlign:"right",minWidth:48,position:"sticky",left:0,zIndex:3}}>
+                  #
+                </th>
+                {visHeaders.map(h => {
+                  const isNum = rows.slice(0,20).some(r => typeof r[h] === "number");
+                  return (
+                    <th key={h} onClick={() => setSelCol(selCol===h ? null : h)}
+                      style={{
+                        background: selCol===h ? `${C.teal}18` : C.surface2,
+                        padding:"5px 10px",
+                        borderRight:`1px solid ${C.border}`,
+                        borderBottom:`1px solid ${C.border2}`,
+                        color: selCol===h ? C.teal : C.text,
+                        fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",
+                        userSelect:"none",
+                      }}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        {h}
+                        <span style={{fontSize:8,color: selCol===h ? C.teal : C.textMuted,
+                                      border:`1px solid ${selCol===h ? C.teal+"60" : C.border2}`,
+                                      borderRadius:2,padding:"1px 4px",fontWeight:400}}>
+                          {isNum ? "num" : "str"}
+                        </span>
+                      </div>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((row, i) => {
+                const absIdx = page * PAGE_SIZE + i;
+                return (
+                  <tr key={absIdx} style={{background: i%2===0 ? C.surface : C.bg}}>
+                    <td style={{padding:"3px 8px",borderRight:`1px solid ${C.border}`,
+                                color:C.textMuted,textAlign:"right",fontVariantNumeric:"tabular-nums",
+                                position:"sticky",left:0,background: i%2===0 ? C.surface : C.bg,zIndex:1}}>
+                      {absIdx + 1}
+                    </td>
+                    {visHeaders.map(h => (
+                      <td key={h} style={{
+                        padding:"3px 10px",
+                        borderRight:`1px solid ${C.border}`,
+                        color: selCol===h ? C.text : C.textDim,
+                        background: selCol===h ? `${C.teal}08` : "transparent",
+                        whiteSpace:"nowrap",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",
+                        fontVariantNumeric:"tabular-nums",
+                      }}>
+                        {fmt(row[h])}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Column stats panel */}
+        {selCol && stats && (
+          <div style={{width:200,flexShrink:0,borderLeft:`1px solid ${C.border2}`,
+                       background:C.surface,padding:"0.8rem",overflowY:"auto",fontFamily:mono}}>
+            <div style={{fontSize:9,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>{selCol}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {stats.type === "numeric" ? (
+                <>
+                  {[
+                    ["Type",  "numeric"],
+                    ["n",     stats.n.toLocaleString()],
+                    ["NAs",   stats.nulls],
+                    ["Mean",  stats.mean.toFixed(4)],
+                    ["SD",    stats.sd.toFixed(4)],
+                    ["Min",   stats.min],
+                    ["Max",   stats.max],
+                  ].map(([l,v]) => (
+                    <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                      <span style={{fontSize:9,color:C.textMuted}}>{l}</span>
+                      <span style={{fontSize:10,color:C.text}}>{v}</span>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {[
+                    ["Type",   "string"],
+                    ["n",      stats.n.toLocaleString()],
+                    ["NAs",    stats.nulls],
+                    ["Unique", stats.unique],
+                  ].map(([l,v]) => (
+                    <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                      <span style={{fontSize:9,color:C.textMuted}}>{l}</span>
+                      <span style={{fontSize:10,color:C.text}}>{v}</span>
+                    </div>
+                  ))}
+                  <div style={{marginTop:6}}>
+                    <div style={{fontSize:9,color:C.textMuted,marginBottom:4}}>Top values</div>
+                    {stats.top.map(([val, cnt]) => (
+                      <div key={val} style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                        <span style={{fontSize:9,color:C.textDim,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{val}</span>
+                        <span style={{fontSize:9,color:C.textMuted}}>{cnt}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <button onClick={() => setSelCol(null)}
+              style={{marginTop:14,fontSize:9,color:C.textMuted,background:"none",border:"none",
+                      cursor:"pointer",fontFamily:mono,padding:0}}>✕ close</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── COLUMN META TABLE ────────────────────────────────────────────────────────
+// Renders a compact column-by-column info table: name, type, non-null %, range/top.
+function ColumnMetaTable({ rows, headers, colInfo }) {
+  const { C } = useTheme();
+  const [expandedCol, setExpandedCol] = useState(null);
+
+  const meta = useMemo(() => headers.map(h => {
+    const isNum = colInfo?.[h]?.isNumeric
+      ?? rows.slice(0,30).some(r => typeof r[h] === "number");
+    const vals  = rows.map(r => r[h]).filter(v => v !== null && v !== undefined && v !== "");
+    const nulls = rows.length - vals.length;
+    const nullPct = rows.length ? Math.round(nulls / rows.length * 100) : 0;
+
+    if (isNum) {
+      const nums = vals.map(v => typeof v === "number" ? v : parseFloat(v)).filter(v => !isNaN(v));
+      if (nums.length) {
+        const mean = nums.reduce((a,b)=>a+b,0) / nums.length;
+        const sd   = Math.sqrt(nums.reduce((a,b)=>a+(b-mean)**2,0)/nums.length);
+        return { h, type:"num", nullPct, mean, sd, min:nums.reduce((a,b)=>a<b?a:b, Infinity), max:nums.reduce((a,b)=>a>b?a:b, -Infinity), unique: new Set(nums).size };
+      }
+    }
+    const freq = {};
+    vals.forEach(v => { const k=String(v); freq[k]=(freq[k]||0)+1; });
+    const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,4);
+    return { h, type:"str", nullPct, unique: Object.keys(freq).length, top };
+  }), [rows, headers, colInfo]);
+
+  const typeColor = t => t==="num" ? C.blue : t==="date" ? C.teal : C.gold;
+
+  return (
+    <table style={{width:"100%",borderCollapse:"collapse",fontFamily:mono,fontSize:10}}>
+      <thead>
+        <tr style={{background:C.surface2}}>
+          {["Column","Type","Non-null","Summary"].map(h=>(
+            <th key={h} style={{padding:"5px 10px",textAlign:"left",fontWeight:500,
+                                color:C.textMuted,fontSize:9,letterSpacing:"0.1em",
+                                textTransform:"uppercase",borderBottom:`1px solid ${C.border2}`}}>
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {meta.map((m,i) => (
+          <Fragment key={m.h}>
+            <tr
+              onClick={()=>setExpandedCol(expandedCol===m.h ? null : m.h)}
+              style={{background: i%2===0 ? C.surface : C.bg, cursor:"pointer",
+                      borderBottom:`1px solid ${C.border}`}}>
+              <td style={{padding:"5px 10px",color:C.text,fontWeight:500}}>
+                {expandedCol===m.h ? "▾ " : "▸ "}{m.h}
+              </td>
+              <td style={{padding:"5px 10px"}}>
+                <span style={{fontSize:9,color:typeColor(m.type),border:`1px solid ${typeColor(m.type)}40`,
+                              borderRadius:2,padding:"1px 5px"}}>{m.type}</span>
+              </td>
+              <td style={{padding:"5px 10px",color: m.nullPct>0 ? C.gold : C.textDim}}>
+                {100-m.nullPct}%
+                {m.nullPct>0 && <span style={{fontSize:9,color:C.gold,marginLeft:4}}>({m.nullPct}% NA)</span>}
+              </td>
+              <td style={{padding:"5px 10px",color:C.textMuted,fontSize:9}}>
+                {m.type==="num"
+                  ? `${m.min} – ${m.max}  ·  μ ${m.mean.toFixed(2)}`
+                  : `${m.unique} unique · "${m.top[0]?.[0] ?? ""}"`
+                }
+              </td>
+            </tr>
+            {expandedCol===m.h && (
+              <tr style={{background:C.surface}}>
+                <td colSpan={4} style={{padding:"8px 14px 10px 28px",borderBottom:`1px solid ${C.border2}`}}>
+                  {m.type==="num" ? (
+                    <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+                      {[["Mean",m.mean.toFixed(4)],["Std Dev",m.sd.toFixed(4)],
+                        ["Min",m.min],["Max",m.max],["Unique",m.unique]].map(([l,v])=>(
+                        <div key={l}>
+                          <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:2}}>{l}</div>
+                          <div style={{fontSize:11,color:C.text}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6}}>Top values</div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {m.top.map(([val,cnt])=>(
+                          <span key={val} style={{fontSize:9,padding:"2px 8px",border:`1px solid ${C.border2}`,
+                                                  borderRadius:2,color:C.textDim}}>
+                            {val} <span style={{color:C.textMuted}}>×{cnt}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            )}
+          </Fragment>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 // Dataset overview + load controls (file upload, World Bank, OECD).
-// studioRef.current.addFile(file) / addApiData(fname, rows, headers)
-// forward the loaded data into DataStudio's dataset registry.
-function DataTab({ filename, rawData, studioRef }) {
+function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset }) {
+  const { C } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP"];
   const fileRef  = useRef();
   const [loading,   setLoading]   = useState(false);
@@ -253,6 +545,26 @@ function DataTab({ filename, rawData, studioRef }) {
   const [wbOpen,    setWbOpen]    = useState(false);
   const [oecdOpen,  setOecdOpen]  = useState(false);
   const [dragOver,  setDragOver]  = useState(false);
+  const [view,      setView]      = useState("overview"); // "overview" | "grid"
+
+  // Cleaned data takes priority for display; raw is the fallback
+  const viewRows    = cleanedData?.cleanRows ?? rawData?.rows ?? [];
+  const viewHeaders = cleanedData?.headers   ?? rawData?.headers ?? [];
+  const viewFile    = cleanedData?.filename  ?? filename ?? "dataset";
+  const isPipelined = !!cleanedData;
+
+  // Summary stats derived from active data
+  const totalNAs = useMemo(() => {
+    if (!viewRows.length || !viewHeaders.length) return 0;
+    return viewRows.reduce((sum, row) =>
+      sum + viewHeaders.filter(h => row[h] === null || row[h] === undefined || row[h] === "").length, 0);
+  }, [viewRows, viewHeaders]);
+  const numericCols = useMemo(() =>
+    viewHeaders.filter(h => viewRows.slice(0,20).some(r => typeof r[h] === "number")),
+  [viewRows, viewHeaders]);
+  const memEstKB = useMemo(() =>
+    Math.round((viewRows?.length ?? 0) * (viewHeaders?.length ?? 0) * 8 / 1024),
+  [viewRows, viewHeaders]);
 
   async function handleFile(file) {
     if (!file) return;
@@ -267,113 +579,225 @@ function DataTab({ filename, rawData, studioRef }) {
   }
 
   return (
-    <div style={{padding:"2rem 2.4rem",fontFamily:mono,maxWidth:720,color:C.text,overflowY:"auto",height:"100%"}}>
-      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:4}}>Data</div>
-      <div style={{fontSize:18,color:C.text,marginBottom:"1.6rem",letterSpacing:"-0.01em"}}>Dataset Overview</div>
-
-      {/* Primary dataset card */}
-      {rawData && (
-        <div style={{border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden",marginBottom:"1.8rem"}}>
-          <div style={{background:C.surface2,padding:"0.6rem 0.9rem",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${C.border}`}}>
-            <span style={{fontSize:9,color:C.teal}}>●</span>
-            <span style={{fontSize:12,color:C.text}}>{filename}</span>
-            <span style={{marginLeft:"auto",fontSize:9,color:C.textMuted,padding:"1px 6px",border:`1px solid ${C.border2}`,borderRadius:2}}>primary</span>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:1,background:C.border}}>
-            {[
-              {l:"Rows",    v: rawData.rows.length.toLocaleString(), c: C.text},
-              {l:"Columns", v: rawData.headers.length,               c: C.text},
-              {l:"Source",  v: "loaded",                             c: C.textMuted},
-            ].map(s=>(
-              <div key={s.l} style={{background:C.surface,padding:"0.55rem 0.85rem"}}>
-                <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:2}}>{s.l}</div>
-                <div style={{fontSize:13,color:s.c}}>{s.v}</div>
-              </div>
-            ))}
-          </div>
-          {rawData.headers.length > 0 && (
-            <div style={{padding:"0.5rem 0.9rem",background:C.surface,borderTop:`1px solid ${C.border}`}}>
-              <div style={{fontSize:9,color:C.textMuted,marginBottom:4,letterSpacing:"0.1em",textTransform:"uppercase"}}>Columns</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                {rawData.headers.map(h=>(
-                  <span key={h} style={{fontSize:9,padding:"2px 7px",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textDim}}>{h}</span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Accepted file formats */}
-      <div style={{marginBottom:"1.4rem"}}>
-        <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:8}}>Accepted formats</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-          {formats.map(f=>(
-            <span key={f} style={{fontSize:10,padding:"3px 9px",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textDim,fontFamily:mono}}>{f}</span>
-          ))}
-        </div>
-        <div style={{fontSize:10,color:C.textMuted,marginTop:8,lineHeight:1.7}}>
-          Drag & drop or click to upload · Auto-delimiter detection (CSV / TSV / pipe)<br/>
-          Additional datasets loaded here are available for JOIN / APPEND in the Clean tab.
-        </div>
-      </div>
-
-      {/* Load controls */}
-      <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.16em",textTransform:"uppercase",marginBottom:10}}>Load data</div>
-
-      {/* File upload drop zone */}
-      <div
-        onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-        onDragLeave={()=>setDragOver(false)}
-        onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
-        onClick={()=>fileRef.current?.click()}
-        style={{
-          border:`2px dashed ${dragOver ? C.gold : C.border2}`,
-          borderRadius:4, padding:"1.2rem 1rem",
-          textAlign:"center", cursor:"pointer",
-          background: dragOver ? C.goldFaint : C.surface,
-          transition:"all 0.15s", marginBottom:10,
-        }}>
-        <input ref={fileRef} type="file"
-          accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp"
-          onChange={e=>handleFile(e.target.files[0])}
-          style={{display:"none"}}/>
-        {loading
-          ? <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>Parsing…</div>
-          : <>
-              <div style={{fontSize:11,color:C.text,marginBottom:3}}>+ Load dataset</div>
-              <div style={{fontSize:9,color:C.textMuted}}>Drop file here or click to browse</div>
-            </>
-        }
-      </div>
-
-      {/* API fetchers */}
-      <div style={{display:"flex",flexDirection:"column",gap:6,maxWidth:280,marginBottom:12}}>
-        {[
-          {label:"↓ World Bank data", color:C.teal, action:()=>setWbOpen(true)},
-          {label:"↓ OECD data",       color:C.blue, action:()=>setOecdOpen(true)},
-        ].map(({label,color,action})=>(
-          <button key={label} onClick={action} style={{
-            padding:"0.42rem 0.75rem",background:"transparent",
-            border:`1px solid ${C.border2}`,borderRadius:3,
-            color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,
-            textAlign:"left",transition:"all 0.12s",
-          }}
-            onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.color=color;}}
-            onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
-          >{label}</button>
+    <div style={{display:"flex",flexDirection:"column",height:"100%",fontFamily:mono,color:C.text}}>
+      {/* Sub-tab bar */}
+      <div style={{display:"flex",gap:0,borderBottom:`1px solid ${C.border}`,background:C.surface2,flexShrink:0}}>
+        {[["overview","Overview"],["grid","Data Viewer"]].map(([id,label]) => (
+          <button key={id} onClick={() => setView(id)} style={{
+            padding:"0.5rem 1rem", background:"transparent", border:"none",
+            borderBottom: view===id ? `2px solid ${C.teal}` : "2px solid transparent",
+            color: view===id ? C.teal : C.textDim,
+            fontFamily:mono, fontSize:10, cursor:"pointer", letterSpacing:"0.1em",
+          }}>{label}</button>
         ))}
+        {view==="grid" && isPipelined && (
+          <span style={{marginLeft:8,alignSelf:"center",fontSize:9,color:C.teal,
+                        border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 6px"}}>
+            pipeline applied
+          </span>
+        )}
       </div>
 
-      {/* Status messages */}
-      {success && (
-        <div style={{fontSize:10,color:C.green,fontFamily:mono,padding:"0.5rem 0.75rem",border:`1px solid ${C.green}40`,borderRadius:3,marginBottom:8}}>
-          ✓ {success}
+      {/* Overview panel */}
+      {view === "overview" && (
+        <div style={{display:"flex",flex:1,minHeight:0,overflow:"hidden"}}>
+
+          {/* ── Left column: dataset info + column table ── */}
+          <div style={{flex:1,minWidth:0,overflowY:"auto",padding:"1.6rem 2rem"}}>
+
+            {/* Dataset selector — shown when multiple datasets are loaded */}
+            {availableDatasets.length > 1 && (
+              <div style={{marginBottom:"1.4rem"}}>
+                <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>Session datasets</div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {availableDatasets.map((ds, idx) => {
+                    const isActive = ds.id === activeDatasetId;
+                    const isPrimary = idx === 0;
+                    return (
+                      <div key={ds.id} style={{display:"flex",alignItems:"center",gap:4}}>
+                        <button onClick={() => onSelectDataset?.(ds.id)}
+                          style={{display:"flex",alignItems:"center",gap:8,padding:"0.45rem 0.75rem",
+                                  flex:1,minWidth:0,
+                                  background: isActive ? `${C.teal}12` : C.surface,
+                                  border:`1px solid ${isActive ? C.teal+"60" : C.border2}`,
+                                  borderRadius:3,cursor:"pointer",textAlign:"left",fontFamily:mono,
+                                  transition:"all 0.12s"}}>
+                          <span style={{fontSize:9,color: isActive ? C.teal : C.textMuted}}>
+                            {isActive ? "●" : "○"}
+                          </span>
+                          <span style={{fontSize:10,color: isActive ? C.text : C.textDim,flex:1,
+                                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {ds.filename ?? ds.id}
+                          </span>
+                          {ds.rowCount && (
+                            <span style={{fontSize:9,color:C.textMuted,flexShrink:0}}>
+                              {ds.rowCount.toLocaleString()} × {ds.colCount ?? "?"}
+                            </span>
+                          )}
+                        </button>
+                        {!isPrimary && (
+                          <button
+                            onClick={() => onDeleteDataset?.(ds.id)}
+                            title="Remove dataset"
+                            style={{flexShrink:0,width:20,height:20,display:"flex",alignItems:"center",
+                                    justifyContent:"center",background:"transparent",border:"none",
+                                    cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,
+                                    borderRadius:2,transition:"color 0.1s"}}
+                            onMouseEnter={e => e.currentTarget.style.color = C.text}
+                            onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                          >×</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Active dataset card */}
+            {rawData && (
+              <div style={{border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden",marginBottom:"1.6rem"}}>
+                {/* Header */}
+                <div style={{background:C.surface2,padding:"0.6rem 0.9rem",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:9,color:C.teal}}>●</span>
+                  <span style={{fontSize:12,color:C.text}}>{filename}</span>
+                  {isPipelined && (
+                    <span style={{fontSize:9,color:C.teal,border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 5px"}}>pipeline applied</span>
+                  )}
+                  <span style={{marginLeft:"auto",fontSize:9,color:C.textMuted,padding:"1px 6px",border:`1px solid ${C.border2}`,borderRadius:2}}>primary</span>
+                </div>
+
+                {/* Stats grid */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border}}>
+                  {[
+                    {l:"Rows",     v: viewRows.length.toLocaleString(),        c: C.text},
+                    {l:"Columns",  v: viewHeaders.length,                       c: C.text},
+                    {l:"Numeric",  v: numericCols.length,                       c: C.blue},
+                    {l:"Total NAs",v: totalNAs.toLocaleString(),                c: totalNAs > 0 ? C.gold : C.textMuted},
+                    {l:"Est. size", v: memEstKB >= 1024 ? `${(memEstKB/1024).toFixed(1)} MB` : `${memEstKB} KB`, c: C.textMuted},
+                  ].map(s=>(
+                    <div key={s.l} style={{background:C.surface,padding:"0.5rem 0.75rem"}}>
+                      <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:2}}>{s.l}</div>
+                      <div style={{fontSize:13,color:s.c}}>{s.v}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Panel info if available */}
+                {cleanedData?.panelIndex && (
+                  <div style={{padding:"0.45rem 0.9rem",background:C.surface,borderTop:`1px solid ${C.border}`,
+                               display:"flex",gap:16,alignItems:"center"}}>
+                    <span style={{fontSize:9,color:C.blue,border:`1px solid ${C.blue}40`,borderRadius:2,padding:"1px 5px"}}>Panel</span>
+                    <span style={{fontSize:9,color:C.textMuted}}>Entity: <span style={{color:C.textDim}}>{cleanedData.panelIndex.entityCol}</span></span>
+                    <span style={{fontSize:9,color:C.textMuted}}>Time: <span style={{color:C.textDim}}>{cleanedData.panelIndex.timeCol}</span></span>
+                    {cleanedData.panelIndex.balance && (
+                      <span style={{fontSize:9,color:C.textMuted}}>Balance: <span style={{color:C.textDim}}>{cleanedData.panelIndex.balance}</span></span>
+                    )}
+                  </div>
+                )}
+
+                {/* View data button */}
+                <div style={{padding:"0.4rem 0.9rem",background:C.surface,borderTop:`1px solid ${C.border}`,display:"flex",gap:8}}>
+                  <button onClick={() => setView("grid")}
+                    style={{padding:"3px 12px",background:`${C.teal}14`,border:`1px solid ${C.teal}60`,
+                            borderRadius:3,color:C.teal,cursor:"pointer",fontFamily:mono,fontSize:9}}>
+                    View data ›
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Column metadata table */}
+            {viewHeaders.length > 0 && (
+              <div style={{marginBottom:"1.6rem"}}>
+                <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:10}}>
+                  Column details <span style={{color:C.textMuted,fontWeight:400,letterSpacing:0,textTransform:"none"}}>— click row to expand</span>
+                </div>
+                <div style={{border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden"}}>
+                  <ColumnMetaTable rows={viewRows} headers={viewHeaders} colInfo={cleanedData?.colInfo} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Right column: load controls ── */}
+          <div style={{width:260,flexShrink:0,borderLeft:`1px solid ${C.border}`,padding:"1.6rem 1.4rem",
+                       overflowY:"auto",background:C.surface}}>
+            <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:12}}>Load data</div>
+
+            {/* Drop zone */}
+            <div
+              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+              onDragLeave={()=>setDragOver(false)}
+              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+              onClick={()=>fileRef.current?.click()}
+              style={{border:`2px dashed ${dragOver ? C.gold : C.border2}`,borderRadius:4,
+                      padding:"1rem 0.75rem",textAlign:"center",cursor:"pointer",
+                      background: dragOver ? C.goldFaint : "transparent",
+                      transition:"all 0.15s",marginBottom:10}}>
+              <input ref={fileRef} type="file"
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp"
+                onChange={e=>handleFile(e.target.files[0])}
+                style={{display:"none"}}/>
+              {loading
+                ? <div style={{fontSize:10,color:C.textDim,fontFamily:mono}}>Parsing…</div>
+                : <>
+                    <div style={{fontSize:10,color:C.text,marginBottom:2}}>+ Load dataset</div>
+                    <div style={{fontSize:9,color:C.textMuted}}>Drop file or click to browse</div>
+                  </>
+              }
+            </div>
+
+            {/* API fetchers */}
+            <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:14}}>
+              {[
+                {label:"↓ World Bank data", color:C.teal, action:()=>setWbOpen(true)},
+                {label:"↓ OECD data",       color:C.blue, action:()=>setOecdOpen(true)},
+              ].map(({label,color,action})=>(
+                <button key={label} onClick={action} style={{
+                  padding:"0.4rem 0.65rem",background:"transparent",
+                  border:`1px solid ${C.border2}`,borderRadius:3,
+                  color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,
+                  textAlign:"left",transition:"all 0.12s",
+                }}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.color=color;}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+                >{label}</button>
+              ))}
+            </div>
+
+            {/* Accepted formats */}
+            <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>Formats</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:10}}>
+              {formats.map(f=>(
+                <span key={f} style={{fontSize:9,padding:"2px 6px",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textMuted}}>{f}</span>
+              ))}
+            </div>
+            <div style={{fontSize:9,color:C.textMuted,lineHeight:1.7}}>
+              Auto-delimiter detection (CSV / TSV / pipe).<br/>
+              Additional datasets can be joined in Clean.
+            </div>
+
+            {/* Status */}
+            {success && (
+              <div style={{marginTop:10,fontSize:9,color:C.green,fontFamily:mono,padding:"0.4rem 0.6rem",
+                           border:`1px solid ${C.green}40`,borderRadius:3}}>✓ {success}</div>
+            )}
+            {err && (
+              <div style={{marginTop:10,fontSize:9,color:C.red,fontFamily:mono,padding:"0.4rem 0.6rem",
+                           border:`1px solid ${C.red}40`,borderRadius:3}}>{err}</div>
+            )}
+          </div>
         </div>
       )}
-      {err && (
-        <div style={{fontSize:10,color:C.red,fontFamily:mono,padding:"0.5rem 0.75rem",border:`1px solid ${C.red}40`,borderRadius:3,marginBottom:8}}>
-          {err}
+
+      {/* Data Viewer grid */}
+      {view === "grid" && viewRows.length > 0 && (
+        <DataViewer rows={viewRows} headers={viewHeaders} filename={viewFile} />
+      )}
+      {view === "grid" && viewRows.length === 0 && (
+        <div style={{padding:"3rem",color:C.textMuted,fontSize:11,textAlign:"center",fontFamily:mono}}>
+          No data loaded yet. Use Overview to load a file.
         </div>
       )}
 
@@ -404,6 +828,7 @@ function DataTab({ filename, rawData, studioRef }) {
 
 // Placeholder for tabs not yet implemented (Simulate, Calculate, Report).
 function ComingSoon({ tab }) {
+  const { C } = useTheme();
   const labels = { simulate:"Simulate", calculate:"Calculate", report:"Report" };
   const descs  = {
     simulate:  "Build data generating processes, run Monte Carlo simulations, power analysis.",
@@ -442,6 +867,7 @@ function WorkspaceRegistrar({ filename, rawData }) {
 // Mirrors R/Gretl workspace model — projects are first-class, datasets are children.
 
 function Dashboard({onNew, onLoad}) {
+  const { C } = useTheme();
   const [projects, setProjects]   = useState([]);
   const [expanded, setExpanded]   = useState({});
   const [loading,  setLoading]    = useState(true);
@@ -801,11 +1227,12 @@ function Dashboard({onNew, onLoad}) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
+  const { C } = useTheme();
   const [screen,             setScreen]            = useState("dashboard");
   const [rawData,            setRawData]           = useState(null);
   const [filename,           setFilename]          = useState("");
   const [pid,                setPid]               = useState(null);
-  const [output,             setOutput]            = useState(null);
+  const [outputs,            setOutputs]           = useState({});
   const [activeTab,          setActiveTab]         = useState("clean");
   const [activeDatasetId,    setActiveDatasetId]   = useState(null);
   const [sidebarOpen,        setSidebarOpen]       = useState(false);
@@ -819,7 +1246,7 @@ export default function App() {
   const handleLoad = async p => {
     setFilename(p.filename || "project");
     setPid(p.id);
-    setOutput(null);
+    setOutputs({});
     setActiveTab("clean");
 
     if (p.filename === "wages_panel_demo.csv") {
@@ -849,16 +1276,25 @@ export default function App() {
     setRawData(data);
     setFilename(fname || "dataset.csv");
     setPid(`proj_${Date.now()}_${Math.random().toString(36).slice(2)}`);
-    setOutput(null);
+    setOutputs({});
     setActiveTab("clean");
     setScreen("workspace");
   };
 
   // ── Pipeline output — fired by DataStudio when user clicks "→ Analyze" ───
   const handleComplete = r => {
-    setOutput(r);
+    const id = activeDatasetId ?? pid;
+    setOutputs(prev => ({ ...prev, [id]: r }));
     setActiveTab("explore");
   };
+
+  // ── Auto output — fired silently when a dataset's pipeline finishes loading ─
+  const handleOutputReady = (r, dsId) => {
+    setOutputs(prev => ({ ...prev, [dsId]: r }));
+  };
+
+  // Active output: prefer the selected dataset's output, fall back to primary
+  const activeOutput = outputs[activeDatasetId ?? pid] ?? outputs[pid] ?? null;
 
   const inWorkspace = screen === "workspace";
 
@@ -886,9 +1322,9 @@ export default function App() {
           <>
             <span style={{color:C.border2}}>|</span>
             <span style={{fontSize:11,color:C.textDim,fontFamily:mono}}>{filename}</span>
-            {output && (
+            {activeOutput && (
               <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
-                · {output.cleanRows.length} obs · {output.headers.length} vars
+                · {activeOutput.cleanRows.length} obs · {activeOutput.headers.length} vars
               </span>
             )}
           </>
@@ -896,7 +1332,7 @@ export default function App() {
 
         {inWorkspace && (
           <>
-            {!output && (
+            {!activeOutput && (
               <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginLeft:4}}>
                 autosaved ✓
               </span>
@@ -934,7 +1370,7 @@ export default function App() {
 
         {screen==="dashboard" && (
           <Dashboard
-            onNew={()=>{ setPid(null); setRawData(null); setOutput(null); setScreen("upload"); }}
+            onNew={()=>{ setPid(null); setRawData(null); setOutputs({}); setScreen("upload"); }}
             onLoad={handleLoad}
           />
         )}
@@ -951,7 +1387,7 @@ export default function App() {
               <WorkspaceBar
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
-                hasOutput={!!output}
+                hasOutput={!!activeOutput}
                 activeDatasetId={activeDatasetId}
                 onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
               />
@@ -961,7 +1397,14 @@ export default function App() {
 
                 {/* DATA — dataset overview + file upload + WB/OECD fetchers */}
                 <div style={{...tabPanel, display: activeTab==="data" ? "flex" : "none", flexDirection:"column"}}>
-                  <DataTab filename={filename} rawData={rawData} studioRef={studioRef}/>
+                  <DataTab
+                    filename={filename} rawData={rawData} studioRef={studioRef}
+                    cleanedData={activeOutput}
+                    availableDatasets={availableDatasets}
+                    activeDatasetId={activeDatasetId ?? pid}
+                    onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
+                    onDeleteDataset={id => { studioRef.current?.removeDataset(id); }}
+                  />
                 </div>
 
                 {/* CLEAN — DataStudio always mounted; never remounts on tab switch */}
@@ -973,6 +1416,7 @@ export default function App() {
                     filename={filename}
                     pid={pid}
                     onComplete={handleComplete}
+                    onOutputReady={handleOutputReady}
                     onDatasetsChange={setAvailableDatasets}
                     activeDatasetId={activeDatasetId}
                   />
@@ -980,9 +1424,9 @@ export default function App() {
 
                 {/* EXPLORE */}
                 <div style={{...tabPanel, display: activeTab==="explore" ? "flex" : "none", flexDirection:"column"}}>
-                  {output
+                  {activeOutput
                     ? <ExplorerModule
-                        cleanedData={output}
+                        cleanedData={activeOutput}
                         onBack={()=>setActiveTab("clean")}
                         onProceed={()=>setActiveTab("model")}
                       />
@@ -992,9 +1436,9 @@ export default function App() {
 
                 {/* MODEL */}
                 <div style={{...tabPanel, display: activeTab==="model" ? "flex" : "none", flexDirection:"column"}}>
-                  {output
+                  {activeOutput
                     ? <ModelingTab
-                        cleanedData={output}
+                        cleanedData={activeOutput}
                         availableDatasets={availableDatasets}
                         onBack={()=>setActiveTab("explore")}
                         onResultChange={r=>setActiveResult(r)}
@@ -1011,16 +1455,19 @@ export default function App() {
                   />
                 </div>
 
-                {/* REPORT — stub */}
+                {/* REPORT — Phase 9.10 */}
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
-                  <ComingSoon tab="report"/>
+                  {activeOutput
+                    ? <ReportingModule result={activeResult} cleanedData={activeOutput} />
+                    : <NeedsOutput onGoToClean={() => setActiveTab("clean")} />
+                  }
                 </div>
 
                 {/* CALCULATE — Phase 9.7 */}
                 <div style={{...tabPanel, display: activeTab==="calculate" ? "flex" : "none", flexDirection:"column"}}>
                   <CalculateTab
-                    rows={output?.cleanRows ?? rawData?.rows ?? []}
-                    headers={output?.headers ?? rawData?.headers ?? []}
+                    rows={activeOutput?.cleanRows ?? rawData?.rows ?? []}
+                    headers={activeOutput?.headers ?? rawData?.headers ?? []}
                     onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
                   />
                 </div>
@@ -1036,7 +1483,7 @@ export default function App() {
         isOpen={sidebarOpen}
         onClose={()=>setSidebarOpen(false)}
         screen={activeTab}
-        cleanedData={output}
+        cleanedData={activeOutput}
         modelResult={activeResult}
         prefillMessage={coachPrefill}
       />

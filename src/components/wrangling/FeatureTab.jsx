@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · components/wrangling/FeatureTab.jsx ─────────────────────
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { C, mono, Lbl, Tabs, Btn } from "./shared.jsx";
+import { useTheme, mono, Lbl, Tabs, Btn } from "./shared.jsx";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
 // dplyr-style free-form expression evaluator.
 // Exposes all column names as variables + a whitelist of helper functions.
 // Generates a pipeline step {type:"mutate", nn, expr, desc}.
 function MutateSubTab({rows, headers, info, onAdd}){
+  const { C } = useTheme();
   const [name,   setName]   = useState("");
   const [expr,   setExpr]   = useState("");
   const [refOpen,setRefOpen]= useState(false);
@@ -236,6 +237,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
 
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
+  const { C } = useTheme();
   const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
   const [qt,setQt]=useState("log"),[qc,setQc]=useState(""),[xc2,setXc2]=useState("");
   const [pop,setPop]=useState("lag"),[pc,setPc]=useState(""),[lagN,setLagN]=useState(1);

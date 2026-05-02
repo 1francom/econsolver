@@ -241,9 +241,30 @@ function vectorValues(obj) {
   return [];
 }
 
+// ── Gzip decompression ─────────────────────────────────────────────────────────
+async function decompressGzip(arrayBuffer) {
+  const ds = new DecompressionStream("gzip");
+  const writer = ds.writable.getWriter();
+  writer.write(new Uint8Array(arrayBuffer));
+  writer.close();
+  const reader = ds.readable.getReader();
+  const chunks = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  return out.buffer;
+}
+
 // ── Main export ────────────────────────────────────────────────────────────────
 /**
  * Parse an R .rds file (XDR binary serialization format).
+ * Handles gzip-compressed files automatically (R's default compress=TRUE).
  * @param {ArrayBuffer} arrayBuffer
  * @returns {{ headers: string[], rows: object[] }}
  */
@@ -261,14 +282,10 @@ export async function parseRDS(arrayBuffer) {
     if (magic0 === 0x42 && magic1 === 0x0A) {
       throw new Error("RDS: Native binary format is not supported — please re-save with saveRDS(..., version=2) in R.");
     }
-    // Could be a gzip-compressed RDS (most common when saved with compress=TRUE)
-    // Gzip magic: 0x1F 0x8B
+    // Gzip-compressed RDS (default when compress=TRUE, which is R's default)
     if (magic0 === 0x1F && magic1 === 0x8B) {
-      throw new Error(
-        "RDS: File appears to be gzip-compressed. " +
-        "Browser cannot decompress it natively. " +
-        "Re-save with: saveRDS(obj, file, compress=FALSE) in R, or convert to CSV."
-      );
+      const decompressed = await decompressGzip(arrayBuffer);
+      return parseRDS(decompressed);
     }
     throw new Error(`RDS: Unrecognized file magic 0x${magic0.toString(16)} 0x${magic1.toString(16)}. Is this an .rds file?`);
   }

@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.33.1-dev45.0",
     "fflate": "^0.8.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

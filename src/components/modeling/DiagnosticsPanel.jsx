@@ -15,28 +15,21 @@
 // All tests are computed lazily via useMemo — zero cost if not rendered.
 
 import { useState, useMemo } from "react";
+import { useTheme } from "../../ThemeContext.jsx";
 import { breuschPagan, whiteTest }      from "../../core/diagnostics/heteroskedasticity.js";
 import { durbinWatson, breuschGodfrey } from "../../core/diagnostics/autocorrelation.js";
 import { jarqueBera, shapiroWilk }      from "../../core/diagnostics/normality.js";
 import { computeVIF, conditionNumber }  from "../../core/diagnostics/multicollinearity.js";
 import { hausmanTest }                  from "../../math/LinearEngine.js";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", teal:"#6ec8b4", orange:"#c88e6e",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function sevColor(reject, inconclusive) {
+function sevColor(C, reject, inconclusive) {
   if (inconclusive) return C.yellow;
   return reject ? C.red : C.green;
 }
-function vifColor(severity) {
+function vifColor(C, severity) {
   return severity === "severe" ? C.red : severity === "moderate" ? C.yellow : C.green;
 }
 function fmt4(v) { return v != null && isFinite(v) ? v.toFixed(4) : "—"; }
@@ -47,6 +40,7 @@ function fmtP(p) {
 
 // ── Section header ────────────────────────────────────────────────────────────
 function SectionHdr({ children }) {
+  const { C } = useTheme();
   return (
     <div style={{
       padding: "0.28rem 0.85rem",
@@ -61,7 +55,8 @@ function SectionHdr({ children }) {
 
 // ── Single test result card ───────────────────────────────────────────────────
 function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusive, note }) {
-  const color = sevColor(reject, inconclusive);
+  const { C } = useTheme();
+  const color = sevColor(C, reject, inconclusive);
   return (
     <div style={{
       padding: "0.6rem 0.85rem",
@@ -92,12 +87,13 @@ function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusi
 
 // ── VIF cards ─────────────────────────────────────────────────────────────────
 function VIFCards({ vifResults }) {
+  const { C } = useTheme();
   if (!vifResults?.length) return null;
   return (
     <div style={{ padding: "0.6rem 0.85rem" }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
         {vifResults.map(({ col, vif: v, severity }) => {
-          const color = vifColor(severity);
+          const color = vifColor(C, severity);
           return (
             <div key={col} style={{
               padding: "0.3rem 0.6rem",
@@ -173,6 +169,7 @@ function buildAlerts(bp, white, dw, bg, vif, hausman) {
 
 // ── Alert card ────────────────────────────────────────────────────────────────
 function DiagAlertCard({ alert, onCoachQuery }) {
+  const { C } = useTheme();
   const sevColor = { high: C.red, medium: C.yellow, low: C.textDim };
   const color = sevColor[alert.severity] ?? C.textDim;
   return (
@@ -215,6 +212,7 @@ export default function DiagnosticsPanel({
   model = "OLS", panelFE, panelFD, panel,
   onCoachQuery,
 }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(true);
 
   // Build design matrix X from rows + xCols (needed for BP and White)
@@ -355,11 +353,11 @@ export default function DiagnosticsPanel({
               {cond && (
                 <div style={{ padding: "0.4rem 0.85rem 0.6rem", fontFamily: mono, fontSize: 10, color: C.textDim, display: "flex", gap: 12, alignItems: "center" }}>
                   <span>Condition number</span>
-                  <span style={{ color: vifColor(cond.severity), fontSize: 13 }}>κ = {cond.kappa}</span>
+                  <span style={{ color: vifColor(C, cond.severity), fontSize: 13 }}>κ = {cond.kappa}</span>
                   <span style={{
                     fontSize: 9, padding: "1px 5px",
-                    border: `1px solid ${vifColor(cond.severity)}40`,
-                    color: vifColor(cond.severity), borderRadius: 2,
+                    border: `1px solid ${vifColor(C, cond.severity)}40`,
+                    color: vifColor(C, cond.severity), borderRadius: 2,
                   }}>
                     {cond.severity === "none" ? "Acceptable" : cond.severity === "moderate" ? "Moderate" : "Severe"}
                   </span>

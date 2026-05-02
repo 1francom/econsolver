@@ -7,20 +7,14 @@
 //   onClose()
 
 import { useState, useMemo } from "react";
+import { useTheme } from "../../ThemeContext.jsx";
 import { stars } from "../../math/index.js";
 import { compareModels } from "../../services/AI/AIService.js";
 import { generateMultiModelRScript }     from "../../services/export/rScript.js";
 import { generateMultiModelPythonScript } from "../../services/export/pythonScript.js";
 import { generateMultiModelStataScript }  from "../../services/export/stataScript.js";
+import { buildStargazer }                 from "../../services/export/latexTable.js";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", teal:"#6ec8b4", orange:"#c88e6e", purple:"#a87ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 const TYPE_COLOR = {
@@ -34,6 +28,7 @@ function safeN(v, dp = 4) {
 }
 
 function CopyBtn({ text, label = "Copy" }) {
+  const { C } = useTheme();
   const [ok, setOk] = useState(false);
   return (
     <button
@@ -51,6 +46,7 @@ function CopyBtn({ text, label = "Copy" }) {
 // ─── STARGAZER TABLE ──────────────────────────────────────────────────────────
 // HTML coefficient table: variables in rows, models in columns.
 function StargazerTable({ models }) {
+  const { C } = useTheme();
   // Collect all variable names (union), intercept last
   const allVars = useMemo(() => {
     const set = new Set();
@@ -171,6 +167,7 @@ function StargazerTable({ models }) {
 // ─── COEFFICIENT STABILITY HEATMAP ───────────────────────────────────────────
 // Per variable, shows β across models + color-codes by sign change / significance.
 function StabilityHeatmap({ models }) {
+  const { C } = useTheme();
   const allVars = useMemo(() => {
     const set = new Set();
     models.forEach(m => (m.varNames ?? []).forEach(v => { if (v !== "(Intercept)") set.add(v); }));
@@ -272,6 +269,7 @@ function StabilityHeatmap({ models }) {
 
 // ─── FIT STATS GRID ───────────────────────────────────────────────────────────
 function FitGrid({ models }) {
+  const { C } = useTheme();
   const rows = [
     { label: "R²",      fn: m => m.R2     != null && isFinite(m.R2)     ? m.R2.toFixed(4)     : "—" },
     { label: "Adj. R²", fn: m => m.adjR2  != null && isFinite(m.adjR2)  ? m.adjR2.toFixed(4)  : "—" },
@@ -324,9 +322,17 @@ function FitGrid({ models }) {
 
 // ─── MULTI-MODEL EXPORT ───────────────────────────────────────────────────────
 function ExportBlock({ models, dataDictionary }) {
+  const { C } = useTheme();
   const [lang, setLang] = useState("r");
 
   const script = useMemo(() => {
+    if (lang === "latex") {
+      return buildStargazer(models.map((m, i) => ({
+        label:  m.label ?? m.type ?? `M${i + 1}`,
+        result: m,
+        yVar:   m.spec?.yVar ?? m.yVar ?? "y",
+      })));
+    }
     const configs = models.map(m => ({
       model: {
         type: m.type,
@@ -351,18 +357,24 @@ function ExportBlock({ models, dataDictionary }) {
     return "";
   }, [models, dataDictionary, lang]);
 
-  const ext = lang === "r" ? ".R" : lang === "python" ? ".py" : ".do";
+  const ext = lang === "r" ? ".R" : lang === "python" ? ".py" : lang === "stata" ? ".do" : ".tex";
+  const LANGS = [
+    { id: "r",      label: "R" },
+    { id: "python", label: "Python" },
+    { id: "stata",  label: "Stata" },
+    { id: "latex",  label: "LaTeX" },
+  ];
 
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
-        {["r", "python", "stata"].map(l => (
-          <button key={l} onClick={() => setLang(l)}
+        {LANGS.map(({ id, label }) => (
+          <button key={id} onClick={() => setLang(id)}
             style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10,
-                     border: `1px solid ${lang === l ? C.teal : C.border2}`,
-                     background: lang === l ? `${C.teal}14` : "transparent",
-                     color: lang === l ? C.teal : C.textDim, cursor: "pointer" }}>
-            {l === "r" ? "R" : l === "python" ? "Python" : "Stata"}
+                     border: `1px solid ${lang === id ? C.teal : C.border2}`,
+                     background: lang === id ? `${C.teal}14` : "transparent",
+                     color: lang === id ? C.teal : C.textDim, cursor: "pointer" }}>
+            {label}
           </button>
         ))}
         <div style={{ flex: 1 }} />
@@ -381,6 +393,12 @@ function ExportBlock({ models, dataDictionary }) {
           Download
         </button>
       </div>
+      {lang === "latex" && (
+        <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, fontFamily: mono }}>
+          Add <span style={{ color: C.gold }}>{"\\usepackage{booktabs}"}</span> to your preamble if needed.
+          Paste into your <span style={{ color: C.gold }}>\\begin{"{document}"}</span> body.
+        </div>
+      )}
       <pre style={{
         background: C.surface2, border: `1px solid ${C.border}`,
         borderRadius: 4, padding: "0.8rem", fontSize: 9, color: C.textDim,
@@ -395,6 +413,7 @@ function ExportBlock({ models, dataDictionary }) {
 
 // ─── AI NARRATIVE ─────────────────────────────────────────────────────────────
 function AICompareNarrative({ models, dataDictionary }) {
+  const { C } = useTheme();
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
@@ -456,6 +475,7 @@ function AICompareNarrative({ models, dataDictionary }) {
 
 // ─── SECTION HEADER ───────────────────────────────────────────────────────────
 function SectionHdr({ children }) {
+  const { C } = useTheme();
   return (
     <div style={{
       fontSize: 9, color: C.textMuted, letterSpacing: "0.22em",
@@ -470,6 +490,7 @@ function SectionHdr({ children }) {
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export default function ModelComparison({ models, dataDictionary, onClose }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("table");
 
   if (!models?.length) return null;

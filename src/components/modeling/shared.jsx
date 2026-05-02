@@ -1,27 +1,25 @@
-// ─── ECON STUDIO · src/components/modeling/shared.jsx ─────────────────────────
-// Theme constants + micro-UI atoms shared across all Modeling sub-components.
-// No state, no side effects.
+// ─── ECON STUDIO · src/components/modeling/shared.jsx ───────────────────────
+// Theme hook + micro-UI atoms shared across all Modeling sub-components.
 
-// ─── THEME ────────────────────────────────────────────────────────────────────
-export const C = {
-  bg: "#080808", surface: "#0f0f0f", surface2: "#131313", surface3: "#161616",
-  border: "#1c1c1c", border2: "#252525",
-  gold: "#c8a96e", goldDim: "#7a6040", goldFaint: "#1a1408",
-  text: "#ddd8cc", textDim: "#888", textMuted: "#444",
-  green: "#7ab896", red: "#c47070", yellow: "#c8b46e",
-  blue: "#6e9ec8", purple: "#a87ec8", teal: "#6ec8b4", orange: "#c88e6e",
-  violet: "#9e7ec8",
-};
+import { useTheme } from "../../ThemeContext.jsx";
+
+// Re-export so consumers can import from one place.
+export { useTheme };
+
+// Static fallback for non-React contexts.
+export { DARK as C } from "../../theme.js";
 
 export const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 
-export function Lbl({ children, color = C.textMuted }) {
+export function Lbl({ children, color }) {
+  const { C } = useTheme();
   return (
     <div style={{
-      fontSize: 9, color, letterSpacing: "0.22em",
-      textTransform: "uppercase", marginBottom: 8, fontFamily: mono,
+      fontSize: 9, color: color ?? C.textMuted,
+      letterSpacing: "0.22em", textTransform: "uppercase",
+      marginBottom: 8, fontFamily: mono,
     }}>
       {children}
     </div>
@@ -41,6 +39,7 @@ export function Badge({ label, color }) {
 }
 
 export function Chip({ label, selected, color, onClick, disabled, title }) {
+  const { C } = useTheme();
   return (
     <button
       onClick={onClick}
@@ -62,6 +61,7 @@ export function Chip({ label, selected, color, onClick, disabled, title }) {
 }
 
 export function ModelBtn({ model, selected, disabled, onClick, color, hint }) {
+  const { C } = useTheme();
   return (
     <button
       onClick={onClick}
@@ -85,22 +85,25 @@ export function ModelBtn({ model, selected, disabled, onClick, color, hint }) {
   );
 }
 
-export function Section({ title, children, color = C.textMuted }) {
+export function Section({ title, children, color }) {
+  const { C } = useTheme();
   return (
     <div style={{ marginBottom: "1.4rem" }}>
-      <Lbl color={color}>{title}</Lbl>
+      <Lbl color={color ?? C.textMuted}>{title}</Lbl>
       {children}
     </div>
   );
 }
 
-export function InfoBox({ children, color = C.blue, bg }) {
+export function InfoBox({ children, color, bg }) {
+  const { C } = useTheme();
+  const col = color ?? C.blue;
   return (
     <div style={{
       padding: "0.65rem 0.9rem",
-      background: bg || `${color}08`,
-      border: `1px solid ${color}30`,
-      borderLeft: `3px solid ${color}`,
+      background: bg || `${col}08`,
+      border: `1px solid ${col}30`,
+      borderLeft: `3px solid ${col}`,
       borderRadius: 4, fontSize: 11,
       color: C.textDim, lineHeight: 1.7,
       fontFamily: mono, marginBottom: "1rem",
@@ -111,9 +114,8 @@ export function InfoBox({ children, color = C.blue, bg }) {
 }
 
 // ─── VAR PANEL ────────────────────────────────────────────────────────────────
-// Reusable variable-picker strip: title bar + chip grid.
-// Used by VariableSelector and ModelConfiguration.
 export function VarPanel({ title, color, vars, selected, onToggle, multi = true, info }) {
+  const { C } = useTheme();
   return (
     <Section title={`${title} — ${selected.length > 0 ? selected.join(", ") : "none"}`} color={color}>
       {info && (

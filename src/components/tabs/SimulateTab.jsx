@@ -24,9 +24,9 @@ function Btn({ onClick, ch, color = C.gold, v = "out", dis = false, sm = false }
   if (v === "ghost") return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: "none", color: dis ? C.textMuted : color }}>{ch}</button>;
   return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: `1px solid ${C.border2}`, color: dis ? C.textMuted : C.textDim }}>{ch}</button>;
 }
-const fieldStyle = { background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" };
-const thStyle = { padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2, whiteSpace: "nowrap" };
-const tdStyle = { padding: "0.32rem 0.65rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" };
+const fieldStyle = C => ({ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" });
+const thStyle = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2, whiteSpace: "nowrap" });
+const tdStyle = C => ({ padding: "0.32rem 0.65rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
 
 // ─── SEEDED PRNG (mulberry32) ─────────────────────────────────────────────────
 function mulberry32(seed) {
@@ -95,14 +95,17 @@ const DIST_DEFAULTS = {
   t:           { df: 5 },
   "Chi-squared": { df: 3 },
   Expression:  { expr: "" },
+  ForLoop:     { init: "0", update: "prev * 0.9 + eps[i]" },
+  WhileLoop:   { init: "1", update: "prev * 0.95", condition: "Math.abs(prev) > 0.001", maxIter: "1000" },
 };
 
-const DIST_OPTIONS = ["Normal","Uniform","Bernoulli","Poisson","Exponential","t","Chi-squared","Expression"];
+const DIST_OPTIONS = ["Normal","Uniform","Bernoulli","Poisson","Exponential","t","Chi-squared","Expression","ForLoop","WhileLoop"];
 
 const DIST_COLOR = {
   Normal: C.blue, Uniform: C.teal, Bernoulli: C.purple,
   Poisson: C.gold, Exponential: "#c88e6e", t: C.green,
   "Chi-squared": "#c87e9e", Expression: C.textDim,
+  ForLoop: "#9ec87e", WhileLoop: "#c87e6e",
 };
 
 // ─── PARAM EDITOR ─────────────────────────────────────────────────────────────
@@ -115,7 +118,7 @@ function ParamEditor({ dist, params, onChange }) {
           value={params[key] ?? ""}
           onChange={e => onChange({ ...params, [key]: e.target.value })}
           placeholder={placeholder}
-          style={{ ...fieldStyle, width: 68 }}
+          style={{ ...fieldStyle(C), width: 68 }}
         />
       </label>
     );
@@ -131,8 +134,46 @@ function ParamEditor({ dist, params, onChange }) {
       value={params.expr ?? ""}
       onChange={e => onChange({ ...params, expr: e.target.value })}
       placeholder="e.g. 1 + 2*X1 + eps"
-      style={{ ...fieldStyle, width: 240 }}
+      style={{ ...fieldStyle(C), width: 240 }}
     />
+  );
+  if (dist === "ForLoop") return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>init</span>
+        <input value={params.init ?? "0"} onChange={e => onChange({ ...params, init: e.target.value })}
+          placeholder="0" style={{ ...fieldStyle(C), width: 70 }} />
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>update(prev,i)</span>
+        <input value={params.update ?? ""} onChange={e => onChange({ ...params, update: e.target.value })}
+          placeholder="prev * 0.9 + eps[i]" style={{ ...fieldStyle(C), width: 180 }} />
+      </label>
+    </div>
+  );
+  if (dist === "WhileLoop") return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>init</span>
+        <input value={params.init ?? "1"} onChange={e => onChange({ ...params, init: e.target.value })}
+          placeholder="1" style={{ ...fieldStyle(C), width: 60 }} />
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>update(prev)</span>
+        <input value={params.update ?? ""} onChange={e => onChange({ ...params, update: e.target.value })}
+          placeholder="prev * 0.95" style={{ ...fieldStyle(C), width: 130 }} />
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>while</span>
+        <input value={params.condition ?? ""} onChange={e => onChange({ ...params, condition: e.target.value })}
+          placeholder="Math.abs(prev) > 0.001" style={{ ...fieldStyle(C), width: 170 }} />
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>maxIter</span>
+        <input value={params.maxIter ?? "1000"} onChange={e => onChange({ ...params, maxIter: e.target.value })}
+          placeholder="1000" style={{ ...fieldStyle(C), width: 60 }} />
+      </label>
+    </div>
   );
   return null;
 }
@@ -173,6 +214,28 @@ export function generateSimScript(language, n, seed, variables) {
     variables.forEach(v => {
       if (v.dist === "Expression") {
         lines.push(`# ${v.name} = ${v.params.expr||""}`, `${v.name} <- ${v.params.expr||"NA"}`);
+      } else if (v.dist === "ForLoop") {
+        const init = v.params.init || "0";
+        const upd  = v.params.update || "prev";
+        lines.push(
+          `# ForLoop: ${v.name}`,
+          `${v.name} <- numeric(n)`,
+          `${v.name}[1] <- ${init}`,
+          `for (i in 2:n) { ${v.name}[i] <- ${upd.replace(/\bprev\b/g, `${v.name}[i-1]`).replace(/\bi\b/g, "i")} }`,
+        );
+      } else if (v.dist === "WhileLoop") {
+        const init = v.params.init || "1";
+        const upd  = v.params.update || "prev";
+        const cond = v.params.condition || "FALSE";
+        const mi   = +(v.params.maxIter) || 1000;
+        lines.push(
+          `# WhileLoop: ${v.name} (converged scalar)`,
+          `${v.name}_val <- ${init}; ${v.name}_iter <- 0L`,
+          `while ((${cond.replace(/\bprev\b/g, `${v.name}_val`)}) && ${v.name}_iter < ${mi}) {`,
+          `  ${v.name}_val <- ${upd.replace(/\bprev\b/g, `${v.name}_val`)}; ${v.name}_iter <- ${v.name}_iter + 1L`,
+          `}`,
+          `${v.name} <- rep(${v.name}_val, n)`,
+        );
       } else {
         lines.push(`${v.name} <- ${distR[v.dist]?.(v) ?? "NA"}`);
       }
@@ -183,6 +246,29 @@ export function generateSimScript(language, n, seed, variables) {
     variables.forEach(v => {
       if (v.dist === "Expression") {
         lines.push(`# ${v.name} = ${v.params.expr||""}`, `${v.name} = ${v.params.expr||"None"}`);
+      } else if (v.dist === "ForLoop") {
+        const init = v.params.init || "0";
+        const upd  = v.params.update || "prev";
+        lines.push(
+          `# ForLoop: ${v.name}`,
+          `${v.name} = np.empty(n)`,
+          `${v.name}[0] = ${init}`,
+          `for i in range(1, n):`,
+          `    prev = ${v.name}[i-1]`,
+          `    ${v.name}[i] = ${upd}`,
+        );
+      } else if (v.dist === "WhileLoop") {
+        const init = v.params.init || "1";
+        const upd  = v.params.update || "prev";
+        const cond = v.params.condition || "False";
+        const mi   = +(v.params.maxIter) || 1000;
+        lines.push(
+          `# WhileLoop: ${v.name} (converged scalar)`,
+          `prev = ${init}; ${v.name}_iter = 0`,
+          `while (${cond}) and ${v.name}_iter < ${mi}:`,
+          `    prev = ${upd}; ${v.name}_iter += 1`,
+          `${v.name} = np.full(n, prev)`,
+        );
       } else {
         lines.push(`${v.name} = ${distPy[v.dist]?.(v) ?? "None"}`);
       }
@@ -193,6 +279,31 @@ export function generateSimScript(language, n, seed, variables) {
     variables.forEach(v => {
       if (v.dist === "Expression") {
         lines.push(`* ${v.name} = ${v.params.expr||""}`, `generate ${v.name} = ${v.params.expr||"."}`);
+      } else if (v.dist === "ForLoop") {
+        const init = v.params.init || "0";
+        const upd  = v.params.update || "prev";
+        const rUpd = upd.replace(/\bprev\b/g, `${v.name}[_n-1]`).replace(/\bi\b/g, "_n");
+        lines.push(
+          `* ForLoop: ${v.name}`,
+          `generate ${v.name} = .`,
+          `replace ${v.name} = ${init} in 1`,
+          `forvalues i = 2/\`=_N' { quietly replace ${v.name} = ${rUpd} in \`i' }`,
+        );
+      } else if (v.dist === "WhileLoop") {
+        const init = v.params.init || "1";
+        const upd  = v.params.update || "prev";
+        const cond = v.params.condition || "0";
+        const mi   = +(v.params.maxIter) || 1000;
+        lines.push(
+          `* WhileLoop: ${v.name} (converged scalar)`,
+          `local ${v.name}_val = ${init}`,
+          `local ${v.name}_iter = 0`,
+          `while (${cond.replace(/\bprev\b/g, `\`${v.name}_val'`)}) & \`${v.name}_iter' < ${mi} {`,
+          `  local ${v.name}_val = ${upd.replace(/\bprev\b/g, `\`${v.name}_val'`)}`,
+          `  local ${v.name}_iter = \`${v.name}_iter' + 1`,
+          `}`,
+          `generate ${v.name} = \`${v.name}_val'`,
+        );
       } else {
         lines.push(`generate ${v.name} = ${distStata[v.dist]?.(v) ?? "."}`);
       }
@@ -246,6 +357,51 @@ export default function SimulateTab({ onAddDataset }) {
           scope[v.name] = arr;
         } catch (e) {
           setGenErr(`${v.name}: expression error — ${e.message}`);
+          return;
+        }
+      } else if (v.dist === "ForLoop") {
+        const initExpr  = (v.params.init   || "0").trim();
+        const updExpr   = (v.params.update || "prev").trim();
+        const varNames  = Object.keys(scope);
+        const varArrays = Object.values(scope);
+        try {
+          const arr = new Array(nObs);
+          // eslint-disable-next-line no-new-func
+          const initFn = new Function(...varNames, `"use strict"; return (${initExpr});`);
+          const scalarsAt0 = varArrays.map(a => a[0]);
+          arr[0] = initFn(...scalarsAt0);
+          for (let i = 1; i < nObs; i++) {
+            const prev = arr[i - 1];
+            const scalars = varArrays.map(a => a[i]);
+            // eslint-disable-next-line no-new-func
+            arr[i] = new Function("prev", "i", ...varNames, `"use strict"; return (${updExpr});`)(prev, i, ...scalars);
+          }
+          scope[v.name] = arr;
+        } catch (e) {
+          setGenErr(`${v.name} (ForLoop): ${e.message}`);
+          return;
+        }
+      } else if (v.dist === "WhileLoop") {
+        const initExpr  = (v.params.init      || "1").trim();
+        const updExpr   = (v.params.update    || "prev").trim();
+        const condExpr  = (v.params.condition || "false").trim();
+        const maxIter   = Math.max(1, Math.min(100000, +(v.params.maxIter) || 1000));
+        try {
+          // eslint-disable-next-line no-new-func
+          let val = new Function(`"use strict"; return (${initExpr});`)();
+          let iter = 0;
+          // eslint-disable-next-line no-new-func
+          const condFn = new Function("prev", `"use strict"; return !!(${condExpr});`);
+          // eslint-disable-next-line no-new-func
+          const updFn  = new Function("prev", `"use strict"; return (${updExpr});`);
+          while (condFn(val) && iter < maxIter) {
+            val = updFn(val);
+            iter++;
+          }
+          // WhileLoop produces a scalar — broadcast to all rows
+          scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
+        } catch (e) {
+          setGenErr(`${v.name} (WhileLoop): ${e.message}`);
           return;
         }
       } else {
@@ -315,12 +471,12 @@ export default function SimulateTab({ onAddDataset }) {
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <Lbl mb={2}>Observations (n)</Lbl>
           <input type="number" min={1} max={100000} value={n} onChange={e => setN(e.target.value)}
-            style={{ ...fieldStyle, width: 100 }} />
+            style={{ ...fieldStyle(C), width: 100 }} />
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <Lbl mb={2}>Seed</Lbl>
           <input type="number" value={seed} onChange={e => setSeed(e.target.value)}
-            style={{ ...fieldStyle, width: 80 }} />
+            style={{ ...fieldStyle(C), width: 80 }} />
         </label>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           <Btn onClick={generate} v="solid" color={C.teal} ch="Generate" />
@@ -336,40 +492,40 @@ export default function SimulateTab({ onAddDataset }) {
             <thead>
               <tr>
                 <th style={{ ...thStyle, width: 24 }}>#</th>
-                <th style={thStyle}>Name</th>
-                <th style={thStyle}>Distribution</th>
-                <th style={thStyle}>Parameters</th>
+                <th style={thStyle(C)}>Name</th>
+                <th style={thStyle(C)}>Distribution</th>
+                <th style={thStyle(C)}>Parameters</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {variables.map((v, idx) => (
                 <tr key={v.id} style={{ background: idx % 2 ? C.surface2 : C.surface }}>
-                  <td style={{ ...tdStyle, color: C.textMuted, fontSize: 9, textAlign: "center" }}>{idx + 1}</td>
-                  <td style={tdStyle}>
+                  <td style={{ ...tdStyle(C), color: C.textMuted, fontSize: 9, textAlign: "center" }}>{idx + 1}</td>
+                  <td style={tdStyle(C)}>
                     <input
                       value={v.name}
                       onChange={e => updateVar(v.id, { name: e.target.value })}
-                      style={{ ...fieldStyle, width: 80 }}
+                      style={{ ...fieldStyle(C), width: 80 }}
                     />
                   </td>
-                  <td style={tdStyle}>
+                  <td style={tdStyle(C)}>
                     <select
                       value={v.dist}
                       onChange={e => updateDist(v.id, e.target.value)}
-                      style={{ ...fieldStyle, width: 118 }}
+                      style={{ ...fieldStyle(C), width: 118 }}
                     >
                       {DIST_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </td>
-                  <td style={tdStyle}>
+                  <td style={tdStyle(C)}>
                     <ParamEditor
                       dist={v.dist}
                       params={v.params}
                       onChange={p => updateVar(v.id, { params: p })}
                     />
                   </td>
-                  <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
+                  <td style={{ ...tdStyle(C), textAlign: "right", whiteSpace: "nowrap" }}>
                     <span style={{ display: "inline-flex", gap: 2 }}>
                       <button onClick={() => moveVar(v.id, -1)} disabled={idx === 0}
                         title="Move up"
@@ -395,26 +551,26 @@ export default function SimulateTab({ onAddDataset }) {
 
               {/* ── Add variable row ── */}
               <tr style={{ background: C.surface }}>
-                <td style={{ ...tdStyle, color: C.textMuted, fontSize: 9, textAlign: "center" }}>+</td>
-                <td style={tdStyle}>
+                <td style={{ ...tdStyle(C), color: C.textMuted, fontSize: 9, textAlign: "center" }}>+</td>
+                <td style={tdStyle(C)}>
                   <input
                     value={newVarName}
                     onChange={e => setNewVarName(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && addVariable()}
                     placeholder="name"
-                    style={{ ...fieldStyle, width: 80 }}
+                    style={{ ...fieldStyle(C), width: 80 }}
                   />
                 </td>
-                <td style={tdStyle}>
+                <td style={tdStyle(C)}>
                   <select value={newDist} onChange={e => setNewDist(e.target.value)}
-                    style={{ ...fieldStyle, width: 118 }}>
+                    style={{ ...fieldStyle(C), width: 118 }}>
                     {DIST_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </td>
-                <td style={tdStyle}>
+                <td style={tdStyle(C)}>
                   <span style={{ fontSize: 10, color: C.textMuted }}>params after adding</span>
                 </td>
-                <td style={{ ...tdStyle, textAlign: "right" }}>
+                <td style={{ ...tdStyle(C), textAlign: "right" }}>
                   <Btn onClick={addVariable} dis={!newVarName.trim()} v="out" ch="+ Add" sm />
                 </td>
               </tr>
@@ -452,7 +608,7 @@ export default function SimulateTab({ onAddDataset }) {
                     {generated.headers.map(h => {
                       const v = row[h];
                       return (
-                        <td key={h} style={{ ...tdStyle, fontFamily: mono, fontSize: 11, color: C.text, whiteSpace: "nowrap" }}>
+                        <td key={h} style={{ ...tdStyle(C), fontFamily: mono, fontSize: 11, color: C.text, whiteSpace: "nowrap" }}>
                           {typeof v === "number" ? v.toFixed(4).replace(/\.?0+$/, "") : String(v ?? "·")}
                         </td>
                       );
@@ -469,7 +625,7 @@ export default function SimulateTab({ onAddDataset }) {
               value={dsName}
               onChange={e => { setDsName(e.target.value); setSaved(false); }}
               placeholder="dataset name"
-              style={{ ...fieldStyle, width: 200 }}
+              style={{ ...fieldStyle(C), width: 200 }}
             />
             <Btn onClick={saveToSession} v="solid" color={C.gold} ch="Save to session" />
             {saved && (

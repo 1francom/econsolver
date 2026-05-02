@@ -11,32 +11,29 @@
 // and passing the result — this component is purely presentational.
 
 import { useState, useMemo } from "react";
+import { useTheme } from "../../ThemeContext.jsx";
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", teal:"#6ec8b4", orange:"#c88e6e", purple:"#a87ec8",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
-const CAT_COLOR = {
-  cleaning: C.teal,
-  features: C.green,
-  reshape:  C.purple,
-  merge:    C.blue,
-  unknown:  C.textMuted,
-};
-
-const STATUS_COLOR  = { ok: C.green, noop: C.textMuted, error: C.red };
+function makeCatColor(C) {
+  return {
+    cleaning: C.teal,
+    features: C.green,
+    reshape:  C.purple,
+    merge:    C.blue,
+    unknown:  C.textMuted,
+  };
+}
+function makeStatusColor(C) {
+  return { ok: C.green, noop: C.textMuted, error: C.red };
+}
 const STATUS_ICON   = { ok: "✓", noop: "—", error: "✗" };
 const CAT_LABEL     = { cleaning: "Clean", features: "Feature", reshape: "Reshape", merge: "Merge", unknown: "?" };
 
-function StatPill({ label, value, color = C.textDim }) {
+function StatPill({ label, value, color }) {
+  const { C } = useTheme();
+  color = color ?? C.textDim;
   return (
     <div style={{
       display: "flex", flexDirection: "column", alignItems: "center",
@@ -51,6 +48,7 @@ function StatPill({ label, value, color = C.textDim }) {
 }
 
 function DeltaBadge({ value, positiveGood = false }) {
+  const { C } = useTheme();
   if (value == null || value === 0) return null;
   const good  = positiveGood ? value > 0 : value < 0;
   const color = good ? C.green : (value === 0 ? C.textMuted : C.yellow);
@@ -63,6 +61,9 @@ function DeltaBadge({ value, positiveGood = false }) {
 
 // ─── FILTER BAR ───────────────────────────────────────────────────────────────
 function FilterBar({ categories, filter, setFilter, statusFilter, setStatusFilter }) {
+  const { C } = useTheme();
+  const CAT_COLOR = makeCatColor(C);
+  const STATUS_COLOR = makeStatusColor(C);
   const allCats = ["all", ...categories];
   const statuses = ["all", "ok", "noop", "error"];
   return (
@@ -110,6 +111,9 @@ function FilterBar({ categories, filter, setFilter, statusFilter, setStatusFilte
 
 // ─── ENTRY CARD ───────────────────────────────────────────────────────────────
 function EntryCard({ entry }) {
+  const { C } = useTheme();
+  const CAT_COLOR = makeCatColor(C);
+  const STATUS_COLOR = makeStatusColor(C);
   const [expanded, setExpanded] = useState(false);
   const catClr  = CAT_COLOR[entry.category] ?? C.textMuted;
   const statClr = STATUS_COLOR[entry.status] ?? C.textMuted;
@@ -225,7 +229,9 @@ function EntryCard({ entry }) {
   );
 }
 
-function Detail({ label, value, color = C.textDim }) {
+function Detail({ label, value, color }) {
+  const { C } = useTheme();
+  color = color ?? C.textDim;
   return (
     <div>
       <div style={{ fontSize: 8, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 2, fontFamily: mono }}>{label}</div>
@@ -236,6 +242,7 @@ function Detail({ label, value, color = C.textDim }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function AuditTrail({ trail, filename = "analysis", onClose }) {
+  const { C } = useTheme();
   const [filter,       setFilter]       = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [markdownCopied, setMarkdownCopied] = useState(false);

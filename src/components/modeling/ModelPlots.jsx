@@ -17,14 +17,16 @@
 // No React state except PlotSelector (activeId only).
 
 import { useState, useRef } from "react";
-import { C, mono } from "./shared.jsx";
+import { useTheme, mono } from "./shared.jsx";
 import PlotExportBar from "../shared/PlotExportBar.jsx";
 
 // ─── PLOT SELECTOR ────────────────────────────────────────────────────────────
 // Tabbed shell that renders one plot at a time.
 // plots: [{ id, label, node }]  — node is a pre-built React element
 // accentColor: border color for the active tab
-export function PlotSelector({ plots, defaultId, accentColor = C.teal }) {
+export function PlotSelector({ plots, defaultId, accentColor }) {
+  const { C } = useTheme();
+  accentColor = accentColor ?? C.teal;
   const [activeId, setActiveId] = useState(defaultId ?? plots[0]?.id);
   if (!plots?.length) return null;
   const active = plots.find(p => p.id === activeId) ?? plots[0];
@@ -71,6 +73,7 @@ export function PlotSelector({ plots, defaultId, accentColor = C.teal }) {
 // Points colored by |standardized residual| — darker = larger deviation.
 // Props: resid, Yhat (both from engine output), yLabel
 export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!resid?.length || !Yhat?.length) return null;
 
   const W = 480, H = 320;
@@ -180,6 +183,7 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
 //   pVal_i   — p-value of xCol (for significance color)
 //   runOLS   — engine function passed in to avoid circular import
 export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!rows?.length || !yCol || !xCol || !runOLS) return null;
 
   // Frisch-Waugh: regress Y on otherX, take residuals
@@ -333,6 +337,7 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
 // ─── SHARED SVG HELPERS ───────────────────────────────────────────────────────
 
 function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
+  const { C } = useTheme();
   return (
     <g>
       <line x1={sx(ticks[0])} x2={sx(ticks[ticks.length - 1])} y1={y} y2={y}
@@ -350,6 +355,7 @@ function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
 }
 
 function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
+  const { C } = useTheme();
   return (
     <g>
       <line x1={x} x2={x} y1={sy(ticks[0])} y2={sy(ticks[ticks.length - 1])}
@@ -367,6 +373,7 @@ function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
 }
 
 function GridLines({ sx, sy, xTicks, yTicks, x0, x1, y0, y1 }) {
+  const { C } = useTheme();
   return (
     <g opacity={0.4}>
       {xTicks.map((t, i) => (
@@ -417,6 +424,7 @@ function exportSVG(svgId, filename) {
 // Lightweight wrapper for inline plots (no W/H needed — SVG is self-sizing).
 // Adds a thin header with label + PlotExportBar (preset + SVG + PNG).
 function InlinePlotShell({ title, svgId, filename, children }) {
+  const { C } = useTheme();
   const wrapRef = useRef(null);
   // Derive a clean base filename from the passed filename (strip extension)
   const baseName = filename ? filename.replace(/\.(svg|png)$/i, "") : (svgId || "plot");
@@ -442,6 +450,7 @@ function InlinePlotShell({ title, svgId, filename, children }) {
 
 // ─── PLOT WRAPPER ─────────────────────────────────────────────────────────────
 function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
+  const { C } = useTheme();
   const wrapRef = useRef(null);
   const baseName = filename ? filename.replace(/\.(svg|png)$/i, "") : (svgId || "plot");
   return (
@@ -483,6 +492,7 @@ function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
 // yLabel, xLabel: axis labels
 
 export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
+  const { C } = useTheme();
   if (!result?.valid?.length) return null;
 
   const W = 620, H = 380;
@@ -650,6 +660,7 @@ export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
 // yLabel: axis label
 
 export function DiDPlot({ result, yLabel = "Y" }) {
+  const { C } = useTheme();
   if (!result?.means) return null;
 
   const { ctrl_pre, ctrl_post, trt_pre, trt_post, att, attP } = {
@@ -808,6 +819,7 @@ export function DiDPlot({ result, yLabel = "Y" }) {
 // yLabel: axis label
 
 export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
+  const { C } = useTheme();
   if (!result?.eventMeans?.length) return null;
 
   const { eventMeans, att, attP } = result;
@@ -1012,6 +1024,7 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
 //   endogVars   — endogenous column names (xVars from ModelingTab)
 
 export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
+  const { C } = useTheme();
   if (!firstStages?.length || !rows?.length) return null;
 
   const W = 420, H = 300;
@@ -1208,6 +1221,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
 //   runSharpRDD — the engine function (passed in to avoid circular imports)
 
 export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "triangular", controls = [], runSharpRDD }) {
+  const { C } = useTheme();
   if (!rows?.length || !optH || !runSharpRDD) return null;
 
   // evaluate at 15 bandwidths: 0.4h to 1.8h
@@ -1360,6 +1374,7 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
 //   rows     — original data rows (needed to read covariate values)
 
 export function RDDCovariateBalance({ result, controls, rows }) {
+  const { C } = useTheme();
   if (!result?.valid?.length || !controls?.length || !rows?.length) return null;
 
   const { valid, D, xc, h, cutoff } = result;
@@ -1516,6 +1531,7 @@ export function RDDCovariateBalance({ result, controls, rows }) {
 // Props: result from runMcCrary — { bins, leftFit, rightFit, fhatLeft, fhatRight,
 //   theta, thetaSE, zStat, pVal, manipulation, cutoff, h, bw, n }
 export function McCraryPlot({ result, xLabel = "Running variable" }) {
+  const { C } = useTheme();
   if (!result?.bins?.length) return null;
 
   const {
@@ -1700,6 +1716,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
 // ─── Y vs X̂ PLOT (2SLS) ──────────────────────────────────────────────────────
 // Y vs instrumented endogenous X̂. Slope = β_IV.
 export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂", resid2, svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!Y?.length || !Xhat?.length) return null;
   const pts = Y.map((y, i) => ({ y, x: Xhat[i], e: resid2?.[i] ?? 0 }))
     .filter(p => isFinite(p.y) && isFinite(p.x));
@@ -1756,6 +1773,7 @@ export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂"
 // ─── X vs X̂ PLOT (2SLS first stage) ─────────────────────────────────────────
 // Original endogenous X vs instrumented X̂. Tight diagonal = strong instrument.
 export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!rows?.length || !endVar || !Xhat?.length) return null;
   const xVals = rows.map(r => r[endVar]).filter(v => typeof v === "number" && isFinite(v));
   if (xVals.length !== Xhat.length) return null;
@@ -1801,6 +1819,7 @@ export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" 
 // First-stage residuals vs second-stage residuals.
 // Correlation confirms endogeneity was real. Flat = OLS would have been fine.
 export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!residFirst?.length || !residSecond?.length) return null;
   const n = Math.min(residFirst.length, residSecond.length);
   const pts = Array.from({ length: n }, (_, i) => ({ x: residFirst[i], y: residSecond[i] }))
@@ -1856,6 +1875,7 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
 // Props: fitted {number[]} — P̂(Y=1), Y {number[]} — actual 0/1 labels
 // Returns an SVG with the ROC curve, diagonal reference, and AUC annotation.
 export function ROCCurve({ fitted, Y }) {
+  const { C } = useTheme();
   if (!fitted?.length || !Y?.length || fitted.length !== Y.length) return null;
   const nPos = Y.reduce((s, y) => s + y, 0);
   const nNeg = fitted.length - nPos;
@@ -1948,6 +1968,7 @@ export function ROCCurve({ fitted, Y }) {
 // Red bars = Y=0, teal bars = Y=1.
 // Props: fitted {number[]} — P̂(Y=1), Y {number[]} — actual 0/1 labels
 export function PredProbHistogram({ fitted, Y }) {
+  const { C } = useTheme();
   if (!fitted?.length || !Y?.length || fitted.length !== Y.length) return null;
 
   const nBins = 20;
@@ -2030,6 +2051,7 @@ export function PredProbHistogram({ fitted, Y }) {
 // ─── EVENT STUDY COEFFICIENT PLOT ────────────────────────────────────────────
 // eventCoeffs: [{ k, beta, se, t, p, isRef? }] — from runEventStudy
 export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
+  const { C } = useTheme();
   if (!eventCoeffs?.length) return null;
 
   const sorted = [...eventCoeffs].sort((a, b) => a.k - b.k);
@@ -2097,6 +2119,7 @@ export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
 // preFit:  [{ t, actual, synthetic }]
 // postGap: [{ t, actual, synthetic, gap }]
 export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel = "Y" }) {
+  const { C } = useTheme();
   const allPoints = [
     ...preFit.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
     ...postGap.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
