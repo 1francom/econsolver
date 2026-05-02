@@ -18,6 +18,83 @@
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
 
+// ─── SMART NUMBER HELPERS ─────────────────────────────────────────────────────
+// Column-level locale detection. Votes over all values to decide whether
+// the column uses EU (dot=thousands, comma=decimal) or US (comma=thousands,
+// dot=decimal) formatting. Used by extract_regex auto mode and CleanTab preview.
+export function detectNumberLocale(values) {
+  let eu = 0, us = 0;
+  for (const v of values.filter(v => v != null).slice(0, 100)) {
+    const s = String(v).replace(/[^\d.,]/g, "");
+    const dots   = (s.match(/\./g) || []).length;
+    const commas = (s.match(/,/g) || []).length;
+    if (dots   > 1) eu += 3;          // 2.792.046 — dot is thousands
+    if (commas > 1) us += 3;          // 1,580,025 — comma is thousands
+    if (/,\d{1,2}$/.test(s)) eu += 2; // ends ,XX  — decimal comma (EU)
+    if (/\.\d{1,2}$/.test(s)) us += 2;// ends .XX  — decimal dot  (US)
+  }
+  return eu >= us ? "EU" : "US";
+}
+
+// Per-value smart number parser.
+// Handles: space-thousands, multiple-dot (EU), multiple-comma (US), mixed.
+// colLocale is only used for the truly ambiguous "3 digits + comma + 3 digits"
+// case where the column-level vote is the only available signal.
+export function parseSmartNumber(raw, colLocale = "US") {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  s = s.replace(/\s/g, "");                    // space-thousands: "4 253 525" → "4253525"
+  s = s.replace(/^[^\d\-]+/, "").replace(/[^\d.,]+$/, ""); // strip currency/% prefix-suffix
+  const str = s.replace(/[^\d.,\-]/g, "");
+  if (!str) return null;
+
+  const dots   = (str.match(/\./g) || []).length;
+  const commas = (str.match(/,/g) || []).length;
+  let norm;
+
+  if (dots > 1 && commas === 0) {
+    // 3.970.127 — multiple dots, no comma → EU thousands only
+    norm = str.replace(/\./g, "");
+  } else if (commas > 1 && dots === 0) {
+    // 1,255,974 — multiple commas, no dot → US thousands only
+    norm = str.replace(/,/g, "");
+  } else if (dots > 0 && commas > 0) {
+    // Both present — last separator is decimal
+    norm = str.lastIndexOf(".") > str.lastIndexOf(",")
+      ? str.replace(/,/g, "")               // 1,580,025.00 → dot decimal (US)
+      : str.replace(/\./g, "").replace(",", "."); // 2.792.046,00 → comma decimal (EU)
+  } else if (commas === 1 && dots === 0) {
+    const [before, after] = str.split(",");
+    if (after.length !== 3) {
+      // 547,3419 or 912,0422 — non-3-digit tail → decimal comma
+      norm = str.replace(",", ".");
+    } else if (before.length >= 4) {
+      // 9522,937 — 4+ digits before comma → thousands
+      norm = str.replace(",", "");
+    } else {
+      // 837,450 — truly ambiguous (3 + comma + 3) → use column locale
+      norm = colLocale === "EU" ? str.replace(",", ".") : str.replace(",", "");
+    }
+  } else if (dots === 1 && commas === 0) {
+    const [before, after] = str.split(".");
+    if (after.length !== 3) {
+      // 3.14 or 3.14159 → decimal dot
+      norm = str;
+    } else if (before.length >= 4) {
+      // 12345.678 → 4+ digits before → decimal (not thousands)
+      norm = str;
+    } else {
+      // 3.970 — ambiguous → EU: thousands, US: decimal
+      norm = colLocale === "EU" ? str.replace(".", "") : str;
+    }
+  } else {
+    norm = str; // plain integer or single-separator decimal
+  }
+
+  const n = parseFloat(norm);
+  return isFinite(n) ? n : null;
+}
+
 // ─── APPLY STEP ───────────────────────────────────────────────────────────────
 export function applyStep(rows, headers, s, context = {}) {
   let R = rows, H = [...headers];
@@ -164,7 +241,14 @@ export function applyStep(rows, headers, s, context = {}) {
 
     case "ai_tr": {
       try {
-        const fn = new Function("value", "rowIndex", `return (${s.js});`);
+        const js = (s.js || "").trim();
+        // s.js may be a full arrow/function expression ("v => {...}", "function(v){...}")
+        // or a raw function body ("if (v == null) return null; ...").
+        // Detect by checking for arrow or function keyword at the start.
+        const isFnExpr = /^(\(?\s*[\w$,\s]*\s*\)?\s*=>|\bfunction\b)/.test(js);
+        const fn = isFnExpr
+          ? new Function(`return (${js})`)()          // eval to get the arrow fn, then call per row
+          : new Function("value", "rowIndex", js);    // body format — wrap directly
         R = rows.map((r, i) => ({ ...r, [s.col]: fn(r[s.col], i) }));
       } catch {}
       break;
@@ -534,8 +618,14 @@ export function applyStep(rows, headers, s, context = {}) {
     case "type_cast": {
       // Convert a column to a target type in-place.
       // s.col:    column name
-      // s.to:     "number" | "string" | "boolean"
+      // s.to:     "number" | "number_smart" | "string" | "boolean"
+      //   number       — strict: bare Number(), NaN → null
+      //   number_smart — locale-aware: detectNumberLocale + parseSmartNumber
+      //                  handles EU/US/space-thousands mixed formats
       // Unparseable values → null (never silently corrupt)
+      const colLocaleCache = s.to === "number_smart"
+        ? detectNumberLocale(rows.map(r => r[s.col]))
+        : null;
       R = rows.map(r => {
         const v = r[s.col];
         if (v === null || v === undefined) return r;
@@ -543,6 +633,8 @@ export function applyStep(rows, headers, s, context = {}) {
         if (s.to === "number") {
           const n = Number(v);
           out = isFinite(n) ? n : null;
+        } else if (s.to === "number_smart") {
+          out = parseSmartNumber(v, colLocaleCache);
         } else if (s.to === "string") {
           out = String(v);
         } else if (s.to === "boolean") {
@@ -716,42 +808,74 @@ export function applyStep(rows, headers, s, context = {}) {
       const locale   = s.locale || "auto";
       const customRx = s.regex ? new RegExp(s.regex) : null;
 
+      // Column-level locale detection (done once, not per-row)
+      const colLocale = locale === "auto"
+        ? detectNumberLocale(rows.map(r => r[s.col]))
+        : locale === "comma" ? "EU" : "US";
+
       const toFloat = raw => {
         if (raw == null) return null;
         let str = String(raw).trim();
-
         if (customRx) {
           const m = str.match(customRx);
           if (!m) return null;
           str = m[1] ?? m[0];
         }
-
-        // Strip non-numeric prefix/suffix (currency symbols, whitespace)
-        str = str.replace(/[^\d.,\-+eE]/g, "");
-        if (!str) return null;
-
-        // Detect decimal convention
-        let det = locale;
-        if (det === "auto") {
-          // If string ends in ",dd" (1-2 digits after comma) → EU decimal
-          det = /,\d{1,2}$/.test(str) ? "comma" : "dot";
-        }
-
-        let normalised;
-        if (det === "comma") {
-          // EU: 1.200,50  → remove dots (thousands), replace comma with dot
-          normalised = str.replace(/\./g, "").replace(",", ".");
-        } else {
-          // US: 1,200.50 → remove commas (thousands)
-          normalised = str.replace(/,/g, "");
-        }
-
-        const n = parseFloat(normalised);
-        return isFinite(n) ? n : null;
+        return parseSmartNumber(str, colLocale);
       };
 
       R = rows.map(r => ({ ...r, [s.nn]: toFloat(r[s.col]) }));
       if (!H.includes(s.nn)) H = [...H, s.nn];
+      break;
+    }
+
+    // ── clean_strings ────────────────────────────────────────────────────────
+    // Normalizes a string column in-place.
+    // s.col        — column to clean
+    // s.stripPunct — bool (default true): strip trailing . , - –
+    // s.normSep    — bool (default false): replace - / , separators with space
+    // s.midWordSep — bool (default false): remove . - _ and lone spaces between letters
+    //                e.g. "Cla.ude" → "Claude", "Cla ude" → "Claude" (single-token only)
+    // s.ocrNoise   — bool (default false): fix common OCR/leet char substitutions mid-word.
+    //                Patterns consume optional surrounding whitespace so "Fr@ nco" → "Franco".
+    //                @ → a, 3 → e, 0 → o, 1 → i, | → l, $ → s, ! → i
+    // s.case       — "keep" | "lower" | "upper" | "title" (default "keep")
+    case "clean_strings": {
+      R = rows.map(r => {
+        let v = r[s.col];
+        if (typeof v !== "string") return r;
+        v = v.trim();
+        v = v.replace(/\s+/g, " ");                           // collapse internal spaces
+        if (s.ocrNoise) {
+          // @ consumes surrounding spaces so "Fr@ nco" → "Franco"
+          v = v.replace(/(?<=[a-zA-Z])\s*@\s*(?=[a-zA-Z])/g, "a");
+          // 3+ with lookbehind only: handles word-final (Claud3→Claude) and runs (D33ps33k→Deepseek)
+          v = v.replace(/(?<=[a-zA-Z])3+/g, m => "e".repeat(m.length));
+          v = v.replace(/(?<=[a-zA-Z])0+/g, m => "o".repeat(m.length));
+          v = v.replace(/(?<=[a-zA-Z])1+/g, m => "i".repeat(m.length));
+          v = v.replace(/(?<=[a-zA-Z])\|+/g, m => "l".repeat(m.length));
+          v = v.replace(/(?<=[a-zA-Z])\$+/g, m => "s".repeat(m.length));
+          v = v.replace(/(?<=[a-zA-Z])!+/g, m => "i".repeat(m.length));
+        }
+        if (s.midWordSep) {
+          // Remove . - _ between letters: "Cla.ude" → "Claude"
+          v = v.replace(/(?<=[a-zA-Z])[.\-_]+(?=[a-zA-Z])/g, "");
+          // Collapse spaces between letters only when there is exactly one space
+          // (i.e. the value looks like a single broken token, not "New York")
+          v = v.replace(/(?<=[a-zA-Z]) (?=[a-zA-Z])/g, (_, offset, str) => {
+            const spaceCount = (str.match(/ /g) || []).length;
+            return spaceCount === 1 ? "" : " ";
+          });
+        }
+        if (s.normSep)              v = v.replace(/\s*[-–,]\s*/g, " ").trim();
+        if (s.stripPunct !== false) v = v.replace(/[.,\-–]+$/, "").trim();
+        const cs = s.case || "keep";
+        if      (cs === "lower") v = v.toLowerCase();
+        else if (cs === "upper") v = v.toUpperCase();
+        else if (cs === "title") v = v.replace(/\w\S*/g, w =>
+          w[0].toUpperCase() + w.slice(1).toLowerCase());
+        return { ...r, [s.col]: v };
+      });
       break;
     }
 

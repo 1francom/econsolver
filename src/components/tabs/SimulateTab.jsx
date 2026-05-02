@@ -3,30 +3,24 @@
 // Props: onAddDataset(name, rows, headers)
 
 import { useState } from "react";
-
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070",
-  blue:"#6e9ec8", teal:"#6ec8b4", purple:"#a87ec8",
-};
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
+import { useTheme, mono } from "../modeling/shared.jsx";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
-function Lbl({ children, color = C.textMuted, mb = 6 }) {
-  return <div style={{ fontSize: 9, color, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: mono }}>{children}</div>;
+function Lbl({ children, color, mb = 6 }) {
+  const { C } = useTheme();
+  return <div style={{ fontSize: 9, color: color ?? C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: mono }}>{children}</div>;
 }
-function Btn({ onClick, ch, color = C.gold, v = "out", dis = false, sm = false }) {
+function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
+  const { C } = useTheme();
+  const c = color ?? C.gold;
   const b = { padding: sm ? "0.28rem 0.65rem" : "0.45rem 0.9rem", borderRadius: 3, cursor: dis ? "not-allowed" : "pointer", fontFamily: mono, fontSize: sm ? 10 : 11, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
-  if (v === "solid") return <button onClick={onClick} disabled={dis} style={{ ...b, background: color, color: C.bg, border: `1px solid ${color}`, fontWeight: 700 }}>{ch}</button>;
-  if (v === "ghost") return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: "none", color: dis ? C.textMuted : color }}>{ch}</button>;
+  if (v === "solid") return <button onClick={onClick} disabled={dis} style={{ ...b, background: c, color: C.bg, border: `1px solid ${c}`, fontWeight: 700 }}>{ch}</button>;
+  if (v === "ghost") return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: "none", color: dis ? C.textMuted : c }}>{ch}</button>;
   return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: `1px solid ${C.border2}`, color: dis ? C.textMuted : C.textDim }}>{ch}</button>;
 }
 const fieldStyle = C => ({ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" });
-const thStyle = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2, whiteSpace: "nowrap" });
-const tdStyle = C => ({ padding: "0.32rem 0.65rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
+const thStyle    = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2, whiteSpace: "nowrap" });
+const tdStyle    = C => ({ padding: "0.32rem 0.65rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
 
 // ─── SEEDED PRNG (mulberry32) ─────────────────────────────────────────────────
 function mulberry32(seed) {
@@ -55,7 +49,6 @@ function drawSamples(rng, n, dist, params) {
       case "Uniform":    arr.push((+params.min ?? 0) + u * ((+params.max ?? 1) - (+params.min ?? 0))); break;
       case "Bernoulli":  arr.push(u < (+params.p ?? 0.5) ? 1 : 0); break;
       case "Poisson": {
-        // Knuth algorithm
         const lam = +params.lambda ?? 1;
         const L = Math.exp(-lam); let k = 0, p = 1;
         do { k++; p *= rng(); } while (p > L);
@@ -64,7 +57,6 @@ function drawSamples(rng, n, dist, params) {
       }
       case "Exponential": arr.push(-Math.log(1 - u + 1e-15) / (+params.lambda ?? 1)); break;
       case "t": {
-        // t via ratio of normals / chi
         const df = +params.df ?? 5;
         const z1 = normalSample(rng, 0, 1);
         let chi = 0;
@@ -101,15 +93,18 @@ const DIST_DEFAULTS = {
 
 const DIST_OPTIONS = ["Normal","Uniform","Bernoulli","Poisson","Exponential","t","Chi-squared","Expression","ForLoop","WhileLoop"];
 
-const DIST_COLOR = {
-  Normal: C.blue, Uniform: C.teal, Bernoulli: C.purple,
-  Poisson: C.gold, Exponential: "#c88e6e", t: C.green,
-  "Chi-squared": "#c87e9e", Expression: C.textDim,
-  ForLoop: "#9ec87e", WhileLoop: "#c87e6e",
-};
+function distColor(C) {
+  return {
+    Normal: C.blue, Uniform: C.teal, Bernoulli: C.purple,
+    Poisson: C.gold, Exponential: "#c88e6e", t: C.green,
+    "Chi-squared": "#c87e9e", Expression: C.textDim,
+    ForLoop: "#9ec87e", WhileLoop: "#c87e6e",
+  };
+}
 
 // ─── PARAM EDITOR ─────────────────────────────────────────────────────────────
 function ParamEditor({ dist, params, onChange }) {
+  const { C } = useTheme();
   function field(key, label, placeholder) {
     return (
       <label key={key} style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -316,6 +311,7 @@ export function generateSimScript(language, n, seed, variables) {
 let _nextId = 4;
 
 export default function SimulateTab({ onAddDataset }) {
+  const { C } = useTheme();
   const [n,          setN]          = useState(500);
   const [seed,       setSeed]       = useState(42);
   const [variables,  setVariables]  = useState([
@@ -323,7 +319,7 @@ export default function SimulateTab({ onAddDataset }) {
     { id:2, name:"eps", dist:"Normal",     params:{ mean:0, sd:0.5 } },
     { id:3, name:"Y",   dist:"Expression", params:{ expr:"1 + 2*X1 + eps" } },
   ]);
-  const [generated,  setGenerated]  = useState(null); // { rows, headers }
+  const [generated,  setGenerated]  = useState(null);
   const [dsName,     setDsName]     = useState("simulated_data");
   const [newVarName, setNewVarName] = useState("");
   const [newDist,    setNewDist]    = useState("Normal");
@@ -332,12 +328,14 @@ export default function SimulateTab({ onAddDataset }) {
   const [scriptLang, setScriptLang] = useState("r");
   const [scriptOpen, setScriptOpen] = useState(false);
 
+  const DIST_COLOR = distColor(C);
+
   // ── Generate ───────────────────────────────────────────────────────────────
   function generate() {
     setGenErr(""); setSaved(false);
     const rng = mulberry32(+seed || 0);
     const nObs = Math.max(1, Math.min(100000, +n || 500));
-    const scope = {}; // built-up variable arrays
+    const scope = {};
 
     for (const v of variables) {
       if (!v.name.trim()) { setGenErr(`Variable with empty name — fix before generating.`); return; }
@@ -398,7 +396,6 @@ export default function SimulateTab({ onAddDataset }) {
             val = updFn(val);
             iter++;
           }
-          // WhileLoop produces a scalar — broadcast to all rows
           scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
         } catch (e) {
           setGenErr(`${v.name} (WhileLoop): ${e.message}`);
@@ -455,7 +452,6 @@ export default function SimulateTab({ onAddDataset }) {
     setSaved(true);
   }
 
-  // ── Preview table ──────────────────────────────────────────────────────────
   const previewRows = generated?.rows.slice(0, 5) ?? [];
 
   return (
@@ -491,11 +487,11 @@ export default function SimulateTab({ onAddDataset }) {
           <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 560 }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle, width: 24 }}>#</th>
+                <th style={{ ...thStyle(C), width: 24 }}>#</th>
                 <th style={thStyle(C)}>Name</th>
                 <th style={thStyle(C)}>Distribution</th>
                 <th style={thStyle(C)}>Parameters</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Actions</th>
+                <th style={{ ...thStyle(C), textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -598,7 +594,7 @@ export default function SimulateTab({ onAddDataset }) {
               <thead>
                 <tr style={{ background: C.surface2 }}>
                   {generated.headers.map(h => (
-                    <th key={h} style={{ ...thStyle, color: C.teal }}>{h}</th>
+                    <th key={h} style={{ ...thStyle(C), color: C.teal }}>{h}</th>
                   ))}
                 </tr>
               </thead>
