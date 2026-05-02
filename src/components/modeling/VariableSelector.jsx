@@ -13,7 +13,7 @@
 //   wVars        {string[]}  – selected controls
 //   setWVars     {fn}
 
-import { VarPanel, C, mono } from "./shared.jsx";
+import { VarPanel, useTheme, mono } from "./shared.jsx";
 
 // Models that expose an X (Features) selector
 const SHOW_X = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit", "GMM", "LIML", "PoissonFE", "LSDV"]);
@@ -31,6 +31,7 @@ export default function VariableSelector({
   wVars,
   setWVars,
 }) {
+  const { C } = useTheme();
   // Exclude already-assigned columns from downstream pickers
   const availForX = numericCols.filter(h => !yVar.includes(h));
   const availForW = numericCols.filter(h => !yVar.includes(h) && !xVars.includes(h));

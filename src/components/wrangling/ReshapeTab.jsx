@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · components/wrangling/ReshapeTab.jsx ─────────────────────
 import { useState, useMemo } from "react";
-import { C, mono, Lbl, Tabs, Btn } from "./shared.jsx";
+import { useTheme, mono, Lbl, Tabs, Btn } from "./shared.jsx";
 
 // ─── RESHAPE TAB ──────────────────────────────────────────────────────────────
 // pivot_longer (wide→long) + group_summarize (collapse rows).
 // Both are structurally destructive — they change the shape of the dataset,
 // not just add columns. Kept separate from Feature Engineering deliberately.
 function ReshapeTab({ rows, headers, info, onAdd, onRmLastStep, onSaveSubset, filename }) {
+  const { C } = useTheme();
   const [sub, setSub] = useState("pivot");
 
   // ── pivot_longer state ────────────────────────────────────────────────────

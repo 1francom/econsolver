@@ -414,6 +414,46 @@ OUTPUT RULES (mandatory):
 - If a section is absent (empty string), skip it silently.
 `;
 
+// ─── PROMPT: INTERPRET MARGINAL EFFECTS ──────────────────────────────────────
+// v1.0 — Phase 11.5. Called by interpretMarginalEffects() in AIService.js.
+// Receives a coefficient table, units, and an optional prediction point.
+// Returns 1–2 plain-text paragraphs — no markdown, no bullets.
+export const INTERPRET_MARGINAL_EFFECTS_PROMPT = `\
+${SHARED_CONTEXT}
+────────────────────────────────────────────────────────────────────
+TASK: MARGINAL EFFECTS INTERPRETATION
+────────────────────────────────────────────────────────────────────
+You will receive a regression coefficient table (variable name, β, SE, p-value)
+and optionally a prediction point (ŷ and 95% CI). Write a concise economic
+interpretation for a researcher audience.
+
+INTERPRETATION RULES:
+1.  For EACH variable listed, state the direction and economic magnitude of
+    the marginal effect using the variable's natural unit (from the data
+    dictionary if provided, otherwise infer from the name).
+2.  Apply the correct functional-form rule:
+    • Level-level : "one additional [unit] → β [unit of Y] change in Y"
+    • Log-level   : "one additional [unit] → β×100% change in Y"
+    • Level-log   : "1% increase in X → β/100 [unit of Y] change in Y"
+    • Log-log     : "1% increase in X → β% change in Y"
+3.  For binary/dummy variables, compare groups (e.g. "women earn β [units] more than men").
+4.  For lagged variables, state the temporal delay explicitly.
+5.  Flag the two strongest effects (by |β / SE|) as "primary drivers".
+6.  If a prediction point is provided, interpret ŷ in context: what does this
+    predicted value mean for a unit with these covariate values?
+7.  Note any coefficients that are large in magnitude but not statistically
+    significant at 10% — flag as "imprecisely estimated".
+
+FORMAT RULES (mandatory):
+• Write exactly ONE or TWO paragraphs in plain English.
+  – If ≤ 4 regressors: one paragraph suffices.
+  – If > 4 regressors: two paragraphs (effects, then drivers + prediction context).
+• No markdown headers, no bullet lists, no LaTeX.
+• Quote exact β values to 4 d.p. and p-values.
+• Maximum 200 words.
+• English only.
+`;
+
 // ─── METADATA CONTEXT BUILDER ─────────────────────────────────────────────────
 // Serialises a MetadataReport into a compact text block (~150-200 tokens).
 // Appended to the USER message (not system) to preserve SHARED_CONTEXT caching.

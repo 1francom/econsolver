@@ -2,31 +2,24 @@
 // Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
 // Consumes cleanedData emitted by WranglingModule.
 import { useState, useMemo, useRef } from "react";
+import { useTheme } from "./ThemeContext.jsx";
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
-function Lbl({children,color=C.textMuted,mb=6}){return<div style={{fontSize:10,color,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:mb,fontFamily:mono}}>{children}</div>;}
-function Btn({onClick,ch,color=C.gold,v="out",dis=false,sm=false}){
+function Lbl({children,color,mb=6}){const{C}=useTheme();color=color??C.textMuted;return<div style={{fontSize:10,color,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:mb,fontFamily:mono}}>{children}</div>;}
+function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
+  const{C}=useTheme();color=color??C.gold;
   const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily:mono,fontSize:sm?10:11,transition:"all 0.13s",opacity:dis?0.4:1};
   if(v==="solid")return<button onClick={onClick} disabled={dis} style={{...b,background:color,color:C.bg,border:`1px solid ${color}`,fontWeight:700}}>{ch}</button>;
   return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:`1px solid ${C.border2}`,color:dis?C.textMuted:C.textDim}}>{ch}</button>;
 }
-function Spin(){return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
+function Spin(){const{C}=useTheme();return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
 
 // ─── MINI MATH ────────────────────────────────────────────────────────────────
 function olsSimple(xs,ys){
@@ -47,7 +40,8 @@ function pearson(xs,ys){
 }
 
 // ─── SVG CHARTS ───────────────────────────────────────────────────────────────
-function SvgHistogram({data,color=C.gold,label=""}){
+function SvgHistogram({data,color,label=""}){
+  const{C}=useTheme();color=color??C.gold;
   const W=320,H=120,PAD=24;
   if(!data.length)return null;
   const min=Math.min(...data),max=Math.max(...data);
@@ -72,6 +66,7 @@ function SvgHistogram({data,color=C.gold,label=""}){
 }
 
 function SvgScatter({xs,ys,xlbl="",ylbl="",showOls=true}){
+  const{C}=useTheme();
   const W=340,H=200,PAD=36;
   if(!xs.length||!ys.length)return null;
   const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
@@ -97,6 +92,7 @@ function SvgScatter({xs,ys,xlbl="",ylbl="",showOls=true}){
 }
 
 function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
+  const{C}=useTheme();
   const W=380,H=200,PAD=36;
   const entities=[...new Set(rows.map(r=>r[entityCol]))];
   const seed=entities.length;
@@ -129,6 +125,7 @@ function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
 }
 
 function CorrHeatmap({headers,rows,info}){
+  const{C}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   if(numH.length<2)return<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Need ≥2 numeric columns.</div>;
   const mat=numH.map(h1=>numH.map(h2=>{
@@ -170,6 +167,7 @@ function CorrHeatmap({headers,rows,info}){
 
 // ─── SUMMARY TABLE (Table 1) ──────────────────────────────────────────────────
 function SummaryTable({rows,headers,info,panel}){
+  const{C}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   const catH=headers.filter(h=>info[h]?.isCat&&!info[h]?.isNum);
   const [groupBy,setGroupBy]=useState("");
@@ -228,6 +226,7 @@ function SummaryTable({rows,headers,info,panel}){
 
 // ─── DISTRIBUTION TAB ─────────────────────────────────────────────────────────
 function DistributionTab({rows,headers,info,panel}){
+  const{C}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   const [histCol,setHistCol]=useState(numH[0]||"");
   const [scX,setScX]=useState(numH[0]||""),[scY,setScY]=useState(numH[1]||"");
@@ -316,6 +315,7 @@ function DistributionTab({rows,headers,info,panel}){
 // No dependency on group_summarize pipeline step — computes in-component.
 // ─── ACF / PACF BAR CHART ─────────────────────────────────────────────────────
 function SvgACF({ acf, pacf, n }) {
+  const{C}=useTheme();
   const maxLag = acf.length - 1;
   const W = 620, H = 260;
   const PAD = { l: 48, r: 16, t: 20, b: 36 };
@@ -384,6 +384,7 @@ function SvgACF({ acf, pacf, n }) {
 
 // ─── ADF RESULTS PANEL ────────────────────────────────────────────────────────
 function AdfPanel({ results }) {
+  const{C}=useTheme();
   if (!results?.length) return null;
   const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
   return (
@@ -419,6 +420,7 @@ function AdfPanel({ results }) {
 
 // ─── TIME SERIES TAB ──────────────────────────────────────────────────────────
 function TimeSeriesTab({ rows, headers, info, panel }) {
+  const{C}=useTheme();
   const numH = headers.filter(h => info[h]?.isNum);
   const catH = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && headers.includes(h)));
 
@@ -743,6 +745,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
   );
 }
 function AIInsights({rows,headers,info,panel}){
+  const{C}=useTheme();
   const [text,setText]=useState(""),[loading,setLoading]=useState(false),[done,setDone]=useState(false);
   const ran = { current: false };
 
@@ -873,6 +876,7 @@ function generateExploreScript(language, { headers, info, filename }) {
 
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
 export default function ExplorerModule({cleanedData, onBack, onProceed}) {
+  const{C}=useTheme();
   const {headers, cleanRows:rows, panelIndex:panel, filename} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");

@@ -10,10 +10,11 @@
 //   allDatasets — { id: { name, filename } } — for resolving join/append names
 
 import { useState } from "react";
-import { C, mono } from "./shared.jsx";
+import { useTheme, mono } from "./shared.jsx";
 import { generateCleanScript } from "../../pipeline/exporter.js";
 
 function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDatasets = {} }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(false);
   const base        = filename ? filename.replace(/\.[^.]+$/, "") : "dataset";
   const dsName      = datasetName || base;

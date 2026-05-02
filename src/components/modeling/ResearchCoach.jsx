@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { researchCoach as callResearchCoach } from "../../services/AI/AIService.js";
-import { C, mono } from "./shared.jsx";
+import { useTheme, mono } from "./shared.jsx";
 
 // ─── STARTER QUESTIONS ────────────────────────────────────────────────────────
 // Keyed by model type — shown as clickable chips to lower the barrier to entry.
@@ -80,6 +80,7 @@ function getStarters(result) {
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Spin() {
+  const { C } = useTheme();
   return (
     <div style={{
       width: 12, height: 12,
@@ -90,6 +91,7 @@ function Spin() {
 }
 
 function UserBubble({ text }) {
+  const { C } = useTheme();
   return (
     <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
       <div style={{
@@ -105,6 +107,7 @@ function UserBubble({ text }) {
 }
 
 function AssistantBubble({ text }) {
+  const { C } = useTheme();
   return (
     <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 10 }}>
       <div style={{ marginRight: 8, marginTop: 4, flexShrink: 0 }}>
@@ -129,6 +132,7 @@ function AssistantBubble({ text }) {
 }
 
 function ThinkingBubble() {
+  const { C } = useTheme();
   return (
     <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 10, alignItems: "center" }}>
       <div style={{
@@ -152,6 +156,7 @@ function ThinkingBubble() {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function ResearchCoach({ result, dataDictionary, prefillMessage, metadataReport = null }) {
+  const { C } = useTheme();
   const [open,     setOpen]     = useState(false);
   const [history,  setHistory]  = useState([]);
   const [input,    setInput]    = useState("");

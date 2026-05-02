@@ -8,7 +8,7 @@
 //   onRemove(id)                       — X → remove from buffer
 //   onCompare()                        — opens comparison panel (enabled when 2+)
 
-import { C, mono } from "./shared.jsx";
+import { useTheme, mono } from "./shared.jsx";
 
 function safeR2(r) {
   if (r == null) return null;
@@ -37,6 +37,7 @@ const TYPE_COLOR = {
 };
 
 export default function ModelBufferBar({ models, activeId, onRestore, onRemove, onCompare }) {
+  const { C } = useTheme();
   if (!models?.length) return null;
 
   const canCompare = models.length >= 2;

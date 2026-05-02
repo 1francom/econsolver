@@ -9,19 +9,12 @@
 
 import { useState } from "react";
 import { PRESETS, downloadSVG, downloadPNG } from "../../services/export/plotExporter.js";
+import { useTheme } from "../../ThemeContext.jsx";
 
-const C = {
-  bg:       "#080808",
-  border:   "#1c1c1c",
-  border2:  "#252525",
-  text:     "#ddd8cc",
-  textDim:  "#888",
-  textMuted:"#444",
-  teal:     "#6ec8b4",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 export default function PlotExportBar({ getEl, filename = "plot", style }) {
+  const { C } = useTheme();
   const [preset, setPreset] = useState("default");
 
   const btnBase = {

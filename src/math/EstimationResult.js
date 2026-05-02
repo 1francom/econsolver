@@ -137,6 +137,7 @@ function base(type, spec) {
     firstStages: null, marginalEffects: null, oddsRatios: null,
     alphas: null, eventMeans: null, means: null, rddData: null,
     converged: true, iterations: null,
+    XtXinv: null, s2: null,   // for model prediction in CalculateTab
   };
 }
 
@@ -155,8 +156,10 @@ function wrapLinear(type, eng, spec) {
     df:        eng.df    ?? 0,
     Fstat:     eng.Fstat ?? null,
     Fpval:     eng.Fpval ?? null,
-    resid:     eng.resid ?? [],
-    Yhat:      eng.Yhat  ?? [],
+    resid:     eng.resid  ?? [],
+    Yhat:      eng.Yhat   ?? [],
+    XtXinv:    eng.XtXinv ?? null,
+    s2:        eng.s2     ?? null,
   };
 }
 
