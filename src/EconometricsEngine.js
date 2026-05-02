@@ -512,9 +512,9 @@ export function hausmanTest(fe, fd, xCols) {
 // ─── EXPORT HELPERS ──────────────────────────────────────────────────────────
 export function buildLatex(yVar, xVars, results, model = "OLS") {
   const vars = results.varNames || ["(Intercept)", ...xVars];
-  const fmtP = p => p == null ? "N/A" : p < 0.001 ? "<0.001" : p.toFixed(4);
+  const fmtP = p => p == null ? "N/A" : p < 0.001 ? "$<$0.001" : p.toFixed(4);
   const rows = vars.map((v, i) => {
-    const b = results.beta?.[i], se = results.se?.[i], t = results.tStats?.[i], p = results.pVals?.[i];
+    const b = results.beta?.[i], se = results.se?.[i], t = (results.testStats ?? results.tStats)?.[i], p = results.pVals?.[i];
     const bFmt  = b  != null && isFinite(b)  ? b.toFixed(4)  : "N/A";
     const seFmt = se != null && isFinite(se) ? se.toFixed(4) : "N/A";
     const tFmt  = t  != null && isFinite(t)  ? t.toFixed(3)  : "N/A";

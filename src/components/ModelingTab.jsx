@@ -161,7 +161,7 @@ function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
@@ -263,7 +263,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
       <div style={{
         display: "grid", gridTemplateColumns: COLS,
-        background: "#0a0a0a", padding: "0.5rem 0.75rem",
+        background: C.surface, padding: "0.5rem 0.75rem",
         fontSize: 9, color: C.textMuted, letterSpacing: "0.13em",
         textTransform: "uppercase", gap: 6,
         borderBottom: `1px solid ${C.border}`, fontFamily: mono,
@@ -289,11 +289,11 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
               style={{
                 display: "grid", gridTemplateColumns: COLS,
                 padding: "0.65rem 0.75rem", gap: 6,
-                background: isOpen ? "#0e0c09" : i % 2 === 0 ? C.surface : C.surface2,
+                background: isOpen ? C.surface2 : i % 2 === 0 ? C.surface : C.surface2,
                 cursor: isInt ? "default" : "pointer",
                 alignItems: "center", transition: "background 0.1s", fontFamily: mono,
               }}
-              onMouseOver={e => { if (!isInt) e.currentTarget.style.background = "#0e0c09"; }}
+              onMouseOver={e => { if (!isInt) e.currentTarget.style.background = C.surface2; }}
               onMouseOut={e => { if (!isOpen) e.currentTarget.style.background = i % 2 === 0 ? C.surface : C.surface2; }}
             >
               <div style={{ fontSize: 12, color: isInt ? C.textMuted : C.text, display: "flex", alignItems: "center", gap: 5 }}>
@@ -304,14 +304,14 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
               <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>({s.toFixed(4)})</div>
               <div style={{ textAlign: "right", fontSize: 11, color: sig ? C.teal + "cc" : C.textMuted }}>{lo.toFixed(4)}</div>
               <div style={{ textAlign: "right", fontSize: 11, color: sig ? C.teal + "cc" : C.textMuted }}>{hi.toFixed(4)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{tStats[i].toFixed(3)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p.toFixed(4)}</div>
+              <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{tStats?.[i] != null ? Number(tStats[i]).toFixed(3) : "—"}</div>
+              <div style={{ textAlign: "right", fontSize: 11, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p?.toFixed(4) ?? "—"}</div>
               <div style={{ textAlign: "center", fontSize: 12, color: C.gold }}>{stars(p)}</div>
             </div>
             {isOpen && (
               <div style={{
-                padding: "0.8rem 1.1rem 0.8rem 1.4rem", background: "#0c0b08",
-                borderTop: `1px solid #2a2010`, borderLeft: `3px solid ${C.gold}`,
+                padding: "0.8rem 1.1rem 0.8rem 1.4rem", background: C.surface2,
+                borderTop: `1px solid ${C.border}`, borderLeft: `3px solid ${C.gold}`,
                 animation: "fadeUp 0.18s ease", fontSize: 12,
                 color: "#b0a888", lineHeight: 1.8, fontFamily: mono,
               }}>
@@ -350,7 +350,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
       })}
 
       <div style={{
-        padding: "0.4rem 0.75rem", background: "#0a0a0a",
+        padding: "0.4rem 0.75rem", background: C.surface,
         borderTop: `1px solid ${C.border}`,
         fontSize: 9, color: C.textMuted, fontFamily: mono,
         display: "flex", justifyContent: "space-between",
@@ -500,7 +500,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: "1.2rem" }}>
-      <div style={{ background: "#0a0a0a", padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono, borderRadius: "4px 4px 0 0" }}>
+      <div style={{ background: C.surface, padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono, borderRadius: "4px 4px 0 0" }}>
         Export
       </div>
       {/* Button row — inner group has overflow:hidden for rounded corners; Replicate sits outside it */}
@@ -517,7 +517,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
                 border: "none", color: active ? C.gold : C.textDim,
                 cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
               }}
-              onMouseOver={e => { if (!active) e.currentTarget.style.background = "#0e0e0e"; }}
+              onMouseOver={e => { if (!active) e.currentTarget.style.background = C.surface2; }}
               onMouseOut={e =>  { if (!active) e.currentTarget.style.background = C.surface; }}
             >
               {label}
@@ -540,7 +540,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
         <ReplicateDropdown replicateConfig={replicateConfig} model={model} />
       </div>
       {showLatex && (
-        <div style={{ background: "#080a06", borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
+        <div style={{ background: C.surface2, borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <span style={{ fontSize: 10, color: "#5a8a5a", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: mono }}>LaTeX · {model}</span>
             <button
@@ -1300,48 +1300,42 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setSpecRows(pts);
   }, [specConfig, rows, _runEstimation]);
 
-  // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
-  const estimate = useCallback(() => {
-    setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
-    const out = _runEstimation(rows);
-    if (out.error) { setErr(out.error); }
-    else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
-    setRunning(false);
-  }, [rows, _runEstimation]);
-
   // ── RUN ALL SUBSETS ───────────────────────────────────────────────────────────
   const runAllSubsets = useCallback(() => {
     if (!subsets.length) return;
     setRunning(true);
+    try {
+      const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
+      const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
 
-    const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
-    const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
-
-    // Full sample (with per-subset steps applied if a branch point is set)
-    const fullRows = hasSubsetSteps
-      ? (runPipeline(rows, headers, perSubsetSteps, pipelineCtx)?.rows ?? rows)
-      : rows;
-    const fullOut = _runEstimation(fullRows);
-    if (!fullOut.error && fullOut.result) {
-      const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
-      modelBuffer.add(r);
-      setBufferVersion(v => v + 1);
-    }
-
-    // Each named subset
-    for (const s of subsets) {
-      const filtered = applySubsetFilter(rows, s.filters);
-      const subsetRows = hasSubsetSteps
-        ? (runPipeline(filtered, headers, perSubsetSteps, pipelineCtx)?.rows ?? filtered)
-        : filtered;
-      const out = _runEstimation(subsetRows);
-      if (!out.error && out.result) {
-        const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
+      // Full sample (with per-subset steps applied if a branch point is set)
+      const fullRows = hasSubsetSteps
+        ? (runPipeline(rows, headers, perSubsetSteps, pipelineCtx)?.rows ?? rows)
+        : rows;
+      const fullOut = _runEstimation(fullRows);
+      if (!fullOut.error && fullOut.result) {
+        const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
         modelBuffer.add(r);
         setBufferVersion(v => v + 1);
       }
+
+      // Each named subset
+      for (const s of subsets) {
+        const filtered = applySubsetFilter(rows, s.filters);
+        const subsetRows = hasSubsetSteps
+          ? (runPipeline(filtered, headers, perSubsetSteps, pipelineCtx)?.rows ?? filtered)
+          : filtered;
+        const out = _runEstimation(subsetRows);
+        if (!out.error && out.result) {
+          const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
+          modelBuffer.add(r);
+          setBufferVersion(v => v + 1);
+        }
+      }
+    } finally {
+      setRunning(false);
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+  }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
   // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
   const estimate = useCallback(() => {
@@ -1680,7 +1674,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           {err && (
             <div style={{
               marginTop: "0.8rem", padding: "0.6rem 0.8rem",
-              background: "#0d0808", border: `1px solid ${C.red}40`,
+              background: C.surface, border: `1px solid ${C.red}40`,
               borderLeft: `3px solid ${C.red}`, borderRadius: 4,
               fontSize: 11, color: C.red, fontFamily: mono, lineHeight: 1.6,
             }}>
@@ -1821,7 +1815,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           {/* Panel FE / FD */}
           {(result?.type === "FE" || result?.type === "FD") && (
-            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} rows={rows} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* 2SLS */}
@@ -1849,7 +1843,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.weak && <Badge label="⚠ Weak instrument (F < 10)" color={C.red} />}
                 </div>
-                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#0d0a08", border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
+                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
                   <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Local Average Treatment Effect (LATE)</div>
                   <div style={{ fontSize: 24, color: r.lateP < 0.05 ? C.orange : C.textDim, fontFamily: mono }}>
                     {r.late >= 0 ? "+" : ""}{r.late?.toFixed(4) ?? "—"}{stars(r.lateP)}
@@ -1889,7 +1883,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`${r.units ?? "?"} units`} color={C.textDim} />
                 </div>
                 {r.preTestStat != null && (
-                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: "#081210", border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
+                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
                     <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
                       Pre-trend F-test: F = {r.preTestStat?.toFixed(3) ?? "—"} · p = {r.preTestPval < 0.001 ? "<0.001" : r.preTestPval?.toFixed(4) ?? "—"}
                       {r.preTestPval < 0.05
@@ -1929,6 +1923,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "F-stat",  value: r.Fstat?.toFixed(3) ?? "—", color: C.gold },
                   { label: "n",       value: r.n,                         color: C.text },
                 ]} />
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <Lbl color={C.textMuted}>Structural Coefficient Table (excl. dummies)</Lbl>
                 <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 <PlotSelector accentColor={C.blue} defaultId="forest" plots={[
@@ -1936,6 +1931,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
                   { id: "resid", label: "Residuals", node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
                 ]} />
+                <ExportBar yVar={yVar[0]} results={r} model="LSDV"
+                  onReport={() => openReport({ ...r, modelLabel: "Panel LSDV", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "LSDV", yVar: yVar[0], xVars, wVars } } : null}
+                />
               </div>
             );
           })()}
@@ -1990,7 +1989,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`treated: ${r.scTreatedUnit}`} color={C.gold} />
                   <Badge label={`T* = ${r.scTreatTime}`} color={C.textDim} />
                 </div>
-                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#0d0c08", border: `1px solid ${C.gold}30`, borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
+                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.gold}30`, borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
                   <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Fit Quality & Inference</div>
                   <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono }}>
                     Pre-RMSPE: {r.scRmspePre?.toFixed(6) ?? "—"} · Post-RMSPE: {r.scRmspePost?.toFixed(6) ?? "—"}
@@ -2133,7 +2132,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <>
                     <Lbl color={C.textMuted}>Marginal Effects at the Mean (MEM) · dP(Y=1)/dx</Lbl>
                     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", background: "#0a0a0a", padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
                         <div>Variable</div>
                         <div style={{ textAlign: "right" }}>dP/dx at x̄</div>
                       </div>
@@ -2145,7 +2144,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                           </div>
                         </div>
                       ))}
-                      <div style={{ padding: "0.35rem 0.75rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
                         Evaluated at sample means of all covariates
                       </div>
                     </div>
@@ -2157,7 +2156,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <>
                     <Lbl color={C.textMuted}>Odds Ratios · exp(β) with 95% CI</Lbl>
                     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", background: "#0a0a0a", padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
                         <div>Variable</div>
                         <div style={{ textAlign: "right" }}>OR</div>
                         <div style={{ textAlign: "right" }}>2.5%</div>
@@ -2174,7 +2173,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                           </div>
                         );
                       })}
-                      <div style={{ padding: "0.35rem 0.75rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
                         OR &gt; 1 = positive association · OR &lt; 1 = negative association · CI based on ±1.96 × SE
                       </div>
                     </div>

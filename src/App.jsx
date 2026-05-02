@@ -1350,19 +1350,6 @@ export default function App() {
             >✦ AI Coach</button>
           </>
         )}
-        {inFlow&&(
-          <button
-            onClick={()=>setSidebarOpen(o=>!o)}
-            style={{
-              marginLeft:"auto", padding:"0.22rem 0.65rem",
-              background: sidebarOpen ? `${"#9e7ec8"}18` : "transparent",
-              border:`1px solid ${sidebarOpen ? "#9e7ec8" : C.border2}`,
-              borderRadius:3, color: sidebarOpen ? "#9e7ec8" : C.textMuted,
-              cursor:"pointer", fontFamily:mono, fontSize:9,
-              letterSpacing:"0.12em", transition:"all 0.13s",
-            }}
-          >✦ AI Coach</button>
-        )}
       </div>
 
       {/* ── Main Content ──────────────────────────────────────────────────── */}

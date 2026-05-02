@@ -477,7 +477,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           ["clean",     "⬡ Cleaning"],
           ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
           ["structure", "⊞ Panel Structure"],
-          ["features",  "⊕ Features"],
+          ["transform", "⊕ Transform"],
           ["reshape",   "⟲ Reshape"],
           ["merge",     "⊞ Merge"],
           ["dictionary","◈ Dictionary"],
@@ -504,11 +504,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "structure" && (
           <PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>
         )}
-        {tab === "features" && (
+        {tab === "transform" && (
           <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>
         )}
         {tab === "reshape" && (
-          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep} onRmLastStep={rmLastStep} onSaveSubset={onSaveSubset} filename={filename}/>
+          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
         )}
         {tab === "merge" && (
           <MergeTab rows={rows} headers={headers} filename={filename}

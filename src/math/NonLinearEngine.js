@@ -550,7 +550,7 @@ export function buildBinaryLatex(yVar, results) {
   const { family, beta, se, zStats, pVals, varNames, n, df,
           logLik, mcFaddenR2, AIC, BIC } = results;
   const model = family === "logit" ? "Logit" : "Probit";
-  const fmtP  = p => (p == null ? "N/A" : p < 0.001 ? "<0.001" : p.toFixed(4));
+  const fmtP  = p => (p == null ? "N/A" : p < 0.001 ? "$<$0.001" : p.toFixed(4));
 
   const rows = varNames.map((v, i) => {
     const b  = beta?.[i],  s  = se?.[i];
