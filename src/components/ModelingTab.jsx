@@ -548,7 +548,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
               onClick={() => { navigator.clipboard.writeText(latex); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
               style={{
                 padding: "0.28rem 0.8rem",
-                background: copied ? "#0a2010" : "transparent",
+                background: copied ? `${C.green}18` : "transparent",
                 border: `1px solid ${copied ? C.green : C.border2}`,
                 color: copied ? C.green : C.textMuted,
                 borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: mono, transition: "all 0.2s",
@@ -2191,7 +2191,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                 </div>
                 {isATT && (
-                  <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#081210", border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
+                  <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
                     <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
                       Average Treatment Effect on the Treated (ATT)
                     </div>
