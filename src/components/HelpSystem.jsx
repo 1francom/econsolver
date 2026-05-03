@@ -13,7 +13,7 @@ export const TOUR_STEPS = [
   {
     id: "welcome",
     tab: null,
-    title: "Welcome to Econ Studio",
+    title: "Welcome to Litux",
     text: "A privacy-first econometrics platform. All computation runs in your browser — your data never leaves your machine. This tour walks through the full research workflow.",
   },
   {

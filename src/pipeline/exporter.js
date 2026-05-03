@@ -25,7 +25,7 @@ const LANG = {
 function rHeader(datasetName) {
   return [
     `# ${"─".repeat(70)}`,
-    `# Econ Studio — Replication Script (R)`,
+    `# Litux — Replication Script (R)`,
     `# Dataset: ${datasetName}`,
     `# Generated: ${new Date().toISOString().slice(0, 10)}`,
     `# ${"─".repeat(70)}`,
@@ -42,7 +42,7 @@ function rHeader(datasetName) {
 function stataHeader(datasetName) {
   return [
     `* ${"─".repeat(70)}`,
-    `* Econ Studio — Replication Script (Stata)`,
+    `* Litux — Replication Script (Stata)`,
     `* Dataset: ${datasetName}`,
     `* Generated: ${new Date().toISOString().slice(0, 10)}`,
     `* ${"─".repeat(70)}`,
@@ -56,7 +56,7 @@ function stataHeader(datasetName) {
 function pythonHeader(datasetName) {
   return [
     `# ${"─".repeat(70)}`,
-    `# Econ Studio — Replication Script (Python)`,
+    `# Litux — Replication Script (Python)`,
     `# Dataset: ${datasetName}`,
     `# Generated: ${new Date().toISOString().slice(0, 10)}`,
     `# ${"─".repeat(70)}`,
