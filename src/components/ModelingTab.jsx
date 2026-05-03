@@ -38,6 +38,7 @@ import PlotBuilder          from "./PlotBuilder.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
+import { HintBox } from "./HelpSystem.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 
@@ -161,7 +162,7 @@ function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
@@ -263,7 +264,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
       <div style={{
         display: "grid", gridTemplateColumns: COLS,
-        background: "#0a0a0a", padding: "0.5rem 0.75rem",
+        background: C.surface, padding: "0.5rem 0.75rem",
         fontSize: 9, color: C.textMuted, letterSpacing: "0.13em",
         textTransform: "uppercase", gap: 6,
         borderBottom: `1px solid ${C.border}`, fontFamily: mono,
@@ -289,11 +290,11 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
               style={{
                 display: "grid", gridTemplateColumns: COLS,
                 padding: "0.65rem 0.75rem", gap: 6,
-                background: isOpen ? "#0e0c09" : i % 2 === 0 ? C.surface : C.surface2,
+                background: isOpen ? C.surface2 : i % 2 === 0 ? C.surface : C.surface2,
                 cursor: isInt ? "default" : "pointer",
                 alignItems: "center", transition: "background 0.1s", fontFamily: mono,
               }}
-              onMouseOver={e => { if (!isInt) e.currentTarget.style.background = "#0e0c09"; }}
+              onMouseOver={e => { if (!isInt) e.currentTarget.style.background = C.surface2; }}
               onMouseOut={e => { if (!isOpen) e.currentTarget.style.background = i % 2 === 0 ? C.surface : C.surface2; }}
             >
               <div style={{ fontSize: 12, color: isInt ? C.textMuted : C.text, display: "flex", alignItems: "center", gap: 5 }}>
@@ -304,14 +305,14 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
               <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>({s.toFixed(4)})</div>
               <div style={{ textAlign: "right", fontSize: 11, color: sig ? C.teal + "cc" : C.textMuted }}>{lo.toFixed(4)}</div>
               <div style={{ textAlign: "right", fontSize: 11, color: sig ? C.teal + "cc" : C.textMuted }}>{hi.toFixed(4)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{tStats[i].toFixed(3)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p.toFixed(4)}</div>
+              <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{tStats?.[i] != null ? Number(tStats[i]).toFixed(3) : "—"}</div>
+              <div style={{ textAlign: "right", fontSize: 11, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p?.toFixed(4) ?? "—"}</div>
               <div style={{ textAlign: "center", fontSize: 12, color: C.gold }}>{stars(p)}</div>
             </div>
             {isOpen && (
               <div style={{
-                padding: "0.8rem 1.1rem 0.8rem 1.4rem", background: "#0c0b08",
-                borderTop: `1px solid #2a2010`, borderLeft: `3px solid ${C.gold}`,
+                padding: "0.8rem 1.1rem 0.8rem 1.4rem", background: C.surface2,
+                borderTop: `1px solid ${C.border}`, borderLeft: `3px solid ${C.gold}`,
                 animation: "fadeUp 0.18s ease", fontSize: 12,
                 color: "#b0a888", lineHeight: 1.8, fontFamily: mono,
               }}>
@@ -350,7 +351,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
       })}
 
       <div style={{
-        padding: "0.4rem 0.75rem", background: "#0a0a0a",
+        padding: "0.4rem 0.75rem", background: C.surface,
         borderTop: `1px solid ${C.border}`,
         fontSize: 9, color: C.textMuted, fontFamily: mono,
         display: "flex", justifyContent: "space-between",
@@ -500,7 +501,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: "1.2rem" }}>
-      <div style={{ background: "#0a0a0a", padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono, borderRadius: "4px 4px 0 0" }}>
+      <div style={{ background: C.surface, padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono, borderRadius: "4px 4px 0 0" }}>
         Export
       </div>
       {/* Button row — inner group has overflow:hidden for rounded corners; Replicate sits outside it */}
@@ -517,7 +518,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
                 border: "none", color: active ? C.gold : C.textDim,
                 cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
               }}
-              onMouseOver={e => { if (!active) e.currentTarget.style.background = "#0e0e0e"; }}
+              onMouseOver={e => { if (!active) e.currentTarget.style.background = C.surface2; }}
               onMouseOut={e =>  { if (!active) e.currentTarget.style.background = C.surface; }}
             >
               {label}
@@ -540,7 +541,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
         <ReplicateDropdown replicateConfig={replicateConfig} model={model} />
       </div>
       {showLatex && (
-        <div style={{ background: "#080a06", borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
+        <div style={{ background: C.surface2, borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <span style={{ fontSize: 10, color: "#5a8a5a", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: mono }}>LaTeX · {model}</span>
             <button
@@ -934,6 +935,177 @@ function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, openReport, base
   );
 }
 
+// ─── FUZZY RDD LATEX EXPORT ──────────────────────────────────────────────────
+function buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName) {
+  const fmtP = p => p == null ? "N/A" : p < 0.001 ? "$<$0.001" : p.toFixed(4);
+  if (stage === "second") {
+    const vars = result.varNames ?? [];
+    const rows = vars.map((v, i) => {
+      const b = result.beta?.[i], se = result.se?.[i];
+      const t = result.tStats?.[i], p = result.pVals?.[i];
+      const strs = p != null ? stars(p) : "";
+      return `  ${v.replace(/_/g, "\\_")} & ${b?.toFixed(4) ?? "N/A"}${strs} & ${se?.toFixed(4) ?? "N/A"} & ${t?.toFixed(3) ?? "N/A"} & ${fmtP(p)} \\\\`;
+    }).join("\n");
+    return `\\begin{table}[htbp]
+\\centering
+\\caption{Fuzzy RDD --- Second Stage (IV): \\texttt{${yVar}}}
+\\begin{tabular}{lrrrr}
+\\hline\\hline
+Variable & Estimate & Std. Error & t-value & Pr($>|t|$) \\\\
+\\hline
+${rows}
+\\hline
+\\multicolumn{5}{l}{$R^2 = ${result.R2?.toFixed(4) ?? "N/A"}$, $n = ${result.n ?? "N/A"}$, bw $= ${result.bandwidth?.toFixed(4) ?? "N/A"}$, FS $F = ${result.firstStageFstat?.toFixed(2) ?? "N/A"}$} \\\\
+\\multicolumn{5}{l}{Significance: *$p<0.1$, **$p<0.05$, ***$p<0.01$} \\\\
+\\hline
+\\end{tabular}
+\\end{table}`;
+  } else {
+    const fs = result.firstStage;
+    const vars = fsVarNames ?? [];
+    const rows = vars.map((v, i) => {
+      const b = fs?.beta?.[i], se = fs?.se?.[i];
+      const t = fs?.tStats?.[i], p = fs?.pVals?.[i];
+      const strs = p != null ? stars(p) : "";
+      return `  ${v.replace(/_/g, "\\_")} & ${b?.toFixed(4) ?? "N/A"}${strs} & ${se?.toFixed(4) ?? "N/A"} & ${t?.toFixed(3) ?? "N/A"} & ${fmtP(p)} \\\\`;
+    }).join("\n");
+    return `\\begin{table}[htbp]
+\\centering
+\\caption{Fuzzy RDD --- First Stage: \\texttt{${treatVarName ?? "D"}} $\\sim$ Z + running variable}
+\\begin{tabular}{lrrrr}
+\\hline\\hline
+Variable & Estimate & Std. Error & t-value & Pr($>|t|$) \\\\
+\\hline
+${rows}
+\\hline
+\\multicolumn{5}{l}{$R^2 = ${fs?.R2?.toFixed(4) ?? "N/A"}$, $F\\text{-stat} = ${result.firstStageFstat?.toFixed(2) ?? "N/A"}$, Jump in D $= ${result.firstStageJumpD?.toFixed(4) ?? "N/A"}$} \\\\
+\\multicolumn{5}{l}{Significance: *$p<0.1$, **$p<0.05$, ***$p<0.01$} \\\\
+\\hline
+\\end{tabular}
+\\end{table}`;
+  }
+}
+
+function FuzzyLatexExport({ stage, result, yVar, fsVarNames, treatVarName }) {
+  const { C } = useTheme();
+  const [open, setOpen] = useState(false);
+  const latex = useMemo(
+    () => buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName),
+    [stage, result, yVar, fsVarNames, treatVarName]
+  );
+  return (
+    <div style={{ marginBottom: "0.8rem" }}>
+      <button
+        onClick={() => setOpen(s => !s)}
+        style={{ padding: "0.4rem 0.9rem", background: open ? C.goldFaint : C.surface2, border: `1px solid ${C.border}`, color: open ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, borderRadius: 3, transition: "all 0.15s" }}
+      >
+        {open ? "▾" : "▸"} LaTeX table
+      </button>
+      {open && (
+        <div style={{ position: "relative", marginTop: 4 }}>
+          <pre style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3, padding: "0.7rem 1rem", fontSize: 10, color: C.text, fontFamily: mono, overflowX: "auto", margin: 0 }}>
+            {latex}
+          </pre>
+          <button
+            onClick={() => downloadText(latex, `fuzzyrdd_${stage}_stage_${yVar}.tex`)}
+            style={{ position: "absolute", top: 6, right: 8, padding: "0.25rem 0.6rem", background: C.surface, border: `1px solid ${C.border}`, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 9, borderRadius: 3 }}
+          >
+            ↓ .tex
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── FUZZY RDD RESULTS ───────────────────────────────────────────────────────
+function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
+  const [tab, setTab] = useState("second");
+  const r  = result;
+  const fs = r.firstStage;
+  const fsVarNames = r.firstStageVarNames ?? ["(Intercept)", "Z (instrument)", "running − c", "Z × (running − c)"];
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Fuzzy RDD Results</span>
+        <Badge label={`n = ${r.n}`} color={C.textDim} />
+        {r.weak && <Badge label="⚠ Weak instrument (F < 10)" color={C.red} />}
+      </div>
+
+      {/* LATE highlight */}
+      <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
+        <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Local Average Treatment Effect (LATE)</div>
+        <div style={{ fontSize: 24, color: r.lateP < 0.05 ? C.orange : C.textDim, fontFamily: mono }}>
+          {r.late >= 0 ? "+" : ""}{r.late?.toFixed(4) ?? "—"}{stars(r.lateP)}
+        </div>
+        <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+          SE = {r.lateSE?.toFixed(4) ?? "—"} · p = {r.lateP < 0.001 ? "<0.001" : r.lateP?.toFixed(4) ?? "—"}
+        </div>
+        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 8 }}>
+          Compliance (first-stage jump): {r.firstStageJumpD?.toFixed(4) ?? "—"} · F = {r.firstStageFstat?.toFixed(2) ?? "—"} · Wald ratio: {r.waldRatio?.toFixed(4) ?? "—"}
+        </div>
+      </div>
+
+      {/* Stage tab switcher */}
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+        {[["second", "Second Stage (Structural)"], ["first", "First Stage (Instrument)"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? "#2a1800" : C.surface, border: "none", color: tab === k ? C.orange : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.orange}` : "2px solid transparent", transition: "all 0.15s" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* Second stage */}
+      {tab === "second" && (
+        <>
+          <FitBar items={[
+            { label: "n (bw)", value: r.n,                                         color: C.text },
+            { label: "df",     value: r.df,                                         color: C.textDim },
+            { label: "R²",     value: r.R2?.toFixed(4) ?? "—",                     color: C.orange },
+            { label: "FS-F",   value: r.firstStageFstat?.toFixed(2) ?? "—",        color: r.weak ? C.red : C.gold },
+          ]} />
+          <Lbl color={C.textMuted}>Second-Stage Coefficient Table</Lbl>
+          <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar} df={r.df} />
+          <FuzzyLatexExport stage="second" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} />
+          <PlotSelector accentColor={C.orange} defaultId="rdd" plots={[
+            { id: "rdd",    label: "RDD Plot",
+              node: <RDDPlot result={r.rddData ?? {}} yLabel={yVar} xLabel={runningVar} /> },
+            { id: "forest", label: "Coefficient plot",
+              node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
+          ]} />
+        </>
+      )}
+
+      {/* First stage */}
+      {tab === "first" && fs && (
+        <>
+          <FitBar items={[
+            { label: "R²",     value: fs.R2?.toFixed(4)                 ?? "—", color: C.gold },
+            { label: "F-stat", value: r.firstStageFstat?.toFixed(2)     ?? "—", color: r.weak ? C.red : C.gold },
+            { label: "Jump D", value: r.firstStageJumpD?.toFixed(4)     ?? "—", color: C.text },
+            { label: "df",     value: fs.df,                                      color: C.textDim },
+          ]} />
+          {r.weak && (
+            <div style={{ padding: "0.6rem 0.8rem", marginBottom: "0.8rem", background: C.surface2, border: `1px solid ${C.red}40`, borderLeft: `3px solid ${C.red}`, borderRadius: 4, fontSize: 10, color: C.red, fontFamily: mono }}>
+              ⚠ F-stat = {r.firstStageFstat?.toFixed(2)} &lt; 10 — weak instrument. LATE estimate may be unreliable.
+            </div>
+          )}
+          <Lbl color={C.textMuted}>First-Stage Coefficient Table — D ~ Z + running variable</Lbl>
+          <CoeffTable varNames={fsVarNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={treatVarName ?? "D"} df={fs.df} />
+          <FuzzyLatexExport stage="first" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} />
+          <PlotSelector accentColor={C.gold} defaultId="fs_forest" plots={[
+            { id: "fs_forest", label: "Coefficient plot",
+              node: <ForestPlot varNames={fsVarNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId="forest-fuzzyrdd-fs" filename="fuzzyrdd_first_stage.svg" /> },
+          ]} />
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function buildModelAvail(panelOk) {
   return {
@@ -1300,48 +1472,42 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setSpecRows(pts);
   }, [specConfig, rows, _runEstimation]);
 
-  // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
-  const estimate = useCallback(() => {
-    setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
-    const out = _runEstimation(rows);
-    if (out.error) { setErr(out.error); }
-    else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
-    setRunning(false);
-  }, [rows, _runEstimation]);
-
   // ── RUN ALL SUBSETS ───────────────────────────────────────────────────────────
   const runAllSubsets = useCallback(() => {
     if (!subsets.length) return;
     setRunning(true);
+    try {
+      const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
+      const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
 
-    const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
-    const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
-
-    // Full sample (with per-subset steps applied if a branch point is set)
-    const fullRows = hasSubsetSteps
-      ? (runPipeline(rows, headers, perSubsetSteps, pipelineCtx)?.rows ?? rows)
-      : rows;
-    const fullOut = _runEstimation(fullRows);
-    if (!fullOut.error && fullOut.result) {
-      const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
-      modelBuffer.add(r);
-      setBufferVersion(v => v + 1);
-    }
-
-    // Each named subset
-    for (const s of subsets) {
-      const filtered = applySubsetFilter(rows, s.filters);
-      const subsetRows = hasSubsetSteps
-        ? (runPipeline(filtered, headers, perSubsetSteps, pipelineCtx)?.rows ?? filtered)
-        : filtered;
-      const out = _runEstimation(subsetRows);
-      if (!out.error && out.result) {
-        const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
+      // Full sample (with per-subset steps applied if a branch point is set)
+      const fullRows = hasSubsetSteps
+        ? (runPipeline(rows, headers, perSubsetSteps, pipelineCtx)?.rows ?? rows)
+        : rows;
+      const fullOut = _runEstimation(fullRows);
+      if (!fullOut.error && fullOut.result) {
+        const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
         modelBuffer.add(r);
         setBufferVersion(v => v + 1);
       }
+
+      // Each named subset
+      for (const s of subsets) {
+        const filtered = applySubsetFilter(rows, s.filters);
+        const subsetRows = hasSubsetSteps
+          ? (runPipeline(filtered, headers, perSubsetSteps, pipelineCtx)?.rows ?? filtered)
+          : filtered;
+        const out = _runEstimation(subsetRows);
+        if (!out.error && out.result) {
+          const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
+          modelBuffer.add(r);
+          setBufferVersion(v => v + 1);
+        }
+      }
+    } finally {
+      setRunning(false);
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+  }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
   // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
   const estimate = useCallback(() => {
@@ -1412,6 +1578,15 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
         {/* ── LEFT: Spec Panel ── */}
         <div style={{ width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`, overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem" }}>
+
+          <HintBox color={C.teal} title="How to model" tips={[
+            "Choose an estimator from the dropdown — grouped by strategy (linear, panel, causal…)",
+            "Assign Y (outcome), X (controls), Z (instruments), or W (weights) via the chip selectors",
+            "Panel structure (FE, FD, DiD, Event Study) requires entity & time declared in Wrangling → Panel",
+            "Inference Options: switch between classical, HC1–HC3, clustered, or HAC standard errors",
+            "Pin results to the model buffer to compare multiple specifications side by side",
+            "Export: LaTeX table, CSV coefficients, or replication scripts in R / Stata / Python",
+          ]} />
 
           {/* ── Dataset picker (data= selector) ── */}
           {availableDatasets.length > 1 && (
@@ -1680,7 +1855,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           {err && (
             <div style={{
               marginTop: "0.8rem", padding: "0.6rem 0.8rem",
-              background: "#0d0808", border: `1px solid ${C.red}40`,
+              background: C.surface, border: `1px solid ${C.red}40`,
               borderLeft: `3px solid ${C.red}`, borderRadius: 4,
               fontSize: 11, color: C.red, fontFamily: mono, lineHeight: 1.6,
             }}>
@@ -1821,7 +1996,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           {/* Panel FE / FD */}
           {(result?.type === "FE" || result?.type === "FD") && (
-            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} rows={rows} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* 2SLS */}
@@ -1840,43 +2015,16 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           )}
 
           {/* Fuzzy RDD */}
-          {result?.type === "FuzzyRDD" && (() => {
-            const r = result;
-            return (
-              <div style={{ animation: "fadeUp 0.22s ease" }}>
-                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Fuzzy RDD Results</span>
-                  <Badge label={`n = ${r.n}`} color={C.textDim} />
-                  {r.weak && <Badge label="⚠ Weak instrument (F < 10)" color={C.red} />}
-                </div>
-                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#0d0a08", border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
-                  <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Local Average Treatment Effect (LATE)</div>
-                  <div style={{ fontSize: 24, color: r.lateP < 0.05 ? C.orange : C.textDim, fontFamily: mono }}>
-                    {r.late >= 0 ? "+" : ""}{r.late?.toFixed(4) ?? "—"}{stars(r.lateP)}
-                  </div>
-                  <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
-                    SE = {r.lateSE?.toFixed(4) ?? "—"} · p = {r.lateP < 0.001 ? "<0.001" : r.lateP?.toFixed(4) ?? "—"}
-                  </div>
-                  <div style={{ fontSize: 10, color: C.textMuted, marginTop: 8 }}>
-                    Compliance (first-stage jump): {r.firstStageJumpD?.toFixed(4) ?? "—"} · F = {r.firstStageFstat?.toFixed(2) ?? "—"} · Wald ratio: {r.waldRatio?.toFixed(4) ?? "—"}
-                  </div>
-                </div>
-                <FitBar items={[
-                  { label: "n (bw)", value: r.n, color: C.text },
-                  { label: "df",     value: r.df, color: C.textDim },
-                  { label: "R²",     value: r.R2?.toFixed(4) ?? "—", color: C.orange },
-                  { label: "FS-F",   value: r.firstStageFstat?.toFixed(2) ?? "—", color: r.weak ? C.red : C.gold },
-                ]} />
-                <Lbl color={C.textMuted}>Second-Stage Coefficient Table</Lbl>
-                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
-                <PlotSelector accentColor={C.orange} defaultId="rdd" plots={[
-                  { id: "rdd", label: "RDD Plot", node: <RDDPlot result={r.rddData ?? {}} yLabel={yVar[0]} /> },
-                  { id: "forest", label: "Coefficient plot",
-                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
-                ]} />
-              </div>
-            );
-          })()}
+          {result?.type === "FuzzyRDD" && (
+            <FuzzyRDDResults
+              result={result}
+              yVar={yVar[0]}
+              treatVarName={treatVar[0]}
+              runningVar={runningVar[0]}
+              openReport={openReport}
+              baseReplicateConfig={baseReplicateConfig}
+            />
+          )}
 
           {/* Event Study */}
           {result?.type === "EventStudy" && (() => {
@@ -1889,7 +2037,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`${r.units ?? "?"} units`} color={C.textDim} />
                 </div>
                 {r.preTestStat != null && (
-                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: "#081210", border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
+                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
                     <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
                       Pre-trend F-test: F = {r.preTestStat?.toFixed(3) ?? "—"} · p = {r.preTestPval < 0.001 ? "<0.001" : r.preTestPval?.toFixed(4) ?? "—"}
                       {r.preTestPval < 0.05
@@ -1929,6 +2077,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "F-stat",  value: r.Fstat?.toFixed(3) ?? "—", color: C.gold },
                   { label: "n",       value: r.n,                         color: C.text },
                 ]} />
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <Lbl color={C.textMuted}>Structural Coefficient Table (excl. dummies)</Lbl>
                 <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 <PlotSelector accentColor={C.blue} defaultId="forest" plots={[
@@ -1936,6 +2085,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
                   { id: "resid", label: "Residuals", node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
                 ]} />
+                <ExportBar yVar={yVar[0]} results={r} model="LSDV"
+                  onReport={() => openReport({ ...r, modelLabel: "Panel LSDV", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "LSDV", yVar: yVar[0], xVars, wVars } } : null}
+                />
               </div>
             );
           })()}
@@ -1990,7 +2143,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`treated: ${r.scTreatedUnit}`} color={C.gold} />
                   <Badge label={`T* = ${r.scTreatTime}`} color={C.textDim} />
                 </div>
-                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#0d0c08", border: `1px solid ${C.gold}30`, borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
+                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.gold}30`, borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
                   <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Fit Quality & Inference</div>
                   <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono }}>
                     Pre-RMSPE: {r.scRmspePre?.toFixed(6) ?? "—"} · Post-RMSPE: {r.scRmspePost?.toFixed(6) ?? "—"}
@@ -2133,7 +2286,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <>
                     <Lbl color={C.textMuted}>Marginal Effects at the Mean (MEM) · dP(Y=1)/dx</Lbl>
                     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", background: "#0a0a0a", padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
                         <div>Variable</div>
                         <div style={{ textAlign: "right" }}>dP/dx at x̄</div>
                       </div>
@@ -2145,7 +2298,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                           </div>
                         </div>
                       ))}
-                      <div style={{ padding: "0.35rem 0.75rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
                         Evaluated at sample means of all covariates
                       </div>
                     </div>
@@ -2157,7 +2310,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <>
                     <Lbl color={C.textMuted}>Odds Ratios · exp(β) with 95% CI</Lbl>
                     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", background: "#0a0a0a", padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
                         <div>Variable</div>
                         <div style={{ textAlign: "right" }}>OR</div>
                         <div style={{ textAlign: "right" }}>2.5%</div>
@@ -2174,7 +2327,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                           </div>
                         );
                       })}
-                      <div style={{ padding: "0.35rem 0.75rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
                         OR &gt; 1 = positive association · OR &lt; 1 = negative association · CI based on ±1.96 × SE
                       </div>
                     </div>

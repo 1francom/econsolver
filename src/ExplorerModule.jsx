@@ -6,6 +6,7 @@ import { useTheme } from "./ThemeContext.jsx";
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
+import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
@@ -65,31 +66,6 @@ function SvgHistogram({data,color,label=""}){
   );
 }
 
-function SvgScatter({xs,ys,xlbl="",ylbl="",showOls=true}){
-  const{C}=useTheme();
-  const W=340,H=200,PAD=36;
-  if(!xs.length||!ys.length)return null;
-  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
-  const rX=maxX-minX||1,rY=maxY-minY||1;
-  const toSvgX=x=>PAD+(x-minX)/rX*(W-PAD*2);
-  const toSvgY=y=>(H-PAD)-(y-minY)/rY*(H-PAD*2);
-  const ols=olsSimple(xs,ys);
-  const tx1=minX,tx2=maxX,ty1=ols.b0+ols.b1*tx1,ty2=ols.b0+ols.b1*tx2;
-  return(
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",fontFamily:mono}}>
-      <line x1={PAD} y1={PAD} x2={PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
-      <line x1={PAD} y1={H-PAD} x2={W-PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
-      {xs.map((x,i)=><circle key={i} cx={toSvgX(x)} cy={toSvgY(ys[i])} r={2.5} fill={C.teal} opacity={0.6}/>)}
-      {showOls&&<line x1={toSvgX(tx1)} y1={toSvgY(ty1)} x2={toSvgX(tx2)} y2={toSvgY(ty2)} stroke={C.orange} strokeWidth={1.5} strokeDasharray="4,2"/>}
-      <text x={PAD-4} y={PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{maxY.toFixed(1)}</text>
-      <text x={PAD-4} y={H-PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{minY.toFixed(1)}</text>
-      <text x={PAD} y={H-PAD+12} fill={C.textMuted} fontSize={8} fontFamily={mono}>{minX.toFixed(1)}</text>
-      <text x={W-PAD} y={H-PAD+12} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{maxX.toFixed(1)}</text>
-      {xlbl&&<text x={W/2} y={H-4} fill={C.textDim} fontSize={9} fontFamily={mono} textAnchor="middle">{xlbl}</text>}
-      {showOls&&<text x={W-PAD} y={PAD} fill={C.orange} fontSize={8} fontFamily={mono} textAnchor="end">R²={ols.r2.toFixed(3)}</text>}
-    </svg>
-  );
-}
 
 function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
   const{C}=useTheme();
@@ -229,17 +205,18 @@ function DistributionTab({rows,headers,info,panel}){
   const{C}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   const [histCol,setHistCol]=useState(numH[0]||"");
-  const [scX,setScX]=useState(numH[0]||""),[scY,setScY]=useState(numH[1]||"");
   const [spagCol,setSpagCol]=useState(numH[0]||"");
   const [sub,setSub]=useState("hist");
   const hasPanel=panel?.entityCol&&panel?.timeCol;
-  const subTabs=[["hist","Histogram"],["scatter","Scatter + OLS"],...(hasPanel?[["spaghetti","Spaghetti"]]:[])]
+  const subTabs=[["hist","Histogram"],...(hasPanel?[["spaghetti","Spaghetti"]]:[])]
 
   return(
     <div>
-      <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-        {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
-      </div>
+      {subTabs.length > 1 && (
+        <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
+          {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
+        </div>
+      )}
       {sub==="hist"&&(
         <div>
           <Lbl>Variable</Lbl>
@@ -264,33 +241,6 @@ function DistributionTab({rows,headers,info,panel}){
               </div>
             );
           })()}
-        </div>
-      )}
-      {sub==="scatter"&&(
-        <div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1.2rem"}}>
-            {[["X axis",scX,setScX,C.teal],["Y axis",scY,setScY,C.gold]].map(([lbl,val,setter,color])=>(
-              <div key={lbl}><Lbl color={color}>{lbl}</Lbl>
-                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {numH.map(h=><button key={h} onClick={()=>setter(h)} style={{padding:"0.22rem 0.5rem",border:`1px solid ${val===h?color:C.border2}`,background:val===h?`${color}18`:"transparent",color:val===h?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{val===h?"✓ ":""}{h}</button>)}
-                </div>
-              </div>
-            ))}
-          </div>
-          {scX&&scY&&scX!==scY&&(()=>{
-            const pairs=rows.filter(r=>typeof r[scX]==="number"&&typeof r[scY]==="number");
-            const xs=pairs.map(r=>r[scX]),ys=pairs.map(r=>r[scY]);
-            const ols=olsSimple(xs,ys);
-            return(
-              <div>
-                <SvgScatter xs={xs} ys={ys} xlbl={scX} ylbl={scY} showOls/>
-                <div style={{marginTop:8,padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono}}>
-                  OLS: <span style={{color:C.gold}}>{scY}</span> = <span style={{color:C.teal}}>{ols.b0.toFixed(4)}</span> + <span style={{color:C.teal}}>{ols.b1.toFixed(4)}</span>·<span style={{color:C.gold}}>{scX}</span> · R²=<span style={{color:C.orange}}>{ols.r2.toFixed(4)}</span> · n={xs.length}
-                </div>
-              </div>
-            );
-          })()}
-          {scX===scY&&<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Select two different variables.</div>}
         </div>
       )}
       {sub==="spaghetti"&&hasPanel&&(
@@ -874,12 +824,440 @@ function generateExploreScript(language, { headers, info, filename }) {
   return "";
 }
 
+// ─── GROUP & SUMMARIZE EXPLORER ───────────────────────────────────────────────
+// Non-destructive descriptive stats panel with as.factor() override and LaTeX export.
+function GroupSummarizeExplorer({ rows, headers, info }) {
+  const { C } = useTheme();
+  const [byCols,    setByCols]    = useState([]);
+  const [factorOverrides, setFactorOverrides] = useState(new Set()); // numeric cols forced as categorical
+  const [aggs,      setAggs]      = useState([]);
+  const [sumResult, setSumResult] = useState(null);
+  const [latexOpen, setLatexOpen] = useState(false);
+  const [copied,    setCopied]    = useState(false);
+  const [hoveredCol, setHoveredCol] = useState(null);
+
+  const numC = headers.filter(h => info[h]?.isNum);
+  const FN_OPTS = [
+    ["mean","Mean (μ)"],["median","Median"],["sum","Sum (Σ)"],
+    ["count","Count (n)"],["min","Min"],["max","Max"],["sd","Std dev (σ)"],
+  ];
+  const inS = { padding:"0.38rem 0.6rem", background:C.surface2,
+    border:`1px solid ${C.border2}`, borderRadius:3, color:C.text,
+    fontFamily:mono, fontSize:11, outline:"none" };
+
+  function toggleFactor(h) {
+    setFactorOverrides(prev => {
+      const next = new Set(prev);
+      if (next.has(h)) { next.delete(h); setByCols(p => p.filter(x => x !== h)); }
+      else next.add(h);
+      return next;
+    });
+  }
+
+  function isGroupable(h) {
+    return !info[h]?.isNum || factorOverrides.has(h);
+  }
+
+  function toggleByCol(h) {
+    if (!isGroupable(h)) return;
+    setByCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
+  }
+
+  function addAgg(col = "", fn = "mean") {
+    const nn = col ? `${fn}_${col}` : "";
+    setAggs(a => [...a, { col, fn, nn }]);
+  }
+  function updAgg(i, patch) {
+    setAggs(a => a.map((x, j) => {
+      if (j !== i) return x;
+      const updated = { ...x, ...patch };
+      const oldAuto = `${x.fn}_${x.col}`;
+      if ((!x.nn || x.nn === oldAuto) && (patch.col !== undefined || patch.fn !== undefined)) {
+        updated.nn = `${updated.fn}_${updated.col}`;
+      }
+      return updated;
+    }));
+  }
+  function rmAgg(i) { setAggs(a => a.filter((_, j) => j !== i)); }
+
+  function doSummarize() {
+    if (!byCols.length || !aggs.length) return;
+    const validAggs = aggs.filter(a => a.col && a.fn && a.nn.trim());
+    if (!validAggs.length) return;
+    const byKey = r => byCols.map(b => String(r[b] ?? "")).join("||");
+    const groups = new Map();
+    rows.forEach(r => {
+      const k = byKey(r);
+      if (!groups.has(k)) groups.set(k, { _first: r, _rows: [] });
+      groups.get(k)._rows.push(r);
+    });
+    const outRows = [];
+    const outHeaders = [...byCols, ...validAggs.map(a => a.nn)];
+    for (const { _first, _rows } of groups.values()) {
+      const out = {};
+      byCols.forEach(b => { out[b] = _first[b]; });
+      validAggs.forEach(({ col, fn, nn }) => {
+        const vals = _rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v));
+        if (fn === "count") { out[nn] = _rows.length; return; }
+        if (!vals.length)   { out[nn] = null; return; }
+        if (fn === "sum")   { out[nn] = vals.reduce((a,b)=>a+b,0); return; }
+        if (fn === "min")   { out[nn] = Math.min(...vals); return; }
+        if (fn === "max")   { out[nn] = Math.max(...vals); return; }
+        const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+        if (fn === "mean")  { out[nn] = mean; return; }
+        if (fn === "sd")    { out[nn] = vals.length>1 ? Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/(vals.length-1)) : 0; return; }
+        if (fn === "median") { const s=[...vals].sort((a,b)=>a-b),m=Math.floor(s.length/2); out[nn]=s.length%2===0?(s[m-1]+s[m])/2:s[m]; return; }
+        out[nn] = null;
+      });
+      outRows.push(out);
+    }
+    outRows.sort((a, b) => {
+      for (const col of byCols) {
+        const av = String(a[col]??""), bv = String(b[col]??"");
+        if (av < bv) return -1; if (av > bv) return 1;
+      }
+      return 0;
+    });
+    setSumResult({ rows: outRows, headers: outHeaders, by: byCols, aggs: validAggs });
+    setLatexOpen(false); setCopied(false);
+  }
+
+  function buildLatex(res) {
+    const numCols = new Set(res.aggs.map(a => a.nn));
+    const fmt = v => v === null || v === undefined ? "" : typeof v === "number" ? v.toFixed(3) : String(v);
+    const colSpec = res.headers.map(h => numCols.has(h) ? "r" : "l").join(" ");
+    const header  = res.headers.map(h => h.replace(/_/g,"\\_")).join(" & ") + " \\\\";
+    const body    = res.rows.map(r => res.headers.map(h => fmt(r[h])).join(" & ") + " \\\\").join("\n    ");
+    return [
+      "\\begin{table}[htbp]","  \\centering",
+      `  \\caption{Summary statistics by ${res.by.join(", ")}}`,
+      "  \\label{tab:summary}",
+      `  \\begin{tabular}{${colSpec}}`,
+      "    \\hline",`    ${header}`,"    \\hline",`    ${body}`,"    \\hline",
+      "  \\end{tabular}","\\end{table}",
+    ].join("\n");
+  }
+
+  const canSummarize = byCols.length > 0 && aggs.some(a => a.col && a.fn && a.nn.trim());
+
+  return (
+    <div>
+      <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,
+        borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.2rem",
+        fontSize:11,color:C.textDim,lineHeight:1.6}}>
+        Group by any column (including numeric — use{" "}
+        <span style={{color:C.gold,fontFamily:mono}}>as.factor()</span> to treat a number as a category)
+        and compute summary statistics. Results are read-only — use the LaTeX button to export.
+      </div>
+
+      {/* ── Group by ── */}
+      <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",
+        marginBottom:6,fontFamily:mono}}>Group by</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"0.5rem"}}>
+        {headers.map(h => {
+          const isNum  = info[h]?.isNum;
+          const isFact = factorOverrides.has(h);
+          const groupable = !isNum || isFact;
+          const sel = byCols.includes(h);
+          const uVals = info[h]?.uVals?.map(v => String(v)) || [];
+          return (
+            <div key={h} style={{position:"relative",display:"flex",gap:1,alignItems:"center"}}>
+              <button
+                onClick={() => toggleByCol(h)}
+                onMouseEnter={() => groupable && setHoveredCol(h)}
+                onMouseLeave={() => setHoveredCol(null)}
+                style={{
+                  padding:"0.28rem 0.6rem",
+                  border:`1px solid ${sel ? C.gold : groupable ? C.border2 : C.border}`,
+                  background: sel ? `${C.gold}18` : "transparent",
+                  color: sel ? C.gold : groupable ? C.textDim : C.textMuted,
+                  borderRadius:3, cursor: groupable ? "pointer" : "default",
+                  fontSize:10, fontFamily:mono, opacity: groupable ? 1 : 0.5,
+                  transition:"all 0.1s",
+                }}>
+                {sel ? "✓ " : ""}{h}
+                {isNum && !isFact && <span style={{fontSize:8,marginLeft:3,color:C.textMuted}}>num</span>}
+                {isFact && <span style={{fontSize:8,marginLeft:3,color:C.gold}}>factor</span>}
+                {!isNum && <span style={{fontSize:8,color:C.textMuted,marginLeft:3}}>({info[h]?.uCount})</span>}
+              </button>
+              {/* as.factor() toggle — shown for numeric columns */}
+              {isNum && (
+                <button
+                  onClick={() => toggleFactor(h)}
+                  title={isFact ? "Remove as.factor() — revert to numeric" : "as.factor() — treat as categorical for grouping"}
+                  style={{
+                    padding:"0.18rem 0.38rem",
+                    border:`1px solid ${isFact ? C.gold : C.border2}`,
+                    background: isFact ? `${C.gold}18` : "transparent",
+                    color: isFact ? C.gold : C.textMuted,
+                    borderRadius:2, cursor:"pointer",
+                    fontSize:8, fontFamily:mono, transition:"all 0.1s",
+                    whiteSpace:"nowrap",
+                  }}>
+                  {isFact ? "✓ f" : "f"}
+                </button>
+              )}
+              {hoveredCol===h && uVals.length>0 && (
+                <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,
+                  background:C.surface2,border:`1px solid ${C.border2}`,
+                  borderRadius:4,padding:"0.5rem 0.65rem",zIndex:50,
+                  minWidth:120,maxWidth:220,boxShadow:"0 6px 20px #000a",
+                  fontSize:10,fontFamily:mono,color:C.textDim,pointerEvents:"none"}}>
+                  <div style={{fontSize:9,color:C.gold,letterSpacing:"0.12em",
+                    textTransform:"uppercase",marginBottom:4}}>
+                    {info[h]?.uCount} unique values
+                  </div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                    {uVals.slice(0,12).map(v=>(
+                      <span key={v} style={{padding:"1px 5px",border:`1px solid ${C.border2}`,
+                        borderRadius:2,color:C.text,background:C.surface3,fontSize:10}}>{v}</span>
+                    ))}
+                    {uVals.length>12 && <span style={{color:C.textMuted,fontSize:9}}>+{uVals.length-12} more</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginBottom:"1.2rem"}}>
+        Hover a column to preview its unique values · click <span style={{color:C.gold}}>f</span> next to a numeric column to use as.factor()
+      </div>
+
+      {/* ── Aggregations ── */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.6rem"}}>
+        <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",fontFamily:mono}}>Aggregations</div>
+        <button onClick={()=>addAgg()} style={{
+          padding:"0.2rem 0.55rem",border:`1px solid ${C.blue}`,
+          background:`${C.blue}10`,color:C.blue,borderRadius:2,
+          cursor:"pointer",fontSize:9,fontFamily:mono}}>+ add row</button>
+      </div>
+      {numC.length > 0 && (
+        <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:"0.8rem"}}>
+          <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,alignSelf:"center",marginRight:2}}>quick add:</span>
+          {numC.map(h => (
+            <button key={h} onClick={()=>addAgg(h,"mean")}
+              style={{padding:"0.18rem 0.5rem",border:`1px solid ${C.border2}`,
+                background:"transparent",color:C.textDim,borderRadius:2,
+                cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.1s"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.blue;e.currentTarget.style.color=C.blue;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+              title={`Add mean(${h})`}>+ {h}</button>
+          ))}
+        </div>
+      )}
+      {aggs.length === 0 && (
+        <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px dashed ${C.border2}`,
+          borderRadius:4,fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"1.2rem"}}>
+          Add aggregations above.
+        </div>
+      )}
+      <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:"1.2rem"}}>
+        {aggs.map((agg, i) => (
+          <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 140px 1fr auto",
+            gap:6,alignItems:"center",padding:"0.5rem 0.65rem",
+            background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
+            <select value={agg.col} onChange={e=>updAgg(i,{col:e.target.value})} style={{...inS,width:"100%"}}>
+              <option value="">— column —</option>
+              {numC.map(h=><option key={h} value={h}>{h}</option>)}
+            </select>
+            <select value={agg.fn} onChange={e=>updAgg(i,{fn:e.target.value})} style={inS}>
+              {FN_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+            </select>
+            <input value={agg.nn}
+              onChange={e=>setAggs(a=>a.map((x,j)=>j!==i?x:{...x,nn:e.target.value}))}
+              placeholder={`${agg.fn}_${agg.col||"col"}`}
+              style={{...inS,width:"100%",boxSizing:"border-box"}}/>
+            <button onClick={()=>rmAgg(i)} style={{
+              background:"transparent",border:`1px solid ${C.border2}`,
+              borderRadius:2,color:C.textMuted,cursor:"pointer",
+              fontSize:11,padding:"0.2rem 0.4rem"}}>✕</button>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={doSummarize} disabled={!canSummarize} style={{
+        padding:"0.42rem 0.9rem",borderRadius:3,cursor:canSummarize?"pointer":"not-allowed",
+        fontFamily:mono,fontSize:11,fontWeight:700,
+        background:canSummarize?C.gold:"transparent",
+        color:canSummarize?C.bg:C.textMuted,
+        border:`1px solid ${canSummarize?C.gold:C.border2}`,
+        opacity:canSummarize?1:0.5,marginBottom:"1.5rem",
+      }}>Compute →</button>
+
+      {/* ── Result ── */}
+      {sumResult && (
+        <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
+          <div style={{padding:"0.55rem 0.9rem",background:C.surface2,
+            display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:10,color:C.gold,fontFamily:mono,flex:1}}>
+              {sumResult.rows.length} groups · grouped by [{sumResult.by.join(", ")}]
+            </span>
+            {/* LaTeX toggle */}
+            <button onClick={()=>{setLatexOpen(o=>!o);setCopied(false);}} style={{
+              padding:"0.22rem 0.6rem",background:latexOpen?`${C.gold}18`:"transparent",
+              border:`1px solid ${latexOpen?C.gold:C.border2}`,borderRadius:2,
+              color:latexOpen?C.gold:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono}}>
+              LaTeX {latexOpen?"▾":"▸"}
+            </button>
+            {/* CSV download */}
+            <button onClick={()=>{
+              const esc=v=>{if(v===null||v===undefined)return"";const s=String(v);return s.includes(",")||s.includes('"')?`"${s.replace(/"/g,'""')}"`  :s;};
+              const lines=[sumResult.headers.map(esc).join(","),...sumResult.rows.map(r=>sumResult.headers.map(h=>esc(r[h])).join(","))];
+              const blob=new Blob([lines.join("\r\n")],{type:"text/csv"});
+              const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+              a.download=`summary_${sumResult.by.join("_")}.csv`;a.click();URL.revokeObjectURL(a.href);
+            }} style={{
+              padding:"0.22rem 0.6rem",background:"transparent",
+              border:`1px solid ${C.border2}`,borderRadius:2,
+              color:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;e.currentTarget.style.color=C.teal;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}>
+              ↓ CSV
+            </button>
+          </div>
+          {/* LaTeX panel */}
+          {latexOpen && (()=>{
+            const tex = buildLatex(sumResult);
+            return (
+              <div style={{padding:"0.75rem 0.9rem",background:"#0a0c0a",borderBottom:`1px solid ${C.border}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <span style={{fontSize:9,color:C.gold,letterSpacing:"0.15em",
+                    textTransform:"uppercase",fontFamily:mono,flex:1}}>LaTeX — tabular</span>
+                  <button onClick={()=>{navigator.clipboard.writeText(tex).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1800);});}} style={{
+                    padding:"0.22rem 0.75rem",
+                    background:copied?`${C.teal}18`:`${C.gold}10`,
+                    border:`1px solid ${copied?C.teal:C.gold}`,
+                    borderRadius:3,color:copied?C.teal:C.gold,
+                    cursor:"pointer",fontSize:10,fontFamily:mono,fontWeight:600}}>
+                    {copied ? "✓ Copied" : "⎘ Copy"}
+                  </button>
+                </div>
+                <pre style={{margin:0,fontSize:10,color:C.textDim,fontFamily:mono,
+                  overflowX:"auto",lineHeight:1.6,whiteSpace:"pre"}}>{tex}</pre>
+              </div>
+            );
+          })()}
+          {/* Data table */}
+          <div style={{overflowX:"auto",maxHeight:400,overflowY:"auto"}}>
+            <table style={{borderCollapse:"collapse",fontSize:11,width:"100%",fontFamily:mono}}>
+              <thead>
+                <tr style={{background:C.surface2,position:"sticky",top:0}}>
+                  {sumResult.headers.map(h => {
+                    const isBy = sumResult.by.includes(h);
+                    const aggDef = sumResult.aggs.find(a=>a.nn===h);
+                    return (
+                      <th key={h} style={{padding:"0.4rem 0.75rem",
+                        textAlign:isBy?"left":"right",fontWeight:400,fontSize:10,
+                        color:isBy?C.gold:C.blue,whiteSpace:"nowrap",
+                        borderBottom:`1px solid ${C.border}`}}>
+                        {h}<span style={{fontSize:8,color:C.textMuted,marginLeft:4}}>{isBy?"group":aggDef?.fn}</span>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {sumResult.rows.map((row,i)=>(
+                  <tr key={i} style={{background:i%2?C.surface2:C.surface}}>
+                    {sumResult.headers.map(h=>{
+                      const v=row[h];
+                      const isNull=v===null||v===undefined;
+                      const isNum=typeof v==="number";
+                      const isBy=sumResult.by.includes(h);
+                      return (
+                        <td key={h} style={{padding:"0.32rem 0.75rem",
+                          color:isNull?C.textMuted:isNum?C.blue:C.text,
+                          borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",
+                          textAlign:isBy?"left":"right"}}>
+                          {isNull?"·":isNum?v.toFixed(3):String(v)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── QUICK FILTER ─────────────────────────────────────────────────────────────
+// Ephemeral in-explorer filter — never touches the pipeline or rawData.
+// Conditions are ANDed; numeric ops (>,<,>=,<=) skip non-numeric values.
+const FILTER_OPS = [">", "<", ">=", "<=", "=", "≠", "contains"];
+
+function matchCond(row, {col, op, val}) {
+  const v = row[col];
+  if (op === "contains") return String(v ?? "").toLowerCase().includes(String(val).toLowerCase());
+  if (op === "=")  return String(v) === String(val);
+  if (op === "≠")  return String(v) !== String(val);
+  const n = parseFloat(val);
+  if (!isFinite(n) || typeof v !== "number") return true; // skip invalid numeric cond
+  if (op === ">")  return v > n;
+  if (op === "<")  return v < n;
+  if (op === ">=") return v >= n;
+  if (op === "<=") return v <= n;
+  return true;
+}
+
+function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
+  const {C} = useTheme();
+  const [open, setOpen] = useState(false);
+  const active = conds.length > 0;
+  const isFiltered = filteredCount !== totalRows;
+  const selStyle = {fontFamily:mono,fontSize:10,background:C.surface2,border:`1px solid ${C.border}`,color:C.text,borderRadius:3,padding:"0.2rem 0.3rem"};
+  const upd = (i, patch) => setConds(cs => cs.map((c,j) => j===i ? {...c,...patch} : c));
+
+  return (
+    <div style={{marginBottom:"0.8rem"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <button onClick={()=>setOpen(s=>!s)} style={{padding:"0.22rem 0.7rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:active?`${C.teal}18`:"transparent",border:`1px solid ${active?C.teal:C.border2}`,color:active?C.teal:C.textDim,transition:"all 0.12s"}}>
+          ⊘ Filter{active?` (${conds.length})`:""}
+        </button>
+        {isFiltered&&<span style={{fontSize:10,color:C.teal,fontFamily:mono}}>{filteredCount.toLocaleString()} / {totalRows.toLocaleString()} rows</span>}
+        {active&&<button onClick={()=>{setConds([]);}} style={{fontSize:10,color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontFamily:mono,padding:0}}>× clear</button>}
+      </div>
+      {open&&(
+        <div style={{marginTop:6,padding:"0.7rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:4}}>
+          {conds.map((cond,i)=>(
+            <div key={i} style={{display:"flex",gap:4,alignItems:"center",marginBottom:4}}>
+              <select value={cond.col} onChange={e=>upd(i,{col:e.target.value})} style={selStyle}>
+                {headers.map(h=><option key={h} value={h}>{h}</option>)}
+              </select>
+              <select value={cond.op} onChange={e=>upd(i,{op:e.target.value})} style={{...selStyle,width:76}}>
+                {FILTER_OPS.map(op=><option key={op} value={op}>{op}</option>)}
+              </select>
+              <input value={cond.val} onChange={e=>upd(i,{val:e.target.value})}
+                style={{...selStyle,width:100}} placeholder="value" />
+              <button onClick={()=>setConds(cs=>cs.filter((_,j)=>j!==i))}
+                style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:14,lineHeight:1,padding:"0 2px"}}>×</button>
+            </div>
+          ))}
+          <button onClick={()=>setConds(cs=>[...cs,{col:headers[0]??"",op:">",val:""}])}
+            style={{fontSize:10,color:C.teal,background:"none",border:`1px solid ${C.teal}40`,borderRadius:3,cursor:"pointer",fontFamily:mono,padding:"0.2rem 0.5rem",marginTop:2}}>
+            + condition
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
 export default function ExplorerModule({cleanedData, onBack, onProceed}) {
   const{C}=useTheme();
   const {headers, cleanRows:rows, panelIndex:panel, filename} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
+  const [filterConds, setFilterConds] = useState([]);
+  const filteredRows = useMemo(()=>{
+    if(!filterConds.length) return rows;
+    return rows.filter(row=>filterConds.every(cond=>matchCond(row,cond)));
+  },[rows,filterConds]);
   const corrRef = useRef(null);
 
   function downloadExploreScript(language) {
@@ -902,7 +1280,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
             <div style={{fontSize:9,color:C.violet,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>Evidence Explorer</div>
             <div style={{fontSize:18,color:C.text,letterSpacing:"-0.02em",marginBottom:3}}>Exploratory Analysis</div>
             <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
-              <span style={{color:C.gold}}>{rows.length}</span> obs ·{" "}
+              <span style={{color:C.gold}}>{filteredRows.length !== rows.length ? `${filteredRows.length.toLocaleString()} of ${rows.length.toLocaleString()}` : rows.length}</span> obs ·{" "}
               <span style={{color:C.teal}}>{headers.filter(h=>info[h]?.isNum).length}</span> numeric ·{" "}
               <span style={{color:C.purple}}>{headers.filter(h=>info[h]?.isCat).length}</span> categorical
               {panel&&<span style={{color:C.blue}}> · panel i={panel.entityCol} t={panel.timeCol}</span>}
@@ -929,15 +1307,25 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
           </div>
         </div>
         {/* AI Insights */}
-        <AIInsights rows={rows} headers={headers} info={info} panel={panel}/>
+        <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
+        <HintBox tips={[
+          "⊘ Filter slices data temporarily — applies to all tabs but never touches the pipeline",
+          "Group By in Summary Table shows statistics split by any categorical variable",
+          "Distributions tab: histogram + 5-number summary for any numeric variable",
+          "Correlation tab: Pearson heatmap across all numeric variables",
+          "Plot Builder: compose layered visualizations (point, line, bar, histogram, smooth…)",
+        ]} />
+        {/* Quick Filter */}
+        <QuickFilter headers={headers} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-          {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"]].map(([k,l])=>(
+          {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"],["summarize","⊞ Summarize"]].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"0.6rem 0.7rem",background:tab===k?C.goldFaint:C.surface,border:"none",color:tab===k?C.gold:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,borderBottom:tab===k?`2px solid ${C.gold}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>
           ))}
         </div>
-        {tab==="summary"&&<SummaryTable rows={rows} headers={headers} info={info} panel={panel}/>}
-        {tab==="visuals"&&<DistributionTab rows={rows} headers={headers} info={info} panel={panel}/>}
+        {tab==="summary"&&<SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="summarize"&&<GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info}/>}
         {tab==="corr"&&(
           <div>
             <div style={{fontSize:11,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
@@ -945,14 +1333,14 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
             </div>
             <div ref={corrRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
               <div style={{padding:"0.5rem"}}>
-                <CorrHeatmap headers={headers} rows={rows} info={info}/>
+                <CorrHeatmap headers={headers} rows={filteredRows} info={info}/>
               </div>
               <PlotExportBar getEl={() => corrRef.current} filename="correlation_heatmap" />
             </div>
           </div>
         )}
-        {tab==="timeseries"&&<TimeSeriesTab rows={rows} headers={headers} info={info} panel={panel}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={rows} style={{marginTop:"0.25rem"}}/>}
+        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} style={{marginTop:"0.25rem"}}/>}
       </div>
     </div>
   );
