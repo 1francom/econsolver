@@ -14,7 +14,9 @@ import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from ".
 import { useTheme } from "./ThemeContext.jsx";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
 import SimulateTab      from './components/tabs/SimulateTab.jsx';
+import SpatialTab       from './components/tabs/SpatialTab.jsx';
 import ReportingModule  from './ReportingModule.jsx';
+import { TourOverlay, TOUR_STEPS } from "./components/HelpSystem.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 const LS_KEY = "econ_wrangle_v2";
@@ -1229,6 +1231,7 @@ function Dashboard({onNew, onLoad}) {
 export default function App() {
   const { C } = useTheme();
   const [screen,             setScreen]            = useState("dashboard");
+  const [tourStep,           setTourStep]          = useState(-1);
   const [rawData,            setRawData]           = useState(null);
   const [filename,           setFilename]          = useState("");
   const [pid,                setPid]               = useState(null);
@@ -1350,19 +1353,6 @@ export default function App() {
             >✦ AI Coach</button>
           </>
         )}
-        {inFlow&&(
-          <button
-            onClick={()=>setSidebarOpen(o=>!o)}
-            style={{
-              marginLeft:"auto", padding:"0.22rem 0.65rem",
-              background: sidebarOpen ? `${"#9e7ec8"}18` : "transparent",
-              border:`1px solid ${sidebarOpen ? "#9e7ec8" : C.border2}`,
-              borderRadius:3, color: sidebarOpen ? "#9e7ec8" : C.textMuted,
-              cursor:"pointer", fontFamily:mono, fontSize:9,
-              letterSpacing:"0.12em", transition:"all 0.13s",
-            }}
-          >✦ AI Coach</button>
-        )}
       </div>
 
       {/* ── Main Content ──────────────────────────────────────────────────── */}
@@ -1390,7 +1380,18 @@ export default function App() {
                 hasOutput={!!activeOutput}
                 activeDatasetId={activeDatasetId}
                 onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
+                onStartTour={() => setTourStep(0)}
               />
+
+              {tourStep >= 0 && tourStep < TOUR_STEPS.length && (
+                <TourOverlay
+                  step={tourStep}
+                  onNext={() => setTourStep(s => s + 1)}
+                  onPrev={() => setTourStep(s => s - 1)}
+                  onClose={() => setTourStep(-1)}
+                  onTabChange={setActiveTab}
+                />
+              )}
 
               {/* ── Tab panels — kept mounted via display:none to preserve state ── */}
               <div style={{flex:1,minHeight:0,position:"relative"}}>
@@ -1446,6 +1447,16 @@ export default function App() {
                       />
                     : <NeedsOutput onGoToClean={()=>setActiveTab("clean")}/>
                   }
+                </div>
+
+                {/* SPATIAL — Phase 11 */}
+                <div style={{...tabPanel, display: activeTab==="spatial" ? "flex" : "none", flexDirection:"column"}}>
+                  <SpatialTab
+                    rows={activeOutput?.cleanRows ?? rawData?.rows ?? []}
+                    headers={activeOutput?.headers ?? rawData?.headers ?? []}
+                    availableDatasets={availableDatasets}
+                    onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                  />
                 </div>
 
                 {/* SIMULATE — Phase 9.8 */}

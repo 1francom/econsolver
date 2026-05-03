@@ -528,7 +528,11 @@ export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
 
   const runningVals = valid.map(r => r[Object.keys(r).find(k => !k.startsWith("__"))]);
   // reconstruct x from xc + cutoff
-  const rawPts = valid.map((r, i) => ({ x: xc[i] + cutoff, y: Y[i], d: D[i] }));
+  // Determine side by position (above cutoff = right).
+  // For Sharp RDD this equals D, for Fuzzy RDD D is take-up (would mix sides).
+  // Use the `above` Z-indicator if present, otherwise fall back to xc >= 0.
+  const sideOf = (i) => result.above?.length ? result.above[i] : (xc[i] >= 0 ? 1 : 0);
+  const rawPts = valid.map((r, i) => ({ x: xc[i] + cutoff, y: Y[i], d: sideOf(i) }));
   const leftPts  = rawPts.filter(p => p.d === 0);
   const rightPts = rawPts.filter(p => p.d === 1);
   const leftBins  = binSide(leftPts);

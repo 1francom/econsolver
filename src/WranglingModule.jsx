@@ -4,6 +4,7 @@
 // ~110 lines — add features in the tab files, not here.
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { HintBox } from "./components/HelpSystem.jsx";
 import { applyStep, runPipeline }  from "./pipeline/runner.js";
 import { validatePanel, buildInfo } from "./pipeline/validator.js";
 import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQuality.js";
@@ -472,12 +473,20 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           </div>
         </div>
 
+        <HintBox color="#6ec8b4" tips={[
+          "Non-destructive: every step replays on raw data — undo any step from the history sidebar",
+          "Clean tab: filter rows, fill NAs, rename, drop, recode, and winsorize",
+          "Features tab: add log, lag, lead, z-score, dummies, polynomial, and interaction terms",
+          "Panel tab: declare entity (i) and time (t) columns to unlock FE, FD, DiD, and Event Study",
+          "Merge tab: LEFT/INNER join or append a second dataset",
+        ]} />
+
         {/* ── Tab bar ── */}
         <Tabs tabs={[
           ["clean",     "⬡ Cleaning"],
           ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
           ["structure", "⊞ Panel Structure"],
-          ["features",  "⊕ Features"],
+          ["transform", "⊕ Transform"],
           ["reshape",   "⟲ Reshape"],
           ["merge",     "⊞ Merge"],
           ["dictionary","◈ Dictionary"],
@@ -504,11 +513,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "structure" && (
           <PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>
         )}
-        {tab === "features" && (
+        {tab === "transform" && (
           <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>
         )}
         {tab === "reshape" && (
-          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep} onRmLastStep={rmLastStep} onSaveSubset={onSaveSubset} filename={filename}/>
+          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
         )}
         {tab === "merge" && (
           <MergeTab rows={rows} headers={headers} filename={filename}

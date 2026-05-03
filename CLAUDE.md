@@ -24,6 +24,7 @@ src/
 │   ├── NonLinearEngine.js          ← Logit/Probit, IRLS/Newton-Raphson MLE, McFadden R², MEM, PoissonFE
 │   ├── GMMEngine.js                ← GMM, LIML
 │   ├── SyntheticControlEngine.js   ← Frank-Wolfe synthetic control, placebo inference
+│   ├── SpatialEngine.js            ← haversine/euclidean, buffer assign, grid assign (rect+H3), spatial join, nearest-neighbor
 │   ├── timeSeries.js               ← time series utilities
 │   ├── EstimationResult.js         ← shared result type for all engines
 │   └── __validation__/
@@ -113,10 +114,15 @@ src/
 │   │   ├── InferenceOptions.jsx  ← collapsible SE type selector (chips + cluster/lag inputs)
 │   │   └── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
 │   │
+│   ├── tabs/
+│   │   ├── CalculateTab.jsx      ← calculator tab; HintBox with calculator tips
+│   │   ├── SimulateTab.jsx       ← simulate tab; HintBox with simulate tips
+│   │   └── SpatialTab.jsx        ← spatial analytics tab (Phase 11); HintBox with spatial tips
 │   ├── workspace/
-│   │   ├── WorkspaceBar.jsx      ← 7-tab nav bar (Data/Clean/Explore/Model/Simulate/Calculate/Report) + DatasetManager toggle
+│   │   ├── WorkspaceBar.jsx      ← 7-tab nav bar (Data/Clean/Explore/Model/Simulate/Calculate/Report) + DatasetManager toggle + ? tour button
 │   │   └── DatasetManager.jsx    ← collapsible D·N dataset button + dropdown panel showing all session datasets
 │   ├── AIContextSidebar.jsx      ← AI context panel (sidebar)
+│   ├── HelpSystem.jsx            ← HintBox (collapsible per-module tips) + TOUR_STEPS registry (9 steps) + TourOverlay (floating tour card, bottom-right)
 │   ├── ModelingTab.jsx           ← modeling tab root; estimate useCallback dep array includes SC/EventStudy/LSDV state
 │   ├── PlotBuilder.jsx           ← G1+G2+G8: layer-based plot builder (Observable Plot 0.6 CDN); point/line/bar/histogram/density geoms; aesthetic mappings (x, y, color); labels panel; ResizeObserver responsive; dark theme patched
 │   └── validation/
