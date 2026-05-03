@@ -154,11 +154,43 @@ function Uploader({onReady}){
   const { C } = useTheme();
   const [drag,setDrag]=useState(false),[loading,setLoading]=useState(false),[err,setErr]=useState(""),[pf,setPf]=useState(null);
   const ref=useRef();
+  function processParsed({headers,rows},fname){
+    try{
+      if(!headers.length)throw new Error("No headers found");
+      const types={};
+      headers.forEach(h=>{types[h]=detectType(rows.slice(0,100).map(r=>r[h]));});
+      const withRi=rows.map((r,i)=>({__ri:i,...r}));
+      setPf({headers,rows:withRi,dt:types,fname});
+    }catch(e){setErr("Error: "+e.message);}
+  }
   async function handleFile(file){
     if(!file)return;
     setLoading(true);setErr("");
     try{
       const name=file.name.toLowerCase();
+      if(name.endsWith(".rds")){
+        const{parseRDS}=await import("./services/data/parsers/rds.js");
+        const ab=await file.arrayBuffer();
+        const parsed=await parseRDS(ab);
+        processParsed(parsed,file.name);
+        setLoading(false);return;
+      }
+      if(name.endsWith(".zip")){
+        const{unzipSync}=await import("fflate");
+        const ab=await file.arrayBuffer();
+        const files=unzipSync(new Uint8Array(ab));
+        const keys=Object.keys(files);
+        const shpKey=keys.find(k=>k.toLowerCase().endsWith(".shp"));
+        const dbfKey=keys.find(k=>k.toLowerCase().endsWith(".dbf"));
+        if(!dbfKey)throw new Error("ZIP contains no .dbf file.");
+        const{parseShapefile}=await import("./services/data/parsers/shapefile.js");
+        const dbfArr=files[dbfKey];
+        const dbfBuf=dbfArr.buffer.slice(dbfArr.byteOffset,dbfArr.byteOffset+dbfArr.byteLength);
+        let shpBuf=null;
+        if(shpKey){const a=files[shpKey];shpBuf=a.buffer.slice(a.byteOffset,a.byteOffset+a.byteLength);}
+        processParsed(parseShapefile(dbfBuf,shpBuf),file.name);
+        setLoading(false);return;
+      }
       let text="";
       if(name.endsWith(".xlsx")||name.endsWith(".xls")){
         const ab=await file.arrayBuffer();
@@ -210,10 +242,10 @@ function Uploader({onReady}){
         onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}}
         onClick={()=>ref.current?.click()}
         style={{width:"100%",border:`2px dashed ${drag?C.gold:C.border2}`,borderRadius:6,padding:"2.5rem 1.5rem",textAlign:"center",cursor:"pointer",background:drag?C.goldFaint:C.surface,transition:"all 0.15s"}}>
-        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.dta" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
+        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.zip" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
         <div style={{fontSize:26,marginBottom:8}}>⬆</div>
         <div style={{fontSize:13,color:C.text,marginBottom:4}}>Drop file or click to browse</div>
-        <div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>CSV · TSV · XLSX · Stata .dta</div>
+        <div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
       </div>
       {loading&&<div style={{display:"flex",alignItems:"center",gap:10,color:C.textDim,fontSize:12}}><Spin/> Parsing…</div>}
       {err&&<div style={{color:C.red,fontSize:11,fontFamily:mono,padding:"0.65rem 1rem",border:`1px solid ${C.red}40`,borderRadius:4,width:"100%"}}>{err}</div>}
@@ -539,7 +571,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
 // Dataset overview + load controls (file upload, World Bank, OECD).
 function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset }) {
   const { C } = useTheme();
-  const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP"];
+  const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP","ZIP"];
   const fileRef  = useRef();
   const [loading,   setLoading]   = useState(false);
   const [err,       setErr]       = useState("");
@@ -738,7 +770,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
                       background: dragOver ? C.goldFaint : "transparent",
                       transition:"all 0.15s",marginBottom:10}}>
               <input ref={fileRef} type="file"
-                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp"
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.zip"
                 onChange={e=>handleFile(e.target.files[0])}
                 style={{display:"none"}}/>
               {loading
