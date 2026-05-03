@@ -34,7 +34,7 @@ export function PlotSelector({ plots, defaultId, accentColor }) {
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       {/* tab strip */}
-      <div style={{ display: "flex", overflowX: "auto", background: "#0a0a0a", borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ display: "flex", overflowX: "auto", background: C.surface, borderBottom: `1px solid ${C.border}` }}>
         {plots.map(p => {
           const isActive = p.id === active.id;
           return (
@@ -432,7 +432,7 @@ function InlinePlotShell({ title, svgId, filename, children }) {
     <div ref={wrapRef} style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
@@ -457,7 +457,7 @@ function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
     <div ref={wrapRef} style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div>
@@ -1084,7 +1084,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
@@ -1208,7 +1208,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
           })}
         </svg>
       </div>
-      <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
         Stock-Yogo weak instrument threshold: F &gt; 10 · gold line = OLS fit · each panel = one instrument
       </div>
     </div>
@@ -1268,7 +1268,7 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
@@ -1361,7 +1361,7 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
           </text>
         </svg>
       </div>
-      <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
         15 bandwidths from 0.4h to 1.8h · filled = p&lt;0.05 · band = ±1.96 SE · gold = IK-optimal
       </div>
     </div>
@@ -1429,7 +1429,7 @@ export function RDDCovariateBalance({ result, controls, rows }) {
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1519,7 +1519,7 @@ export function RDDCovariateBalance({ result, controls, rows }) {
           </text>
         </svg>
       </div>
-      <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", justifyContent: "space-between" }}>
+      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", justifyContent: "space-between" }}>
         <span>● blue = left of cutoff · ● orange = right · bars = 95% CI</span>
         <span>imbalanced if |t| &gt; 1.96</span>
       </div>
@@ -1587,7 +1587,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
       {/* header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1709,7 +1709,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
       </div>
 
       {/* footer */}
-      <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", justifyContent: "space-between" }}>
+      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", justifyContent: "space-between" }}>
         <span>n = {n} · bins = {result.nBins} · bw = {bw.toFixed(4)} · fit bandwidth = {h.toFixed(4)}</span>
         <span>H₀: density continuous at cutoff · McCrary (2008, JOE)</span>
       </div>

@@ -299,7 +299,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
             >
               <div style={{ fontSize: 12, color: isInt ? C.textMuted : C.text, display: "flex", alignItems: "center", gap: 5 }}>
                 {sig && !isInt && <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.teal, display: "inline-block", flexShrink: 0 }} />}
-                {v}{!isInt && <span style={{ fontSize: 9, color: "#333" }}>▾</span>}
+                {v}{!isInt && <span style={{ fontSize: 9, color: C.textDim }}>▾</span>}
               </div>
               <div style={{ textAlign: "right", fontSize: 13, color: b >= 0 ? C.green : C.red, fontFamily: mono }}>{b.toFixed(4)}</div>
               <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>({s.toFixed(4)})</div>
