@@ -169,13 +169,26 @@ async function parseFile(file) {
     const buf = await file.arrayBuffer();
     return parseShapefile(buf, null);
   }
+  if (ext === "zip") {
+    const { unzipSync } = await import("fflate");
+    const buf = await file.arrayBuffer();
+    const files = unzipSync(new Uint8Array(buf));
+    const keys = Object.keys(files);
+    const shpKey = keys.find(k => k.toLowerCase().endsWith(".shp"));
+    const dbfKey = keys.find(k => k.toLowerCase().endsWith(".dbf"));
+    if (!dbfKey) throw new Error("ZIP contains no .dbf file. Upload a shapefile ZIP with both .shp and .dbf.");
+    const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
+    const dbfArr = files[dbfKey];
+    const dbfBuf = dbfArr.buffer.slice(dbfArr.byteOffset, dbfArr.byteOffset + dbfArr.byteLength);
+    let shpBuf = null;
+    if (shpKey) {
+      const shpArr = files[shpKey];
+      shpBuf = shpArr.buffer.slice(shpArr.byteOffset, shpArr.byteOffset + shpArr.byteLength);
+    }
+    return parseShapefile(dbfBuf, shpBuf);
+  }
   if (ext === "shp") {
-    // User uploaded the .shp directly — we can only extract geometry without a .dbf.
-    // Advise them to upload the .dbf instead for the attribute table.
-    throw new Error(
-      "Upload the .dbf file (not .shp) to load shapefile attributes. " +
-      "The .dbf contains the data table. The .shp geometry will be omitted."
-    );
+    throw new Error("Upload a ZIP containing both .shp and .dbf for full shapefile support.");
   }
   // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
@@ -313,7 +326,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.parquet"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.parquet,.zip"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
         />
@@ -482,8 +495,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     try {
       const parsed = await parseFile(file);
       if (!parsed || !parsed.rows.length) {
-        setLoadErr("Could not parse file. Check format (CSV, TSV, XLSX, Parquet).");
-        return;
+        throw new Error("Could not parse file — no rows found. Check the file format.");
       }
       if (parsed._duckdb?.truncated) {
         setLoadErr(
@@ -508,6 +520,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       }
     } catch (e) {
       setLoadErr("Parse error: " + (e?.message || "unknown"));
+      throw e;
     } finally {
       setLoading(false);
     }
