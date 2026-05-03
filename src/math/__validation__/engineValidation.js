@@ -1064,7 +1064,7 @@ export function runAllValidations() {
   const results = [];
   let totalPass = 0, totalFail = 0;
 
-  console.group("Econ Studio — Engine Validation");
+  console.group("Litux — Engine Validation");
   for (const [name, fn] of suites) {
     const { pass, fail, ok } = runSuite(name, fn);
     totalPass += pass; totalFail += fail;
@@ -1092,5 +1092,5 @@ if (typeof window === "undefined") {
 } else {
   // Browser: attach to window so dev can run it manually
   window.__econValidate = runAllValidations;
-  console.log("[Econ Studio] Validation loaded. Run window.__econValidate() to execute.");
+  console.log("[Litux] Validation loaded. Run window.__econValidate() to execute.");
 }

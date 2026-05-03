@@ -953,7 +953,7 @@ function Dashboard({onNew, onLoad}) {
           flexShrink: 0,
         }}>
           <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
-            Econ Studio
+            Litux
           </div>
           <div style={{fontSize:15,color:C.text,letterSpacing:"-0.01em",marginBottom:1}}>
             Projects
@@ -1109,7 +1109,7 @@ function Dashboard({onNew, onLoad}) {
             LMU Munich · Econometrics
           </div>
           <div style={{fontSize:22,color:C.text,letterSpacing:"-0.02em",marginBottom:4}}>
-            Econ Studio
+            Litux
           </div>
           <div style={{fontSize:11,color:C.textMuted}}>
             Non-destructive pipeline · OLS · 2SLS · Panel FE/FD · RDD · DiD
@@ -1350,7 +1350,7 @@ export default function App() {
           onClick={()=>setScreen("dashboard")}
           style={{background:"transparent",border:"none",color:C.gold,cursor:"pointer",fontFamily:mono,fontSize:11,letterSpacing:"0.12em"}}
         >
-          ⬡ ECON STUDIO
+          ⬡ LITUX
         </button>
 
         {inWorkspace && filename && (
