@@ -204,13 +204,13 @@ function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
   );
   return (
     <VarPanel
-      title="W̃ · Survey Weight (optional)"
+      title="W̃ · Observation Weight"
       color="#9e7ec8"
       vars={avail}
       selected={weightVar}
       onToggle={setWeightVar}
       multi={false}
-      info="Sampling weight column. Activates WLS. Leave empty for OLS."
+      info="One column of positive weights (e.g. population size, inverse variance). Each row is multiplied by its weight — this does NOT limit the number of X regressors. Select X regressors above."
     />
   );
 }
