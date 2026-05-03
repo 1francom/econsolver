@@ -1380,7 +1380,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         return { result: wrapResult("LIML", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
 
       } else if (model === "WLS") {
-        return { error: "WLS: select OLS and set a weight variable in Model Configuration." };
+        if (!allX.length) return { error: "Select at least one regressor." };
+        const wCol = weightVar[0];
+        if (!wCol) return { error: "WLS: select a weight variable in Model Configuration." };
+        const weights = dataRows.map(r => {
+          const v = r[wCol];
+          return typeof v === "number" && isFinite(v) && v > 0 ? v : null;
+        });
+        if (weights.every(w => w === null))
+          return { error: `Weight column '${wCol}' has no valid positive values.` };
+        const res = runWLS(dataRows, y, allX, weights, seOpts);
+        if (!res) return { error: "Matrix is singular or insufficient data." };
+        return { result: wrapResult("WLS", res, { yVar: y, xVars, wVars, weightCol: wCol }), panelFE: null, panelFD: null };
 
       } else if (model === "LSDV") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
