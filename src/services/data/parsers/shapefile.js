@@ -297,7 +297,26 @@ function parseSHP(buf) {
   return geometries;
 }
 
-// ── Main export ────────────────────────────────────────────────────────────────
+// ── Main exports ───────────────────────────────────────────────────────────────
+
+/**
+ * Load a standalone .shp file (geometry only, no attribute table).
+ * Returns a single __geometry column with WKT strings.
+ * @param {ArrayBuffer} shpBuffer
+ * @returns {{ headers: string[], rows: object[] }}
+ */
+export function parseSHPOnly(shpBuffer) {
+  if (!shpBuffer || shpBuffer.byteLength < 100) {
+    throw new Error("SHP: buffer is missing or too small.");
+  }
+  const geometries = parseSHP(shpBuffer);
+  if (!geometries.length) {
+    throw new Error("SHP: no shape records found.");
+  }
+  const rows = geometries.map((wkt, i) => ({ id: i + 1, __geometry: wkt }));
+  return { headers: ["id", "__geometry"], rows };
+}
+
 /**
  * Parse an ESRI Shapefile attribute table.
  * @param {ArrayBuffer} dbfBuffer   - Contents of the .dbf file (required)

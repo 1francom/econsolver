@@ -188,7 +188,9 @@ async function parseFile(file) {
     return parseShapefile(dbfBuf, shpBuf);
   }
   if (ext === "shp") {
-    throw new Error("Upload a ZIP containing both .shp and .dbf for full shapefile support.");
+    const { parseSHPOnly } = await import("./services/data/parsers/shapefile.js");
+    const buf = await file.arrayBuffer();
+    return parseSHPOnly(buf);
   }
   // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
