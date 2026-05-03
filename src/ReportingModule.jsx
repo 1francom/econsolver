@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useTheme } from "./ThemeContext.jsx";
+import { HintBox } from "./components/HelpSystem.jsx";
 import { stars, buildLatex } from "./math/index.js";
 import { interpretRegression, generateUnifiedScript } from "./services/AI/AIService.js";
 import { generateCleanScript } from "./pipeline/exporter.js";
@@ -992,6 +993,14 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
       {/* ── Body ── */}
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto",
                     padding: "1.4rem", paddingBottom: "3rem" }}>
+
+        <HintBox color={C.gold} tips={[
+          "Models pinned in the Model tab appear here for export",
+          "LaTeX Stargazer table: multi-column comparison of all pinned models",
+          "Forest plot: visualize coefficients and 95% CI across specifications",
+          "AI Narrative: auto-generates a 2–3 sentence academic interpretation of results",
+          "Download scripts (R/Stata/Python) for full replication of the analysis",
+        ]} />
 
         {/* Fit stats always visible */}
         <FitBar result={result} />

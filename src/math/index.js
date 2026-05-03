@@ -54,3 +54,12 @@ export { runSyntheticControl } from "./SyntheticControlEngine.js";
 
 // ── Canonical result wrapper ──────────────────────────────────────────────────
 export { wrapResult, getCoeffBlock } from "./EstimationResult.js";
+
+// ── Spatial Analytics (Phase 11) ─────────────────────────────────────────────
+export {
+  haversine, euclidean,
+  isWithinBuffer, assignBuffer, assignDistance,
+  assignRectGrid, assignH3Grid,
+  pointInPolygon, parseWKTPolygon, spatialJoin,
+  nearestNeighbor,
+} from "./SpatialEngine.js";

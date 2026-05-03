@@ -38,6 +38,7 @@ import PlotBuilder          from "./PlotBuilder.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
+import { HintBox } from "./HelpSystem.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 
@@ -1577,6 +1578,15 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
         {/* ── LEFT: Spec Panel ── */}
         <div style={{ width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`, overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem" }}>
+
+          <HintBox color={C.teal} title="How to model" tips={[
+            "Choose an estimator from the dropdown — grouped by strategy (linear, panel, causal…)",
+            "Assign Y (outcome), X (controls), Z (instruments), or W (weights) via the chip selectors",
+            "Panel structure (FE, FD, DiD, Event Study) requires entity & time declared in Wrangling → Panel",
+            "Inference Options: switch between classical, HC1–HC3, clustered, or HAC standard errors",
+            "Pin results to the model buffer to compare multiple specifications side by side",
+            "Export: LaTeX table, CSV coefficients, or replication scripts in R / Stata / Python",
+          ]} />
 
           {/* ── Dataset picker (data= selector) ── */}
           {availableDatasets.length > 1 && (
