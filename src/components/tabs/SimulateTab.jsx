@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { useTheme, mono } from "../modeling/shared.jsx";
+import { HintBox } from "../HelpSystem.jsx";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
@@ -456,6 +457,12 @@ export default function SimulateTab({ onAddDataset }) {
 
   return (
     <div style={{ height: "100%", overflowY: "auto", padding: "1.8rem 2.2rem", fontFamily: mono, color: C.text, maxWidth: 900 }}>
+      <HintBox tips={[
+        "Define variables as normal, uniform, Bernoulli, or Poisson distributions",
+        "Add structural equations linking variables (e.g. Y = 2*X + noise)",
+        "Generate synthetic datasets for power analysis or Monte Carlo experiments",
+        "Datasets created here appear in the Data tab for further wrangling and modeling",
+      ]} />
       <Lbl color={C.teal} mb={4}>Simulate</Lbl>
       <div style={{ fontSize: 17, color: C.text, marginBottom: "0.3rem", letterSpacing: "-0.01em" }}>DGP Builder</div>
       <div style={{ fontSize: 10, color: C.textMuted, marginBottom: "1.8rem" }}>

@@ -6,6 +6,7 @@ import { useTheme } from "./ThemeContext.jsx";
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
+import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
@@ -1307,6 +1308,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
         </div>
         {/* AI Insights */}
         <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
+        <HintBox tips={[
+          "⊘ Filter slices data temporarily — applies to all tabs but never touches the pipeline",
+          "Group By in Summary Table shows statistics split by any categorical variable",
+          "Distributions tab: histogram + 5-number summary for any numeric variable",
+          "Correlation tab: Pearson heatmap across all numeric variables",
+          "Plot Builder: compose layered visualizations (point, line, bar, histogram, smooth…)",
+        ]} />
         {/* Quick Filter */}
         <QuickFilter headers={headers} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}

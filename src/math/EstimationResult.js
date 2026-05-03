@@ -417,10 +417,11 @@ function wrapFuzzyRDD(eng, spec) {
     firstStageR2:     eng.firstStageR2     ?? null,
     weak:             eng.weak             ?? false,
     waldRatio:        eng.waldRatio        ?? null,
-    // Plot data (same shape as RDD)
+    // Plot data (same shape as Sharp RDD)
     rddData: {
       valid:      eng.valid      ?? [],
       xc:         eng.xc         ?? [],
+      above:      eng.above      ?? [],  // Z indicator — used by RDDPlot to colour by side
       D:          eng.D          ?? [],
       Y:          eng.Y          ?? [],
       W:          eng.W          ?? [],
@@ -429,8 +430,13 @@ function wrapFuzzyRDD(eng, spec) {
       cutoff:     eng.cutoff     ?? null,
       h:          eng.bandwidth  ?? null,
       kernelType: eng.kernel     ?? null,
+      late:       eng.late       ?? null,
+      lateP:      eng.lateP      ?? null,
     },
     Dhat: eng.Dhat ?? [],
+    // First-stage engine output (raw, not normalised through wrapResult)
+    firstStage:         eng.firstStage         ?? null,
+    firstStageVarNames: eng.firstStageVarNames ?? ["(Intercept)", "Z (instrument)", "running − c", "Z × (running − c)"],
   };
 }
 

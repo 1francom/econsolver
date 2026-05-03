@@ -4,6 +4,7 @@
 // ~110 lines — add features in the tab files, not here.
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { HintBox } from "./components/HelpSystem.jsx";
 import { applyStep, runPipeline }  from "./pipeline/runner.js";
 import { validatePanel, buildInfo } from "./pipeline/validator.js";
 import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQuality.js";
@@ -471,6 +472,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             </button>
           </div>
         </div>
+
+        <HintBox color="#6ec8b4" tips={[
+          "Non-destructive: every step replays on raw data — undo any step from the history sidebar",
+          "Clean tab: filter rows, fill NAs, rename, drop, recode, and winsorize",
+          "Features tab: add log, lag, lead, z-score, dummies, polynomial, and interaction terms",
+          "Panel tab: declare entity (i) and time (t) columns to unlock FE, FD, DiD, and Event Study",
+          "Merge tab: LEFT/INNER join or append a second dataset",
+        ]} />
 
         {/* ── Tab bar ── */}
         <Tabs tabs={[

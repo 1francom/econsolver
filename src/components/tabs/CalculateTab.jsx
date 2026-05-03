@@ -12,6 +12,7 @@
 // Props: rows, headers, onAddDataset(name, rows, headers)
 
 import { useState, useMemo } from "react";
+import { HintBox } from "../HelpSystem.jsx";
 import { evalExpression, buildScope, solveRoot, solveSystem, derivative, nthDerivative, predict } from "../../math/calcEngine.js";
 import { getAll as getBufferedModels } from "../../services/modelBuffer.js";
 import { interpretMarginalEffects } from "../../services/AI/AIService.js";
@@ -351,6 +352,14 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
 
   return (
     <div style={{ height: "100%", overflowY: "auto", padding: "1.8rem 2.4rem", fontFamily: mono, color: C.text, maxWidth: 900 }}>
+
+      <HintBox tips={[
+        "Define scalar or vector variables using your dataset column names or numeric literals",
+        "Expression evaluator: enter any math expression (e.g. log(wage) / sqrt(exper))",
+        "Equation solver: find roots of f(x) = 0 using Brent's method",
+        "Derivatives: compute first or higher-order derivatives at a point",
+        "Model prediction: generate ŷ ± 95% CI from any pinned model in the buffer",
+      ]} />
 
       {/* Header + export buttons */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: "1.6rem", flexWrap: "wrap" }}>

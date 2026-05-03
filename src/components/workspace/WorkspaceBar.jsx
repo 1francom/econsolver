@@ -13,12 +13,13 @@ const TABS = [
   { id: "clean",     label: "Clean",     icon: "⌾", requiresOutput: false },
   { id: "explore",   label: "Explore",   icon: "◈", requiresOutput: true  },
   { id: "model",     label: "Model",     icon: "⊞", requiresOutput: true  },
+  { id: "spatial",   label: "Spatial",   icon: "⊙", requiresOutput: false },
   { id: "simulate",  label: "Simulate",  icon: "∿", requiresOutput: false },
   { id: "calculate", label: "Calculate", icon: "∑", requiresOutput: false },
   { id: "report",    label: "Report",    icon: "⊟", requiresOutput: true  },
 ];
 
-export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, onSelectDataset }) {
+export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, onSelectDataset, onStartTour }) {
   const { C, theme, setTheme } = useTheme();
 
   return (
@@ -85,6 +86,31 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           );
         })}
       </div>
+
+      {/* ── Help / Tour button ── */}
+      <button
+        onClick={() => onStartTour?.()}
+        title="Start tour"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 32,
+          flexShrink: 0,
+          background: "transparent",
+          border: "none",
+          borderLeft: `1px solid ${C.border}`,
+          color: C.textMuted,
+          cursor: "pointer",
+          fontSize: 13,
+          fontFamily: mono,
+          transition: "color 0.12s",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+      >
+        ?
+      </button>
 
       {/* ── Theme toggle ── */}
       <button
