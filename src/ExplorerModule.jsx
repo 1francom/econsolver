@@ -65,31 +65,6 @@ function SvgHistogram({data,color,label=""}){
   );
 }
 
-function SvgScatter({xs,ys,xlbl="",ylbl="",showOls=true}){
-  const{C}=useTheme();
-  const W=340,H=200,PAD=36;
-  if(!xs.length||!ys.length)return null;
-  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
-  const rX=maxX-minX||1,rY=maxY-minY||1;
-  const toSvgX=x=>PAD+(x-minX)/rX*(W-PAD*2);
-  const toSvgY=y=>(H-PAD)-(y-minY)/rY*(H-PAD*2);
-  const ols=olsSimple(xs,ys);
-  const tx1=minX,tx2=maxX,ty1=ols.b0+ols.b1*tx1,ty2=ols.b0+ols.b1*tx2;
-  return(
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",fontFamily:mono}}>
-      <line x1={PAD} y1={PAD} x2={PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
-      <line x1={PAD} y1={H-PAD} x2={W-PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
-      {xs.map((x,i)=><circle key={i} cx={toSvgX(x)} cy={toSvgY(ys[i])} r={2.5} fill={C.teal} opacity={0.6}/>)}
-      {showOls&&<line x1={toSvgX(tx1)} y1={toSvgY(ty1)} x2={toSvgX(tx2)} y2={toSvgY(ty2)} stroke={C.orange} strokeWidth={1.5} strokeDasharray="4,2"/>}
-      <text x={PAD-4} y={PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{maxY.toFixed(1)}</text>
-      <text x={PAD-4} y={H-PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{minY.toFixed(1)}</text>
-      <text x={PAD} y={H-PAD+12} fill={C.textMuted} fontSize={8} fontFamily={mono}>{minX.toFixed(1)}</text>
-      <text x={W-PAD} y={H-PAD+12} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{maxX.toFixed(1)}</text>
-      {xlbl&&<text x={W/2} y={H-4} fill={C.textDim} fontSize={9} fontFamily={mono} textAnchor="middle">{xlbl}</text>}
-      {showOls&&<text x={W-PAD} y={PAD} fill={C.orange} fontSize={8} fontFamily={mono} textAnchor="end">R²={ols.r2.toFixed(3)}</text>}
-    </svg>
-  );
-}
 
 function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
   const{C}=useTheme();
@@ -229,17 +204,18 @@ function DistributionTab({rows,headers,info,panel}){
   const{C}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   const [histCol,setHistCol]=useState(numH[0]||"");
-  const [scX,setScX]=useState(numH[0]||""),[scY,setScY]=useState(numH[1]||"");
   const [spagCol,setSpagCol]=useState(numH[0]||"");
   const [sub,setSub]=useState("hist");
   const hasPanel=panel?.entityCol&&panel?.timeCol;
-  const subTabs=[["hist","Histogram"],["scatter","Scatter + OLS"],...(hasPanel?[["spaghetti","Spaghetti"]]:[])]
+  const subTabs=[["hist","Histogram"],...(hasPanel?[["spaghetti","Spaghetti"]]:[])]
 
   return(
     <div>
-      <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-        {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
-      </div>
+      {subTabs.length > 1 && (
+        <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
+          {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
+        </div>
+      )}
       {sub==="hist"&&(
         <div>
           <Lbl>Variable</Lbl>
@@ -264,33 +240,6 @@ function DistributionTab({rows,headers,info,panel}){
               </div>
             );
           })()}
-        </div>
-      )}
-      {sub==="scatter"&&(
-        <div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1.2rem"}}>
-            {[["X axis",scX,setScX,C.teal],["Y axis",scY,setScY,C.gold]].map(([lbl,val,setter,color])=>(
-              <div key={lbl}><Lbl color={color}>{lbl}</Lbl>
-                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {numH.map(h=><button key={h} onClick={()=>setter(h)} style={{padding:"0.22rem 0.5rem",border:`1px solid ${val===h?color:C.border2}`,background:val===h?`${color}18`:"transparent",color:val===h?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{val===h?"✓ ":""}{h}</button>)}
-                </div>
-              </div>
-            ))}
-          </div>
-          {scX&&scY&&scX!==scY&&(()=>{
-            const pairs=rows.filter(r=>typeof r[scX]==="number"&&typeof r[scY]==="number");
-            const xs=pairs.map(r=>r[scX]),ys=pairs.map(r=>r[scY]);
-            const ols=olsSimple(xs,ys);
-            return(
-              <div>
-                <SvgScatter xs={xs} ys={ys} xlbl={scX} ylbl={scY} showOls/>
-                <div style={{marginTop:8,padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono}}>
-                  OLS: <span style={{color:C.gold}}>{scY}</span> = <span style={{color:C.teal}}>{ols.b0.toFixed(4)}</span> + <span style={{color:C.teal}}>{ols.b1.toFixed(4)}</span>·<span style={{color:C.gold}}>{scX}</span> · R²=<span style={{color:C.orange}}>{ols.r2.toFixed(4)}</span> · n={xs.length}
-                </div>
-              </div>
-            );
-          })()}
-          {scX===scY&&<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Select two different variables.</div>}
         </div>
       )}
       {sub==="spaghetti"&&hasPanel&&(
@@ -1235,12 +1184,79 @@ function GroupSummarizeExplorer({ rows, headers, info }) {
   );
 }
 
+// ─── QUICK FILTER ─────────────────────────────────────────────────────────────
+// Ephemeral in-explorer filter — never touches the pipeline or rawData.
+// Conditions are ANDed; numeric ops (>,<,>=,<=) skip non-numeric values.
+const FILTER_OPS = [">", "<", ">=", "<=", "=", "≠", "contains"];
+
+function matchCond(row, {col, op, val}) {
+  const v = row[col];
+  if (op === "contains") return String(v ?? "").toLowerCase().includes(String(val).toLowerCase());
+  if (op === "=")  return String(v) === String(val);
+  if (op === "≠")  return String(v) !== String(val);
+  const n = parseFloat(val);
+  if (!isFinite(n) || typeof v !== "number") return true; // skip invalid numeric cond
+  if (op === ">")  return v > n;
+  if (op === "<")  return v < n;
+  if (op === ">=") return v >= n;
+  if (op === "<=") return v <= n;
+  return true;
+}
+
+function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
+  const {C} = useTheme();
+  const [open, setOpen] = useState(false);
+  const active = conds.length > 0;
+  const isFiltered = filteredCount !== totalRows;
+  const selStyle = {fontFamily:mono,fontSize:10,background:C.surface2,border:`1px solid ${C.border}`,color:C.text,borderRadius:3,padding:"0.2rem 0.3rem"};
+  const upd = (i, patch) => setConds(cs => cs.map((c,j) => j===i ? {...c,...patch} : c));
+
+  return (
+    <div style={{marginBottom:"0.8rem"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <button onClick={()=>setOpen(s=>!s)} style={{padding:"0.22rem 0.7rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:active?`${C.teal}18`:"transparent",border:`1px solid ${active?C.teal:C.border2}`,color:active?C.teal:C.textDim,transition:"all 0.12s"}}>
+          ⊘ Filter{active?` (${conds.length})`:""}
+        </button>
+        {isFiltered&&<span style={{fontSize:10,color:C.teal,fontFamily:mono}}>{filteredCount.toLocaleString()} / {totalRows.toLocaleString()} rows</span>}
+        {active&&<button onClick={()=>{setConds([]);}} style={{fontSize:10,color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontFamily:mono,padding:0}}>× clear</button>}
+      </div>
+      {open&&(
+        <div style={{marginTop:6,padding:"0.7rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:4}}>
+          {conds.map((cond,i)=>(
+            <div key={i} style={{display:"flex",gap:4,alignItems:"center",marginBottom:4}}>
+              <select value={cond.col} onChange={e=>upd(i,{col:e.target.value})} style={selStyle}>
+                {headers.map(h=><option key={h} value={h}>{h}</option>)}
+              </select>
+              <select value={cond.op} onChange={e=>upd(i,{op:e.target.value})} style={{...selStyle,width:76}}>
+                {FILTER_OPS.map(op=><option key={op} value={op}>{op}</option>)}
+              </select>
+              <input value={cond.val} onChange={e=>upd(i,{val:e.target.value})}
+                style={{...selStyle,width:100}} placeholder="value" />
+              <button onClick={()=>setConds(cs=>cs.filter((_,j)=>j!==i))}
+                style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:14,lineHeight:1,padding:"0 2px"}}>×</button>
+            </div>
+          ))}
+          <button onClick={()=>setConds(cs=>[...cs,{col:headers[0]??"",op:">",val:""}])}
+            style={{fontSize:10,color:C.teal,background:"none",border:`1px solid ${C.teal}40`,borderRadius:3,cursor:"pointer",fontFamily:mono,padding:"0.2rem 0.5rem",marginTop:2}}>
+            + condition
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
 export default function ExplorerModule({cleanedData, onBack, onProceed}) {
   const{C}=useTheme();
   const {headers, cleanRows:rows, panelIndex:panel, filename} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
+  const [filterConds, setFilterConds] = useState([]);
+  const filteredRows = useMemo(()=>{
+    if(!filterConds.length) return rows;
+    return rows.filter(row=>filterConds.every(cond=>matchCond(row,cond)));
+  },[rows,filterConds]);
   const corrRef = useRef(null);
 
   function downloadExploreScript(language) {
@@ -1263,7 +1279,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
             <div style={{fontSize:9,color:C.violet,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>Evidence Explorer</div>
             <div style={{fontSize:18,color:C.text,letterSpacing:"-0.02em",marginBottom:3}}>Exploratory Analysis</div>
             <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
-              <span style={{color:C.gold}}>{rows.length}</span> obs ·{" "}
+              <span style={{color:C.gold}}>{filteredRows.length !== rows.length ? `${filteredRows.length.toLocaleString()} of ${rows.length.toLocaleString()}` : rows.length}</span> obs ·{" "}
               <span style={{color:C.teal}}>{headers.filter(h=>info[h]?.isNum).length}</span> numeric ·{" "}
               <span style={{color:C.purple}}>{headers.filter(h=>info[h]?.isCat).length}</span> categorical
               {panel&&<span style={{color:C.blue}}> · panel i={panel.entityCol} t={panel.timeCol}</span>}
@@ -1290,16 +1306,18 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
           </div>
         </div>
         {/* AI Insights */}
-        <AIInsights rows={rows} headers={headers} info={info} panel={panel}/>
+        <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
+        {/* Quick Filter */}
+        <QuickFilter headers={headers} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
           {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"],["summarize","⊞ Summarize"]].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"0.6rem 0.7rem",background:tab===k?C.goldFaint:C.surface,border:"none",color:tab===k?C.gold:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,borderBottom:tab===k?`2px solid ${C.gold}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>
           ))}
         </div>
-        {tab==="summary"&&<SummaryTable rows={rows} headers={headers} info={info} panel={panel}/>}
-        {tab==="visuals"&&<DistributionTab rows={rows} headers={headers} info={info} panel={panel}/>}
-        {tab==="summarize"&&<GroupSummarizeExplorer rows={rows} headers={headers} info={info}/>}
+        {tab==="summary"&&<SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="summarize"&&<GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info}/>}
         {tab==="corr"&&(
           <div>
             <div style={{fontSize:11,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
@@ -1307,14 +1325,14 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
             </div>
             <div ref={corrRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
               <div style={{padding:"0.5rem"}}>
-                <CorrHeatmap headers={headers} rows={rows} info={info}/>
+                <CorrHeatmap headers={headers} rows={filteredRows} info={info}/>
               </div>
               <PlotExportBar getEl={() => corrRef.current} filename="correlation_heatmap" />
             </div>
           </div>
         )}
-        {tab==="timeseries"&&<TimeSeriesTab rows={rows} headers={headers} info={info} panel={panel}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={rows} style={{marginTop:"0.25rem"}}/>}
+        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} style={{marginTop:"0.25rem"}}/>}
       </div>
     </div>
   );
