@@ -423,6 +423,18 @@ export default function ModelConfiguration({
     return <SyntheticControlConfig numericCols={numericCols} yVar={yVar} treatedUnit={treatedUnit} setTreatedUnit={setTreatedUnit} synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime} xVars={xVars} setXVars={setXVars} rows={rows} panel={panel} />;
   }
 
+  if (model === "WLS") {
+    return (
+      <WeightsConfig
+        numericCols={numericCols}
+        yVar={yVar}
+        xVars={xVars}
+        weightVar={weightVar}
+        setWeightVar={setWeightVar}
+      />
+    );
+  }
+
   // OLS / FE / FD: no model-specific configuration beyond variable selection
   return null;
 }
