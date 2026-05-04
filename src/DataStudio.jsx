@@ -137,6 +137,7 @@ function detectDelimiter(text) {
 }
 
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
+export async function parseFileForPrimary(file) { return parseFile(file); }
 async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   if (["csv", "txt"].includes(ext)) {
@@ -458,13 +459,13 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     prevRawDataRef.current = rawData;
     if (newFile) {
       // New primary file loaded — drop secondary datasets and clear sessionStorage
-      setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData }]);
+      setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData) }]);
       setActiveId(primaryId);
       ssClear(primaryId);
     } else {
-      // Same file, just sync props (e.g. filename rename)
+      // Same file, just sync filename (rawData ref unchanged — keep ensureRowIds-processed version)
       setDatasets(prev => prev.map(ds =>
-        ds.id === primaryId ? { ...ds, rawData, filename: filename || ds.filename } : ds
+        ds.id === primaryId ? { ...ds, filename: filename || ds.filename } : ds
       ));
     }
   }, [rawData, filename]);

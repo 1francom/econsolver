@@ -1020,7 +1020,11 @@ export function applyStep(rows, headers, s, context = {}) {
     // s.col   — column name to overwrite
     // s.value — new value (number | string | null)
     case "patch":
-      R = rows.map(r => r.__ri === s.ri ? { ...r, [s.col]: s.value } : r);
+      // Guard: s.ri must be a defined number — prevents a stale step with ri:undefined
+      // from matching every row (undefined === undefined is true for all rows).
+      R = s.ri != null
+        ? rows.map(r => r.__ri === s.ri ? { ...r, [s.col]: s.value } : r)
+        : rows;
       break;
 
   }

@@ -2,7 +2,7 @@
 // Root orchestrator. Manages global state and screen routing.
 // All heavy logic lives in the module files — this file should stay thin.
 import { useState, useRef, useEffect, useMemo, Fragment } from "react";
-import DataStudio from "./DataStudio.jsx";
+import DataStudio, { parseFileForPrimary } from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './components/ModelingTab.jsx';
 import AIContextSidebar from './components/AIContextSidebar.jsx';
@@ -10,7 +10,10 @@ import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
-import { listPipelines, deletePipeline, clearAllPipelines, loadRawData } from "./services/persistence/indexedDB.js";
+import {
+  listPipelines, deletePipeline, clearAllPipelines, loadPipeline, loadRawData,
+  saveProject, listProjects, deleteProject, clearAllProjects,
+} from "./services/persistence/indexedDB.js";
 import { useTheme } from "./ThemeContext.jsx";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
 import SimulateTab      from './components/tabs/SimulateTab.jsx';
@@ -258,6 +261,22 @@ function Uploader({onReady}){
 }
 
 // ─── WORKSPACE HELPERS ────────────────────────────────────────────────────────
+// Shown when no dataset is loaded yet — directs user to Data tab.
+function NeedsData({ onGoToData }) {
+  const { C } = useTheme();
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                 height:"100%",gap:12,fontFamily:mono}}>
+      <div style={{fontSize:28,color:C.border2}}>⊕</div>
+      <div style={{fontSize:12,color:C.textDim}}>No dataset loaded yet.</div>
+      <div style={{fontSize:10,color:C.textMuted,marginBottom:4}}>
+        Load a file, fetch from World Bank, or simulate data from the Data tab.
+      </div>
+      <Btn onClick={onGoToData} v="solid" color={C.teal} ch="→ Go to Data"/>
+    </div>
+  );
+}
+
 // Shown in Explore / Model / Report tabs when no pipeline output exists yet.
 function NeedsOutput({ onGoToClean }) {
   const { C } = useTheme();
@@ -300,8 +319,16 @@ function DataViewer({ rows, headers, filename, onPatch }) {
   const [page,         setPage]        = useState(0);
   const [selCol,       setSelCol]      = useState(null);
   const [colFilter,    setColFilter]   = useState("");
+  const [editMode,     setEditMode]    = useState(false);
   const [editingCell,  setEditingCell] = useState(null); // { ri, col }
   const [editValue,    setEditValue]   = useState("");
+
+  // Pre-compute which columns are numeric once per rows change.
+  const numCols = useMemo(() => {
+    const s = new Set();
+    headers.forEach(h => { if (rows.slice(0, 20).some(r => typeof r[h] === "number")) s.add(h); });
+    return s;
+  }, [rows, headers]);
 
   const visHeaders = colFilter
     ? headers.filter(h => h.toLowerCase().includes(colFilter.toLowerCase()))
@@ -315,21 +342,29 @@ function DataViewer({ rows, headers, filename, onPatch }) {
     return String(v);
   };
 
-  function commitEdit(ri, col) {
+  function handleCommit(ri, col, val) {
     setEditingCell(null);
     if (!onPatch) return;
-    const trimmed = editValue.trim();
-    if (trimmed === "") { onPatch(ri, col, null); return; }
-    // Parse as number if the column has numeric values
-    const isNumCol = rows.slice(0, 20).some(r => typeof r[col] === "number");
-    const n = Number(trimmed);
-    onPatch(ri, col, isNumCol && !isNaN(n) ? n : trimmed);
+    const trimmed = val.trim();
+    let finalVal;
+    if (trimmed === "") {
+      finalVal = null;
+    } else if (numCols.has(col)) {
+      const n = Number(trimmed);
+      finalVal = isNaN(n) ? trimmed : n;
+    } else {
+      finalVal = trimmed;
+    }
+    // No-op if unchanged
+    const oldVal = rows.find(r => r.__ri === ri)?.[col] ?? null;
+    if (finalVal === oldVal) return;
+    onPatch(ri, col, finalVal);
   }
 
   function startEdit(ri, col, currentVal) {
-    if (!onPatch) return; // read-only if no patch handler
-    setEditingCell({ ri, col });
+    if (!onPatch) return;
     setEditValue(currentVal != null ? String(currentVal) : "");
+    setEditingCell({ ri, col });
   }
 
   return (
@@ -339,10 +374,19 @@ function DataViewer({ rows, headers, filename, onPatch }) {
         <span style={{fontSize:10,color:C.text,fontFamily:mono}}>{filename}</span>
         <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{rows.length.toLocaleString()} × {headers.length}</span>
         {onPatch && (
-          <span style={{fontSize:9,color:C.teal,fontFamily:mono,
-            border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 6px"}}>
-            double-click to edit
-          </span>
+          <button
+            onClick={() => { setEditMode(m => !m); setEditingCell(null); }}
+            title={editMode ? "Exit cell editing mode" : "Enable cell editing (double-click to edit cells)"}
+            style={{
+              padding:"2px 8px", borderRadius:3, fontFamily:mono, fontSize:9,
+              cursor:"pointer",
+              background: editMode ? `${C.teal}22` : "transparent",
+              border: `1px solid ${editMode ? C.teal : C.border2}`,
+              color: editMode ? C.teal : C.textMuted,
+              transition:"all 0.12s",
+            }}>
+            {editMode ? "✎ editing" : "✎ edit cells"}
+          </button>
         )}
         <div style={{flex:1}}/>
         <input
@@ -414,10 +458,15 @@ function DataViewer({ rows, headers, filename, onPatch }) {
                       {absIdx + 1}
                     </td>
                     {visHeaders.map(h => {
-                      const isEditing = editingCell?.ri === row.__ri && editingCell?.col === h;
+                      const isEditing = editingCell != null
+                        && row.__ri != null
+                        && editingCell.ri === row.__ri
+                        && editingCell.col === h;
                       return (
                         <td key={h}
-                          onDoubleClick={() => !isEditing && startEdit(row.__ri, h, row[h])}
+                          onDoubleClick={() => {
+                            if (editMode && !isEditing) startEdit(row.__ri, h, row[h]);
+                          }}
                           style={{
                             padding: isEditing ? "1px 4px" : "3px 10px",
                             borderRight:`1px solid ${C.border}`,
@@ -425,45 +474,52 @@ function DataViewer({ rows, headers, filename, onPatch }) {
                             background: isEditing ? `${C.teal}15` : selCol===h ? `${C.teal}08` : "transparent",
                             whiteSpace:"nowrap", maxWidth:200, overflow:"hidden", textOverflow:"ellipsis",
                             fontVariantNumeric:"tabular-nums",
-                            cursor: onPatch ? "default" : undefined,
+                            cursor: editMode ? "text" : undefined,
+                            userSelect: editMode ? "none" : undefined,
                           }}>
                           {isEditing ? (
                             <input
                               autoFocus
+                              type={numCols.has(h) ? "number" : "text"}
                               value={editValue}
                               onChange={e => setEditValue(e.target.value)}
                               onKeyDown={e => {
-                                if (e.key === "Escape") { setEditingCell(null); return; }
-                                if (e.key === "Enter") { e.preventDefault(); commitEdit(row.__ri, h); return; }
+                                if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  setEditingCell(null);
+                                  return;
+                                }
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleCommit(row.__ri, h, editValue);
+                                  return;
+                                }
                                 if (e.key === "Tab") {
                                   e.preventDefault();
-                                  commitEdit(row.__ri, h);
+                                  handleCommit(row.__ri, h, editValue);
                                   const ni = visHeaders.indexOf(h) + (e.shiftKey ? -1 : 1);
                                   if (ni >= 0 && ni < visHeaders.length) {
                                     const nc = visHeaders[ni];
-                                    setEditingCell({ ri: row.__ri, col: nc });
-                                    setEditValue(row[nc] != null ? String(row[nc]) : "");
+                                    startEdit(row.__ri, nc, row[nc]);
                                   }
                                   return;
                                 }
                                 if (e.key === "ArrowDown" && i < pageRows.length - 1) {
                                   e.preventDefault();
-                                  commitEdit(row.__ri, h);
+                                  handleCommit(row.__ri, h, editValue);
                                   const nr = pageRows[i + 1];
-                                  setEditingCell({ ri: nr.__ri, col: h });
-                                  setEditValue(nr[h] != null ? String(nr[h]) : "");
+                                  startEdit(nr.__ri, h, nr[h]);
                                   return;
                                 }
                                 if (e.key === "ArrowUp" && i > 0) {
                                   e.preventDefault();
-                                  commitEdit(row.__ri, h);
+                                  handleCommit(row.__ri, h, editValue);
                                   const pr = pageRows[i - 1];
-                                  setEditingCell({ ri: pr.__ri, col: h });
-                                  setEditValue(pr[h] != null ? String(pr[h]) : "");
+                                  startEdit(pr.__ri, h, pr[h]);
                                   return;
                                 }
                               }}
-                              onBlur={() => commitEdit(row.__ri, h)}
+                              onBlur={e => handleCommit(row.__ri, h, e.target.value)}
                               style={{
                                 width: "100%", minWidth: 60,
                                 background: "transparent",
@@ -646,7 +702,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
 }
 
 // Dataset overview + load controls (file upload, World Bank, OECD).
-function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset }) {
+function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset, onLoadPrimary }) {
   const { C } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP","ZIP"];
   const fileRef  = useRef();
@@ -681,8 +737,15 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
     if (!file) return;
     setLoading(true); setErr(""); setSuccess("");
     try {
-      await studioRef.current?.addFile(file);
-      setSuccess(`"${file.name}" loaded — visible in Dataset Manager.`);
+      if (!rawData && onLoadPrimary) {
+        // No primary dataset yet — parse and promote to primary.
+        const parsed = await parseFileForPrimary(file);
+        await onLoadPrimary(parsed, file.name);
+        setSuccess(`"${file.name}" loaded.`);
+      } else {
+        await studioRef.current?.addFile(file);
+        setSuccess(`"${file.name}" loaded — visible in Dataset Manager.`);
+      }
     } catch (e) {
       setErr("Parse error: " + (e?.message || "unknown"));
     }
@@ -710,7 +773,65 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
       </div>
 
       {/* Overview panel */}
-      {view === "overview" && (
+      {view === "overview" && !rawData && (
+        /* ── No data state: show a centered load prompt ── */
+        <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem"}}>
+          <div style={{maxWidth:460,width:"100%",display:"flex",flexDirection:"column",gap:20}}>
+            <div>
+              <div style={{fontSize:9,color:C.teal,letterSpacing:"0.22em",textTransform:"uppercase",marginBottom:8}}>
+                Data · Load dataset
+              </div>
+              <div style={{fontSize:16,color:C.text,marginBottom:6}}>Load your first dataset</div>
+              <div style={{fontSize:10,color:C.textMuted,lineHeight:1.7}}>
+                Drop a file below, fetch from World Bank / OECD, or use the Simulate tab to generate synthetic data.
+              </div>
+            </div>
+
+            {/* Big drop zone */}
+            <div
+              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+              onDragLeave={()=>setDragOver(false)}
+              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+              onClick={()=>fileRef.current?.click()}
+              style={{
+                border:`2px dashed ${dragOver ? C.gold : C.teal}40`,
+                borderRadius:6, padding:"2.5rem 1.5rem", textAlign:"center",
+                cursor:"pointer", background: dragOver ? C.goldFaint : `${C.teal}06`,
+                transition:"all 0.15s",
+              }}>
+              <input ref={fileRef} type="file"
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.zip"
+                onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
+              {loading
+                ? <div style={{fontSize:11,color:C.textDim}}>Parsing…</div>
+                : <>
+                    <div style={{fontSize:22,color:C.teal,marginBottom:8,opacity:0.6}}>↑</div>
+                    <div style={{fontSize:12,color:C.textDim,marginBottom:4}}>Drop file or click to browse</div>
+                    <div style={{fontSize:9,color:C.textMuted}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
+                  </>
+              }
+            </div>
+            {err && <div style={{fontSize:10,color:C.red,fontFamily:mono}}>{err}</div>}
+            {success && <div style={{fontSize:10,color:C.teal,fontFamily:mono}}>{success}</div>}
+
+            {/* Or: World Bank / OECD */}
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setWbOpen(true)}
+                style={{flex:1,padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
+                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily:mono,fontSize:10}}>
+                World Bank ↗
+              </button>
+              <button onClick={()=>setOecdOpen(true)}
+                style={{flex:1,padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
+                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily:mono,fontSize:10}}>
+                OECD ↗
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === "overview" && rawData && (
         <div style={{display:"flex",flex:1,minHeight:0,overflow:"hidden"}}>
 
           {/* ── Left column: dataset info + column table ── */}
@@ -984,35 +1105,77 @@ function WorkspaceRegistrar({ filename, rawData }) {
 
 function Dashboard({onNew, onLoad}) {
   const { C } = useTheme();
-  const [projects, setProjects]   = useState([]);
-  const [expanded, setExpanded]   = useState({});
-  const [loading,  setLoading]    = useState(true);
-  const [selected, setSelected]   = useState(null);
+  const [projects,    setProjects]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [selected,    setSelected]    = useState(null);
+  const [selPipeline, setSelPipeline] = useState(null); // pipeline record for pipeline steps preview
+  const [renaming,    setRenaming]    = useState(null);  // pid being renamed
+  const [renameVal,   setRenameVal]   = useState("");
 
   const fmt = ts => ts
     ? new Date(ts).toLocaleDateString("en-GB", {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})
     : "—";
 
   useEffect(() => {
-    listPipelines()
-      .then(list => { setProjects(list); setLoading(false); })
-      .catch(() => setLoading(false));
+    listProjects().then(async list => {
+      if (list.length === 0) {
+        // Migration v3: first open after schema upgrade — promote all pipeline entries
+        // that look like top-level projects (have a filename field).
+        // This handles: proj_* IDs (new format), any other format that was used before.
+        try {
+          const pipes = await listPipelines();
+          for (const p of pipes) {
+            if (!p.id || !p.filename) continue; // skip bare/secondary entries
+            await saveProject(p.id, {
+              name:     (p.filename || "").replace(/\.[^.]+$/, "") || "Untitled",
+              filename: p.filename || "dataset.csv",
+              rowCount: p.rowCount ?? 0,
+              colCount: p.colCount ?? 0,
+            });
+          }
+        } catch (e) {
+          console.warn("[Projects] migration failed:", e);
+        }
+        const migrated = await listProjects();
+        setProjects(migrated);
+      } else {
+        setProjects(list);
+      }
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
+
+  // When selected project changes, load its pipeline for detail display.
+  useEffect(() => {
+    if (!selected) { setSelPipeline(null); return; }
+    loadPipeline(selected).then(p => setSelPipeline(p ?? null)).catch(() => setSelPipeline(null));
+  }, [selected]);
 
   async function handleDelete(pid, e) {
     e.stopPropagation();
+    await deleteProject(pid);
     await deletePipeline(pid);
-    setProjects(p => p.filter(x => x.id !== pid));
-    if (selected === pid) setSelected(null);
+    setProjects(p => p.filter(x => x.pid !== pid));
+    if (selected === pid) { setSelected(null); setSelPipeline(null); }
   }
 
   async function handleClearAll() {
+    await clearAllProjects();
     await clearAllPipelines();
     setProjects([]);
     setSelected(null);
+    setSelPipeline(null);
   }
 
-  const selProject = projects.find(p => p.id === selected);
+  async function handleRename(pid) {
+    const trimmed = renameVal.trim();
+    if (!trimmed) { setRenaming(null); return; }
+    await saveProject(pid, { name: trimmed });
+    setProjects(prev => prev.map(p => p.pid === pid ? { ...p, name: trimmed } : p));
+    setRenaming(null);
+  }
+
+  const selProject = projects.find(p => p.pid === selected);
 
   // ── Layout: two-panel like RStudio/Gretl ──────────────────────────────────
   return (
@@ -1058,97 +1221,86 @@ function Dashboard({onNew, onLoad}) {
           )}
 
           {projects.map(p => {
-            const isSel = p.id === selected;
-            const isExp = expanded[p.id];
-            // Infer subdatasets from pipeline steps of type join/append
-            const mergeSteps = (p.pipeline||[]).filter(s => ["join","append"].includes(s.type));
+            const isSel = p.pid === selected;
+            const isRen = renaming === p.pid;
 
             return (
-              <div key={p.id}>
-                {/* ── Project row ── */}
-                <div
-                  onClick={() => {
-                    setSelected(p.id);
-                    if (mergeSteps.length) setExpanded(x => ({...x, [p.id]: !x[p.id]}));
-                  }}
-                  style={{
-                    display: "flex", alignItems: "flex-start", gap: 8,
-                    padding: "0.7rem 1rem",
-                    background: isSel ? `${C.teal}0d` : "transparent",
-                    borderLeft: `2px solid ${isSel ? C.teal : "transparent"}`,
-                    borderBottom: `1px solid ${C.border}`,
-                    cursor: "pointer", transition: "background 0.1s",
-                  }}
-                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = C.surface2; }}
-                  onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = "transparent"; }}
-                >
-                  {/* Expand toggle */}
-                  <span style={{
-                    fontSize:9, color: C.textMuted, marginTop:3, flexShrink:0, width:10,
-                    opacity: mergeSteps.length ? 1 : 0,
-                  }}>
-                    {isExp ? "▾" : "▸"}
-                  </span>
-
-                  {/* Info */}
-                  <div style={{flex:1, minWidth:0}}>
-                    <div style={{
-                      fontSize:12, color: isSel ? C.text : C.textDim,
-                      fontWeight: isSel ? 600 : 400,
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                    }}>
-                      {p.filename || "Unnamed"}
+              <div
+                key={p.pid}
+                onClick={() => setSelected(p.pid)}
+                style={{
+                  display: "flex", alignItems: "flex-start", gap: 8,
+                  padding: "0.7rem 1rem",
+                  background: isSel ? `${C.teal}0d` : "transparent",
+                  borderLeft: `2px solid ${isSel ? C.teal : "transparent"}`,
+                  borderBottom: `1px solid ${C.border}`,
+                  cursor: "pointer", transition: "background 0.1s",
+                }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = C.surface2; }}
+                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = "transparent"; }}
+              >
+                {/* Info */}
+                <div style={{flex:1, minWidth:0}}>
+                  {isRen ? (
+                    <input
+                      autoFocus
+                      value={renameVal}
+                      onChange={e => setRenameVal(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") { e.preventDefault(); handleRename(p.pid); }
+                        if (e.key === "Escape") setRenaming(null);
+                      }}
+                      onBlur={() => handleRename(p.pid)}
+                      onClick={e => e.stopPropagation()}
+                      style={{
+                        fontSize:12, fontFamily:mono, background:C.surface,
+                        border:`1px solid ${C.teal}`, borderRadius:2,
+                        color:C.text, padding:"1px 4px", width:"100%",
+                        outline:"none",
+                      }}
+                    />
+                  ) : (
+                    <div
+                      onDoubleClick={e => {
+                        e.stopPropagation();
+                        setRenaming(p.pid);
+                        setRenameVal(p.name || p.filename || "");
+                      }}
+                      title="Double-click to rename"
+                      style={{
+                        fontSize:12, color: isSel ? C.text : C.textDim,
+                        fontWeight: isSel ? 600 : 400,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                      }}
+                    >
+                      {p.name || p.filename || "Unnamed"}
                     </div>
-                    <div style={{fontSize:9, color:C.textMuted, marginTop:2, display:"flex", gap:8, flexWrap:"wrap"}}>
-                      <span>{(p.rowCount||"?").toLocaleString()} rows</span>
-                      <span>{p.colCount||"?"} cols</span>
-                      {p.pipelineLength > 0 && <span style={{color:C.gold}}>{p.pipelineLength} steps</span>}
-                      {p.panel && <span style={{color:C.blue}}>Panel</span>}
-                    </div>
-                    <div style={{fontSize:9, color:C.border2, marginTop:2}}>{fmt(p.ts)}</div>
+                  )}
+                  <div style={{fontSize:9, color:C.textMuted, marginTop:2, display:"flex", gap:8, flexWrap:"wrap"}}>
+                    <span>{(p.rowCount||"?").toLocaleString()} rows</span>
+                    <span>{p.colCount||"?"} cols</span>
+                    {(p.pipelineLength ?? 0) > 0 && (
+                      <span style={{color:C.gold}}>{p.pipelineLength} steps</span>
+                    )}
                   </div>
-
-                  {/* Delete */}
-                  <button
-                    onClick={e => handleDelete(p.id, e)}
-                    title="Delete project"
-                    style={{
-                      background:"transparent", border:"none",
-                      color:C.textMuted, cursor:"pointer",
-                      fontSize:13, padding:"0 2px", flexShrink:0, marginTop:1,
-                      transition:"color 0.1s",
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.color = C.red}
-                    onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
-                  >
-                    ×
-                  </button>
+                  <div style={{fontSize:9, color:C.border2, marginTop:2}}>{fmt(p.updatedAt ?? p.ts)}</div>
                 </div>
 
-                {/* ── Subdatasets (merge steps) ── */}
-                {isExp && mergeSteps.map((s, i) => (
-                  <div key={i} style={{
-                    display:"flex", alignItems:"center", gap:6,
-                    padding:"0.4rem 1rem 0.4rem 2.2rem",
-                    background:`${C.teal}05`,
-                    borderBottom:`1px solid ${C.border}`,
-                    fontSize:10, color:C.textMuted,
-                  }}>
-                    <span style={{color:s.type==="join"?C.teal:C.violet, fontSize:9}}>
-                      {s.type==="join"?"⊞":"⊕"}
-                    </span>
-                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                      {s.filename || s.desc || s.type}
-                    </span>
-                    <span style={{
-                      marginLeft:"auto", fontSize:8, padding:"1px 5px",
-                      border:`1px solid ${C.border2}`, borderRadius:2, color:C.border2,
-                      flexShrink:0,
-                    }}>
-                      {s.type}
-                    </span>
-                  </div>
-                ))}
+                {/* Delete */}
+                <button
+                  onClick={e => handleDelete(p.pid, e)}
+                  title="Delete project"
+                  style={{
+                    background:"transparent", border:"none",
+                    color:C.textMuted, cursor:"pointer",
+                    fontSize:13, padding:"0 2px", flexShrink:0, marginTop:1,
+                    transition:"color 0.1s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = C.red}
+                  onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                >
+                  ×
+                </button>
               </div>
             );
           })}
@@ -1235,14 +1387,14 @@ function Dashboard({onNew, onLoad}) {
             }}>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,color:C.text,marginBottom:2}}>
-                  {selProject.filename || "Unnamed"}
+                  {selProject.name || selProject.filename || "Unnamed"}
                 </div>
                 <div style={{fontSize:10,color:C.textMuted}}>
-                  Last modified {fmt(selProject.ts)}
+                  Last modified {fmt(selProject.updatedAt ?? selProject.ts)}
                 </div>
               </div>
-              {selProject.panel && (
-                <Badge ch={`Panel · i=${selProject.panel.entityCol} · t=${selProject.panel.timeCol}`} color={C.blue}/>
+              {selPipeline?.panel && (
+                <Badge ch={`Panel · i=${selPipeline.panel.entityCol} · t=${selPipeline.panel.timeCol}`} color={C.blue}/>
               )}
             </div>
 
@@ -1254,8 +1406,8 @@ function Dashboard({onNew, onLoad}) {
               {[
                 {l:"Rows",     v:(selProject.rowCount||"—").toLocaleString(), c:C.text},
                 {l:"Columns",  v:selProject.colCount||"—",                    c:C.text},
-                {l:"Pipeline", v:`${selProject.pipelineLength||0} steps`,     c:selProject.pipelineLength?C.gold:C.textMuted},
-                {l:"Datasets", v:1 + (selProject.pipeline||[]).filter(s=>["join","append"].includes(s.type)).length, c:C.teal},
+                {l:"Pipeline", v:`${selPipeline?.pipelineLength||0} steps`,   c:(selPipeline?.pipelineLength)?C.gold:C.textMuted},
+                {l:"Datasets", v:1 + (selPipeline?.pipeline||[]).filter(s=>["join","append"].includes(s.type)).length, c:C.teal},
               ].map(s=>(
                 <div key={s.l} style={{background:C.surface,padding:"0.6rem 0.8rem"}}>
                   <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:3}}>{s.l}</div>
@@ -1265,13 +1417,13 @@ function Dashboard({onNew, onLoad}) {
             </div>
 
             {/* Pipeline steps preview */}
-            {selProject.pipeline?.length > 0 && (
+            {selPipeline?.pipeline?.length > 0 && (
               <div style={{padding:"0.7rem 1rem", borderTop:`1px solid ${C.border}`, background:C.surface}}>
                 <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>
                   Pipeline steps
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                  {selProject.pipeline.slice(0,5).map((s,i)=>(
+                  {selPipeline.pipeline.slice(0,5).map((s,i)=>(
                     <div key={i} style={{fontSize:10,color:C.textDim,display:"flex",gap:6}}>
                       <span style={{color:C.border2,flexShrink:0}}>{i+1}.</span>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -1279,9 +1431,9 @@ function Dashboard({onNew, onLoad}) {
                       </span>
                     </div>
                   ))}
-                  {selProject.pipeline.length > 5 && (
+                  {selPipeline.pipeline.length > 5 && (
                     <div style={{fontSize:10,color:C.textMuted}}>
-                      … {selProject.pipeline.length - 5} more steps
+                      … {selPipeline.pipeline.length - 5} more steps
                     </div>
                   )}
                 </div>
@@ -1296,7 +1448,7 @@ function Dashboard({onNew, onLoad}) {
               display:"flex", justifyContent:"flex-end",
             }}>
               <button
-                onClick={() => onLoad(selProject)}
+                onClick={() => onLoad({ ...selProject, id: selProject.pid })}
                 style={{
                   padding:"0.42rem 1.1rem",
                   background:C.teal, color:C.bg,
@@ -1335,6 +1487,89 @@ function Dashboard({onNew, onLoad}) {
               {i<arr.length-1&&<span style={{color:C.border}}>→</span>}
             </span>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PROJECT NAMING SCREEN ────────────────────────────────────────────────────
+// Shown when the user clicks "New Project" on the dashboard.
+// Just a name input — no file required. Data is loaded from inside the workspace.
+function ProjectNamingScreen({ onConfirm, onBack }) {
+  const { C } = useTheme();
+  const [name, setName] = useState("");
+  const inputRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  function confirm() {
+    const trimmed = name.trim() || "Untitled project";
+    onConfirm(trimmed);
+  }
+
+  return (
+    <div style={{
+      height:"100%", display:"flex", alignItems:"center", justifyContent:"center",
+      background:C.bg, fontFamily:mono,
+    }}>
+      <div style={{
+        width:440, display:"flex", flexDirection:"column", gap:24,
+        padding:"2.4rem 2.6rem",
+        background:C.surface, border:`1px solid ${C.border}`, borderRadius:6,
+      }}>
+        <div>
+          <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:8}}>
+            Litux · New project
+          </div>
+          <div style={{fontSize:18,color:C.text,marginBottom:6}}>Name your project</div>
+          <div style={{fontSize:10,color:C.textMuted,lineHeight:1.6}}>
+            You can load datasets, simulate data, or fetch from World Bank inside the workspace.
+          </div>
+        </div>
+
+        <div>
+          <label style={{fontSize:10,color:C.textMuted,display:"block",marginBottom:6,
+                         letterSpacing:"0.1em",textTransform:"uppercase"}}>
+            Project name
+          </label>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") confirm(); if (e.key === "Escape") onBack(); }}
+            placeholder="e.g. Wage inequality study"
+            style={{
+              width:"100%", padding:"0.6rem 0.8rem",
+              background:C.bg, border:`1px solid ${C.border}`,
+              borderRadius:3, color:C.text, fontFamily:mono, fontSize:13,
+              outline:"none", transition:"border-color 0.12s",
+            }}
+            onFocus={e => e.target.style.borderColor = C.teal}
+            onBlur={e => e.target.style.borderColor = C.border}
+          />
+        </div>
+
+        <div style={{display:"flex", gap:10, justifyContent:"flex-end"}}>
+          <button
+            onClick={onBack}
+            style={{
+              padding:"0.45rem 1rem", borderRadius:3, cursor:"pointer",
+              background:"transparent", border:`1px solid ${C.border2}`,
+              color:C.textMuted, fontFamily:mono, fontSize:11,
+            }}
+          >
+            ← Back
+          </button>
+          <button
+            onClick={confirm}
+            style={{
+              padding:"0.45rem 1.3rem", borderRadius:3, cursor:"pointer",
+              background:C.teal, border:`1px solid ${C.teal}`,
+              color:C.bg, fontFamily:mono, fontSize:11, fontWeight:700,
+            }}
+          >
+            Create →
+          </button>
         </div>
       </div>
     </div>
@@ -1389,15 +1624,34 @@ export default function App() {
     }
   };
 
-  // ── Called by Uploader once file is confirmed ─────────────────────────────
-  // Always generate a fresh pid — never reuse a previous project's pid.
-  const handleReady = (data, types, fname) => {
-    setRawData(data);
-    setFilename(fname || "dataset.csv");
-    setPid(`proj_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  // ── Called by ProjectNamingScreen when user confirms the project name ────
+  // Creates an empty project and enters the workspace. Data is loaded from
+  // the Data tab inside the workspace.
+  const handleNamingConfirm = async (projectName) => {
+    const newPid = `proj_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    try {
+      await saveProject(newPid, { name: projectName, filename: "", rowCount: 0, colCount: 0 });
+    } catch (e) {
+      console.warn("[Projects] saveProject failed:", e);
+    }
+    setRawData(null);
+    setFilename(projectName);
+    setPid(newPid);
     setOutputs({});
-    setActiveTab("clean");
+    setActiveTab("data"); // land on Data tab — that's where they load data
     setScreen("workspace");
+  };
+
+  // ── Called by DataTab when user loads the first (primary) dataset ─────────
+  const handlePrimaryLoad = async (data, fname) => {
+    setRawData(data);
+    setFilename(fname);
+    // Update project metadata with real row/col counts
+    if (pid) {
+      try {
+        await saveProject(pid, { filename: fname, rowCount: data.rows?.length ?? 0, colCount: data.headers?.length ?? 0 });
+      } catch (e) { /* non-fatal */ }
+    }
   };
 
   // ── Pipeline output — fired by DataStudio when user clicks "→ Analyze" ───
@@ -1416,6 +1670,7 @@ export default function App() {
   const activeOutput = outputs[activeDatasetId ?? pid] ?? outputs[pid] ?? null;
 
   const inWorkspace = screen === "workspace";
+  const inNaming    = screen === "naming";
 
   return(
     <div style={{height:"100vh",background:C.bg,overflow:"hidden",display:"flex",flexDirection:"column"}}>
@@ -1476,16 +1731,19 @@ export default function App() {
 
         {screen==="dashboard" && (
           <Dashboard
-            onNew={()=>{ setPid(null); setRawData(null); setOutputs({}); setScreen("upload"); }}
+            onNew={()=>setScreen("naming")}
             onLoad={handleLoad}
           />
         )}
 
-        {screen==="upload" && (
-          <Uploader onReady={handleReady}/>
+        {screen==="naming" && (
+          <ProjectNamingScreen
+            onConfirm={handleNamingConfirm}
+            onBack={() => setScreen("dashboard")}
+          />
         )}
 
-        {screen==="workspace" && rawData && (
+        {screen==="workspace" && (
           <SessionStateProvider key={pid}>
             <WorkspaceRegistrar filename={filename} rawData={rawData}/>
 
@@ -1521,22 +1779,26 @@ export default function App() {
                     activeDatasetId={activeDatasetId ?? pid}
                     onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
                     onDeleteDataset={id => { studioRef.current?.removeDataset(id); }}
+                    onLoadPrimary={handlePrimaryLoad}
                   />
                 </div>
 
-                {/* CLEAN — DataStudio always mounted; never remounts on tab switch */}
+                {/* CLEAN — only mounted when there is data */}
                 <div style={{...tabPanel, display: activeTab==="clean" ? "flex" : "none", flexDirection:"column"}}>
-                  <DataStudio
-                    ref={studioRef}
-                    key={pid}
-                    rawData={rawData}
-                    filename={filename}
-                    pid={pid}
-                    onComplete={handleComplete}
-                    onOutputReady={handleOutputReady}
-                    onDatasetsChange={setAvailableDatasets}
-                    activeDatasetId={activeDatasetId}
-                  />
+                  {rawData
+                    ? <DataStudio
+                        ref={studioRef}
+                        key={pid}
+                        rawData={rawData}
+                        filename={filename}
+                        pid={pid}
+                        onComplete={handleComplete}
+                        onOutputReady={handleOutputReady}
+                        onDatasetsChange={setAvailableDatasets}
+                        activeDatasetId={activeDatasetId}
+                      />
+                    : <NeedsData onGoToData={() => setActiveTab("data")}/>
+                  }
                 </div>
 
                 {/* EXPLORE */}
@@ -1578,7 +1840,13 @@ export default function App() {
                 {/* SIMULATE — Phase 9.8 */}
                 <div style={{...tabPanel, display: activeTab==="simulate" ? "flex" : "none", flexDirection:"column"}}>
                   <SimulateTab
-                    onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                    onAddDataset={(name, rows, headers) => {
+                      if (!rawData) {
+                        handlePrimaryLoad({ headers, rows }, name).then(() => setActiveTab("clean"));
+                      } else {
+                        studioRef.current?.addApiData(name, rows, headers);
+                      }
+                    }}
                   />
                 </div>
 
