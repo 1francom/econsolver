@@ -16,28 +16,25 @@ import { HintBox } from "../HelpSystem.jsx";
 import { evalExpression, buildScope, solveRoot, solveSystem, derivative, nthDerivative, predict } from "../../math/calcEngine.js";
 import { getAll as getBufferedModels } from "../../services/modelBuffer.js";
 import { interpretMarginalEffects } from "../../services/AI/AIService.js";
+import { useTheme } from "../../ThemeContext.jsx";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070",
-  blue:"#6e9ec8", teal:"#6ec8b4", purple:"#a87ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
-function Lbl({ children, color = C.textMuted, mb = 6 }) {
-  return <div style={{ fontSize: 10, color, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: mono }}>{children}</div>;
+function Lbl({ children, color, mb = 6 }) {
+  const { C } = useTheme();
+  return <div style={{ fontSize: 10, color: color ?? C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: mono }}>{children}</div>;
 }
-function Btn({ onClick, ch, color = C.gold, v = "out", dis = false, sm = false }) {
+function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
+  const { C } = useTheme();
+  const btnColor = color ?? C.gold;
   const b = { padding: sm ? "0.28rem 0.65rem" : "0.45rem 0.9rem", borderRadius: 3, cursor: dis ? "not-allowed" : "pointer", fontFamily: mono, fontSize: sm ? 10 : 11, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
-  if (v === "solid") return <button onClick={onClick} disabled={dis} style={{ ...b, background: color, color: C.bg, border: `1px solid ${color}`, fontWeight: 700 }}>{ch}</button>;
-  if (v === "ghost") return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: "none", color: dis ? C.textMuted : color }}>{ch}</button>;
+  if (v === "solid") return <button onClick={onClick} disabled={dis} style={{ ...b, background: btnColor, color: C.bg, border: `1px solid ${btnColor}`, fontWeight: 700 }}>{ch}</button>;
+  if (v === "ghost") return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: "none", color: dis ? C.textMuted : btnColor }}>{ch}</button>;
   return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: `1px solid ${C.border2}`, color: dis ? C.textMuted : C.textDim }}>{ch}</button>;
 }
 function SectionHeader({ label, open, onToggle, badge }) {
+  const { C } = useTheme();
   return (
     <div onClick={onToggle} style={{ background: C.surface2, padding: "0.55rem 0.85rem", borderBottom: open ? `1px solid ${C.border}` : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
       <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▾" : "▸"}</span>
@@ -123,8 +120,24 @@ function fmt(n, d = 6) {
   return Number(n).toFixed(d);
 }
 
+// ─── RESULT BOX ───────────────────────────────────────────────────────────────
+function ResultBox({ children, color }) {
+  const { C } = useTheme();
+  const col = color ?? C.teal;
+  return (
+    <div style={{ background: `${col}0a`, border: `1px solid ${col}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: mono, fontSize: 11, color: C.text, lineHeight: 1.9, marginTop: 8 }}>
+      {children}
+    </div>
+  );
+}
+function ErrBox({ msg }) {
+  const { C } = useTheme();
+  return <div style={{ color: C.red, fontFamily: mono, fontSize: 10, marginTop: 6 }}>{msg}</div>;
+}
+
 // ─── VALUE INPUT ──────────────────────────────────────────────────────────────
 function ValueInput({ type, value, onChange }) {
+  const { C } = useTheme();
   if (type === "Boolean") return (
     <select value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1 }}>
       <option>TRUE</option><option>FALSE</option>
@@ -141,20 +154,9 @@ function ValueInput({ type, value, onChange }) {
     value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1, minWidth: 80 }} />;
 }
 
-// ─── RESULT BOX ───────────────────────────────────────────────────────────────
-function ResultBox({ children, color = C.teal }) {
-  return (
-    <div style={{ background: `${color}0a`, border: `1px solid ${color}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: mono, fontSize: 11, color: C.text, lineHeight: 1.9, marginTop: 8 }}>
-      {children}
-    </div>
-  );
-}
-function ErrBox({ msg }) {
-  return <div style={{ color: C.red, fontFamily: mono, fontSize: 10, marginTop: 6 }}>{msg}</div>;
-}
-
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function CalculateTab({ rows = [], headers = [], onAddDataset }) {
+  const { C } = useTheme();
   // ── Variable workspace ─────────────────────────────────────────────────────
   const [variables,    setVariables]   = useState([]);
   const [computeds,    setComputeds]   = useState([]);
@@ -663,7 +665,7 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
               <input value={dPoint} onChange={e => setDPoint(e.target.value)} placeholder="point"
                 style={{ ...fieldStyle(C), width: 90 }} />
               <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>order</span>
-              <select value={dOrder} onChange={e => setDOrder(e.target.value)} style={{ ...fieldStyle }}>
+              <select value={dOrder} onChange={e => setDOrder(e.target.value)} style={{ ...fieldStyle(C) }}>
                 {["1","2","3","4"].map(n => <option key={n}>{n}</option>)}
               </select>
               <Btn ch="Compute" v="solid" color={C.teal} sm onClick={runDerivative} />
@@ -730,7 +732,7 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
                                 placeholder={colMean || "value"}
                                 value={predInputs[vn] ?? ""}
                                 onChange={e => { setPredInputs(p => ({ ...p, [vn]: e.target.value })); setPredResult(null); }}
-                                style={{ ...fieldStyle }}
+                                style={{ ...fieldStyle(C) }}
                               />
                             </div>
                           );

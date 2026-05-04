@@ -299,7 +299,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
             >
               <div style={{ fontSize: 12, color: isInt ? C.textMuted : C.text, display: "flex", alignItems: "center", gap: 5 }}>
                 {sig && !isInt && <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.teal, display: "inline-block", flexShrink: 0 }} />}
-                {v}{!isInt && <span style={{ fontSize: 9, color: "#333" }}>▾</span>}
+                {v}{!isInt && <span style={{ fontSize: 9, color: C.textDim }}>▾</span>}
               </div>
               <div style={{ textAlign: "right", fontSize: 13, color: b >= 0 ? C.green : C.red, fontFamily: mono }}>{b.toFixed(4)}</div>
               <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>({s.toFixed(4)})</div>
@@ -548,7 +548,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
               onClick={() => { navigator.clipboard.writeText(latex); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
               style={{
                 padding: "0.28rem 0.8rem",
-                background: copied ? "#0a2010" : "transparent",
+                background: copied ? `${C.green}18` : "transparent",
                 border: `1px solid ${copied ? C.green : C.border2}`,
                 color: copied ? C.green : C.textMuted,
                 borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: mono, transition: "all 0.2s",
@@ -1380,7 +1380,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         return { result: wrapResult("LIML", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
 
       } else if (model === "WLS") {
-        return { error: "WLS: select OLS and set a weight variable in Model Configuration." };
+        if (!allX.length) return { error: "Select at least one regressor." };
+        const wCol = weightVar[0];
+        if (!wCol) return { error: "WLS: select a weight variable in Model Configuration." };
+        const weights = dataRows.map(r => {
+          const v = r[wCol];
+          return typeof v === "number" && isFinite(v) && v > 0 ? v : null;
+        });
+        if (weights.every(w => w === null))
+          return { error: `Weight column '${wCol}' has no valid positive values.` };
+        const res = runWLS(dataRows, y, allX, weights, seOpts);
+        if (!res) return { error: "Matrix is singular or insufficient data." };
+        return { result: wrapResult("WLS", res, { yVar: y, xVars, wVars, weightCol: wCol }), panelFE: null, panelFD: null };
 
       } else if (model === "LSDV") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
@@ -2180,7 +2191,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                 </div>
                 {isATT && (
-                  <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#081210", border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
+                  <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
                     <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
                       Average Treatment Effect on the Treated (ATT)
                     </div>

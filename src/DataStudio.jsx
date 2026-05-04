@@ -169,13 +169,28 @@ async function parseFile(file) {
     const buf = await file.arrayBuffer();
     return parseShapefile(buf, null);
   }
+  if (ext === "zip") {
+    const { unzipSync } = await import("fflate");
+    const buf = await file.arrayBuffer();
+    const files = unzipSync(new Uint8Array(buf));
+    const keys = Object.keys(files);
+    const shpKey = keys.find(k => k.toLowerCase().endsWith(".shp"));
+    const dbfKey = keys.find(k => k.toLowerCase().endsWith(".dbf"));
+    if (!dbfKey) throw new Error("ZIP contains no .dbf file. Upload a shapefile ZIP with both .shp and .dbf.");
+    const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
+    const dbfArr = files[dbfKey];
+    const dbfBuf = dbfArr.buffer.slice(dbfArr.byteOffset, dbfArr.byteOffset + dbfArr.byteLength);
+    let shpBuf = null;
+    if (shpKey) {
+      const shpArr = files[shpKey];
+      shpBuf = shpArr.buffer.slice(shpArr.byteOffset, shpArr.byteOffset + shpArr.byteLength);
+    }
+    return parseShapefile(dbfBuf, shpBuf);
+  }
   if (ext === "shp") {
-    // User uploaded the .shp directly — we can only extract geometry without a .dbf.
-    // Advise them to upload the .dbf instead for the attribute table.
-    throw new Error(
-      "Upload the .dbf file (not .shp) to load shapefile attributes. " +
-      "The .dbf contains the data table. The .shp geometry will be omitted."
-    );
+    const { parseSHPOnly } = await import("./services/data/parsers/shapefile.js");
+    const buf = await file.arrayBuffer();
+    return parseSHPOnly(buf);
   }
   // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
@@ -313,7 +328,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.parquet"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.parquet,.zip"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
         />
@@ -389,16 +404,26 @@ function ssClear(pid) {
 }
 
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
+// Assign stable __ri row IDs if not already present.
+// __ri is used by the patch pipeline step for cell editing (runner.js).
+function ensureRowIds(data) {
+  if (!data?.rows?.length || data.rows[0]?.__ri !== undefined) return data;
+  return { ...data, rows: data.rows.map((r, i) => ({ __ri: i, ...r })) };
+}
+
 const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplete, onOutputReady, pid, onDatasetsChange, activeDatasetId }, ref) {
   const { C } = useTheme();
   const primaryId = pid || genId();
   const dispatch = useSessionDispatch();
 
+  // Ref exposed to WranglingModule so DataViewer can dispatch patch steps
+  const wranglingAddStepRef = useRef(null);
+
   const [datasets, setDatasets] = useState(() => {
     // Secondary datasets scoped to this project's pid — no cross-project leakage
     const secondary = ssRead(primaryId);
     return [
-      { id: primaryId, filename: filename || "dataset.csv", rawData },
+      { id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData) },
       ...secondary,
     ];
   });
@@ -480,11 +505,12 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     setLoading(true);
     setLoadErr("");
     try {
-      const parsed = await parseFile(file);
+      let parsed = await parseFile(file);
       if (!parsed || !parsed.rows.length) {
-        setLoadErr("Could not parse file. Check format (CSV, TSV, XLSX, Parquet).");
-        return;
+        throw new Error("Could not parse file — no rows found. Check the file format.");
       }
+      // Assign stable row IDs for cell editing
+      parsed = ensureRowIds(parsed);
       if (parsed._duckdb?.truncated) {
         setLoadErr(
           `Large file: loaded first 500,000 of ${parsed._duckdb.rowCount.toLocaleString()} rows via DuckDB.`
@@ -508,6 +534,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       }
     } catch (e) {
       setLoadErr("Parse error: " + (e?.message || "unknown"));
+      throw e;
     } finally {
       setLoading(false);
     }
@@ -555,6 +582,14 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       setDatasets(prev => prev.filter(d => d.id !== id));
       setActiveId(prev => prev === id ? primaryId : prev);
     },
+    // Called by DataViewer when a cell is edited — dispatches a patch step into
+    // the active WranglingModule's pipeline via the shared ref
+    addPatchStep: (ri, col, value) => {
+      wranglingAddStepRef.current?.({
+        type: "patch", internal: true, ri, col, value,
+        desc: `edit row ${ri + 1} · ${col} → ${value ?? "NA"}`,
+      });
+    },
   }), [handleLoadFile, handleSaveSubset, primaryId]);
 
   return (
@@ -580,6 +615,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
             pid={activeDs.id}
             allDatasets={otherDatasets}
             onSaveSubset={handleSaveSubset}
+            addStepRef={wranglingAddStepRef}
           />
         </div>
       )}

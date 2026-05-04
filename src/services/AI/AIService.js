@@ -1,4 +1,4 @@
-// ─── ECON STUDIO · AIService.js ───────────────────────────────────────────────
+// ─── LITUX · AIService.js ───────────────────────────────────────────────
 // Centralised LLM service layer. All Anthropic API calls live here.
 //
 // PROMPT CACHING:
@@ -790,7 +790,7 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
   const fallback = () => {
     const header = [
       `${cmt} ${"─".repeat(70)}`,
-      `${cmt} Econ Studio — Unified Replication Script (${langLabel})`,
+      `${cmt} Litux — Unified Replication Script (${langLabel})`,
       `${cmt} Generated: ${new Date().toISOString().slice(0, 10)}`,
       `${cmt} ${"─".repeat(70)}`,
       "",

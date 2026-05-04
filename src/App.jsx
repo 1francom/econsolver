@@ -154,11 +154,43 @@ function Uploader({onReady}){
   const { C } = useTheme();
   const [drag,setDrag]=useState(false),[loading,setLoading]=useState(false),[err,setErr]=useState(""),[pf,setPf]=useState(null);
   const ref=useRef();
+  function processParsed({headers,rows},fname){
+    try{
+      if(!headers.length)throw new Error("No headers found");
+      const types={};
+      headers.forEach(h=>{types[h]=detectType(rows.slice(0,100).map(r=>r[h]));});
+      const withRi=rows.map((r,i)=>({__ri:i,...r}));
+      setPf({headers,rows:withRi,dt:types,fname});
+    }catch(e){setErr("Error: "+e.message);}
+  }
   async function handleFile(file){
     if(!file)return;
     setLoading(true);setErr("");
     try{
       const name=file.name.toLowerCase();
+      if(name.endsWith(".rds")){
+        const{parseRDS}=await import("./services/data/parsers/rds.js");
+        const ab=await file.arrayBuffer();
+        const parsed=await parseRDS(ab);
+        processParsed(parsed,file.name);
+        setLoading(false);return;
+      }
+      if(name.endsWith(".zip")){
+        const{unzipSync}=await import("fflate");
+        const ab=await file.arrayBuffer();
+        const files=unzipSync(new Uint8Array(ab));
+        const keys=Object.keys(files);
+        const shpKey=keys.find(k=>k.toLowerCase().endsWith(".shp"));
+        const dbfKey=keys.find(k=>k.toLowerCase().endsWith(".dbf"));
+        if(!dbfKey)throw new Error("ZIP contains no .dbf file.");
+        const{parseShapefile}=await import("./services/data/parsers/shapefile.js");
+        const dbfArr=files[dbfKey];
+        const dbfBuf=dbfArr.buffer.slice(dbfArr.byteOffset,dbfArr.byteOffset+dbfArr.byteLength);
+        let shpBuf=null;
+        if(shpKey){const a=files[shpKey];shpBuf=a.buffer.slice(a.byteOffset,a.byteOffset+a.byteLength);}
+        processParsed(parseShapefile(dbfBuf,shpBuf),file.name);
+        setLoading(false);return;
+      }
       let text="";
       if(name.endsWith(".xlsx")||name.endsWith(".xls")){
         const ab=await file.arrayBuffer();
@@ -210,10 +242,10 @@ function Uploader({onReady}){
         onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}}
         onClick={()=>ref.current?.click()}
         style={{width:"100%",border:`2px dashed ${drag?C.gold:C.border2}`,borderRadius:6,padding:"2.5rem 1.5rem",textAlign:"center",cursor:"pointer",background:drag?C.goldFaint:C.surface,transition:"all 0.15s"}}>
-        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.dta" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
+        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.zip" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
         <div style={{fontSize:26,marginBottom:8}}>⬆</div>
         <div style={{fontSize:13,color:C.text,marginBottom:4}}>Drop file or click to browse</div>
-        <div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>CSV · TSV · XLSX · Stata .dta</div>
+        <div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
       </div>
       {loading&&<div style={{display:"flex",alignItems:"center",gap:10,color:C.textDim,fontSize:12}}><Spin/> Parsing…</div>}
       {err&&<div style={{color:C.red,fontSize:11,fontFamily:mono,padding:"0.65rem 1rem",border:`1px solid ${C.red}40`,borderRadius:4,width:"100%"}}>{err}</div>}
@@ -263,11 +295,13 @@ function colStats(col, rows) {
   return { type: "string", n: vals.length, nulls, unique: Object.keys(freq).length, top };
 }
 
-function DataViewer({ rows, headers, filename }) {
+function DataViewer({ rows, headers, filename, onPatch }) {
   const { C } = useTheme();
-  const [page,      setPage]      = useState(0);
-  const [selCol,    setSelCol]    = useState(null);
-  const [colFilter, setColFilter] = useState("");
+  const [page,         setPage]        = useState(0);
+  const [selCol,       setSelCol]      = useState(null);
+  const [colFilter,    setColFilter]   = useState("");
+  const [editingCell,  setEditingCell] = useState(null); // { ri, col }
+  const [editValue,    setEditValue]   = useState("");
 
   const visHeaders = colFilter
     ? headers.filter(h => h.toLowerCase().includes(colFilter.toLowerCase()))
@@ -281,12 +315,35 @@ function DataViewer({ rows, headers, filename }) {
     return String(v);
   };
 
+  function commitEdit(ri, col) {
+    setEditingCell(null);
+    if (!onPatch) return;
+    const trimmed = editValue.trim();
+    if (trimmed === "") { onPatch(ri, col, null); return; }
+    // Parse as number if the column has numeric values
+    const isNumCol = rows.slice(0, 20).some(r => typeof r[col] === "number");
+    const n = Number(trimmed);
+    onPatch(ri, col, isNumCol && !isNaN(n) ? n : trimmed);
+  }
+
+  function startEdit(ri, col, currentVal) {
+    if (!onPatch) return; // read-only if no patch handler
+    setEditingCell({ ri, col });
+    setEditValue(currentVal != null ? String(currentVal) : "");
+  }
+
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
       {/* Toolbar */}
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"0.5rem 0.9rem",borderBottom:`1px solid ${C.border}`,flexShrink:0,background:C.surface2}}>
         <span style={{fontSize:10,color:C.text,fontFamily:mono}}>{filename}</span>
         <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{rows.length.toLocaleString()} × {headers.length}</span>
+        {onPatch && (
+          <span style={{fontSize:9,color:C.teal,fontFamily:mono,
+            border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 6px"}}>
+            double-click to edit
+          </span>
+        )}
         <div style={{flex:1}}/>
         <input
           value={colFilter}
@@ -356,18 +413,70 @@ function DataViewer({ rows, headers, filename }) {
                                 position:"sticky",left:0,background: i%2===0 ? C.surface : C.bg,zIndex:1}}>
                       {absIdx + 1}
                     </td>
-                    {visHeaders.map(h => (
-                      <td key={h} style={{
-                        padding:"3px 10px",
-                        borderRight:`1px solid ${C.border}`,
-                        color: selCol===h ? C.text : C.textDim,
-                        background: selCol===h ? `${C.teal}08` : "transparent",
-                        whiteSpace:"nowrap",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",
-                        fontVariantNumeric:"tabular-nums",
-                      }}>
-                        {fmt(row[h])}
-                      </td>
-                    ))}
+                    {visHeaders.map(h => {
+                      const isEditing = editingCell?.ri === row.__ri && editingCell?.col === h;
+                      return (
+                        <td key={h}
+                          onDoubleClick={() => !isEditing && startEdit(row.__ri, h, row[h])}
+                          style={{
+                            padding: isEditing ? "1px 4px" : "3px 10px",
+                            borderRight:`1px solid ${C.border}`,
+                            color: selCol===h ? C.text : C.textDim,
+                            background: isEditing ? `${C.teal}15` : selCol===h ? `${C.teal}08` : "transparent",
+                            whiteSpace:"nowrap", maxWidth:200, overflow:"hidden", textOverflow:"ellipsis",
+                            fontVariantNumeric:"tabular-nums",
+                            cursor: onPatch ? "default" : undefined,
+                          }}>
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === "Escape") { setEditingCell(null); return; }
+                                if (e.key === "Enter") { e.preventDefault(); commitEdit(row.__ri, h); return; }
+                                if (e.key === "Tab") {
+                                  e.preventDefault();
+                                  commitEdit(row.__ri, h);
+                                  const ni = visHeaders.indexOf(h) + (e.shiftKey ? -1 : 1);
+                                  if (ni >= 0 && ni < visHeaders.length) {
+                                    const nc = visHeaders[ni];
+                                    setEditingCell({ ri: row.__ri, col: nc });
+                                    setEditValue(row[nc] != null ? String(row[nc]) : "");
+                                  }
+                                  return;
+                                }
+                                if (e.key === "ArrowDown" && i < pageRows.length - 1) {
+                                  e.preventDefault();
+                                  commitEdit(row.__ri, h);
+                                  const nr = pageRows[i + 1];
+                                  setEditingCell({ ri: nr.__ri, col: h });
+                                  setEditValue(nr[h] != null ? String(nr[h]) : "");
+                                  return;
+                                }
+                                if (e.key === "ArrowUp" && i > 0) {
+                                  e.preventDefault();
+                                  commitEdit(row.__ri, h);
+                                  const pr = pageRows[i - 1];
+                                  setEditingCell({ ri: pr.__ri, col: h });
+                                  setEditValue(pr[h] != null ? String(pr[h]) : "");
+                                  return;
+                                }
+                              }}
+                              onBlur={() => commitEdit(row.__ri, h)}
+                              style={{
+                                width: "100%", minWidth: 60,
+                                background: "transparent",
+                                border: "none", outline: "none",
+                                color: C.teal,
+                                fontFamily: mono, fontSize: 10,
+                                padding: "2px 6px",
+                              }}
+                            />
+                          ) : fmt(row[h])}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
@@ -539,7 +648,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
 // Dataset overview + load controls (file upload, World Bank, OECD).
 function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset }) {
   const { C } = useTheme();
-  const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP"];
+  const formats  = ["CSV","TSV","XLSX","XLS","DTA","RDS","DBF","SHP","ZIP"];
   const fileRef  = useRef();
   const [loading,   setLoading]   = useState(false);
   const [err,       setErr]       = useState("");
@@ -738,7 +847,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
                       background: dragOver ? C.goldFaint : "transparent",
                       transition:"all 0.15s",marginBottom:10}}>
               <input ref={fileRef} type="file"
-                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp"
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.zip"
                 onChange={e=>handleFile(e.target.files[0])}
                 style={{display:"none"}}/>
               {loading
@@ -795,7 +904,12 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
 
       {/* Data Viewer grid */}
       {view === "grid" && viewRows.length > 0 && (
-        <DataViewer rows={viewRows} headers={viewHeaders} filename={viewFile} />
+        <DataViewer
+          rows={viewRows}
+          headers={viewHeaders}
+          filename={viewFile}
+          onPatch={(ri, col, value) => studioRef.current?.addPatchStep?.(ri, col, value)}
+        />
       )}
       {view === "grid" && viewRows.length === 0 && (
         <div style={{padding:"3rem",color:C.textMuted,fontSize:11,textAlign:"center",fontFamily:mono}}>
@@ -921,7 +1035,7 @@ function Dashboard({onNew, onLoad}) {
           flexShrink: 0,
         }}>
           <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
-            Econ Studio
+            Litux
           </div>
           <div style={{fontSize:15,color:C.text,letterSpacing:"-0.01em",marginBottom:1}}>
             Projects
@@ -1077,7 +1191,7 @@ function Dashboard({onNew, onLoad}) {
             LMU Munich · Econometrics
           </div>
           <div style={{fontSize:22,color:C.text,letterSpacing:"-0.02em",marginBottom:4}}>
-            Econ Studio
+            Litux
           </div>
           <div style={{fontSize:11,color:C.textMuted}}>
             Non-destructive pipeline · OLS · 2SLS · Panel FE/FD · RDD · DiD
@@ -1259,14 +1373,16 @@ export default function App() {
       const coerced = rows.map(r => {
         const o = {}; headers.forEach(h => { o[h] = coerce(r[h], types[h]); }); return o;
       });
-      setRawData({ headers, rows: coerced });
+      const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
+      setRawData(ensRi({ headers, rows: coerced }));
       setScreen("workspace");
       return;
     }
 
     const stored = await loadRawData(p.id);
     if (stored && stored.rows?.length) {
-      setRawData(stored);
+      const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
+      setRawData(ensRi(stored));
       setScreen("workspace");
     } else {
       setScreen("upload");
@@ -1318,7 +1434,7 @@ export default function App() {
           onClick={()=>setScreen("dashboard")}
           style={{background:"transparent",border:"none",color:C.gold,cursor:"pointer",fontFamily:mono,fontSize:11,letterSpacing:"0.12em"}}
         >
-          ⬡ ECON STUDIO
+          ⬡ LITUX
         </button>
 
         {inWorkspace && filename && (

@@ -46,7 +46,7 @@ function SectionHdr({ children }) {
       padding: "0.28rem 0.85rem",
       fontSize: 9, color: C.textMuted, letterSpacing: "0.16em",
       textTransform: "uppercase", fontFamily: mono,
-      background: "#0b0b0b", borderBottom: `1px solid ${C.border}`,
+      background: C.surface2, borderBottom: `1px solid ${C.border}`,
     }}>
       {children}
     </div>
@@ -60,7 +60,7 @@ function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusi
   return (
     <div style={{
       padding: "0.6rem 0.85rem",
-      background: reject ? "#0d0808" : inconclusive ? "#0d0c08" : "#080d0a",
+      background: C.surface,
       border: `1px solid ${color}30`,
       borderLeft: `3px solid ${color}`,
       display: "flex", flexDirection: "column", gap: 3,
@@ -176,7 +176,7 @@ function DiagAlertCard({ alert, onCoachQuery }) {
     <div style={{
       display: "flex", alignItems: "flex-start", justifyContent: "space-between",
       gap: 12, padding: "0.55rem 0.85rem",
-      background: alert.severity === "high" ? "#0d0808" : "#0c0c08",
+      background: C.surface,
       borderLeft: `3px solid ${color}`,
       border: `1px solid ${color}25`,
     }}>
@@ -258,7 +258,7 @@ export default function DiagnosticsPanel({
         onClick={() => setOpen(s => !s)}
         style={{
           width: "100%", display: "flex", alignItems: "center", gap: 10,
-          background: "#0a0a0a", padding: "0.5rem 1rem",
+          background: C.surface2, padding: "0.5rem 1rem",
           border: "none", borderBottom: open ? `1px solid ${C.border}` : "none",
           cursor: "pointer", fontFamily: mono, color: C.textMuted,
           fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase",
@@ -386,7 +386,7 @@ export default function DiagnosticsPanel({
 
           {/* Footer */}
           <div style={{ padding: "0.35rem 0.85rem", fontSize: 9, color: C.textMuted,
-            fontFamily: mono, background: "#0a0a0a", borderTop: `1px solid ${C.border}` }}>
+            fontFamily: mono, background: C.surface2, borderTop: `1px solid ${C.border}` }}>
             Significance at 5% · BP/White/BG: LM ~ χ² · DW: consult tables for exact bounds · SW: Royston (1992)
           </div>
         </div>
