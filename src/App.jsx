@@ -295,11 +295,13 @@ function colStats(col, rows) {
   return { type: "string", n: vals.length, nulls, unique: Object.keys(freq).length, top };
 }
 
-function DataViewer({ rows, headers, filename }) {
+function DataViewer({ rows, headers, filename, onPatch }) {
   const { C } = useTheme();
-  const [page,      setPage]      = useState(0);
-  const [selCol,    setSelCol]    = useState(null);
-  const [colFilter, setColFilter] = useState("");
+  const [page,         setPage]        = useState(0);
+  const [selCol,       setSelCol]      = useState(null);
+  const [colFilter,    setColFilter]   = useState("");
+  const [editingCell,  setEditingCell] = useState(null); // { ri, col }
+  const [editValue,    setEditValue]   = useState("");
 
   const visHeaders = colFilter
     ? headers.filter(h => h.toLowerCase().includes(colFilter.toLowerCase()))
@@ -313,12 +315,35 @@ function DataViewer({ rows, headers, filename }) {
     return String(v);
   };
 
+  function commitEdit(ri, col) {
+    setEditingCell(null);
+    if (!onPatch) return;
+    const trimmed = editValue.trim();
+    if (trimmed === "") { onPatch(ri, col, null); return; }
+    // Parse as number if the column has numeric values
+    const isNumCol = rows.slice(0, 20).some(r => typeof r[col] === "number");
+    const n = Number(trimmed);
+    onPatch(ri, col, isNumCol && !isNaN(n) ? n : trimmed);
+  }
+
+  function startEdit(ri, col, currentVal) {
+    if (!onPatch) return; // read-only if no patch handler
+    setEditingCell({ ri, col });
+    setEditValue(currentVal != null ? String(currentVal) : "");
+  }
+
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
       {/* Toolbar */}
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"0.5rem 0.9rem",borderBottom:`1px solid ${C.border}`,flexShrink:0,background:C.surface2}}>
         <span style={{fontSize:10,color:C.text,fontFamily:mono}}>{filename}</span>
         <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{rows.length.toLocaleString()} × {headers.length}</span>
+        {onPatch && (
+          <span style={{fontSize:9,color:C.teal,fontFamily:mono,
+            border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 6px"}}>
+            double-click to edit
+          </span>
+        )}
         <div style={{flex:1}}/>
         <input
           value={colFilter}
@@ -388,18 +413,70 @@ function DataViewer({ rows, headers, filename }) {
                                 position:"sticky",left:0,background: i%2===0 ? C.surface : C.bg,zIndex:1}}>
                       {absIdx + 1}
                     </td>
-                    {visHeaders.map(h => (
-                      <td key={h} style={{
-                        padding:"3px 10px",
-                        borderRight:`1px solid ${C.border}`,
-                        color: selCol===h ? C.text : C.textDim,
-                        background: selCol===h ? `${C.teal}08` : "transparent",
-                        whiteSpace:"nowrap",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",
-                        fontVariantNumeric:"tabular-nums",
-                      }}>
-                        {fmt(row[h])}
-                      </td>
-                    ))}
+                    {visHeaders.map(h => {
+                      const isEditing = editingCell?.ri === row.__ri && editingCell?.col === h;
+                      return (
+                        <td key={h}
+                          onDoubleClick={() => !isEditing && startEdit(row.__ri, h, row[h])}
+                          style={{
+                            padding: isEditing ? "1px 4px" : "3px 10px",
+                            borderRight:`1px solid ${C.border}`,
+                            color: selCol===h ? C.text : C.textDim,
+                            background: isEditing ? `${C.teal}15` : selCol===h ? `${C.teal}08` : "transparent",
+                            whiteSpace:"nowrap", maxWidth:200, overflow:"hidden", textOverflow:"ellipsis",
+                            fontVariantNumeric:"tabular-nums",
+                            cursor: onPatch ? "default" : undefined,
+                          }}>
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === "Escape") { setEditingCell(null); return; }
+                                if (e.key === "Enter") { e.preventDefault(); commitEdit(row.__ri, h); return; }
+                                if (e.key === "Tab") {
+                                  e.preventDefault();
+                                  commitEdit(row.__ri, h);
+                                  const ni = visHeaders.indexOf(h) + (e.shiftKey ? -1 : 1);
+                                  if (ni >= 0 && ni < visHeaders.length) {
+                                    const nc = visHeaders[ni];
+                                    setEditingCell({ ri: row.__ri, col: nc });
+                                    setEditValue(row[nc] != null ? String(row[nc]) : "");
+                                  }
+                                  return;
+                                }
+                                if (e.key === "ArrowDown" && i < pageRows.length - 1) {
+                                  e.preventDefault();
+                                  commitEdit(row.__ri, h);
+                                  const nr = pageRows[i + 1];
+                                  setEditingCell({ ri: nr.__ri, col: h });
+                                  setEditValue(nr[h] != null ? String(nr[h]) : "");
+                                  return;
+                                }
+                                if (e.key === "ArrowUp" && i > 0) {
+                                  e.preventDefault();
+                                  commitEdit(row.__ri, h);
+                                  const pr = pageRows[i - 1];
+                                  setEditingCell({ ri: pr.__ri, col: h });
+                                  setEditValue(pr[h] != null ? String(pr[h]) : "");
+                                  return;
+                                }
+                              }}
+                              onBlur={() => commitEdit(row.__ri, h)}
+                              style={{
+                                width: "100%", minWidth: 60,
+                                background: "transparent",
+                                border: "none", outline: "none",
+                                color: C.teal,
+                                fontFamily: mono, fontSize: 10,
+                                padding: "2px 6px",
+                              }}
+                            />
+                          ) : fmt(row[h])}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
@@ -827,7 +904,12 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
 
       {/* Data Viewer grid */}
       {view === "grid" && viewRows.length > 0 && (
-        <DataViewer rows={viewRows} headers={viewHeaders} filename={viewFile} />
+        <DataViewer
+          rows={viewRows}
+          headers={viewHeaders}
+          filename={viewFile}
+          onPatch={(ri, col, value) => studioRef.current?.addPatchStep?.(ri, col, value)}
+        />
       )}
       {view === "grid" && viewRows.length === 0 && (
         <div style={{padding:"3rem",color:C.textMuted,fontSize:11,textAlign:"center",fontFamily:mono}}>
@@ -1291,14 +1373,16 @@ export default function App() {
       const coerced = rows.map(r => {
         const o = {}; headers.forEach(h => { o[h] = coerce(r[h], types[h]); }); return o;
       });
-      setRawData({ headers, rows: coerced });
+      const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
+      setRawData(ensRi({ headers, rows: coerced }));
       setScreen("workspace");
       return;
     }
 
     const stored = await loadRawData(p.id);
     if (stored && stored.rows?.length) {
-      setRawData(stored);
+      const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
+      setRawData(ensRi(stored));
       setScreen("workspace");
     } else {
       setScreen("upload");

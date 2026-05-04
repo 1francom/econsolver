@@ -14,6 +14,7 @@
 //   onConfirmDelete(mode) — "single" | "cascade"
 //   onCancelDelete  — cancel pending delete
 
+import { useState } from "react";
 import { useTheme, mono, Lbl } from "./shared.jsx";
 
 // ── Step type → accent color ──────────────────────────────────────────────────
@@ -67,9 +68,14 @@ function UndoBtn({ label, title, onClick, enabled }) {
   );
 }
 
-function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete }) {
+function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete }) {
   const { C } = useTheme();
+  const [patchOpen, setPatchOpen] = useState(false);
   if (!pipeline.length && !canUndo && !canRedo) return null;
+
+  // Separate patch (cell edit) steps from regular pipeline steps
+  const patches  = pipeline.map((s, i) => ({ s, i })).filter(({ s }) => s.type === "patch");
+  const regulars = pipeline.map((s, i) => ({ s, i })).filter(({ s }) => s.type !== "patch");
 
   return (
     <div style={{
@@ -127,7 +133,87 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo, br
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {pipeline.map((s, i) => {
+
+            {/* ── Cell edits group (collapsible) ── */}
+            {patches.length > 0 && (
+              <div style={{ marginBottom: 2 }}>
+                {/* Group header */}
+                <div
+                  onClick={() => setPatchOpen(o => !o)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 4,
+                    padding: "0.35rem 0.5rem",
+                    background: C.surface2,
+                    borderRadius: patchOpen ? "3px 3px 0 0" : 3,
+                    border: `1px solid ${C.border}`,
+                    borderLeft: `2px solid ${C.teal}`,
+                    cursor: "pointer",
+                    userSelect: "none",
+                  }}>
+                  <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>
+                    {patchOpen ? "▾" : "▸"}
+                  </span>
+                  <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>✎</span>
+                  <span style={{ flex: 1, fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                    Cell edits ({patches.length})
+                  </span>
+                  {onClearPatches && (
+                    <button
+                      onClick={e => { e.stopPropagation(); onClearPatches(); }}
+                      title="Remove all cell edits"
+                      style={{
+                        background: "transparent", border: "none",
+                        color: C.textMuted, cursor: "pointer",
+                        fontSize: 9, padding: "0 2px", flexShrink: 0,
+                        fontFamily: mono,
+                      }}
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+                {/* Expanded list */}
+                {patchOpen && (
+                  <div style={{
+                    border: `1px solid ${C.border}`,
+                    borderTop: "none",
+                    borderRadius: "0 0 3px 3px",
+                    background: C.bg,
+                    display: "flex", flexDirection: "column", gap: 0,
+                  }}>
+                    {patches.map(({ s, i }) => (
+                      <div key={s.id || i} style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        padding: "0.28rem 0.5rem",
+                        borderBottom: `1px solid ${C.border}`,
+                      }}>
+                        <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>✎</span>
+                        <span style={{
+                          flex: 1, fontSize: 9, color: C.textDim, fontFamily: mono,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {s.desc || `row ${(s.ri ?? 0) + 1} · ${s.col}`}
+                        </span>
+                        <button
+                          onClick={() => onRm(i)}
+                          title={`Remove this cell edit`}
+                          style={{
+                            background: "transparent", border: "none",
+                            color: C.textMuted, cursor: "pointer",
+                            fontSize: 11, padding: "0 2px", flexShrink: 0,
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Regular pipeline steps ── */}
+            {regulars.map(({ s, i }) => {
               const col = typeColor(C)[s.type] || C.textMuted;
               const ico = TYPE_ICON[s.type]  || "·";
               const isActiveBranch = branchPointIndex === i;
@@ -270,7 +356,7 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo, br
         }}>
           {branchPointIndex !== null
             ? `${branchPointIndex + 1} shared · ${pipeline.length - branchPointIndex - 1} per-subset · IDB ✓`
-            : `${pipeline.length} step${pipeline.length !== 1 ? "s" : ""} · IDB ✓`
+            : `${regulars.length} step${regulars.length !== 1 ? "s" : ""}${patches.length ? ` · ${patches.length} edit${patches.length !== 1 ? "s" : ""}` : ""} · IDB ✓`
           }
         </div>
       )}

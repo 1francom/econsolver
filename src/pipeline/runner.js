@@ -1009,6 +1009,20 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    // ── patch ─────────────────────────────────────────────────────────────────
+    // Direct cell edit created by the Data Viewer cell editor.
+    // Tagged internal:true so History.jsx groups all patches into a collapsible
+    // "Cell edits" section rather than listing them individually.
+    //
+    // s.ri    — __ri value identifying the target row (stable original index,
+    //           assigned at load time; survives filter/sort/rename/feature steps
+    //           but NOT pivot_longer / group_summarize which reshape row count)
+    // s.col   — column name to overwrite
+    // s.value — new value (number | string | null)
+    case "patch":
+      R = rows.map(r => r.__ri === s.ri ? { ...r, [s.col]: s.value } : r);
+      break;
+
   }
   return { rows: R, headers: H };
 }

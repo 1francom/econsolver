@@ -413,6 +413,19 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "group_summarize", by: [], aggs: [] }),
   },
 
+  // ── CELL EDITS ──────────────────────────────────────────────────────────────
+
+  {
+    type: "patch",
+    label: "Cell edit",
+    category: "cleaning",
+    internal: true,   // History.jsx groups all patch steps under a collapsible section
+    description: "Direct cell edit from the Data Viewer. Targets a row by __ri (stable original index).",
+    schema: [],
+    toLabel: s => `edit row ${(s.ri ?? 0) + 1} · ${s.col} → ${s.value ?? "NA"}`,
+    defaultStep: () => ({ type: "patch", internal: true, ri: 0, col: "", value: null }),
+  },
+
   // ── MERGE ───────────────────────────────────────────────────────────────────
 
   {

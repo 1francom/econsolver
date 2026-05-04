@@ -43,7 +43,7 @@ export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, allDatasets = [], onSaveSubset }) {
+export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, allDatasets = [], onSaveSubset, addStepRef }) {
   const { C } = useTheme();
   // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
   const sessionDispatch = useSessionDispatch();
@@ -188,6 +188,19 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       return [...p, { ...s, id: stepId, datasetId: pid, ...(gStepId ? { gStepId } : {}) }];
     });
   }, [snapshot, pid, sessionDispatch]);
+
+  // Expose addStep via ref so DataStudio can dispatch patch steps from DataViewer
+  useEffect(() => {
+    if (addStepRef) addStepRef.current = addStep;
+  }); // intentionally no dep array — always keep ref in sync with latest addStep
+
+  // Remove all cell-edit patch steps at once (called from History "clear edits" button)
+  const clearPatches = useCallback(() => {
+    setPipeline(p => {
+      snapshot(p);
+      return p.filter(s => s.type !== "patch");
+    });
+  }, [snapshot]);
 
   const rmStep = useCallback(i => {
     // Deleting the last step needs no warning — nothing downstream.
@@ -533,6 +546,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         pipeline={pipeline}
         onRm={rmStep}
         onClear={clear}
+        onClearPatches={clearPatches}
         onUndo={undo}
         onRedo={redo}
         canUndo={canUndo}
