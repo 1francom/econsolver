@@ -111,6 +111,13 @@ function readObject(r) {
     throw new Error(`RDS: dangling back-reference ${idx}`);
   }
 
+  // R serialization special-value markers (no payload, no ref-table slot)
+  if (type === 254) return null;   // NILVALUE_SXP — pairlist terminator
+  if (type === 253) return null;   // GLOBALENV_SXP
+  if (type === 252) return null;   // UNBOUNDVALUE_SXP
+  if (type === 251) return null;   // MISSINGARG_SXP
+  if (type === 250) return null;   // BASENAMESPACE_SXP
+
   // Allocate slot in reference table before reading children
   const refIdx = r.refs.length;
   r.refs.push(null);
@@ -233,11 +240,38 @@ function strsxpStrings(obj) {
   return obj.values.map(v => (v == null ? "" : String(v)));
 }
 
-/** Extract JS array from any vector sxp */
+/** Extract JS array from any vector sxp, handling factors and POSIXct */
 function vectorValues(obj) {
   if (!obj) return [];
-  if (obj.sxp === REALSXP || obj.sxp === INTSXP || obj.sxp === LGLSXP) return obj.values;
-  if (obj.sxp === STRSXP)  return obj.values.map(v => (v == null ? null : String(v)));
+  if (obj.sxp === INTSXP) {
+    // Factor: INTSXP with "levels" STRSXP attribute → return level strings
+    if (obj.attrs) {
+      const am = attrsToMap(obj.attrs);
+      const levels = am["levels"];
+      if (levels) {
+        const lvlArr = strsxpStrings(levels);
+        return obj.values.map(v => v == null ? null : (lvlArr[v - 1] ?? null));
+      }
+    }
+    return obj.values;
+  }
+  if (obj.sxp === REALSXP) {
+    // POSIXct: REALSXP with class "POSIXct" → seconds-since-epoch to ISO string
+    if (obj.attrs) {
+      const am = attrsToMap(obj.attrs);
+      const cls = am["class"];
+      if (cls) {
+        const clsArr = strsxpStrings(cls);
+        if (clsArr.includes("POSIXct")) {
+          return obj.values.map(v => v == null ? null :
+            new Date(v * 1000).toISOString().slice(0, 19).replace("T", " "));
+        }
+      }
+    }
+    return obj.values;
+  }
+  if (obj.sxp === LGLSXP) return obj.values;
+  if (obj.sxp === STRSXP) return obj.values.map(v => (v == null ? null : String(v)));
   return [];
 }
 

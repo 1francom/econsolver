@@ -204,13 +204,13 @@ function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
   );
   return (
     <VarPanel
-      title="W̃ · Survey Weight (optional)"
+      title="W̃ · Observation Weight"
       color="#9e7ec8"
       vars={avail}
       selected={weightVar}
       onToggle={setWeightVar}
       multi={false}
-      info="Sampling weight column. Activates WLS. Leave empty for OLS."
+      info="One column of positive weights (e.g. population size, inverse variance). Each row is multiplied by its weight — this does NOT limit the number of X regressors. Select X regressors above."
     />
   );
 }
@@ -421,6 +421,18 @@ export default function ModelConfiguration({
 
   if (model === "SyntheticControl") {
     return <SyntheticControlConfig numericCols={numericCols} yVar={yVar} treatedUnit={treatedUnit} setTreatedUnit={setTreatedUnit} synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime} xVars={xVars} setXVars={setXVars} rows={rows} panel={panel} />;
+  }
+
+  if (model === "WLS") {
+    return (
+      <WeightsConfig
+        numericCols={numericCols}
+        yVar={yVar}
+        xVars={xVars}
+        weightVar={weightVar}
+        setWeightVar={setWeightVar}
+      />
+    );
   }
 
   // OLS / FE / FD: no model-specific configuration beyond variable selection

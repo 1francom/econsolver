@@ -741,7 +741,7 @@ function generateExploreScript(language, { headers, info, filename }) {
   if (language === "r") {
     const lines = [
       `# ${"─".repeat(70)}`,
-      `# Econ Studio — Explore Script (R)`,
+      `# Litux — Explore Script (R)`,
       `# Dataset: ${base}`,
       `# Generated: ${new Date().toISOString().slice(0,10)}`,
       `# ${"─".repeat(70)}`,
@@ -769,7 +769,7 @@ function generateExploreScript(language, { headers, info, filename }) {
   if (language === "stata") {
     const lines = [
       `* ${"─".repeat(70)}`,
-      `* Econ Studio — Explore Script (Stata)`,
+      `* Litux — Explore Script (Stata)`,
       `* Dataset: ${base}`,
       `* Generated: ${new Date().toISOString().slice(0,10)}`,
       `* ${"─".repeat(70)}`,
@@ -797,7 +797,7 @@ function generateExploreScript(language, { headers, info, filename }) {
   if (language === "python") {
     const lines = [
       `# ${"─".repeat(70)}`,
-      `# Econ Studio — Explore Script (Python)`,
+      `# Litux — Explore Script (Python)`,
       `# Dataset: ${base}`,
       `# Generated: ${new Date().toISOString().slice(0,10)}`,
       `# ${"─".repeat(70)}`,

@@ -38,7 +38,7 @@ function InlinePlotShell({ title, svgId, filename, children }) {
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
@@ -474,7 +474,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
       {/* header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -518,7 +518,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
           <div style={{
             padding: "0.35rem 0.7rem", borderBottom: `1px solid ${C.border}`,
             fontSize: 8, color: C.textMuted, letterSpacing: "0.14em",
-            textTransform: "uppercase", fontFamily: mono, background: "#0a0a0a",
+            textTransform: "uppercase", fontFamily: mono, background: C.surface,
           }}>
             Residuals vs Fitted
           </div>
@@ -530,7 +530,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
           <div style={{
             padding: "0.35rem 0.7rem", borderBottom: `1px solid ${C.border}`,
             fontSize: 8, color: C.textMuted, letterSpacing: "0.14em",
-            textTransform: "uppercase", fontFamily: mono, background: "#0a0a0a",
+            textTransform: "uppercase", fontFamily: mono, background: C.surface,
           }}>
             Normal Q-Q
           </div>
@@ -542,7 +542,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
 
       {/* footer note */}
       <div style={{
-        padding: "0.4rem 0.9rem", background: "#0a0a0a",
+        padding: "0.4rem 0.9rem", background: C.surface,
         borderTop: `1px solid ${C.border}`,
         fontSize: 9, color: C.textMuted, fontFamily: mono,
         display: "flex", justifyContent: "space-between",

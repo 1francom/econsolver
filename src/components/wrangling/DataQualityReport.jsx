@@ -15,11 +15,11 @@ const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 // ─── SEVERITY PALETTE ─────────────────────────────────────────────────────────
 function makeSEV(C) {
   return {
-    critical: { color: "#e06c75", bg: "#1a0a0a", border: "#e06c7530", icon: "●" },
-    high:     { color: C.red,     bg: "#120808", border: `${C.red}30`,    icon: "▲" },
-    medium:   { color: C.yellow,  bg: "#12100a", border: `${C.yellow}30`, icon: "◆" },
-    low:      { color: C.blue,    bg: "#080c12", border: `${C.blue}30`,   icon: "○" },
-    ok:       { color: C.green,   bg: C.surface, border: `${C.green}20`,  icon: "✓" },
+    critical: { color: "#e06c75", bg: C.surface,  border: "#e06c7530", icon: "●" },
+    high:     { color: C.red,     bg: C.surface,  border: `${C.red}30`,    icon: "▲" },
+    medium:   { color: C.yellow,  bg: C.surface,  border: `${C.yellow}30`, icon: "◆" },
+    low:      { color: C.blue,    bg: C.surface,  border: `${C.blue}30`,   icon: "○" },
+    ok:       { color: C.green,   bg: C.surface,  border: `${C.green}20`,  icon: "✓" },
   };
 }
 
@@ -363,7 +363,7 @@ export default function DataQualityReport({ report, onApplyStep, onExportMd }) {
       {criticalCount > 0 && (
         <div style={{
           padding: "0.65rem 1rem", marginBottom: "1rem",
-          background: "#1a0a0a", border: `1px solid ${C.red}40`,
+          background: C.surface, border: `1px solid ${C.red}40`,
           borderLeft: `4px solid ${C.red}`, borderRadius: 4,
           display: "flex", alignItems: "center", gap: 10,
         }}>
