@@ -30,8 +30,9 @@ import {
   loadPipeline,
   savePipeline,
   saveRawData,
+  saveProject,
   migrateFromLocalStorage,
-} from "./services/Persistence/indexedDB.js";
+} from "./services/persistence/indexedDB.js";
 
 // ── Session state — two-tier pipeline registry ─────────────────────────────
 import { useSessionDispatch } from "./services/session/sessionState.jsx";
@@ -99,11 +100,22 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     if (!idbReady) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      savePipeline(pid, {
+      const pipelineRecord = {
         filename, pipeline, panel, dataDictionary, branchPointIndex,
         rowCount: rawData.rows.length, colCount: rawData.headers.length,
         pipelineLength: pipeline.length,
-      });
+      };
+      savePipeline(pid, pipelineRecord);
+      // Keep project store in sync — only for primary projects (pid starts with "proj_").
+      // Secondary datasets use genId() keys and must not create project entries.
+      if (pid?.startsWith("proj_")) {
+        saveProject(pid, {
+          filename,
+          rowCount:       rawData.rows.length,
+          colCount:       rawData.headers.length,
+          pipelineLength: pipeline.length,
+        });
+      }
       // Persist raw dataset once per session (skip if already stored this session)
       if (!rawDataSaved.current) {
         saveRawData(pid, rawData).then(({ stored }) => {

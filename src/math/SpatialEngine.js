@@ -9,6 +9,8 @@
 //   pointInPolygon, spatialJoin
 //   nearestNeighbor
 //   parseWKTPolygon (helper)
+//   makeGrid          — st_make_grid equivalent: rectangular cells clipped to boundary
+//   aggregateToGrid   — count/sum/mean of point dataset within each grid cell
 
 const EARTH_RADIUS_KM = 6371;
 
@@ -244,5 +246,154 @@ export function nearestNeighbor(
       [outDistCol]: minDist === Infinity ? null : minDist,
       [outIdCol]:   minIdx,
     };
+  });
+}
+
+// ─── GRID GENERATION ──────────────────────────────────────────────────────────
+
+/**
+ * st_make_grid equivalent: generates rectangular grid cells (as WKT POLYGON
+ * strings) clipped to a boundary WKT polygon.
+ *
+ * Works in WGS-84 decimal degrees. Cell sizes are converted from metres using
+ * the standard approximation at the centroid latitude:
+ *   1° lat ≈ 111 320 m
+ *   1° lon ≈ 111 320 · cos(lat) m
+ *
+ * A cell is included if its centroid falls inside the boundary (ray-casting).
+ * Hard cap: 25 000 cells — throws if exceeded so the UI can warn the user.
+ *
+ * @param   {string}  boundaryWkt    WKT POLYGON or MULTIPOLYGON string
+ * @param   {number}  cellsizeMeters Grid cell side length in metres (default 500)
+ * @returns {Array<{grid_id:number, geometry:string}>}
+ */
+export function makeGrid(boundaryWkt, cellsizeMeters = 500) {
+  if (!boundaryWkt || typeof boundaryWkt !== "string") throw new Error("boundaryWkt must be a WKT string");
+  if (cellsizeMeters <= 0) throw new Error("cellsizeMeters must be > 0");
+
+  const MAX_CELLS = 25_000;
+  const wktU = boundaryWkt.trim().toUpperCase();
+
+  // ── Parse outer ring(s) ──────────────────────────────────────────────────
+  // Returns [{lon, lat}] rings; captures outer ring of each polygon part.
+  function parseRings(wkt) {
+    const rings = [];
+    // MULTIPOLYGON: extract each (( )) block
+    if (wktU.startsWith("MULTIPOLYGON")) {
+      const re = /\(\(([^()]+)\)\)/g;
+      let m;
+      while ((m = re.exec(wkt)) !== null) {
+        const r = m[1].split(",").map(p => {
+          const [lon, lat] = p.trim().split(/\s+/).map(Number);
+          return { lon, lat };
+        }).filter(p => !isNaN(p.lon) && !isNaN(p.lat));
+        if (r.length >= 3) rings.push(r);
+      }
+    } else {
+      // POLYGON — outer ring only (first ((...)))
+      const m = wkt.match(/POLYGON\s*\(\(([^()]+)\)/i);
+      if (m) {
+        const r = m[1].split(",").map(p => {
+          const [lon, lat] = p.trim().split(/\s+/).map(Number);
+          return { lon, lat };
+        }).filter(p => !isNaN(p.lon) && !isNaN(p.lat));
+        if (r.length >= 3) rings.push(r);
+      }
+    }
+    return rings;
+  }
+
+  const rings = parseRings(boundaryWkt);
+  if (!rings.length) throw new Error("Could not parse boundary WKT. Expected POLYGON or MULTIPOLYGON.");
+
+  // ── Bounding box ──────────────────────────────────────────────────────────
+  const allLons = rings.flatMap(r => r.map(p => p.lon));
+  const allLats = rings.flatMap(r => r.map(p => p.lat));
+  const minLon = Math.min(...allLons), maxLon = Math.max(...allLons);
+  const minLat = Math.min(...allLats), maxLat = Math.max(...allLats);
+
+  // ── Degree sizes ──────────────────────────────────────────────────────────
+  const centerLat = (minLat + maxLat) / 2;
+  const dLat = cellsizeMeters / 111_320;
+  const dLon = cellsizeMeters / (111_320 * Math.cos(centerLat * Math.PI / 180));
+
+  // Safety: estimate cell count before generating
+  const nCols = Math.ceil((maxLon - minLon) / dLon);
+  const nRows = Math.ceil((maxLat - minLat) / dLat);
+  if (nCols * nRows > MAX_CELLS * 4) {
+    throw new Error(
+      `Cell size ${cellsizeMeters} m would produce ~${(nCols * nRows).toLocaleString()} candidate cells — too many. Increase cell size.`
+    );
+  }
+
+  // ── Point-in-polygon (ray casting) for any ring ───────────────────────────
+  function pip(lat, lon) {
+    for (const ring of rings) {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const { lon: xi, lat: yi } = ring[i];
+        const { lon: xj, lat: yj } = ring[j];
+        if ((yi > lat) !== (yj > lat) &&
+            lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+          inside = !inside;
+        }
+      }
+      if (inside) return true;
+    }
+    return false;
+  }
+
+  // ── Generate cells ────────────────────────────────────────────────────────
+  const f = n => n.toFixed(8);
+  const cells = [];
+  for (let row = 0; minLat + row * dLat < maxLat + dLat * 0.01; row++) {
+    for (let col = 0; minLon + col * dLon < maxLon + dLon * 0.01; col++) {
+      const lon0 = minLon + col * dLon;
+      const lat0 = minLat + row * dLat;
+      const cLat = lat0 + dLat / 2;
+      const cLon = lon0 + dLon / 2;
+      if (!pip(cLat, cLon)) continue;
+      if (cells.length >= MAX_CELLS) {
+        throw new Error(`Grid exceeds ${MAX_CELLS.toLocaleString()} cells. Increase cell size.`);
+      }
+      // WKT: POLYGON((lon lat, ...)) — standard lon-first convention
+      const wkt = `POLYGON((${f(lon0)} ${f(lat0)}, ${f(lon0+dLon)} ${f(lat0)}, ${f(lon0+dLon)} ${f(lat0+dLat)}, ${f(lon0)} ${f(lat0+dLat)}, ${f(lon0)} ${f(lat0)}))`;
+      cells.push({ grid_id: cells.length + 1, geometry: wkt });
+    }
+  }
+  return cells;
+}
+
+/**
+ * Aggregates point rows into grid cells.
+ * For each cell (identified by its WKT geometry), counts/sums/averages matching
+ * points. Returns the grid rows enriched with aggregate columns.
+ *
+ * aggSpecs: [{ col: "schools", fn: "count"|"sum"|"mean", outCol: "n_schools" }]
+ * Use fn="count" with col="" to simply count rows.
+ *
+ * O(n_points × n_cells) — suitable for ≤ 5 000 × 10 000.
+ */
+export function aggregateToGrid(gridRows, gridWktCol, pointRows, latCol, lonCol, aggSpecs) {
+  return gridRows.map(cell => {
+    const wkt = cell[gridWktCol];
+    if (!wkt) return cell;
+    const matched = pointRows.filter(p => {
+      const lat = parseFloat(p[latCol]);
+      const lon = parseFloat(p[lonCol]);
+      return !isNaN(lat) && !isNaN(lon) && pointInPolygon(lat, lon, wkt);
+    });
+    const extra = {};
+    for (const { col, fn, outCol } of aggSpecs) {
+      if (fn === "count") {
+        extra[outCol] = matched.length;
+      } else if (fn === "sum") {
+        extra[outCol] = matched.reduce((s, p) => s + (parseFloat(p[col]) || 0), 0);
+      } else if (fn === "mean") {
+        const vals = matched.map(p => parseFloat(p[col])).filter(v => !isNaN(v));
+        extra[outCol] = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+      }
+    }
+    return { ...cell, ...extra };
   });
 }
