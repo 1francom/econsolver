@@ -4,7 +4,12 @@
 //
 // DB layout:
 //   DB name  : "econ_studio_v1"
-//   Version  : 2
+//   Version  : 3
+//
+//   Store "projects"   — named project registry (top-level, user-visible)
+//     Key   : pid (string, same as pipeline key)
+//     Index : updatedAt
+//     Value : { pid, name, filename, rowCount, colCount, createdAt, updatedAt }
 //
 //   Store "pipelines"  — pipeline metadata, steps, panel config, dictionary
 //     Key   : pid (string)
@@ -17,14 +22,16 @@
 //
 // Exports:
 //   openDB()
+//   saveProject(pid, meta)      / listProjects()      / deleteProject(pid) / clearAllProjects()
 //   savePipeline(id, record)    / loadPipeline(id)
-//   listPipelines()             / deletePipeline(id) / clearAllPipelines()
-//   saveRawData(id, rawData)    / loadRawData(id)    / deleteRawData(id)
+//   listPipelines()             / deletePipeline(id)  / clearAllPipelines()
+//   saveRawData(id, rawData)    / loadRawData(id)     / deleteRawData(id)
 
 const DB_NAME              = "econ_studio_v1";
-const DB_VERSION           = 2;
+const DB_VERSION           = 3;
 const STORE_PIPE           = "pipelines";
 const STORE_RAW            = "raw_data";
+const STORE_PROJ           = "projects";
 const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
 
 // ── Singleton DB promise ───────────────────────────────────────────────────────
@@ -54,6 +61,12 @@ export function openDB() {
       // v2: raw_data store
       if (oldVer < 2) {
         db.createObjectStore(STORE_RAW, { keyPath: "id" });
+      }
+
+      // v3: projects store — named project registry (separate from per-dataset pipelines)
+      if (oldVer < 3) {
+        const proj = db.createObjectStore(STORE_PROJ, { keyPath: "pid" });
+        proj.createIndex("updatedAt", "updatedAt", { unique: false });
       }
     };
 
@@ -170,6 +183,68 @@ export async function deleteRawData(id) {
     const db = await openDB();
     await tx(STORE_RAW, db, "readwrite", s => s.delete(id));
   } catch { /* non-fatal */ }
+}
+
+// ─── PROJECTS API ─────────────────────────────────────────────────────────────
+// Projects are the top-level concept: { pid, name, filename, rowCount, colCount, createdAt, updatedAt }.
+// Pipelines and raw data are children keyed by the same pid — they never appear
+// as project entries on their own.
+
+/**
+ * Upsert a project record. Call when creating or updating a project.
+ * @param {string} pid
+ * @param {{ name, filename, rowCount, colCount }} meta
+ */
+export async function saveProject(pid, meta) {
+  const db  = await openDB();
+  const now = Date.now();
+  // Merge with existing record so updatedAt always advances, createdAt is preserved.
+  const existing = await new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE_PROJ, "readonly");
+    const req = t.objectStore(STORE_PROJ).get(pid);
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = e => reject(e.target.error);
+  });
+  await tx(STORE_PROJ, db, "readwrite", s =>
+    s.put({
+      createdAt: now,
+      ...existing,
+      ...meta,
+      pid,
+      updatedAt: now,
+    })
+  );
+}
+
+/**
+ * List all projects, newest first.
+ */
+export async function listProjects() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE_PROJ, "readonly");
+    const req = t.objectStore(STORE_PROJ).getAll();
+    req.onsuccess = e => resolve(
+      (e.target.result ?? []).sort((a, b) => b.updatedAt - a.updatedAt)
+    );
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+/**
+ * Delete a project record (also call deletePipeline/deleteRawData separately).
+ */
+export async function deleteProject(pid) {
+  const db = await openDB();
+  await tx(STORE_PROJ, db, "readwrite", s => s.delete(pid));
+}
+
+/**
+ * Clear all project records.
+ */
+export async function clearAllProjects() {
+  const db = await openDB();
+  await tx(STORE_PROJ, db, "readwrite", s => s.clear());
 }
 
 // ─── MIGRATION HELPER ─────────────────────────────────────────────────────────

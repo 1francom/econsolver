@@ -32,6 +32,29 @@ function loadPlot() {
   return _pltPromise;
 }
 
+// ─── LEAFLET — CACHED CDN SINGLETON ──────────────────────────────────────────
+let _leafletPromise = null;
+function loadLeaflet() {
+  if (typeof window !== "undefined" && window.L) return Promise.resolve(window.L);
+  if (_leafletPromise) return _leafletPromise;
+  _leafletPromise = new Promise((resolve, reject) => {
+    // Inject Leaflet CSS once
+    if (!document.getElementById("leaflet-css")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css";
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.onload = () => { _leafletPromise = null; resolve(window.L); };
+    script.onerror = () => { _leafletPromise = null; reject(new Error("Leaflet load failed")); };
+    document.head.appendChild(script);
+  });
+  return _leafletPromise;
+}
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const GEOMS = [
   { id: "point",     label: "Point"     },
@@ -191,6 +214,10 @@ function buildMarksForLayer(Plt, ly, rows) {
         }));
       break;
     }
+
+    case "map":
+      // Map layers render via MapCanvas, not Observable Plot — skip here
+      break;
   }
 
   return marks;
@@ -260,6 +287,125 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
   if (err) return <div style={{ color: C.red, fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
   if (!Plt) return <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Observable Plot…</div>;
   return <div ref={ref} style={{ width: "100%", overflow: "hidden" }} />;
+}
+
+// ─── MAP CANVAS — Leaflet + OSM tile underlay ─────────────────────────────────
+// Does NOT accept width/height from parent — owns its own ResizeObserver to
+// avoid the feedback loop: Leaflet fills container → parent ResizeObserver fires
+// → canvasH grows → Leaflet grows → repeat.
+function MapCanvas({ layer, rows }) {
+  const { C } = useTheme();
+  const wrapRef     = useRef(null);  // fixed-size wrapper — ResizeObserver target
+  const mapDivRef   = useRef(null);  // inner div Leaflet mounts into
+  const leafMapRef  = useRef(null);
+  const [L,   setL]   = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    loadLeaflet().then(setL).catch(() => setErr("Could not load Leaflet. Check internet connection."));
+  }, []);
+
+  // Watch the wrapper (not the Leaflet div) and invalidate — safe because
+  // wrapRef has CSS height: 100% of a fixed-height parent, not of the map itself.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (leafMapRef.current) leafMapRef.current.invalidateSize();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!L || !mapDivRef.current) return;
+    const { aes, fill, opacity = 1 } = layer;
+    const lonCol = aes.x;
+    const latCol = aes.y;
+    if (!lonCol || !latCol) return;
+
+    // Destroy previous map instance
+    if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; }
+
+    const validRows = rows.filter(r => {
+      const lat = parseFloat(r[latCol]);
+      const lon = parseFloat(r[lonCol]);
+      return !isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+    });
+    if (validRows.length === 0) return;
+
+    const map = L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
+    leafMapRef.current = map;
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>",
+      maxZoom: 19,
+    }).addTo(map);
+
+    // Color scale
+    const colorCol = aes.color;
+    let getColor;
+    if (colorCol) {
+      const vals = validRows.map(r => r[colorCol]);
+      const isNum = vals.every(v => v !== "" && v !== null && !isNaN(parseFloat(v)));
+      if (isNum) {
+        const nums = vals.map(Number);
+        const mn = Math.min(...nums), mx = Math.max(...nums), rng = mx - mn || 1;
+        // teal (#6ec8b4) → gold (#c8a96e) gradient
+        getColor = row => {
+          const t = (Number(row[colorCol]) - mn) / rng;
+          const r = Math.round(110 + t * (200 - 110));
+          const g = Math.round(200 - t * (200 - 169));
+          const b = Math.round(180 - t * (180 - 110));
+          return `rgb(${r},${g},${b})`;
+        };
+      } else {
+        const cats = [...new Set(vals)];
+        const pal  = ["#6ec8b4","#c8a96e","#6e9ec8","#c47070","#a87ec8","#7ab896","#c88e6e"];
+        const cmap = Object.fromEntries(cats.map((c, i) => [c, pal[i % pal.length]]));
+        getColor = row => cmap[row[colorCol]] ?? fill;
+      }
+    } else {
+      getColor = () => fill;
+    }
+
+    const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const markers = [];
+    for (const row of validRows) {
+      const lat = parseFloat(row[latCol]);
+      const lon = parseFloat(row[lonCol]);
+      const color = getColor(row);
+      const m = L.circleMarker([lat, lon], {
+        radius: 5, fillColor: color, color: color,
+        weight: 1, opacity, fillOpacity: 0.78 * opacity,
+      });
+      const tipParts = [`${esc(latCol)}: ${lat.toFixed(4)}`, `${esc(lonCol)}: ${lon.toFixed(4)}`];
+      if (colorCol) tipParts.push(`${esc(colorCol)}: ${esc(row[colorCol])}`);
+      m.bindTooltip(tipParts.join("<br>"));
+      markers.push(m);
+    }
+    const group = L.featureGroup(markers).addTo(map);
+    try { map.fitBounds(group.getBounds().pad(0.08)); } catch (_) { map.setView([0, 0], 2); }
+
+    return () => { if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; } };
+  }, [L, layer, rows]);
+
+  if (err) return <div style={{ color: "#c47070", fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
+  if (!L)  return <div style={{ color: "#666", fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Leaflet…</div>;
+  const { aes } = layer;
+  if (!aes.x || !aes.y) return (
+    <div style={{ fontFamily: mono, fontSize: 10, color: "#666", padding: "2rem", textAlign: "center" }}>
+      Set <b>lon</b> (x) and <b>lat</b> (y) columns to render the map.
+    </div>
+  );
+  // wrapRef is the ResizeObserver target — fixed height so Leaflet cannot push the
+  // parent panel taller and trigger a resize loop.
+  return (
+    <div ref={wrapRef} style={{ width: "100%", height: "100%", minHeight: 420, position: "relative" }}>
+      <div ref={mapDivRef} style={{ position: "absolute", inset: 0, borderRadius: 3 }} />
+    </div>
+  );
 }
 
 // ─── AES ROW ─────────────────────────────────────────────────────────────────
@@ -340,6 +486,7 @@ function LayerCard({ layer, isActive, onSelect, onToggle, onPin, onRemove }) {
 // ─── LAYER EDITOR ─────────────────────────────────────────────────────────────
 function LayerEditor({ layer, onChange, headers }) {
   const { C } = useTheme();
+  const isMap        = layer.geom === "map";
   const isRefLine    = ["hline", "vline"].includes(layer.geom);
   const needsYMinMax = ["errorbar", "ribbon"].includes(layer.geom);
   const noY          = ["histogram", "density", "hline", "vline"].includes(layer.geom);
@@ -368,7 +515,7 @@ function LayerEditor({ layer, onChange, headers }) {
       </div>
 
       {/* Position */}
-      {POSITION_OPTIONS[layer.geom] && (
+      {!isMap && POSITION_OPTIONS[layer.geom] && (
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono, marginBottom: 7 }}>
             Position
@@ -414,12 +561,12 @@ function LayerEditor({ layer, onChange, headers }) {
       )}
 
       {!noX && (
-        <AesRow label="x" value={layer.aes.x}
+        <AesRow label={isMap ? "lon" : "x"} value={layer.aes.x}
           onChange={v => onChange({ ...layer, aes: { ...layer.aes, x: v } })}
           headers={headers} optional={["boxplot"].includes(layer.geom)} />
       )}
       {!noY && (
-        <AesRow label="y" value={layer.aes.y}
+        <AesRow label={isMap ? "lat" : "y"} value={layer.aes.y}
           onChange={v => onChange({ ...layer, aes: { ...layer.aes, y: v } })}
           headers={headers} />
       )}
@@ -761,15 +908,22 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
           /* Single active layer */
           <div ref={canvasRef} style={{ padding: "0.65rem", flex: 1 }}>
             {activeLayer ? (
-              <PlotCanvas
-                layers={[activeLayer]}
-                rows={rows}
-                xLabel={xLabel}
-                yLabel={yLabel}
-                width={canvasW}
-                height={canvasH}
-                scheme={scheme}
-              />
+              activeLayer.geom === "map" ? (
+                /* Fixed-height wrapper breaks the ResizeObserver feedback loop */
+                <div style={{ height: 480, overflow: "hidden" }}>
+                  <MapCanvas layer={activeLayer} rows={rows} />
+                </div>
+              ) : (
+                <PlotCanvas
+                  layers={[activeLayer]}
+                  rows={rows}
+                  xLabel={xLabel}
+                  yLabel={yLabel}
+                  width={canvasW}
+                  height={canvasH}
+                  scheme={scheme}
+                />
+              )
             ) : (
               <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "2rem", textAlign: "center" }}>
                 Select a layer in the left panel to preview it.
