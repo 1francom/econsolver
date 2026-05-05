@@ -131,11 +131,11 @@ export async function aiAuditScan(sug,rows,info){
 // ─── AI HELPER ────────────────────────────────────────────────────────────────
 // Delegates to callClaude (AIService.js) — benefits from prompt caching on
 // SHARED_CONTEXT. Task-specific system prompts imported from prompts/index.js.
-import { callClaude } from "../../services/ai/AIService.js";
+import { callClaude } from "../../services/AI/AIService.js";
 import {
   WRANGLING_TRANSFORM_PROMPT,
   WRANGLING_QUERY_PROMPT,
-} from "../../services/ai/prompts/index.js";
+} from "../../services/AI/Prompts/index.js";
 
 export async function callAI(instruction, col, sample, mode) {
   const isQ = mode === "query";
