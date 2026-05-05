@@ -7,7 +7,7 @@ import { useTheme } from "../../ThemeContext.jsx";
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 export default function LoginForm() {
-  const { C } = useTheme();
+  const { C, theme, setTheme } = useTheme();
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [loading,  setLoading]  = useState(false);
@@ -61,7 +61,30 @@ export default function LoginForm() {
       justifyContent: "center",
       fontFamily: mono,
       padding: "2rem",
+      position: "relative",
     }}>
+
+      {/* ── Theme toggle ── */}
+      <button
+        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        style={{
+          position: "absolute",
+          top: "1rem",
+          right: "1rem",
+          background: "none",
+          border: "none",
+          color: C.textMuted,
+          fontSize: 16,
+          cursor: "pointer",
+          padding: "0.4rem",
+          lineHeight: 1,
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+      >
+        {theme === "dark" ? "☀" : "☾"}
+      </button>
 
       {/* ── Brand ── */}
       <div style={{ textAlign: "center", marginBottom: "3rem" }}>
