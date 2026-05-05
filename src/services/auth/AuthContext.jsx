@@ -3,7 +3,7 @@
 // Initialises from the persisted Supabase session on mount.
 import { createContext, useContext, useEffect, useState } from "react";
 import { getSession, onAuthStateChange } from "./authService.js";
-import { setCurrentUser } from "../persistence/indexedDB.js";
+import { setCurrentUser } from "../Persistence/indexedDB.js";
 
 const AuthContext = createContext(null);
 
