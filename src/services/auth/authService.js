@@ -6,33 +6,47 @@ import { createClient } from "@supabase/supabase-js";
 const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-  auth: {
-    persistSession: true,          // saves session to localStorage — "remember me" behaviour
-    autoRefreshToken: true,        // refreshes JWT before it expires
-    detectSessionInUrl: false,     // no magic-link redirects for now
-  },
-});
+// Guard: if env vars are missing (e.g. Vercel project not configured yet),
+// keep supabase null and let every function return gracefully so the login
+// form still renders instead of crashing the app.
+export let supabase = null;
+try {
+  if (SUPABASE_URL && SUPABASE_ANON) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+      },
+    });
+  }
+} catch (e) {
+  console.error("[Auth] Supabase init failed:", e);
+}
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
 export async function signIn(email, password) {
+  if (!supabase) throw new Error("Authentication not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel environment variables.");
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
   return data;
 }
 
 export async function signOut() {
+  if (!supabase) return;
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
 
 export async function getSession() {
+  if (!supabase) return null;
   const { data: { session } } = await supabase.auth.getSession();
   return session;
 }
 
 export function onAuthStateChange(callback) {
+  if (!supabase) return () => {};
   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
     callback(session);
   });
