@@ -1019,15 +1019,15 @@ No new dependencies — Observable Plot handles the scatter rendering; tile laye
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `src/math/SpatialEngine.js` | Haversine, buffer, grid, point-in-polygon, nearest neighbor | PENDING |
+| `src/math/SpatialEngine.js` | Haversine, buffer, grid, point-in-polygon, nearest neighbor | DONE |
 
 ### Phase 11 Modified Files Summary
 
 | File | Changes | Status |
 |------|---------|--------|
-| `src/pipeline/runner.js` | Add `geocode`, `distance`, `buffer`, `assign_grid`, `spatial_join` step types | PENDING |
-| `src/pipeline/registry.js` | Register 5 new step types with labels and param schemas | PENDING |
-| `src/components/wrangling/FeatureTab.jsx` | Add Spatial section with 5 sub-panels | PENDING |
+| `src/pipeline/runner.js` | Add `geocode`, `distance`, `buffer`, `assign_grid`, `spatial_join` step types | DONE |
+| `src/pipeline/registry.js` | Register 5 new step types with labels and param schemas | DONE |
+| `src/components/wrangling/FeatureTab.jsx` | Add Spatial section with 5 sub-panels | DONE |
 | `src/components/PlotBuilder.jsx` | Add `map` geom type with locked lat/lon axes and tile option | PENDING |
 
 ### Phase 11 Build Order
@@ -1040,21 +1040,377 @@ No new dependencies — Observable Plot handles the scatter rendering; tile laye
 
 ---
 
-## Overall Status Summary (last updated 2026-05-01)
+## Phase 12: Excel-style Cell Editing — PENDING
+
+Inline cell editing directly in the DataViewer grid. Edits are non-destructive: each committed change becomes a `patch` pipeline step (already implemented in `runner.js` and `registry.js`), so all downstream transforms (mutate, log, etc.) automatically reflect the new value.
+
+### Infrastructure already in place (do not re-implement)
+- `patch` step type in `runner.js` and `registry.js` — matches row by `__ri`, sets column value
+- `__ri` stable row ID — assigned at load time in `DataStudio.ensureRowIds`, survives filter/sort/rename
+- `addPatchStep(ri, col, value)` exposed via `DataStudio` `useImperativeHandle`
+- `addStepRef` / `wranglingAddStepRef` bridge from DataStudio → WranglingModule
+- History.jsx collapsible "Cell edits (N)" group with per-item remove and bulk "clear" button
+- `clearPatches` in WranglingModule
+- `✎ edit cells` toggle button in DataViewer toolbar (gates editing behind explicit activation)
+- `isEditing` guard: `editingCell != null && row.__ri != null && editingCell.ri === row.__ri && editingCell.col === h`
+- runner.js patch guard: `s.ri != null` — prevents stale `ri:undefined` step from nuking all rows
+- DataStudio sync useEffect fix: `ensureRowIds` applied in both `newFile` and `else` branches
+
+### What is NOT working (as of 2026-05-04)
+Double-click to edit fails silently — the input either does not appear or does not receive focus. Root cause not yet identified despite multiple approaches:
+- `autoFocus` on input
+- `requestAnimationFrame` + `useRef` focus
+- `onMouseDown` + `e.preventDefault()` (removed — suspected to suppress dblclick in some browsers)
+
+### Recommended next approach
+Use a **native DOM event listener** on the table container instead of React's `onDoubleClick` synthetic event, to rule out synthetic event system issues:
+
+```js
+const tbodyRef = useRef(null);
+useEffect(() => {
+  if (!editMode) return;
+  const handler = e => {
+    const td = e.target.closest('td[data-ri]');
+    if (!td) return;
+    const ri = Number(td.dataset.ri);
+    const col = td.dataset.col;
+    const val = td.dataset.val ?? "";
+    startEdit(ri, col, val);
+  };
+  tbodyRef.current?.addEventListener('dblclick', handler);
+  return () => tbodyRef.current?.removeEventListener('dblclick', handler);
+}, [editMode]);
+```
+
+Each `<td>` gets `data-ri={row.__ri} data-col={h} data-val={row[h]}`. The `<tbody>` gets `ref={tbodyRef}`.
+
+### Script export (also PENDING)
+`src/services/export/rScript.js`, `pythonScript.js`, `stataScript.js` must emit `patch` steps as language-appropriate cell assignment statements before the main pipeline chain:
+- R: `df[df$__ri == 47, "wage"] <- 1500`
+- Python: `df.loc[df['__ri'] == 47, 'wage'] = 1500`
+- Stata: `replace wage = 1500 if __ri == 47`
+
+---
+
+---
+
+## Phase 13: Project Isolation & User Authentication — PENDING
+
+Pre-condition for the web launch. Two distinct problems: (1) projects are not properly scoped — files loaded inside one project can leak into the project list as separate projects, and (2) there is no user identity, so the app is single-user only.
+
+---
+
+### 13.1 — Project Isolation Fix — DONE
+
+**Current bug:** when a user loads multiple datasets inside a project, each file may create a top-level project entry rather than being scoped as a dataset within the current project. The project picker on the home screen shows file names instead of project names.
+
+**Root cause area:** `DataStudio.jsx` — project creation on file upload; `App.jsx` — project list reading from IndexedDB.
+
+**Fix:**
+- Enforce that a **project** is created only when the user explicitly names and creates one (or on first load).
+- All `onAddDataset` calls within an active project scope to `pid` — never create a new `pid`.
+- The `App.jsx` project list reads `project.name` (user-set), not `dataset.filename`.
+- If no project name is set, default to `"Untitled project — YYYY-MM-DD"`.
+- IndexedDB schema: `projects` store keyed by `pid` with `{ pid, name, createdAt, updatedAt }`. Datasets and pipelines reference `pid`, never appear as project entries.
+
+**Files modified:**
+| File | Change | Status |
+|------|--------|--------|
+| `src/App.jsx` | Dashboard reads `listProjects()`; migration from pipelines; rename in-place; `handleReady` calls `saveProject` | DONE |
+| `src/WranglingModule.jsx` | On pipeline save, also calls `saveProject` for primary pids (starts with "proj_") | DONE |
+| `src/services/Persistence/indexedDB.js` | v3 — `projects` store; `saveProject`, `listProjects`, `deleteProject`, `clearAllProjects` | DONE |
+
+---
+
+### 13.2 — User Authentication — PENDING
+
+**Backend choice: Supabase** — open-source, free tier covers the test launch, has auth + PostgreSQL + row-level security. No custom server needed to ship v0.1.
+
+**Auth flows:**
+- Email + password (primary)
+- Magic link (secondary, lower friction for academic users)
+- Google OAuth (optional — adds adoption for non-LMU users)
+
+**Privacy-first constraint:** dataset content **never leaves the browser**. Only the following is stored server-side:
+- `user_id`, email, `created_at`
+- Project metadata: `{ pid, name, created_at, updated_at }`
+- Pipeline steps (JSON, no raw data): `{ pid, pipeline[] }` — enables cross-device project resume without uploading data
+
+**Implementation:**
+- Install `@supabase/supabase-js` (CDN import to avoid bundle size — same pattern as Leaflet/Observable Plot)
+- `src/services/auth/authService.js` — wraps Supabase auth: `signUp`, `signIn`, `signOut`, `getSession`, `onAuthStateChange`
+- `src/services/auth/AuthContext.jsx` — React context: `{ user, session, loading }`, available app-wide
+- `src/components/auth/AuthGate.jsx` — renders login/signup UI if no session; renders `<App>` if authenticated
+- `src/components/auth/LoginForm.jsx` — email + password form with "send magic link" toggle; IBM Plex Mono, dark theme
+- `src/components/auth/SignupForm.jsx` — name, email, password, institution (optional — useful for LMU targeting)
+
+**Session persistence:** Supabase SDK handles token refresh automatically. `AuthContext` initializes on mount by calling `supabase.auth.getSession()`.
+
+**Supabase tables (RLS enforced — users only see their own rows):**
+```sql
+projects (pid text PK, user_id uuid FK, name text, created_at timestamptz, updated_at timestamptz)
+pipelines (pid text FK, steps jsonb, updated_at timestamptz)
+```
+Datasets are never stored in Supabase — they remain in the user's IndexedDB, keyed by `pid`.
+
+**New files:**
+| File | Purpose |
+|------|---------|
+| `src/services/auth/authService.js` | Supabase auth wrapper |
+| `src/services/auth/AuthContext.jsx` | React auth context provider |
+| `src/components/auth/AuthGate.jsx` | Auth guard wrapping App |
+| `src/components/auth/LoginForm.jsx` | Login UI |
+| `src/components/auth/SignupForm.jsx` | Signup UI |
+
+**Modified files:**
+| File | Change |
+|------|--------|
+| `src/App.jsx` | Wrap with `<AuthGate>` |
+| `src/DataStudio.jsx` | Attach `user_id` to projects; sync pipeline to Supabase on save |
+| `src/services/Persistence/indexedDB.js` | Add project store; `listProjects` scoped to current user |
+
+---
+
+### 13.3 — Tier & Access Control — PENDING
+
+Three tiers for the initial launch:
+
+| Tier | Price | Limits | Notes |
+|------|-------|--------|-------|
+| **Free** | €0 | 3 projects, no AI features, no export scripts | For onboarding and testing |
+| **Researcher** | €19/mo | Unlimited projects, full AI, all exports | Individual academic users |
+| **Institution** | €499/seat-yr | All Researcher features + team projects + priority support | LMU department licensing target |
+
+Tier stored on Supabase in `users.tier` column. Checked client-side (gated in `AuthContext`) — not security-critical for v0.1 since the product is client-side anyway. Proper server-side enforcement comes in v0.2.
+
+**Premium gates (v0.1):**
+- AI narrative interpretation → Researcher+
+- AI unified script export → Researcher+
+- More than 3 projects → Researcher+
+
+Gate implementation: thin `usePremium()` hook returning `{ canUse: bool, showUpgrade: fn }`. Upgrade prompt is a modal with "Email us" CTA for v0.1 (no Stripe yet).
+
+---
+
+### Phase 13 Build Order
+
+1. **`indexedDB.js` project store** — adds `projects` object store without breaking existing data
+2. **Project isolation fix** (`App.jsx` + `DataStudio.jsx`) — testable locally before auth
+3. **Supabase project setup** — create project, configure RLS, get API keys
+4. **`authService.js` + `AuthContext.jsx`** — auth logic, no UI yet
+5. **`LoginForm.jsx` + `SignupForm.jsx`** — auth UI
+6. **`AuthGate.jsx` + wire into `App.jsx`** — gate the whole app
+7. **Pipeline sync to Supabase** — on save, write pipeline JSON to `pipelines` table
+8. **Tier gates** — `usePremium()` hook, upgrade modal
+
+---
+
+## Phase 14: Web Launch (v0.1 Public Beta) — PENDING
+
+**Goal:** a hosted URL to share with test users (friends, thesis group, LMU contacts). Fast feedback loop. Not production — some rough edges expected.
+
+---
+
+### 14.1 — Frontend Deployment — PENDING
+
+**Host: Vercel** (free tier, auto-deploy from main branch, CDN-edge delivery).
+
+- `vite.config.js` already configured for React; just needs `vercel.json` with SPA fallback:
+  ```json
+  { "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }
+  ```
+- Environment variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ANTHROPIC_KEY`
+  - Anthropic key: user supplies their own for v0.1 (entered in app settings, stored in `sessionStorage` — never logged or sent to our backend)
+  - For v0.2: proxy all Anthropic calls through a serverless function (removes key exposure)
+- Custom domain: `app.litux.io` (or similar — TBD)
+
+**New files:**
+| File | Purpose |
+|------|---------|
+| `vercel.json` | SPA rewrite rule |
+| `.env.example` | Document all required env vars |
+
+---
+
+### 14.2 — Anthropic Key Handling for Web — PENDING
+
+**v0.1 approach (fast):** user enters their own Anthropic API key in a Settings modal. Key stored in `sessionStorage` only — cleared on tab close.
+
+**Settings modal** (`src/components/SettingsModal.jsx`):
+- API key input (password type) + "Test connection" button
+- Privacy notice: "Your key is stored only in this browser tab's session memory. It is never sent to our servers."
+- Persistent across the session (re-enter on each browser session)
+
+**`AIService.js` change:** read API key from `sessionStorage` instead of hardcoded env var, with a fallback to `import.meta.env.VITE_ANTHROPIC_KEY` for local development.
+
+**v0.2 approach (proper):** serverless proxy on Vercel (`/api/claude`) — Anthropic key lives server-side, never exposed to browser. Users authenticate with their Econ Studio session token to call the proxy. This enables Researcher tier metering (track token usage per user).
+
+---
+
+### 14.3 — Landing Page & Marketing Site — PENDING
+
+**Separate from the app.** Hosted at `litux.io` (root domain). Built with the same Vite + React stack but as a standalone page — no app logic, no Supabase dependency.
+
+**Sections:**
+1. **Hero** — headline + subheadline + "Request early access" CTA (email capture)
+   - Headline: *"Research-grade econometrics. No code required."*
+   - Subheadline: *"The tool PhD students and policy analysts use to go from raw data to publication-ready results — entirely in the browser."*
+
+2. **Feature highlights** — 3 cards:
+   - *Estimation suite* — OLS, IV, RDD, DiD, FE, Synthetic Control with validated math
+   - *Spatial analytics* — Maps, grid construction, buffer analysis, choropleth from shapefiles
+   - *Replication export* — One-click R, Python, Stata scripts from every analysis
+
+3. **Who it's for** — PhD students · Thesis students · Policy analysts · Research assistants
+
+4. **How it works** — 3 steps: Load data → Build pipeline → Estimate + export
+
+5. **Privacy first** — *"Your data never leaves your browser. All computation is client-side."*
+
+6. **Early access form** — email + institution + use case (3 fields, submits to Supabase `waitlist` table or Airtable)
+
+7. **Footer** — links, LMU affiliation note, contact email
+
+**Design:**
+- Same IBM Plex Mono + dark theme as the app (brand consistency)
+- Accent: teal `#6ec8b4` for CTAs, gold `#c8a96e` for feature badges
+- Background: near-black `#080808`
+- No stock photos — code/plot screenshots from actual app only
+
+**New files:**
+| File | Purpose |
+|------|---------|
+| `landing/index.html` | Standalone landing page (separate Vite app or `public/index.html` at root domain) |
+| `landing/App.jsx` | Landing page component |
+| `landing/sections/` | Hero, Features, HowItWorks, Privacy, EarlyAccess, Footer components |
+
+---
+
+### 14.4 — Feedback Collection — PENDING
+
+Built into the app for v0.1 beta users. Lightweight — no external service needed.
+
+- **"Send feedback" button** in the app header (top-right, always visible)
+- Opens a small modal: text area + category dropdown (Bug / Feature request / Question / Other) + optional email field
+- Submits to `feedback` table in Supabase
+- No AI processing — just stored as raw text for Franco to review
+
+**New file:** `src/components/FeedbackModal.jsx`
+
+---
+
+### Phase 14 Build Order
+
+1. **`vercel.json` + env vars** — deploy the current app to Vercel (no auth yet — just confirms it builds)
+2. **`SettingsModal.jsx` + APIkey sessionStorage** — unblocks AI for web users
+3. **Landing page** — parallel work, independent of app code
+4. **`FeedbackModal.jsx`** — quick win, high value for beta feedback
+5. **Auth (Phase 13) integration** — add login gate once landing page is live
+6. **Custom domain** — point `app.litux.io` at Vercel deployment
+
+---
+
+## Phase 15: Local Installable Version — PENDING
+
+**Prerequisite:** web version is validated (Phase 14). The local version is the web app packaged as a desktop app with offline support.
+
+**Goal:** users install once, get offline access, and the app auto-updates from the hosted version. No cloud sync required — all data stays local in IndexedDB.
+
+---
+
+### 15.1 — Tauri Packaging — PENDING
+
+**Why Tauri over Electron:**
+- ~10× smaller binary (no bundled Chromium — uses system WebView)
+- Rust backend gives native file system access (load local `.csv`, `.dta`, `.shp` directly from disk — no drag-and-drop required)
+- Auto-update via `tauri-plugin-updater` pointing to GitHub Releases
+
+**Implementation:**
+- Add `src-tauri/` directory with standard Tauri scaffold (`tauri.conf.json`, `Cargo.toml`, `main.rs`)
+- `tauri.conf.json` build target: `src/` (existing Vite app), no changes to React code needed
+- Rust commands exposed to frontend:
+  - `read_file(path) → ArrayBuffer` — for loading files from arbitrary disk paths
+  - `list_recent_files() → string[]` — MRU list for the Data tab "Open recent" feature
+- `src/services/data/fileLoader.js` — detects Tauri (`window.__TAURI__`) and uses `invoke("read_file", { path })` instead of `<input type="file">`
+
+**Auto-update strategy:**
+- Tauri updater polls `https://litux.io/releases/latest.json` on startup
+- `latest.json` is a static file updated on every Vercel deploy (via a Vercel build hook that writes the file to the CDN)
+- Update dialog: *"A new version is available. Update now or later."* — inline, non-blocking
+
+**New files:**
+| File | Purpose |
+|------|---------|
+| `src-tauri/` | Full Tauri scaffold (generated by `cargo tauri init`) |
+| `src/services/data/fileLoader.js` | Abstraction: web file input vs Tauri `read_file` command |
+
+**Modified files:**
+| File | Change |
+|------|--------|
+| `vite.config.js` | Add Tauri dev server config (`server.port = 1420`, `clearScreen = false`) |
+| `src/DataStudio.jsx` | Use `fileLoader.js` instead of direct `<input>` for file loading |
+
+---
+
+### 15.2 — Offline AI Fallback — PENDING
+
+When the user is offline (no internet) or has no Anthropic key set, AI features degrade gracefully:
+- AI narrative → replaced by a deterministic template-based summary (uses `LocalAI.js`, already exists)
+- AI unit inference → falls back to column name heuristics (already in codebase)
+- AI coaching → shows rule-based signals only (already in `coachingTriggers.js`)
+
+No new code required — just ensure the error handling in `AIService.js` falls through to `LocalAI.js` on network failure.
+
+---
+
+### 15.3 — Build & Release Pipeline — PENDING
+
+**GitHub Actions workflow** (`releases.yml`):
+1. On push to `main`: run `vite build`, deploy to Vercel (web version)
+2. On tag `v*.*.*`: additionally run `cargo tauri build`, upload binaries to GitHub Releases (macOS `.dmg`, Windows `.msi`, Linux `.AppImage`)
+3. After binaries upload: write `latest.json` to the CDN (triggers auto-update check in installed apps)
+
+**New files:**
+| File | Purpose |
+|------|---------|
+| `.github/workflows/deploy.yml` | Vercel deploy on push to main |
+| `.github/workflows/releases.yml` | Tauri build + GitHub release on version tag |
+
+---
+
+### Phase 15 Build Order
+
+1. **Tauri scaffold** — `cargo tauri init`; confirm app loads in Tauri WebView
+2. **`fileLoader.js`** — abstract file loading; no behavior change on web
+3. **`vite.config.js` Tauri dev mode** — `npm run tauri dev` works
+4. **Rust `read_file` command** — enables drag-to-path and "Open recent"
+5. **Auto-update config** — `tauri.conf.json` updater section + `latest.json` endpoint
+6. **GitHub Actions** — deploy + release workflows
+7. **Offline AI fallback** — verify `LocalAI.js` is called correctly on `fetch` error
+
+---
+
+## Overall Status Summary (last updated 2026-05-04)
 
 | Phase | Title | Status |
 |-------|-------|--------|
 | 1 | Standardised Estimation Result | DONE |
 | 2 | Advanced Context-Aware AI Coach | DONE |
 | 3 | Multi-Model Comparison System | DONE |
-| 4 | Integration | IN PROGRESS — pending browser validation of full comparison flow |
-| 5 | New Estimators (Fuzzy RDD, Event Study, LSDV, Poisson FE, Synthetic Control) | DONE (crash bugs fixed) |
+| 4 | Integration | IN PROGRESS |
+| 5 | New Estimators | DONE |
 | 6 | Robust Standard Errors | DONE |
-| 7 | New File Format Support (.rds, .shp/.dbf) | DONE |
-| 8 | Modeling UI Overhaul (EstimatorSidebar, InferenceOptions, CodeEditor) | DONE |
-| 9 | Workspace Architecture (7-tab shell, Dataset Manager, two-tier pipeline, Calculate, Simulate, exports) | DONE |
-| 10 | Probability & Simulation Analytics (CDFs/PDFs, Monte Carlo, probability calculator) | IN PROGRESS — 10.1 DONE (all 12 functions in calcEngine.js + buildScope); System solver (Newton-Raphson n×n) added to CalculateTab; 10.2 Monte Carlo + 10.3 Prob Calculator pending |
-| 11 | Spatial Analytics (geocoding, distance, buffer, grid, spatial join, map geom) | PENDING |
+| 7 | New File Format Support | DONE |
+| 8 | Modeling UI Overhaul | DONE |
+| 9 | Workspace Architecture | DONE |
+| 10 | Probability & Simulation Analytics | IN PROGRESS (10.1 done) |
+| 11 | Spatial Analytics | IN PROGRESS (11.1–11.5 done) |
+| 12 | Excel-style Cell Editing | PENDING — double-click focus bug |
+| 13 | Project Isolation & User Auth | IN PROGRESS (13.1 done) |
+| 14 | Web Launch v0.1 Beta | PENDING — blocked on 13 |
+| 15 | Local Installable Version (Tauri) | PENDING — blocked on 14 validation |
+
+---
 
 ## Next unblocked tasks
 
@@ -1064,4 +1420,8 @@ No new dependencies — Observable Plot handles the scatter rendering; tile laye
 
 3. **Phase 10.1** — add probability functions (`dnorm`, `pnorm`, `qnorm`, `dt`, `pt`, `qt`, `dbinom`, `pbinom`, `dpois`, `ppois`) to `calcEngine.js` and register in `buildScope()`. Unblocks 10.2 and 10.3.
 
-4. **Phase 11.1** — `SpatialEngine.js` pure math file. Unblocks all spatial pipeline steps.
+4. **Phase 13.1** — fix project isolation bug. Fast, no dependencies, unblocks auth.
+
+5. **Phase 13.2** — Supabase auth. Unblocks web deployment.
+
+6. **Phase 12** — Excel-style cell editing. Infrastructure complete; blocker is double-click → focus handoff. Use native DOM listener on `<tbody>` — see Phase 12 notes above.

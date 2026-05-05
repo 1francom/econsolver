@@ -1133,12 +1133,8 @@ function buildModelHint(panel, panelOk) {
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion }) {
   const { C } = useTheme();
-  // ── Dataset override (data= picker) ─────────────────────────────────────────
-  // null = use cleanedData (default). Set to a dataset entry to model on it.
-  const [overrideDataset, setOverrideDataset] = useState(null);
-
-  const rows    = overrideDataset?.rows    ?? cleanedData?.cleanRows ?? [];
-  const headers = overrideDataset?.headers ?? cleanedData?.headers   ?? [];
+  const rows    = cleanedData?.cleanRows ?? [];
+  const headers = cleanedData?.headers   ?? [];
   const panel   = cleanedData?.panelIndex ?? null;
 
   const fullPipeline    = cleanedData?.pipeline          ?? [];
@@ -1598,51 +1594,6 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             "Pin results to the model buffer to compare multiple specifications side by side",
             "Export: LaTeX table, CSV coefficients, or replication scripts in R / Stata / Python",
           ]} />
-
-          {/* ── Dataset picker (data= selector) ── */}
-          {availableDatasets.length > 1 && (
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono, marginBottom: 6 }}>
-                Data
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                {/* Default: cleanedData */}
-                {[
-                  { id: "__cleaned__", filename: cleanedData?.filename ?? "dataset.csv", rows: cleanedData?.cleanRows ?? [], headers: cleanedData?.headers ?? [] },
-                  ...availableDatasets.filter(d => d.filename !== (cleanedData?.filename ?? "")),
-                ].map(ds => {
-                  const isActive = overrideDataset === null
-                    ? ds.id === "__cleaned__"
-                    : overrideDataset.id === ds.id;
-                  return (
-                    <button
-                      key={ds.id}
-                      onClick={() => {
-                        if (ds.id === "__cleaned__") { setOverrideDataset(null); }
-                        else { setOverrideDataset(ds); }
-                        setResult(null); setErr(null);
-                        setYVar([]); setXVars([]); setWVars([]);
-                      }}
-                      style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "5px 8px", borderRadius: 3, cursor: "pointer", textAlign: "left",
-                        background: isActive ? `${C.gold}12` : "transparent",
-                        border: `1px solid ${isActive ? C.gold + "60" : C.border}`,
-                        fontFamily: mono,
-                      }}
-                    >
-                      <span style={{ fontSize: 10, color: isActive ? C.gold : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
-                        {ds.filename}
-                      </span>
-                      <span style={{ fontSize: 9, color: C.textMuted, flexShrink: 0, marginLeft: 6 }}>
-                        {ds.rows.length.toLocaleString()} obs
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           <EstimatorSidebar
             model={model}
