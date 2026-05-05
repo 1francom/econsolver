@@ -1594,12 +1594,43 @@ export default function App() {
   const coachSeqRef  = useRef(0);
   const studioRef    = useRef(null);
 
+  // ── Navigation history — tracks {screen, tab} entries for ← back button ──
+  const navHistory = useRef([]);                  // stack of past states
+  const [canGoBack, setCanGoBack]   = useState(false);
+
+  // Push current location before navigating somewhere new
+  function pushHistory(fromScreen, fromTab) {
+    navHistory.current.push({ screen: fromScreen, tab: fromTab });
+    setCanGoBack(true);
+  }
+
+  function goBack() {
+    const prev = navHistory.current.pop();
+    if (!prev) return;
+    setCanGoBack(navHistory.current.length > 0);
+    setScreen(prev.screen);
+    if (prev.tab) setActiveTab(prev.tab);
+  }
+
+  // Wrapped navigation helpers — always push before moving
+  function navigateToScreen(newScreen) {
+    pushHistory(screen, activeTab);
+    setScreen(newScreen);
+  }
+
+  function navigateToTab(newTab) {
+    if (newTab === activeTab) return;
+    pushHistory(screen, activeTab);
+    setActiveTab(newTab);
+  }
+
   // ── Load a saved project from the dashboard ──────────────────────────────
   const handleLoad = async p => {
-    setFilename(p.filename || "project");
+    setFilename(p.filename || p.name || "project");
     setPid(p.id);
     setOutputs({});
-    setActiveTab("clean");
+    navHistory.current = [];   // fresh history for this project
+    setCanGoBack(false);
 
     if (p.filename === "wages_panel_demo.csv") {
       const { headers, rows } = parseCSV(DEMO_CSV);
@@ -1610,6 +1641,7 @@ export default function App() {
       });
       const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
       setRawData(ensRi({ headers, rows: coerced }));
+      setActiveTab("data");
       setScreen("workspace");
       return;
     }
@@ -1618,10 +1650,13 @@ export default function App() {
     if (stored && stored.rows?.length) {
       const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
       setRawData(ensRi(stored));
-      setScreen("workspace");
+      setActiveTab("clean");
     } else {
-      setScreen("upload");
+      // No data yet — open workspace on the Data tab so user can load data
+      setRawData(null);
+      setActiveTab("data");
     }
+    setScreen("workspace");
   };
 
   // ── Called by ProjectNamingScreen when user confirms the project name ────
@@ -1638,7 +1673,9 @@ export default function App() {
     setFilename(projectName);
     setPid(newPid);
     setOutputs({});
-    setActiveTab("data"); // land on Data tab — that's where they load data
+    setActiveTab("data");
+    navHistory.current = [];   // fresh history for brand-new project
+    setCanGoBack(false);
     setScreen("workspace");
   };
 
@@ -1684,9 +1721,24 @@ export default function App() {
       `}</style>
 
       {/* ── Navbar ────────────────────────────────────────────────────────── */}
-      <div style={{height:38,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",padding:"0 1.2rem",gap:12,flexShrink:0,background:C.surface}}>
+      <div style={{height:38,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",padding:"0 1.2rem",gap:8,flexShrink:0,background:C.surface}}>
+
+        {/* ← Back button — visible whenever there is history to go back to */}
+        {canGoBack && (
+          <button
+            onClick={goBack}
+            title="Go back"
+            style={{background:"transparent",border:"none",color:C.textMuted,cursor:"pointer",
+                    fontFamily:mono,fontSize:16,lineHeight:1,padding:"0 4px",
+                    display:"flex",alignItems:"center",transition:"color 0.12s"}}
+            onMouseEnter={e=>{ e.currentTarget.style.color=C.teal; }}
+            onMouseLeave={e=>{ e.currentTarget.style.color=C.textMuted; }}
+          >←</button>
+        )}
+
         <button
-          onClick={()=>setScreen("dashboard")}
+          onClick={()=>navigateToScreen("dashboard")}
+          title="Go to dashboard"
           style={{background:"transparent",border:"none",color:C.gold,cursor:"pointer",fontFamily:mono,fontSize:11,letterSpacing:"0.12em"}}
         >
           ⬡ LITUX
@@ -1731,7 +1783,7 @@ export default function App() {
 
         {screen==="dashboard" && (
           <Dashboard
-            onNew={()=>setScreen("naming")}
+            onNew={()=>navigateToScreen("naming")}
             onLoad={handleLoad}
           />
         )}
@@ -1739,7 +1791,7 @@ export default function App() {
         {screen==="naming" && (
           <ProjectNamingScreen
             onConfirm={handleNamingConfirm}
-            onBack={() => setScreen("dashboard")}
+            onBack={goBack}
           />
         )}
 
@@ -1750,7 +1802,7 @@ export default function App() {
             <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
               <WorkspaceBar
                 activeTab={activeTab}
-                onTabChange={setActiveTab}
+                onTabChange={navigateToTab}
                 hasOutput={!!activeOutput}
                 activeDatasetId={activeDatasetId}
                 onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
@@ -1797,7 +1849,7 @@ export default function App() {
                         onDatasetsChange={setAvailableDatasets}
                         activeDatasetId={activeDatasetId}
                       />
-                    : <NeedsData onGoToData={() => setActiveTab("data")}/>
+                    : <NeedsData onGoToData={() => navigateToTab("data")}/>
                   }
                 </div>
 
@@ -1806,10 +1858,10 @@ export default function App() {
                   {activeOutput
                     ? <ExplorerModule
                         cleanedData={activeOutput}
-                        onBack={()=>setActiveTab("clean")}
-                        onProceed={()=>setActiveTab("model")}
+                        onBack={()=>navigateToTab("clean")}
+                        onProceed={()=>navigateToTab("model")}
                       />
-                    : <NeedsOutput onGoToClean={()=>setActiveTab("clean")}/>
+                    : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
                 </div>
 
@@ -1819,11 +1871,11 @@ export default function App() {
                     ? <ModelingTab
                         cleanedData={activeOutput}
                         availableDatasets={availableDatasets}
-                        onBack={()=>setActiveTab("explore")}
+                        onBack={()=>navigateToTab("explore")}
                         onResultChange={r=>setActiveResult(r)}
                         onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
                       />
-                    : <NeedsOutput onGoToClean={()=>setActiveTab("clean")}/>
+                    : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
                 </div>
 
@@ -1854,7 +1906,7 @@ export default function App() {
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
                   {activeOutput
                     ? <ReportingModule result={activeResult} cleanedData={activeOutput} />
-                    : <NeedsOutput onGoToClean={() => setActiveTab("clean")} />
+                    : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }
                 </div>
 
