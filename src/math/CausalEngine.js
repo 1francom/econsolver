@@ -1,15 +1,16 @@
 // ─── ECON STUDIO · src/math/CausalEngine.js ───────────────────────────────────
-// Causal inference estimators: 2SLS/IV and Sharp RDD.
+// Causal inference estimators: 2SLS/IV, Sharp RDD, Fuzzy RDD.
 // No React. No side effects. Depends only on LinearEngine.js.
 
 import {
   transpose, matMul, matInv,
   runOLS, pValue, fCDF,
 } from "./LinearEngine.js";
+import { computeRobustSE } from "../core/inference/robustSE.js";
 
 // ─── 2SLS / IV ───────────────────────────────────────────────────────────────
 // endog: endogenous regressors  |  exog: exogenous controls  |  instr: excluded instruments
-export function run2SLS(rows, yCol, endog, exog, instr) {
+export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     [...endog, ...exog, ...instr].every(c => typeof r[c] === "number" && isFinite(r[c]))
@@ -76,10 +77,12 @@ export function run2SLS(rows, yCol, endog, exog, instr) {
   if (!XtXinv)
     return { error: "Matrix is singular (check for perfect collinearity or weak instruments)." };
 
-  const corrSE = XtXinv.map((row, i) => {
+  const classicalSE = XtXinv.map((row, i) => {
     const v = row[i] * trueS2;
     return isFinite(v) && v >= 0 ? Math.sqrt(v) : NaN;
   });
+  const robustSe = computeRobustSE(seOpts, XtXinv, X2, trueResid, n, k, valid);
+  const corrSE   = robustSe ?? classicalSE;
   const corrT = secondRes.beta.map((b, i) => {
     const s = corrSE[i];
     return isFinite(b) && isFinite(s) && s > 0 ? b / s : NaN;
@@ -119,7 +122,7 @@ function kernelWeights(runningVals, cutoff, h, kernelType) {
   });
 }
 
-function runWLS(xData, yData, weights) {
+function runWLS(xData, yData, weights, seOpts = {}) {
   const sqW = weights.map(w => Math.sqrt(w));
   const wX  = xData.map((row, i) => row.map(v => v * sqW[i]));
   const wY  = yData.map((v, i) => v * sqW[i]);
@@ -140,7 +143,13 @@ function runWLS(xData, yData, weights) {
   const Ym  = yData.reduce((a, b) => a + b, 0) / n;
   const SST = yData.reduce((s, y) => s + (y - Ym) ** 2, 0);
   const R2  = 1 - SSR_uw / SST;
-  const se  = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  // Classical SE as default; computeRobustSE overrides when seType != "classical"
+  // For WLS, pass weight-scaled X and residuals so the HC meat matches R's sandwich:
+  // meat = Σ w_i² e_i² x_i x_i' = Σ (√w_i e_i)² (√w_i x_i)(√w_i x_i)'
+  const wResid = resid.map((e, i) => e * sqW[i]);
+  let se = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  const robustSe = computeRobustSE(seOpts, XtXinv, wX, wResid, n, k, null);
+  if (robustSe) se = robustSe;
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals  = tStats.map(t => pValue(t, df));
   return { beta, se, tStats, pVals, R2, n, df, SSR: SSR_uw, resid, yhat };
@@ -391,7 +400,7 @@ export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
     n,
   };
 }
-export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangular", controls = []) {
+export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangular", controls = [], seOpts = {}) {
   const valid = rows.filter(r =>
     typeof r[yCol]   === "number" && typeof r[runCol] === "number" &&
     isFinite(r[yCol]) && isFinite(r[runCol]) &&
@@ -405,7 +414,7 @@ export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangu
   const W  = kernelWeights(valid.map(r => r[runCol]), cutoff, h, kernelType);
   const X  = valid.map((r, i) => [1, D[i], xc[i], D[i] * xc[i], ...controls.map(c => r[c])]);
 
-  const res = runWLS(X, Y, W);
+  const res = runWLS(X, Y, W, seOpts);
   if (!res) return null;
 
   const varNames  = ["(Intercept)", "D (treatment)", "running − c", "D × (running − c)", ...controls];
@@ -425,5 +434,260 @@ export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangu
     late:   res.beta[1],
     lateSE: res.se[1],
     lateP:  res.pVals[1],
+  };
+}
+
+// ─── FUZZY RDD ────────────────────────────────────────────────────────────────
+// Fuzzy RDD: treatment take-up is imperfect at the cutoff.
+// Uses the cutoff indicator as an IV for actual treatment D in a 2SLS sense,
+// estimated locally via WLS with kernel weights.
+//
+// First stage:  D_i  ~ [1, (x-c), above, (x-c)·above]  — WLS with kernel weights
+// Second stage: Y_i  ~ [D̂_i, (x-c), above, (x-c)·above] — WLS, same weights
+// LATE = coefficient on D̂_i in the second stage.
+//
+// The local Wald ratio: τ = jump_Y / jump_D at the cutoff.
+// SE: propagated from the IV sandwich (2SLS-in-a-window).
+//
+// Parameters:
+//   rows    — data rows
+//   yCol    — outcome column name
+//   dCol    — treatment column name (binary or fractional, the fuzzy take-up)
+//   runCol  — running variable column name
+//   cutoff  — threshold value
+//   opts    — { bandwidth, kernel, seOpts }
+//             bandwidth = null → IK bandwidth selector
+//             kernel    = "triangular" (default)
+export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
+  const { bandwidth = null, kernel = "triangular", seOpts = {} } = opts;
+
+  // ── 1. Filter valid rows ────────────────────────────────────────────────────
+  const valid = rows.filter(r =>
+    typeof r[yCol]   === "number" && isFinite(r[yCol])   &&
+    typeof r[dCol]   === "number" && isFinite(r[dCol])   &&
+    typeof r[runCol] === "number" && isFinite(r[runCol])
+  );
+
+  if (valid.length < 10)
+    return { error: "Insufficient observations for Fuzzy RDD (need ≥ 10 valid rows)." };
+
+  const runVals = valid.map(r => r[runCol]);
+  const yVals   = valid.map(r => r[yCol]);
+
+  // ── 2. Determine bandwidth ──────────────────────────────────────────────────
+  // If user supplies one, use it directly.
+  // Otherwise apply IK bandwidth to Y ~ running (same logic as Sharp RDD UI).
+  const h = bandwidth != null
+    ? Number(bandwidth)
+    : ikBandwidth(runVals, yVals, cutoff);
+
+  if (!isFinite(h) || h <= 0)
+    return { error: "Bandwidth selection failed — check that the running variable has sufficient spread." };
+
+  // ── 3. Filter to bandwidth window and compute kernel weights ─────────────────
+  const inWindow = valid.filter(r => Math.abs(r[runCol] - cutoff) <= h);
+
+  if (inWindow.length < 8)
+    return { error: `Too few observations within bandwidth (h=${h.toFixed(4)}). Widen bandwidth or use more data.` };
+
+  const xc     = inWindow.map(r => r[runCol] - cutoff);
+  const above  = inWindow.map(r => r[runCol] >= cutoff ? 1 : 0);
+  const D      = inWindow.map(r => r[dCol]);
+  const Y      = inWindow.map(r => r[yCol]);
+  const W      = kernelWeights(inWindow.map(r => r[runCol]), cutoff, h, kernel);
+
+  const n = inWindow.length;
+
+  // ── First stage design matrix: [1, Z, (x-c), Z·(x-c)] ─────────────────────
+  // Column order: intercept=0, above(Z)=1, xc=2, Z·xc=3
+  // Z = above is the excluded instrument; all four columns appear in the first stage.
+  const Xfs = inWindow.map((_, i) => [1, above[i], xc[i], above[i] * xc[i]]);
+
+  // ── 4. First stage: D ~ Xfs with kernel weights ─────────────────────────────
+  // β̂_fs = (X_fs' W X_fs)⁻¹ X_fs' W D
+  const firstStage = runWLS(Xfs, D, W);
+  if (!firstStage)
+    return { error: "First-stage WLS failed — singular matrix. Check for perfect collinearity." };
+
+  const Dhat = firstStage.yhat; // D̂_i = fitted values of treatment from first stage
+
+  // ── 5. First-stage diagnostics ───────────────────────────────────────────────
+  // F-stat: tests H₀: α₁ = 0 (instrument Z has no effect on D).
+  // Restricted model drops the 'above' (Z) indicator: D ~ [1, xc, Z·xc]
+  // This is the key weak-instrument check (Stock-Yogo threshold: F < 10 → weak).
+  const XfsRestricted = inWindow.map((_, i) => [1, xc[i], above[i] * xc[i]]);
+  const firstRestricted = runWLS(XfsRestricted, D, W);
+  const qFS  = 1; // one exclusion restriction (Z = above indicator)
+  const dfFS = firstStage.df;
+  const fstatFS = firstRestricted && dfFS > 0
+    ? ((firstRestricted.SSR - firstStage.SSR) / qFS) / (firstStage.SSR / dfFS)
+    : NaN;
+  const weakInstrument = isFinite(fstatFS) ? fstatFS < 10 : true;
+
+  // First-stage jump in D at cutoff: coefficient on Z (column index 1)
+  // This is α̂₁ = E[D | x≥c] − E[D | x<c] at the cutoff (first-stage discontinuity)
+  const firstStageJumpD = firstStage.beta[1];
+
+  // ── 6. Second stage: Y ~ [1, D̂, (x-c), Z·(x-c)] with kernel weights ────────
+  // Structural equation: Y = β₀ + β₁·D + β₂·(x-c) + β₃·Z·(x-c) + u
+  // Z is the EXCLUDED instrument — it does NOT appear directly in the structural
+  // equation. The intercept shift across the cutoff is absorbed by β₁ (the LATE).
+  // X̂ = [1, D̂, (x-c), Z·(x-c)]  — instrumented design matrix for 2SLS
+  const Xss = inWindow.map((_, i) => [1, Dhat[i], xc[i], above[i] * xc[i]]);
+
+  const secondStage = runWLS(Xss, Y, W);
+  if (!secondStage)
+    return { error: "Second-stage WLS failed — singular matrix." };
+
+  // ── 7. LATE (Local Average Treatment Effect) ─────────────────────────────────
+  // β̂₁ = LATE: causal effect of treatment at the cutoff (compliers only).
+  // Column index 1 (after intercept at 0).
+  const late  = secondStage.beta[1];
+  const lateT = secondStage.tStats[1];
+  const lateP = secondStage.pVals[1];
+
+  // ── 8. Corrected IV standard errors ─────────────────────────────────────────
+  // Var(β̂_2SLS) = σ̂² · (X̂'WX̂)⁻¹
+  //
+  //   σ̂² = Σᵢ eᵢ² / (n−k)   — UNWEIGHTED structural residuals
+  //         eᵢ = Yᵢ − X_orig_i · β̂_2SLS   (X_orig uses actual D, not D̂)
+  //
+  //   (X̂'WX̂)⁻¹  — kernel-weighted bread using instrumented regressors D̂
+  //
+  // Using weighted SSR would deflate σ̂² by mean(W) ≈ 0.5 for triangular kernel,
+  // causing ~√2 underestimation of SE (same issue as Sharp RDD).
+  const k    = 4;   // [intercept, D, xc, Z·xc]
+  const dfIV = n - k;
+  if (dfIV <= 0)
+    return { error: "Degrees of freedom ≤ 0 in second stage." };
+
+  // Structural design matrix: X_orig = [1, D, (x-c), Z·(x-c)]  (original D, not D̂)
+  const XorigSS = inWindow.map((_, i) => [1, D[i], xc[i], above[i] * xc[i]]);
+  const residIV = Y.map((y, i) =>
+    y - XorigSS[i].reduce((s, v, j) => s + v * secondStage.beta[j], 0)
+  );
+  // σ̂² from UNWEIGHTED SSR of structural residuals
+  const SSR_IV = residIV.reduce((s, e) => s + e * e, 0);
+  const s2IV   = SSR_IV / dfIV;
+
+  // (X̂'WX̂)⁻¹: kernel-weighted instrumented design matrix
+  // wXss = √W · X̂  →  (wXss' wXss) = X̂'WX̂
+  const sqW_iv   = W.map(w => Math.sqrt(w));
+  const wXss     = Xss.map((row, i) => row.map(v => v * sqW_iv[i]));
+  const XtXinvIV = matInv(matMul(transpose(wXss), wXss));
+
+  // Classical SE: σ̂² · diag(X̂'WX̂)⁻¹
+  const classicalSE = XtXinvIV
+    ? XtXinvIV.map((row, i) => {
+        const v = row[i] * s2IV;
+        return isFinite(v) && v >= 0 ? Math.sqrt(v) : secondStage.se[i];
+      })
+    : secondStage.se;
+
+  // Robust SE (HC1/HC3/clustered): 2SLS sandwich with kernel-weighted X̂ and structural e
+  // wResidIV = √W · e — scales meat consistently with the kernel-weighted bread
+  const wResidIV = residIV.map((e, i) => e * sqW_iv[i]);
+  const robustSE  = computeRobustSE(seOpts, XtXinvIV, wXss, wResidIV, n, k, null);
+  const corrSE    = robustSE ?? classicalSE;
+
+  const lateSE    = corrSE[1]; // index 1 = β̂₁ (LATE), after intercept
+  const lateTCorr = isFinite(lateSE) && lateSE > 0 ? late / lateSE : lateT;
+  const latePCorr = isFinite(lateTCorr) ? pValue(lateTCorr, dfIV) : lateP;
+
+  // ── 8. Local Wald ratio for reference ────────────────────────────────────────
+  // Also compute reduced-form Sharp RDD (jump in Y at cutoff ignoring D),
+  // and report the Wald ratio: τ_fuzzy = jump_Y / jump_D
+  const reducedForm = runSharpRDD(valid, yCol, runCol, cutoff, h, kernel);
+
+  const jumpY = reducedForm ? reducedForm.late : NaN;
+  const waldRatio = isFinite(firstStageJumpD) && Math.abs(firstStageJumpD) > 1e-10
+    ? jumpY / firstStageJumpD
+    : NaN;
+
+  // ── 9. Plot data: smooth fit lines using first-stage + second-stage coefficients
+  // Using D̂ from first stage at each grid point gives a clean regression curve,
+  // avoiding the noisy band caused by actual D[i] varying within each side.
+  //   Left  (above=0): D̂(x) = α₀ + α₂·xc;            Ŷ = β₀ + β₁·D̂ + β₂·xc
+  //   Right (above=1): D̂(x) = α₀ + α₁ + (α₂+α₃)·xc;  Ŷ = β₀ + β₁·D̂ + (β₂+β₃)·xc
+  const Yhat2SLS = XorigSS.map((row, i) =>
+    row.reduce((s, v, j) => s + v * secondStage.beta[j], 0)
+  );
+
+  const nGrid = 60;
+  const fsB = firstStage.beta;   // [α₀, α₁(Z), α₂(xc), α₃(Z·xc)]
+  const ssB = secondStage.beta;  // [β₀, β₁(D), β₂(xc), β₃(Z·xc)]
+
+  const leftFit = Array.from({ length: nGrid + 1 }, (_, i) => {
+    const x    = cutoff - h + i * (h / nGrid);
+    const xcv  = x - cutoff;
+    const dhat = fsB[0] + fsB[2] * xcv;                              // above=0
+    const yhat = ssB[0] + ssB[1] * dhat + ssB[2] * xcv;             // above=0
+    return { x, yhat };
+  });
+
+  const rightFit = Array.from({ length: nGrid + 1 }, (_, i) => {
+    const x    = cutoff + i * (h / nGrid);
+    const xcv  = x - cutoff;
+    const dhat = fsB[0] + fsB[1] + (fsB[2] + fsB[3]) * xcv;         // above=1
+    const yhat = ssB[0] + ssB[1] * dhat + (ssB[2] + ssB[3]) * xcv;  // above=1
+    return { x, yhat };
+  });
+
+  // ── 10. Return result ────────────────────────────────────────────────────────
+  // varNames match X̂ column order: [intercept, D̂, (x-c), Z·(x-c)]
+  const varNames = ["(Intercept)", "D (LATE)", "running − c", "Z × (running − c)"];
+  // First-stage column order: [intercept, Z, (x-c), Z·(x-c)]
+  const firstStageVarNames = ["(Intercept)", "Z (instrument)", "running − c", "Z × (running − c)"];
+
+  return {
+    // Core LATE
+    late,
+    lateSE,
+    lateT:  lateTCorr,
+    lateP:  latePCorr,
+
+    // First-stage diagnostics
+    firstStageFstat:  fstatFS,
+    firstStageJumpD,
+    firstStageR2:     firstStage.R2,
+    weak:             weakInstrument,
+
+    // Wald ratio cross-check
+    waldRatio,
+    reducedForm,   // runSharpRDD result (jump in Y at cutoff)
+
+    // Second-stage detail (corrected SE replaces WLS SE from second stage)
+    beta:    secondStage.beta,
+    se:      [corrSE[0], lateSE, corrSE[2], corrSE[3]],
+    tStats:  [secondStage.tStats[0], lateTCorr, secondStage.tStats[2], secondStage.tStats[3]],
+    pVals:   [secondStage.pVals[0],  latePCorr, secondStage.pVals[2],  secondStage.pVals[3]],
+    R2:      secondStage.R2,
+    varNames,
+
+    // Sample info
+    n,
+    df:    dfIV,
+    bandwidth: h,
+    h,           // alias for RDDPlot
+    kernel,
+    kernelType: kernel,  // alias for RDDPlot
+    cutoff,
+
+    // Plot data
+    leftFit,
+    rightFit,
+    Yhat: Yhat2SLS,
+
+    // Raw arrays for downstream use
+    valid: inWindow,
+    xc,
+    above,   // Z indicator (1 = above cutoff) — used by RDDPlot for left/right coloring
+    D,
+    Y,
+    W,
+    Dhat,
+    firstStage,
+    firstStageVarNames,
+    secondStage,
   };
 }

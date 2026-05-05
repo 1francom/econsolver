@@ -3,18 +3,22 @@
 // Includes undo / redo controls powered by WranglingModule's snapshot stacks.
 //
 // Props:
-//   pipeline  — step[]
-//   onRm(i)   — remove step at index i
-//   onClear() — clear all steps
-//   onUndo()  — revert to previous snapshot
-//   onRedo()  — advance to next snapshot
-//   canUndo   — boolean
-//   canRedo   — boolean
+//   pipeline        — step[]
+//   onRm(i)         — remove step at index i
+//   onClear()       — clear all steps
+//   onUndo()        — revert to previous snapshot
+//   onRedo()        — advance to next snapshot
+//   canUndo         — boolean
+//   canRedo         — boolean
+//   pendingDelete   — { index, downstreamCount } | null
+//   onConfirmDelete(mode) — "single" | "cascade"
+//   onCancelDelete  — cancel pending delete
 
-import { C, mono, Lbl } from "./shared.jsx";
+import { useState } from "react";
+import { useTheme, mono, Lbl } from "./shared.jsx";
 
 // ── Step type → accent color ──────────────────────────────────────────────────
-const TYPE_COLOR = {
+const typeColor = C => ({
   recode:C.teal, quickclean:C.teal, winz:C.orange, log:C.blue, sq:C.blue,
   std:C.blue, drop:C.red, filter:C.yellow, ai_tr:C.purple, dummy:C.green,
   did:C.gold, lag:C.orange, lead:C.orange, diff:C.orange, ix:C.blue,
@@ -24,7 +28,7 @@ const TYPE_COLOR = {
   trim_outliers:C.red, flag_outliers:C.orange,
   extract_regex:C.violet, normalize_cats:C.teal, factor_interactions:C.blue,
   arrange:C.textMuted, type_cast:C.orange,
-};
+});
 
 // ── Step type → short icon ────────────────────────────────────────────────────
 const TYPE_ICON = {
@@ -39,6 +43,7 @@ const TYPE_ICON = {
 
 // ── Undo / Redo button ────────────────────────────────────────────────────────
 function UndoBtn({ label, title, onClick, enabled }) {
+  const { C } = useTheme();
   return (
     <button
       onClick={onClick}
@@ -63,8 +68,14 @@ function UndoBtn({ label, title, onClick, enabled }) {
   );
 }
 
-function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo }) {
+function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete }) {
+  const { C } = useTheme();
+  const [patchOpen, setPatchOpen] = useState(false);
   if (!pipeline.length && !canUndo && !canRedo) return null;
+
+  // Separate patch (cell edit) steps from regular pipeline steps
+  const patches  = pipeline.map((s, i) => ({ s, i })).filter(({ s }) => s.type === "patch");
+  const regulars = pipeline.map((s, i) => ({ s, i })).filter(({ s }) => s.type !== "patch");
 
   return (
     <div style={{
@@ -104,6 +115,16 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo }) 
 
       {/* ── Step list ── */}
       <div style={{ flex: 1, overflowY: "auto", padding: "0.6rem 1rem" }}>
+        {branchPointIndex !== null && (
+          <div style={{
+            fontSize: 9, color: C.gold, fontFamily: mono, lineHeight: 1.6,
+            padding: "4px 6px", marginBottom: 4,
+            background: `${C.gold}0d`, borderRadius: 3, border: `1px solid ${C.gold}30`,
+          }}>
+            Shared: {branchPointIndex + 1} step{branchPointIndex !== 0 ? "s" : ""}<br/>
+            Per-subset: {pipeline.length - branchPointIndex - 1} step{pipeline.length - branchPointIndex - 1 !== 1 ? "s" : ""}
+          </div>
+        )}
         {pipeline.length === 0 ? (
           <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono,
             textAlign: "center", paddingTop: "1rem", lineHeight: 1.8 }}>
@@ -112,46 +133,213 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo }) 
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {pipeline.map((s, i) => {
-              const col = TYPE_COLOR[s.type] || C.textMuted;
+
+            {/* ── Cell edits group (collapsible) ── */}
+            {patches.length > 0 && (
+              <div style={{ marginBottom: 2 }}>
+                {/* Group header */}
+                <div
+                  onClick={() => setPatchOpen(o => !o)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 4,
+                    padding: "0.35rem 0.5rem",
+                    background: C.surface2,
+                    borderRadius: patchOpen ? "3px 3px 0 0" : 3,
+                    border: `1px solid ${C.border}`,
+                    borderLeft: `2px solid ${C.teal}`,
+                    cursor: "pointer",
+                    userSelect: "none",
+                  }}>
+                  <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>
+                    {patchOpen ? "▾" : "▸"}
+                  </span>
+                  <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>✎</span>
+                  <span style={{ flex: 1, fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                    Cell edits ({patches.length})
+                  </span>
+                  {onClearPatches && (
+                    <button
+                      onClick={e => { e.stopPropagation(); onClearPatches(); }}
+                      title="Remove all cell edits"
+                      style={{
+                        background: "transparent", border: "none",
+                        color: C.textMuted, cursor: "pointer",
+                        fontSize: 9, padding: "0 2px", flexShrink: 0,
+                        fontFamily: mono,
+                      }}
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+                {/* Expanded list */}
+                {patchOpen && (
+                  <div style={{
+                    border: `1px solid ${C.border}`,
+                    borderTop: "none",
+                    borderRadius: "0 0 3px 3px",
+                    background: C.bg,
+                    display: "flex", flexDirection: "column", gap: 0,
+                  }}>
+                    {patches.map(({ s, i }) => (
+                      <div key={s.id || i} style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        padding: "0.28rem 0.5rem",
+                        borderBottom: `1px solid ${C.border}`,
+                      }}>
+                        <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>✎</span>
+                        <span style={{
+                          flex: 1, fontSize: 9, color: C.textDim, fontFamily: mono,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {s.desc || `row ${(s.ri ?? 0) + 1} · ${s.col}`}
+                        </span>
+                        <button
+                          onClick={() => onRm(i)}
+                          title={`Remove this cell edit`}
+                          style={{
+                            background: "transparent", border: "none",
+                            color: C.textMuted, cursor: "pointer",
+                            fontSize: 11, padding: "0 2px", flexShrink: 0,
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Regular pipeline steps ── */}
+            {regulars.map(({ s, i }) => {
+              const col = typeColor(C)[s.type] || C.textMuted;
               const ico = TYPE_ICON[s.type]  || "·";
+              const isActiveBranch = branchPointIndex === i;
+
+              // Deletion state roles
+              const isTarget     = pendingDelete?.index === i;
+              const isDownstream = pendingDelete != null && i > pendingDelete.index;
+              const isBlocked    = pendingDelete != null && !isTarget;
+
               return (
-                <div key={s.id || i} style={{
-                  display: "flex", alignItems: "center", gap: 4,
-                  padding: "0.35rem 0.5rem",
-                  background: C.surface2, borderRadius: 3,
-                  border: `1px solid ${C.border}`,
-                  borderLeft: `2px solid ${col}`,
-                }}>
-                  <span style={{
-                    fontSize: 8, color: C.textMuted, fontFamily: mono,
-                    flexShrink: 0, minWidth: 12, textAlign: "right",
+                <div key={s.id || i}>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 4,
+                    padding: "0.35rem 0.5rem",
+                    background: isTarget ? "#2a0a0a" : isDownstream ? "#1a1500" : C.surface2,
+                    borderRadius: 3,
+                    border: `1px solid ${isTarget ? C.red + "60" : isDownstream ? C.yellow + "50" : C.border}`,
+                    borderLeft: `2px solid ${isTarget ? C.red : isDownstream ? C.yellow : col}`,
+                    opacity: isBlocked && !isTarget && !isDownstream ? 0.45 : 1,
+                    transition: "all 0.12s",
                   }}>
-                    {i + 1}
-                  </span>
-                  <span style={{
-                    fontSize: 8, color: col, fontFamily: mono,
-                    flexShrink: 0, minWidth: 14, textAlign: "center",
-                  }}>
-                    {ico}
-                  </span>
-                  <span style={{
-                    flex: 1, fontSize: 10, color: C.textDim, fontFamily: mono,
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {s.desc || s.type}
-                  </span>
-                  <button
-                    onClick={() => onRm(i)}
-                    title={`Remove step ${i + 1}`}
+                    <span style={{
+                      fontSize: 8, color: isTarget ? C.red : isDownstream ? C.yellow : C.textMuted,
+                      fontFamily: mono, flexShrink: 0, minWidth: 12, textAlign: "right",
+                    }}>
+                      {i + 1}
+                    </span>
+                    <span style={{
+                      fontSize: 8, color: isTarget ? C.red : isDownstream ? C.yellow : col,
+                      fontFamily: mono, flexShrink: 0, minWidth: 14, textAlign: "center",
+                    }}>
+                      {isDownstream ? "!" : ico}
+                    </span>
+                    <span style={{
+                      flex: 1, fontSize: 10,
+                      color: isTarget ? C.red : isDownstream ? C.yellow : C.textDim,
+                      fontFamily: mono,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      textDecoration: isTarget ? "line-through" : "none",
+                    }}>
+                      {s.desc || s.type}
+                    </span>
+                    <button
+                      onClick={() => !isBlocked && onRm(i)}
+                      title={isBlocked ? "Resolve pending delete first" : `Remove step ${i + 1}`}
+                      style={{
+                        background: "transparent", border: "none",
+                        color: isTarget ? C.red : C.textMuted,
+                        cursor: isBlocked ? "not-allowed" : "pointer",
+                        fontSize: 11, padding: "0 2px", flexShrink: 0,
+                        opacity: isBlocked && !isTarget ? 0.3 : 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  {/* Inline confirmation UI — shown immediately below the target step */}
+                  {isTarget && (
+                    <div style={{
+                      padding: "0.55rem 0.5rem",
+                      background: "#1a0808",
+                      border: `1px solid ${C.red}40`,
+                      borderTop: "none",
+                      borderRadius: "0 0 3px 3px",
+                      marginBottom: 2,
+                    }}>
+                      <div style={{ fontSize: 9, color: C.red, fontFamily: mono, marginBottom: 6 }}>
+                        {pendingDelete.downstreamCount} step{pendingDelete.downstreamCount > 1 ? "s" : ""} after this may be affected.
+                      </div>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        <button
+                          onClick={() => onConfirmDelete("single")}
+                          style={{
+                            padding: "0.25rem 0.6rem", background: "transparent",
+                            border: `1px solid ${C.red}70`, borderRadius: 3,
+                            color: C.red, cursor: "pointer", fontFamily: mono, fontSize: 9,
+                          }}
+                        >
+                          Delete this step
+                        </button>
+                        <button
+                          onClick={() => onConfirmDelete("cascade")}
+                          style={{
+                            padding: "0.25rem 0.6rem", background: "#2a0808",
+                            border: `1px solid ${C.red}`, borderRadius: 3,
+                            color: C.red, cursor: "pointer", fontFamily: mono, fontSize: 9,
+                            fontWeight: 700,
+                          }}
+                        >
+                          Delete + {pendingDelete.downstreamCount} after
+                        </button>
+                        <button
+                          onClick={onCancelDelete}
+                          style={{
+                            padding: "0.25rem 0.6rem", background: "transparent",
+                            border: `1px solid ${C.border2}`, borderRadius: 3,
+                            color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9,
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {/* Branch point marker — click to set/clear */}
+                  <div
+                    onClick={() => onSetBranch && onSetBranch(i)}
+                    title={isActiveBranch ? "Click to remove branch point" : "Set branch point here"}
+                    onMouseEnter={e => { e.currentTarget.style.opacity = "1"; }}
+                    onMouseLeave={e => { e.currentTarget.style.opacity = isActiveBranch ? "1" : "0"; }}
                     style={{
-                      background: "transparent", border: "none",
-                      color: C.textMuted, cursor: "pointer",
-                      fontSize: 11, padding: "0 2px", flexShrink: 0,
+                      display: "flex", alignItems: "center", gap: 4,
+                      margin: "1px 0", cursor: "pointer", padding: "2px 4px",
+                      borderRadius: 2, opacity: isActiveBranch ? 1 : 0,
                     }}
                   >
-                    ×
-                  </button>
+                    <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : "#555" }} />
+                    <span style={{
+                      fontSize: 8, color: isActiveBranch ? C.gold : "#888",
+                      fontFamily: mono, letterSpacing: "0.1em", flexShrink: 0,
+                    }}>
+                      {isActiveBranch ? "⊣ branch" : "⊣"}
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : "#555" }} />
+                  </div>
                 </div>
               );
             })}
@@ -166,7 +354,10 @@ function History({ pipeline, onRm, onClear, onUndo, onRedo, canUndo, canRedo }) 
           fontSize: 9, color: C.textMuted, fontFamily: mono,
           flexShrink: 0,
         }}>
-          {pipeline.length} step{pipeline.length !== 1 ? "s" : ""} · IDB ✓
+          {branchPointIndex !== null
+            ? `${branchPointIndex + 1} shared · ${pipeline.length - branchPointIndex - 1} per-subset · IDB ✓`
+            : `${regulars.length} step${regulars.length !== 1 ? "s" : ""}${patches.length ? ` · ${patches.length} edit${patches.length !== 1 ? "s" : ""}` : ""} · IDB ✓`
+          }
         </div>
       )}
     </div>

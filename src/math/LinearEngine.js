@@ -2,6 +2,8 @@
 // Pure math. No React. No side effects.
 // Owns: matrix algebra, core statistics, OLS engine, diagnostics, export helpers.
 
+import { computeRobustSE } from "../core/inference/robustSE.js";
+
 // ─── MATRIX ALGEBRA ──────────────────────────────────────────────────────────
 export function transpose(M) {
   return M[0].map((_, c) => M.map(r => r[c]));
@@ -86,7 +88,8 @@ export function stars(p) {
 // ─── OLS ENGINE ───────────────────────────────────────────────────────────────
 // Returns { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat,
 //           Fstat, Fpval, varNames }
-export function runOLS(rows, yCol, xCols) {
+// seOpts (optional): { seType, clusterVar, clusterVar2, timeVar, maxLag }
+export function runOLS(rows, yCol, xCols, seOpts = {}) {
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     xCols.every(c => typeof r[c] === "number" && isFinite(r[c]))
@@ -102,20 +105,96 @@ export function runOLS(rows, yCol, xCols) {
   const Yhat = X.map(row => row.reduce((s, v, i) => s + v * beta[i], 0));
   const resid = Y.map((y, i) => y - Yhat[i]);
   const SSR = resid.reduce((s, e) => s + e * e, 0);
-  const df = n - xCols.length - 1;
+  const k = xCols.length + 1; // number of parameters (incl. intercept)
+  const df = n - k;
   const s2 = SSR / Math.max(1, df);
   const Ym = Y.reduce((a, b) => a + b, 0) / n;
   const SST = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
   const R2 = 1 - SSR / SST;
   const adjR2 = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
-  const se = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+
+  // Robust SE — falls back to classical when seType is "classical" or absent
+  let se = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  const robustSe = computeRobustSE(seOpts, XtXinv, X, resid, n, k, valid);
+  if (robustSe) se = robustSe;
+
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals = tStats.map(t => pValue(t, df));
   const Fstat = ((SST - SSR) / xCols.length) / s2;
   const Fpval = fCDF(Fstat, xCols.length, df);
   const varNames = ["(Intercept)", ...xCols];
-  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames };
+  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames, XtXinv };
 }
+
+// ─── WLS ENGINE ──────────────────────────────────────────────────────────────
+// Weighted Least Squares: β = (X'WX)⁻¹X'WY
+// weights: array of non-negative numbers, one per row (e.g. sampling weights).
+// Rows with weight ≤ 0 or non-finite weight are excluded.
+// Returns same shape as runOLS plus { weightCol } for display.
+export function runWLS(rows, yCol, xCols, weights, seOpts = {}) {
+  const valid = rows
+    .map((r, i) => ({ r, w: weights?.[i] ?? 1 }))
+    .filter(({ r, w }) =>
+      typeof r[yCol] === "number" && isFinite(r[yCol]) &&
+      xCols.every(c => typeof r[c] === "number" && isFinite(r[c])) &&
+      isFinite(w) && w > 0
+    );
+  if (valid.length < xCols.length + 2) return null;
+
+  const n  = valid.length;
+  const Y  = valid.map(({ r }) => r[yCol]);
+  const X  = valid.map(({ r }) => [1, ...xCols.map(c => r[c])]);
+  const W  = valid.map(({ w }) => w);  // raw weights
+
+  // Build X'WX and X'WY
+  const k = X[0].length;
+  const XtWX = Array.from({ length: k }, () => Array(k).fill(0));
+  const XtWY = Array(k).fill(0);
+  for (let i = 0; i < n; i++) {
+    const wi = W[i];
+    for (let j = 0; j < k; j++) {
+      XtWY[j] += wi * X[i][j] * Y[i];
+      for (let l = 0; l < k; l++) XtWX[j][l] += wi * X[i][j] * X[i][l];
+    }
+  }
+
+  const XtWXinv = matInv(XtWX);
+  if (!XtWXinv) return null;
+
+  const beta = XtWXinv.map((row) => row.reduce((s, v, j) => s + v * XtWY[j], 0));
+  const Yhat = X.map(row => row.reduce((s, v, i) => s + v * beta[i], 0));
+  const resid = Y.map((y, i) => y - Yhat[i]);
+
+  // σ² uses UNWEIGHTED SSR / df (HC-consistent; do NOT weight SSR)
+  const SSR = resid.reduce((s, e) => s + e * e, 0);
+  const df  = n - k;
+  const s2  = SSR / Math.max(1, df);
+
+  // Weighted R² — compare weighted SST vs weighted SSR
+  const Yw_mean = W.reduce((s, w, i) => s + w * Y[i], 0) / W.reduce((s, w) => s + w, 0);
+  const SST_w   = Y.reduce((s, y, i) => s + W[i] * (y - Yw_mean) ** 2, 0);
+  const SSR_w   = resid.reduce((s, e, i) => s + W[i] * e * e, 0);
+  const R2      = SST_w > 0 ? 1 - SSR_w / SST_w : 0;
+  const adjR2   = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
+
+  // For WLS, pass weight-scaled X and residuals so HC meat matches R's sandwich:
+  // meat = Σ w_i² e_i² x_i x_i' = Σ (√w_i e_i)² (√w_i x_i)(√w_i x_i)'
+  const sqW    = W.map(w => Math.sqrt(w));
+  const wX     = X.map((row, i) => row.map(v => v * sqW[i]));
+  const wResid = resid.map((e, i) => e * sqW[i]);
+  let se       = XtWXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  const robustSe = computeRobustSE(seOpts, XtWXinv, wX, wResid, n, k, valid);
+  if (robustSe) se = robustSe;
+  const tStats = beta.map((b, i) => b / se[i]);
+  const pVals  = tStats.map(t => pValue(t, df));
+  const Fstat  = ((SST_w - SSR_w) / (k - 1)) / (SSR_w / Math.max(1, df));
+  const Fpval  = fCDF(Fstat, k - 1, df);
+  const varNames = ["(Intercept)", ...xCols];
+
+  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames, XtXinv: XtWXinv };
+}
+
+
 
 // ─── DIAGNOSTICS ─────────────────────────────────────────────────────────────
 
@@ -171,11 +250,11 @@ export function hausmanTest(fe, fd, xCols) {
 // ─── EXPORT HELPERS ──────────────────────────────────────────────────────────
 export function buildLatex(yVar, xVars, results, model = "OLS") {
   const vars = results.varNames || ["(Intercept)", ...xVars];
-  const fmtP = p => (p == null ? "N/A" : p < 0.001 ? "<0.001" : p.toFixed(4));
+  const fmtP = p => (p == null ? "N/A" : p < 0.001 ? "$<$0.001" : p.toFixed(4));
   const rows = vars.map((v, i) => {
     const b  = results.beta?.[i];
     const se = results.se?.[i];
-    const t  = results.tStats?.[i];
+    const t  = (results.testStats ?? results.tStats)?.[i];
     const p  = results.pVals?.[i];
     const bFmt  = b  != null && isFinite(b)  ? b.toFixed(4)  : "N/A";
     const seFmt = se != null && isFinite(se) ? se.toFixed(4) : "N/A";
@@ -206,7 +285,7 @@ export function buildCSVExport(yVar, results) {
   const rows = vars.map((v, i) => {
     const b  = results.beta?.[i];
     const se = results.se?.[i];
-    const t  = results.tStats?.[i];
+    const t  = (results.testStats ?? results.tStats)?.[i];
     const p  = results.pVals?.[i];
     return [
       v,

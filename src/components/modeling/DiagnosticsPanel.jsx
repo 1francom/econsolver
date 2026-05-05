@@ -15,28 +15,21 @@
 // All tests are computed lazily via useMemo — zero cost if not rendered.
 
 import { useState, useMemo } from "react";
+import { useTheme } from "../../ThemeContext.jsx";
 import { breuschPagan, whiteTest }      from "../../core/diagnostics/heteroskedasticity.js";
 import { durbinWatson, breuschGodfrey } from "../../core/diagnostics/autocorrelation.js";
 import { jarqueBera, shapiroWilk }      from "../../core/diagnostics/normality.js";
 import { computeVIF, conditionNumber }  from "../../core/diagnostics/multicollinearity.js";
 import { hausmanTest }                  from "../../math/LinearEngine.js";
 
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", teal:"#6ec8b4", orange:"#c88e6e",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function sevColor(reject, inconclusive) {
+function sevColor(C, reject, inconclusive) {
   if (inconclusive) return C.yellow;
   return reject ? C.red : C.green;
 }
-function vifColor(severity) {
+function vifColor(C, severity) {
   return severity === "severe" ? C.red : severity === "moderate" ? C.yellow : C.green;
 }
 function fmt4(v) { return v != null && isFinite(v) ? v.toFixed(4) : "—"; }
@@ -47,12 +40,13 @@ function fmtP(p) {
 
 // ── Section header ────────────────────────────────────────────────────────────
 function SectionHdr({ children }) {
+  const { C } = useTheme();
   return (
     <div style={{
       padding: "0.28rem 0.85rem",
       fontSize: 9, color: C.textMuted, letterSpacing: "0.16em",
       textTransform: "uppercase", fontFamily: mono,
-      background: "#0b0b0b", borderBottom: `1px solid ${C.border}`,
+      background: C.surface2, borderBottom: `1px solid ${C.border}`,
     }}>
       {children}
     </div>
@@ -61,11 +55,12 @@ function SectionHdr({ children }) {
 
 // ── Single test result card ───────────────────────────────────────────────────
 function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusive, note }) {
-  const color = sevColor(reject, inconclusive);
+  const { C } = useTheme();
+  const color = sevColor(C, reject, inconclusive);
   return (
     <div style={{
       padding: "0.6rem 0.85rem",
-      background: reject ? "#0d0808" : inconclusive ? "#0d0c08" : "#080d0a",
+      background: C.surface,
       border: `1px solid ${color}30`,
       borderLeft: `3px solid ${color}`,
       display: "flex", flexDirection: "column", gap: 3,
@@ -92,12 +87,13 @@ function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusi
 
 // ── VIF cards ─────────────────────────────────────────────────────────────────
 function VIFCards({ vifResults }) {
+  const { C } = useTheme();
   if (!vifResults?.length) return null;
   return (
     <div style={{ padding: "0.6rem 0.85rem" }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
         {vifResults.map(({ col, vif: v, severity }) => {
-          const color = vifColor(severity);
+          const color = vifColor(C, severity);
           return (
             <div key={col} style={{
               padding: "0.3rem 0.6rem",
@@ -117,11 +113,106 @@ function VIFCards({ vifResults }) {
   );
 }
 
+// ── Diagnostic alert builder ──────────────────────────────────────────────────
+// Returns a list of prioritised AI coach prompts derived from test outcomes.
+function buildAlerts(bp, white, dw, bg, vif, hausman) {
+  const alerts = [];
+
+  if (bp?.reject || white?.reject) {
+    const tests = [bp?.reject && "Breusch-Pagan", white?.reject && "White"].filter(Boolean).join(" & ");
+    alerts.push({
+      type: "heteroskedasticity",
+      severity: "high",
+      message: `Heteroskedasticity detected (${tests}).`,
+      coachPrompt: `My ${tests} test(s) reject homoskedasticity (p=${bp?.reject ? bp.pVal?.toFixed(4) : white?.pVal?.toFixed(4)}). Should I switch to HC1 robust standard errors? What are the tradeoffs, and does this affect my coefficient estimates or just my inference?`,
+    });
+  }
+
+  if (dw?.positive || dw?.negative || bg?.reject) {
+    alerts.push({
+      type: "autocorrelation",
+      severity: "medium",
+      message: `Serial correlation detected${bg?.reject ? ` (BG p=${bg.pVal?.toFixed(4)})` : ""}.`,
+      coachPrompt: `My Durbin-Watson / Breusch-Godfrey test suggests serial correlation in the residuals. Should I add a lag of the dependent variable, use HAC standard errors, or switch to a GLS specification? What does this imply for my inference?`,
+    });
+  }
+
+  const severeVIF = vif?.filter(v => v.severity === "severe");
+  const modVIF    = vif?.filter(v => v.severity === "moderate");
+  if (severeVIF?.length) {
+    alerts.push({
+      type: "multicollinearity",
+      severity: "high",
+      message: `Severe multicollinearity: ${severeVIF.map(v => v.col).join(", ")} (VIF > 10).`,
+      coachPrompt: `VIF is above 10 for ${severeVIF.map(v => `${v.col} (VIF=${v.vif?.toFixed(1)})`).join(", ")}. How should I address this? Should I drop a variable, create a composite index, or use ridge regression?`,
+    });
+  } else if (modVIF?.length) {
+    alerts.push({
+      type: "multicollinearity",
+      severity: "low",
+      message: `Moderate multicollinearity: ${modVIF.map(v => v.col).join(", ")} (VIF 5–10).`,
+      coachPrompt: `VIF is between 5 and 10 for ${modVIF.map(v => v.col).join(", ")}. Is this a problem for my interpretation? What does it do to my standard errors?`,
+    });
+  }
+
+  if (hausman && parseFloat(hausman.pVal) < 0.05) {
+    alerts.push({
+      type: "specification",
+      severity: "medium",
+      message: `Hausman test rejects FE/FD consistency (p=${parseFloat(hausman.pVal).toFixed(4)}).`,
+      coachPrompt: `The Hausman test between FE and FD is significant (H=${hausman.H}, p=${parseFloat(hausman.pVal).toFixed(4)}). What does this divergence imply about serial correlation in my panel? Which estimator should I prefer?`,
+    });
+  }
+
+  return alerts;
+}
+
+// ── Alert card ────────────────────────────────────────────────────────────────
+function DiagAlertCard({ alert, onCoachQuery }) {
+  const { C } = useTheme();
+  const sevColor = { high: C.red, medium: C.yellow, low: C.textDim };
+  const color = sevColor[alert.severity] ?? C.textDim;
+  return (
+    <div style={{
+      display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+      gap: 12, padding: "0.55rem 0.85rem",
+      background: C.surface,
+      borderLeft: `3px solid ${color}`,
+      border: `1px solid ${color}25`,
+    }}>
+      <div style={{ flex: 1 }}>
+        <span style={{ fontSize: 9, color, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: mono }}>
+          {alert.severity === "high" ? "⚠ " : "△ "}
+        </span>
+        <span style={{ fontSize: 11, color: C.text, fontFamily: mono }}>{alert.message}</span>
+      </div>
+      {onCoachQuery && (
+        <button
+          onClick={() => onCoachQuery(alert.coachPrompt)}
+          style={{
+            flexShrink: 0, padding: "0.22rem 0.6rem",
+            background: "transparent", border: `1px solid ${color}50`,
+            borderRadius: 3, color, cursor: "pointer",
+            fontFamily: mono, fontSize: 9, whiteSpace: "nowrap",
+            transition: "all 0.12s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = `${color}18`; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+        >
+          Ask Coach →
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function DiagnosticsPanel({
   resid, rows = [], xCols = [], yCol,
   model = "OLS", panelFE, panelFD, panel,
+  onCoachQuery,
 }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(true);
 
   // Build design matrix X from rows + xCols (needed for BP and White)
@@ -155,6 +246,8 @@ export default function DiagnosticsPanel({
   const hasAny = bp || white || dw || bg || jb || sw || vif || cond || hausman;
   if (!hasAny) return null;
 
+  const alerts = buildAlerts(bp, white, dw, bg, vif, hausman);
+
   return (
     <div style={{
       border: `1px solid ${C.border}`, borderRadius: 4,
@@ -165,7 +258,7 @@ export default function DiagnosticsPanel({
         onClick={() => setOpen(s => !s)}
         style={{
           width: "100%", display: "flex", alignItems: "center", gap: 10,
-          background: "#0a0a0a", padding: "0.5rem 1rem",
+          background: C.surface2, padding: "0.5rem 1rem",
           border: "none", borderBottom: open ? `1px solid ${C.border}` : "none",
           cursor: "pointer", fontFamily: mono, color: C.textMuted,
           fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase",
@@ -177,6 +270,15 @@ export default function DiagnosticsPanel({
 
       {open && (
         <div style={{ display: "flex", flexDirection: "column", gap: 0, animation: "fadeUp 0.18s ease" }}>
+
+          {/* ── AI Coach Alerts ── */}
+          {alerts.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              {alerts.map((a, i) => (
+                <DiagAlertCard key={i} alert={a} onCoachQuery={onCoachQuery} />
+              ))}
+            </div>
+          )}
 
           {/* ── Heteroskedasticity ── */}
           {(bp || white) && (
@@ -251,11 +353,11 @@ export default function DiagnosticsPanel({
               {cond && (
                 <div style={{ padding: "0.4rem 0.85rem 0.6rem", fontFamily: mono, fontSize: 10, color: C.textDim, display: "flex", gap: 12, alignItems: "center" }}>
                   <span>Condition number</span>
-                  <span style={{ color: vifColor(cond.severity), fontSize: 13 }}>κ = {cond.kappa}</span>
+                  <span style={{ color: vifColor(C, cond.severity), fontSize: 13 }}>κ = {cond.kappa}</span>
                   <span style={{
                     fontSize: 9, padding: "1px 5px",
-                    border: `1px solid ${vifColor(cond.severity)}40`,
-                    color: vifColor(cond.severity), borderRadius: 2,
+                    border: `1px solid ${vifColor(C, cond.severity)}40`,
+                    color: vifColor(C, cond.severity), borderRadius: 2,
                   }}>
                     {cond.severity === "none" ? "Acceptable" : cond.severity === "moderate" ? "Moderate" : "Severe"}
                   </span>
@@ -284,7 +386,7 @@ export default function DiagnosticsPanel({
 
           {/* Footer */}
           <div style={{ padding: "0.35rem 0.85rem", fontSize: 9, color: C.textMuted,
-            fontFamily: mono, background: "#0a0a0a", borderTop: `1px solid ${C.border}` }}>
+            fontFamily: mono, background: C.surface2, borderTop: `1px solid ${C.border}` }}>
             Significance at 5% · BP/White/BG: LM ~ χ² · DW: consult tables for exact bounds · SW: Royston (1992)
           </div>
         </div>

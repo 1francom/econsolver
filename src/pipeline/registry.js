@@ -127,9 +127,10 @@ export const STEP_REGISTRY = [
     schema: [
       { key: "col", type: "col",    label: "Column" },
       { key: "to",  type: "select", label: "Target type", options: [
-        { value: "number",  label: "Number" },
-        { value: "string",  label: "String (text)" },
-        { value: "boolean", label: "Boolean (0/1)" },
+        { value: "number",       label: "Number (strict)" },
+        { value: "number_smart", label: "Number (smart — handles EU/US/space formats)" },
+        { value: "string",       label: "String (text)" },
+        { value: "boolean",      label: "Boolean (0/1)" },
       ]},
     ],
     toLabel: s => `cast ${s.col} → ${s.to}`,
@@ -412,6 +413,19 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "group_summarize", by: [], aggs: [] }),
   },
 
+  // ── CELL EDITS ──────────────────────────────────────────────────────────────
+
+  {
+    type: "patch",
+    label: "Cell edit",
+    category: "cleaning",
+    internal: true,   // History.jsx groups all patch steps under a collapsible section
+    description: "Direct cell edit from the Data Viewer. Targets a row by __ri (stable original index).",
+    schema: [],
+    toLabel: s => `edit row ${(s.ri ?? 0) + 1} · ${s.col} → ${s.value ?? "NA"}`,
+    defaultStep: () => ({ type: "patch", internal: true, ri: 0, col: "", value: null }),
+  },
+
   // ── MERGE ───────────────────────────────────────────────────────────────────
 
   {
@@ -525,6 +539,26 @@ export const STEP_REGISTRY = [
     ],
     toLabel: s => `extract_regex ${s.col} → ${s.nn} [${s.locale || "auto"}]`,
     defaultStep: () => ({ type: "extract_regex", col: "", nn: "", locale: "auto", regex: "" }),
+  },
+
+  {
+    type: "clean_strings",
+    label: "Clean string column",
+    category: "cleaning",
+    description: "Normalize a string column in-place: trim whitespace, collapse spaces, strip trailing punctuation, normalize separators and casing.",
+    schema: [
+      { key: "col",        type: "col",     label: "Column" },
+      { key: "stripPunct", type: "boolean", label: "Strip trailing punctuation (. , - –)" },
+      { key: "normSep",    type: "boolean", label: "Normalize separators (- , → space)" },
+      { key: "case",       type: "select",  label: "Case", options: [
+        { value: "keep",  label: "Keep original" },
+        { value: "lower", label: "lowercase" },
+        { value: "upper", label: "UPPERCASE" },
+        { value: "title", label: "Title Case" },
+      ]},
+    ],
+    toLabel: s => `clean_strings ${s.col}${s.case && s.case !== "keep" ? ` [${s.case}]` : ""}`,
+    defaultStep: () => ({ type: "clean_strings", col: "", stripPunct: true, normSep: false, case: "keep" }),
   },
 
   // ── RESHAPE ──────────────────────────────────────────────────────────────────

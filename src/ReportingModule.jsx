@@ -10,19 +10,17 @@
 //   <ReportingModule result={activeResult} onClose={...} />
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { useTheme } from "./ThemeContext.jsx";
+import { HintBox } from "./components/HelpSystem.jsx";
 import { stars, buildLatex } from "./math/index.js";
-import { interpretRegression } from "./services/ai/AIService.js";
+import { interpretRegression, generateUnifiedScript } from "./services/AI/AIService.js";
+import { generateCleanScript } from "./pipeline/exporter.js";
+import { generateRScript }     from "./services/export/rScript.js";
+import { generatePythonScript } from "./services/export/pythonScript.js";
+import { generateStataScript } from "./services/export/stataScript.js";
+import { buildStargazer }      from "./services/export/latexTable.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── SAFE NUMBER FORMATTER ────────────────────────────────────────────────────
@@ -35,38 +33,15 @@ function safeNum(val, dp = 4) {
 }
 
 // ─── RESULT NORMALISER ────────────────────────────────────────────────────────
-// Different estimators return slightly different shapes. This gives us one
-// consistent object the rest of the module can rely on.
 function normaliseResult(raw) {
   if (!raw) return null;
-
-  // Engine returned an error object — surface it cleanly
   if (raw.error) return { __error: raw.error };
-
-  // 2SLS wraps everything in raw.second
-  const core = raw.second ?? raw;
-
-  const {
-    varNames = [], beta = [], se = [], tStats = [], pVals = [],
-    R2 = null, adjR2 = null, n = null, df = null,
-    Fstat = null, Fpval = null,
-    att = null, attSE = null, attP = null,
-    modelLabel = "OLS", yVar = "y", xVars = [],
-  } = core;
-
-  // Sanitise every numeric array: replace undefined/null entries with NaN so
-  // downstream guards (isFinite) work uniformly instead of crashing on .toFixed()
-  const clean = arr => (arr ?? []).map(v => (v == null ? NaN : v));
-
   return {
-    varNames: varNames ?? [],
-    beta:   clean(beta),
-    se:     clean(se),
-    tStats: clean(tStats),
-    pVals:  clean(pVals),
-    R2, adjR2, n, df, Fstat, Fpval,
-    att, attSE, attP, modelLabel, yVar, xVars,
-    firstStages: raw.firstStages ?? null,
+    ...raw,
+    modelLabel: raw.label      ?? raw.modelLabel ?? "OLS",
+    yVar:       raw.spec?.yVar ?? raw.yVar        ?? "y",
+    xVars:      raw.spec?.xVars ?? raw.xVars      ?? [],
+    tStats:     raw.testStats  ?? raw.tStats       ?? [],
   };
 }
 
@@ -74,7 +49,9 @@ function normaliseResult(raw) {
 // Delegated to AIService.js — interpretRegression() handles prompts + API call.
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
-function Lbl({ children, color = C.textMuted, mb = 6 }) {
+function Lbl({ children, color, mb = 6 }) {
+  const { C } = useTheme();
+  color = color ?? C.textMuted;
   return (
     <div style={{ fontSize: 10, color, letterSpacing: "0.2em", textTransform: "uppercase",
                   marginBottom: mb, fontFamily: mono }}>
@@ -82,7 +59,9 @@ function Lbl({ children, color = C.textMuted, mb = 6 }) {
     </div>
   );
 }
-function Btn({ onClick, ch, color = C.gold, v = "out", dis = false, sm = false }) {
+function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
+  const { C } = useTheme();
+  color = color ?? C.gold;
   const b = { padding: sm ? "0.28rem 0.65rem" : "0.48rem 0.95rem", borderRadius: 3,
                cursor: dis ? "not-allowed" : "pointer", fontFamily: mono,
                fontSize: sm ? 10 : 11, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
@@ -107,13 +86,16 @@ function Btn({ onClick, ch, color = C.gold, v = "out", dis = false, sm = false }
   );
 }
 function Spin() {
+  const { C } = useTheme();
   return (
     <div style={{ width: 14, height: 14, border: `2px solid ${C.border2}`,
                   borderTopColor: C.gold, borderRadius: "50%",
                   animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
   );
 }
-function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color = C.teal }) {
+function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color }) {
+  const { C } = useTheme();
+  color = color ?? C.teal;
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(text).then(() => {
@@ -136,6 +118,7 @@ function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color = C.
 // Teal diamond = significant (p < 0.05), grey = not significant.
 // Each row: label | CI whisker + point | β value
 function ForestPlot({ varNames, beta, se, pVals }) {
+  const { C } = useTheme();
   const items = useMemo(() =>
     varNames
       .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
@@ -261,95 +244,10 @@ function ForestPlot({ varNames, beta, se, pVals }) {
 }
 
 // ─── 2. LATEX EXPORT ──────────────────────────────────────────────────────────
-// Generates a stargazer-style tabular with footnotes, significance stars,
-// fit statistics. Supports multi-model comparison if models[] is provided.
-function buildStargazer(models) {
-  // models: [{ label, result, yVar }]
-  // Collect union of varNames across all models (minus Intercept, added at bottom)
-  const allVars = [];
-  models.forEach(({ result: r }) => {
-    (r.varNames ?? []).forEach(v => {
-      if (v !== "(Intercept)" && !allVars.includes(v)) allVars.push(v);
-    });
-  });
-
-  const fmtB = (b, p) => {
-    if (b == null || !isFinite(b)) return "        N/A";
-    return `${b >= 0 ? " " : ""}${b.toFixed(4)}${stars(p ?? 1)}`.padStart(12);
-  };
-  const fmtSE = se => {
-    if (se == null || !isFinite(se)) return "      (N/A)";
-    return `(${se.toFixed(4)})`.padStart(12);
-  };
-  const fmtP  = p  => (p < 0.001 ? "<0.001" : p.toFixed(4)).padStart(12);
-  const dash  = "            ";
-
-  const colsN  = models.length;
-  const colFmt = "l" + " r".repeat(colsN);
-  const header = ["Variable", ...models.map((m, i) => `(${i + 1}) ${m.label}`)];
-  const hline  = "\\hline";
-  const sep    = " & ";
-
-  function modelVal(m, varName, key) {
-    const idx = m.result.varNames?.indexOf(varName) ?? -1;
-    if (idx < 0) return dash;
-    const r = m.result;
-    const b = r.beta?.[idx], p = r.pVals?.[idx], se = r.se?.[idx];
-    if (key === "b")  return fmtB(b, p);
-    if (key === "se") return fmtSE(se);
-    return dash;
-  }
-
-  const rows = [];
-
-  // Regressors (no intercept yet)
-  allVars.forEach(v => {
-    const label = v.replace(/_/g, "\\_");
-    rows.push(`  ${label}${sep}${models.map(m => modelVal(m, v, "b")).join(sep)} \\\\`);
-    rows.push(`  ${" ".repeat(label.length)}${sep}${models.map(m => modelVal(m, v, "se")).join(sep)} \\\\`);
-  });
-
-  // Intercept always last
-  const intV = "(Intercept)";
-  rows.push(`  \\hline`);
-  rows.push(`  Intercept${sep}${models.map(m => modelVal(m, intV, "b")).join(sep)} \\\\`);
-  rows.push(`  ${" ".repeat(9)}${sep}${models.map(m => modelVal(m, intV, "se")).join(sep)} \\\\`);
-
-  // Fit stats
-  rows.push(`  \\hline`);
-  rows.push(`  $R^2$${sep}${models.map(m =>
-    (m.result.R2 != null && isFinite(m.result.R2)) ? m.result.R2.toFixed(4).padStart(12) : dash).join(sep)} \\\\`);
-  rows.push(`  Adj. $R^2$${sep}${models.map(m =>
-    (m.result.adjR2 != null && isFinite(m.result.adjR2)) ? m.result.adjR2.toFixed(4).padStart(12) : dash).join(sep)} \\\\`);
-  rows.push(`  $n$${sep}${models.map(m =>
-    m.result.n != null ? String(m.result.n).padStart(12) : dash).join(sep)} \\\\`);
-
-  const yVarDisplay = models.map(m => `\\texttt{${(m.yVar ?? "y").replace(/_/g, "\\_")}}`);
-  const caption = colsN === 1
-    ? `Regression Results: ${yVarDisplay[0]}`
-    : `Regression Results`;
-
-  return [
-    `% Generated by Econ Studio · LMU Munich`,
-    `\\begin{table}[htbp]`,
-    `\\centering`,
-    `\\caption{${caption}}`,
-    `\\label{tab:results}`,
-    `\\begin{tabular}{${colFmt}}`,
-    `\\hline\\hline`,
-    header.map(h => h.replace(/_/g, "\\_")).join(sep) + " \\\\",
-    hline,
-    ...rows,
-    `\\hline`,
-    `\\multicolumn{${colsN + 1}}{l}{\\textit{Note: }Standard errors in parentheses.} \\\\`,
-    `\\multicolumn{${colsN + 1}}{l}{Significance codes: *$p<0.1$, **$p<0.05$, ***$p<0.01$} \\\\`,
-    `\\hline`,
-    `\\end{tabular}`,
-    `\\end{table}`,
-  ].join("\n");
-}
+// buildStargazer is imported from services/export/latexTable.js (shared with ModelComparison).
 
 function LatexPanel({ result, modelLabel, yVar }) {
+  const { C } = useTheme();
   const latex = useMemo(
     () => buildStargazer([{ label: modelLabel, result, yVar }]),
     [result, modelLabel, yVar]
@@ -387,6 +285,7 @@ function LatexPanel({ result, modelLabel, yVar }) {
 // Bins raw data (~20 bins per side) for performance, draws two fitted lines
 // (local linear from engine) that meet/jump at the cutoff threshold.
 function RDDScatterPlot({ rddResult }) {
+  const { C } = useTheme();
   const { valid, xc, D, Y, leftFit, rightFit, cutoff, h, kernelType } = rddResult ?? {};
 
   if (!valid || valid.length < 4) return (
@@ -517,6 +416,7 @@ function RDDScatterPlot({ rddResult }) {
 
 // Loading skeleton — shown while API is generating
 function NarrativeSkeleton() {
+  const { C } = useTheme();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: "1rem" }}>
       {[0, 1].map(i => (
@@ -551,7 +451,8 @@ function NarrativeSkeleton() {
   );
 }
 
-function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
+function AINarrative({ result, modelLabel, yVar, dataDictionary, rows }) {
+  const { C } = useTheme();
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
@@ -572,7 +473,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
     setError("");
 
     try {
-      const out = await interpretRegression(result, hasDictionary ? dataDictionary : null);
+      const out = await interpretRegression(result, hasDictionary ? dataDictionary : null, null, rows);
       if (abortRef.current === token) {
         setText(out.trim());
       }
@@ -691,7 +592,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
       {/* Actions */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {text && !loading && (
-          <CopyBtn text={text} label="⎘ Copy as plain text" successLabel="✓ Copied!" color={C.purple} />
+          <CopyBtn text={text} label="Copy Narrative" successLabel="✓ Copied!" color={C.purple} />
         )}
         <Btn
           onClick={run}
@@ -712,6 +613,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary }) {
 
 // ─── FIT STATS SUMMARY BAR ────────────────────────────────────────────────────
 function FitBar({ result }) {
+  const { C } = useTheme();
   const { R2, adjR2, n, df, Fstat, Fpval, modelLabel } = result;
   const items = [
     { l: "Model",    v: modelLabel ?? "—",               c: C.gold },
@@ -746,6 +648,7 @@ function FitBar({ result }) {
 
 // ─── SIGNIFICANT COEFFICIENTS CALLOUT ────────────────────────────────────────
 function SigCallout({ result }) {
+  const { C } = useTheme();
   const { varNames, beta, se, pVals } = result;
   const sig = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
@@ -781,8 +684,214 @@ function SigCallout({ result }) {
   );
 }
 
+// ─── AI UNIFIED SCRIPT ───────────────────────────────────────────────────────
+// Phase 9.10 — generates a polished, combined replication script via Claude.
+// Props:
+//   result       — normalised EstimationResult (for model section)
+//   cleanedData  — { cleanRows, headers, pipeline, dataDictionary, filename }
+function AIUnifiedScript({ result, cleanedData }) {
+  const { C } = useTheme();
+  const [open,     setOpen]     = useState(false);
+  const [lang,     setLang]     = useState("r");
+  const [loading,  setLoading]  = useState(false);
+  const [script,   setScript]   = useState("");
+  const [error,    setError]    = useState("");
+  const [copied,   setCopied]   = useState(false);
+
+  const LANGS = [
+    { id: "r",      label: "R" },
+    { id: "python", label: "Python" },
+    { id: "stata",  label: "Stata" },
+  ];
+
+  function _buildModelScript(language) {
+    if (!result) return "";
+    const spec = result.spec ?? {};
+    const config = {
+      filename:       spec.filename       ?? cleanedData?.filename ?? "dataset.csv",
+      pipeline:       spec.pipeline       ?? cleanedData?.pipeline ?? [],
+      dataDictionary: spec.dataDictionary ?? cleanedData?.dataDictionary ?? null,
+      model: {
+        type:       result.type     ?? "OLS",
+        yVar:       spec.yVar       ?? "",
+        xVars:      spec.xVars      ?? [],
+        wVars:      spec.wVars      ?? [],
+        zVars:      spec.zVars      ?? [],
+        entityCol:  spec.entityCol  ?? null,
+        timeCol:    spec.timeCol    ?? null,
+        postVar:    spec.postVar    ?? null,
+        treatVar:   spec.treatVar   ?? null,
+        runningVar: spec.runningVar ?? null,
+        cutoff:     spec.cutoff     ?? null,
+        bandwidth:  spec.bandwidth  ?? null,
+        kernel:     spec.kernel     ?? "triangular",
+      },
+    };
+    try {
+      if (language === "r")      return generateRScript(config);
+      if (language === "python") return generatePythonScript(config);
+      if (language === "stata")  return generateStataScript(config);
+    } catch { return ""; }
+    return "";
+  }
+
+  async function generate() {
+    setLoading(true);
+    setError("");
+    setScript("");
+    try {
+      const dsName  = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
+      const cleanSc = generateCleanScript({
+        language,
+        datasetName: dsName,
+        filename:    cleanedData?.filename ?? "dataset.csv",
+        pipeline:    cleanedData?.pipeline ?? [],
+        allDatasets: {},
+      });
+      const modelSc = _buildModelScript(lang);
+      const dict    = cleanedData?.dataDictionary ?? null;
+      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict);
+      setScript(out);
+    } catch (e) {
+      setError(e.message ?? "Generation failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function download() {
+    const ext = lang === "stata" ? "do" : lang;
+    const blob = new Blob([script], { type: "text/plain" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `replication.${ext}`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ marginTop: "1.2rem" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0.6rem 1rem",
+          background: open ? `${C.gold}0d` : C.surface,
+          border: `1px solid ${open ? C.gold + "50" : C.border}`,
+          borderRadius: open ? "4px 4px 0 0" : 4,
+          cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+        }}
+      >
+        <span style={{ fontSize: 9, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+          ✦ AI Unified Script Export
+        </span>
+        <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div style={{
+          border: `1px solid ${C.gold}50`, borderTop: "none",
+          borderRadius: "0 0 4px 4px", padding: "1.2rem",
+          background: C.surface, animation: "fadeUp 0.15s ease",
+        }}>
+          <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.6, marginBottom: "1rem" }}>
+            Generates one complete, documented replication script combining your
+            pipeline + model. Claude restructures, comments, and deduplicates the
+            auto-generated code.
+          </div>
+
+          {/* Language selector */}
+          <div style={{ display: "flex", gap: 4, marginBottom: "1rem" }}>
+            {LANGS.map(l => (
+              <button key={l.id} onClick={() => setLang(l.id)}
+                style={{
+                  padding: "0.3rem 0.8rem", borderRadius: 3, cursor: "pointer",
+                  fontFamily: mono, fontSize: 11, transition: "all 0.12s",
+                  background:  lang === l.id ? `${C.gold}18` : "transparent",
+                  border:      `1px solid ${lang === l.id ? C.gold : C.border2}`,
+                  color:       lang === l.id ? C.gold : C.textDim,
+                }}>
+                {l.label}
+              </button>
+            ))}
+            <div style={{ flex: 1 }} />
+            <button onClick={generate} disabled={loading}
+              style={{
+                padding: "0.3rem 0.9rem", borderRadius: 3, cursor: loading ? "not-allowed" : "pointer",
+                fontFamily: mono, fontSize: 11, opacity: loading ? 0.5 : 1,
+                background: `${C.gold}18`, border: `1px solid ${C.gold}`,
+                color: C.gold, fontWeight: 700,
+              }}>
+              {loading ? "Generating…" : script ? "↻ Regenerate" : "✦ Generate"}
+            </button>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div style={{ fontSize: 11, color: C.red, fontFamily: mono, marginBottom: "0.8rem",
+                          padding: "0.5rem 0.8rem", border: `1px solid ${C.red}40`, borderRadius: 3 }}>
+              ⚠ {error}
+            </div>
+          )}
+
+          {/* Loading skeleton */}
+          {loading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8,
+                          color: C.gold, fontSize: 11, fontFamily: mono, marginBottom: "0.8rem" }}>
+              <div style={{ width: 12, height: 12, border: `2px solid ${C.border2}`,
+                            borderTopColor: C.gold, borderRadius: "50%",
+                            animation: "spin 0.7s linear infinite" }} />
+              <span>Claude is writing your script…</span>
+            </div>
+          )}
+
+          {/* Script output */}
+          {script && !loading && (
+            <>
+              <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, flex: 1 }}>
+                  {script.split("\n").length} lines
+                </span>
+                <button onClick={() => {
+                  navigator.clipboard.writeText(script).then(() => {
+                    setCopied(true); setTimeout(() => setCopied(false), 2000);
+                  });
+                }}
+                  style={{ padding: "0.22rem 0.6rem", borderRadius: 3, cursor: "pointer",
+                           fontFamily: mono, fontSize: 10,
+                           border: `1px solid ${copied ? C.teal : C.border2}`,
+                           background: copied ? `${C.teal}18` : "transparent",
+                           color: copied ? C.teal : C.textDim }}>
+                  {copied ? "Copied ✓" : "Copy"}
+                </button>
+                <button onClick={download}
+                  style={{ padding: "0.22rem 0.6rem", borderRadius: 3, cursor: "pointer",
+                           fontFamily: mono, fontSize: 10,
+                           border: `1px solid ${C.border2}`, background: "transparent", color: C.textDim }}>
+                  ↓ Download
+                </button>
+              </div>
+              <textarea
+                readOnly
+                value={script}
+                style={{
+                  width: "100%", minHeight: 280, padding: "0.8rem",
+                  background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
+                  fontFamily: mono, fontSize: 10.5, color: C.text, lineHeight: 1.55,
+                  resize: "vertical", boxSizing: "border-box",
+                }}
+              />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function ReportingModule({ result: rawResult, cleanedData, onClose }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("forest");
 
   // ── Debug: log raw result so any NaN/undefined shows in console ──────────────
@@ -790,8 +899,11 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
 
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
 
-  // Detect Sharp RDD — raw result carries .valid / .leftFit / .rightFit
-  const isRDD = !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
+  // Detect Sharp RDD — canonical shape uses type, legacy shape carries rddData or raw fields
+  const isRDD = rawResult?.type === "RDD" || !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
+
+  // ── ALL hooks must be unconditional — never placed after an early return ──────
+  const [narrativeOpen, setNarrativeOpen] = useState(false);
 
   if (!result) return (
     <div style={{ padding: "2rem", color: C.textMuted, fontFamily: mono, fontSize: 12 }}>
@@ -839,8 +951,6 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
   const tabs = [
     ["forest",    "⬡ Forest Plot"],
     ...(isRDD ? [["rdd", "◉ RDD Scatter"]] : []),
-    ["latex",     "⊞ LaTeX Export"],
-    ["narrative", "✦ AI Narrative"],
   ];
 
   return (
@@ -884,6 +994,14 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto",
                     padding: "1.4rem", paddingBottom: "3rem" }}>
 
+        <HintBox color={C.gold} tips={[
+          "Models pinned in the Model tab appear here for export",
+          "LaTeX Stargazer table: multi-column comparison of all pinned models",
+          "Forest plot: visualize coefficients and 95% CI across specifications",
+          "AI Narrative: auto-generates a 2–3 sentence academic interpretation of results",
+          "Download scripts (R/Stata/Python) for full replication of the analysis",
+        ]} />
+
         {/* Fit stats always visible */}
         <FitBar result={result} />
 
@@ -910,7 +1028,15 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
         {/* Tab content */}
         {tab === "forest" && (
           <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <Lbl>Coefficient Estimates · 95% Confidence Intervals</Lbl>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+              <Lbl mb={0}>Coefficient Estimates · 95% Confidence Intervals</Lbl>
+              <CopyBtn
+                text={buildStargazer([{ label: modelLabel, result, yVar }])}
+                label="Copy LaTeX"
+                successLabel="Copied ✓"
+                color={C.gold}
+              />
+            </div>
             <div style={{ marginBottom: "0.8rem", fontSize: 11, color: C.textDim,
                           fontFamily: mono, lineHeight: 1.6 }}>
               <span style={{ color: C.teal }}>◆ Teal</span> = significant at 5% ·{" "}
@@ -938,27 +1064,50 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
             </div>
             <div style={{ border: `1px solid ${C.border}`, borderRadius: 4,
                           padding: "0.5rem", background: C.bg, marginBottom: "1rem" }}>
-              <RDDScatterPlot rddResult={rawResult} />
+              <RDDScatterPlot rddResult={rawResult?.rddData ?? rawResult} />
             </div>
           </div>
         )}
 
-        {tab === "latex" && (
-          <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <LatexPanel result={result} modelLabel={modelLabel} yVar={yVar} />
-          </div>
-        )}
+        {/* ── AI Narrative — inline collapsible ── */}
+        <div style={{ marginTop: "1.2rem" }}>
+          <button
+            onClick={() => setNarrativeOpen(o => !o)}
+            style={{
+              width: "100%", display: "flex", alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0.6rem 1rem",
+              background: narrativeOpen ? `${C.purple}0d` : C.surface,
+              border: `1px solid ${narrativeOpen ? C.purple + "50" : C.border}`,
+              borderRadius: narrativeOpen ? "4px 4px 0 0" : 4,
+              cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+            }}
+          >
+            <span style={{ fontSize: 9, color: C.purple, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+              ✦ AI Narrative
+            </span>
+            <span style={{ fontSize: 9, color: C.textMuted }}>{narrativeOpen ? "▲" : "▼"}</span>
+          </button>
+          {narrativeOpen && (
+            <div style={{
+              border: `1px solid ${C.purple}50`, borderTop: "none",
+              borderRadius: "0 0 4px 4px", padding: "1.2rem",
+              background: C.surface, animation: "fadeUp 0.15s ease",
+            }}>
+              <AINarrative
+                result={result}
+                modelLabel={modelLabel}
+                yVar={yVar}
+                dataDictionary={cleanedData?.dataDictionary ?? null}
+                rows={cleanedData?.cleanRows ?? null}
+              />
+            </div>
+          )}
+        </div>
 
-        {tab === "narrative" && (
-          <div style={{ animation: "fadeUp 0.18s ease" }}>
-            <AINarrative
-              result={result}
-              modelLabel={modelLabel}
-              yVar={yVar}
-              dataDictionary={cleanedData?.dataDictionary ?? null}
-            />
-          </div>
-        )}
+        {/* ── AI Unified Script Export — Phase 9.10 ── */}
+        <AIUnifiedScript result={result} cleanedData={cleanedData} />
+
       </div>
     </div>
   );

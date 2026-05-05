@@ -4,6 +4,7 @@
 // ~110 lines — add features in the tab files, not here.
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { HintBox } from "./components/HelpSystem.jsx";
 import { applyStep, runPipeline }  from "./pipeline/runner.js";
 import { validatePanel, buildInfo } from "./pipeline/validator.js";
 import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQuality.js";
@@ -18,17 +19,23 @@ import DictionaryTab   from "./components/wrangling/DictionaryTab.jsx";
 import History         from "./components/wrangling/History.jsx";
 import ExportMenu      from "./components/wrangling/ExportMenu.jsx";
 import DataQualityReport from "./components/wrangling/DataQualityReport.jsx";
+import AuditTrail        from "./components/validation/AuditTrail.jsx";
+import { auditPipeline } from "./pipeline/auditor.js";
 
 // ── Shared atoms ───────────────────────────────────────────────────────────
-import { C, mono, Tabs } from "./components/wrangling/shared.jsx";
+import { useTheme, mono, Tabs } from "./components/wrangling/shared.jsx";
 
 // ── Persistence — IndexedDB (replaces localStorage 5MB cap) ───────────────
 import {
   loadPipeline,
   savePipeline,
   saveRawData,
+  saveProject,
   migrateFromLocalStorage,
 } from "./services/Persistence/indexedDB.js";
+
+// ── Session state — two-tier pipeline registry ─────────────────────────────
+import { useSessionDispatch } from "./services/session/sessionState.jsx";
 
 // ── Re-exports (consumed by ModelingTab and other modules) ─────────────────
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
@@ -37,13 +44,21 @@ export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function WranglingModule({ rawData, filename, onComplete, pid, allDatasets = [], onSaveSubset }) {
+export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, allDatasets = [], onSaveSubset, addStepRef }) {
+  const { C } = useTheme();
+  // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
+  const sessionDispatch = useSessionDispatch();
+
   // State starts empty — IndexedDB load is async (see useEffect below)
-  const [pipeline,       setPipeline]      = useState([]);
-  const [panel,          setPanel]          = useState(null);
-  const [dataDictionary, setDataDictionary] = useState(null);
-  const [tab,            setTab]            = useState("clean");
-  const [idbReady,       setIdbReady]       = useState(false);
+  const [pipeline,         setPipeline]        = useState([]);
+  const [panel,            setPanel]            = useState(null);
+  const [dataDictionary,   setDataDictionary]   = useState(null);
+  const [tab,              setTab]              = useState("clean");
+  const [idbReady,         setIdbReady]         = useState(false);
+  const [auditTrail,       setAuditTrail]       = useState(null);
+  const [branchPointIndex, setBranchPointIndex] = useState(null);
+  // pendingDelete: { index, downstreamCount } — set when deleting a non-last step
+  const [pendingDelete,    setPendingDelete]    = useState(null);
 
   // ── Initial load from IndexedDB ────────────────────────────────────────────
   useEffect(() => {
@@ -53,9 +68,10 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
       const rec = await loadPipeline(pid);
       if (cancelled) return;
       if (rec) {
-        if (rec.pipeline)       setPipeline(rec.pipeline);
-        if (rec.panel)          setPanel(rec.panel);
-        if (rec.dataDictionary) setDataDictionary(rec.dataDictionary);
+        if (rec.pipeline)            setPipeline(rec.pipeline);
+        if (rec.panel)               setPanel(rec.panel);
+        if (rec.dataDictionary)      setDataDictionary(rec.dataDictionary);
+        if (rec.branchPointIndex != null) setBranchPointIndex(rec.branchPointIndex);
       }
       setIdbReady(true);
     })();
@@ -84,11 +100,22 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     if (!idbReady) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      savePipeline(pid, {
-        filename, pipeline, panel, dataDictionary,
+      const pipelineRecord = {
+        filename, pipeline, panel, dataDictionary, branchPointIndex,
         rowCount: rawData.rows.length, colCount: rawData.headers.length,
         pipelineLength: pipeline.length,
-      });
+      };
+      savePipeline(pid, pipelineRecord);
+      // Keep project store in sync — only for primary projects (pid starts with "proj_").
+      // Secondary datasets use genId() keys and must not create project entries.
+      if (pid?.startsWith("proj_")) {
+        saveProject(pid, {
+          filename,
+          rowCount:       rawData.rows.length,
+          colCount:       rawData.headers.length,
+          pipelineLength: pipeline.length,
+        });
+      }
       // Persist raw dataset once per session (skip if already stored this session)
       if (!rawDataSaved.current) {
         saveRawData(pid, rawData).then(({ stored }) => {
@@ -98,6 +125,36 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     }, 400);
     return () => clearTimeout(saveTimer.current);
   }, [pipeline, panel, dataDictionary, idbReady]);
+
+  // ── Auto-push output to parent whenever pipeline output changes ──────────────
+  // Fires on initial load (idbReady) AND whenever pipeline changes (user edits a
+  // step), so Explorer, Model, PlotBuilder and Data Viewer always stay in sync.
+  // Depends on `pipeline` (stable state), NOT `rows` (computed from allDatasets
+  // which gets a new array ref every render — would cause an infinite loop).
+  useEffect(() => {
+    if (!idbReady || !onReady) return;
+    const ci = {};
+    headers.forEach(h => {
+      const s = rows.find(r => r[h] !== undefined && r[h] !== null);
+      ci[h] = { isNumeric: typeof s?.[h] === "number" };
+    });
+    onReady({
+      headers, cleanRows: rows, colInfo: ci,
+      filename, issues: [], removed: 0,
+      dataDictionary: dataDictionary || {},
+      panelIndex: panel
+        ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
+            balance: panel.validation?.balance, blockFE: panel.validation?.blockFE }
+        : null,
+    });
+  }, [idbReady, pipeline]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-clamp branchPointIndex when pipeline shrinks ─────────────────────
+  useEffect(() => {
+    if (branchPointIndex !== null && branchPointIndex >= pipeline.length) {
+      setBranchPointIndex(pipeline.length > 0 ? pipeline.length - 1 : null);
+    }
+  }, [pipeline.length, branchPointIndex]);
 
   // ── Undo / Redo stack ──────────────────────────────────────────────────────
   // Each entry is a full pipeline snapshot (step[]). Present state is NOT in
@@ -114,18 +171,72 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   }, []);
 
   const addStep = useCallback(s => {
+    const stepId = Date.now() + Math.random();
+
+    // Every step is tagged with its owner dataset (for export DAG traversal).
+    // Cross-dataset steps (join/append) also register a G-step in the global
+    // pipeline so the exporter can build the dependency graph.
+    let gStepId = null;
+    if (sessionDispatch && (s.type === "join" || s.type === "append")) {
+      gStepId = `G_${stepId}`;
+      sessionDispatch({
+        type: "ADD_GLOBAL_STEP",
+        step: {
+          id:              gStepId,
+          localStepId:     stepId,
+          opType:          s.type === "join" ? `${s.how || "left"}_join` : "append",
+          leftDatasetId:   pid,
+          rightDatasetId:  s.rightId,
+          outputDatasetId: pid,         // result stays in the left dataset's pipeline
+          params:          s.type === "join"
+            ? { leftKey: s.leftKey, rightKey: s.rightKey, suffix: s.suffix }
+            : {},
+        },
+      });
+    }
+
     setPipeline(p => {
       snapshot(p);
-      return [...p, { ...s, id: Date.now() + Math.random() }];
+      return [...p, { ...s, id: stepId, datasetId: pid, ...(gStepId ? { gStepId } : {}) }];
+    });
+  }, [snapshot, pid, sessionDispatch]);
+
+  // Expose addStep via ref so DataStudio can dispatch patch steps from DataViewer
+  useEffect(() => {
+    if (addStepRef) addStepRef.current = addStep;
+  }); // intentionally no dep array — always keep ref in sync with latest addStep
+
+  // Remove all cell-edit patch steps at once (called from History "clear edits" button)
+  const clearPatches = useCallback(() => {
+    setPipeline(p => {
+      snapshot(p);
+      return p.filter(s => s.type !== "patch");
     });
   }, [snapshot]);
 
   const rmStep = useCallback(i => {
+    // Deleting the last step needs no warning — nothing downstream.
+    if (i >= pipeline.length - 1) {
+      setPipeline(p => { snapshot(p); return p.filter((_, j) => j !== i); });
+      return;
+    }
+    // Mid-pipeline delete — warn the user about downstream steps.
+    setPendingDelete({ index: i, downstreamCount: pipeline.length - 1 - i });
+  }, [snapshot, pipeline.length]);
+
+  // "Delete this step only" — leaves downstream steps (they may silently degrade).
+  // "cascade" — removes this step and everything after it (clean slate from that point).
+  const confirmDeleteStep = useCallback(mode => {
+    if (!pendingDelete) return;
+    const i = pendingDelete.index;
     setPipeline(p => {
       snapshot(p);
-      return p.filter((_, j) => j !== i);
+      return mode === "cascade" ? p.slice(0, i) : p.filter((_, j) => j !== i);
     });
-  }, [snapshot]);
+    setPendingDelete(null);
+  }, [pendingDelete, snapshot]);
+
+  const cancelDelete = useCallback(() => setPendingDelete(null), []);
 
   const rmLastStep = useCallback(() => {
     setPipeline(p => {
@@ -140,6 +251,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
       snapshot(p);
       return [];
     });
+    setBranchPointIndex(null);
   }, [snapshot]);
 
   const undo = useCallback(() => {
@@ -165,6 +277,10 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;
 
+  const setBranchPoint = useCallback(i => {
+    setBranchPointIndex(prev => prev === i ? null : i);
+  }, []);
+
   // ── Save subset ────────────────────────────────────────────────────────────
   const [showSaveSubset, setShowSaveSubset] = useState(false);
   const [subsetName,     setSubsetName]     = useState("");
@@ -189,6 +305,7 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
     });
     onComplete({
       headers, cleanRows: rows, colInfo: ci,
+      filename,
       issues: [], removed: naCount,
       dataDictionary: dataDictionary || {},
       panelIndex: panel
@@ -199,10 +316,14 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         type: s.type, description: s.desc,
         col: s.col || s.c1 || s.nn || "", map: s.map || null,
       })),
+      pipeline,
+      branchPointIndex,
+      context,
     });
   };
 
   const qualityBadge = qualityReport?.flags?.filter(f => f.severity !== "ok").length;
+  const [aiActionsOpen, setAiActionsOpen] = useState(false);
 
   return (
     <div style={{ display:"flex", height:"100%", minHeight:0,
@@ -244,7 +365,64 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
                 ◈ dict
               </span>
             )}
-            <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}/>
+            {/* AI Data Actions dropdown */}
+            <div style={{ position:"relative" }}>
+              <button
+                onClick={() => setAiActionsOpen(o => !o)}
+                style={{
+                  padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
+                  fontFamily:mono, fontSize:10, transition:"all 0.12s",
+                  background: aiActionsOpen ? `${"#9e7ec8"}18` : "transparent",
+                  color: aiActionsOpen ? "#9e7ec8" : "#888",
+                  border:`1px solid ${aiActionsOpen ? "#9e7ec8" : "#252525"}`,
+                }}>
+                ✦ AI Actions
+              </button>
+              {aiActionsOpen && (
+                <>
+                  <div onClick={() => setAiActionsOpen(false)}
+                    style={{ position:"fixed", inset:0, zIndex:98 }} />
+                  <div style={{
+                    position:"absolute", right:0, top:"calc(100% + 6px)",
+                    background:"#131313", border:"1px solid #252525",
+                    borderRadius:4, zIndex:99, minWidth:220,
+                    boxShadow:"0 8px 24px #000c", overflow:"hidden",
+                  }}>
+                    <button
+                      onClick={() => { setAiActionsOpen(false); setTab("quality"); }}
+                      style={{
+                        width:"100%", padding:"0.65rem 1rem", textAlign:"left",
+                        background:"transparent", border:"none", borderBottom:"1px solid #1c1c1c",
+                        cursor:"pointer", fontFamily:mono, fontSize:11, color:"#ddd8cc",
+                        transition:"background 0.1s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background="#9e7ec818"}
+                      onMouseLeave={e => e.currentTarget.style.background="transparent"}
+                    >
+                      <div style={{ fontSize:9, color:"#9e7ec8", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:2 }}>Suggest Cleaning</div>
+                      <div style={{ fontSize:9, color:"#888" }}>AI-powered data quality recommendations</div>
+                    </button>
+                    <button
+                      onClick={() => { setAiActionsOpen(false); setTab("dictionary"); }}
+                      style={{
+                        width:"100%", padding:"0.65rem 1rem", textAlign:"left",
+                        background:"transparent", border:"none",
+                        cursor:"pointer", fontFamily:mono, fontSize:11, color:"#ddd8cc",
+                        transition:"background 0.1s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background="#9e7ec818"}
+                      onMouseLeave={e => e.currentTarget.style.background="transparent"}
+                    >
+                      <div style={{ fontSize:9, color:"#9e7ec8", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:2 }}>Generate Data Dictionary</div>
+                      <div style={{ fontSize:9, color:"#888" }}>Infer variable descriptions with AI</div>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}
+              datasetName={filename ? filename.replace(/\.[^.]+$/, "") : "dataset"}
+              allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}/>
             {onSaveSubset && (
               <div style={{ position:"relative" }}>
                 <button
@@ -298,6 +476,19 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
                 )}
               </div>
             )}
+            {pipeline.length > 0 && (
+              <button
+                onClick={() => {
+                  const trail = auditPipeline(rawData.rows, rawData.headers, pipeline, context);
+                  setAuditTrail(trail);
+                }}
+                style={{ padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
+                  fontFamily:mono, fontSize:10, transition:"all 0.12s",
+                  background:"transparent", color:"#6ec8b4",
+                  border:"1px solid #6ec8b4" }}>
+                ◈ Audit
+              </button>
+            )}
             <button onClick={proceed} style={{ padding:"0.28rem 0.65rem", borderRadius:3,
               cursor:"pointer", fontFamily:mono, fontSize:10,
               background:"#c8a96e", color:"#080808",
@@ -307,12 +498,20 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
           </div>
         </div>
 
+        <HintBox color="#6ec8b4" tips={[
+          "Non-destructive: every step replays on raw data — undo any step from the history sidebar",
+          "Clean tab: filter rows, fill NAs, rename, drop, recode, and winsorize",
+          "Features tab: add log, lag, lead, z-score, dummies, polynomial, and interaction terms",
+          "Panel tab: declare entity (i) and time (t) columns to unlock FE, FD, DiD, and Event Study",
+          "Merge tab: LEFT/INNER join or append a second dataset",
+        ]} />
+
         {/* ── Tab bar ── */}
         <Tabs tabs={[
           ["clean",     "⬡ Cleaning"],
           ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
           ["structure", "⊞ Panel Structure"],
-          ["features",  "⊕ Features"],
+          ["transform", "⊕ Transform"],
           ["reshape",   "⟲ Reshape"],
           ["merge",     "⊞ Merge"],
           ["dictionary","◈ Dictionary"],
@@ -339,11 +538,11 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         {tab === "structure" && (
           <PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>
         )}
-        {tab === "features" && (
+        {tab === "transform" && (
           <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>
         )}
         {tab === "reshape" && (
-          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep} onRmLastStep={rmLastStep} onSaveSubset={onSaveSubset} filename={filename}/>
+          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
         )}
         {tab === "merge" && (
           <MergeTab rows={rows} headers={headers} filename={filename}
@@ -359,11 +558,25 @@ export default function WranglingModule({ rawData, filename, onComplete, pid, al
         pipeline={pipeline}
         onRm={rmStep}
         onClear={clear}
+        onClearPatches={clearPatches}
         onUndo={undo}
         onRedo={redo}
         canUndo={canUndo}
         canRedo={canRedo}
+        branchPointIndex={branchPointIndex}
+        onSetBranch={setBranchPoint}
+        pendingDelete={pendingDelete}
+        onConfirmDelete={confirmDeleteStep}
+        onCancelDelete={cancelDelete}
       />
+
+      {auditTrail && (
+        <AuditTrail
+          trail={auditTrail}
+          filename={filename}
+          onClose={() => setAuditTrail(null)}
+        />
+      )}
     </div>
   );
 }

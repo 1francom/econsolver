@@ -2,8 +2,9 @@
 // NormalizePanel, StandardizeDialog, Auditor, ColCard,
 // FilterBuilder (ConditionRow, FilterPreview), FillNaSection, CleanTab.
 import { useState, useEffect, useRef, useMemo } from "react";
-import { C, mono, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.jsx";
+import { useTheme, mono, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
+import { detectNumberLocale, parseSmartNumber } from "../../pipeline/runner.js";
 
 // ─── NORMALIZE TEXT CATEGORIES PANEL ─────────────────────────────────────────
 // Standalone tool in the Cleaning tab.
@@ -13,6 +14,7 @@ import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./util
 // Algorithm: Levenshtein fuzzy-groups (already in fuzzyGroups()) + frequency-
 // ranked canonical suggestion. The user can override any canonical inline.
 function NormalizePanel({headers, rows, info, onAdd}){
+  const { C } = useTheme();
   const [selCol, setSelCol]     = useState("");
   const [clusters, setClusters] = useState([]);
   const [rawVals, setRawVals]   = useState([]);
@@ -279,6 +281,7 @@ function NormalizePanel({headers, rows, info, onAdd}){
 
 // ─── STANDARDIZE DIALOG ───────────────────────────────────────────────────────
 function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
+  const { C } = useTheme();
   const [clusterState,setClusterState]=useState(()=>clusters.map(cl=>({...cl})));
   const [qcMode,setQcMode]=useState("");
   const currentMap=useMemo(()=>{
@@ -405,6 +408,7 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
 
 // ─── SMART AUDITOR ────────────────────────────────────────────────────────────
 function Auditor({sug,aiP,onApply,onNormalize,loading}){
+  const { C } = useTheme();
   if(!sug.length&&!loading) return null;
   const sc={high:C.red,medium:C.yellow,low:C.blue},sb={high:"#120808",medium:"#12100a",low:"#080c12"};
   return(
@@ -457,6 +461,7 @@ function Auditor({sug,aiP,onApply,onNormalize,loading}){
 
 // ─── COLUMN CARD ──────────────────────────────────────────────────────────────
 function ColCard({h, info, sug, selected, onSel, onAct}){
+  const { C } = useTheme();
   const c = info[h] || {};
   const [mo, setMo] = useState(false);
 
@@ -511,6 +516,7 @@ function ColCard({h, info, sug, selected, onSel, onAct}){
 // Shown below the grid when a column with issues is selected.
 // Read-only: describes the issue and suggests where to act. No action buttons.
 function ColIssuePanel({ col, issues }) {
+  const { C } = useTheme();
   if (!issues || !issues.length) return null;
 
   const TYPE_META = {
@@ -615,6 +621,7 @@ function opsFor(col, info) {
 
 // A single condition row
 function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove }) {
+  const { C } = useTheme();
   const ops = opsFor(cond.col, info);
   const needsValue = !["notna","isna"].includes(cond.op);
   const isBetween  = cond.op === "between";
@@ -731,6 +738,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
 
 // Preview: how many rows pass the predicate on a sample
 function FilterPreview({ rows, predicate, total }) {
+  const { C } = useTheme();
   const passing = useMemo(() => {
     if (!predicate) return null;
     try {
@@ -792,6 +800,7 @@ function FilterPreview({ rows, predicate, total }) {
 
 // The builder itself
 function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
+  const { C } = useTheme();
   const emptyCondition = () => ({ col:"", op:"notna", value:"", values:[], lo:"", hi:"", _id: Date.now()+Math.random() });
 
   const [groups, setGroups] = useState([
@@ -988,6 +997,7 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
 // Collapsible panel in CleanTab. Clamps extreme values to [p1, p99] bounds.
 // Moved from Features — conceptually data cleaning, not feature engineering.
 function WinsorizeSection({ headers, info, rows, onAdd }) {
+  const { C } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [col,     setCol]     = useState("");
   const [mode,    setMode]    = useState("inplace"); // "inplace" | "newcol"
@@ -1104,6 +1114,7 @@ function WinsorizeSection({ headers, info, rows, onAdd }) {
 // ─── FILL MISSING SECTION ─────────────────────────────────────────────────────
 // Collapsible panel in CleanTab for all fill strategies including grouped imputation.
 function FillNaSection({ headers, info, rows, onAdd }) {
+  const { C } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [col,     setCol]     = useState("");
   const [strat,   setStrat]   = useState("zero");
@@ -1298,8 +1309,235 @@ function FillNaSection({ headers, info, rows, onAdd }) {
   );
 }
 
+// ─── SMART CLEAN SECTION ──────────────────────────────────────────────────────
+// Auto-detects dirty number columns and string columns needing normalization.
+// Numbers: uses extract_regex with auto locale detection.
+// Strings:  uses clean_strings step (trim / punctuation / separators / case).
+function SmartCleanSection({ headers, rows, info, onAdd }) {
+  const { C } = useTheme();
+  const [open,   setOpen]   = useState(false);
+  const [tab,    setTab]    = useState("numbers"); // "numbers" | "strings"
+  const [numCol, setNumCol] = useState("");
+  const [strCol, setStrCol] = useState("");
+  const [strOpts, setStrOpts] = useState({ stripPunct: true, normSep: false, case: "title" });
+
+  // Columns that look like dirty numbers: string/mixed type, ≥70% values match number pattern
+  const NUM_PAT = /^[\s\d.,\-+eE$€£¥R%()]+$/;
+  const dirtyNumCols = useMemo(() => headers.filter(h => {
+    if (info[h]?.isNum) return false; // already numeric
+    const vals = rows.map(r => r[h]).filter(v => v != null);
+    if (!vals.length) return false;
+    return vals.filter(v => NUM_PAT.test(String(v))).length / vals.length >= 0.7;
+  }), [headers, rows, info]);
+
+  // All categorical / string columns
+  const strCols = useMemo(() =>
+    headers.filter(h => info[h] && !info[h].isNum), [headers, info]);
+
+  // Number preview: detect locale + show raw → parsed for first 8 non-null rows
+  const numPreview = useMemo(() => {
+    if (!numCol) return null;
+    const vals = rows.map(r => r[numCol]).filter(v => v != null).slice(0, 8);
+    const locale = detectNumberLocale(vals);
+    return { locale, rows: vals.map(v => ({ raw: String(v), parsed: parseSmartNumber(String(v), locale) })) };
+  }, [numCol, rows]);
+
+  // String preview: apply options to first 8 non-null rows
+  const strPreview = useMemo(() => {
+    if (!strCol) return null;
+    return rows.map(r => r[strCol]).filter(v => v != null).slice(0, 8).map(v => {
+      let s = String(v).trim().replace(/\s+/g, " ");
+      if (strOpts.normSep)    s = s.replace(/\s*[-–,]\s*/g, " ").trim();
+      if (strOpts.stripPunct) s = s.replace(/[.,\-–]+$/, "").trim();
+      if      (strOpts.case === "lower") s = s.toLowerCase();
+      else if (strOpts.case === "upper") s = s.toUpperCase();
+      else if (strOpts.case === "title") s = s.replace(/\w\S*/g, w => w[0].toUpperCase() + w.slice(1).toLowerCase());
+      return { raw: String(v), clean: s };
+    });
+  }, [strCol, strOpts, rows]);
+
+  function applyNum() {
+    if (!numCol) return;
+    onAdd({ type: "extract_regex", col: numCol, nn: numCol, locale: "auto", regex: "",
+            desc: `Smart parse numbers in '${numCol}' (auto locale)` });
+    setNumCol("");
+  }
+
+  function applyStr() {
+    if (!strCol) return;
+    onAdd({ type: "clean_strings", col: strCol, ...strOpts,
+            desc: `Clean strings in '${strCol}'` });
+    setStrCol("");
+  }
+
+  const chipStyle = (active) => ({
+    padding: "0.25rem 0.65rem", border: `1px solid ${active ? C.gold : C.border2}`,
+    background: active ? `${C.gold}18` : "transparent",
+    color: active ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer",
+    fontSize: 11, fontFamily: mono, transition: "all 0.12s",
+  });
+
+  return (
+    <div style={{ border: `1px solid ${C.gold}30`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
+      {/* Header */}
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 8,
+        padding: "0.55rem 1rem", background: open ? `${C.gold}0a` : "transparent",
+        borderBottom: open ? `1px solid ${C.gold}20` : "none",
+        border: "none", cursor: "pointer", textAlign: "left",
+      }}>
+        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono, flex: 1 }}>
+          ⬡ Smart Clean — Numbers &amp; Strings
+        </span>
+        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+          {dirtyNumCols.length} dirty num · {strCols.length} str {open ? "▾" : "▸"}
+        </span>
+      </button>
+
+      {open && (
+        <div style={{ padding: "1rem" }}>
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 4, marginBottom: "1rem" }}>
+            {[["numbers", "Numbers"], ["strings", "Strings"]].map(([k, l]) => (
+              <button key={k} onClick={() => setTab(k)} style={{
+                padding: "0.28rem 0.8rem", border: `1px solid ${tab === k ? C.gold : C.border2}`,
+                background: tab === k ? `${C.gold}18` : "transparent",
+                color: tab === k ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer",
+                fontSize: 10, fontFamily: mono, letterSpacing: "0.1em",
+              }}>{l}</button>
+            ))}
+          </div>
+
+          {/* ── Numbers tab ── */}
+          {tab === "numbers" && (
+            <div>
+              <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.6, marginBottom: "0.9rem", padding: "0.5rem 0.75rem", background: C.surface2, borderRadius: 3, border: `1px solid ${C.border}` }}>
+                Detects columns where values are stored as strings with mixed locale formatting
+                (EU: <span style={{ color: C.gold }}>2.792.046,00</span> · US: <span style={{ color: C.teal }}>1,580,025.00</span> · space: <span style={{ color: C.blue }}>4 253 525</span>).
+                Writes the cleaned float back to the same column via{" "}
+                <span style={{ color: C.gold }}>extract_regex</span>.
+              </div>
+
+              {dirtyNumCols.length === 0 ? (
+                <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>No dirty number columns detected.</div>
+              ) : (
+                <>
+                  <Lbl color={C.gold} mb={6}>Select column</Lbl>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: "1rem" }}>
+                    {dirtyNumCols.map(h => (
+                      <button key={h} onClick={() => setNumCol(h)} style={chipStyle(numCol === h)}>
+                        {numCol === h ? "✓ " : ""}{h}
+                      </button>
+                    ))}
+                  </div>
+
+                  {numPreview && (
+                    <>
+                      <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: 6 }}>
+                        Detected locale: <span style={{ color: C.gold }}>{numPreview.locale === "EU" ? "EU (dot-thousands, comma-decimal)" : "US (comma-thousands, dot-decimal)"}</span>
+                      </div>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: mono, marginBottom: "0.9rem" }}>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: "left", color: C.textMuted, padding: "0.25rem 0.5rem", borderBottom: `1px solid ${C.border}` }}>Raw</th>
+                            <th style={{ textAlign: "left", color: C.textMuted, padding: "0.25rem 0.5rem", borderBottom: `1px solid ${C.border}` }}>→ Parsed</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {numPreview.rows.map((r, i) => (
+                            <tr key={i} style={{ background: i % 2 === 0 ? C.surface2 : "transparent" }}>
+                              <td style={{ padding: "0.22rem 0.5rem", color: C.textDim }}>{r.raw}</td>
+                              <td style={{ padding: "0.22rem 0.5rem", color: r.parsed == null ? C.red : C.teal }}>
+                                {r.parsed == null ? "null" : r.parsed.toLocaleString("en-US", { maximumFractionDigits: 6 })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <Btn onClick={applyNum} color={C.gold} v="solid" sm ch={`Apply to '${numCol}'`} />
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Strings tab ── */}
+          {tab === "strings" && (
+            <div>
+              <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.6, marginBottom: "0.9rem", padding: "0.5rem 0.75rem", background: C.surface2, borderRadius: 3, border: `1px solid ${C.border}` }}>
+                Normalizes string columns: trim whitespace, strip trailing punctuation, fix separators, normalize casing.
+              </div>
+
+              {strCols.length === 0 ? (
+                <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>No string columns detected.</div>
+              ) : (
+                <>
+                  <Lbl color={C.gold} mb={6}>Select column</Lbl>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: "1rem" }}>
+                    {strCols.map(h => (
+                      <button key={h} onClick={() => setStrCol(h)} style={chipStyle(strCol === h)}>
+                        {strCol === h ? "✓ " : ""}{h}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Options */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: "0.8rem", alignItems: "center" }}>
+                    {[["stripPunct", "Strip trailing punct"], ["normSep", "Normalize separators"]].map(([k, l]) => (
+                      <label key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontFamily: mono, color: C.textDim, cursor: "pointer" }}>
+                        <input type="checkbox" checked={!!strOpts[k]}
+                          onChange={e => setStrOpts(o => ({ ...o, [k]: e.target.checked }))}
+                          style={{ accentColor: C.gold }} />
+                        {l}
+                      </label>
+                    ))}
+                    <select value={strOpts.case}
+                      onChange={e => setStrOpts(o => ({ ...o, case: e.target.value }))}
+                      style={{ padding: "0.22rem 0.5rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, fontFamily: mono, fontSize: 11 }}>
+                      {[["keep","Keep case"],["lower","lowercase"],["upper","UPPERCASE"],["title","Title Case"]].map(([v,l]) => (
+                        <option key={v} value={v}>{l}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {strCol && strPreview && (
+                    <>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: mono, marginBottom: "0.9rem" }}>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: "left", color: C.textMuted, padding: "0.25rem 0.5rem", borderBottom: `1px solid ${C.border}` }}>Raw</th>
+                            <th style={{ textAlign: "left", color: C.textMuted, padding: "0.25rem 0.5rem", borderBottom: `1px solid ${C.border}` }}>→ Cleaned</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {strPreview.map((r, i) => (
+                            <tr key={i} style={{ background: i % 2 === 0 ? C.surface2 : "transparent" }}>
+                              <td style={{ padding: "0.22rem 0.5rem", color: C.textDim }}>{r.raw}</td>
+                              <td style={{ padding: "0.22rem 0.5rem", color: r.clean === r.raw ? C.textMuted : C.teal }}>
+                                {r.clean}
+                                {r.clean === r.raw && <span style={{ color: C.textMuted, marginLeft: 4 }}>(unchanged)</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <Btn onClick={applyStr} color={C.gold} v="solid" sm ch={`Apply to '${strCol}'`} />
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
 function CleanTab({rows,headers,info,rawData,onAdd}){
+  const { C } = useTheme();
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
   const [rv,setRv]=useState("");
   const [showFilter,setShowFilter]=useState(false);
@@ -1370,6 +1608,8 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
       )}
       {/* ─ Standalone Text Normalizer ─ */}
       <NormalizePanel headers={headers} rows={rows} info={info} onAdd={onAdd}/>
+      {/* ─ Smart Clean ─ */}
+      <SmartCleanSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
       {/* Standalone filter button */}
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.9rem"}}>
         <Lbl mb={0}>Columns <span style={{color:C.textMuted}}>({headers.length})</span></Lbl>

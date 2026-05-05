@@ -1,12 +1,14 @@
 // ─── ECON STUDIO · components/wrangling/FeatureTab.jsx ─────────────────────
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { C, mono, Lbl, Tabs, Btn } from "./shared.jsx";
+import { useTheme, mono, Lbl, Tabs, Btn } from "./shared.jsx";
+import FormatTab from "./FormatTab.jsx";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
 // dplyr-style free-form expression evaluator.
 // Exposes all column names as variables + a whitelist of helper functions.
 // Generates a pipeline step {type:"mutate", nn, expr, desc}.
 function MutateSubTab({rows, headers, info, onAdd}){
+  const { C } = useTheme();
   const [name,   setName]   = useState("");
   const [expr,   setExpr]   = useState("");
   const [refOpen,setRefOpen]= useState(false);
@@ -236,6 +238,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
 
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
+  const { C } = useTheme();
   const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
   const [qt,setQt]=useState("log"),[qc,setQc]=useState(""),[xc2,setXc2]=useState("");
   const [pop,setPop]=useState("lag"),[pc,setPc]=useState(""),[lagN,setLagN]=useState(1);
@@ -350,7 +353,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
 
   return(
     <div>
-      <Tabs tabs={[["quick","⚡ Transforms"],["mutate","ƒ Mutate"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"]]} active={vt} set={setVt} accent={C.teal} sm/>
+      <Tabs tabs={[["quick","⚡ Transforms"],["mutate","ƒ Mutate"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["numbers","⬡ Numbers"],["strings","◈ Strings"]]} active={vt} set={setVt} accent={C.teal} sm/>
 
       {/* ── Variable name input (shared by quick/panel/did) ── */}
       {(vt==="quick"||vt==="panel"||vt==="did")&&(
@@ -614,6 +617,10 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
 
       {/* ── Mutate ── */}
       {vt==="mutate"&&<MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>}
+
+      {/* ── Numbers / Strings (FormatTab sub-tabs) ── */}
+      {vt==="numbers"&&<FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="numbers"/>}
+      {vt==="strings"&&<FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="strings"/>}
 
     </div>
   );

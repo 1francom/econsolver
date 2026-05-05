@@ -13,20 +13,15 @@
 // They are kept in component state (not persisted) — equivalent to R's
 // "you must re-run your script to reload data" behavior.
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
+import { useTheme } from "./ThemeContext.jsx";
 import WranglingModule from "./WranglingModule.jsx";
-import { saveRawData } from "./services/persistence/indexedDB.js";
+import { saveRawData } from "./services/Persistence/indexedDB.js";
+import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
+import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
+import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const C = {
-  bg:"#080808", surface:"#0f0f0f", surface2:"#131313", surface3:"#161616",
-  border:"#1c1c1c", border2:"#252525",
-  gold:"#c8a96e", goldDim:"#7a6040", goldFaint:"#1a1408",
-  text:"#ddd8cc", textDim:"#888", textMuted:"#444",
-  green:"#7ab896", red:"#c47070", yellow:"#c8b46e",
-  blue:"#6e9ec8", purple:"#a87ec8", teal:"#6ec8b4", orange:"#c88e6e",
-  violet:"#9e7ec8",
-};
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── UTILITIES ────────────────────────────────────────────────────────────────
@@ -96,42 +91,58 @@ function parseCSV(text, delimiter = ",") {
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
 // Excel parser — loads SheetJS from CDN (same pattern as App.jsx, avoids Vite bare-module error)
 async function parseExcel(file) {
-  try {
-    const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
-    const buf  = await file.arrayBuffer();
-    const wb   = read(buf, { type: "array", cellDates: true });
-    const ws   = wb.Sheets[wb.SheetNames[0]];
-    const data = utils.sheet_to_json(ws, { defval: null, raw: false });
-    if (!data.length) return null;
+  const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+  const buf = await file.arrayBuffer();
+  const wb  = read(buf, { type: "array", cellDates: true });
+  const ws  = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error("Excel file has no sheets.");
+  const data = utils.sheet_to_json(ws, { defval: null, raw: false });
+  if (!data.length) throw new Error("Excel sheet is empty — no rows found.");
 
-    const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
-    const headers = Object.keys(data[0]);
-    const rows = data.map(r => {
-      const row = {};
-      headers.forEach(h => {
-        const v = r[h];
-        if (v === null || v === undefined) { row[h] = null; return; }
-        if (typeof v === "number") { row[h] = v; return; }
-        const t = String(v).trim();
-        if (!t || NA_PAT.test(t)) { row[h] = null; return; }
-        const n = Number(t.replace(/,(?=\d{3})/g, ""));
-        row[h] = isNaN(n) ? t : n;
-      });
-      return row;
+  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+  const headers = Object.keys(data[0]);
+  const rows = data.map(r => {
+    const row = {};
+    headers.forEach(h => {
+      const v = r[h];
+      if (v === null || v === undefined) { row[h] = null; return; }
+      if (typeof v === "number") { row[h] = v; return; }
+      const t = String(v).trim();
+      if (!t || NA_PAT.test(t)) { row[h] = null; return; }
+      const n = Number(t.replace(/,(?=\d{3})/g, ""));
+      row[h] = isNaN(n) ? t : n;
     });
-    return { headers, rows };
-  } catch (e) {
-    console.error("Excel parse failed:", e);
-    return null;
-  }
+    return row;
+  });
+  return { headers, rows };
+}
+
+// ─── DELIMITER DETECTION ─────────────────────────────────────────────────────
+// Samples up to 5 non-empty lines and picks the most frequent candidate delimiter.
+// Handles comma, semicolon, tab, pipe — covers sep=",", sep=";", sep="\t", sep="|".
+function detectDelimiter(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 5);
+  if (!lines.length) return ",";
+  let tabs = 0, commas = 0, semis = 0, pipes = 0;
+  lines.forEach(l => {
+    tabs  += (l.match(/\t/g)  || []).length;
+    commas += (l.match(/,/g)  || []).length;
+    semis  += (l.match(/;/g)  || []).length;
+    pipes  += (l.match(/\|/g) || []).length;
+  });
+  if (tabs  > commas && tabs  > semis && tabs  > pipes) return "\t";
+  if (semis > commas && semis > pipes && semis > tabs)  return ";";
+  if (pipes > commas && pipes > semis && pipes > tabs)  return "|";
+  return ",";
 }
 
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
+export async function parseFileForPrimary(file) { return parseFile(file); }
 async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   if (["csv", "txt"].includes(ext)) {
     const text = await file.text();
-    return parseCSV(text, ",");
+    return parseCSV(text, detectDelimiter(text));
   }
   if (ext === "tsv") {
     const text = await file.text();
@@ -140,23 +151,58 @@ async function parseFile(file) {
   if (["xlsx", "xls"].includes(ext)) {
     return parseExcel(file);
   }
-  // Unknown extension: try CSV as fallback
+  if (ext === "dta") {
+    const { parseStata } = await import("./services/data/parsers/stata.js");
+    const buf = await file.arrayBuffer();
+    return parseStata(buf);
+  }
+  if (ext === "rds") {
+    const { parseRDS } = await import("./services/data/parsers/rds.js");
+    const buf = await file.arrayBuffer();
+    return parseRDS(buf);
+  }
+  if (ext === "parquet") {
+    const { loadParquet } = await import("./services/data/duckdb.js");
+    return loadParquet(file);
+  }
+  if (ext === "dbf") {
+    const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
+    const buf = await file.arrayBuffer();
+    return parseShapefile(buf, null);
+  }
+  if (ext === "zip") {
+    const { unzipSync } = await import("fflate");
+    const buf = await file.arrayBuffer();
+    const files = unzipSync(new Uint8Array(buf));
+    const keys = Object.keys(files);
+    const shpKey = keys.find(k => k.toLowerCase().endsWith(".shp"));
+    const dbfKey = keys.find(k => k.toLowerCase().endsWith(".dbf"));
+    if (!dbfKey) throw new Error("ZIP contains no .dbf file. Upload a shapefile ZIP with both .shp and .dbf.");
+    const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
+    const dbfArr = files[dbfKey];
+    const dbfBuf = dbfArr.buffer.slice(dbfArr.byteOffset, dbfArr.byteOffset + dbfArr.byteLength);
+    let shpBuf = null;
+    if (shpKey) {
+      const shpArr = files[shpKey];
+      shpBuf = shpArr.buffer.slice(shpArr.byteOffset, shpArr.byteOffset + shpArr.byteLength);
+    }
+    return parseShapefile(dbfBuf, shpBuf);
+  }
+  if (ext === "shp") {
+    const { parseSHPOnly } = await import("./services/data/parsers/shapefile.js");
+    const buf = await file.arrayBuffer();
+    return parseSHPOnly(buf);
+  }
+  // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
     const text = await file.text();
-    // Detect delimiter heuristically from first line
-    const first = text.split("\n")[0];
-    const tabs   = (first.match(/\t/g) || []).length;
-    const commas = (first.match(/,/g)  || []).length;
-    const semis  = (first.match(/;/g)  || []).length;
-    const delim  = tabs > commas && tabs > semis ? "\t"
-                 : semis > commas ? ";"
-                 : ",";
-    return parseCSV(text, delim);
+    return parseCSV(text, detectDelimiter(text));
   } catch { return null; }
 }
 
 // ─── DATASET SIDEBAR ──────────────────────────────────────────────────────────
-function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, loadErr, loading }) {
+function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, onFetchWorldBank, onFetchOECD, loadErr, loading }) {
+  const { C } = useTheme();
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
 
@@ -283,7 +329,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.txt"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.parquet,.zip"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
         />
@@ -314,9 +360,25 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
           </div>
         )}
 
+        {/* World Bank fetcher button */}
+        <button
+          onClick={onFetchWorldBank}
+          style={{ width:"100%", marginTop:6, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:10, transition:"all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+        >↓ World Bank data</button>
+
+        {/* OECD fetcher button */}
+        <button
+          onClick={onFetchOECD}
+          style={{ width:"100%", marginTop:4, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:10, transition:"all 0.12s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.color = C.blue; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+        >↓ OECD data</button>
+
         {/* Format hint */}
         <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 6, lineHeight: 1.6 }}>
-          CSV · TSV · XLSX · drag & drop supported
+          CSV · TSV · XLSX · DTA · RDS · DBF · Parquet · drag & drop supported
           <br/>
           Loaded datasets available for JOIN / APPEND in the Merge tab.
         </div>
@@ -343,20 +405,42 @@ function ssClear(pid) {
 }
 
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
-export default function DataStudio({ rawData, filename, onComplete, pid }) {
+// Assign stable __ri row IDs if not already present.
+// __ri is used by the patch pipeline step for cell editing (runner.js).
+function ensureRowIds(data) {
+  if (!data?.rows?.length || data.rows[0]?.__ri !== undefined) return data;
+  return { ...data, rows: data.rows.map((r, i) => ({ __ri: i, ...r })) };
+}
+
+const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplete, onOutputReady, pid, onDatasetsChange, activeDatasetId }, ref) {
+  const { C } = useTheme();
   const primaryId = pid || genId();
+  const dispatch = useSessionDispatch();
+
+  // Ref exposed to WranglingModule so DataViewer can dispatch patch steps
+  const wranglingAddStepRef = useRef(null);
 
   const [datasets, setDatasets] = useState(() => {
     // Secondary datasets scoped to this project's pid — no cross-project leakage
     const secondary = ssRead(primaryId);
     return [
-      { id: primaryId, filename: filename || "dataset.csv", rawData },
+      { id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData) },
       ...secondary,
     ];
   });
   const [activeId, setActiveId]   = useState(primaryId);
   const [loading, setLoading]     = useState(false);
   const [loadErr, setLoadErr]     = useState("");
+  const [wbOpen,   setWbOpen]     = useState(false);
+  const [oecdOpen, setOecdOpen]   = useState(false);
+
+  // ── Persist primary raw data on first mount ────────────────────────────────
+  // This ensures "Open project" works without re-uploading.
+  useEffect(() => {
+    if (rawData && primaryId) {
+      saveRawData(primaryId, rawData);
+    }
+  }, [primaryId]); // only on mount — rawData ref won't change for same project
 
   // ── Persist primary raw data on first mount ────────────────────────────────
   // This ensures "Open project" works without re-uploading.
@@ -375,13 +459,13 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     prevRawDataRef.current = rawData;
     if (newFile) {
       // New primary file loaded — drop secondary datasets and clear sessionStorage
-      setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData }]);
+      setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData) }]);
       setActiveId(primaryId);
       ssClear(primaryId);
     } else {
-      // Same file, just sync props (e.g. filename rename)
+      // Same file, just sync filename (rawData ref unchanged — keep ensureRowIds-processed version)
       setDatasets(prev => prev.map(ds =>
-        ds.id === primaryId ? { ...ds, rawData, filename: filename || ds.filename } : ds
+        ds.id === primaryId ? { ...ds, filename: filename || ds.filename } : ds
       ));
     }
   }, [rawData, filename]);
@@ -392,18 +476,46 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     ssWrite(primaryId, secondary);
   }, [datasets, primaryId]);
 
+  // Expose slim dataset list to parent (for Modeling Lab dataset picker)
+  useEffect(() => {
+    onDatasetsChange?.(datasets.map(d => ({
+      id:       d.id,
+      filename: d.filename,
+      rows:     d.rawData?.rows    ?? [],
+      headers:  d.rawData?.headers ?? [],
+    })));
+  }, [datasets]);
+
+  // Sync external activeDatasetId (from DatasetManager click) into local activeId
+  useEffect(() => {
+    if (activeDatasetId && datasets.some(d => d.id === activeDatasetId)) {
+      setActiveId(activeDatasetId);
+    }
+  }, [activeDatasetId]);
+
   const activeDs       = datasets.find(d => d.id === activeId) || datasets[0];
-  // Other datasets — passed to WranglingModule for join/append context
-  const otherDatasets  = datasets.filter(d => d.id !== activeId);
+  // Other datasets — passed to WranglingModule for join/append context.
+  // useMemo so the array reference is stable across re-renders (prevents
+  // context → rows → onReady render loop in WranglingModule).
+  const otherDatasets  = useMemo(
+    () => datasets.filter(d => d.id !== activeId),
+    [datasets, activeId],
+  );
 
   const handleLoadFile = useCallback(async (file) => {
     setLoading(true);
     setLoadErr("");
     try {
-      const parsed = await parseFile(file);
+      let parsed = await parseFile(file);
       if (!parsed || !parsed.rows.length) {
-        setLoadErr("Could not parse file. Check format (CSV, TSV, XLSX).");
-        return;
+        throw new Error("Could not parse file — no rows found. Check the file format.");
+      }
+      // Assign stable row IDs for cell editing
+      parsed = ensureRowIds(parsed);
+      if (parsed._duckdb?.truncated) {
+        setLoadErr(
+          `Large file: loaded first 500,000 of ${parsed._duckdb.rowCount.toLocaleString()} rows via DuckDB.`
+        );
       }
       const id    = genId();
       const entry = { id, filename: file.name, rawData: parsed };
@@ -411,8 +523,19 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
       setActiveId(id);
       // Persist so this secondary dataset survives a reload if promoted to primary
       saveRawData(id, parsed);
+      if (dispatch) {
+        registerDataset(dispatch, {
+          id:       entry.id,
+          name:     file.name,
+          source:   "loaded",
+          rowCount: parsed.rows.length,
+          colCount: parsed.headers.length,
+          headers:  parsed.headers,
+        });
+      }
     } catch (e) {
       setLoadErr("Parse error: " + (e?.message || "unknown"));
+      throw e;
     } finally {
       setLoading(false);
     }
@@ -437,25 +560,46 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
     };
     setDatasets(prev => [...prev, entry]);
     setActiveId(id);        // switch to the new subset immediately
-  }, [activeId]);
+    if (dispatch) {
+      registerDataset(dispatch, {
+        id:       id,
+        name:     name,
+        source:   "derived",
+        rowCount: rows.length,
+        colCount: headers.length,
+        headers:  headers,
+      });
+    }
+  }, [activeId, dispatch]);
+
+  // Expose imperative handles so DataTab can add datasets without prop-drilling.
+  // Must come after handleLoadFile and handleSaveSubset are defined.
+  useImperativeHandle(ref, () => ({
+    addFile:          handleLoadFile,
+    addApiData:       (fname, rows, headers) => handleSaveSubset(fname, rows, headers),
+    switchToDataset:  (id) => setActiveId(id),
+    removeDataset:    (id) => {
+      if (id === primaryId) return; // never remove primary
+      setDatasets(prev => prev.filter(d => d.id !== id));
+      setActiveId(prev => prev === id ? primaryId : prev);
+    },
+    // Called by DataViewer when a cell is edited — dispatches a patch step into
+    // the active WranglingModule's pipeline via the shared ref
+    addPatchStep: (ri, col, value) => {
+      wranglingAddStepRef.current?.({
+        type: "patch", internal: true, ri, col, value,
+        desc: `edit row ${ri + 1} · ${col} → ${value ?? "NA"}`,
+      });
+    },
+  }), [handleLoadFile, handleSaveSubset, primaryId]);
 
   return (
     <div style={{
       display: "flex", height: "100%", minHeight: 0,
       background: C.bg, overflow: "hidden",
     }}>
-      {/* ── Left sidebar: dataset list ── */}
-      <DatasetSidebar
-        datasets={datasets}
-        activeId={activeId}
-        onActivate={setActiveId}
-        onRemove={handleRemove}
-        onLoadFile={handleLoadFile}
-        loadErr={loadErr}
-        loading={loading}
-      />
-
       {/* ── Main panel: WranglingModule for active dataset ── */}
+      {/* DatasetSidebar removed — dataset management lives in WorkspaceBar DatasetManager */}
       {activeDs && (
         <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
           {/*
@@ -468,12 +612,32 @@ export default function DataStudio({ rawData, filename, onComplete, pid }) {
             rawData={activeDs.rawData}
             filename={activeDs.filename}
             onComplete={onComplete}
+            onReady={r => onOutputReady?.(r, activeDs.id)}
             pid={activeDs.id}
             allDatasets={otherDatasets}
             onSaveSubset={handleSaveSubset}
+            addStepRef={wranglingAddStepRef}
           />
         </div>
       )}
+
+      {/* ── World Bank fetcher modal ── */}
+      {wbOpen && (
+        <WorldBankFetcher
+          onLoad={(fname, rows, headers) => handleSaveSubset(fname, rows, headers)}
+          onClose={() => setWbOpen(false)}
+        />
+      )}
+
+      {/* ── OECD fetcher modal ── */}
+      {oecdOpen && (
+        <OECDFetcher
+          onLoad={(fname, rows, headers) => handleSaveSubset(fname, rows, headers)}
+          onClose={() => setOecdOpen(false)}
+        />
+      )}
     </div>
   );
-}
+});
+
+export default DataStudio;
