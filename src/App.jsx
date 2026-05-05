@@ -13,7 +13,7 @@ import { SessionStateProvider, useSessionDispatch, registerDataset } from './ser
 import {
   listPipelines, deletePipeline, clearAllPipelines, loadPipeline, loadRawData,
   saveProject, listProjects, deleteProject, clearAllProjects,
-} from "./services/persistence/indexedDB.js";
+} from "./services/Persistence/indexedDB.js";
 import { useTheme } from "./ThemeContext.jsx";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
 import SimulateTab      from './components/tabs/SimulateTab.jsx';
