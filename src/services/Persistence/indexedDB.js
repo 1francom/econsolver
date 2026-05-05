@@ -27,15 +27,31 @@
 //   listPipelines()             / deletePipeline(id)  / clearAllPipelines()
 //   saveRawData(id, rawData)    / loadRawData(id)     / deleteRawData(id)
 
-const DB_NAME              = "econ_studio_v1";
 const DB_VERSION           = 3;
 const STORE_PIPE           = "pipelines";
 const STORE_RAW            = "raw_data";
 const STORE_PROJ           = "projects";
 const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
 
-// ── Singleton DB promise ───────────────────────────────────────────────────────
+// ── Per-user DB isolation ──────────────────────────────────────────────────────
+// Each authenticated user gets their own IndexedDB so projects never bleed
+// across accounts that share a device or browser profile.
+let _userId    = null;
 let _dbPromise = null;
+
+/**
+ * Call this whenever the auth state changes (login / logout).
+ * It resets the DB singleton so the next openDB() picks up the correct DB name.
+ */
+export function setCurrentUser(uid) {
+  if (uid === _userId) return;
+  _userId    = uid ?? null;
+  _dbPromise = null; // force re-open against the new DB name on next call
+}
+
+function getDbName() {
+  return _userId ? `econ_studio_${_userId}` : "econ_studio_v1";
+}
 
 export function openDB() {
   if (_dbPromise) return _dbPromise;
@@ -46,7 +62,7 @@ export function openDB() {
       return;
     }
 
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(getDbName(), DB_VERSION);
 
     req.onupgradeneeded = e => {
       const db     = e.target.result;
