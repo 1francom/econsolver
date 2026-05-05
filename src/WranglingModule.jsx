@@ -32,7 +32,7 @@ import {
   saveRawData,
   saveProject,
   migrateFromLocalStorage,
-} from "./services/persistence/indexedDB.js";
+} from "./services/Persistence/indexedDB.js";
 
 // ── Session state — two-tier pipeline registry ─────────────────────────────
 import { useSessionDispatch } from "./services/session/sessionState.jsx";
