@@ -13,7 +13,7 @@
 //
 // Depends on: C, mono from ./shared.jsx
 
-import { C, mono } from "./shared.jsx";
+import { useTheme, mono } from "./shared.jsx";
 
 // ─── EXPORT SVG ───────────────────────────────────────────────────────────────
 function exportSVG(svgId, filename) {
@@ -33,11 +33,12 @@ function exportSVG(svgId, filename) {
 
 // ─── INLINE PLOT SHELL ────────────────────────────────────────────────────────
 function InlinePlotShell({ title, svgId, filename, children }) {
+  const { C } = useTheme();
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
@@ -70,6 +71,7 @@ function niceTicks(lo, hi, n = 5) {
 }
 
 function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
+  const { C } = useTheme();
   return (
     <g>
       <line x1={sx(ticks[0])} x2={sx(ticks[ticks.length - 1])}
@@ -87,6 +89,7 @@ function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
 }
 
 function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
+  const { C } = useTheme();
   return (
     <g>
       <line x1={x} x2={x} y1={sy(ticks[0])} y2={sy(ticks[ticks.length - 1])}
@@ -181,6 +184,7 @@ function normalQuantile(p) {
 // - LOWESS smoother to detect non-linearity / heteroskedasticity patterns
 // - Outlier labels for |standardized residual| > 2.5
 export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!resid?.length || !Yhat?.length) return null;
 
   const W = 560, H = 320;
@@ -307,6 +311,7 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
 // - 95% pointwise confidence band (approximate: ±1.36/√n)
 // - Outlier labels for extreme quantiles
 export function QQPlot({ resid, svgIdSuffix = "" }) {
+  const { C } = useTheme();
   if (!resid?.length) return null;
 
   const W = 560, H = 320;
@@ -440,6 +445,7 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
 // Accepts the raw engine result object — pulls resid and Yhat automatically.
 // modelLabel: shown in the header (e.g. "OLS", "FE", "FD")
 export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) {
+  const { C } = useTheme();
   const resid = result?.resid;
   const Yhat  = result?.Yhat;
   if (!resid?.length || !Yhat?.length) return null;
@@ -468,7 +474,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
       {/* header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.45rem 0.9rem", background: "#0a0a0a",
+        padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -512,7 +518,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
           <div style={{
             padding: "0.35rem 0.7rem", borderBottom: `1px solid ${C.border}`,
             fontSize: 8, color: C.textMuted, letterSpacing: "0.14em",
-            textTransform: "uppercase", fontFamily: mono, background: "#0a0a0a",
+            textTransform: "uppercase", fontFamily: mono, background: C.surface,
           }}>
             Residuals vs Fitted
           </div>
@@ -524,7 +530,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
           <div style={{
             padding: "0.35rem 0.7rem", borderBottom: `1px solid ${C.border}`,
             fontSize: 8, color: C.textMuted, letterSpacing: "0.14em",
-            textTransform: "uppercase", fontFamily: mono, background: "#0a0a0a",
+            textTransform: "uppercase", fontFamily: mono, background: C.surface,
           }}>
             Normal Q-Q
           </div>
@@ -536,7 +542,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
 
       {/* footer note */}
       <div style={{
-        padding: "0.4rem 0.9rem", background: "#0a0a0a",
+        padding: "0.4rem 0.9rem", background: C.surface,
         borderTop: `1px solid ${C.border}`,
         fontSize: 9, color: C.textMuted, fontFamily: mono,
         display: "flex", justifyContent: "space-between",

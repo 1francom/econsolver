@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const fs=require('fs');const f=process.env.CLAUDE_TOOL_INPUT_FILE||'';if(!f)process.exit(0);if(f.includes('src/math/')||f.includes('src/core/')){try{const c=fs.readFileSync(f,'utf8');if(/from ['\\\"](react|React)/.test(c)||/require\\(['\\\"]react/.test(c)){console.error('\\n🚨 INVARIANT VIOLATION: React import in '+f+'\\nmath/ and core/ must be pure JS only.');process.exit(1);}}catch(e){}}\" 2>&1 || true"
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const fs=require('fs');const f=process.env.CLAUDE_TOOL_INPUT_FILE||'';if(!f)process.exit(0);if(f.includes('src/')&&!f.includes('AIService.js')){try{const c=fs.readFileSync(f,'utf8');if(/fetch\\(['\\\"]https:\\/\\/api\\.anthropic\\.com/.test(c)){console.error('\\n🚨 INVARIANT VIOLATION: Direct Anthropic fetch in '+f+'\\nAll API calls must go through AIService.js.');process.exit(1);}}catch(e){}}\" 2>&1 || true"
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const fs=require('fs');const f=process.env.CLAUDE_TOOL_INPUT_FILE||'';if(!f)process.exit(0);if(f.includes('src/')){try{const c=fs.readFileSync(f,'utf8');const hooks=['useState','useEffect','useCallback','useMemo','useRef','useContext'];const lines=c.split('\\n');lines.forEach((line,i)=>{if(/^\\s*(if|else|switch|\\?|&&|\\|\\|)/.test(line)){const next=lines.slice(i,i+3).join(' ');if(hooks.some(h=>new RegExp('\\\\b'+h+'\\\\(').test(next))){console.warn('\\n⚠️  CRASH RISK: Possible hook in conditional at '+f+' line '+(i+1)+'\\n'+line.trim());}}});}catch(e){}}\" 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -6,21 +6,39 @@
 //   src/components/modeling/ModelConfiguration.jsx
 // Math lives in src/math/index.js (split from the monolithic EconometricsEngine.js).
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
-  runOLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
+  runOLS, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
+  runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
+  runGMM, runLIML,
+  runFuzzyRDD, runEventStudy, runLSDV, runPoissonFE, runSyntheticControl,
+  wrapResult,
 } from "../math/index.js";
-import { generateRScript } from "../services/export/rScript.js";
+import { generateRScript }      from "../services/export/rScript.js";
+import { generatePythonScript } from "../services/export/pythonScript.js";
+import { generateStataScript }  from "../services/export/stataScript.js";
+import { downloadReplicationBundle, downloadMultiSubsetBundle } from "../services/export/replicationBundle.js";
 import ReportingModule from "../ReportingModule.jsx";
+import * as modelBuffer from "../services/modelBuffer.js";
+import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
+import ModelComparison  from "./modeling/ModelComparison.jsx";
 
 import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
-import ModelConfiguration from "../components/modeling/ModelConfiguration.jsx";
-import { C, mono }        from "../components/modeling/shared.jsx";
-import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot } from "../components/modeling/ModelPlots.jsx";
+import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
+import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
+import CodeEditor          from "../components/modeling/CodeEditor.jsx";
+import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
+import { runPipeline } from "../pipeline/runner.js";
+import { useTheme, mono }  from "../components/modeling/shared.jsx";
+import PlotBuilder          from "./PlotBuilder.jsx";
+import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
+import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
+import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
+import { HintBox } from "./HelpSystem.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 
@@ -28,7 +46,9 @@ import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
 // Result-rendering atoms — kept here because they depend on result shapes,
 // not on the UI chrome that was extracted.
 
-function Lbl({ children, color = C.textMuted }) {
+function Lbl({ children, color }) {
+  const { C } = useTheme();
+  color = color ?? C.textMuted;
   return (
     <div style={{ fontSize: 9, color, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8, fontFamily: mono }}>
       {children}
@@ -36,13 +56,16 @@ function Lbl({ children, color = C.textMuted }) {
   );
 }
 function Badge({ label, color }) {
+  const { C } = useTheme();
   return (
     <span style={{ fontSize: 9, padding: "2px 7px", border: `1px solid ${color}`, color, borderRadius: 2, letterSpacing: "0.1em", fontFamily: mono }}>
       {label}
     </span>
   );
 }
-function InfoBox({ children, color = C.blue }) {
+function InfoBox({ children, color }) {
+  const { C } = useTheme();
+  color = color ?? C.blue;
   return (
     <div style={{
       padding: "0.65rem 0.9rem", background: `${color}08`,
@@ -57,6 +80,7 @@ function InfoBox({ children, color = C.blue }) {
 
 // ─── REGRESSION EQUATION ──────────────────────────────────────────────────────
 function RegressionEquation({ varNames, beta, yVar }) {
+  const { C } = useTheme();
   if (!varNames.length || !beta.length) return null;
   const interceptIdx = varNames.indexOf("(Intercept)");
   const b0 = interceptIdx >= 0 ? beta[interceptIdx] : null;
@@ -103,6 +127,7 @@ function RegressionEquation({ varNames, beta, yVar }) {
 
 // ─── FOREST PLOT ─────────────────────────────────────────────────────────────
 function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename = "coefficient_plot.svg" }) {
+  const { C } = useTheme();
   const items = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
     .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s));
@@ -137,7 +162,7 @@ function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0.35rem 0.9rem", background: "#0a0a0a",
+        padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
@@ -229,7 +254,8 @@ function ciMultiplier(df) {
   return 1.96;
 }
 
-function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
+function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null }) {
+  const { C } = useTheme();
   const [open, setOpen] = useState(null);
   const z    = ciMultiplier(df);
   const COLS = "1.8fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 0.8fr 0.45fr";
@@ -238,7 +264,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
       <div style={{
         display: "grid", gridTemplateColumns: COLS,
-        background: "#0a0a0a", padding: "0.5rem 0.75rem",
+        background: C.surface, padding: "0.5rem 0.75rem",
         fontSize: 9, color: C.textMuted, letterSpacing: "0.13em",
         textTransform: "uppercase", gap: 6,
         borderBottom: `1px solid ${C.border}`, fontFamily: mono,
@@ -248,7 +274,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
         <div style={{ textAlign: "right" }}>(SE)</div>
         <div style={{ textAlign: "right", color: C.teal + "cc" }}>CI 2.5%</div>
         <div style={{ textAlign: "right", color: C.teal + "cc" }}>CI 97.5%</div>
-        <div style={{ textAlign: "right" }}>t</div>
+        <div style={{ textAlign: "right" }}>{statLabel}</div>
         <div style={{ textAlign: "right" }}>p</div>
         <div style={{ textAlign: "center" }}>sig</div>
       </div>
@@ -264,40 +290,53 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
               style={{
                 display: "grid", gridTemplateColumns: COLS,
                 padding: "0.65rem 0.75rem", gap: 6,
-                background: isOpen ? "#0e0c09" : i % 2 === 0 ? C.surface : C.surface2,
+                background: isOpen ? C.surface2 : i % 2 === 0 ? C.surface : C.surface2,
                 cursor: isInt ? "default" : "pointer",
                 alignItems: "center", transition: "background 0.1s", fontFamily: mono,
               }}
-              onMouseOver={e => { if (!isInt) e.currentTarget.style.background = "#0e0c09"; }}
+              onMouseOver={e => { if (!isInt) e.currentTarget.style.background = C.surface2; }}
               onMouseOut={e => { if (!isOpen) e.currentTarget.style.background = i % 2 === 0 ? C.surface : C.surface2; }}
             >
               <div style={{ fontSize: 12, color: isInt ? C.textMuted : C.text, display: "flex", alignItems: "center", gap: 5 }}>
                 {sig && !isInt && <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.teal, display: "inline-block", flexShrink: 0 }} />}
-                {v}{!isInt && <span style={{ fontSize: 9, color: "#333" }}>▾</span>}
+                {v}{!isInt && <span style={{ fontSize: 9, color: C.textDim }}>▾</span>}
               </div>
               <div style={{ textAlign: "right", fontSize: 13, color: b >= 0 ? C.green : C.red, fontFamily: mono }}>{b.toFixed(4)}</div>
               <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>({s.toFixed(4)})</div>
               <div style={{ textAlign: "right", fontSize: 11, color: sig ? C.teal + "cc" : C.textMuted }}>{lo.toFixed(4)}</div>
               <div style={{ textAlign: "right", fontSize: 11, color: sig ? C.teal + "cc" : C.textMuted }}>{hi.toFixed(4)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{tStats[i].toFixed(3)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p.toFixed(4)}</div>
+              <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{tStats?.[i] != null ? Number(tStats[i]).toFixed(3) : "—"}</div>
+              <div style={{ textAlign: "right", fontSize: 11, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p?.toFixed(4) ?? "—"}</div>
               <div style={{ textAlign: "center", fontSize: 12, color: C.gold }}>{stars(p)}</div>
             </div>
             {isOpen && (
               <div style={{
-                padding: "0.8rem 1.1rem 0.8rem 1.4rem", background: "#0c0b08",
-                borderTop: `1px solid #2a2010`, borderLeft: `3px solid ${C.gold}`,
+                padding: "0.8rem 1.1rem 0.8rem 1.4rem", background: C.surface2,
+                borderTop: `1px solid ${C.border}`, borderLeft: `3px solid ${C.gold}`,
                 animation: "fadeUp 0.18s ease", fontSize: 12,
                 color: "#b0a888", lineHeight: 1.8, fontFamily: mono,
               }}>
                 <span style={{ color: C.goldDim, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase" }}>
                   Economic Interpretation ·{" "}
                 </span>
-                A one-unit increase in <span style={{ color: C.text }}>{v}</span> is associated with a{" "}
-                <span style={{ color: b >= 0 ? C.green : C.red }}>
-                  {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "increase" : "decrease"}
-                </span>{" "}
-                in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
+                {meMap?.[v] != null ? (
+                  <>
+                    A one-unit increase in <span style={{ color: C.text }}>{v}</span> is associated with a{" "}
+                    <span style={{ color: meMap[v] >= 0 ? C.green : C.red }}>
+                      {meMap[v] >= 0 ? "+" : ""}{meMap[v].toFixed(4)} change in P(Y=1)
+                    </span>{" "}
+                    at the covariate means (MEM). Latent-index coefficient:{" "}
+                    <span style={{ color: b >= 0 ? C.teal : C.red }}>{b >= 0 ? "+" : ""}{b.toFixed(4)}</span>.{" "}
+                  </>
+                ) : (
+                  <>
+                    A one-unit increase in <span style={{ color: C.text }}>{v}</span> is associated with a{" "}
+                    <span style={{ color: b >= 0 ? C.green : C.red }}>
+                      {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "increase" : "decrease"}
+                    </span>{" "}
+                    in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
+                  </>
+                )}
                 <span style={{ color: C.teal }}>95% CI: [{lo.toFixed(4)}, {hi.toFixed(4)}].</span>{" "}
                 <span style={{ color: p < 0.05 ? C.gold : C.textDim }}>
                   {p < 0.01 ? "Highly significant (p < 0.01)."
@@ -312,7 +351,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
       })}
 
       <div style={{
-        padding: "0.4rem 0.75rem", background: "#0a0a0a",
+        padding: "0.4rem 0.75rem", background: C.surface,
         borderTop: `1px solid ${C.border}`,
         fontSize: 9, color: C.textMuted, fontFamily: mono,
         display: "flex", justifyContent: "space-between",
@@ -326,6 +365,7 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df }) {
 
 // ─── FIT STATS BAR ────────────────────────────────────────────────────────────
 function FitBar({ items }) {
+  const { C } = useTheme();
   return (
     <div style={{
       display: "grid", gridTemplateColumns: `repeat(${items.length}, 1fr)`,
@@ -342,12 +382,111 @@ function FitBar({ items }) {
   );
 }
 
+// ─── REPLICATE DROPDOWN ───────────────────────────────────────────────────────
+function ReplicateDropdown({ replicateConfig, model }) {
+  const { C } = useTheme();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  if (!replicateConfig) return null;
+
+  const stem = (replicateConfig.filename ?? "analysis").replace(/\.[^.]+$/, "");
+
+  const download = (content, ext, color) => {
+    const blob = new Blob([content], { type: "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `${stem}_${model}${ext}`; a.click(); URL.revokeObjectURL(a.href);
+    setOpen(false);
+  };
+
+  const options = [
+    {
+      label: "↓ R Script",
+      color: C.green,
+      action: () => download(generateRScript(replicateConfig), ".R"),
+    },
+    {
+      label: "↓ Python Script",
+      color: C.teal,
+      action: () => download(generatePythonScript(replicateConfig), ".py"),
+    },
+    {
+      label: "↓ Stata Do-file",
+      color: C.blue,
+      action: () => download(generateStataScript(replicateConfig), ".do"),
+    },
+    {
+      label: "↓ ZIP Bundle  (R + Py + Do)",
+      color: C.teal,
+      action: () => { downloadReplicationBundle(replicateConfig); setOpen(false); },
+      divider: true,
+    },
+  ];
+
+  return (
+    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          height: "100%", padding: "0.6rem 1rem", background: open ? `${C.gold}14` : C.surface,
+          border: "none", borderLeft: `1px solid ${C.border}`,
+          color: open ? C.gold : C.textDim,
+          cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
+          display: "flex", alignItems: "center", gap: 5, borderRadius: "0 0 4px 0",
+        }}
+        onMouseOver={e => { e.currentTarget.style.background = `${C.gold}14`; e.currentTarget.style.color = C.gold; }}
+        onMouseOut={e =>  { if (!open) { e.currentTarget.style.background = C.surface; e.currentTarget.style.color = C.textDim; } }}
+      >
+        ⟨/⟩ Replicate <span style={{ fontSize: 9 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", bottom: "calc(100% + 6px)", right: 0, zIndex: 200,
+          background: C.surface, border: `1px solid ${C.border2}`,
+          borderRadius: 4, overflow: "hidden", minWidth: 160,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.6)", animation: "fadeUp 0.12s ease",
+        }}>
+          {options.map(({ label, color, action, divider }) => (
+            <div key={label}>
+              {divider && <div style={{ height: 1, background: C.border, margin: "3px 0" }} />}
+              <button onClick={action}
+                style={{
+                  display: "block", width: "100%", textAlign: "left",
+                  padding: "0.55rem 1rem", background: "transparent", border: "none",
+                  color, cursor: "pointer", fontFamily: mono, fontSize: 11,
+                  transition: "background 0.1s",
+                }}
+                onMouseOver={e => { e.currentTarget.style.background = `${color}14`; }}
+                onMouseOut={e =>  { e.currentTarget.style.background = "transparent"; }}
+              >{label}</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── EXPORT BAR ───────────────────────────────────────────────────────────────
-function ExportBar({ yVar, results, model, onReport, rScriptConfig }) {
+function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuilder, csvBuilder }) {
+  const { C } = useTheme();
   const [showLatex, setShowLatex] = useState(false);
   const [copied, setCopied]       = useState(false);
-  const latex = useMemo(() => buildLatex(yVar, results?.varNames?.slice(1) || [], results, model), [yVar, results, model]);
-  const csv   = useMemo(() => buildCSVExport(yVar, results), [yVar, results]);
+  const latex = useMemo(
+    () => latexBuilder ? latexBuilder(yVar, results) : buildLatex(yVar, results?.varNames?.slice(1) || [], results, model),
+    [yVar, results, model, latexBuilder]
+  );
+  const csv = useMemo(
+    () => csvBuilder ? csvBuilder(yVar, results) : buildCSVExport(yVar, results),
+    [yVar, results, csvBuilder]
+  );
 
   const handleRScript = () => {
     if (!rScriptConfig) return;
@@ -361,64 +500,55 @@ function ExportBar({ yVar, results, model, onReport, rScriptConfig }) {
   };
 
   return (
-    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-      <div style={{ background: "#0a0a0a", padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: "1.2rem" }}>
+      <div style={{ background: C.surface, padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono, borderRadius: "4px 4px 0 0" }}>
         Export
       </div>
-      <div style={{ display: "flex", gap: 1, background: C.border }}>
-        {[
-          { label: "LaTeX table",  action: () => setShowLatex(s => !s), active: showLatex },
-          { label: "Download CSV", action: () => downloadText(csv, `${model}_${yVar}.csv`) },
-        ].map(({ label, action, active }) => (
-          <button key={label} onClick={action}
-            style={{
-              flex: 1, padding: "0.6rem 1rem",
-              background: active ? C.goldFaint : C.surface,
-              border: "none", color: active ? C.gold : C.textDim,
-              cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
-            }}
-            onMouseOver={e => { if (!active) e.currentTarget.style.background = "#0e0e0e"; }}
-            onMouseOut={e =>  { if (!active) e.currentTarget.style.background = C.surface; }}
-          >
-            {label}
-          </button>
-        ))}
-        {rScriptConfig && (
-          <button onClick={handleRScript}
-            style={{
-              flex: 1, padding: "0.6rem 1rem", background: C.surface,
-              border: "none", color: C.green, cursor: "pointer", fontFamily: mono,
-              fontSize: 11, transition: "background 0.15s",
-            }}
-            onMouseOver={e => { e.currentTarget.style.background = `${C.green}14`; }}
-            onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
-          >
-            ↓ R Script
-          </button>
-        )}
-        {onReport && (
-          <button onClick={onReport}
-            style={{
-              flex: 1, padding: "0.6rem 1rem", background: C.surface,
-              border: "none", color: C.purple, cursor: "pointer", fontFamily: mono,
-              fontSize: 11, transition: "background 0.15s",
-            }}
-            onMouseOver={e => { e.currentTarget.style.background = `${C.purple}14`; }}
-            onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
-          >
-            ✦ Full Report
-          </button>
-        )}
+      {/* Button row — inner group has overflow:hidden for rounded corners; Replicate sits outside it */}
+      <div style={{ display: "flex", background: C.border, borderRadius: "0 0 4px 4px", gap: 1 }}>
+        <div style={{ display: "flex", flex: 1, gap: 1, overflow: "hidden", borderRadius: "0 0 0 4px" }}>
+          {[
+            { label: "LaTeX table",  action: () => setShowLatex(s => !s), active: showLatex },
+            { label: "Download CSV", action: () => downloadText(csv, `${model}_${yVar}.csv`) },
+          ].map(({ label, action, active }) => (
+            <button key={label} onClick={action}
+              style={{
+                flex: 1, padding: "0.6rem 1rem",
+                background: active ? C.goldFaint : C.surface,
+                border: "none", color: active ? C.gold : C.textDim,
+                cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
+              }}
+              onMouseOver={e => { if (!active) e.currentTarget.style.background = C.surface2; }}
+              onMouseOut={e =>  { if (!active) e.currentTarget.style.background = C.surface; }}
+            >
+              {label}
+            </button>
+          ))}
+          {onReport && (
+            <button onClick={onReport}
+              style={{
+                flex: 1, padding: "0.6rem 1rem", background: C.surface,
+                border: "none", color: C.purple, cursor: "pointer", fontFamily: mono,
+                fontSize: 11, transition: "background 0.15s",
+              }}
+              onMouseOver={e => { e.currentTarget.style.background = `${C.purple}14`; }}
+              onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
+            >
+              ✦ Full Report
+            </button>
+          )}
+        </div>
+        <ReplicateDropdown replicateConfig={replicateConfig} model={model} />
       </div>
       {showLatex && (
-        <div style={{ background: "#080a06", borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
+        <div style={{ background: C.surface2, borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <span style={{ fontSize: 10, color: "#5a8a5a", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: mono }}>LaTeX · {model}</span>
             <button
               onClick={() => { navigator.clipboard.writeText(latex); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
               style={{
                 padding: "0.28rem 0.8rem",
-                background: copied ? "#0a2010" : "transparent",
+                background: copied ? `${C.green}18` : "transparent",
                 border: `1px solid ${copied ? C.green : C.border2}`,
                 color: copied ? C.green : C.textMuted,
                 borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: mono, transition: "all 0.2s",
@@ -438,7 +568,8 @@ function ExportBar({ yVar, results, model, onReport, rScriptConfig }) {
 
 // ─── PANEL FE/FD RESULTS ─────────────────────────────────────────────────────
 // Must be a named component (not an IIFE) — React Rules of Hooks.
-function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, openReport, baseRConfig }) {
+function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("fe");
   const fe     = result.fe, fd = result.fd;
   const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
@@ -474,15 +605,15 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
             yVar={`${yVar[0]} (within)`}
           />
           <FitBar items={[
-            { label: tab === "fe" ? "R² within"  : "R²",      value: safeR(tab === "fe" ? active.R2_within  : active.R2),    color: C.blue },
-            { label: tab === "fe" ? "R² between" : "Adj. R²", value: safeR(tab === "fe" ? active.R2_between : active.adjR2), color: C.blue },
+            { label: tab === "fe" ? "R² within"  : "R²",      value: safeR(tab === "fe" ? active.R2Within  : active.R2),    color: C.blue },
+            { label: tab === "fe" ? "R² between" : "Adj. R²", value: safeR(tab === "fe" ? active.R2Between : active.adjR2), color: C.blue },
             { label: "n",     value: active.n,     color: C.text },
             { label: "Units", value: active.units, color: C.textDim },
             { label: "df",    value: active.df,    color: C.textDim },
           ]} />
           <Lbl color={C.textMuted}>Coefficient Table — {tab === "fe" ? "FE" : "FD"}</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.tStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
+            <CoeffTable varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.testStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
           </div>
           <PlotSelector
             accentColor={C.blue}
@@ -521,7 +652,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
             yVar: yVar[0],
             xVars: [...xVars, ...wVars],
           })}
-          rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model,
+          replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model,
             type: tab === "fe" ? "FE" : "FD", yVar: yVar[0], xVars, wVars } } : null}
         />
       )}
@@ -530,9 +661,12 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
 }
 
 // ─── 2SLS RESULTS ─────────────────────────────────────────────────────────────
-function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseRConfig }) {
+function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
   const [tab, setTab] = useState("second");
-  const { firstStages, second } = result;
+  // canonical: second-stage fields are at root; firstStages sub-array is engine-shaped
+  const { firstStages } = result;
+  const second = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
 
   return (
@@ -570,7 +704,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
           ]} />
           <Lbl color={C.textMuted}>Second Stage Coefficients</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.tStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
+            <CoeffTable varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.testStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
           </div>
           <PlotSelector
             accentColor={C.gold}
@@ -615,8 +749,8 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
           />
           <ExportBar
             yVar={yVar[0]} results={second} model="2SLS"
-            onReport={() => openReport({ second, firstStages, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
-            rScriptConfig={baseRConfig ? { ...baseRConfig, model: { ...baseRConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } } : null}
+            onReport={() => openReport({ ...result, modelLabel: "2SLS / IV", yVar: yVar[0], xVars })}
+            replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "2SLS", yVar: yVar[0], xVars, wVars, zVars } } : null}
           />
         </>
       )}
@@ -652,25 +786,360 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
   );
 }
 
+// ─── GMM RESULTS ──────────────────────────────────────────────────────────────
+function GMMResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
+  const [tab, setTab] = useState("second");
+  const { firstStages } = result;
+  const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
+  const safeJ = v => (v != null && isFinite(v)) ? v.toFixed(3) : "—";
+  const jOk = result.jDf > 0;
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>Two-Step GMM Results</span>
+        <Badge label={`n = ${result.n}`} color={C.textDim} />
+      </div>
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+        {[["second", "Structural Equation"], ...(firstStages ?? []).map((s, i) => [`fs_${i}`, `First Stage: ${s.endVar}`])].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? C.goldFaint : C.surface, border: "none", color: tab === k ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent", transition: "all 0.15s" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {tab === "second" && (
+        <>
+          <RegressionEquation varNames={result.varNames} beta={result.beta} yVar={yVar[0]} />
+          <FitBar items={[
+            { label: "R²",       value: safeR(result.R2),    color: C.gold },
+            { label: "Adj. R²",  value: safeR(result.adjR2), color: C.gold },
+            { label: "n",   value: result.n,  color: C.text },
+            { label: "df",  value: result.df, color: C.textDim },
+          ]} />
+          {jOk && (
+            <div style={{ padding: "0.55rem 0.8rem", background: result.jPval > 0.05 ? `${C.green}10` : `${C.red}10`, border: `1px solid ${result.jPval > 0.05 ? C.green : C.red}40`, borderRadius: 3, marginBottom: "1rem", fontFamily: mono, fontSize: 11, display: "flex", gap: 16 }}>
+              <span style={{ color: C.textMuted }}>Hansen J-stat</span>
+              <span style={{ color: C.text }}>{safeJ(result.jStat)}</span>
+              <span style={{ color: C.textMuted }}>df = {result.jDf}</span>
+              <span style={{ color: C.textMuted }}>p = {safeJ(result.jPval)}</span>
+              <span style={{ color: result.jPval > 0.05 ? C.green : C.red }}>{result.jPval > 0.05 ? "✓ Overid. not rejected" : "⚠ Overid. rejected"}</span>
+            </div>
+          )}
+          <Lbl color={C.textMuted}>GMM Coefficients (HC-robust SE)</Lbl>
+          <div style={{ marginBottom: "1.2rem" }}>
+            <CoeffTable varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
+          </div>
+          <PlotSelector accentColor={C.gold} defaultId="yhat"
+            plots={[
+              { id: "yhat", label: "Y vs Ŷ", node: <YFittedPlot resid={result.resid} Yhat={result.Yhat} yLabel={yVar[0]} svgIdSuffix="-gmm" /> },
+              { id: "forest", label: "Coefficient plot", node: <ForestPlot varNames={result.varNames} beta={result.beta} se={result.se} pVals={result.pVals} svgId="forest-gmm" filename="gmm_coefficients.svg" /> },
+              { id: "resid", label: "Residuals vs Fitted", node: <ResidualVsFitted resid={result.resid} Yhat={result.Yhat} svgIdSuffix="-gmm-resid" /> },
+              { id: "qq", label: "Q-Q", node: <QQPlot resid={result.resid} svgIdSuffix="-gmm-qq" /> },
+            ]} />
+          <ExportBar yVar={yVar[0]} results={result} model="GMM"
+            onReport={() => openReport({ ...result, modelLabel: "Two-Step GMM", yVar: yVar[0], xVars })}
+            replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "GMM", yVar: yVar[0], xVars, wVars, zVars } } : null}
+          />
+        </>
+      )}
+      {(firstStages ?? []).map((fs, i) => tab === `fs_${i}` && (
+        <div key={i}>
+          <FitBar items={[
+            { label: "R²", value: safeR(fs.R2), color: C.gold },
+            { label: "F-stat", value: (fs.Fstat != null && isFinite(fs.Fstat)) ? fs.Fstat.toFixed(3) : "—", color: fs.weak ? C.red : C.green },
+            { label: "Weak?", value: fs.weak ? "YES ⚠" : "No", color: fs.weak ? C.red : C.green },
+            { label: "n", value: fs.n, color: C.text },
+          ]} />
+          {fs.weak && <InfoBox color={C.red}>⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. GMM efficiency gains diminish with weak instruments.</InfoBox>}
+          <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── LIML RESULTS ─────────────────────────────────────────────────────────────
+function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
+  const [tab, setTab] = useState("second");
+  const { firstStages } = result;
+  const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>LIML Results</span>
+        <Badge label={`n = ${result.n}`} color={C.textDim} />
+        {result.kappa != null && (
+          <Badge label={`κ = ${result.kappa.toFixed(4)}`} color={Math.abs(result.kappa - 1) < 0.01 ? C.textDim : C.gold} />
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+        {[["second", "Structural Equation"], ...(firstStages ?? []).map((s, i) => [`fs_${i}`, `First Stage: ${s.endVar}`])].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? C.goldFaint : C.surface, border: "none", color: tab === k ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent", transition: "all 0.15s" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {tab === "second" && (
+        <>
+          {result.kappa != null && (
+            <div style={{ padding: "0.45rem 0.8rem", background: `${C.gold}10`, border: `1px solid ${C.gold}40`, borderRadius: 3, marginBottom: "1rem", fontFamily: mono, fontSize: 11, display: "flex", gap: 16 }}>
+              <span style={{ color: C.textMuted }}>k-class κ</span>
+              <span style={{ color: C.gold }}>{result.kappa.toFixed(6)}</span>
+              <span style={{ color: C.textMuted }}>{Math.abs(result.kappa - 1) < 1e-4 ? "(= 1 → exactly identified, same as 2SLS)" : "(> 1 → overidentified, LIML corrects finite-sample bias)"}</span>
+            </div>
+          )}
+          <RegressionEquation varNames={result.varNames} beta={result.beta} yVar={yVar[0]} />
+          <FitBar items={[
+            { label: "R²",      value: safeR(result.R2),    color: C.gold },
+            { label: "Adj. R²", value: safeR(result.adjR2), color: C.gold },
+            { label: "n",  value: result.n,  color: C.text },
+            { label: "df", value: result.df, color: C.textDim },
+          ]} />
+          <Lbl color={C.textMuted}>LIML Coefficients</Lbl>
+          <div style={{ marginBottom: "1.2rem" }}>
+            <CoeffTable varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
+          </div>
+          <PlotSelector accentColor={C.gold} defaultId="yhat"
+            plots={[
+              { id: "yhat", label: "Y vs Ŷ", node: <YFittedPlot resid={result.resid} Yhat={result.Yhat} yLabel={yVar[0]} svgIdSuffix="-liml" /> },
+              { id: "forest", label: "Coefficient plot", node: <ForestPlot varNames={result.varNames} beta={result.beta} se={result.se} pVals={result.pVals} svgId="forest-liml" filename="liml_coefficients.svg" /> },
+              { id: "resid", label: "Residuals vs Fitted", node: <ResidualVsFitted resid={result.resid} Yhat={result.Yhat} svgIdSuffix="-liml-resid" /> },
+              { id: "qq", label: "Q-Q", node: <QQPlot resid={result.resid} svgIdSuffix="-liml-qq" /> },
+            ]} />
+          <ExportBar yVar={yVar[0]} results={result} model="LIML"
+            onReport={() => openReport({ ...result, modelLabel: "LIML / k-class", yVar: yVar[0], xVars })}
+            replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "LIML", yVar: yVar[0], xVars, wVars, zVars } } : null}
+          />
+        </>
+      )}
+      {(firstStages ?? []).map((fs, i) => tab === `fs_${i}` && (
+        <div key={i}>
+          <FitBar items={[
+            { label: "R²", value: safeR(fs.R2), color: C.gold },
+            { label: "F-stat", value: (fs.Fstat != null && isFinite(fs.Fstat)) ? fs.Fstat.toFixed(3) : "—", color: fs.weak ? C.red : C.green },
+            { label: "Weak?", value: fs.weak ? "YES ⚠" : "No", color: fs.weak ? C.red : C.green },
+            { label: "n", value: fs.n, color: C.text },
+          ]} />
+          {fs.weak && <InfoBox color={C.red}>⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. LIML is particularly sensitive to weak instruments.</InfoBox>}
+          <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── FUZZY RDD LATEX EXPORT ──────────────────────────────────────────────────
+function buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName) {
+  const fmtP = p => p == null ? "N/A" : p < 0.001 ? "$<$0.001" : p.toFixed(4);
+  if (stage === "second") {
+    const vars = result.varNames ?? [];
+    const rows = vars.map((v, i) => {
+      const b = result.beta?.[i], se = result.se?.[i];
+      const t = result.tStats?.[i], p = result.pVals?.[i];
+      const strs = p != null ? stars(p) : "";
+      return `  ${v.replace(/_/g, "\\_")} & ${b?.toFixed(4) ?? "N/A"}${strs} & ${se?.toFixed(4) ?? "N/A"} & ${t?.toFixed(3) ?? "N/A"} & ${fmtP(p)} \\\\`;
+    }).join("\n");
+    return `\\begin{table}[htbp]
+\\centering
+\\caption{Fuzzy RDD --- Second Stage (IV): \\texttt{${yVar}}}
+\\begin{tabular}{lrrrr}
+\\hline\\hline
+Variable & Estimate & Std. Error & t-value & Pr($>|t|$) \\\\
+\\hline
+${rows}
+\\hline
+\\multicolumn{5}{l}{$R^2 = ${result.R2?.toFixed(4) ?? "N/A"}$, $n = ${result.n ?? "N/A"}$, bw $= ${result.bandwidth?.toFixed(4) ?? "N/A"}$, FS $F = ${result.firstStageFstat?.toFixed(2) ?? "N/A"}$} \\\\
+\\multicolumn{5}{l}{Significance: *$p<0.1$, **$p<0.05$, ***$p<0.01$} \\\\
+\\hline
+\\end{tabular}
+\\end{table}`;
+  } else {
+    const fs = result.firstStage;
+    const vars = fsVarNames ?? [];
+    const rows = vars.map((v, i) => {
+      const b = fs?.beta?.[i], se = fs?.se?.[i];
+      const t = fs?.tStats?.[i], p = fs?.pVals?.[i];
+      const strs = p != null ? stars(p) : "";
+      return `  ${v.replace(/_/g, "\\_")} & ${b?.toFixed(4) ?? "N/A"}${strs} & ${se?.toFixed(4) ?? "N/A"} & ${t?.toFixed(3) ?? "N/A"} & ${fmtP(p)} \\\\`;
+    }).join("\n");
+    return `\\begin{table}[htbp]
+\\centering
+\\caption{Fuzzy RDD --- First Stage: \\texttt{${treatVarName ?? "D"}} $\\sim$ Z + running variable}
+\\begin{tabular}{lrrrr}
+\\hline\\hline
+Variable & Estimate & Std. Error & t-value & Pr($>|t|$) \\\\
+\\hline
+${rows}
+\\hline
+\\multicolumn{5}{l}{$R^2 = ${fs?.R2?.toFixed(4) ?? "N/A"}$, $F\\text{-stat} = ${result.firstStageFstat?.toFixed(2) ?? "N/A"}$, Jump in D $= ${result.firstStageJumpD?.toFixed(4) ?? "N/A"}$} \\\\
+\\multicolumn{5}{l}{Significance: *$p<0.1$, **$p<0.05$, ***$p<0.01$} \\\\
+\\hline
+\\end{tabular}
+\\end{table}`;
+  }
+}
+
+function FuzzyLatexExport({ stage, result, yVar, fsVarNames, treatVarName }) {
+  const { C } = useTheme();
+  const [open, setOpen] = useState(false);
+  const latex = useMemo(
+    () => buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName),
+    [stage, result, yVar, fsVarNames, treatVarName]
+  );
+  return (
+    <div style={{ marginBottom: "0.8rem" }}>
+      <button
+        onClick={() => setOpen(s => !s)}
+        style={{ padding: "0.4rem 0.9rem", background: open ? C.goldFaint : C.surface2, border: `1px solid ${C.border}`, color: open ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, borderRadius: 3, transition: "all 0.15s" }}
+      >
+        {open ? "▾" : "▸"} LaTeX table
+      </button>
+      {open && (
+        <div style={{ position: "relative", marginTop: 4 }}>
+          <pre style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3, padding: "0.7rem 1rem", fontSize: 10, color: C.text, fontFamily: mono, overflowX: "auto", margin: 0 }}>
+            {latex}
+          </pre>
+          <button
+            onClick={() => downloadText(latex, `fuzzyrdd_${stage}_stage_${yVar}.tex`)}
+            style={{ position: "absolute", top: 6, right: 8, padding: "0.25rem 0.6rem", background: C.surface, border: `1px solid ${C.border}`, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 9, borderRadius: 3 }}
+          >
+            ↓ .tex
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── FUZZY RDD RESULTS ───────────────────────────────────────────────────────
+function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, openReport, baseReplicateConfig }) {
+  const { C } = useTheme();
+  const [tab, setTab] = useState("second");
+  const r  = result;
+  const fs = r.firstStage;
+  const fsVarNames = r.firstStageVarNames ?? ["(Intercept)", "Z (instrument)", "running − c", "Z × (running − c)"];
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Fuzzy RDD Results</span>
+        <Badge label={`n = ${r.n}`} color={C.textDim} />
+        {r.weak && <Badge label="⚠ Weak instrument (F < 10)" color={C.red} />}
+      </div>
+
+      {/* LATE highlight */}
+      <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
+        <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Local Average Treatment Effect (LATE)</div>
+        <div style={{ fontSize: 24, color: r.lateP < 0.05 ? C.orange : C.textDim, fontFamily: mono }}>
+          {r.late >= 0 ? "+" : ""}{r.late?.toFixed(4) ?? "—"}{stars(r.lateP)}
+        </div>
+        <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+          SE = {r.lateSE?.toFixed(4) ?? "—"} · p = {r.lateP < 0.001 ? "<0.001" : r.lateP?.toFixed(4) ?? "—"}
+        </div>
+        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 8 }}>
+          Compliance (first-stage jump): {r.firstStageJumpD?.toFixed(4) ?? "—"} · F = {r.firstStageFstat?.toFixed(2) ?? "—"} · Wald ratio: {r.waldRatio?.toFixed(4) ?? "—"}
+        </div>
+      </div>
+
+      {/* Stage tab switcher */}
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+        {[["second", "Second Stage (Structural)"], ["first", "First Stage (Instrument)"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? "#2a1800" : C.surface, border: "none", color: tab === k ? C.orange : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.orange}` : "2px solid transparent", transition: "all 0.15s" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* Second stage */}
+      {tab === "second" && (
+        <>
+          <FitBar items={[
+            { label: "n (bw)", value: r.n,                                         color: C.text },
+            { label: "df",     value: r.df,                                         color: C.textDim },
+            { label: "R²",     value: r.R2?.toFixed(4) ?? "—",                     color: C.orange },
+            { label: "FS-F",   value: r.firstStageFstat?.toFixed(2) ?? "—",        color: r.weak ? C.red : C.gold },
+          ]} />
+          <Lbl color={C.textMuted}>Second-Stage Coefficient Table</Lbl>
+          <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar} df={r.df} />
+          <FuzzyLatexExport stage="second" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} />
+          <PlotSelector accentColor={C.orange} defaultId="rdd" plots={[
+            { id: "rdd",    label: "RDD Plot",
+              node: <RDDPlot result={r.rddData ?? {}} yLabel={yVar} xLabel={runningVar} /> },
+            { id: "forest", label: "Coefficient plot",
+              node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
+          ]} />
+        </>
+      )}
+
+      {/* First stage */}
+      {tab === "first" && fs && (
+        <>
+          <FitBar items={[
+            { label: "R²",     value: fs.R2?.toFixed(4)                 ?? "—", color: C.gold },
+            { label: "F-stat", value: r.firstStageFstat?.toFixed(2)     ?? "—", color: r.weak ? C.red : C.gold },
+            { label: "Jump D", value: r.firstStageJumpD?.toFixed(4)     ?? "—", color: C.text },
+            { label: "df",     value: fs.df,                                      color: C.textDim },
+          ]} />
+          {r.weak && (
+            <div style={{ padding: "0.6rem 0.8rem", marginBottom: "0.8rem", background: C.surface2, border: `1px solid ${C.red}40`, borderLeft: `3px solid ${C.red}`, borderRadius: 4, fontSize: 10, color: C.red, fontFamily: mono }}>
+              ⚠ F-stat = {r.firstStageFstat?.toFixed(2)} &lt; 10 — weak instrument. LATE estimate may be unreliable.
+            </div>
+          )}
+          <Lbl color={C.textMuted}>First-Stage Coefficient Table — D ~ Z + running variable</Lbl>
+          <CoeffTable varNames={fsVarNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={treatVarName ?? "D"} df={fs.df} />
+          <FuzzyLatexExport stage="first" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} />
+          <PlotSelector accentColor={C.gold} defaultId="fs_forest" plots={[
+            { id: "fs_forest", label: "Coefficient plot",
+              node: <ForestPlot varNames={fsVarNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId="forest-fuzzyrdd-fs" filename="fuzzyrdd_first_stage.svg" /> },
+          ]} />
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function buildModelAvail(panelOk) {
-  return { OLS: true, FE: panelOk, FD: panelOk, "2SLS": true, DiD: true, TWFE: panelOk, RDD: true };
+  return {
+    OLS: true, WLS: true,
+    FE: panelOk, FD: panelOk,
+    LSDV: panelOk, TWFE: panelOk, EventStudy: panelOk,
+    "2SLS": true, RDD: true, FuzzyRDD: true, DiD: true,
+    Logit: true, Probit: true, PoissonFE: true,
+    GMM: true, LIML: true,
+    SyntheticControl: true,
+  };
 }
 function buildModelHint(panel, panelOk) {
   const noPanel = "No panel structure declared — set Entity & Time columns in Wrangling.";
   const dupObs  = "Duplicate observations detected — fix in Wrangling.";
   return {
-    FE:   panelOk ? "" : panel ? dupObs : noPanel,
-    FD:   panelOk ? "" : panel ? dupObs : noPanel,
-    TWFE: panelOk ? "" : noPanel,
+    FE:        panelOk ? "" : panel ? dupObs : noPanel,
+    FD:        panelOk ? "" : panel ? dupObs : noPanel,
+    TWFE:      panelOk ? "" : noPanel,
+    LSDV:      panelOk ? "" : noPanel,
+    EventStudy:panelOk ? "" : noPanel,
   };
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function ModelingTab({ cleanedData, onBack }) {
-  const rows    = cleanedData?.cleanRows  ?? [];
-  const headers = cleanedData?.headers    ?? [];
+export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion }) {
+  const { C } = useTheme();
+  const rows    = cleanedData?.cleanRows ?? [];
+  const headers = cleanedData?.headers   ?? [];
   const panel   = cleanedData?.panelIndex ?? null;
+
+  const fullPipeline    = cleanedData?.pipeline          ?? [];
+  const branchPointIdx  = cleanedData?.branchPointIndex  ?? null;
+  const pipelineCtx     = cleanedData?.context           ?? {};
 
   const numericCols = useMemo(
     () => headers.filter(h => rows.some(r => typeof r[h] === "number" && isFinite(r[h]))),
@@ -690,6 +1159,27 @@ export default function ModelingTab({ cleanedData, onBack }) {
   const [bwMode,     setBwMode]     = useState("ik");
   const [bwManual,   setBwManual]   = useState("");
   const [kernel,     setKernel]     = useState("triangular");
+  const [weightVar, setWeightVar] = useState([]);
+
+  // ── New estimator state ───────────────────────────────────────────────────
+  const [treatTimeCol,   setTreatTimeCol]   = useState([]);
+  const [kPre,           setKPre]           = useState(3);
+  const [kPost,          setKPost]          = useState(3);
+  const [lsdvTimeFE,     setLsdvTimeFE]     = useState(false);
+  const [treatedUnit,    setTreatedUnit]    = useState("");
+  const [synthTreatTime, setSynthTreatTime] = useState("");
+
+  // ── Inference / SE options ────────────────────────────────────────────────
+  const [seType,      setSeType]      = useState("classical");
+  const [clusterVar,  setClusterVar]  = useState(null);
+  const [clusterVar2, setClusterVar2] = useState(null);
+  const [maxLag,      setMaxLag]      = useState(null);
+
+  const seOpts = useMemo(() => ({
+    seType, clusterVar, clusterVar2,
+    timeVar: panel?.timeCol ?? null,
+    maxLag: maxLag ? parseInt(maxLag) : null,
+  }), [seType, clusterVar, clusterVar2, maxLag, panel]);
 
   // ── Results state ─────────────────────────────────────────────────────────
   const [result,       setResult]       = useState(null);
@@ -699,86 +1189,348 @@ export default function ModelingTab({ cleanedData, onBack }) {
   const [err,          setErr]          = useState(null);
   const [reportResult, setReportResult] = useState(null);
 
+  // ── Subsets ───────────────────────────────────────────────────────────────
+  const [subsets, setSubsets] = useState([]);
+
+  // ── Model buffer (pinned models) ──────────────────────────────────────────
+  const [bufferVersion, setBufferVersion] = useState(0);
+  const [compareOpen,   setCompareOpen]   = useState(false);
+  const [activeBufferId, setActiveBufferId] = useState(null);
+  const pinnedModels = useMemo(() => modelBuffer.getAll(), [bufferVersion]);
+
+  // ── H8: Specification curve (state only — callback defined after _runEstimation) ──
+  const [specOpen,    setSpecOpen]    = useState(false);
+  const [specConfig,  setSpecConfig]  = useState({ col: "", op: ">=", start: "", end: "", step: "", coefVar: "" });
+  const [specRows,    setSpecRows]    = useState([]);
+  const [specRunning, setSpecRunning] = useState(false);
+
+  // ── G12: Plot Builder panel ───────────────────────────────────────────────
+  const [plotOpen,        setPlotOpen]        = useState(false);
+  const [plotTemplateKey, setPlotTemplateKey]  = useState(0);
+  const [plotInitLayers,  setPlotInitLayers]   = useState([]);
+
+  // Result-augmented rows: append __resid__ and __yhat__ columns (G12)
+  const resultRows = useMemo(() => {
+    if (!result?.resid?.length || !rows?.length) return rows ?? [];
+    const n = Math.min(result.resid.length, rows.length);
+    return rows.slice(0, n).map((row, i) => ({
+      ...row,
+      __resid__: result.resid[i],
+      __yhat__:  result.Yhat[i],
+    }));
+  }, [result, rows]);
+
+  const resultHeaders = useMemo(() => {
+    if (!result?.resid?.length) return headers ?? [];
+    return [...(headers ?? []), "__resid__", "__yhat__"];
+  }, [result, headers]);
+
+  // G13 — multi-model comparison rows (one row per variable × model)
+  const [plotDataMode, setPlotDataMode] = useState("result"); // "result" | "comparison"
+
+  const compRows = useMemo(() => {
+    if (pinnedModels.length < 2) return [];
+    return pinnedModels.flatMap(m =>
+      (m.varNames ?? [])
+        .filter(v => v !== "(Intercept)")
+        .map(v => {
+          const i = (m.varNames ?? []).indexOf(v);
+          const b = m.beta?.[i] ?? 0;
+          const s = m.se?.[i]  ?? 0;
+          return {
+            variable: v,
+            estimate: b,
+            se:       s,
+            ciLow:    b - 1.96 * s,
+            ciHigh:   b + 1.96 * s,
+            pVal:     m.pVals?.[i] ?? 1,
+            model:    m.label ?? m.type ?? "Model",
+          };
+        })
+    );
+  }, [pinnedModels]);
+
+  const compHeaders = ["variable", "estimate", "se", "ciLow", "ciHigh", "pVal", "model"];
+
+  const activePlotRows    = plotDataMode === "comparison" ? compRows    : resultRows;
+  const activePlotHeaders = plotDataMode === "comparison" ? compHeaders : resultHeaders;
+
+  // Notify parent when result changes (for global AI sidebar context)
+  useEffect(() => { onResultChange?.(result); }, [result]);
+
   const panelOk    = !!panel && !panel.blockFE;
   const modelAvail = useMemo(() => buildModelAvail(panelOk),        [panelOk]);
   const modelHint  = useMemo(() => buildModelHint(panel, panelOk),  [panel, panelOk]);
 
+  // ── Metadata & coaching signals ──────────────────────────────────────────────
+  const metadataReport = useMemo(
+    () => buildMetadataReport(headers, rows, panel),
+    [headers, rows, panel]
+  );
+  const modelSpec = useMemo(() => ({
+    type: model, yVar: yVar[0], xVars, wVars, zVars,
+  }), [model, yVar, xVars, wVars, zVars]);
+  const coachingSignals = useMemo(
+    () => generateCoachingSignals(metadataReport, result, modelSpec),
+    [metadataReport, result, modelSpec]
+  );
+
   const handleModelSelect = useCallback((id) => {
-    setModel(id); setResult(null); setErr(null);
+    setModel(id); setResult(null); setErr(null); setSeType("classical");
   }, []);
 
-  // ── ESTIMATE ────────────────────────────────────────────────────────────────
-  const estimate = useCallback(() => {
-    setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
+  // ── PURE ESTIMATION HELPER (no setState) ────────────────────────────────────
+  // Returns { result, panelFE, panelFD } on success, { error } on failure.
+  // dataRows is passed explicitly so runAllSubsets can call it on filtered data.
+  const _runEstimation = useCallback((dataRows) => {
     const y = yVar[0];
-    if (!y) { setErr("Select a dependent variable (Y)."); setRunning(false); return; }
+    if (!y) return { error: "Select a dependent variable (Y)." };
     try {
       const allX = [...xVars, ...wVars];
 
       if (model === "OLS") {
-        if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
-        const res = runOLS(rows, y, allX);
-        if (!res) { setErr("Matrix is singular or insufficient data. Check for perfect multicollinearity."); setRunning(false); return; }
-        setResult({ type: "OLS", main: { ...res, varNames: ["(Intercept)", ...allX] } });
+        if (!allX.length) return { error: "Select at least one regressor." };
+        const wCol = weightVar[0];
+        let res;
+        if (wCol) {
+          const weights = dataRows.map(r => {
+            const v = r[wCol];
+            return typeof v === "number" && isFinite(v) && v > 0 ? v : null;
+          });
+          if (weights.every(w => w === null))
+            return { error: `Weight column '${wCol}' has no valid positive values.` };
+          res = runWLS(dataRows, y, allX, weights, seOpts);
+        } else {
+          res = runOLS(dataRows, y, allX, seOpts);
+        }
+        if (!res) return { error: "Matrix is singular or insufficient data." };
+        const olsType = wCol ? "WLS" : "OLS";
+        return { result: wrapResult(olsType, res, { yVar: y, xVars, wVars, weightCol: wCol ?? null }), panelFE: null, panelFD: null };
 
       } else if (model === "FE" || model === "FD") {
-        if (!allX.length) { setErr("Select at least one regressor."); setRunning(false); return; }
+        if (!allX.length) return { error: "Select at least one regressor." };
         const ec = panel.entityCol, tc = panel.timeCol;
-        const feRaw = runFE(rows, y, allX, ec, tc);
-        const fdRaw = runFD(rows, y, allX, ec, tc);
+        const feRaw = runFE(dataRows, y, allX, ec, tc, seOpts);
+        const fdRaw = runFD(dataRows, y, allX, ec, tc, seOpts);
         const fe = feRaw?.error ? null : feRaw;
         const fd = fdRaw?.error ? null : fdRaw;
-        setPanelFE(fe); setPanelFD(fd);
-        if (!fe && !fd) {
-          setErr(feRaw?.error ?? fdRaw?.error ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid.");
-          setRunning(false); return;
-        }
-        setResult({ type: model, fe, fd, y, x: allX });
+        if (!fe && !fd)
+          return { error: feRaw?.error ?? fdRaw?.error ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid." };
+        const panelSpec = { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc };
+        const feRes = fe ? wrapResult("FE", fe, panelSpec) : null;
+        const fdRes = fd ? wrapResult("FD", fd, panelSpec) : null;
+        return { result: { type: model, fe: feRes, fd: fdRes }, panelFE: feRes, panelFD: fdRes };
 
       } else if (model === "2SLS") {
-        if (!xVars.length) { setErr("Select endogenous regressor(s) in Features (X)."); setRunning(false); return; }
-        if (!zVars.length) { setErr("Select at least one instrument (Z)."); setRunning(false); return; }
-        const res = run2SLS(rows, y, xVars, wVars, zVars);
-        if (!res || res.error) { setErr(res?.error ?? "2SLS failed. Check that instruments are valid (not in X) and data is sufficient."); setRunning(false); return; }
-        setResult({ type: "2SLS", ...res });
+        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!zVars.length) return { error: "Select at least one instrument (Z)." };
+        const res = run2SLS(dataRows, y, xVars, wVars, zVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "2SLS failed. Check that instruments are valid (not in X) and data is sufficient." };
+        return { result: wrapResult("2SLS", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
 
       } else if (model === "DiD") {
-        if (!postVar[0] || !treatVar[0]) { setErr("Select Post and Treated binary columns for DiD."); setRunning(false); return; }
-        const res = run2x2DiD(rows, y, postVar[0], treatVar[0], wVars);
-        if (!res) { setErr("DiD failed. Post and Treated must be 0/1 binary variables."); setRunning(false); return; }
-        setResult({ type: "DiD", main: res });
+        if (!postVar[0] || !treatVar[0]) return { error: "Select Post and Treated binary columns for DiD." };
+        const res = run2x2DiD(dataRows, y, postVar[0], treatVar[0], wVars, seOpts);
+        if (!res) return { error: "DiD failed. Post and Treated must be 0/1 binary variables." };
+        return { result: wrapResult("DiD", res, { yVar: y, wVars, postVar: postVar[0], treatVar: treatVar[0] }), panelFE: null, panelFD: null };
 
       } else if (model === "TWFE") {
-        if (!treatVar[0]) { setErr("Select the treatment indicator column."); setRunning(false); return; }
+        if (!treatVar[0]) return { error: "Select the treatment indicator column." };
         const ec = panel.entityCol, tc = panel.timeCol;
-        const res = runTWFEDiD(rows, y, ec, tc, treatVar[0], wVars);
-        if (!res) { setErr("TWFE DiD failed. Check panel structure and treatment variable."); setRunning(false); return; }
-        setResult({ type: "TWFE", main: res });
+        const res = runTWFEDiD(dataRows, y, ec, tc, treatVar[0], wVars, seOpts);
+        if (!res) return { error: "TWFE DiD failed. Check panel structure and treatment variable." };
+        return { result: wrapResult("TWFE", res, { yVar: y, wVars, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }), panelFE: null, panelFD: null };
 
       } else if (model === "RDD") {
-        if (!runningVar[0]) { setErr("Select a running variable."); setRunning(false); return; }
+        if (!runningVar[0]) return { error: "Select a running variable." };
         const c0 = parseFloat(cutoff);
-        if (isNaN(c0)) { setErr("Enter a valid cutoff value."); setRunning(false); return; }
-        const runVals = rows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
-        const yVals   = rows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
+        if (isNaN(c0)) return { error: "Enter a valid cutoff value." };
+        const runVals = dataRows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
+        const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
         const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
-        if (isNaN(h) || h <= 0) { setErr("Invalid bandwidth."); setRunning(false); return; }
-        const res = runSharpRDD(rows, y, runningVar[0], c0, h, kernel, wVars);
-        if (!res) { setErr("RDD failed. Not enough observations within bandwidth."); setRunning(false); return; }
-        setResult({ type: "RDD", main: res, h });
+        if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
+        const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, wVars, seOpts);
+        if (!res) return { error: "RDD failed. Not enough observations within bandwidth." };
+        return { result: wrapResult("RDD", res, { yVar: y, wVars, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }, { h }), panelFE: null, panelFD: null };
+
+      } else if (model === "Logit" || model === "Probit") {
+        if (!allX.length) return { error: "Select at least one regressor (X)." };
+        const fn  = model === "Logit" ? runLogit : runProbit;
+        const res = fn(dataRows, y, allX, seOpts);
+        if (!res || res.error) return { error: res?.error ?? `${model} failed. Ensure Y is binary (0/1) and X columns are numeric.` };
+        if (!res.converged) console.warn(`${model} did not converge after ${res.iterations} iterations.`);
+        return { result: wrapResult(model, res, { yVar: y, xVars, wVars }), panelFE: null, panelFD: null };
+
+      } else if (model === "GMM") {
+        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!zVars.length) return { error: "Select at least one excluded instrument (Z)." };
+        const res = runGMM(dataRows, y, xVars, wVars, zVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "GMM failed. Check instruments and data." };
+        return { result: wrapResult("GMM", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
+
+      } else if (model === "LIML") {
+        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!zVars.length) return { error: "Select at least one excluded instrument (Z)." };
+        const res = runLIML(dataRows, y, xVars, wVars, zVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "LIML failed. Check instruments and data." };
+        return { result: wrapResult("LIML", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
+
+      } else if (model === "WLS") {
+        if (!allX.length) return { error: "Select at least one regressor." };
+        const wCol = weightVar[0];
+        if (!wCol) return { error: "WLS: select a weight variable in Model Configuration." };
+        const weights = dataRows.map(r => {
+          const v = r[wCol];
+          return typeof v === "number" && isFinite(v) && v > 0 ? v : null;
+        });
+        if (weights.every(w => w === null))
+          return { error: `Weight column '${wCol}' has no valid positive values.` };
+        const res = runWLS(dataRows, y, allX, weights, seOpts);
+        if (!res) return { error: "Matrix is singular or insufficient data." };
+        return { result: wrapResult("WLS", res, { yVar: y, xVars, wVars, weightCol: wCol }), panelFE: null, panelFD: null };
+
+      } else if (model === "LSDV") {
+        if (!allX.length) return { error: "Select at least one regressor (X)." };
+        const ec = panel.entityCol, tc = panel.timeCol;
+        const res = runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };
+        return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc }), panelFE: null, panelFD: null };
+
+      } else if (model === "EventStudy") {
+        if (!treatTimeCol[0]) return { error: "Select the treatment time column (period when each unit was first treated)." };
+        const ec = panel.entityCol, tc = panel.timeCol;
+        const pre  = Math.max(1, kPre  || 3);
+        const post = Math.max(1, kPost || 3);
+        const res = runEventStudy(dataRows, y, ec, tc, treatTimeCol[0], pre, post, wVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "Event Study failed. Check panel structure and treatment time column." };
+        return { result: wrapResult("EventStudy", res, { yVar: y, xVars, wVars, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }), panelFE: null, panelFD: null };
+
+      } else if (model === "FuzzyRDD") {
+        if (!treatVar[0])   return { error: "Select the treatment receipt column (D: actual 0/1 take-up)." };
+        if (!runningVar[0]) return { error: "Select a running variable." };
+        const c0 = parseFloat(cutoff);
+        if (isNaN(c0)) return { error: "Enter a valid cutoff value." };
+        const runVals = dataRows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
+        const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
+        const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
+        if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
+        const res = runFuzzyRDD(dataRows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts });
+        if (!res || res.error) return { error: res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth." };
+        return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }), panelFE: null, panelFD: null };
+
+      } else if (model === "PoissonFE") {
+        if (!allX.length) return { error: "Select at least one regressor (X)." };
+        if (!panel?.entityCol) return { error: "Declare a panel structure (Entity column) in Wrangling before running Poisson FE." };
+        const ec = panel.entityCol;
+        const res = runPoissonFE(dataRows, y, allX, ec, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
+        return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars, entityCol: ec }), panelFE: null, panelFD: null };
+
+      } else if (model === "SyntheticControl") {
+        if (!panel?.entityCol || !panel?.timeCol) return { error: "Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control." };
+        if (!treatedUnit) return { error: "Select the treated unit." };
+        const synthTime = parseFloat(synthTreatTime);
+        if (isNaN(synthTime)) return { error: "Enter a valid treatment time period (numeric)." };
+        const ec = panel.entityCol, tc = panel.timeCol;
+        const predictors = xVars.length ? xVars : [];
+        const res = runSyntheticControl(dataRows, y, ec, tc, treatedUnit, synthTime, { predictorCols: predictors });
+        return { result: wrapResult("SyntheticControl", res, { yVar: y, xVars, entityCol: ec, timeCol: tc, treatedUnit, treatTime: synthTime }), panelFE: null, panelFD: null };
       }
+
+      return { error: `Unknown estimator: ${model}` };
     } catch (e) {
-      setErr(`Estimation error: ${e.message}`);
+      return { error: `Estimation error: ${e.message}` };
     }
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+
+  // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
+  const runSpecCurve = useCallback(() => {
+    const { col, op, start, end, step, coefVar } = specConfig;
+    if (!col || !coefVar || start === "" || end === "" || step === "") return;
+    const s = Math.abs(Number(step)) || 1;
+    const pts = [];
+    setSpecRunning(true);
+    try {
+      for (let t = Number(start); t <= Number(end) + 1e-9; t += s) {
+        const filtered = (rows ?? []).filter(row => {
+          const v = Number(row[col]);
+          switch (op) {
+            case ">=": return !isNaN(v) && v >= t;
+            case "<=": return !isNaN(v) && v <= t;
+            case ">":  return !isNaN(v) && v > t;
+            case "<":  return !isNaN(v) && v < t;
+            default:   return String(row[col]) === String(t);
+          }
+        });
+        if (filtered.length < 5) continue;
+        const out = _runEstimation(filtered);
+        if (out.result && !out.error) {
+          const idx = (out.result.varNames ?? []).indexOf(coefVar);
+          if (idx >= 0) {
+            const b = out.result.beta[idx];
+            const se = out.result.se[idx];
+            pts.push({ threshold: +t.toFixed(6), estimate: b, se, ciLow: b - 1.96 * se, ciHigh: b + 1.96 * se, n: filtered.length });
+          }
+        }
+      }
+    } finally {
+      setSpecRunning(false);
+    }
+    setSpecRows(pts);
+  }, [specConfig, rows, _runEstimation]);
+
+  // ── RUN ALL SUBSETS ───────────────────────────────────────────────────────────
+  const runAllSubsets = useCallback(() => {
+    if (!subsets.length) return;
+    setRunning(true);
+    try {
+      const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
+      const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
+
+      // Full sample (with per-subset steps applied if a branch point is set)
+      const fullRows = hasSubsetSteps
+        ? (runPipeline(rows, headers, perSubsetSteps, pipelineCtx)?.rows ?? rows)
+        : rows;
+      const fullOut = _runEstimation(fullRows);
+      if (!fullOut.error && fullOut.result) {
+        const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
+        modelBuffer.add(r);
+        setBufferVersion(v => v + 1);
+      }
+
+      // Each named subset
+      for (const s of subsets) {
+        const filtered = applySubsetFilter(rows, s.filters);
+        const subsetRows = hasSubsetSteps
+          ? (runPipeline(filtered, headers, perSubsetSteps, pipelineCtx)?.rows ?? filtered)
+          : filtered;
+        const out = _runEstimation(subsetRows);
+        if (!out.error && out.result) {
+          const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
+          modelBuffer.add(r);
+          setBufferVersion(v => v + 1);
+        }
+      }
+    } finally {
+      setRunning(false);
+    }
+  }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
+
+  // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
+  const estimate = useCallback(() => {
+    setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
+    const out = _runEstimation(rows);
+    if (out.error) { setErr(out.error); }
+    else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
     setRunning(false);
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, rows, panel]);
+  }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
 
-  // ── R Script config — base object shared by all ExportBar callsites ──────────
+  // ── Replicate config — base object shared by all ExportBar callsites ─────────
   // Each callsite merges this with its specific model params.
-  const baseRConfig = useMemo(() => ({
+  const baseReplicateConfig = useMemo(() => ({
     filename:        cleanedData?.filename ?? "dataset.csv",
     pipeline:        cleanedData?.changeLog ?? [],
     dataDictionary:  cleanedData?.dataDictionary ?? null,
@@ -834,6 +1586,15 @@ export default function ModelingTab({ cleanedData, onBack }) {
         {/* ── LEFT: Spec Panel ── */}
         <div style={{ width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`, overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem" }}>
 
+          <HintBox color={C.teal} title="How to model" tips={[
+            "Choose an estimator from the dropdown — grouped by strategy (linear, panel, causal…)",
+            "Assign Y (outcome), X (controls), Z (instruments), or W (weights) via the chip selectors",
+            "Panel structure (FE, FD, DiD, Event Study) requires entity & time declared in Wrangling → Panel",
+            "Inference Options: switch between classical, HC1–HC3, clustered, or HAC standard errors",
+            "Pin results to the model buffer to compare multiple specifications side by side",
+            "Export: LaTeX table, CSV coefficients, or replication scripts in R / Stata / Python",
+          ]} />
+
           <EstimatorSidebar
             model={model}
             onSelect={handleModelSelect}
@@ -854,7 +1615,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
             model={model}
             numericCols={numericCols}
             yVar={yVar}
-            xVars={xVars}
+            xVars={xVars}         setXVars={setXVars}
             wVars={wVars}         setWVars={setWVars}
             zVars={zVars}         setZVars={setZVars}
             treatVar={treatVar}   setTreatVar={setTreatVar}
@@ -864,7 +1625,176 @@ export default function ModelingTab({ cleanedData, onBack }) {
             bwMode={bwMode}       setBwMode={setBwMode}
             bwManual={bwManual}   setBwManual={setBwManual}
             kernel={kernel}       setKernel={setKernel}
+            weightVar={weightVar} setWeightVar={setWeightVar}
+            treatTimeCol={treatTimeCol}     setTreatTimeCol={setTreatTimeCol}
+            kPre={kPre}                     setKPre={setKPre}
+            kPost={kPost}                   setKPost={setKPost}
+            lsdvTimeFE={lsdvTimeFE}         setLsdvTimeFE={setLsdvTimeFE}
+            treatedUnit={treatedUnit}       setTreatedUnit={setTreatedUnit}
+            synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime}
+            rows={rows}
+            panel={panel}
           />
+
+          <InferenceOptions
+            modelType={model}
+            headers={headers}
+            seType={seType}           setSeType={setSeType}
+            clusterVar={clusterVar}   setClusterVar={setClusterVar}
+            clusterVar2={clusterVar2} setClusterVar2={setClusterVar2}
+            maxLag={maxLag}           setMaxLag={setMaxLag}
+          />
+
+          <CodeEditor result={result} />
+
+          <SubsetManager
+            headers={headers}
+            rows={rows}
+            subsets={subsets}
+            onChange={setSubsets}
+            onRunAll={runAllSubsets}
+            running={running}
+          />
+
+          {/* ── H7: Download multi-subset bundle ── */}
+          {subsets.length > 0 && (
+            <button
+              onClick={() => {
+                const sharedSteps  = branchPointIdx !== null ? fullPipeline.slice(0, branchPointIdx + 1) : fullPipeline;
+                const perSubSteps  = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1
+                  ? fullPipeline.slice(branchPointIdx + 1) : [];
+                downloadMultiSubsetBundle({
+                  filename:       cleanedData?.filename       ?? "dataset.csv",
+                  pipeline:       sharedSteps,
+                  perSubsetSteps: perSubSteps,
+                  subsets,
+                  model: {
+                    type: model, yVar: yVar[0] ?? "", xVars, wVars,
+                    entityCol: panel?.entityCol ?? null,
+                    timeCol:   panel?.timeCol   ?? null,
+                  },
+                  dataDictionary: cleanedData?.dataDictionary ?? null,
+                });
+              }}
+              style={{
+                width: "100%", marginTop: 6, padding: "4px 0",
+                background: "none", border: `1px solid ${C.border2}`,
+                borderRadius: 3, cursor: "pointer",
+                fontFamily: mono, fontSize: 9, color: C.textMuted,
+                letterSpacing: "0.1em",
+              }}
+            >
+              ↓ Download subset bundle (.zip)
+            </button>
+          )}
+
+          {/* ── H8: Specification curve ── */}
+          {result && headers?.length > 0 && (
+            <div style={{ marginTop: "0.75rem" }}>
+              <button
+                onClick={() => setSpecOpen(v => !v)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center",
+                  justifyContent: "space-between", padding: "0.5rem 0.75rem",
+                  background: specOpen ? `${C.blue}0d` : C.surface,
+                  border: `1px solid ${specOpen ? C.blue + "50" : C.border}`,
+                  borderRadius: specOpen ? "4px 4px 0 0" : 4,
+                  cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+                }}
+              >
+                <span style={{ fontSize: 9, color: C.blue, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+                  ◈ Spec Curve {specRows.length > 0 ? `(${specRows.length} pts)` : ""}
+                </span>
+                <span style={{ fontSize: 9, color: C.textMuted }}>{specOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {specOpen && (
+                <div style={{
+                  border: `1px solid ${C.blue}50`, borderTop: "none",
+                  borderRadius: "0 0 4px 4px", padding: "0.85rem 0.75rem",
+                  background: C.surface,
+                }}>
+                  <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 8, lineHeight: 1.6 }}>
+                    Vary a threshold and plot how the coefficient of interest changes.
+                  </div>
+                  {/* Threshold column + op */}
+                  <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+                    <select
+                      value={specConfig.col}
+                      onChange={e => setSpecConfig(c => ({ ...c, col: e.target.value }))}
+                      style={{ flex: 3, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                    >
+                      <option value="">— threshold column —</option>
+                      {(headers ?? []).map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                    <select
+                      value={specConfig.op}
+                      onChange={e => setSpecConfig(c => ({ ...c, op: e.target.value }))}
+                      style={{ flex: 1, background: C.bg, color: C.teal, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                    >
+                      {[">=", "<=", ">", "<"].map(op => <option key={op} value={op}>{op}</option>)}
+                    </select>
+                  </div>
+                  {/* Range inputs */}
+                  <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+                    {[["start", "from"], ["end", "to"], ["step", "step"]].map(([k, lbl]) => (
+                      <input
+                        key={k}
+                        type="number"
+                        value={specConfig[k]}
+                        onChange={e => setSpecConfig(c => ({ ...c, [k]: e.target.value }))}
+                        placeholder={lbl}
+                        style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px", color: C.text, outline: "none" }}
+                      />
+                    ))}
+                  </div>
+                  {/* Coefficient of interest */}
+                  <select
+                    value={specConfig.coefVar}
+                    onChange={e => setSpecConfig(c => ({ ...c, coefVar: e.target.value }))}
+                    style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px", marginBottom: 8 }}
+                  >
+                    <option value="">— coefficient of interest —</option>
+                    {(result?.varNames ?? []).filter(v => v !== "(Intercept)").map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <button
+                    onClick={runSpecCurve}
+                    disabled={specRunning || !specConfig.col || !specConfig.coefVar}
+                    style={{
+                      width: "100%", padding: "5px 0", borderRadius: 3,
+                      background: specRunning ? "transparent" : `${C.blue}15`,
+                      border: `1px solid ${specRunning ? C.border : C.blue + "60"}`,
+                      color: specRunning ? C.textMuted : C.blue,
+                      fontFamily: mono, fontSize: 9, cursor: "pointer", letterSpacing: "0.12em",
+                    }}
+                  >
+                    {specRunning ? "◌ running…" : "▶ Run spec curve"}
+                  </button>
+
+                  {/* Inline chart */}
+                  {specRows.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <PlotBuilder
+                        key={specRows.length}
+                        headers={["threshold", "estimate", "se", "ciLow", "ciHigh", "n"]}
+                        rows={specRows}
+                        initialLayers={[
+                          { id: "sc_a", geom: "ribbon",   aes: { x: "threshold", y: "", color: "", yMin: "ciLow", yMax: "ciHigh" }, value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_b", geom: "line",     aes: { x: "threshold", y: "estimate", color: "", yMin: "", yMax: "" },     value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_c", geom: "point",    aes: { x: "threshold", y: "estimate", color: "", yMin: "", yMax: "" },     value: "", position: "identity", fill: C.blue, visible: true },
+                          { id: "sc_d", geom: "hline",    aes: { x: "", y: "", color: "", yMin: "", yMax: "" },                      value: "0", position: "identity", fill: C.textDim, visible: true },
+                        ]}
+                        style={{ minHeight: 260 }}
+                      />
+                      <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 4, textAlign: "center" }}>
+                        {specConfig.col} {specConfig.op} threshold → coef({specConfig.coefVar}) · {specRows.length} pts
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <button
             onClick={estimate}
@@ -887,7 +1817,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
           {err && (
             <div style={{
               marginTop: "0.8rem", padding: "0.6rem 0.8rem",
-              background: "#0d0808", border: `1px solid ${C.red}40`,
+              background: C.surface, border: `1px solid ${C.red}40`,
               borderLeft: `3px solid ${C.red}`, borderRadius: 4,
               fontSize: 11, color: C.red, fontFamily: mono, lineHeight: 1.6,
             }}>
@@ -896,7 +1826,8 @@ export default function ModelingTab({ cleanedData, onBack }) {
           )}
         </div>
 
-        {/* ── RIGHT: Results Panel ── */}
+        {/* ── RIGHT: Results Panel (column flex so buffer bar sticks to bottom) ── */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div style={{ flex: 1, overflowY: "auto", padding: "1.4rem 1.6rem", paddingBottom: "3rem" }}>
 
           {!result && !err && (
@@ -906,33 +1837,82 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 Configure your model specification and click Estimate
               </div>
               <div style={{ fontSize: 10, color: C.textMuted, maxWidth: 420, textAlign: "center", lineHeight: 1.8 }}>
-                Supported estimators: OLS · Fixed Effects · First Differences · 2SLS/IV · DiD 2×2 · TWFE · Sharp RDD
+                Supported estimators: OLS · Fixed Effects · First Differences · 2SLS/IV · DiD 2×2 · TWFE · Sharp RDD · Logit · Probit
               </div>
             </div>
           )}
 
-          {/* OLS */}
-          {result?.type === "OLS" && result.main && (() => {
-            const r = result.main;
+          {/* ── Pin result button ── */}
+          {result && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+              <button
+                onClick={() => {
+                  const id = modelBuffer.add(result);
+                  setActiveBufferId(id);
+                  setBufferVersion(v => v + 1);
+                }}
+                style={{
+                  padding: "3px 12px", borderRadius: 3, cursor: "pointer",
+                  fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
+                  border: `1px solid ${C.border2}`, background: "transparent",
+                  color: C.textDim, transition: "all 0.12s",
+                }}
+                title="Pin this result for comparison"
+              >
+                ⊕ Pin
+              </button>
+            </div>
+          )}
+
+          {/* ── Coach Insights ── */}
+          {coachingSignals.length > 0 && (
+            <div style={{ marginBottom: "1.2rem" }}>
+              <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 8 }}>
+                Coach Insights
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {coachingSignals.map(s => {
+                  const clr = s.severity === "warn" ? C.gold : s.severity === "suggest" ? C.teal : C.blue;
+                  const clickable = !!onCoachQuestion && !!s.question;
+                  return (
+                    <button key={s.id} title={s.detail + "\n\n" + s.suggestion + (clickable ? "\n\nClick to ask the AI coach" : "")}
+                      onClick={clickable ? () => onCoachQuestion(s.question) : undefined}
+                      style={{ fontSize: 10, color: clr, border: `1px solid ${clr}`, borderRadius: 3,
+                               padding: "3px 8px", cursor: clickable ? "pointer" : "default", fontFamily: mono,
+                               background: clr + "12", transition: "opacity 0.12s" }}
+                      onMouseEnter={e => { if (clickable) e.currentTarget.style.opacity = "0.75"; }}
+                      onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
+                    >
+                      {s.severity === "warn" ? "⚠ " : s.severity === "suggest" ? "→ " : "i "}{s.title}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* OLS / WLS */}
+          {(result?.type === "OLS" || result?.type === "WLS") && (() => {
+            const r = result;
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1.2rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>OLS Results</span>
+                  <span style={{ fontSize: 10, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.label} Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   <span style={{ fontSize: 12, color: C.textMuted }}>{yVar[0]} ~ {[...xVars, ...wVars].join(" + ")}</span>
                 </div>
                 <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
-                  { label: "R²",     value: r.R2.toFixed(4),     color: C.green },
-                  { label: "Adj. R²",value: r.adjR2.toFixed(4),  color: C.green },
+                  { label: "R²",     value: r.R2?.toFixed(4)    ?? "—", color: C.green },
+                  { label: "Adj. R²",value: r.adjR2?.toFixed(4) ?? "—", color: C.green },
                   { label: "F-stat", value: r.Fstat?.toFixed(3) ?? "—", color: C.gold },
-                  { label: "p(F)",   value: r.Fpval != null ? (r.Fpval < 0.001 ? "<0.001" : r.Fpval.toFixed(4)) : "—", color: r.Fpval < 0.05 ? C.gold : C.textMuted },
+                  { label: "p(F)",   value: r.Fpval != null ? (r.Fpval < 0.001 ? "<0.001" : r.Fpval.toFixed(4)) : "—", color: r.Fpval != null && r.Fpval < 0.05 ? C.gold : C.textMuted },
                   { label: "n", value: r.n, color: C.text },
                   { label: "df",value: r.df, color: C.textDim },
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — 95% Confidence Intervals</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Plot & Diagnostics</Lbl>
                 <PlotSelector
@@ -968,27 +1948,190 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
-                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model="OLS" />
-                <ExportBar yVar={yVar[0]} results={r} model="OLS"
-                  onReport={() => openReport({ ...r, modelLabel: "OLS", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
-                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "OLS", yVar: yVar[0], xVars, wVars } }} />
+                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model={r.type} />
+                <ExportBar yVar={yVar[0]} results={r} model={r.type}
+                  onReport={() => openReport({ ...r, modelLabel: r.label, yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars } }} />
               </div>
             );
           })()}
 
           {/* Panel FE / FD */}
           {(result?.type === "FE" || result?.type === "FD") && (
-            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseRConfig={baseRConfig} />
+            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} rows={rows} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* 2SLS */}
           {result?.type === "2SLS" && (
-            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseRConfig={baseRConfig} />
+            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
+          {/* GMM */}
+          {result?.type === "GMM" && (
+            <GMMResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+          )}
+
+          {/* LIML */}
+          {result?.type === "LIML" && (
+            <LIMLResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+          )}
+
+          {/* Fuzzy RDD */}
+          {result?.type === "FuzzyRDD" && (
+            <FuzzyRDDResults
+              result={result}
+              yVar={yVar[0]}
+              treatVarName={treatVar[0]}
+              runningVar={runningVar[0]}
+              openReport={openReport}
+              baseReplicateConfig={baseReplicateConfig}
+            />
+          )}
+
+          {/* Event Study */}
+          {result?.type === "EventStudy" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Event Study Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  <Badge label={`${r.units ?? "?"} units`} color={C.textDim} />
+                </div>
+                {r.preTestStat != null && (
+                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
+                    <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                      Pre-trend F-test: F = {r.preTestStat?.toFixed(3) ?? "—"} · p = {r.preTestPval < 0.001 ? "<0.001" : r.preTestPval?.toFixed(4) ?? "—"}
+                      {r.preTestPval < 0.05
+                        ? <span style={{ color: C.red }}> ⚠ Pre-trend detected</span>
+                        : <span style={{ color: C.teal }}> ✓ No pre-trend</span>}
+                    </div>
+                  </div>
+                )}
+                <FitBar items={[
+                  { label: "R²",      value: r.R2?.toFixed(4)    ?? "—", color: C.teal },
+                  { label: "Adj. R²", value: r.adjR2?.toFixed(4) ?? "—", color: C.teal },
+                  { label: "n",       value: r.n,                         color: C.text },
+                  { label: "units",   value: r.units ?? "—",              color: C.textDim },
+                ]} />
+                <Lbl color={C.textMuted}>Event-Time Coefficient Plot</Lbl>
+                <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
+                <Lbl color={C.textMuted}>Coefficient Table</Lbl>
+                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+              </div>
+            );
+          })()}
+
+          {/* Panel LSDV */}
+          {result?.type === "LSDV" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>Panel LSDV Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.units != null && <Badge label={`${r.units} units`} color={C.textDim} />}
+                  {r.timeFE && <Badge label="Time FE included" color={C.blue} />}
+                </div>
+                <FitBar items={[
+                  { label: "R²",      value: r.R2?.toFixed(4)    ?? "—", color: C.blue },
+                  { label: "Adj. R²", value: r.adjR2?.toFixed(4) ?? "—", color: C.blue },
+                  { label: "F-stat",  value: r.Fstat?.toFixed(3) ?? "—", color: C.gold },
+                  { label: "n",       value: r.n,                         color: C.text },
+                ]} />
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
+                <Lbl color={C.textMuted}>Structural Coefficient Table (excl. dummies)</Lbl>
+                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <PlotSelector accentColor={C.blue} defaultId="forest" plots={[
+                  { id: "forest", label: "Coefficient plot",
+                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
+                  { id: "resid", label: "Residuals", node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
+                ]} />
+                <ExportBar yVar={yVar[0]} results={r} model="LSDV"
+                  onReport={() => openReport({ ...r, modelLabel: "Panel LSDV", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "LSDV", yVar: yVar[0], xVars, wVars } } : null}
+                />
+              </div>
+            );
+          })()}
+
+          {/* Poisson FE */}
+          {result?.type === "PoissonFE" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson FE Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
+                               : <Badge label="⚠ did not converge" color={C.red} />}
+                </div>
+                <FitBar items={[
+                  { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: "#9e7ec8" },
+                  { label: "Log-lik", value: r.logLik?.toFixed(3)     ?? "—", color: C.textDim },
+                  { label: "AIC",     value: r.AIC?.toFixed(1)         ?? "—", color: C.textDim },
+                  { label: "BIC",     value: r.BIC?.toFixed(1)         ?? "—", color: C.textDim },
+                  { label: "n",       value: r.n,                              color: C.text },
+                ]} />
+                <Lbl color={C.textMuted}>Coefficient Table (log-linear, with IRR)</Lbl>
+                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                {r.IRR?.length > 0 && (
+                  <div style={{ marginTop: "1rem" }}>
+                    <Lbl color={C.textMuted}>Incidence Rate Ratios (IRR = exp(β))</Lbl>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {r.varNames.map((v, i) => (
+                        <div key={v} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                          {v}: <span style={{ color: C.text }}>{r.IRR[i]?.toFixed(4) ?? "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <PlotSelector accentColor={"#9e7ec8"} defaultId="forest" plots={[
+                  { id: "forest", label: "Coefficient plot",
+                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poissonfe" filename="poissonfe_coefficients.svg" /> },
+                ]} />
+              </div>
+            );
+          })()}
+
+          {/* Synthetic Control */}
+          {result?.type === "SyntheticControl" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>Synthetic Control Results</span>
+                  <Badge label={`treated: ${r.scTreatedUnit}`} color={C.gold} />
+                  <Badge label={`T* = ${r.scTreatTime}`} color={C.textDim} />
+                </div>
+                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.gold}30`, borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
+                  <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Fit Quality & Inference</div>
+                  <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono }}>
+                    Pre-RMSPE: {r.scRmspePre?.toFixed(6) ?? "—"} · Post-RMSPE: {r.scRmspePost?.toFixed(6) ?? "—"}
+                    {r.scPValue != null && <span> · Placebo p-value: {r.scPValue?.toFixed(3)}</span>}
+                  </div>
+                </div>
+                <Lbl color={C.textMuted}>Donor Weights</Lbl>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: "1.2rem" }}>
+                  {Object.entries(r.scWeights ?? {})
+                    .sort(([, a], [, b]) => b - a)
+                    .filter(([, w]) => w > 0.001)
+                    .map(([unit, w]) => (
+                      <div key={unit} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 10px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                        {unit}: <span style={{ color: C.gold }}>{(w * 100).toFixed(1)}%</span>
+                      </div>
+                    ))}
+                </div>
+                <Lbl color={C.textMuted}>Outcome Trajectory (Pre + Post)</Lbl>
+                <SyntheticGapPlot preFit={r.scPreFit} postGap={r.scPostGap} treatTime={r.scTreatTime} yLabel={yVar[0]} />
+              </div>
+            );
+          })()}
+
           {/* DiD / TWFE */}
-          {(result?.type === "DiD" || result?.type === "TWFE") && result.main && (() => {
-            const r = result.main;
+          {(result?.type === "DiD" || result?.type === "TWFE") && (() => {
+            const r = result;
             const isATT = r.att != null;
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
@@ -999,7 +2142,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                 </div>
                 {isATT && (
-                  <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#081210", border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
+                  <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
                     <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
                       Average Treatment Effect on the Treated (ATT)
                     </div>
@@ -1020,7 +2163,7 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 ]} />
                 <Lbl color={C.textMuted}>Full Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <PlotSelector
                   accentColor={C.teal}
@@ -1035,55 +2178,201 @@ export default function ModelingTab({ cleanedData, onBack }) {
                 />
                 <ExportBar yVar={yVar[0]} results={r} model={result.type}
                   onReport={() => openReport({ ...r, modelLabel: result.type === "DiD" ? "DiD 2×2" : "TWFE DiD", yVar: yVar[0], xVars: [...wVars] })}
-                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: result.type, yVar: yVar[0], wVars,
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: result.type, yVar: yVar[0], wVars,
                     postVar: postVar[0], treatVar: treatVar[0] } }}
                 />
               </div>
             );
           })()}
 
+          {/* Logit / Probit */}
+          {(result?.type === "Logit" || result?.type === "Probit") && (() => {
+            const r      = result;
+            const family = r.type.toLowerCase();
+            const color  = C.violet;
+            const meMap  = Object.fromEntries((r.marginalEffects ?? []).map(m => [m.variable, m.dy_dx]));
+            const safeF  = (v, d = 4) => (v != null && isFinite(v)) ? v.toFixed(d) : "—";
+            const convergenceWarn = !r.converged;
+            // Y array for the valid rows (matches engine filtering logic)
+            const allX = [...xVars, ...wVars];
+            const validY = rows
+              .filter(row => {
+                const yv = row[yVar[0]];
+                return (yv === 0 || yv === 1) && allX.every(c => typeof row[c] === "number" && isFinite(row[c]));
+              })
+              .map(row => row[yVar[0]]);
+
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                {/* ── Header ── */}
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, color, letterSpacing: "0.24em", textTransform: "uppercase" }}>
+                    {family === "logit" ? "Logistic Regression" : "Probit"} Results
+                  </span>
+                  <Badge label={`n = ${r.n}`}  color={C.textDim} />
+                  <Badge label={`k = ${r.k}`}  color={C.textDim} />
+                  {convergenceWarn && <Badge label={`⚠ did not converge (${r.iterations} iter)`} color={C.red} />}
+                  {r.converged    && <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />}
+                </div>
+
+                {convergenceWarn && (
+                  <InfoBox color={C.red}>
+                    ⚠ IRLS did not converge in {r.iterations} iterations. Results may be unreliable. Check for perfect separation or near-multicollinearity.
+                  </InfoBox>
+                )}
+
+                {/* ── Fit statistics bar ── */}
+                <FitBar items={[
+                  { label: "McFadden R²", value: safeF(r.mcFaddenR2),          color,       hint: "1 − ℓ(β̂)/ℓ₀ — analogous to R² but not directly comparable" },
+                  { label: "Log-lik",     value: safeF(r.logLik, 3),            color: C.gold },
+                  { label: "AIC",         value: safeF(r.AIC, 2),               color: C.textDim },
+                  { label: "BIC",         value: safeF(r.BIC, 2),               color: C.textDim },
+                  { label: "n",           value: r.n,                            color: C.text },
+                  { label: "df",          value: r.df,                           color: C.textDim },
+                ]} />
+
+                {/* ── Coefficient table ── */}
+                <Lbl color={C.textMuted}>Coefficient Table (z-statistics · asymptotic SE)</Lbl>
+                <div style={{ marginBottom: "1.2rem" }}>
+                  <CoeffTable
+                    varNames={r.varNames} beta={r.beta} se={r.se}
+                    tStats={r.testStats} pVals={r.pVals}
+                    yVar={yVar[0]} df={null}
+                    statLabel="z"
+                    meMap={meMap}
+                  />
+                </div>
+
+                {/* ── Marginal Effects at the Mean ── */}
+                {r.marginalEffects?.length > 0 && (
+                  <>
+                    <Lbl color={C.textMuted}>Marginal Effects at the Mean (MEM) · dP(Y=1)/dx</Lbl>
+                    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                        <div>Variable</div>
+                        <div style={{ textAlign: "right" }}>dP/dx at x̄</div>
+                      </div>
+                      {r.marginalEffects.map(({ variable, dy_dx }, i) => (
+                        <div key={variable} style={{ display: "grid", gridTemplateColumns: "2fr 1fr", padding: "0.55rem 0.75rem", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: i % 2 === 0 ? C.surface : C.surface2, fontFamily: mono }}>
+                          <div style={{ fontSize: 12, color: C.text }}>{variable}</div>
+                          <div style={{ textAlign: "right", fontSize: 13, color: dy_dx >= 0 ? C.green : C.red, fontFamily: mono }}>
+                            {dy_dx >= 0 ? "+" : ""}{dy_dx.toFixed(4)}
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                        Evaluated at sample means of all covariates
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* ── Odds Ratios (Logit only) ── */}
+                {family === "logit" && r.oddsRatios?.length > 0 && (
+                  <>
+                    <Lbl color={C.textMuted}>Odds Ratios · exp(β) with 95% CI</Lbl>
+                    <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                        <div>Variable</div>
+                        <div style={{ textAlign: "right" }}>OR</div>
+                        <div style={{ textAlign: "right" }}>2.5%</div>
+                        <div style={{ textAlign: "right" }}>97.5%</div>
+                      </div>
+                      {r.oddsRatios.map(({ variable, or, ciLo, ciHi }, i) => {
+                        const isRef = variable === "(Intercept)";
+                        return (
+                          <div key={variable} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", padding: "0.55rem 0.75rem", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: i % 2 === 0 ? C.surface : C.surface2, fontFamily: mono }}>
+                            <div style={{ fontSize: 12, color: isRef ? C.textMuted : C.text }}>{variable}</div>
+                            <div style={{ textAlign: "right", fontSize: 13, color: or >= 1 ? C.green : C.red }}>{or.toFixed(4)}</div>
+                            <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{ciLo.toFixed(4)}</div>
+                            <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{ciHi.toFixed(4)}</div>
+                          </div>
+                        );
+                      })}
+                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                        OR &gt; 1 = positive association · OR &lt; 1 = negative association · CI based on ±1.96 × SE
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* ── Plots ── */}
+                <Lbl color={C.textMuted}>Model Diagnostics</Lbl>
+                <PlotSelector
+                  accentColor={color}
+                  defaultId="roc"
+                  plots={[
+                    { id: "roc",  label: "ROC Curve",
+                      node: <ROCCurve fitted={r.Yhat} Y={validY} /> },
+                    { id: "hist", label: "Predicted Probabilities",
+                      node: <PredProbHistogram fitted={r.Yhat} Y={validY} /> },
+                    { id: "forest", label: "Coefficient plot",
+                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${family}`} filename={`${family}_coefficients.svg`} /> },
+                  ]}
+                />
+
+                {/* ── Significance note ── */}
+                <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
+                  *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · z-statistics · SE from Fisher information matrix
+                </div>
+
+                {/* ── Export ── */}
+                <ExportBar
+                  yVar={yVar[0]}
+                  results={r}
+                  model={family === "logit" ? "Logit" : "Probit"}
+                  latexBuilder={(yv, res) => buildBinaryLatex(yv, res)}
+                  csvBuilder={(yv, res)   => buildBinaryCSV(yv, res)}
+                  onReport={() => openReport({ ...r, modelLabel: family === "logit" ? "Logistic Regression" : "Probit", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: result.type, yVar: yVar[0], xVars, wVars } } : null}
+                />
+              </div>
+            );
+          })()}
+
           {/* RDD */}
-          {result?.type === "RDD" && result.main && (() => {
-            const r = result.main;
+          {result?.type === "RDD" && (() => {
+            const r   = result;
+            const rdd = r.rddData ?? {};
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
                   <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Sharp RDD Results</span>
-                  <Badge label={`bw = ${result.h.toFixed(3)}`} color={C.textDim} />
+                  <Badge label={`bw = ${rdd.h?.toFixed(3) ?? "—"}`} color={C.textDim} />
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                 </div>
                 <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#100a04", border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
                   <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
-                    Local Average Treatment Effect (LATE) at cutoff = {r.cutoff}
+                    Local Average Treatment Effect (LATE) at cutoff = {rdd.cutoff}
                   </div>
                   <div style={{ fontSize: 24, color: r.lateP != null && r.lateP < 0.05 ? C.orange : C.textDim }}>
                     {r.late != null && isFinite(r.late) ? (r.late >= 0 ? "+" : "") + r.late.toFixed(4) : "N/A"}{r.lateP != null ? stars(r.lateP) : ""}
                   </div>
                   <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
-                    SE = {r.lateSE != null && isFinite(r.lateSE) ? r.lateSE.toFixed(4) : "N/A"} · p = {r.lateP != null && isFinite(r.lateP) ? (r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)) : "N/A"} · Kernel: {r.kernelType}
+                    SE = {r.lateSE != null && isFinite(r.lateSE) ? r.lateSE.toFixed(4) : "N/A"} · p = {r.lateP != null && isFinite(r.lateP) ? (r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)) : "N/A"} · Kernel: {rdd.kernelType}
                   </div>
                 </div>
                 <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
                   { label: "R²",        value: r.R2?.toFixed(4) ?? "—", color: C.orange },
                   { label: "n in bw",   value: r.n,                     color: C.text },
-                  { label: "cutoff",    value: r.cutoff,                 color: C.textDim },
-                  { label: "bandwidth", value: result.h.toFixed(3),      color: C.textDim },
+                  { label: "cutoff",    value: rdd.cutoff,               color: C.textDim },
+                  { label: "bandwidth", value: rdd.h?.toFixed(3) ?? "—", color: C.textDim },
                 ]} />
                 <Lbl color={C.textMuted}>RDD Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <PlotSelector
                   accentColor={C.orange}
                   defaultId="scatter"
                   plots={[
                     { id: "scatter", label: "Binned scatter",
-                      node: <RDDPlot result={r} yLabel={yVar[0]} xLabel={runningVar[0]} /> },
+                      node: <RDDPlot result={{ ...rdd, late: r.late, lateP: r.lateP }} yLabel={yVar[0]} xLabel={runningVar[0]} /> },
                     { id: "bw",      label: "Bandwidth sensitivity",
                       node: <RDDBandwidthPlot
                         rows={rows} yCol={yVar[0]} runCol={runningVar[0]}
-                        cutoff={parseFloat(cutoff)} optH={result.h}
+                        cutoff={parseFloat(cutoff)} optH={rdd.h}
                         kernel={kernel} controls={wVars} runSharpRDD={runSharpRDD}
                       /> },
                     { id: "mccrary", label: "McCrary density",
@@ -1094,24 +2383,170 @@ export default function ModelingTab({ cleanedData, onBack }) {
                     ...wVars.map(xc => ({
                       id: `bal_${xc}`,
                       label: `Balance: ${xc}`,
-                      node: <RDDCovariateBalance result={r} controls={[xc]} rows={rows} />,
+                      node: <RDDCovariateBalance result={rdd} controls={[xc]} rows={rows} />,
                     })),
                   ]}
                 />
                 <ExportBar
                   yVar={yVar[0]}
-                  results={{ ...r, varNames: r.varNames, adjR2: null }}
+                  results={r}
                   model="RDD"
-                  onReport={() => openReport({ ...r, varNames: r.varNames, adjR2: null, modelLabel: "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
-                  rScriptConfig={{ ...baseRConfig, model: { ...baseRConfig.model, type: "RDD", yVar: yVar[0], wVars,
-                    runningVar: runningVar[0], cutoff: parseFloat(cutoff), bandwidth: result.h, kernel } }}
+                  onReport={() => openReport({ ...r, modelLabel: "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "RDD", yVar: yVar[0], wVars,
+                    runningVar: runningVar[0], cutoff: parseFloat(cutoff), bandwidth: rdd.h, kernel } }}
                 />
               </div>
             );
           })()}
 
         </div>
-      </div>
+
+        {/* ── G12: Plot Builder panel ── */}
+        {result && (
+          <div style={{ borderTop: `1px solid ${C.border}`, background: C.surface }}>
+            {/* Toggle header */}
+            <button
+              onClick={() => setPlotOpen(v => !v)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 8,
+                padding: "0.55rem 1rem", background: "none", border: "none",
+                cursor: "pointer", fontFamily: mono, fontSize: 10, color: C.textMuted,
+                textAlign: "left",
+              }}
+            >
+              <span style={{ color: C.teal, fontSize: 11 }}>◈</span>
+              <span>Plot Builder</span>
+              <span style={{ marginLeft: "auto", fontSize: 9 }}>{plotOpen ? "▲" : "▼"}</span>
+            </button>
+
+            {plotOpen && (
+              <div style={{ padding: "0 0.75rem 0.75rem" }}>
+
+                {/* G13 — data mode toggle (only when 2+ models pinned) */}
+                {pinnedModels.length >= 2 && (
+                  <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                    {["result", "comparison"].map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => { setPlotDataMode(mode); setPlotTemplateKey(k => k + 1); setPlotInitLayers([]); }}
+                        style={{
+                          padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer", borderRadius: 3,
+                          background: plotDataMode === mode ? `${C.teal}18` : "none",
+                          border: `1px solid ${plotDataMode === mode ? C.teal + "60" : C.border}`,
+                          color: plotDataMode === mode ? C.teal : C.textMuted,
+                        }}
+                      >
+                        {mode === "result" ? "Result data" : `Comparison (${pinnedModels.length} models)`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* G10 — Estimator templates */}
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                  <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center", marginRight: 2 }}>
+                    Templates:
+                  </span>
+                  {[
+                    {
+                      label: "Resid vs Fitted",
+                      layers: [
+                        { id: "g10_a", geom: "point",  aes: { x: "__yhat__", y: "__resid__", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal,    visible: true },
+                        { id: "g10_b", geom: "hline",  aes: { x: "", y: "", color: "", yMin: "", yMax: "" },                  value: "0", position: "identity", fill: C.textDim, visible: true },
+                      ],
+                      xLabel: "Fitted values", yLabel: "Residuals", title: "Residuals vs Fitted",
+                    },
+                    {
+                      label: "Resid distribution",
+                      layers: [
+                        { id: "g10_c", geom: "histogram", aes: { x: "__resid__", y: "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal, visible: true },
+                      ],
+                      xLabel: "Residuals", yLabel: "Count", title: "Residual distribution",
+                    },
+                    {
+                      label: "Actual vs Fitted",
+                      layers: [
+                        { id: "g10_d", geom: "point", aes: { x: "__yhat__", y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.gold, visible: true },
+                        { id: "g10_e", geom: "smooth", aes: { x: "__yhat__", y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.gold, visible: true },
+                      ],
+                      xLabel: "Fitted values", yLabel: yVar[0] || "Y", title: "Actual vs Fitted",
+                    },
+                    ...(xVars[0] ? [{
+                      label: `Y vs ${xVars[0]}`,
+                      mode: "result",
+                      layers: [
+                        { id: "g10_f", geom: "point",  aes: { x: xVars[0], y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.blue, visible: true },
+                        { id: "g10_g", geom: "smooth", aes: { x: xVars[0], y: yVar[0] || "", color: "", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.blue, visible: true },
+                      ],
+                      xLabel: xVars[0], yLabel: yVar[0] || "Y", title: `${yVar[0] || "Y"} vs ${xVars[0]}`,
+                    }] : []),
+                    // G13 — multi-model coefficient comparison template
+                    ...(pinnedModels.length >= 2 ? [{
+                      label: "Coef comparison",
+                      mode: "comparison",
+                      layers: [
+                        { id: "g13_a", geom: "point",    aes: { x: "variable", y: "estimate", color: "model", yMin: "", yMax: "" }, value: "", position: "identity", fill: C.teal, visible: true },
+                        { id: "g13_b", geom: "errorbar", aes: { x: "variable", y: "", color: "model", yMin: "ciLow", yMax: "ciHigh" }, value: "", position: "identity", fill: C.teal, visible: true },
+                        { id: "g13_c", geom: "hline",    aes: { x: "", y: "", color: "", yMin: "", yMax: "" }, value: "0", position: "identity", fill: C.textDim, visible: true },
+                      ],
+                      xLabel: "Variable", yLabel: "Estimate", title: "Coefficient comparison",
+                    }] : []),
+                  ].map(tmpl => (
+                    <button
+                      key={tmpl.label}
+                      onClick={() => {
+                        if (tmpl.mode) setPlotDataMode(tmpl.mode);
+                        setPlotInitLayers(tmpl.layers);
+                        setPlotTemplateKey(k => k + 1);
+                      }}
+                      style={{
+                        padding: "3px 8px", fontFamily: mono, fontSize: 9,
+                        background: "none", border: `1px solid ${C.border2}`,
+                        borderRadius: 3, color: C.textDim, cursor: "pointer",
+                      }}
+                    >{tmpl.label}</button>
+                  ))}
+                </div>
+
+                {/* PlotBuilder — key resets when template applied (G12+G13) */}
+                <PlotBuilder
+                  key={plotTemplateKey}
+                  headers={activePlotHeaders}
+                  rows={activePlotRows}
+                  initialLayers={plotInitLayers}
+                  style={{ minHeight: 340 }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Model Buffer Bar ── */}
+        <ModelBufferBar
+          models={pinnedModels}
+          activeId={activeBufferId}
+          onRestore={(id) => {
+            const r = modelBuffer.get(id);
+            if (r) { setResult(r); setActiveBufferId(id); }
+          }}
+          onRemove={(id) => {
+            modelBuffer.remove(id);
+            if (activeBufferId === id) setActiveBufferId(null);
+            setBufferVersion(v => v + 1);
+          }}
+          onCompare={() => setCompareOpen(true)}
+        />
+        </div>{/* closes RIGHT outer column wrapper */}
+      </div>{/* closes body flex */}
+
+      {/* ── Model Comparison Modal ── */}
+      {compareOpen && pinnedModels.length >= 2 && (
+        <ModelComparison
+          models={pinnedModels}
+          dataDictionary={cleanedData?.dataDictionary ?? null}
+          onClose={() => setCompareOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -13,13 +13,13 @@
 //   wVars        {string[]}  – selected controls
 //   setWVars     {fn}
 
-import { VarPanel, C, mono } from "./shared.jsx";
+import { VarPanel, useTheme, mono } from "./shared.jsx";
 
 // Models that expose an X (Features) selector
-const SHOW_X = new Set(["OLS", "FE", "FD", "2SLS", "RDD"]);
+const SHOW_X = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit", "GMM", "LIML", "PoissonFE", "LSDV"]);
 // Models that expose a W (Controls) selector in this panel
 // DiD/TWFE controls are rendered in ModelConfiguration alongside group selectors
-const SHOW_W = new Set(["OLS", "FE", "FD", "2SLS", "RDD"]);
+const SHOW_W = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit", "GMM", "LIML", "PoissonFE", "LSDV"]);
 
 export default function VariableSelector({
   model,
@@ -31,6 +31,7 @@ export default function VariableSelector({
   wVars,
   setWVars,
 }) {
+  const { C } = useTheme();
   // Exclude already-assigned columns from downstream pickers
   const availForX = numericCols.filter(h => !yVar.includes(h));
   const availForW = numericCols.filter(h => !yVar.includes(h) && !xVars.includes(h));
@@ -51,7 +52,7 @@ export default function VariableSelector({
       {SHOW_X.has(model) && (
         <VarPanel
           title={
-            model === "2SLS"
+            (model === "2SLS" || model === "GMM" || model === "LIML")
               ? "X · Endogenous Regressors"
               : "X · Features (regressors)"
           }
@@ -59,7 +60,12 @@ export default function VariableSelector({
           vars={availForX}
           selected={xVars}
           onToggle={setXVars}
-          info={model === "2SLS" ? "These regressors will be instrumented in Stage 1." : undefined}
+          info={
+            model === "2SLS" ? "These regressors will be instrumented in Stage 1." :
+            model === "GMM"  ? "Endogenous regressors — instrumented via Z in both GMM steps." :
+            model === "LIML" ? "Endogenous regressors — LIML k-class correction applied." :
+            undefined
+          }
         />
       )}
 

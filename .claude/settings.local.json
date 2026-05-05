@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(Rscript validation/GMM_check.R)",
+      "Bash(/c/Program Files/R/R-4.4.1/bin/Rscript.exe:*)",
+      "Bash(npx vite:*)",
+      "Bash(Rscript:*)",
+      "Bash(node:*)",
+      "Bash(C:/Program Files/R/R-4.4.3/bin/Rscript.exe:*)",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"install.packages\\('rdrobust', repos='https://cloud.r-project.org'\\)\")",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" r_validation/RDD_check.R)",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"install.packages\\('AER', repos='https://cloud.r-project.org'\\)\")",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" r_validation/TSLS_check.R)",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(xargs grep:*)",
+      "Bash(npm run:*)",
+      "Bash(awk 'NR>=169 && NR<=175' src/ExplorerModule.jsx)",
+      "Bash(awk 'NR>=228 && NR<=234' src/ExplorerModule.jsx)",
+      "Bash(awk 'NR>=317 && NR<=323' src/ExplorerModule.jsx)",
+      "Bash(awk 'NR>=386 && NR<=392' src/ExplorerModule.jsx)",
+      "Bash(awk 'NR>=422 && NR<=428' src/ExplorerModule.jsx)",
+      "mcp__code-review-graph__detect_changes_tool",
+      "mcp__code-review-graph__get_architecture_overview_tool",
+      "Bash(grep -v \"//.*ECON STUDIO.*src/\")",
+      "mcp__code-review-graph__semantic_search_nodes_tool",
+      "mcp__code-review-graph__query_graph_tool",
+      "Bash(gh api:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}
