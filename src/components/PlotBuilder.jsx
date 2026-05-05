@@ -68,7 +68,6 @@ const GEOMS = [
   { id: "ribbon",    label: "Ribbon"    },
   { id: "hline",     label: "H-Line"    },
   { id: "vline",     label: "V-Line"    },
-  { id: "map",       label: "Map"       },
 ];
 
 const PALETTE_PRESETS = [
