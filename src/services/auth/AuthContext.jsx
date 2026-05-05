@@ -3,6 +3,7 @@
 // Initialises from the persisted Supabase session on mount.
 import { createContext, useContext, useEffect, useState } from "react";
 import { getSession, onAuthStateChange } from "./authService.js";
+import { setCurrentUser } from "../persistence/indexedDB.js";
 
 const AuthContext = createContext(null);
 
@@ -11,16 +12,23 @@ export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null);
 
   useEffect(() => {
-    // Restore persisted session on first load
+    // Restore persisted session on first load. Catch any Supabase failure so
+    // the app never gets stuck on the loading spinner — fall through to LoginForm.
     getSession().then(s => {
       setSession(s);
       setUser(s?.user ?? null);
+      setCurrentUser(s?.user?.id ?? null);
+    }).catch(() => {
+      setSession(null);
+      setUser(null);
+      setCurrentUser(null);
     });
 
     // Keep in sync with Supabase auth state changes (login, logout, token refresh)
     const unsub = onAuthStateChange(s => {
       setSession(s);
       setUser(s?.user ?? null);
+      setCurrentUser(s?.user?.id ?? null);
     });
 
     return unsub;
