@@ -252,17 +252,23 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
         if (!ly.visible) continue;
         marks.push(...buildMarksForLayer(Plt, ly, rows));
       }
-      // Grid + frame always present
-      marks.push(Plt.gridX({ stroke: "#1c1c1c", strokeOpacity: 1 }));
-      marks.push(Plt.gridY({ stroke: "#1c1c1c", strokeOpacity: 1 }));
+      // Grid + frame always present — subtle lines on any background
+      marks.push(Plt.gridX({ stroke: "#808080", strokeOpacity: 0.18 }));
+      marks.push(Plt.gridY({ stroke: "#808080", strokeOpacity: 0.18 }));
       marks.push(Plt.frame({ stroke: "#252525" }));
+
+      // Auto-detect ISO date x-axis for smart tick intervals
+      const xAesCol = layers.find(ly => ly.visible && ly.aes?.x)?.aes.x;
+      const firstXVal = xAesCol ? rows.find(r => r[xAesCol] != null)?.[xAesCol] : null;
+      const xIsDate = firstXVal != null && /^\d{4}-\d{2}-\d{2}/.test(String(firstXVal));
 
       const colorOpts = scheme ? { scheme } : {};
       const el = Plt.plot({
         width:        width || 580,
         height:       height || 310,
         marginLeft:   52,
-        marginBottom: 40,
+        marginBottom: xIsDate ? 52 : 40,
+        marginTop:    24,
         style: {
           background: "transparent",
           color:      C.text,
@@ -270,7 +276,11 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
           fontSize:   "10px",
           overflow:   "visible",
         },
-        x: { label: xLabel || null, labelOffset: 34 },
+        x: {
+          label:       xLabel || null,
+          labelOffset: xIsDate ? 46 : 34,
+          ...(xIsDate ? { type: "utc" } : { ticks: Math.min(10, Math.floor((width || 580) / 70)) }),
+        },
         y: { label: yLabel || null, labelOffset: 40 },
         color: colorOpts,
         marks,
@@ -286,7 +296,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
 
   if (err) return <div style={{ color: C.red, fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
   if (!Plt) return <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Observable Plot…</div>;
-  return <div ref={ref} style={{ width: "100%", overflow: "hidden" }} />;
+  return <div ref={ref} style={{ width: "100%", overflow: "visible" }} />;
 }
 
 // ─── MAP CANVAS — Leaflet + OSM tile underlay ─────────────────────────────────

@@ -6,7 +6,7 @@
 // Props:
 //   modelType    {string}   — current estimator (OLS, FE, FD, 2SLS, DiD, TWFE, RDD, …)
 //   headers      {string[]} — all column names (for cluster dropdown)
-//   seType       {string}   — one of: classical | hc1 | hc3 | clustered | twoway | hac
+//   seType       {string}   — one of: classical | hc1 | hc2 | hc3 | clustered | twoway | hac
 //   setSeType    {fn}
 //   clusterVar   {string|null}
 //   setClusterVar {fn}
@@ -22,6 +22,7 @@ import { useTheme, mono, Chip } from "./shared.jsx";
 const SE_TYPES = [
   { id: "classical", label: "Classical",     hint: "Homoskedastic OLS standard errors (default)" },
   { id: "hc1",       label: "HC1 (Robust)",  hint: "MacKinnon-White HC1 heteroskedasticity-robust SE — most common robust option" },
+  { id: "hc2",       label: "HC2",           hint: "HC2 leverage-corrected robust SE — unbiased under homoskedasticity; default in R's iv_robust" },
   { id: "hc3",       label: "HC3",           hint: "HC3 leverage-corrected robust SE — preferred in small samples" },
   { id: "clustered", label: "Clustered",     hint: "Cluster-robust SE: accounts for within-group correlation" },
   { id: "twoway",    label: "Two-Way",       hint: "Two-way cluster-robust SE (Cameron-Gelbach-Miller)" },

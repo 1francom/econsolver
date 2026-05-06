@@ -450,6 +450,37 @@ export function applyStep(rows, headers, s, context = {}) {
           return null;
         }
 
+        // ── 6-digit YYMMDD (e.g. 911202 → 1991-12-02) ──────────────────────
+        // Century rule: yy >= 70 → 1900+yy, else 2000+yy
+        if (fmt === "YYMMDD" || (fmt === "auto" && /^\d{6}$/.test(raw))) {
+          const yy = +raw.slice(0, 2), mo = +raw.slice(2, 4), dy = +raw.slice(4, 6);
+          if (mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) {
+            const yr = yy >= 70 ? 1900 + yy : 2000 + yy;
+            return `${yr}-${String(mo).padStart(2,"0")}-${String(dy).padStart(2,"0")}`;
+          }
+          return null;
+        }
+
+        // ── 6-digit DDMMYY (e.g. 021291 → 1991-12-02) ──────────────────────
+        if (fmt === "DDMMYY") {
+          const dd = +raw.slice(0, 2), mo = +raw.slice(2, 4), yy = +raw.slice(4, 6);
+          if (mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31) {
+            const yr = yy >= 70 ? 1900 + yy : 2000 + yy;
+            return `${yr}-${String(mo).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+          }
+          return null;
+        }
+
+        // ── 6-digit MMDDYY (e.g. 120291 → 1991-12-02) ──────────────────────
+        if (fmt === "MMDDYY") {
+          const mo = +raw.slice(0, 2), dd = +raw.slice(2, 4), yy = +raw.slice(4, 6);
+          if (mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31) {
+            const yr = yy >= 70 ? 1900 + yy : 2000 + yy;
+            return `${yr}-${String(mo).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+          }
+          return null;
+        }
+
         // ── DD-MM-YYYY or DD/MM/YYYY ────────────────────────────────────────
         if (fmt === "DDMMYYYY") {
           const m = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);

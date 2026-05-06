@@ -1,7 +1,8 @@
 // ─── ECON STUDIO · components/wrangling/DictionaryTab.jsx ──────────────────
 import { useState, useEffect } from "react";
-import { useTheme, mono, Lbl, Btn, Grid } from "./shared.jsx";
+import { useTheme, mono, Lbl, Btn, Grid, Spin } from "./shared.jsx";
 import { callAI } from "./utils.js";
+import { inferVariableUnits } from "../../services/AI/AIService.js";
 
 // ─── DATA DICTIONARY TAB ─────────────────────────────────────────────────────
 // Allows AI inference of column descriptions + manual editing.
