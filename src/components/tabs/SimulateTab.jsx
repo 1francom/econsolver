@@ -87,18 +87,20 @@ const DIST_DEFAULTS = {
   Exponential: { lambda: 1 },
   t:           { df: 5 },
   "Chi-squared": { df: 3 },
+  Constant:    { value: "0" },
+  Sequence:    { from: "1", by: "1" },
   Expression:  { expr: "" },
   ForLoop:     { init: "0", update: "prev * 0.9 + eps[i]" },
   WhileLoop:   { init: "1", update: "prev * 0.95", condition: "Math.abs(prev) > 0.001", maxIter: "1000" },
 };
 
-const DIST_OPTIONS = ["Normal","Uniform","Bernoulli","Poisson","Exponential","t","Chi-squared","Expression","ForLoop","WhileLoop"];
+const DIST_OPTIONS = ["Normal","Uniform","Bernoulli","Poisson","Exponential","t","Chi-squared","Constant","Sequence","Expression","ForLoop","WhileLoop"];
 
 function distColor(C) {
   return {
     Normal: C.blue, Uniform: C.teal, Bernoulli: C.purple,
     Poisson: C.gold, Exponential: "#c88e6e", t: C.green,
-    "Chi-squared": "#c87e9e", Expression: C.textDim,
+    "Chi-squared": "#c87e9e", Constant: C.textMuted, Sequence: C.teal, Expression: C.textDim,
     ForLoop: "#9ec87e", WhileLoop: "#c87e6e",
   };
 }
@@ -125,6 +127,32 @@ function ParamEditor({ dist, params, onChange }) {
   if (dist === "Poisson")     return field("lambda","λ","1");
   if (dist === "Exponential") return field("lambda","λ","1");
   if (dist === "t" || dist === "Chi-squared") return field("df","df","5");
+  if (dist === "Sequence")    return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 24 }}>from</span>
+        <input value={params.from ?? "1"} onChange={e => onChange({ ...params, from: e.target.value })}
+          placeholder="1" style={{ ...fieldStyle(C), width: 68 }} />
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 18 }}>by</span>
+        <input value={params.by ?? "1"} onChange={e => onChange({ ...params, by: e.target.value })}
+          placeholder="1" style={{ ...fieldStyle(C), width: 68 }} />
+      </label>
+      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>→ 1, 2, 3, …, n</span>
+    </div>
+  );
+  if (dist === "Constant")    return (
+    <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+      <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 28 }}>value</span>
+      <input
+        value={params.value ?? "0"}
+        onChange={e => onChange({ ...params, value: e.target.value })}
+        placeholder="e.g. 0.5 or 1000"
+        style={{ ...fieldStyle(C), width: 120 }}
+      />
+    </label>
+  );
   if (dist === "Expression")  return (
     <input
       value={params.expr ?? ""}
@@ -206,9 +234,14 @@ export function generateSimScript(language, n, seed, variables) {
 
   const lines = [];
   if (language === "r") {
-    lines.push(`set.seed(${seed})`, `n <- ${n}`);
+    lines.push(`set.seed(${seed})`, `n <- ${n}`, `N <- n`, `observations <- n`);
     variables.forEach(v => {
-      if (v.dist === "Expression") {
+      if (v.dist === "Sequence") {
+        const from = v.params.from ?? "1", by = v.params.by ?? "1";
+        lines.push(`${v.name} <- seq(${from}, by=${by}, length.out=n)`);
+      } else if (v.dist === "Constant") {
+        lines.push(`${v.name} <- rep(${v.params.value ?? 0}, n)`);
+      } else if (v.dist === "Expression") {
         lines.push(`# ${v.name} = ${v.params.expr||""}`, `${v.name} <- ${v.params.expr||"NA"}`);
       } else if (v.dist === "ForLoop") {
         const init = v.params.init || "0";
@@ -238,9 +271,14 @@ export function generateSimScript(language, n, seed, variables) {
     });
     lines.push(`df <- data.frame(${variables.map(v=>v.name).join(", ")})`);
   } else if (language === "python") {
-    lines.push("import numpy as np", "import pandas as pd", `rng = np.random.default_rng(${seed})`, `n = ${n}`);
+    lines.push("import numpy as np", "import pandas as pd", `rng = np.random.default_rng(${seed})`, `n = ${n}`, `N = n`, `observations = n`);
     variables.forEach(v => {
-      if (v.dist === "Expression") {
+      if (v.dist === "Sequence") {
+        const from = v.params.from ?? "1", by = v.params.by ?? "1";
+        lines.push(`${v.name} = np.arange(${from}, ${from} + ${by} * n, ${by})`);
+      } else if (v.dist === "Constant") {
+        lines.push(`${v.name} = np.full(n, ${v.params.value ?? 0})`);
+      } else if (v.dist === "Expression") {
         lines.push(`# ${v.name} = ${v.params.expr||""}`, `${v.name} = ${v.params.expr||"None"}`);
       } else if (v.dist === "ForLoop") {
         const init = v.params.init || "0";
@@ -271,9 +309,14 @@ export function generateSimScript(language, n, seed, variables) {
     });
     lines.push(`df = pd.DataFrame({${variables.map(v=>`'${v.name}': ${v.name}`).join(", ")}})`);
   } else if (language === "stata") {
-    lines.push(`set seed ${seed}`, `set obs ${n}`);
+    lines.push(`set seed ${seed}`, `set obs ${n}`, `local N = ${n}`, `local observations = ${n}`);
     variables.forEach(v => {
-      if (v.dist === "Expression") {
+      if (v.dist === "Sequence") {
+        const from = +(v.params.from ?? 1), by = +(v.params.by ?? 1);
+        lines.push(`generate ${v.name} = (_n - 1) * ${by} + ${from}`);
+      } else if (v.dist === "Constant") {
+        lines.push(`generate ${v.name} = ${v.params.value ?? 0}`);
+      } else if (v.dist === "Expression") {
         lines.push(`* ${v.name} = ${v.params.expr||""}`, `generate ${v.name} = ${v.params.expr||"."}`);
       } else if (v.dist === "ForLoop") {
         const init = v.params.init || "0";
@@ -350,7 +393,7 @@ export default function SimulateTab({ onAddDataset }) {
           for (let i = 0; i < nObs; i++) {
             const scalars = varArrays.map(a => a[i]);
             // eslint-disable-next-line no-new-func
-            const val = new Function(...varNames, `"use strict"; return (${expr});`)(...scalars);
+            const val = new Function(...varNames, "N", "observations", `"use strict"; return (${expr});`)(...scalars, nObs, nObs);
             arr.push(typeof val === "number" ? val : 0);
           }
           scope[v.name] = arr;
@@ -358,6 +401,20 @@ export default function SimulateTab({ onAddDataset }) {
           setGenErr(`${v.name}: expression error — ${e.message}`);
           return;
         }
+      } else if (v.dist === "Constant") {
+        const raw = (v.params.value ?? "0").trim();
+        try {
+          // eslint-disable-next-line no-new-func
+          const val = new Function("N", "observations", `"use strict"; return (${raw});`)(nObs, nObs);
+          scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
+        } catch (e) {
+          setGenErr(`${v.name} (Constant): ${e.message}`);
+          return;
+        }
+      } else if (v.dist === "Sequence") {
+        const from = +(v.params.from ?? 1);
+        const by   = +(v.params.by   ?? 1);
+        scope[v.name] = Array.from({ length: nObs }, (_, i) => from + i * by);
       } else if (v.dist === "ForLoop") {
         const initExpr  = (v.params.init   || "0").trim();
         const updExpr   = (v.params.update || "prev").trim();
@@ -366,14 +423,14 @@ export default function SimulateTab({ onAddDataset }) {
         try {
           const arr = new Array(nObs);
           // eslint-disable-next-line no-new-func
-          const initFn = new Function(...varNames, `"use strict"; return (${initExpr});`);
+          const initFn = new Function(...varNames, "N", "observations", `"use strict"; return (${initExpr});`);
           const scalarsAt0 = varArrays.map(a => a[0]);
-          arr[0] = initFn(...scalarsAt0);
+          arr[0] = initFn(...scalarsAt0, nObs, nObs);
           for (let i = 1; i < nObs; i++) {
             const prev = arr[i - 1];
             const scalars = varArrays.map(a => a[i]);
             // eslint-disable-next-line no-new-func
-            arr[i] = new Function("prev", "i", ...varNames, `"use strict"; return (${updExpr});`)(prev, i, ...scalars);
+            arr[i] = new Function("prev", "i", ...varNames, "N", "observations", `"use strict"; return (${updExpr});`)(prev, i, ...scalars, nObs, nObs);
           }
           scope[v.name] = arr;
         } catch (e) {

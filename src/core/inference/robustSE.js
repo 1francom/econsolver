@@ -77,15 +77,26 @@ function meatHC(X, e, scaleFn) {
   return B;
 }
 
-// Compute leverage values h_ii = x_i′(X′X)⁻¹x_i
-function leverages(XtXinv, X) {
-  return X.map(xi => {
-    let h = 0;
-    for (let j = 0; j < XtXinv.length; j++)
-      for (let l = 0; l < XtXinv.length; l++)
-        h += xi[j] * XtXinv[j][l] * xi[l];
-    return Math.min(1 - 1e-10, Math.max(0, h)); // clamp to [0, 1)
-  });
+// Compute leverage values h_ii via QR decomposition (Gram-Schmidt).
+// h_ii = ||Q[i,:]||² where X = Q R.
+// More numerically stable than x_i′(X′X)⁻¹x_i (avoids squaring condition number).
+function leverages(X) {
+  const n = X.length, k = X[0].length;
+  // Build orthonormal columns via modified Gram-Schmidt
+  const Q = Array.from({ length: k });
+  for (let j = 0; j < k; j++) {
+    let v = X.map(row => row[j]);
+    for (let p = 0; p < j; p++) {
+      const dot = Q[p].reduce((s, qi, i) => s + qi * v[i], 0);
+      v = v.map((vi, i) => vi - dot * Q[p][i]);
+    }
+    const norm = Math.sqrt(v.reduce((s, vi) => s + vi * vi, 0));
+    Q[j] = norm > 1e-10 ? v.map(vi => vi / norm) : new Array(n).fill(0);
+  }
+  // h_ii = Σ_j Q[j][i]²
+  return Array.from({ length: n }, (_, i) =>
+    Math.min(1 - 1e-10, Math.max(0, Q.reduce((s, q) => s + q[i] * q[i], 0)))
+  );
 }
 
 // ─── HC SANDWICH (HC0, HC1, HC2, HC3) ────────────────────────────────────────
@@ -111,7 +122,7 @@ export function sandwichSE(XtXinv, X, e, n, k, variant = "HC1") {
     }
   } else {
     // HC2 or HC3: need leverages
-    const h = leverages(XtXinv, X);
+    const h = leverages(X);
     const exp = variant === "HC3" ? 2 : 1;
     B = meatHC(X, e, i => (e[i] * e[i]) / Math.pow(1 - h[i], exp));
   }
