@@ -56,14 +56,17 @@ export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
   if (!secondRes)
     return { error: "Second-stage OLS failed — singular matrix." };
 
-  // ── Corrected SE: use original X (not X̂) with IV coefficients ────────────
-  // This follows the textbook IV SE formula: σ̂² = (y − Xβ_IV)′(y − Xβ_IV) / (n − k)
+  // ── Corrected SE (iv_robust spec) ───────────────────────────────────────────
+  // Bread + meat: X̂ (second-stage design matrix with first-stage Yhat for endogenous).
+  // Residuals: y − X_actual·β̂  (structural residuals, not second-stage residuals).
+  // σ̂² = (y − Xβ_IV)′(y − Xβ_IV) / (n − k)
   const k  = 1 + endog.length + exog.length;   // intercept + regressors
   const df = n - k;
   if (df <= 0)
     return { error: "Degrees of freedom ≤ 0 — add more observations or reduce regressors." };
 
   const Y  = valid.map(r => r[yCol]);
+  // X_actual: actual endogenous regressors — used only for structural residuals
   const X2 = valid.map(r => [1, ...endog.map(ev => r[ev]), ...exog.map(c => r[c])]);
 
   const trueResid = Y.map((y, i) =>
@@ -72,16 +75,18 @@ export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
   const trueSSR  = trueResid.reduce((s, e) => s + e * e, 0);
   const trueS2   = trueSSR / df;
 
-  const Xt     = transpose(X2);
-  const XtXinv = matInv(matMul(Xt, X2));
-  if (!XtXinv)
+  // X̂: second-stage design matrix (first-stage Yhat for endogenous + actual exogenous).
+  // Used for bread (X̂′X̂)⁻¹ and for leverage-based HC2/HC3 meat, per iv_robust spec.
+  const Xhat      = valid.map((r, i) => [1, ...endog.map((_, j) => firstStages[j].Yhat[i]), ...exog.map(c => r[c])]);
+  const XtXinvHat = matInv(matMul(transpose(Xhat), Xhat));
+  if (!XtXinvHat)
     return { error: "Matrix is singular (check for perfect collinearity or weak instruments)." };
 
-  const classicalSE = XtXinv.map((row, i) => {
+  const classicalSE = XtXinvHat.map((row, i) => {
     const v = row[i] * trueS2;
     return isFinite(v) && v >= 0 ? Math.sqrt(v) : NaN;
   });
-  const robustSe = computeRobustSE(seOpts, XtXinv, X2, trueResid, n, k, valid);
+  const robustSe = computeRobustSE(seOpts, XtXinvHat, Xhat, trueResid, n, k, valid);
   const corrSE   = robustSe ?? classicalSE;
   const corrT = secondRes.beta.map((b, i) => {
     const s = corrSE[i];
