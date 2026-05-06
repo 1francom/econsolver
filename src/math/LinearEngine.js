@@ -78,7 +78,7 @@ export function fCDF(F, df1, df2) {
 }
 
 export function pValue(t, df) {
-  return Math.min(1, 2 * tCDF(Math.abs(t), df));
+  return Math.min(1, tCDF(Math.abs(t), df));
 }
 
 export function stars(p) {

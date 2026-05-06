@@ -254,7 +254,7 @@ function ciMultiplier(df) {
   return 1.96;
 }
 
-function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null }) {
+function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [] }) {
   const { C } = useTheme();
   const [open, setOpen] = useState(null);
   const z    = ciMultiplier(df);
@@ -328,15 +328,58 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
                     at the covariate means (MEM). Latent-index coefficient:{" "}
                     <span style={{ color: b >= 0 ? C.teal : C.red }}>{b >= 0 ? "+" : ""}{b.toFixed(4)}</span>.{" "}
                   </>
-                ) : (
-                  <>
-                    A one-unit increase in <span style={{ color: C.text }}>{v}</span> is associated with a{" "}
-                    <span style={{ color: b >= 0 ? C.green : C.red }}>
-                      {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "increase" : "decrease"}
-                    </span>{" "}
-                    in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
-                  </>
-                )}
+                ) : (() => {
+                  const desc = dict[v] ?? "";
+                  const dummyMatch = desc.match(/^dummy\s+1\s*=\s*(.+)$/i);
+                  // Binary detection: all non-null values are 0 or 1
+                  const isBinary = rows.length > 0 && (() => {
+                    const vals = rows.map(r => r[v]).filter(x => x != null && x !== "");
+                    return vals.length > 0 && vals.every(x => { const n = Number(x); return (n === 0 || n === 1) && !isNaN(n); });
+                  })();
+                  const cleanDesc = desc && !/^entity identifier$/i.test(desc) ? desc : null;
+
+                  if (dummyMatch) {
+                    const lbl = dummyMatch[1].trim();
+                    return (
+                      <>
+                        When <span style={{ color: C.text }}>{v}</span> = 1 ({lbl}),{" "}
+                        <span style={{ color: C.text }}>{yVar}</span> is{" "}
+                        <span style={{ color: b >= 0 ? C.green : C.red }}>
+                          {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "higher" : "lower"}
+                        </span> than the reference group, ceteris paribus.{" "}
+                      </>
+                    );
+                  }
+                  if (isBinary) {
+                    return (
+                      <>
+                        {cleanDesc
+                          ? <>{cleanDesc} (<span style={{ color: C.text }}>{v}</span> = 1):</>
+                          : <>When <span style={{ color: C.text }}>{v}</span> = 1,</>
+                        }{" "}
+                        <span style={{ color: C.text }}>{yVar}</span> is{" "}
+                        <span style={{ color: b >= 0 ? C.green : C.red }}>
+                          {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "higher" : "lower"}
+                        </span>
+                        {cleanDesc
+                          ? <> compared to the reference group, ceteris paribus.{" "}</>
+                          : <> than when <span style={{ color: C.text }}>{v}</span> = 0, ceteris paribus.{" "}</>
+                        }
+                      </>
+                    );
+                  }
+                  // Continuous — append dict description as unit hint if available
+                  const unitHint = cleanDesc ? ` (${cleanDesc})` : "";
+                  return (
+                    <>
+                      A one-unit increase in <span style={{ color: C.text }}>{v}</span>{unitHint} is associated with a{" "}
+                      <span style={{ color: b >= 0 ? C.green : C.red }}>
+                        {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "increase" : "decrease"}
+                      </span>{" "}
+                      in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
+                    </>
+                  );
+                })()}
                 <span style={{ color: C.teal }}>95% CI: [{lo.toFixed(4)}, {hi.toFixed(4)}].</span>{" "}
                 <span style={{ color: p < 0.05 ? C.gold : C.textDim }}>
                   {p < 0.01 ? "Highly significant (p < 0.01)."
@@ -568,7 +611,7 @@ function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuild
 
 // ─── PANEL FE/FD RESULTS ─────────────────────────────────────────────────────
 // Must be a named component (not an IIFE) — React Rules of Hooks.
-function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, openReport, baseReplicateConfig }) {
+function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, dict = {}, openReport, baseReplicateConfig }) {
   const { C } = useTheme();
   const [tab, setTab] = useState("fe");
   const fe     = result.fe, fd = result.fd;
@@ -613,7 +656,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
           ]} />
           <Lbl color={C.textMuted}>Coefficient Table — {tab === "fe" ? "FE" : "FD"}</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.testStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
+            <CoeffTable dict={dict} rows={rows} varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.testStats} pVals={active.pVals} yVar={yVar[0]} df={active.df} />
           </div>
           <PlotSelector
             accentColor={C.blue}
@@ -661,7 +704,7 @@ function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, row
 }
 
 // ─── 2SLS RESULTS ─────────────────────────────────────────────────────────────
-function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}, openReport, baseReplicateConfig }) {
   const { C } = useTheme();
   const [tab, setTab] = useState("second");
   // canonical: second-stage fields are at root; firstStages sub-array is engine-shaped
@@ -704,7 +747,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
           ]} />
           <Lbl color={C.textMuted}>Second Stage Coefficients</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.testStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
+            <CoeffTable dict={dict} rows={rows} varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.testStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
           </div>
           <PlotSelector
             accentColor={C.gold}
@@ -767,7 +810,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
               ⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. Stock-Yogo threshold is F &gt; 10. 2SLS estimates may be biased toward OLS.
             </InfoBox>
           )}
-          <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
           <PlotSelector
             accentColor={C.gold}
             defaultId="xhat"
@@ -787,7 +830,7 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, openReport, ba
 }
 
 // ─── GMM RESULTS ──────────────────────────────────────────────────────────────
-function GMMResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+function GMMResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}, openReport, baseReplicateConfig }) {
   const { C } = useTheme();
   const [tab, setTab] = useState("second");
   const { firstStages } = result;
@@ -830,7 +873,7 @@ function GMMResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseR
           )}
           <Lbl color={C.textMuted}>GMM Coefficients (HC-robust SE)</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
+            <CoeffTable dict={dict} rows={rows} varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
           </div>
           <PlotSelector accentColor={C.gold} defaultId="yhat"
             plots={[
@@ -854,7 +897,7 @@ function GMMResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseR
             { label: "n", value: fs.n, color: C.text },
           ]} />
           {fs.weak && <InfoBox color={C.red}>⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. GMM efficiency gains diminish with weak instruments.</InfoBox>}
-          <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
         </div>
       ))}
     </div>
@@ -862,7 +905,7 @@ function GMMResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseR
 }
 
 // ─── LIML RESULTS ─────────────────────────────────────────────────────────────
-function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, openReport, baseReplicateConfig }) {
+function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}, openReport, baseReplicateConfig }) {
   const { C } = useTheme();
   const [tab, setTab] = useState("second");
   const { firstStages } = result;
@@ -904,7 +947,7 @@ function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, openReport, base
           ]} />
           <Lbl color={C.textMuted}>LIML Coefficients</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
+            <CoeffTable dict={dict} rows={rows} varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
           </div>
           <PlotSelector accentColor={C.gold} defaultId="yhat"
             plots={[
@@ -928,7 +971,7 @@ function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, openReport, base
             { label: "n", value: fs.n, color: C.text },
           ]} />
           {fs.weak && <InfoBox color={C.red}>⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. LIML is particularly sensitive to weak instruments.</InfoBox>}
-          <CoeffTable varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
         </div>
       ))}
     </div>
@@ -1019,7 +1062,7 @@ function FuzzyLatexExport({ stage, result, yVar, fsVarNames, treatVarName }) {
 }
 
 // ─── FUZZY RDD RESULTS ───────────────────────────────────────────────────────
-function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, openReport, baseReplicateConfig }) {
+function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, dict = {}, rows = [], openReport, baseReplicateConfig }) {
   const { C } = useTheme();
   const [tab, setTab] = useState("second");
   const r  = result;
@@ -1068,7 +1111,7 @@ function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, openReport, b
             { label: "FS-F",   value: r.firstStageFstat?.toFixed(2) ?? "—",        color: r.weak ? C.red : C.gold },
           ]} />
           <Lbl color={C.textMuted}>Second-Stage Coefficient Table</Lbl>
-          <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar} df={r.df} />
+          <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar} df={r.df} />
           <FuzzyLatexExport stage="second" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} />
           <PlotSelector accentColor={C.orange} defaultId="rdd" plots={[
             { id: "rdd",    label: "RDD Plot",
@@ -1094,7 +1137,7 @@ function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, openReport, b
             </div>
           )}
           <Lbl color={C.textMuted}>First-Stage Coefficient Table — D ~ Z + running variable</Lbl>
-          <CoeffTable varNames={fsVarNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={treatVarName ?? "D"} df={fs.df} />
+          <CoeffTable dict={dict} rows={rows} varNames={fsVarNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={treatVarName ?? "D"} df={fs.df} />
           <FuzzyLatexExport stage="first" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} />
           <PlotSelector accentColor={C.gold} defaultId="fs_forest" plots={[
             { id: "fs_forest", label: "Coefficient plot",
@@ -1134,6 +1177,7 @@ function buildModelHint(panel, panelOk) {
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion }) {
   const { C } = useTheme();
   const rows    = cleanedData?.cleanRows ?? [];
+  const dict    = cleanedData?.dataDictionary ?? {};
   const headers = cleanedData?.headers   ?? [];
   const panel   = cleanedData?.panelIndex ?? null;
 
@@ -1912,7 +1956,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — 95% Confidence Intervals</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Plot & Diagnostics</Lbl>
                 <PlotSelector
@@ -1958,22 +2002,22 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           {/* Panel FE / FD */}
           {(result?.type === "FE" || result?.type === "FD") && (
-            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} rows={rows} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+            <PanelResults result={result} panel={panel} xVars={xVars} wVars={wVars} yVar={yVar} rows={rows} dict={dict} panelFE={panelFE} panelFD={panelFD} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* 2SLS */}
           {result?.type === "2SLS" && (
-            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+            <TwoSLSResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} dict={dict} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* GMM */}
           {result?.type === "GMM" && (
-            <GMMResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+            <GMMResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} dict={dict} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* LIML */}
           {result?.type === "LIML" && (
-            <LIMLResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
+            <LIMLResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} dict={dict} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
 
           {/* Fuzzy RDD */}
@@ -1983,6 +2027,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               yVar={yVar[0]}
               treatVarName={treatVar[0]}
               runningVar={runningVar[0]}
+              dict={dict}
+              rows={rows}
               openReport={openReport}
               baseReplicateConfig={baseReplicateConfig}
             />
@@ -2017,7 +2063,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <Lbl color={C.textMuted}>Event-Time Coefficient Plot</Lbl>
                 <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
                 <Lbl color={C.textMuted}>Coefficient Table</Lbl>
-                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
               </div>
             );
           })()}
@@ -2041,7 +2087,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <Lbl color={C.textMuted}>Structural Coefficient Table (excl. dummies)</Lbl>
-                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 <PlotSelector accentColor={C.blue} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
                     node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
@@ -2074,7 +2120,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table (log-linear, with IRR)</Lbl>
-                <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 {r.IRR?.length > 0 && (
                   <div style={{ marginTop: "1rem" }}>
                     <Lbl color={C.textMuted}>Incidence Rate Ratios (IRR = exp(β))</Lbl>
@@ -2163,7 +2209,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>Full Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <PlotSelector
                   accentColor={C.teal}
@@ -2235,6 +2281,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <Lbl color={C.textMuted}>Coefficient Table (z-statistics · asymptotic SE)</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable
+                    dict={dict} rows={rows}
                     varNames={r.varNames} beta={r.beta} se={r.se}
                     tStats={r.testStats} pVals={r.pVals}
                     yVar={yVar[0]} df={null}
@@ -2361,7 +2408,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>RDD Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 <PlotSelector
                   accentColor={C.orange}
