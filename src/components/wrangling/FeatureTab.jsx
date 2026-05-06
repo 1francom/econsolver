@@ -260,17 +260,25 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
     const y=+s.slice(0,4), m=+s.slice(4,6), d=+s.slice(6,8);
     return y>=1000 && y<=9999 && m>=1 && m<=12 && d>=1 && d<=31;
   };
+  // Detect 6-digit compact dates: YYMMDD / DDMMYY / MMDDYY (e.g. 911202)
+  const is6DigitDate = v => {
+    const s = String(v).trim();
+    if (!/^\d{6}$/.test(s)) return false;
+    const [a,b,c] = [+s.slice(0,2), +s.slice(2,4), +s.slice(4,6)];
+    const ok = (m,d) => m>=1&&m<=12&&d>=1&&d<=31;
+    return ok(b,c) || ok(a,b) || ok(a,c);
+  };
 
-  // Date columns: ISO/parseable strings + numeric YYYYMMDD
+  // Date columns: ISO/parseable strings + numeric YYYYMMDD + 6-digit compact
   const dateC=headers.filter(h=>{
     const samples=rows.slice(0,20).map(r=>r[h]).filter(v=>v!=null);
     if(!samples.length) return false;
-    if(info[h]?.isNum) return samples.filter(v=>isYYYYMMDD(v)).length/samples.length>0.7;
+    if(info[h]?.isNum) return samples.filter(v=>isYYYYMMDD(v)||is6DigitDate(v)).length/samples.length>0.7;
     const strSamples=samples.filter(v=>typeof v==="string");
     if(!strSamples.length) return false;
     return strSamples.filter(v=>!isNaN(new Date(v).getTime())).length/strSamples.length>0.5;
   });
-  // Subset: numeric YYYYMMDD columns that need a parse step first
+  // Subset: numeric date columns that need a parse step first
   const numericDateC=dateC.filter(h=>info[h]?.isNum);
   const isP=panel?.entityCol&&panel?.timeCol;
 
@@ -297,7 +305,12 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
       dow:       n.dow       ||`${dateSrc}_dow`,
       isweekend: n.isweekend ||`${dateSrc}_isweekend`,
     }));
-    if(numericDateC.includes(dateSrc)) setDateParseMode("YYYYMMDD");
+    if(numericDateC.includes(dateSrc)){
+      // Auto-select format hint based on first sample value
+      const sample = rows.slice(0,20).map(r=>r[dateSrc]).find(v=>v!=null);
+      const s = sample != null ? String(sample).trim() : "";
+      setDateParseMode(/^\d{6}$/.test(s) ? "YYMMDD" : "YYYYMMDD");
+    }
   },[dateSrc]);
 
   function resetQuick(){setNm("");setQc("");setXc2("");prevAutoRef.current="";}
@@ -409,14 +422,14 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
         <div>
           {/* Info */}
           <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
-            Extracts calendar features as new numeric columns. Numeric <span style={{color:C.gold}}>YYYYMMDD</span> columns (e.g. <span style={{color:C.gold}}>20200101</span>) are auto-detected and parsed to ISO first.
+            Extracts calendar features as new numeric columns. Numeric <span style={{color:C.gold}}>YYYYMMDD</span> (e.g. <span style={{color:C.gold}}>20200101</span>) and 6-digit <span style={{color:C.gold}}>YYMMDD</span> (e.g. <span style={{color:C.gold}}>911202</span>) columns are auto-detected and parsed to ISO first.
           </div>
 
           {/* Source column */}
           <Lbl color={C.violet}>Date source column</Lbl>
           {dateC.length===0?(
             <div style={{fontSize:11,color:C.orange,fontFamily:mono,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4}}>
-              No date columns detected. Supports ISO strings ("2021-06-15") and numeric YYYYMMDD integers (20210615).
+              No date columns detected. Supports ISO strings ("2021-06-15"), numeric YYYYMMDD (20210615), and 6-digit YYMMDD (911202).
             </div>
           ):(
             <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.1rem"}}>
@@ -439,7 +452,14 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
             <div style={{padding:"0.7rem 0.9rem",background:`${C.gold}08`,border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.1rem"}}>
               <div style={{fontSize:10,color:C.gold,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:6,fontFamily:mono}}>Numeric format</div>
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
-                {[["YYYYMMDD","YYYYMMDD","20200115"],["DDMMYYYY","DDMMYYYY","15012020"],["MMDDYYYY","MMDDYYYY","01152020"]].map(([k,l,ex])=>(
+                {[
+                  ["YYYYMMDD","YYYYMMDD","20200115"],
+                  ["DDMMYYYY","DDMMYYYY","15012020"],
+                  ["MMDDYYYY","MMDDYYYY","01152020"],
+                  ["YYMMDD","YYMMDD","911202"],
+                  ["DDMMYY","DDMMYY","021291"],
+                  ["MMDDYY","MMDDYY","120291"],
+                ].map(([k,l,ex])=>(
                   <button key={k} onClick={()=>setDateParseMode(k)}
                     style={{padding:"0.25rem 0.65rem",border:`1px solid ${dateParseMode===k?C.gold:C.border2}`,
                       background:dateParseMode===k?`${C.gold}18`:"transparent",
