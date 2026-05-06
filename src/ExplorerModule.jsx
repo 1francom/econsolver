@@ -826,7 +826,7 @@ function generateExploreScript(language, { headers, info, filename }) {
 
 // ─── GROUP & SUMMARIZE EXPLORER ───────────────────────────────────────────────
 // Non-destructive descriptive stats panel with as.factor() override and LaTeX export.
-function GroupSummarizeExplorer({ rows, headers, info }) {
+function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
   const { C } = useTheme();
   const [byCols,    setByCols]    = useState([]);
   const [factorOverrides, setFactorOverrides] = useState(new Set()); // numeric cols forced as categorical
@@ -835,6 +835,8 @@ function GroupSummarizeExplorer({ rows, headers, info }) {
   const [latexOpen, setLatexOpen] = useState(false);
   const [copied,    setCopied]    = useState(false);
   const [hoveredCol, setHoveredCol] = useState(null);
+  const [saveName,  setSaveName]  = useState("");
+  const [saved,     setSaved]     = useState(false);
 
   const numC = headers.filter(h => info[h]?.isNum);
   const FN_OPTS = [
@@ -1115,6 +1117,28 @@ function GroupSummarizeExplorer({ rows, headers, info }) {
               onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}>
               ↓ CSV
             </button>
+            {/* Save as Dataset */}
+            {onSaveDataset && (
+              <div style={{display:"flex",alignItems:"center",gap:4,borderLeft:`1px solid ${C.border2}`,paddingLeft:8}}>
+                <input
+                  value={saveName}
+                  onChange={e=>{setSaveName(e.target.value);setSaved(false);}}
+                  placeholder={`summary_${sumResult.by.join("_")}`}
+                  style={{padding:"0.2rem 0.45rem",background:C.surface,border:`1px solid ${C.border2}`,
+                    borderRadius:2,color:C.text,fontSize:9,fontFamily:mono,width:140,outline:"none"}}
+                />
+                <button onClick={()=>{
+                  const name=(saveName.trim()||`summary_${sumResult.by.join("_")}`);
+                  onSaveDataset(name, sumResult.rows, sumResult.headers);
+                  setSaved(true);setTimeout(()=>setSaved(false),2000);
+                }} style={{
+                  padding:"0.22rem 0.6rem",background:saved?`${C.teal}18`:`${C.teal}12`,
+                  border:`1px solid ${saved?C.teal:C.border2}`,borderRadius:2,
+                  color:saved?C.teal:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono,whiteSpace:"nowrap"}}>
+                  {saved?"✓ Saved":"⊕ Save as Dataset"}
+                </button>
+              </div>
+            )}
           </div>
           {/* LaTeX panel */}
           {latexOpen && (()=>{
@@ -1248,7 +1272,7 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
 }
 
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
-export default function ExplorerModule({cleanedData, onBack, onProceed}) {
+export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset}) {
   const{C}=useTheme();
   const {headers, cleanRows:rows, panelIndex:panel, filename} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
@@ -1325,7 +1349,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed}) {
         </div>
         {tab==="summary"&&<SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel}/>}
         {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
-        {tab==="summarize"&&<GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info}/>}
+        {tab==="summarize"&&<GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset}/>}
         {tab==="corr"&&(
           <div>
             <div style={{fontSize:11,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
