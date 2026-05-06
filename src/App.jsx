@@ -1908,6 +1908,7 @@ export default function App() {
                         cleanedData={activeOutput}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
+                        onSaveDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
