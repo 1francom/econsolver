@@ -9,7 +9,7 @@ import AIContextSidebar from './components/AIContextSidebar.jsx';
 import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
-import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
+import { SessionStateProvider } from './services/session/sessionState.jsx';
 import {
   listPipelines, deletePipeline, clearAllPipelines, loadPipeline, loadRawData,
   saveProject, listProjects, deleteProject, clearAllProjects,
@@ -1081,6 +1081,24 @@ function ComingSoon({ tab }) {
   );
 }
 
+// Placeholder for tabs not yet implemented (Simulate, Calculate, Report).
+function ComingSoon({ tab }) {
+  const { C } = useTheme();
+  const labels = { simulate:"Simulate", calculate:"Calculate", report:"Report" };
+  const descs  = {
+    simulate:  "Build data generating processes, run Monte Carlo simulations, power analysis.",
+    calculate: "Define scalars, vectors, and expressions. Create datasets from scratch.",
+    report:    "Publication-ready output: LaTeX tables, AI narratives, and unified script export.",
+  };
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:10,fontFamily:mono}}>
+      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase"}}>{labels[tab] || tab}</div>
+      <div style={{fontSize:11,color:C.textDim,maxWidth:360,textAlign:"center",lineHeight:1.7}}>{descs[tab] || "Coming soon."}</div>
+      <div style={{fontSize:9,color:C.textMuted,marginTop:4}}>Phase 9 — in development</div>
+    </div>
+  );
+}
+
 // Thin wrapper that registers the primary dataset in sessionState when workspace mounts.
 function WorkspaceRegistrar({ filename, rawData }) {
   const dispatch = useSessionDispatch();
@@ -1111,6 +1129,8 @@ function Dashboard({onNew, onLoad}) {
   const [selPipeline, setSelPipeline] = useState(null); // pipeline record for pipeline steps preview
   const [renaming,    setRenaming]    = useState(null);  // pid being renamed
   const [renameVal,   setRenameVal]   = useState("");
+  const [editingDesc, setEditingDesc] = useState(null);  // pid with open desc editor
+  const [descVal,     setDescVal]     = useState("");
 
   const fmt = ts => ts
     ? new Date(ts).toLocaleDateString("en-GB", {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})
@@ -1127,10 +1147,11 @@ function Dashboard({onNew, onLoad}) {
           for (const p of pipes) {
             if (!p.id || !p.filename) continue; // skip bare/secondary entries
             await saveProject(p.id, {
-              name:     (p.filename || "").replace(/\.[^.]+$/, "") || "Untitled",
-              filename: p.filename || "dataset.csv",
-              rowCount: p.rowCount ?? 0,
-              colCount: p.colCount ?? 0,
+              name:         (p.filename || "").replace(/\.[^.]+$/, "") || "Untitled",
+              filename:     p.filename || "dataset.csv",
+              rowCount:     p.rowCount ?? 0,
+              colCount:     p.colCount ?? 0,
+              datasetCount: 1 + (p.pipeline || []).filter(s => s.type === "join" || s.type === "append").length,
             });
           }
         } catch (e) {
@@ -1173,6 +1194,13 @@ function Dashboard({onNew, onLoad}) {
     await saveProject(pid, { name: trimmed });
     setProjects(prev => prev.map(p => p.pid === pid ? { ...p, name: trimmed } : p));
     setRenaming(null);
+  }
+
+  async function handleDescriptionSave(pid) {
+    const trimmed = descVal.trim();
+    await saveProject(pid, { description: trimmed });
+    setProjects(prev => prev.map(p => p.pid === pid ? { ...p, description: trimmed } : p));
+    setEditingDesc(null);
   }
 
   const selProject = projects.find(p => p.pid === selected);
@@ -1277,12 +1305,16 @@ function Dashboard({onNew, onLoad}) {
                     </div>
                   )}
                   <div style={{fontSize:9, color:C.textMuted, marginTop:2, display:"flex", gap:8, flexWrap:"wrap"}}>
-                    <span>{(p.rowCount||"?").toLocaleString()} rows</span>
-                    <span>{p.colCount||"?"} cols</span>
+                    <span style={{color:C.teal}}>{p.datasetCount ?? 1} dataset{(p.datasetCount ?? 1) !== 1 ? "s" : ""}</span>
                     {(p.pipelineLength ?? 0) > 0 && (
                       <span style={{color:C.gold}}>{p.pipelineLength} steps</span>
                     )}
                   </div>
+                  {p.description && (
+                    <div style={{fontSize:9, color:C.textMuted, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:220}}>
+                      {p.description}
+                    </div>
+                  )}
                   <div style={{fontSize:9, color:C.border2, marginTop:2}}>{fmt(p.updatedAt ?? p.ts)}</div>
                 </div>
 
@@ -1400,20 +1432,67 @@ function Dashboard({onNew, onLoad}) {
 
             {/* Stats grid */}
             <div style={{
-              display:"grid", gridTemplateColumns:"repeat(4,1fr)",
+              display:"grid", gridTemplateColumns:"repeat(2,1fr)",
               gap:1, background:C.border,
             }}>
               {[
-                {l:"Rows",     v:(selProject.rowCount||"—").toLocaleString(), c:C.text},
-                {l:"Columns",  v:selProject.colCount||"—",                    c:C.text},
-                {l:"Pipeline", v:`${selPipeline?.pipelineLength||0} steps`,   c:(selPipeline?.pipelineLength)?C.gold:C.textMuted},
-                {l:"Datasets", v:1 + (selPipeline?.pipeline||[]).filter(s=>["join","append"].includes(s.type)).length, c:C.teal},
+                {l:"Datasets", v: selProject.datasetCount ?? (1 + (selPipeline?.pipeline||[]).filter(s=>["join","append"].includes(s.type)).length), c:C.teal},
+                {l:"Pipeline", v:`${selPipeline?.pipelineLength||0} steps`, c:(selPipeline?.pipelineLength)?C.gold:C.textMuted},
               ].map(s=>(
                 <div key={s.l} style={{background:C.surface,padding:"0.6rem 0.8rem"}}>
                   <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:3}}>{s.l}</div>
                   <div style={{fontSize:14,color:s.c,fontFamily:mono}}>{s.v}</div>
                 </div>
               ))}
+            </div>
+
+            {/* Description */}
+            <div style={{padding:"0.7rem 1rem", borderTop:`1px solid ${C.border}`, background:C.surface}}>
+              <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:5}}>
+                Description
+              </div>
+              {editingDesc === selProject.pid ? (
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <textarea
+                    autoFocus
+                    value={descVal}
+                    onChange={e => setDescVal(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Escape") setEditingDesc(null); }}
+                    rows={3}
+                    placeholder="Brief project description…"
+                    style={{
+                      width:"100%", fontFamily:mono, fontSize:10,
+                      background:C.surface2, border:`1px solid ${C.teal}`,
+                      borderRadius:3, color:C.text, padding:"0.4rem 0.5rem",
+                      resize:"vertical", outline:"none", boxSizing:"border-box",
+                    }}
+                  />
+                  <div style={{display:"flex",gap:6}}>
+                    <button
+                      onClick={() => handleDescriptionSave(selProject.pid)}
+                      style={{padding:"0.22rem 0.6rem",background:C.teal,border:"none",borderRadius:3,
+                              color:C.bg,cursor:"pointer",fontFamily:mono,fontSize:9,fontWeight:700}}
+                    >Save</button>
+                    <button
+                      onClick={() => setEditingDesc(null)}
+                      style={{padding:"0.22rem 0.6rem",background:"transparent",border:`1px solid ${C.border2}`,
+                              borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily:mono,fontSize:9}}
+                    >Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  onClick={() => { setEditingDesc(selProject.pid); setDescVal(selProject.description || ""); }}
+                  title="Click to edit description"
+                  style={{
+                    fontSize:10, color: selProject.description ? C.textDim : C.border2,
+                    cursor:"pointer", lineHeight:1.6, minHeight:18,
+                    fontStyle: selProject.description ? "normal" : "italic",
+                  }}
+                >
+                  {selProject.description || "Add a description…"}
+                </div>
+              )}
             </div>
 
             {/* Pipeline steps preview */}
@@ -1583,6 +1662,7 @@ export default function App() {
   const [tourStep,           setTourStep]          = useState(-1);
   const [rawData,            setRawData]           = useState(null);
   const [filename,           setFilename]          = useState("");
+  const [projectName,        setProjectName]       = useState("");
   const [pid,                setPid]               = useState(null);
   const [outputs,            setOutputs]           = useState({});
   const [activeTab,          setActiveTab]         = useState("clean");
@@ -1627,6 +1707,7 @@ export default function App() {
   // ── Load a saved project from the dashboard ──────────────────────────────
   const handleLoad = async p => {
     setFilename(p.filename || p.name || "project");
+    setProjectName(p.name || (p.filename || "").replace(/\.[^.]+$/, "") || "Project");
     setPid(p.id);
     setOutputs({});
     navHistory.current = [];   // fresh history for this project
@@ -1665,12 +1746,13 @@ export default function App() {
   const handleNamingConfirm = async (projectName) => {
     const newPid = `proj_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     try {
-      await saveProject(newPid, { name: projectName, filename: "", rowCount: 0, colCount: 0 });
+      await saveProject(newPid, { name: projectName, filename: "", datasetCount: 0 });
     } catch (e) {
       console.warn("[Projects] saveProject failed:", e);
     }
     setRawData(null);
     setFilename(projectName);
+    setProjectName(projectName);
     setPid(newPid);
     setOutputs({});
     setActiveTab("data");
@@ -1686,7 +1768,7 @@ export default function App() {
     // Update project metadata with real row/col counts
     if (pid) {
       try {
-        await saveProject(pid, { filename: fname, rowCount: data.rows?.length ?? 0, colCount: data.headers?.length ?? 0 });
+        await saveProject(pid, { filename: fname, rowCount: data.rows?.length ?? 0, colCount: data.headers?.length ?? 0, datasetCount: 1 });
       } catch (e) { /* non-fatal */ }
     }
   };
@@ -1744,13 +1826,13 @@ export default function App() {
           ⬡ LITUX
         </button>
 
-        {inWorkspace && filename && (
+        {inWorkspace && (projectName || filename) && (
           <>
             <span style={{color:C.border2}}>|</span>
-            <span style={{fontSize:11,color:C.textDim,fontFamily:mono}}>{filename}</span>
-            {activeOutput && (
+            <span style={{fontSize:11,color:C.textDim,fontFamily:mono}}>{projectName || filename}</span>
+            {availableDatasets.length > 0 && (
               <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
-                · {activeOutput.cleanRows.length} obs · {activeOutput.headers.length} vars
+                · {availableDatasets.length} dataset{availableDatasets.length !== 1 ? "s" : ""}
               </span>
             )}
           </>
@@ -1797,7 +1879,6 @@ export default function App() {
 
         {screen==="workspace" && (
           <SessionStateProvider key={pid}>
-            <WorkspaceRegistrar filename={filename} rawData={rawData}/>
 
             <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
               <WorkspaceBar
@@ -1846,7 +1927,10 @@ export default function App() {
                         pid={pid}
                         onComplete={handleComplete}
                         onOutputReady={handleOutputReady}
-                        onDatasetsChange={setAvailableDatasets}
+                        onDatasetsChange={dsList => {
+                          setAvailableDatasets(dsList);
+                          if (pid?.startsWith("proj_")) saveProject(pid, { datasetCount: dsList.length }).catch(()=>{});
+                        }}
                         activeDatasetId={activeDatasetId}
                       />
                     : <NeedsData onGoToData={() => navigateToTab("data")}/>
@@ -1860,6 +1944,7 @@ export default function App() {
                         cleanedData={activeOutput}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
+                        onSaveDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
