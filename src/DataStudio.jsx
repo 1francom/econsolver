@@ -476,6 +476,25 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     ssWrite(primaryId, secondary);
   }, [datasets, primaryId]);
 
+  // Register ALL initial datasets in sessionState on mount — primary + any restored from
+  // sessionStorage. Runs once so previously-loaded secondary datasets reappear in
+  // the Dataset Manager without needing to reload them.
+  useEffect(() => {
+    if (!dispatch) return;
+    datasets.forEach(d => {
+      if (!d.rawData) return;
+      registerDataset(dispatch, {
+        id:       d.id,
+        name:     d.filename,
+        source:   "loaded",
+        rowCount: d.rawData.rows?.length    ?? 0,
+        colCount: d.rawData.headers?.length ?? 0,
+        headers:  d.rawData.headers         ?? [],
+      });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount only — initial snapshot includes sessionStorage-restored datasets
+
   // Expose slim dataset list to parent (for Modeling Lab dataset picker)
   useEffect(() => {
     onDatasetsChange?.(datasets.map(d => ({
