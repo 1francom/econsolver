@@ -1081,24 +1081,6 @@ function ComingSoon({ tab }) {
   );
 }
 
-// Placeholder for tabs not yet implemented (Simulate, Calculate, Report).
-function ComingSoon({ tab }) {
-  const { C } = useTheme();
-  const labels = { simulate:"Simulate", calculate:"Calculate", report:"Report" };
-  const descs  = {
-    simulate:  "Build data generating processes, run Monte Carlo simulations, power analysis.",
-    calculate: "Define scalars, vectors, and expressions. Create datasets from scratch.",
-    report:    "Publication-ready output: LaTeX tables, AI narratives, and unified script export.",
-  };
-  return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:10,fontFamily:mono}}>
-      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase"}}>{labels[tab] || tab}</div>
-      <div style={{fontSize:11,color:C.textDim,maxWidth:360,textAlign:"center",lineHeight:1.7}}>{descs[tab] || "Coming soon."}</div>
-      <div style={{fontSize:9,color:C.textMuted,marginTop:4}}>Phase 9 — in development</div>
-    </div>
-  );
-}
-
 // Thin wrapper that registers the primary dataset in sessionState when workspace mounts.
 function WorkspaceRegistrar({ filename, rawData }) {
   const dispatch = useSessionDispatch();
