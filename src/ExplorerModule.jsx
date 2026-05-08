@@ -350,7 +350,7 @@ function AdfPanel({ results }) {
         const color = r.stationary ? "#6ec8b4" : "#c47070";
         const label = r.stationary ? "✓ Stationary" : "✗ Unit root";
         return (
-          <div key={r.lag} style={{ display: "grid", gridTemplateColumns: "3rem 6rem 5rem 6rem 1fr", gap: 8, alignItems: "center", padding: "0.4rem 0.5rem", background: r.stationary ? "#081008" : "#100808", border: `1px solid ${color}20`, borderLeft: `3px solid ${color}`, borderRadius: 3 }}>
+          <div key={r.lag} style={{ display: "grid", gridTemplateColumns: "3rem 6rem 5rem 6rem 1fr", gap: 8, alignItems: "center", padding: "0.4rem 0.5rem", background: r.stationary ? `${C.green}20` : `${C.red}20`, border: `1px solid ${color}20`, borderLeft: `3px solid ${color}`, borderRadius: 3 }}>
             <span style={{ fontSize: 12, color: "#888", fontFamily: mono }}>{r.lag}</span>
             <span style={{ fontSize: 12, color: "#ddd8cc", fontFamily: mono }}>{isFinite(r.stat) ? r.stat.toFixed(4) : "—"}</span>
             <span style={{ fontSize: 12, color: isFinite(r.pVal) && r.pVal < 0.05 ? "#6ec8b4" : "#888", fontFamily: mono }}>
@@ -551,7 +551,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
       {/* ACF / PACF panel */}
       {tsView === "acf" && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
-          <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          <div style={{ padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
             ACF &amp; PACF · {yCol} · n = {flatY.length} time points · max lag = {maxLag}
           </div>
           {acfVals.length > 1 ? (
@@ -569,7 +569,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
       {/* ADF panel */}
       {tsView === "adf" && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
-          <div style={{ padding: "0.4rem 0.9rem", background: "#0a0a0a", borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          <div style={{ padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
             Augmented Dickey-Fuller · {yCol} · n = {flatY.length} time points
           </div>
           {adfRes.length > 0 ? (
@@ -586,7 +586,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
       {tsView === "line" && series.length > 0 && chart ? (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
           {/* header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.9rem", background: "#0a0a0a", borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
             <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
               {agg.charAt(0).toUpperCase()+agg.slice(1)} of {yCol} by {tCol}
               {grpCol ? ` · grouped by ${grpCol}` : ""}
@@ -680,7 +680,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
           </div>
 
           {/* footer stats */}
-          <div style={{ padding: "0.35rem 0.9rem", background: "#0a0a0a", borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", gap: 16 }}>
+          <div style={{ padding: "0.35rem 0.9rem", background: C.surface2, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", gap: 16 }}>
             <span>{series.length} serie{series.length !== 1 ? "s" : ""}</span>
             <span>{series[0]?.pts.length} time points</span>
             <span>n = {rows.length} observations</span>
@@ -1144,7 +1144,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
           {latexOpen && (()=>{
             const tex = buildLatex(sumResult);
             return (
-              <div style={{padding:"0.75rem 0.9rem",background:"#0a0c0a",borderBottom:`1px solid ${C.border}`}}>
+              <div style={{padding:"0.75rem 0.9rem",background:C.surface2,borderBottom:`1px solid ${C.border}`}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                   <span style={{fontSize:9,color:C.gold,letterSpacing:"0.15em",
                     textTransform:"uppercase",fontFamily:mono,flex:1}}>LaTeX — tabular</span>

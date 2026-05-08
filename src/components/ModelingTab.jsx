@@ -1095,7 +1095,7 @@ function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, dict = {}, ro
       <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
         {[["second", "Second Stage (Structural)"], ["first", "First Stage (Instrument)"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)}
-            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? "#2a1800" : C.surface, border: "none", color: tab === k ? C.orange : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.orange}` : "2px solid transparent", transition: "all 0.15s" }}>
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? `${C.orange}20` : C.surface, border: "none", color: tab === k ? C.orange : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.orange}` : "2px solid transparent", transition: "all 0.15s" }}>
             {l}
           </button>
         ))}
@@ -2388,7 +2388,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`bw = ${rdd.h?.toFixed(3) ?? "—"}`} color={C.textDim} />
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                 </div>
-                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: "#100a04", border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
+                <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
                   <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
                     Local Average Treatment Effect (LATE) at cutoff = {rdd.cutoff}
                   </div>

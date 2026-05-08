@@ -121,15 +121,15 @@ async function parseExcel(file) {
 // Samples up to 5 non-empty lines and picks the most frequent candidate delimiter.
 // Handles comma, semicolon, tab, pipe — covers sep=",", sep=";", sep="\t", sep="|".
 function detectDelimiter(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 5);
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (!lines.length) return ",";
-  let tabs = 0, commas = 0, semis = 0, pipes = 0;
-  lines.forEach(l => {
-    tabs  += (l.match(/\t/g)  || []).length;
-    commas += (l.match(/,/g)  || []).length;
-    semis  += (l.match(/;/g)  || []).length;
-    pipes  += (l.match(/\|/g) || []).length;
-  });
+  // Use only the header line — data rows may contain commas/semicolons inside
+  // values (e.g. WKT geometry coordinates), which would skew a multi-line count.
+  const header = lines[0];
+  const tabs   = (header.match(/\t/g)  || []).length;
+  const commas = (header.match(/,/g)   || []).length;
+  const semis  = (header.match(/;/g)   || []).length;
+  const pipes  = (header.match(/\|/g)  || []).length;
   if (tabs  > commas && tabs  > semis && tabs  > pipes) return "\t";
   if (semis > commas && semis > pipes && semis > tabs)  return ";";
   if (pipes > commas && pipes > semis && pipes > tabs)  return "|";
@@ -589,6 +589,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         headers:  headers,
       });
     }
+    return id;
   }, [activeId, dispatch]);
 
   // Expose imperative handles so DataTab can add datasets without prop-drilling.
@@ -601,6 +602,26 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       if (id === primaryId) return; // never remove primary
       setDatasets(prev => prev.filter(d => d.id !== id));
       setActiveId(prev => prev === id ? primaryId : prev);
+      if (dispatch) dispatch({ type: "REMOVE_DATASET", id }); // sync sessionState
+    },
+    removeDatasetLocal: (id) => {
+      // Called by DatasetManager which already dispatched to sessionState
+      if (id === primaryId) return;
+      setDatasets(prev => prev.filter(d => d.id !== id));
+      setActiveId(prev => prev === id ? primaryId : prev);
+    },
+    patchDatasetColumns: (id, newRows, newCols) => {
+      // Adds new columns to an existing dataset in-place — no new dataset created.
+      setDatasets(prev => prev.map(d => {
+        if (d.id !== id) return d;
+        const allHeaders = [...new Set([...(d.rawData?.headers ?? []), ...newCols])];
+        const updated = { ...d, rawData: { rows: newRows, headers: allHeaders } };
+        return updated;
+      }));
+      if (dispatch) dispatch({
+        type: "UPDATE_DATASET_META", id,
+        patch: { colCount: undefined }, // will be recalculated via onDatasetsChange
+      });
     },
     // Called by DataViewer when a cell is edited — dispatches a patch step into
     // the active WranglingModule's pipeline via the shared ref
