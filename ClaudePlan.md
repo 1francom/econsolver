@@ -1404,11 +1404,35 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 | 8 | Modeling UI Overhaul | DONE |
 | 9 | Workspace Architecture | DONE |
 | 10 | Probability & Simulation Analytics | IN PROGRESS (10.1 done) |
-| 11 | Spatial Analytics | IN PROGRESS (11.1–11.5 done) |
+| 11 | Spatial Analytics | IN PROGRESS — see Phase 11 remaining below |
 | 12 | Excel-style Cell Editing | PENDING — double-click focus bug |
 | 13 | Project Isolation & User Auth | IN PROGRESS (13.1 done) |
 | 14 | Web Launch v0.1 Beta | PENDING — blocked on 13 |
 | 15 | Local Installable Version (Tauri) | PENDING — blocked on 14 validation |
+
+---
+
+## Phase 11 Remaining — Spatial Module
+
+### Done
+- `SpatialEngine.js`: haversine, buffer, grid (rect + hex), point-in-polygon, spatial join, nearest neighbour, `assignBoundaryDistance` (Spatial RD running variable)
+- `SpatialTab.jsx`: Analyze tab (Distance to Point, Buffer, Grid, Spatial Join, Nearest Neighbour, Distance to Boundary) + Plot tab (Boundary/Grid/Points layers with per-layer dataset selector)
+- CSV auto-delimiter detection fixed (header-only sampling avoids WKT coordinate pollution)
+- Delete sync: Data tab ↔ DatasetManager now bidirectional
+
+### Remaining (ordered by priority)
+
+1. **Per-operation dataset selector in Analyze tab** — Distance to Point, Buffer, Grid, Spatial Join, Nearest Neighbour all use the active dataset for points. Should allow selecting any loaded dataset as the source (mirrors what Plot tab already does per layer). Needed when the enriched dataset is in a different tab than the active one.
+
+2. **Geocode — Address → Lat/Lon** — UI stub exists, marked "coming soon · phase 11.2". Uses OpenStreetMap Nominatim (1 req/sec, session-cached). Adds `lat_geocoded` + `lon_geocoded` columns.
+
+3. **Spatial autocorrelation (Moran's I)** — listed in HintBox tips but not implemented. Pure math: weight matrix (k-NN or distance band) + I statistic + permutation p-value. Needed for spatial econometrics diagnostics.
+
+4. **Aggregate to Grid UI** — `aggregateToGrid()` exists in SpatialEngine but has no UI section. Counts/sums/means of point dataset within each grid cell. Useful for constructing density variables.
+
+5. **Spatial RD estimator shortcut** — once `boundary_running` is computed in Spatial tab, add a one-click "Estimate RDD with this running variable" button that pre-fills the RDD estimator in Model tab (running var + treatment + bandwidth suggestion).
+
+6. **Pipeline integration (architectural)** — see "Architectural Discussion" section below. Low urgency, high impact on reproducibility.
 
 ---
 

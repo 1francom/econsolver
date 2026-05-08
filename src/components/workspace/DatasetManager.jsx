@@ -148,7 +148,7 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
+export default function DatasetManager({ activeDatasetId, onSelectDataset, onRemoveDataset }) {
   const { C } = useTheme();
   const { datasets, primaryDatasetId, globalPipeline } = useSessionState();
   const dispatch = useSessionDispatch();
@@ -176,7 +176,10 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
   // ── Dispatch helpers ────────────────────────────────────────────────────────
   function execCascade({ gStepIds, datasetIds }) {
     gStepIds.forEach(id  => dispatch({ type: "REMOVE_GLOBAL_STEP", id }));
-    datasetIds.forEach(id => dispatch({ type: "REMOVE_DATASET",     id }));
+    datasetIds.forEach(id => {
+      dispatch({ type: "REMOVE_DATASET", id });
+      onRemoveDataset?.(id); // sync DataStudio local state
+    });
   }
 
   function execSaveSnapshot({ gStepIds, datasetIds }) {
@@ -388,12 +391,14 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
                         const { gStepIds, datasetIds } = pendingDelete.cascade;
                         execSaveSnapshot({ gStepIds, datasetIds });
                         dispatch({ type: "REMOVE_DATASET", id: ds.id });
+                        onRemoveDataset?.(ds.id);
                         setPendingDelete(null);
                       }}
                       onDeleteAll={() => {
                         const { gStepIds, datasetIds } = pendingDelete.cascade;
                         execCascade({ gStepIds, datasetIds });
                         dispatch({ type: "REMOVE_DATASET", id: ds.id });
+                        onRemoveDataset?.(ds.id);
                         setPendingDelete(null);
                       }}
                       onCancel={() => setPendingDelete(null)}

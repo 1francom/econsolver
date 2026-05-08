@@ -1882,6 +1882,7 @@ export default function App() {
                 hasOutput={!!tabOutput(activeTab)}
                 activeDatasetId={tabDsId(activeTab)}
                 onSelectDataset={id => selectDataset(activeTab, id, activeTab === "clean")}
+                onRemoveDataset={id => studioRef.current?.removeDatasetLocal(id)}
                 onStartTour={() => setTourStep(0)}
                 onOpenFeedback={() => setFeedbackOpen(true)}
               />
@@ -1981,11 +1982,15 @@ export default function App() {
                       if (newId) selectDataset("spatial", newId);
                     }}
                     onMergeColumns={(resultRows, newCols) => {
-                      const activeDs = availableDatasets.find(d => d.id === tabDsId("spatial"));
-                      const baseName = activeDs?.name ?? "spatial_data";
-                      const allHeaders = [...new Set([...(activeDs?.headers ?? (tabOutput("spatial")?.headers ?? [])), ...newCols])];
-                      const newId = studioRef.current?.addApiData(baseName, resultRows, allHeaders);
-                      if (newId) selectDataset("spatial", newId);
+                      const activeId = tabDsId("spatial");
+                      const activeDs = availableDatasets.find(d => d.id === activeId);
+                      const name     = activeDs?.filename ?? activeDs?.name ?? "spatial_data";
+                      const allHeaders = [...new Set([...(activeDs?.headers ?? []), ...newCols])];
+                      const newId = studioRef.current?.addApiData(name, resultRows, allHeaders);
+                      if (newId) {
+                        studioRef.current?.removeDataset(activeId);
+                        selectDataset("spatial", newId);
+                      }
                     }}
                   />
                 </div>

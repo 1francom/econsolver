@@ -14,6 +14,7 @@ import {
   assignH3Grid,
   spatialJoin,
   nearestNeighbor,
+  assignBoundaryDistance,
   makeGrid,
   aggregateToGrid,
 } from "../../math/SpatialEngine.js";
@@ -921,9 +922,98 @@ function SpatialMapSection({ rows, headers, C }) {
   );
 }
 
+// ─── BOUNDARY DISTANCE SECTION ───────────────────────────────────────────────
+function BoundaryDistanceSection({ rows, headers, availableDatasets, onResult, C }) {
+  const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
+  const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
+  const [polyDsId,  setPolyDsId]  = useState("");
+  const [wktCol,    setWktCol]    = useState("");
+  const [outPrefix, setOutPrefix] = useState("boundary");
+  const [result,    setResult]    = useState(null);
+  const [err,       setErr]       = useState("");
+
+  const polyDs      = availableDatasets.find(d => d.id === polyDsId);
+  const polyHeaders = polyDs?.headers ?? [];
+  const guessedWkt  = useMemo(() =>
+    polyHeaders.find(h => {
+      const s = polyDs?.rows?.find(r => r[h] != null)?.[h];
+      return typeof s === "string" && /^(POINT|POLYGON|MULTIPOLYGON)/i.test(s.trim());
+    }) ?? "",
+  [polyDs, polyHeaders]);
+  const effectiveWkt = wktCol || guessedWkt;
+
+  const canApply = latCol && lonCol && polyDs?.rows?.length && effectiveWkt && outPrefix;
+
+  function apply() {
+    setErr("");
+    try {
+      const out = assignBoundaryDistance(rows, latCol, lonCol, polyDs.rows, effectiveWkt, outPrefix);
+      const treated  = out.filter(r => r[`${outPrefix}_treat`] === 1).length;
+      const newCols  = [`${outPrefix}_dist_km`, `${outPrefix}_treat`, `${outPrefix}_running`];
+      setResult({ rows: out, treated, newCols });
+      onResult(out, newCols);
+    } catch (e) {
+      setErr(e.message);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+        Computes the minimum distance from each point to the nearest polygon boundary edge,
+        plus a treatment indicator and signed running variable for Spatial RD.
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <ColSelect label="Latitude column" value={latCol} onChange={setLatCol} headers={headers} C={C} />
+        <ColSelect label="Longitude column" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
+      </div>
+
+      {/* Polygon dataset picker */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>
+          Boundary polygon dataset
+        </label>
+        <select
+          value={polyDsId}
+          onChange={e => { setPolyDsId(e.target.value); setWktCol(""); }}
+          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: polyDsId ? C.text : C.textMuted, fontFamily: mono, fontSize: 10, outline: "none" }}
+        >
+          <option value="">— select polygon dataset —</option>
+          {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
+        </select>
+      </div>
+
+      {polyDs && (
+        <ColSelect label={`WKT geometry column${guessedWkt ? ` (auto: ${guessedWkt})` : ""}`}
+          value={effectiveWkt} onChange={setWktCol} headers={polyHeaders} C={C} />
+      )}
+
+      <TextInput label="Output column prefix" value={outPrefix} onChange={setOutPrefix} C={C} placeholder="boundary" />
+
+      {outPrefix && (
+        <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, lineHeight: 1.7 }}>
+          Outputs: <span style={{ color: C.teal }}>{outPrefix}_dist_km</span> · <span style={{ color: C.teal }}>{outPrefix}_treat</span> · <span style={{ color: C.teal }}>{outPrefix}_running</span> (signed, use as RD running variable)
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <ApplyBtn onClick={apply} disabled={!canApply} C={C} />
+        {result && (
+          <span style={{ fontSize: 9, color: C.teal }}>
+            ✓ {result.rows.length} rows · {result.treated} treated
+          </span>
+        )}
+      </div>
+      <ErrBanner msg={err} C={C} />
+      {result && <ResultPreview rows={result.rows} newCols={result.newCols} C={C} />}
+    </div>
+  );
+}
+
 // ─── DATASET OUTPUT PANEL ─────────────────────────────────────────────────────
 
-function OutputPanel({ pendingRows, pendingCols, onSave, onMergeToActive, C }) {
+function OutputPanel({ pendingRows, pendingCols, onSave, C }) {
   const [name, setName] = useState("spatial_result");
 
   if (!pendingRows) return null;
@@ -939,24 +1029,12 @@ function OutputPanel({ pendingRows, pendingCols, onSave, onMergeToActive, C }) {
         Ready — {pendingRows.length} rows · new col{pendingCols.length > 1 ? "s" : ""}: <strong>{pendingCols.join(", ")}</strong>
       </span>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        {onMergeToActive && (
-          <button
-            onClick={() => onMergeToActive(pendingRows, pendingCols)}
-            style={{
-              padding: "4px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10, cursor: "pointer",
-              background: `${C.teal}18`, border: `1px solid ${C.teal}60`, color: C.teal,
-            }}
-          >
-            ↳ Add to current dataset
-          </button>
-        )}
-        <span style={{ fontSize: 9, color: C.textMuted }}>or save as new:</span>
         <input
           value={name} onChange={e => setName(e.target.value)}
           placeholder="dataset name"
           style={{
             padding: "3px 8px", background: C.surface, border: `1px solid ${C.border2}`,
-            borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none", width: 140,
+            borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none", width: 160,
           }}
         />
         <SaveBtn onClick={() => onSave(name, pendingRows)} disabled={!name} C={C} />
@@ -1378,7 +1456,7 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset, onMergeColumns }) {
+export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset }) {
   const { C } = useTheme();
   const [mainTab,     setMainTab]     = useState("analyze");
   const [pendingRows, setPendingRows] = useState(null);
@@ -1473,17 +1551,8 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
 
       {/* ── Analyze sections ── */}
       {hasData && mainTab === "analyze" && (
-        <div style={{ flex: 1, overflowY: "auto", padding: "1.2rem 1.4rem" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "1.2rem 1.4rem", position: "relative" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 860 }}>
-
-            {/* Save pending result */}
-            <OutputPanel
-              pendingRows={pendingRows}
-              pendingCols={pendingCols}
-              onSave={handleSave}
-              onMergeToActive={onMergeColumns}
-              C={C}
-            />
 
             <Section title="Distance to Point" badge="haversine · km" C={C} defaultOpen>
               <DistanceSection rows={rows} headers={numericHeaders.length ? numericHeaders : headers} onResult={handleResult} C={C} />
@@ -1513,6 +1582,14 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
               />
             </Section>
 
+            <Section title="Distance to Boundary" badge="Spatial RD running variable" C={C}>
+              <BoundaryDistanceSection
+                rows={rows} headers={numericHeaders.length ? numericHeaders : headers}
+                availableDatasets={availableDatasets}
+                C={C} onResult={handleResult}
+              />
+            </Section>
+
             <Section title="Map Viewer" badge="points · boundaries · choropleth" C={C}>
               <SpatialMapSection rows={rows} headers={headers} C={C} />
             </Section>
@@ -1522,6 +1599,18 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
             </Section>
 
           </div>
+
+          {/* Sticky save bar — visible wherever the user is in the list */}
+          {pendingRows && (
+            <div style={{ position: "sticky", bottom: 0, left: 0, right: 0, zIndex: 10, paddingTop: 8 }}>
+              <OutputPanel
+                pendingRows={pendingRows}
+                pendingCols={pendingCols}
+                onSave={handleSave}
+                C={C}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
