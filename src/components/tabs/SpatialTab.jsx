@@ -1467,6 +1467,13 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
     [rows, headers]
   );
 
+  // Eagerly preload Leaflet so Map Viewer and Plot tab open instantly.
+  // loadLeaflet() is idempotent — uses window.L cache after first load.
+  const hasRows = rows.length > 0;
+  useEffect(() => {
+    if (hasRows) loadLeaflet().catch(() => {});
+  }, [hasRows]);
+
   const handleResult = useCallback((resultRows, newCols) => {
     setPendingRows(resultRows);
     setPendingCols(newCols);
@@ -1480,6 +1487,17 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
   }
 
   const hasData = rows.length > 0 && headers.length > 0;
+
+  // Key derived from the active dataset's column fingerprint.
+  // When headers change (dataset switch), all section sub-components remount
+  // so their useState() column selections reset to the new dataset's guesses.
+  const sectionsKey = headers.join("\0");
+
+  // Clear any pending result from the previous dataset when headers change.
+  useEffect(() => {
+    setPendingRows(null);
+    setPendingCols([]);
+  }, [sectionsKey]);
 
   return (
     <div style={{
@@ -1551,7 +1569,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
 
       {/* ── Analyze sections ── */}
       {hasData && mainTab === "analyze" && (
-        <div style={{ flex: 1, overflowY: "auto", padding: "1.2rem 1.4rem", position: "relative" }}>
+        <div key={sectionsKey} style={{ flex: 1, overflowY: "auto", padding: "1.2rem 1.4rem", position: "relative" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 860 }}>
 
             <Section title="Distance to Point" badge="haversine · km" C={C} defaultOpen>

@@ -246,7 +246,7 @@ function Uploader({onReady}){
         onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}}
         onClick={()=>ref.current?.click()}
         style={{width:"100%",border:`2px dashed ${drag?C.gold:C.border2}`,borderRadius:6,padding:"2.5rem 1.5rem",textAlign:"center",cursor:"pointer",background:drag?C.goldFaint:C.surface,transition:"all 0.15s"}}>
-        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.zip" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
+        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.parquet,.zip" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
         <div style={{fontSize:26,marginBottom:8}}>⬆</div>
         <div style={{fontSize:13,color:C.text,marginBottom:4}}>Drop file or click to browse</div>
         <div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
@@ -801,7 +801,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
                 transition:"all 0.15s",
               }}>
               <input ref={fileRef} type="file"
-                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.zip"
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.parquet,.zip"
                 onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
               {loading
                 ? <div style={{fontSize:11,color:C.textDim}}>Parsing…</div>
@@ -969,7 +969,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
                       background: dragOver ? C.goldFaint : "transparent",
                       transition:"all 0.15s",marginBottom:10}}>
               <input ref={fileRef} type="file"
-                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.zip"
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.parquet,.zip"
                 onChange={e=>handleFile(e.target.files[0])}
                 style={{display:"none"}}/>
               {loading
@@ -1658,6 +1658,7 @@ export default function App() {
   const [activeResult,       setActiveResult]      = useState(null);
   const [coachPrefill,       setCoachPrefill]      = useState(null);
   const [feedbackOpen,       setFeedbackOpen]      = useState(false);
+
   const [availableDatasets,  setAvailableDatasets] = useState([]);
   const coachSeqRef  = useRef(0);
   const studioRef    = useRef(null);
@@ -1853,6 +1854,7 @@ export default function App() {
             >✦ AI Coach</button>
           </>
         )}
+
       </div>
 
       {/* ── Main Content ──────────────────────────────────────────────────── */}
@@ -1945,6 +1947,7 @@ export default function App() {
                 <div style={{...tabPanel, display: activeTab==="explore" ? "flex" : "none", flexDirection:"column"}}>
                   {tabOutput("explore")
                     ? <ExplorerModule
+                        key={tabDsId("explore")}
                         cleanedData={tabOutput("explore")}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
