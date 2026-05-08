@@ -113,7 +113,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
       padding: "0.5rem 1rem",
       borderBottom: `1px solid ${C.border}`,
       borderLeft: `3px solid ${suppress || isHigh ? C.red : color}`,
-      background: suppress ? "#140808" : C.bg,
+      background: suppress ? `${C.red}15` : C.bg,
     }}>
       {/* Column name */}
       <div style={{ fontFamily: mono, fontSize: 11, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

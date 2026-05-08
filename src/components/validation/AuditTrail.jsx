@@ -129,7 +129,7 @@ function EntryCard({ entry }) {
         border: `1px solid ${entry.status === "error" ? `${C.red}40` : C.border}`,
         borderLeft: `3px solid ${entry.status === "error" ? C.red : catClr}`,
         borderRadius: 4, marginBottom: 6, overflow: "hidden",
-        background: entry.status === "error" ? "#0d0808" : C.surface,
+        background: entry.status === "error" ? `${C.red}15` : C.surface,
       }}
     >
       {/* Header row */}

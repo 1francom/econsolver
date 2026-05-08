@@ -192,7 +192,7 @@ export default function OECDFetcher({ onLoad, onClose }) {
             </div>
           )}
           {step === "error" && (
-            <div style={{ padding:"0.8rem 1.1rem", display:"flex", gap:8, background:"#0d0808", borderLeft:`3px solid ${C.red}`, fontSize:11, color:C.red, fontFamily:mono }}>
+            <div style={{ padding:"0.8rem 1.1rem", display:"flex", gap:8, background:`${C.red}15`, borderLeft:`3px solid ${C.red}`, fontSize:11, color:C.red, fontFamily:mono }}>
               <span>⚠ {error}</span>
               <button onClick={() => setStep("pick")} style={{ marginLeft:"auto", background:"none", border:`1px solid ${C.red}40`, borderRadius:2, color:C.red, cursor:"pointer", fontFamily:mono, fontSize:9, padding:"2px 8px" }}>Retry</button>
             </div>

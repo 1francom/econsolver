@@ -1375,7 +1375,7 @@ function Dashboard({onNew, onLoad}) {
             display:"flex", alignItems:"center", gap:14,
             transition:"background 0.15s, border-color 0.15s",
           }}
-          onMouseEnter={e=>{e.currentTarget.style.background="#201808";e.currentTarget.style.borderColor=C.goldDim;}}
+          onMouseEnter={e=>{e.currentTarget.style.background=C.surface3;e.currentTarget.style.borderColor=C.goldDim;}}
           onMouseLeave={e=>{e.currentTarget.style.background=C.goldFaint;e.currentTarget.style.borderColor=C.border2;}}
         >
           <span style={{fontSize:22, color:C.gold, flexShrink:0}}>⊕</span>

@@ -384,7 +384,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                     style={{ position:"fixed", inset:0, zIndex:98 }} />
                   <div style={{
                     position:"absolute", right:0, top:"calc(100% + 6px)",
-                    background:"#131313", border:"1px solid #252525",
+                    background:C.surface2, border:`1px solid ${C.border2}`,
                     borderRadius:4, zIndex:99, minWidth:220,
                     boxShadow:"0 8px 24px #000c", overflow:"hidden",
                   }}>
@@ -440,7 +440,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                       style={{ position:"fixed", inset:0, zIndex:98 }}/>
                     <div style={{
                       position:"absolute", right:0, top:"calc(100% + 6px)",
-                      background:"#131313", border:"1px solid #252525",
+                      background:C.surface2, border:`1px solid ${C.border2}`,
                       borderRadius:4, padding:"0.85rem", zIndex:99,
                       minWidth:280, boxShadow:"0 8px 24px #000c",
                     }}>
@@ -459,9 +459,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                         placeholder={filename ? filename.replace(/\.[^.]+$/, "") + "_subset.csv" : "subset.csv"}
                         autoFocus
                         style={{ width:"100%", boxSizing:"border-box",
-                          padding:"0.38rem 0.6rem", background:"#0f0f0f",
-                          border:"1px solid #252525", borderRadius:3,
-                          color:"#ddd8cc", fontFamily:mono, fontSize:11,
+                          padding:"0.38rem 0.6rem", background:C.surface,
+                          border:`1px solid ${C.border2}`, borderRadius:3,
+                          color:C.text, fontFamily:mono, fontSize:11,
                           outline:"none", marginBottom:8 }}/>
                       <button onClick={doSaveSubset} style={{
                         width:"100%", padding:"0.42rem",

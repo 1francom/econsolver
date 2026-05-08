@@ -410,10 +410,10 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
 function Auditor({sug,aiP,onApply,onNormalize,loading}){
   const { C } = useTheme();
   if(!sug.length&&!loading) return null;
-  const sc={high:C.red,medium:C.yellow,low:C.blue},sb={high:"#120808",medium:"#12100a",low:"#080c12"};
+  const sc={high:C.red,medium:C.yellow,low:C.blue},sb={high:`${C.red}20`,medium:`${C.yellow}15`,low:`${C.blue}15`};
   return(
     <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-      <div style={{padding:"0.5rem 1rem",background:"#0a0a0a",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
+      <div style={{padding:"0.5rem 1rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
         <span style={{fontSize:10,color:C.purple,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,flex:1}}>✦ Smart Auditor</span>
         {loading&&<Spin/>}
         {!loading&&<span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>{sug.length} issue{sug.length!==1?"s":""}</span>}
