@@ -589,6 +589,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         headers:  headers,
       });
     }
+    return id;
   }, [activeId, dispatch]);
 
   // Expose imperative handles so DataTab can add datasets without prop-drilling.
