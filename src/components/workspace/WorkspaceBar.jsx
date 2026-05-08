@@ -20,7 +20,7 @@ const TABS = [
   { id: "report",    label: "Report",    icon: "⊟", requiresOutput: true  },
 ];
 
-export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, onSelectDataset, onStartTour }) {
+export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, onSelectDataset, onStartTour, onOpenFeedback }) {
   const { C, theme, setTheme } = useTheme();
 
   return (
@@ -87,6 +87,31 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           );
         })}
       </div>
+
+      {/* ── Feedback button ── */}
+      <button
+        onClick={() => onOpenFeedback?.()}
+        title="Send feedback"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 32,
+          flexShrink: 0,
+          background: "transparent",
+          border: "none",
+          borderLeft: `1px solid ${C.border}`,
+          color: C.textMuted,
+          cursor: "pointer",
+          fontSize: 13,
+          fontFamily: mono,
+          transition: "color 0.12s",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.teal; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+      >
+        ⚑
+      </button>
 
       {/* ── Help / Tour button ── */}
       <button
