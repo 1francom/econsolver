@@ -141,10 +141,18 @@ export async function parseFileForPrimary(file) { return parseFile(file); }
 async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   if (["csv", "txt"].includes(ext)) {
+    if (file.size > 10 * 1024 * 1024) {
+      const { loadLargeCSV } = await import("./services/data/duckdb.js");
+      return loadLargeCSV(file);
+    }
     const text = await file.text();
     return parseCSV(text, detectDelimiter(text));
   }
   if (ext === "tsv") {
+    if (file.size > 10 * 1024 * 1024) {
+      const { loadLargeCSV } = await import("./services/data/duckdb.js");
+      return loadLargeCSV(file);
+    }
     const text = await file.text();
     return parseCSV(text, "\t");
   }
@@ -290,8 +298,11 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
 
                 {/* Dimensions */}
                 <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
-                  {ds.rawData.rows.length.toLocaleString()} rows ×{" "}
+                  {(ds.rawData._duckdb?.rowCount ?? ds.rawData.rows.length).toLocaleString()} rows ×{" "}
                   {ds.rawData.headers.length} cols
+                  {ds.rawData._duckdb && (
+                    <span style={{ marginLeft: 5, color: C.teal, letterSpacing: "0.05em" }}>· duckdb</span>
+                  )}
                 </div>
               </div>
 
@@ -353,9 +364,9 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
           {loading ? "Parsing…" : dragOver ? "Drop to load" : "+ Load dataset"}
         </button>
 
-        {/* Error message */}
+        {/* Error/info message */}
         {loadErr && (
-          <div style={{ fontSize: 9, color: C.red, fontFamily: mono, marginTop: 6, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 9, color: loadErr.startsWith("Large file") ? C.gold : C.red, fontFamily: mono, marginTop: 6, lineHeight: 1.5 }}>
             {loadErr}
           </div>
         )}

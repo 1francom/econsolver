@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef } from "react";
 import { researchCoach as callResearchCoach } from "../../services/AI/AIService.js";
 import { useTheme, mono } from "./shared.jsx";
+import { useAuth } from "../../services/auth/AuthContext.jsx";
 
 // ─── STARTER QUESTIONS ────────────────────────────────────────────────────────
 // Keyed by model type — shown as clickable chips to lower the barrier to entry.
@@ -157,6 +158,8 @@ function ThinkingBubble() {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function ResearchCoach({ result, dataDictionary, prefillMessage, metadataReport = null }) {
   const { C } = useTheme();
+  const { tier } = useAuth();
+  const isPremium = tier === "pro" || tier === "premium";
   const [open,     setOpen]     = useState(false);
   const [history,  setHistory]  = useState([]);
   const [input,    setInput]    = useState("");
@@ -225,7 +228,7 @@ export default function ResearchCoach({ result, dataDictionary, prefillMessage, 
 
       {/* ── Header / toggle ─────────────────────────────────────────────────── */}
       <button
-        onClick={() => { setOpen(o => !o); if (!open) setTimeout(() => inputRef.current?.focus(), 80); }}
+        onClick={() => { setOpen(o => !o); if (isPremium && !open) setTimeout(() => inputRef.current?.focus(), 80); }}
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "0.6rem 1rem",
@@ -238,15 +241,21 @@ export default function ResearchCoach({ result, dataDictionary, prefillMessage, 
         onMouseLeave={e => { if (!open) e.currentTarget.style.borderColor = C.border; }}
       >
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 9, color: C.violet, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono }}>
+          <span style={{ fontSize: 9, color: isPremium ? C.violet : C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono }}>
             AI Research Coach
           </span>
-          {!hasResult && (
+          {!isPremium && (
+            <span style={{ fontSize: 9, padding: "1px 7px", borderRadius: 8,
+                           background: `${C.gold}20`, color: C.gold, fontFamily: mono, letterSpacing:"0.1em" }}>
+              pro
+            </span>
+          )}
+          {isPremium && !hasResult && (
             <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
               — run a model first
             </span>
           )}
-          {history.length > 0 && (
+          {isPremium && history.length > 0 && (
             <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8,
                            background: `${C.violet}25`, color: C.violet, fontFamily: mono }}>
               {history.filter(h => h.role === "user").length}
@@ -254,12 +263,29 @@ export default function ResearchCoach({ result, dataDictionary, prefillMessage, 
           )}
         </span>
         <span style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>
-          {open ? "▲" : "▼"}
+          {isPremium ? (open ? "▲" : "▼") : "🔒"}
         </span>
       </button>
 
+      {/* ── Upgrade prompt (free tier) ──────────────────────────────────────── */}
+      {!isPremium && open && (
+        <div style={{
+          border: `1px solid ${C.gold}40`, borderTop: "none",
+          borderRadius: "0 0 4px 4px", padding: "1.5rem 1.25rem",
+          background: `${C.gold}08`, textAlign: "center",
+        }}>
+          <div style={{ fontSize: 11, color: C.gold, fontFamily: mono, marginBottom: 6 }}>
+            AI Research Coach is available on Pro and Premium plans.
+          </div>
+          <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.7 }}>
+            Upgrade your account to get contextual methodology advice,<br/>
+            identification threat detection, and robustness suggestions.
+          </div>
+        </div>
+      )}
+
       {/* ── Expanded panel ──────────────────────────────────────────────────── */}
-      {open && (
+      {isPremium && open && (
         <div style={{
           border: `1px solid ${C.violet}50`, borderTop: "none",
           borderRadius: "0 0 4px 4px",
