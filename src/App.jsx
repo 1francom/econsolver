@@ -1082,6 +1082,7 @@ function ComingSoon({ tab }) {
   );
 }
 
+
 // Thin wrapper that registers the primary dataset in sessionState when workspace mounts.
 function WorkspaceRegistrar({ filename, rawData }) {
   const dispatch = useSessionDispatch();
