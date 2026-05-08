@@ -923,7 +923,7 @@ function SpatialMapSection({ rows, headers, C }) {
 
 // ─── DATASET OUTPUT PANEL ─────────────────────────────────────────────────────
 
-function OutputPanel({ pendingRows, pendingCols, onSave, C }) {
+function OutputPanel({ pendingRows, pendingCols, onSave, onMergeToActive, C }) {
   const [name, setName] = useState("spatial_result");
 
   if (!pendingRows) return null;
@@ -933,20 +933,34 @@ function OutputPanel({ pendingRows, pendingCols, onSave, C }) {
       border: `1px solid ${C.teal}40`,
       borderRadius: 4,
       background: `${C.teal}08`,
-      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+      display: "flex", flexDirection: "column", gap: 8,
     }}>
-      <span style={{ fontSize: 10, color: C.teal, flex: 1 }}>
-        Ready to save — {pendingRows.length} rows · new col{pendingCols.length > 1 ? "s" : ""}: {pendingCols.join(", ")}
+      <span style={{ fontSize: 10, color: C.teal }}>
+        Ready — {pendingRows.length} rows · new col{pendingCols.length > 1 ? "s" : ""}: <strong>{pendingCols.join(", ")}</strong>
       </span>
-      <input
-        value={name} onChange={e => setName(e.target.value)}
-        placeholder="dataset name"
-        style={{
-          padding: "3px 8px", background: C.surface, border: `1px solid ${C.border2}`,
-          borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none", width: 160,
-        }}
-      />
-      <SaveBtn onClick={() => onSave(name, pendingRows)} disabled={!name} C={C} />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {onMergeToActive && (
+          <button
+            onClick={() => onMergeToActive(pendingRows, pendingCols)}
+            style={{
+              padding: "4px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10, cursor: "pointer",
+              background: `${C.teal}18`, border: `1px solid ${C.teal}60`, color: C.teal,
+            }}
+          >
+            ↳ Add to current dataset
+          </button>
+        )}
+        <span style={{ fontSize: 9, color: C.textMuted }}>or save as new:</span>
+        <input
+          value={name} onChange={e => setName(e.target.value)}
+          placeholder="dataset name"
+          style={{
+            padding: "3px 8px", background: C.surface, border: `1px solid ${C.border2}`,
+            borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none", width: 140,
+          }}
+        />
+        <SaveBtn onClick={() => onSave(name, pendingRows)} disabled={!name} C={C} />
+      </div>
     </div>
   );
 }
@@ -973,10 +987,38 @@ function ColorRow({ label, color, opacity, opacityLabel = "opacity", opacityMin 
   );
 }
 
-function SpatialLayerEditor({ layer, onChange, headers, wktHeaders, C }) {
-  const geomCols = wktHeaders.length ? wktHeaders : headers;
+function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders, availableDatasets, C }) {
+  const lyDs      = (layer.datasetId && layer.datasetId !== "active")
+    ? availableDatasets.find(d => d.id === layer.datasetId) : null;
+  const lyRows    = lyDs?.rows    ?? activeRows;
+  const lyHeaders = lyDs?.headers ?? activeHeaders;
+  const lyWktHeaders = useMemo(() =>
+    lyHeaders.filter(h => {
+      const s = lyRows.find(r => r[h] != null)?.[h];
+      return typeof s === "string" && /^(POINT|POLYGON|MULTIPOLYGON)/i.test(s.trim());
+    }),
+  [lyRows, lyHeaders]);
+  const geomCols = lyWktHeaders.length ? lyWktHeaders : lyHeaders;
+
+  function onDsChange(dsId) {
+    onChange({ ...layer, datasetId: dsId, latCol: "", lonCol: "", wktCol: "", colorCol: "", colorByCol: "", boundaryCol: "" });
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Dataset selector */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>Dataset</label>
+        <select
+          value={layer.datasetId ?? "active"}
+          onChange={e => onDsChange(e.target.value)}
+          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none", cursor: "pointer" }}
+        >
+          <option value="active">Active dataset</option>
+          {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
+        </select>
+      </div>
+
       <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono }}>
         {layer.type} layer
       </div>
@@ -996,7 +1038,6 @@ function SpatialLayerEditor({ layer, onChange, headers, wktHeaders, C }) {
 
       {/* ── Grid ──────────────────────────────────────────────────────────── */}
       {layer.type === "grid" && (<>
-        {/* Mode: auto-generate vs existing WKT column */}
         <div style={{ display: "flex", gap: 4 }}>
           {[["generate", "Auto-generate"], ["wkt", "From WKT col"]].map(([m, lbl]) => (
             <button key={m} onClick={() => onChange({ ...layer, mode: m })}
@@ -1021,7 +1062,7 @@ function SpatialLayerEditor({ layer, onChange, headers, wktHeaders, C }) {
           <ColSelect label="Grid WKT column" value={layer.wktCol}
             onChange={v => onChange({ ...layer, wktCol: v })} headers={geomCols} C={C} allowNone />
           <ColSelect label="Choropleth variable" value={layer.colorByCol}
-            onChange={v => onChange({ ...layer, colorByCol: v })} headers={headers} C={C} allowNone />
+            onChange={v => onChange({ ...layer, colorByCol: v })} headers={lyHeaders} C={C} allowNone />
           {layer.colorByCol && (
             <NumInput label="Choropleth fill opacity" value={layer.colorFillOpacity}
               onChange={v => onChange({ ...layer, colorFillOpacity: Number(v) })} C={C} min={0} max={1} step={0.05} />
@@ -1039,14 +1080,14 @@ function SpatialLayerEditor({ layer, onChange, headers, wktHeaders, C }) {
 
       {/* ── Points ────────────────────────────────────────────────────────── */}
       {layer.type === "points" && (<>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <ColSelect label="Latitude" value={layer.latCol}
-            onChange={v => onChange({ ...layer, latCol: v })} headers={headers} C={C} allowNone />
+            onChange={v => onChange({ ...layer, latCol: v })} headers={lyHeaders} C={C} allowNone />
           <ColSelect label="Longitude" value={layer.lonCol}
-            onChange={v => onChange({ ...layer, lonCol: v })} headers={headers} C={C} allowNone />
+            onChange={v => onChange({ ...layer, lonCol: v })} headers={lyHeaders} C={C} allowNone />
         </div>
         <ColSelect label="Color by (optional)" value={layer.colorCol}
-          onChange={v => onChange({ ...layer, colorCol: v })} headers={headers} C={C} allowNone />
+          onChange={v => onChange({ ...layer, colorCol: v })} headers={lyHeaders} C={C} allowNone />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
           <NumInput label="Radius (px)" value={layer.radius}
             onChange={v => onChange({ ...layer, radius: Number(v) })} C={C} min={1} max={20} step={1} />
@@ -1071,9 +1112,9 @@ const LAYER_COLORS = ["#6e9ec8", "#c8a96e", "#6ec8b4", "#c47070", "#a87ec8"];
 function mkSLayer(type, idx) {
   const col = LAYER_COLORS[idx % LAYER_COLORS.length];
   const id  = "sl_" + Math.random().toString(36).slice(2, 7);
-  if (type === "boundary") return { id, type, visible: true, wktCol: "", fillColor: "#d0d0d0", fillOpacity: 0.12, borderColor: "#222222", borderWidth: 0.5 };
-  if (type === "grid")     return { id, type, visible: true, mode: "generate", wktCol: "", boundaryCol: "", cellsize: 500, fillColor: col, fillOpacity: 0, borderColor: "#d73027", borderWidth: 0.15, colorByCol: "", colorFillOpacity: 0.55 };
-  if (type === "points")   return { id, type, visible: true, latCol: "", lonCol: "", colorCol: "", fillColor: col, radius: 4, opacity: 0.78 };
+  if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fillColor: "#d0d0d0", fillOpacity: 0.12, borderColor: "#222222", borderWidth: 0.5 };
+  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "generate", wktCol: "", boundaryCol: "", cellsize: 500, fillColor: col, fillOpacity: 0, borderColor: "#d73027", borderWidth: 0.15, colorByCol: "", colorFillOpacity: 0.55 };
+  if (type === "points")   return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", colorCol: "", fillColor: col, radius: 4, opacity: 0.78 };
   return { id, type, visible: true };
 }
 
@@ -1110,15 +1151,22 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
   const removeLayer = id   => { setLayers(prev => prev.filter(l => l.id !== id)); setActiveId(prev => prev === id ? null : prev); };
   const activeLayer = layers.find(l => l.id === activeId) ?? null;
 
+  // Helper: resolve rows for a layer based on its datasetId
+  function lyRows(ly) {
+    if (!ly.datasetId || ly.datasetId === "active") return rows;
+    return availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+  }
+
   // Auto-generate grid cells (memoized — also used for save)
   const generatedGrid = useMemo(() => {
     const gl = layers.find(l => l.type === "grid" && l.mode === "generate" && l.boundaryCol && l.cellsize > 0);
     if (!gl) return null;
-    const wkt = rows.find(r => r[gl.boundaryCol])?.[gl.boundaryCol];
+    const glRows = (!gl.datasetId || gl.datasetId === "active") ? rows : availableDatasets.find(d => d.id === gl.datasetId)?.rows ?? rows;
+    const wkt = glRows.find(r => r[gl.boundaryCol])?.[gl.boundaryCol];
     if (!wkt) return null;
     try { return { cells: makeGrid(wkt, gl.cellsize), error: null }; }
     catch (e) { return { cells: null, error: e.message }; }
-  }, [layers, rows]);
+  }, [layers, rows, availableDatasets]);
 
   // Build Leaflet map
   useEffect(() => {
@@ -1139,7 +1187,7 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
 
       // ── Boundary ──────────────────────────────────────────────────────────
       if (ly.type === "boundary" && ly.wktCol) {
-        for (const row of rows) {
+        for (const row of lyRows(ly)) {
           const geo = wktToLeaflet(row[ly.wktCol]);
           if (!geo) continue;
           if (geo.type === "point") {
@@ -1155,7 +1203,7 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
       if (ly.type === "grid") {
         let cells = [];
         if (ly.mode === "wkt" && ly.wktCol) {
-          cells = rows.filter(r => r[ly.wktCol]);
+          cells = lyRows(ly).filter(r => r[ly.wktCol]);
           const { getColor } = buildColorScale(cells, ly.colorByCol);
           for (const cell of cells) {
             const geo = wktToLeaflet(cell[ly.wktCol]);
@@ -1182,8 +1230,9 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
 
       // ── Points ────────────────────────────────────────────────────────────
       if (ly.type === "points" && ly.latCol && ly.lonCol) {
-        const { getColor } = buildColorScale(rows, ly.colorCol);
-        for (const row of rows) {
+        const ptRows = lyRows(ly);
+        const { getColor } = buildColorScale(ptRows, ly.colorCol);
+        for (const row of ptRows) {
           const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]);
           if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
           const color = (ly.colorCol ? getColor(row) : null) ?? ly.fillColor;
@@ -1203,17 +1252,18 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
     } catch (_) { map.setView([20, 0], 2); }
 
     return () => { if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; } };
-  }, [L, layers, rows, generatedGrid]);
+  }, [L, layers, rows, availableDatasets, generatedGrid]);
 
   // Active legend
   const activeLegend = useMemo(() => {
     for (const ly of [...layers].reverse()) {
       if (!ly.visible) continue;
-      if (ly.type === "grid"   && ly.mode === "wkt" && ly.colorByCol) return buildColorScale(rows, ly.colorByCol).legend;
-      if (ly.type === "points" && ly.colorCol)                         return buildColorScale(rows, ly.colorCol).legend;
+      const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+      if (ly.type === "grid"   && ly.mode === "wkt" && ly.colorByCol) return buildColorScale(r, ly.colorByCol).legend;
+      if (ly.type === "points" && ly.colorCol)                         return buildColorScale(r, ly.colorCol).legend;
     }
     return null;
-  }, [layers, rows]);
+  }, [layers, rows, availableDatasets]);
 
   if (!L) return <div style={{ padding: "2rem", fontFamily: mono, fontSize: 10, color: C.textMuted }}>Loading Leaflet…</div>;
 
@@ -1274,7 +1324,7 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
         {/* Layer editor */}
         <div style={{ flex: 1, padding: "0.75rem 0.65rem", overflowY: "auto" }}>
           {activeLayer
-            ? <SpatialLayerEditor layer={activeLayer} onChange={updateLayer} headers={headers} wktHeaders={wktHeaders} C={C} />
+            ? <SpatialLayerEditor layer={activeLayer} onChange={updateLayer} activeRows={rows} activeHeaders={headers} availableDatasets={availableDatasets} C={C} />
             : <div style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Select or add a layer.</div>
           }
         </div>
@@ -1328,7 +1378,7 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset }) {
+export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset, onMergeColumns }) {
   const { C } = useTheme();
   const [mainTab,     setMainTab]     = useState("analyze");
   const [pendingRows, setPendingRows] = useState(null);
@@ -1431,6 +1481,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
               pendingRows={pendingRows}
               pendingCols={pendingCols}
               onSave={handleSave}
+              onMergeToActive={onMergeColumns}
               C={C}
             />
 

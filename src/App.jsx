@@ -1980,6 +1980,13 @@ export default function App() {
                       const newId = studioRef.current?.addApiData(name, rows, headers);
                       if (newId) selectDataset("spatial", newId);
                     }}
+                    onMergeColumns={(resultRows, newCols) => {
+                      const activeDs = availableDatasets.find(d => d.id === tabDsId("spatial"));
+                      const baseName = activeDs?.name ?? "spatial_data";
+                      const allHeaders = [...new Set([...(activeDs?.headers ?? (tabOutput("spatial")?.headers ?? [])), ...newCols])];
+                      const newId = studioRef.current?.addApiData(baseName, resultRows, allHeaders);
+                      if (newId) selectDataset("spatial", newId);
+                    }}
                   />
                 </div>
 

@@ -1412,6 +1412,27 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 
 ---
 
+## Architectural Discussion — TO DISCUSS
+
+### Pipeline scope redefinition (spatial + cross-module ops)
+
+**Problem:** Spatial operations (distance, buffer, join, grid) currently run outside the pipeline and save results as new datasets via `onAddDataset` / `onMergeColumns`. This creates reproducibility and traceability gaps when:
+- A spatial merge is followed by Clean Module steps (filter, rename, type cast)
+- A derived column like `dist_km` is transformed (`* 1000`, log, z-score) in FeatureTab
+- Simulated data is enriched spatially, modeled, and predicted values are saved back
+- Multiple datasets are involved (multi-subset + spatial join + model)
+
+The current pipeline is scoped to a single dataset and lives in `runner.js` (23 step types). Spatial ops are stateful side effects, not pipeline steps — this makes the audit trail incomplete and replication scripts wrong.
+
+**Options to discuss:**
+1. Add spatial step types to `runner.js` (e.g. `spatial_distance`, `spatial_join`, `spatial_buffer`) — pipeline becomes the single source of truth across all modules
+2. Separate "spatial pipeline" that chains into the main pipeline output — looser coupling but cleaner module boundary
+3. Keep spatial ops outside the pipeline but enforce a "checkpoint" pattern — user explicitly promotes a spatial result into a named pipeline input
+
+**Blocker:** None — this is an architectural decision, not a bug. Low urgency but high impact on reproducibility and the replication bundle.
+
+---
+
 ## Next unblocked tasks
 
 1. **Browser validation of Phase 4** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, all three multi-model export scripts (R/Python/Stata) generate correctly.
