@@ -20,7 +20,7 @@ const TABS = [
   { id: "report",    label: "Report",    icon: "⊟", requiresOutput: true  },
 ];
 
-export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, onSelectDataset, onStartTour, onOpenFeedback }) {
+export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback }) {
   const { C, theme, setTheme } = useTheme();
 
   return (
@@ -36,6 +36,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
       <DatasetManager
         activeDatasetId={activeDatasetId}
         onSelectDataset={onSelectDataset}
+        onRemoveDataset={onRemoveDataset}
       />
 
       {/* ── Separator ── */}

@@ -1082,6 +1082,24 @@ function ComingSoon({ tab }) {
   );
 }
 
+// Placeholder for tabs not yet implemented (Simulate, Calculate, Report).
+function ComingSoon({ tab }) {
+  const { C } = useTheme();
+  const labels = { simulate:"Simulate", calculate:"Calculate", report:"Report" };
+  const descs  = {
+    simulate:  "Build data generating processes, run Monte Carlo simulations, power analysis.",
+    calculate: "Define scalars, vectors, and expressions. Create datasets from scratch.",
+    report:    "Publication-ready output: LaTeX tables, AI narratives, and unified script export.",
+  };
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:10,fontFamily:mono}}>
+      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase"}}>{labels[tab] || tab}</div>
+      <div style={{fontSize:11,color:C.textDim,maxWidth:360,textAlign:"center",lineHeight:1.7}}>{descs[tab] || "Coming soon."}</div>
+      <div style={{fontSize:9,color:C.textMuted,marginTop:4}}>Phase 9 — in development</div>
+    </div>
+  );
+}
+
 // Thin wrapper that registers the primary dataset in sessionState when workspace mounts.
 function WorkspaceRegistrar({ filename, rawData }) {
   const dispatch = useSessionDispatch();
@@ -1375,7 +1393,7 @@ function Dashboard({onNew, onLoad}) {
             display:"flex", alignItems:"center", gap:14,
             transition:"background 0.15s, border-color 0.15s",
           }}
-          onMouseEnter={e=>{e.currentTarget.style.background="#201808";e.currentTarget.style.borderColor=C.goldDim;}}
+          onMouseEnter={e=>{e.currentTarget.style.background=C.surface3;e.currentTarget.style.borderColor=C.goldDim;}}
           onMouseLeave={e=>{e.currentTarget.style.background=C.goldFaint;e.currentTarget.style.borderColor=C.border2;}}
         >
           <span style={{fontSize:22, color:C.gold, flexShrink:0}}>⊕</span>
@@ -1649,7 +1667,11 @@ export default function App() {
   const [pid,                setPid]               = useState(null);
   const [outputs,            setOutputs]           = useState({});
   const [activeTab,          setActiveTab]         = useState("clean");
-  const [activeDatasetId,    setActiveDatasetId]   = useState(null);
+  // Per-tab independent dataset selection — each tab remembers its own active dataset
+  const [activeDatasetIds,   setActiveDatasetIds]  = useState({
+    data: null, clean: null, explore: null, model: null,
+    spatial: null, simulate: null, calculate: null, report: null,
+  });
   const [sidebarOpen,        setSidebarOpen]       = useState(false);
   const [activeResult,       setActiveResult]      = useState(null);
   const [coachPrefill,       setCoachPrefill]      = useState(null);
@@ -1757,9 +1779,19 @@ export default function App() {
     }
   };
 
+  // ── Per-tab helpers ───────────────────────────────────────────────────────
+  const tabDsId  = (tab) => activeDatasetIds[tab] ?? pid;
+  const tabOutput = (tab) => outputs[tabDsId(tab)] ?? outputs[pid] ?? null;
+
+  // Setter: update one tab's selection; optionally call switchToDataset
+  const selectDataset = (tab, id, switchDs = false) => {
+    setActiveDatasetIds(prev => ({ ...prev, [tab]: id }));
+    if (switchDs) studioRef.current?.switchToDataset(id);
+  };
+
   // ── Pipeline output — fired by DataStudio when user clicks "→ Analyze" ───
   const handleComplete = r => {
-    const id = activeDatasetId ?? pid;
+    const id = tabDsId("clean");
     setOutputs(prev => ({ ...prev, [id]: r }));
     setActiveTab("explore");
   };
@@ -1768,9 +1800,6 @@ export default function App() {
   const handleOutputReady = (r, dsId) => {
     setOutputs(prev => ({ ...prev, [dsId]: r }));
   };
-
-  // Active output: prefer the selected dataset's output, fall back to primary
-  const activeOutput = outputs[activeDatasetId ?? pid] ?? outputs[pid] ?? null;
 
   const inWorkspace = screen === "workspace";
   const inNaming    = screen === "naming";
@@ -1824,7 +1853,7 @@ export default function App() {
 
         {inWorkspace && (
           <>
-            {!activeOutput && (
+            {!tabOutput(activeTab) && (
               <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginLeft:4}}>
                 autosaved ✓
               </span>
@@ -1868,9 +1897,10 @@ export default function App() {
               <WorkspaceBar
                 activeTab={activeTab}
                 onTabChange={navigateToTab}
-                hasOutput={!!activeOutput}
-                activeDatasetId={activeDatasetId}
-                onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
+                hasOutput={!!tabOutput(activeTab)}
+                activeDatasetId={tabDsId(activeTab)}
+                onSelectDataset={id => selectDataset(activeTab, id, activeTab === "clean")}
+                onRemoveDataset={id => studioRef.current?.removeDatasetLocal(id)}
                 onStartTour={() => setTourStep(0)}
                 onOpenFeedback={() => setFeedbackOpen(true)}
               />
@@ -1899,10 +1929,10 @@ export default function App() {
                 <div style={{...tabPanel, display: activeTab==="data" ? "flex" : "none", flexDirection:"column"}}>
                   <DataTab
                     filename={filename} rawData={rawData} studioRef={studioRef}
-                    cleanedData={activeOutput}
+                    cleanedData={tabOutput("data")}
                     availableDatasets={availableDatasets}
-                    activeDatasetId={activeDatasetId ?? pid}
-                    onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
+                    activeDatasetId={tabDsId("data")}
+                    onSelectDataset={id => selectDataset("data", id, true)}
                     onDeleteDataset={id => { studioRef.current?.removeDataset(id); }}
                     onLoadPrimary={handlePrimaryLoad}
                   />
@@ -1923,7 +1953,7 @@ export default function App() {
                           setAvailableDatasets(dsList);
                           if (pid?.startsWith("proj_")) saveProject(pid, { datasetCount: dsList.length }).catch(()=>{});
                         }}
-                        activeDatasetId={activeDatasetId}
+                        activeDatasetId={tabDsId("clean")}
                       />
                     : <NeedsData onGoToData={() => navigateToTab("data")}/>
                   }
@@ -1931,12 +1961,15 @@ export default function App() {
 
                 {/* EXPLORE */}
                 <div style={{...tabPanel, display: activeTab==="explore" ? "flex" : "none", flexDirection:"column"}}>
-                  {activeOutput
+                  {tabOutput("explore")
                     ? <ExplorerModule
-                        cleanedData={activeOutput}
+                        cleanedData={tabOutput("explore")}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
-                        onSaveDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                        onSaveDataset={(name, rows, headers) => {
+                          const newId = studioRef.current?.addApiData(name, rows, headers);
+                          if (newId) selectDataset("explore", newId);
+                        }}
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
@@ -1944,9 +1977,9 @@ export default function App() {
 
                 {/* MODEL */}
                 <div style={{...tabPanel, display: activeTab==="model" ? "flex" : "none", flexDirection:"column"}}>
-                  {activeOutput
+                  {tabOutput("model")
                     ? <ModelingTab
-                        cleanedData={activeOutput}
+                        cleanedData={tabOutput("model")}
                         availableDatasets={availableDatasets}
                         onBack={()=>navigateToTab("explore")}
                         onResultChange={r=>setActiveResult(r)}
@@ -1959,10 +1992,24 @@ export default function App() {
                 {/* SPATIAL — Phase 11 */}
                 <div style={{...tabPanel, display: activeTab==="spatial" ? "flex" : "none", flexDirection:"column"}}>
                   <SpatialTab
-                    rows={activeOutput?.cleanRows ?? rawData?.rows ?? []}
-                    headers={activeOutput?.headers ?? rawData?.headers ?? []}
+                    rows={tabOutput("spatial")?.cleanRows ?? rawData?.rows ?? []}
+                    headers={tabOutput("spatial")?.headers ?? rawData?.headers ?? []}
                     availableDatasets={availableDatasets}
-                    onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                    onAddDataset={(name, rows, headers) => {
+                      const newId = studioRef.current?.addApiData(name, rows, headers);
+                      if (newId) selectDataset("spatial", newId);
+                    }}
+                    onMergeColumns={(resultRows, newCols) => {
+                      const activeId = tabDsId("spatial");
+                      const activeDs = availableDatasets.find(d => d.id === activeId);
+                      const name     = activeDs?.filename ?? activeDs?.name ?? "spatial_data";
+                      const allHeaders = [...new Set([...(activeDs?.headers ?? []), ...newCols])];
+                      const newId = studioRef.current?.addApiData(name, resultRows, allHeaders);
+                      if (newId) {
+                        studioRef.current?.removeDataset(activeId);
+                        selectDataset("spatial", newId);
+                      }
+                    }}
                   />
                 </div>
 
@@ -1973,7 +2020,8 @@ export default function App() {
                       if (!rawData) {
                         handlePrimaryLoad({ headers, rows }, name).then(() => setActiveTab("clean"));
                       } else {
-                        studioRef.current?.addApiData(name, rows, headers);
+                        const newId = studioRef.current?.addApiData(name, rows, headers);
+                        if (newId) selectDataset("simulate", newId); // auto-select only in Simulate
                       }
                     }}
                   />
@@ -1981,8 +2029,8 @@ export default function App() {
 
                 {/* REPORT — Phase 9.10 */}
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
-                  {activeOutput
-                    ? <ReportingModule result={activeResult} cleanedData={activeOutput} />
+                  {tabOutput("report")
+                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }
                 </div>
@@ -1990,9 +2038,12 @@ export default function App() {
                 {/* CALCULATE — Phase 9.7 */}
                 <div style={{...tabPanel, display: activeTab==="calculate" ? "flex" : "none", flexDirection:"column"}}>
                   <CalculateTab
-                    rows={activeOutput?.cleanRows ?? rawData?.rows ?? []}
-                    headers={activeOutput?.headers ?? rawData?.headers ?? []}
-                    onAddDataset={(name, rows, headers) => studioRef.current?.addApiData(name, rows, headers)}
+                    rows={tabOutput("calculate")?.cleanRows ?? rawData?.rows ?? []}
+                    headers={tabOutput("calculate")?.headers ?? rawData?.headers ?? []}
+                    onAddDataset={(name, rows, headers) => {
+                      const newId = studioRef.current?.addApiData(name, rows, headers);
+                      if (newId) selectDataset("calculate", newId);
+                    }}
                   />
                 </div>
 
@@ -2007,7 +2058,7 @@ export default function App() {
         isOpen={sidebarOpen}
         onClose={()=>setSidebarOpen(false)}
         screen={activeTab}
-        cleanedData={activeOutput}
+        cleanedData={tabOutput(activeTab)}
         modelResult={activeResult}
         prefillMessage={coachPrefill}
       />
