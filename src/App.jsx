@@ -7,6 +7,7 @@ import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './components/ModelingTab.jsx';
 import AIContextSidebar from './components/AIContextSidebar.jsx';
 import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
+import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import { SessionStateProvider } from './services/session/sessionState.jsx';
@@ -1652,6 +1653,7 @@ export default function App() {
   const [sidebarOpen,        setSidebarOpen]       = useState(false);
   const [activeResult,       setActiveResult]      = useState(null);
   const [coachPrefill,       setCoachPrefill]      = useState(null);
+  const [feedbackOpen,       setFeedbackOpen]      = useState(false);
   const [availableDatasets,  setAvailableDatasets] = useState([]);
   const coachSeqRef  = useRef(0);
   const studioRef    = useRef(null);
@@ -1870,7 +1872,15 @@ export default function App() {
                 activeDatasetId={activeDatasetId}
                 onSelectDataset={id => { setActiveDatasetId(id); studioRef.current?.switchToDataset(id); }}
                 onStartTour={() => setTourStep(0)}
+                onOpenFeedback={() => setFeedbackOpen(true)}
               />
+
+              {feedbackOpen && (
+                <FeedbackModal
+                  activeTab={activeTab}
+                  onClose={() => setFeedbackOpen(false)}
+                />
+              )}
 
               {tourStep >= 0 && tourStep < TOUR_STEPS.length && (
                 <TourOverlay
