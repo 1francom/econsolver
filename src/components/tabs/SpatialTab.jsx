@@ -716,7 +716,7 @@ function MapLegend({ legend, C }) {
   return (
     <div style={{
       position: "absolute", bottom: 24, right: 8, zIndex: 999,
-      background: "rgba(8,8,8,0.82)", border: `1px solid ${C.border2}`,
+      background: C.surface, border: `1px solid ${C.border2}`,
       borderRadius: 4, padding: "6px 10px", fontFamily: mono, fontSize: 9, minWidth: 100,
       backdropFilter: "blur(4px)",
     }}>

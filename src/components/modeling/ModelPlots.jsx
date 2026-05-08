@@ -1164,7 +1164,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
 
                 {/* F-stat badge */}
                 <rect x={ox + PAD.l + iW - 90} y={oy + PAD.t + 4} width={86} height={22}
-                  fill={p.weak ? "#100505" : "#050f08"}
+                  fill={C.surface}
                   stroke={fColor + "40"} rx={3} />
                 <text x={ox + PAD.l + iW - 47} y={oy + PAD.t + 14} textAnchor="middle"
                   fill={fColor} fontSize={8} fontFamily={mono}>
@@ -1859,7 +1859,7 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
         {yLo<0&&yHi>0&&<line x1={PAD.l} x2={PAD.l+iW} y1={sy(0)} y2={sy(0)} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3"/>}
         {pts.map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={2.2} fill={hasCorr?C.red:C.blue} opacity={0.4}/>)}
         <line x1={sx(xLo)} y1={sy(slope*xLo+intcp)} x2={sx(xHi)} y2={sy(slope*xHi+intcp)} stroke={lColor} strokeWidth={1.8} opacity={0.85}/>
-        <rect x={PAD.l+6} y={PAD.t+4} width={110} height={22} fill={hasCorr?"#100505":"#050f08"} stroke={lColor+"40"} rx={3}/>
+        <rect x={PAD.l+6} y={PAD.t+4} width={110} height={22} fill={C.surface} stroke={lColor+"40"} rx={3}/>
         <text x={PAD.l+61} y={PAD.t+14} textAnchor="middle" fill={lColor} fontSize={8} fontFamily={mono}>r = {corr.toFixed(3)}</text>
         <text x={PAD.l+61} y={PAD.t+23} textAnchor="middle" fill={lColor} fontSize={7} fontFamily={mono}>{hasCorr?"⚠ endogeneity confirmed":"✓ residuals uncorrelated"}</text>
         {xTicks.map((t,i)=><g key={i}><line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1}/><text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
