@@ -48,7 +48,7 @@ function PanelTab({rows,headers,panel,setPanel}){
       </div>
       {v&&(
         <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-          <div style={{padding:"0.45rem 1rem",background:"#0a0a0a",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>Panel Diagnostics</div>
+          <div style={{padding:"0.45rem 1rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>Panel Diagnostics</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border}}>
             {[{l:"Entities",v:v.entities.length,c:C.gold},{l:"Periods",v:v.times.length,c:C.blue},{l:"Obs",v:rows.length,c:C.text},{l:"Attrition",v:`${(v.attrition*100).toFixed(0)}%`,c:v.attrition>.1?C.red:C.green},{l:"Dups",v:v.dups.length,c:v.dups.length>0?C.red:C.green}].map(s=>(
               <div key={s.l} style={{background:C.surface,padding:"0.55rem 0.75rem"}}>
@@ -62,7 +62,7 @@ function PanelTab({rows,headers,panel,setPanel}){
             <span style={{fontSize:12,color:bc[v.balance]||C.textMuted,fontFamily:mono}}>{bl[v.balance]||v.balance}</span>
             {v.attrition>0&&<span style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>· t₀: {v.at0} → tN: {v.atN} ({(v.attrition*100).toFixed(0)}% lost)</span>}
           </div>
-          {v.dups.length>0&&<div style={{padding:"0.65rem 1rem",borderTop:`1px solid ${C.border}`,background:"#120808",borderLeft:`3px solid ${C.red}`}}>
+          {v.dups.length>0&&<div style={{padding:"0.65rem 1rem",borderTop:`1px solid ${C.border}`,background:`${C.red}20`,borderLeft:`3px solid ${C.red}`}}>
             <div style={{fontSize:11,color:C.red,fontWeight:700,marginBottom:3,fontFamily:mono}}>⚠ Duplicate (i,t) pairs — FE/FD blocked</div>
             {v.dups.slice(0,3).map((d,i)=><div key={i} style={{fontSize:11,color:C.textDim,fontFamily:mono}}>e={String(d.e)}, t={String(d.t)} → rows {d.rows.join(" & ")}</div>)}
           </div>}

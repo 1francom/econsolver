@@ -73,11 +73,11 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
   return (
     <div style={{
       padding: "0.5rem 0.85rem",
-      background: "#130808",
+      background: `${C.red}15`,
       borderBottom: `1px solid ${C.border}`,
       fontFamily: mono,
     }}>
-      <div style={{ fontSize: 9, color: "#c47070", fontWeight: 700, marginBottom: 4 }}>
+      <div style={{ fontSize: 9, color: C.red, fontWeight: 700, marginBottom: 4 }}>
         {label}
       </div>
 
@@ -109,7 +109,7 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
             onClick={onSaveSnapshot}
             style={{
               padding: "0.22rem 0.6rem",
-              background: "#0a1a10",
+              background: `${C.teal}15`,
               border: `1px solid ${C.teal}80`,
               borderRadius: 3,
               color: C.teal,
@@ -122,10 +122,10 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
           onClick={onDeleteAll}
           style={{
             padding: "0.22rem 0.6rem",
-            background: "#2a0808",
-            border: "1px solid #c47070",
+            background: `${C.red}30`,
+            border: `1px solid ${C.red}`,
             borderRadius: 3,
-            color: "#c47070",
+            color: C.red,
             cursor: "pointer",
             fontFamily: mono, fontSize: 9, fontWeight: 700,
           }}
@@ -314,7 +314,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
                       gap: 8,
                       padding: "0.5rem 0.85rem",
                       borderBottom: `1px solid ${C.border}`,
-                      background: isDelPending ? "#130808" : isActive ? `${C.teal}0a` : "transparent",
+                      background: isDelPending ? `${C.red}15` : isActive ? `${C.teal}0a` : "transparent",
                       cursor: onSelectDataset ? "pointer" : "default",
                       transition: "background 0.1s",
                     }}
@@ -453,7 +453,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset }) {
                         padding: "0.3rem 0.85rem",
                         borderTop: `1px solid ${C.border}`,
                         fontFamily: mono,
-                        background: isDelPending ? "#130808" : "transparent",
+                        background: isDelPending ? `${C.red}15` : "transparent",
                       }}>
                         <span style={{
                           fontSize: 8, padding: "1px 4px",
