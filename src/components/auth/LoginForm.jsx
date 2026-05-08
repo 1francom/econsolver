@@ -1,27 +1,49 @@
 // ─── LOGIN FORM ───────────────────────────────────────────────────────────────
 // Welcome page + email/password login. Shown when the user is not authenticated.
 import { useState } from "react";
-import { signIn } from "../../services/auth/authService.js";
+import { signIn, signUp } from "../../services/auth/authService.js";
 import { useTheme } from "../../ThemeContext.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 export default function LoginForm() {
   const { C, theme, setTheme } = useTheme();
+  const [mode,     setMode]     = useState("login"); // "login" | "signup"
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
+  const [confirm,  setConfirm]  = useState("");
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
+
+  function switchMode(next) {
+    setMode(next);
+    setError(null);
+    setPassword("");
+    setConfirm("");
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
+    if (mode === "signup" && password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (mode === "signup" && password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
     setLoading(true);
     try {
-      await signIn(email.trim(), password);
+      if (mode === "login") {
+        await signIn(email.trim(), password);
+      } else {
+        await signUp(email.trim(), password);
+        // signUp with email confirmation OFF signs the user in immediately
+      }
       // AuthContext will update automatically via onAuthStateChange
     } catch (err) {
-      setError(err.message ?? "Sign-in failed.");
+      setError(err.message ?? (mode === "login" ? "Sign-in failed." : "Sign-up failed."));
     } finally {
       setLoading(false);
     }
@@ -120,15 +142,37 @@ export default function LoginForm() {
         padding: "2rem",
       }}>
 
+        {/* ── Mode toggle ── */}
         <div style={{
-          fontSize: 9,
-          color: C.textMuted,
-          letterSpacing: "0.26em",
-          textTransform: "uppercase",
+          display: "flex",
           marginBottom: "1.5rem",
-          textAlign: "center",
+          borderRadius: 4,
+          overflow: "hidden",
+          border: `1px solid ${C.border2}`,
         }}>
-          Sign in to continue
+          {["login", "signup"].map(m => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => switchMode(m)}
+              style={{
+                flex: 1,
+                padding: "0.45rem 0",
+                background: mode === m ? C.teal : "transparent",
+                color: mode === m ? C.bg : C.textMuted,
+                border: "none",
+                fontFamily: mono,
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              {m === "login" ? "Log in" : "Sign up"}
+            </button>
+          ))}
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
@@ -155,13 +199,30 @@ export default function LoginForm() {
               value={password}
               onChange={e => setPassword(e.target.value)}
               required
-              autoComplete="current-password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
               placeholder="••••••••"
               style={inputStyle}
               onFocus={e => e.target.style.borderColor = C.teal}
               onBlur={e => e.target.style.borderColor = C.border2}
             />
           </div>
+
+          {mode === "signup" && (
+            <div>
+              <label style={labelStyle}>Confirm password</label>
+              <input
+                type="password"
+                value={confirm}
+                onChange={e => setConfirm(e.target.value)}
+                required
+                autoComplete="new-password"
+                placeholder="••••••••"
+                style={inputStyle}
+                onFocus={e => e.target.style.borderColor = C.teal}
+                onBlur={e => e.target.style.borderColor = C.border2}
+              />
+            </div>
+          )}
 
           {error && (
             <div style={{
@@ -194,7 +255,9 @@ export default function LoginForm() {
               transition: "all 0.15s",
             }}
           >
-            {loading ? "Signing in…" : "Sign in"}
+            {loading
+              ? (mode === "login" ? "Signing in…" : "Creating account…")
+              : (mode === "login" ? "Log in" : "Create account")}
           </button>
 
         </form>
@@ -208,7 +271,7 @@ export default function LoginForm() {
         letterSpacing: "0.1em",
         opacity: 0.5,
       }}>
-        Access is by invitation only · test phase
+        Litux · test phase
       </div>
 
     </div>
