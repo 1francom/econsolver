@@ -541,7 +541,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
         !isP
           ?<div style={{padding:"1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4,fontSize:12,color:C.orange,lineHeight:1.7}}>⚠ Set panel index first (Panel Structure tab). Operators respect entity boundaries to prevent cross-unit contamination.</div>
           :<div>
-            <div style={{padding:"0.48rem 0.75rem",background:"#080c10",border:`1px solid ${C.blue}30`,borderRadius:3,marginBottom:"1.2rem",fontSize:11,color:C.blue,fontFamily:mono}}>i={panel.entityCol} · t={panel.timeCol} · entity-bounded operators</div>
+            <div style={{padding:"0.48rem 0.75rem",background:`${C.blue}15`,border:`1px solid ${C.blue}30`,borderRadius:3,marginBottom:"1.2rem",fontSize:11,color:C.blue,fontFamily:mono}}>i={panel.entityCol} · t={panel.timeCol} · entity-bounded operators</div>
             <Lbl color={C.orange}>Operator</Lbl>
             <div style={{display:"flex",gap:4,marginBottom:"1.2rem"}}>
               {[["lag","L. Lag","yᵢ,ₜ₋ₙ"],["lead","F. Lead","yᵢ,ₜ₊ₙ"],["diff","Δ Diff","Δyᵢₜ"]].map(([k,l,f])=>(

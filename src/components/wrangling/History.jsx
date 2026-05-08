@@ -228,7 +228,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                   <div style={{
                     display: "flex", alignItems: "center", gap: 4,
                     padding: "0.35rem 0.5rem",
-                    background: isTarget ? "#2a0a0a" : isDownstream ? "#1a1500" : C.surface2,
+                    background: isTarget ? `${C.red}20` : isDownstream ? `${C.yellow}20` : C.surface2,
                     borderRadius: 3,
                     border: `1px solid ${isTarget ? C.red + "60" : isDownstream ? C.yellow + "50" : C.border}`,
                     borderLeft: `2px solid ${isTarget ? C.red : isDownstream ? C.yellow : col}`,
@@ -275,7 +275,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                   {isTarget && (
                     <div style={{
                       padding: "0.55rem 0.5rem",
-                      background: "#1a0808",
+                      background: `${C.red}15`,
                       border: `1px solid ${C.red}40`,
                       borderTop: "none",
                       borderRadius: "0 0 3px 3px",
@@ -298,7 +298,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                         <button
                           onClick={() => onConfirmDelete("cascade")}
                           style={{
-                            padding: "0.25rem 0.6rem", background: "#2a0808",
+                            padding: "0.25rem 0.6rem", background: `${C.red}30`,
                             border: `1px solid ${C.red}`, borderRadius: 3,
                             color: C.red, cursor: "pointer", fontFamily: mono, fontSize: 9,
                             fontWeight: 700,

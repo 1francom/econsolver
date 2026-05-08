@@ -8,6 +8,7 @@
 //   assignRectGrid, assignH3Grid
 //   pointInPolygon, spatialJoin
 //   nearestNeighbor
+//   assignBoundaryDistance — signed distance to polygon boundary (Spatial RD running variable)
 //   parseWKTPolygon (helper)
 //   makeGrid          — st_make_grid equivalent: rectangular cells clipped to boundary
 //   aggregateToGrid   — count/sum/mean of point dataset within each grid cell
@@ -82,6 +83,128 @@ export function assignDistance(rows, latCol, lonCol, refLat, refLon, outCol) {
       ...r,
       [outCol]: haversine(Number(lat), Number(lon), refLat, refLon),
     };
+  });
+}
+
+// ─── BOUNDARY DISTANCE (SPATIAL RD) ──────────────────────────────────────────
+
+/**
+ * Parses a WKT POLYGON or MULTIPOLYGON into an array of rings.
+ * Each ring is an array of [lon, lat] pairs.
+ * Internal helper — handles both geometry types.
+ */
+function parseWKTRings(wkt) {
+  if (!wkt || typeof wkt !== "string") return [];
+  const w = wkt.trim();
+  const rings = [];
+  if (/^MULTIPOLYGON/i.test(w)) {
+    const re = /\(\(([^()]+)\)\)/g;
+    let m;
+    while ((m = re.exec(w)) !== null) {
+      const r = m[1].split(",").map(p => {
+        const [lon, lat] = p.trim().split(/\s+/).map(Number);
+        return [lon, lat];
+      }).filter(([x, y]) => !isNaN(x) && !isNaN(y));
+      if (r.length >= 3) rings.push(r);
+    }
+  } else if (/^POLYGON/i.test(w)) {
+    const m = w.match(/POLYGON\s*\(\(([^()]+)\)/i);
+    if (m) {
+      const r = m[1].split(",").map(p => {
+        const [lon, lat] = p.trim().split(/\s+/).map(Number);
+        return [lon, lat];
+      }).filter(([x, y]) => !isNaN(x) && !isNaN(y));
+      if (r.length >= 3) rings.push(r);
+    }
+  }
+  return rings;
+}
+
+/**
+ * Approximate planar distance (km) from point P to line segment AB.
+ * Uses equirectangular projection centred on the three points.
+ * Accurate to <0.1% for segments < 200 km — sufficient for urban polygons.
+ */
+function distPointToSegKm(pLat, pLon, aLat, aLon, bLat, bLon) {
+  const lat0  = (pLat + aLat + bLat) / 3;
+  const cosLat = Math.cos(lat0 * Math.PI / 180);
+  const K = 111.32; // km per degree latitude
+  const px = (pLon - aLon) * K * cosLat;
+  const py = (pLat - aLat) * K;
+  const bx = (bLon - aLon) * K * cosLat;
+  const by = (bLat - aLat) * K;
+  const lenSq = bx * bx + by * by;
+  if (lenSq < 1e-12) return Math.sqrt(px * px + py * py);
+  const t  = Math.max(0, Math.min(1, (px * bx + py * by) / lenSq));
+  const dx = px - t * bx;
+  const dy = py - t * by;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Assigns boundary-distance columns to each point row relative to a set of
+ * polygon rows — the core operation for Spatial Regression Discontinuity.
+ *
+ * Three output columns (names derived from outPrefix):
+ *   {outPrefix}_dist_km  — unsigned haversine distance to nearest boundary edge (km)
+ *   {outPrefix}_treat    — 1 if point is inside any polygon, 0 otherwise
+ *   {outPrefix}_running  — signed distance: +dist inside treatment, −dist outside
+ *                          Use this directly as the RD running variable.
+ *
+ * @param {object[]} pointRows   rows with lat/lon columns
+ * @param {string}   latCol      latitude column
+ * @param {string}   lonCol      longitude column
+ * @param {object[]} polyRows    polygon dataset rows
+ * @param {string}   wktCol      WKT geometry column in polyRows
+ * @param {string}   outPrefix   prefix for the three output columns (default "boundary")
+ * @returns {object[]}
+ */
+export function assignBoundaryDistance(pointRows, latCol, lonCol, polyRows, wktCol, outPrefix = "boundary") {
+  const distCol    = `${outPrefix}_dist_km`;
+  const treatCol   = `${outPrefix}_treat`;
+  const runningCol = `${outPrefix}_running`;
+
+  // Build segment list from all polygon rings in polyRows
+  const segments = [];
+  for (const row of polyRows) {
+    for (const ring of parseWKTRings(row[wktCol] ?? "")) {
+      for (let i = 0; i < ring.length - 1; i++) {
+        const [aLon, aLat] = ring[i];
+        const [bLon, bLat] = ring[i + 1];
+        segments.push({ aLat, aLon, bLat, bLon });
+      }
+    }
+  }
+
+  if (segments.length === 0) {
+    return pointRows.map(r => ({ ...r, [distCol]: null, [treatCol]: null, [runningCol]: null }));
+  }
+
+  return pointRows.map(row => {
+    const lat = row[latCol];
+    const lon = row[lonCol];
+    if (lat == null || lon == null || isNaN(lat) || isNaN(lon)) {
+      return { ...row, [distCol]: null, [treatCol]: null, [runningCol]: null };
+    }
+    const pLat = Number(lat);
+    const pLon = Number(lon);
+
+    // Minimum distance to any boundary segment
+    let minDist = Infinity;
+    for (const { aLat, aLon, bLat, bLon } of segments) {
+      const d = distPointToSegKm(pLat, pLon, aLat, aLon, bLat, bLon);
+      if (d < minDist) minDist = d;
+    }
+
+    // Treatment: inside any polygon?
+    let treat = 0;
+    for (const pRow of polyRows) {
+      if (pRow[wktCol] && pointInPolygon(pLat, pLon, pRow[wktCol])) { treat = 1; break; }
+    }
+
+    const dist    = minDist === Infinity ? null : minDist;
+    const running = dist === null ? null : (treat === 1 ? dist : -dist);
+    return { ...row, [distCol]: dist, [treatCol]: treat, [runningCol]: running };
   });
 }
 

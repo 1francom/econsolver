@@ -916,7 +916,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
     <div style={{ padding: "2rem", fontFamily: mono }}>
       <div style={{
         padding: "1.2rem 1.4rem",
-        background: "#0d0808",
+        background: `${C.red}15`,
         border: `1px solid ${C.red}40`,
         borderLeft: `3px solid ${C.red}`,
         borderRadius: 4,

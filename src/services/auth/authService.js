@@ -33,6 +33,13 @@ export async function signIn(email, password) {
   return data;
 }
 
+export async function signUp(email, password) {
+  if (!supabase) throw new Error("Authentication not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel environment variables.");
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) throw error;
+  return data;
+}
+
 export async function signOut() {
   if (!supabase) return;
   const { error } = await supabase.auth.signOut();
