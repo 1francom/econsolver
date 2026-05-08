@@ -2,7 +2,7 @@
 // Provides { user, session, loading } to the entire app.
 // Initialises from the persisted Supabase session on mount.
 import { createContext, useContext, useEffect, useState } from "react";
-import { getSession, onAuthStateChange } from "./authService.js";
+import { getSession, onAuthStateChange, getTier } from "./authService.js";
 import { setCurrentUser } from "../Persistence/indexedDB.js";
 
 const AuthContext = createContext(null);
@@ -10,34 +10,32 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined); // undefined = still loading
   const [user,    setUser]    = useState(null);
+  const [tier,    setTier]    = useState("free");
+
+  async function applySession(s) {
+    setSession(s);
+    const u = s?.user ?? null;
+    setUser(u);
+    setCurrentUser(u?.id ?? null);
+    setTier(u ? await getTier(u.id) : "free");
+  }
 
   useEffect(() => {
-    // Restore persisted session on first load. Catch any Supabase failure so
-    // the app never gets stuck on the loading spinner — fall through to LoginForm.
-    getSession().then(s => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      setCurrentUser(s?.user?.id ?? null);
-    }).catch(() => {
+    getSession().then(applySession).catch(() => {
       setSession(null);
       setUser(null);
       setCurrentUser(null);
+      setTier("free");
     });
 
-    // Keep in sync with Supabase auth state changes (login, logout, token refresh)
-    const unsub = onAuthStateChange(s => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      setCurrentUser(s?.user?.id ?? null);
-    });
-
+    const unsub = onAuthStateChange(applySession);
     return unsub;
   }, []);
 
   const loading = session === undefined;
 
   return (
-    <AuthContext.Provider value={{ user, session, loading }}>
+    <AuthContext.Provider value={{ user, session, loading, tier }}>
       {children}
     </AuthContext.Provider>
   );

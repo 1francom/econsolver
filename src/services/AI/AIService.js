@@ -27,10 +27,25 @@ import {
   buildMetadataContext,
 } from "./Prompts/index.js";
 
-const API_URL   = "https://api.anthropic.com/v1/messages";
-const MODEL     = "claude-sonnet-4-6";        // narratives, cleaning, research coach
-const MODEL_FAST = "claude-haiku-4-5-20251001"; // unit inference — cheap, fast
-const MAX_TOK   = 700;
+const API_URL       = "https://api.anthropic.com/v1/messages";
+const MODEL         = "claude-sonnet-4-6";        // orchestrator: narratives, cleaning, comparison
+const MODEL_FAST    = "claude-haiku-4-5-20251001"; // unit inference — cheap, fast
+const MODEL_ADVISOR = "claude-opus-4-7";           // specialist: focused technical sub-questions
+const MAX_TOK       = 700;
+
+// ── API routing ───────────────────────────────────────────────────────────────
+// VITE_AI_PROXY_ENABLED=true  → Supabase Edge Function (key in Vault, never in browser)
+// VITE_AI_PROXY_ENABLED=false → direct Anthropic call using localStorage/env key (dev only)
+const _proxyEnabled = import.meta.env.VITE_AI_PROXY_ENABLED === "true";
+const PROXY_URL = _proxyEnabled && import.meta.env.VITE_SUPABASE_URL
+  ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/Proxy-Claude-Litux`
+  : "";
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
+
+// Dev fallback: localStorage key > env var. Only used when proxy is disabled.
+function getApiKey() {
+  return localStorage.getItem("litux_api_key") || import.meta.env.VITE_ANTHROPIC_KEY || "";
+}
 
 // ─── MOCK FALLBACKS ───────────────────────────────────────────────────────────
 function mockNarrative(result) {
@@ -97,16 +112,35 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
 
   let res;
   try {
-    res = await fetch(API_URL, {
-      method:  "POST",
-      headers: {
-        "Content-Type":   "application/json",
-        "anthropic-beta": "prompt-caching-2024-07-31",
-      },
-      body: JSON.stringify(body),
-    });
+    if (PROXY_URL) {
+      // Production: key stored in Supabase Vault — never reaches the browser.
+      res = await fetch(PROXY_URL, {
+        method:  "POST",
+        headers: {
+          "Content-Type":   "application/json",
+          "apikey":         SUPABASE_ANON,
+          "anthropic-beta": "prompt-caching-2024-07-31",
+        },
+        body: JSON.stringify(body),
+      });
+    } else {
+      // Dev fallback: direct Anthropic call with localStorage / env key.
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error("No API key — enter your Anthropic key in Settings (⚙), or set VITE_AI_PROXY_ENABLED=true to use the Supabase backend.");
+      res = await fetch(API_URL, {
+        method:  "POST",
+        headers: {
+          "Content-Type":   "application/json",
+          "x-api-key":      apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "prompt-caching-2024-07-31",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify(body),
+      });
+    }
   } catch (networkErr) {
-    throw new Error(`Network error: ${networkErr.message ?? "could not reach Anthropic API"}`);
+    throw new Error(`Network error: ${networkErr.message ?? "could not reach API"}`);
   }
 
   if (!res.ok) {
@@ -660,30 +694,41 @@ function _serializeModelContext(result, dataDictionary) {
 export async function researchCoach({ question, modelResult, dataDictionary = null, history = [], metadataReport = null }) {
   if (!question?.trim()) return "";
 
-  const modelContext = _serializeModelContext(modelResult, dataDictionary);
-  const taskPrompt   = RESEARCH_COACH_PROMPT.replace(SHARED_CONTEXT, "").trim();
-  const metaCtx      = metadataReport ? "\n" + buildMetadataContext(metadataReport) : "";
-
-  // First user message always includes the model context (pinned to the top of the conversation)
+  const modelContext  = _serializeModelContext(modelResult, dataDictionary);
+  const taskPrompt    = RESEARCH_COACH_PROMPT.replace(SHARED_CONTEXT, "").trim();
+  const metaCtx       = metadataReport ? "\n" + buildMetadataContext(metadataReport) : "";
   const contextPrefix = `MODEL CONTEXT:\n${modelContext}${metaCtx}\n\n────────────────────────────\n`;
 
-  // Build messages array from history
-  const apiMessages = [];
-  history.forEach((turn, idx) => {
-    const content = (turn.role === "user" && idx === 0)
-      ? contextPrefix + turn.text
-      : turn.text;
-    apiMessages.push({ role: turn.role, content });
-  });
-
-  // New user turn — prepend context only if history is empty (first question)
-  const newContent = apiMessages.length === 0
-    ? contextPrefix + question.trim()
-    : question.trim();
-  apiMessages.push({ role: "user", content: newContent });
-
   try {
-    return await callClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 500 });
+    // ── Step 1: Opus specialist — focused technical sub-question (≤250 tokens) ─
+    // Opus answers only the hardest methodological/identification part of the question.
+    // Short prompt + short answer → cheap. Sonnet uses this insight to write better.
+    const opusInsight = await callClaude({
+      system: "You are a specialist econometrician advising a PhD researcher. Given the research context below, identify and answer the single most important technical or methodological concern in the question. Focus on identification strategy, causal assumptions, instrument validity, or statistical interpretation. Be direct and specific. Maximum 3 sentences.",
+      user:   `RESEARCH CONTEXT:\n${modelContext}\n\nRESEARCHER QUESTION: ${question.trim()}`,
+      maxTokens: 250,
+      model: MODEL_ADVISOR,
+    }).catch(() => null); // non-fatal — Sonnet proceeds without it if Opus fails
+
+    // ── Step 2: Sonnet orchestrates full research advice ──────────────────────
+    // Incorporates Opus's specialist insight as a grounding block.
+    const apiMessages = [];
+    history.forEach((turn, idx) => {
+      const content = (turn.role === "user" && idx === 0)
+        ? contextPrefix + turn.text
+        : turn.text;
+      apiMessages.push({ role: turn.role, content });
+    });
+
+    const specialistBlock = opusInsight
+      ? `[Specialist insight: ${opusInsight}]\n\n`
+      : "";
+    const newContent = apiMessages.length === 0
+      ? specialistBlock + contextPrefix + question.trim()
+      : specialistBlock + question.trim();
+    apiMessages.push({ role: "user", content: newContent });
+
+    return await callClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 800 });
   } catch (err) {
     console.warn("[AIService] researchCoach failed:", err.message);
     return "The research coach is unavailable — check your API key and network connection.";

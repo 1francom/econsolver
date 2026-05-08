@@ -52,6 +52,16 @@ export async function getSession() {
   return session;
 }
 
+export async function getTier(userId) {
+  if (!supabase || !userId) return "free";
+  const { data } = await supabase
+    .from("profiles")
+    .select("tier")
+    .eq("id", userId)
+    .single();
+  return data?.tier ?? "free";
+}
+
 export function onAuthStateChange(callback) {
   if (!supabase) return () => {};
   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
