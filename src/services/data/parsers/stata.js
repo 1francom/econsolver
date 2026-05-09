@@ -65,10 +65,21 @@ export function parseStata(arrayBuffer) {
   const view  = new DataView(arrayBuffer);
 
   // ── Format / byte order ──────────────────────────────────────────────────
+  // Formats 117-119 use XML-like tags. Pre-117 (Stata 12-) use raw binary.
   const releaseStr = between(bytes, '<release>', '</release>').text.trim();
-  const format = parseInt(releaseStr, 10); // 117 or 118
-  if (format !== 117 && format !== 118) {
-    throw new Error(`Unsupported Stata format: ${releaseStr}. Only 117/118 supported.`);
+  const format = parseInt(releaseStr, 10);
+
+  if (!releaseStr) {
+    // Pre-117 format: first byte is the format number (113=Stata8, 114=Stata10, 115=Stata12)
+    const oldFmt = bytes[0];
+    throw new Error(
+      `Stata format ${oldFmt || '?'} (Stata 12 or older) is not supported. ` +
+      `Please resave the file in Stata 13+ format: use(yourfile), saveold yourfile, version(13) in Stata.`
+    );
+  }
+  // Formats 117 (Stata 13), 118 (Stata 14), 119 (Stata 15 large datasets)
+  if (format < 117 || format > 119) {
+    throw new Error(`Unsupported Stata format ${format}. Supported: 117 (Stata 13), 118 (Stata 14), 119 (Stata 15).`);
   }
 
   const boText = between(bytes, '<byteorder>', '</byteorder>').text.trim();
@@ -76,7 +87,8 @@ export function parseStata(arrayBuffer) {
 
   // ── K, N ────────────────────────────────────────────────────────────────
   const kPos = tagPos(bytes, '<K>') + '<K>'.length;
-  const K = view.getUint16(kPos, le);
+  // Format 119 uses uint32 for K to support > 32,767 variables; 117/118 use uint16
+  const K = format === 119 ? view.getUint32(kPos, le) : view.getUint16(kPos, le);
 
   const nPos = tagPos(bytes, '<N>') + '<N>'.length;
   let N;
@@ -91,10 +103,10 @@ export function parseStata(arrayBuffer) {
 
   // ── Dataset label ────────────────────────────────────────────────────────
   // Format 117: uint8 length prefix (max 80) + chars
-  // Format 118: uint16 length prefix (max 320) + chars
+  // Formats 118/119: uint16 length prefix (max 320) + chars
   const labelTagPos = tagPos(bytes, '<label>') + '<label>'.length;
   let label = '';
-  if (format === 118) {
+  if (format >= 118) {
     const labelLen = view.getUint16(labelTagPos, le);
     label = dec.decode(bytes.subarray(labelTagPos + 2, labelTagPos + 2 + labelLen));
   } else {
