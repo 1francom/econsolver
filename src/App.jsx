@@ -323,7 +323,6 @@ function DataViewer({ rows, headers, filename, onPatch }) {
   const [editMode,     setEditMode]    = useState(false);
   const [editingCell,  setEditingCell] = useState(null); // { ri, col }
   const [editValue,    setEditValue]   = useState("");
-
   // Pre-compute which columns are numeric once per rows change.
   const numCols = useMemo(() => {
     const s = new Set();
