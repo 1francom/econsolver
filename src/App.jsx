@@ -397,14 +397,16 @@ function DataViewer({ rows, headers, filename, onPatch }) {
                   color:C.text,fontFamily:mono,fontSize:10,width:140,outline:"none"}}
         />
         {totalPages > 1 && (
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>rows {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, rows.length)}</span>
             <button onClick={() => setPage(p => Math.max(0, p-1))} disabled={page===0}
-              style={{padding:"2px 7px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
-                      color: page===0 ? C.textMuted : C.textDim,cursor: page===0 ? "default":"pointer",fontFamily:mono,fontSize:10}}>‹</button>
-            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{page+1}/{totalPages}</span>
+              title="Previous 100 rows"
+              style={{padding:"2px 6px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
+                      color: page===0 ? C.textMuted : C.textDim,cursor: page===0 ? "default":"pointer",fontFamily:mono,fontSize:10}}>↑</button>
             <button onClick={() => setPage(p => Math.min(totalPages-1, p+1))} disabled={page===totalPages-1}
-              style={{padding:"2px 7px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
-                      color: page===totalPages-1 ? C.textMuted : C.textDim,cursor: page===totalPages-1 ? "default":"pointer",fontFamily:mono,fontSize:10}}>›</button>
+              title="Next 100 rows"
+              style={{padding:"2px 6px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
+                      color: page===totalPages-1 ? C.textMuted : C.textDim,cursor: page===totalPages-1 ? "default":"pointer",fontFamily:mono,fontSize:10}}>↓</button>
           </div>
         )}
       </div>
