@@ -1,0 +1,78 @@
+name: Feedback Collector
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # 2:00 AM Berlin (CEST = UTC+2)
+  workflow_dispatch: # allow manual runs
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Main-
+        uses: actions/checkout@v4
+        with:
+          ref: Main-
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch unprocessed feedback
+        id: fetch
+        run: |
+          RESPONSE=$(curl -s -X POST \
+            "https://zxknjfezkatuldipdskw.supabase.co/functions/v1/collect-feedback" \
+            -H "x-secret: ${{ secrets.AGENT_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"action": "fetch"}')
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          COUNT=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('rows',[])))")
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+      - name: Write ClaudeFB.md
+        if: steps.fetch.outputs.count != '0'
+        run: |
+          python3 << 'EOF'
+          import json, os
+
+          data = json.loads(os.environ["RESPONSE"])
+          rows = data.get("rows", [])
+
+          header = "# EconSolver — User Feedback Log\n"
+          path = "ClaudeFB.md"
+
+          if not os.path.exists(path):
+              with open(path, "w") as f:
+                  f.write(header + "\n")
+
+          with open(path, "a") as f:
+              for r in rows:
+                  f.write(f"## Feedback — {r.get('created_at', 'unknown')}\n")
+                  f.write(f"**User:** {r.get('user_id') or 'anonymous'}\n")
+                  f.write(f"**Rating:** {r.get('rating', '')}\n")
+                  f.write(f"**Message:** {r.get('message', '')}\n")
+                  f.write(f"**Source:** {r.get('source', '')}\n")
+                  f.write("---\n\n")
+          EOF
+        env:
+          RESPONSE: ${{ steps.fetch.outputs.response }}
+
+      - name: Commit and push
+        if: steps.fetch.outputs.count != '0'
+        run: |
+          git config user.email "mederofranco21@gmail.com"
+          git config user.name "Franco"
+          git add ClaudeFB.md
+          git commit -m "chore(feedback): collect nightly feedback"
+          git push origin Main-
+
+      - name: Mark rows as processed
+        if: steps.fetch.outputs.count != '0'
+        run: |
+          IDS=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps([r['id'] for r in d.get('rows',[])]))")
+          curl -s -X POST \
+            "https://zxknjfezkatuldipdskw.supabase.co/functions/v1/collect-feedback" \
+            -H "x-secret: ${{ secrets.AGENT_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"action\": \"mark_processed\", \"ids\": $IDS}"
+        env:
+          RESPONSE: ${{ steps.fetch.outputs.response }}
