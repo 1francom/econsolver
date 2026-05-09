@@ -58,7 +58,107 @@ function between(bytes, openTag, closeTag, from = 0) {
   };
 }
 
-// ── Main parser ───────────────────────────────────────────────────────────────
+// ── Old format parser (formats 113-116, Stata 8-12) ──────────────────────────
+// Binary layout — no XML tags:
+//   [0]       format byte (e.g. 115)
+//   [1]       byteorder (1=MSF/big-endian, 2=LSF/little-endian)
+//   [2]       filetype (1, unused)
+//   [3]       unused (0)
+//   [4-5]     K  uint16
+//   [6-9]     N  uint32
+//   [10-89]   dataset label (80 bytes, null-padded)
+//   [90-107]  timestamp (18 bytes, null-padded)
+//   then:     typlist (K bytes), varnames (K*NAME_LEN), sortlist, fmts,
+//             value-label names, variable labels, characteristics, data, value-labels
+//
+// Type codes: 251=byte 252=int 253=long 254=float 255=double 1-244=str(N)
+// Name/format lengths: formats 113 use 9/12/9/32; formats 114-116 use 33/49/33/81.
+
+function parseStataOld(bytes, view) {
+  const fmt      = bytes[0];
+  const le       = bytes[1] === 2; // 2=LSF little-endian, 1=MSF big-endian
+  const K        = view.getUint16(4, le);
+  const N        = view.getUint32(6, le);
+
+  // Layout constants differ by format version
+  const NAME_LEN     = fmt >= 114 ? 33 : 9;
+  const FMT_LEN      = fmt >= 114 ? 49 : 12;
+  const LBLNAME_LEN  = fmt >= 114 ? 33 : 9;
+  const VARLABEL_LEN = fmt >= 114 ? 81 : 32;
+
+  let off = 108; // after header (10) + label (80) + timestamp (18)
+
+  // typlist
+  const types = Array.from(bytes.subarray(off, off + K));
+  off += K;
+
+  // varnames
+  const headers = [];
+  const latin1  = new TextDecoder('latin1');
+  for (let k = 0; k < K; k++) {
+    const chunk = bytes.subarray(off, off + NAME_LEN);
+    const end   = chunk.indexOf(0);
+    headers.push(latin1.decode(chunk.subarray(0, end === -1 ? NAME_LEN : end)));
+    off += NAME_LEN;
+  }
+
+  // sortlist, formats, value-label names, variable labels — skip
+  off += (K + 1) * 2;         // sortlist
+  off += K * FMT_LEN;         // display formats
+  off += K * LBLNAME_LEN;     // value-label names
+  off += K * VARLABEL_LEN;    // variable labels
+
+  // characteristics — records of [uint32 len][payload]; len=0 terminates
+  while (off + 4 <= bytes.length) {
+    const len = view.getUint32(off, le);
+    off += 4;
+    if (len === 0) break;
+    off += len;
+  }
+
+  // data
+  const rows = [];
+  for (let n = 0; n < N; n++) {
+    const row = {};
+    for (let k = 0; k < K; k++) {
+      const t = types[k];
+      const h = headers[k];
+      if (t === 251) {                          // byte (int8)
+        const v = view.getInt8(off); off += 1;
+        row[h] = v >= 101 ? null : v;
+      } else if (t === 252) {                   // int (int16)
+        const v = view.getInt16(off, le); off += 2;
+        row[h] = v >= 32741 ? null : v;
+      } else if (t === 253) {                   // long (int32)
+        const v = view.getInt32(off, le); off += 4;
+        row[h] = v >= 2147483621 ? null : v;
+      } else if (t === 254) {                   // float
+        const v = view.getFloat32(off, le); off += 4;
+        row[h] = isFloatMissing(v) ? null : v;
+      } else if (t === 255) {                   // double
+        const v = view.getFloat64(off, le); off += 8;
+        row[h] = isDoubleMissing(v) ? null : v;
+      } else if (t >= 1 && t <= 244) {          // str(N)
+        const chunk = bytes.subarray(off, off + t);
+        const end   = chunk.indexOf(0);
+        row[h] = latin1.decode(chunk.subarray(0, end === -1 ? t : end));
+        off += t;
+      } else {
+        row[h] = null;
+      }
+    }
+    rows.push(row);
+  }
+
+  if (!rows.length) throw new Error(`No data found in Stata format ${fmt} file.`);
+  return {
+    headers,
+    rows,
+    meta: { format: fmt, N, K, source: `Stata format ${fmt}` },
+  };
+}
+
+// ── Main parser (formats 117-119, Stata 13-15) ────────────────────────────────
 
 export function parseStata(arrayBuffer) {
   const bytes = new Uint8Array(arrayBuffer);
@@ -70,12 +170,8 @@ export function parseStata(arrayBuffer) {
   const format = parseInt(releaseStr, 10);
 
   if (!releaseStr) {
-    // Pre-117 format: first byte is the format number (113=Stata8, 114=Stata10, 115=Stata12)
-    const oldFmt = bytes[0];
-    throw new Error(
-      `Stata format ${oldFmt || '?'} (Stata 12 or older) is not supported. ` +
-      `Please resave the file in Stata 13+ format: use(yourfile), saveold yourfile, version(13) in Stata.`
-    );
+    // Pre-117: raw binary format (no XML tags). First byte = format number.
+    return parseStataOld(bytes, view);
   }
   // Formats 117 (Stata 13), 118 (Stata 14), 119 (Stata 15 large datasets)
   if (format < 117 || format > 119) {
