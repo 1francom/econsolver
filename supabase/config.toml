@@ -1,0 +1,5 @@
+[functions.oecd-proxy]
+verify_jwt = false
+
+[functions.collect-feedback]
+verify_jwt = false
