@@ -185,10 +185,13 @@ export async function fetchOECDIndicator(indicator, opts = {}) {
     body: JSON.stringify({ dataset, key, startYear, endYear }),
   });
 
-  if (!res.ok) throw new Error(`OECD proxy error ${res.status} for ${dataset}/${key}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`OECD proxy error ${res.status} for ${dataset}/${key}${body.detail ? ": " + body.detail.slice(0, 200) : ""}`);
+  }
 
   const json = await res.json();
-  if (json.error) throw new Error(`OECD API error: ${json.error}`);
+  if (json.error) throw new Error(`OECD API error: ${json.error}${json.detail ? " — " + json.detail.slice(0, 200) : ""}`);
 
   let rows = parseSdmxJson(json, safeId);
 
