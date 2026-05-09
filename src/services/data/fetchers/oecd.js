@@ -1,154 +1,110 @@
 // ─── ECON STUDIO · services/data/fetchers/oecd.js ────────────────────────────
-// OECD Data API (SDMX-JSON v2) — no API key required, CORS enabled.
-// Docs: https://sdmx.oecd.org/public/rest/
+// OECD Data API (SDMX-JSON) via server-side proxy (bypasses browser CORS).
+// New API base: https://sdmx.oecd.org/public/rest
+// Proxy adds: ?format=json&startPeriod=...&endPeriod=...&dimensionAtObservation=AllDimensions
+//
+// Dataset format: "{agency},{dataflow}" e.g. "OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I"
+// Key format: SDMX filter string, one value per dimension separated by dots.
+//             Empty segment = wildcard (all values). Trailing dots optional.
 //
 // Exports:
 //   POPULAR_OECD          — curated indicator list
 //   fetchOECDIndicator(ind, opts?)   → Promise<{ rows, headers, meta }>
-//
-// SDMX-JSON response structure:
-//   data.dataSets[0].observations: { "i:j:k": [value, status] }
-//   Keys are colon-separated indices into dimension value arrays.
-//   data.structure.dimensions.observation[d].values[i] gives the label.
 
-const BASE = "https://sdmx.oecd.org/public/rest";
+const PROXY_URL = "https://zxknjfezkatuldipdskw.supabase.co/functions/v1/oecd-proxy";
 
 // ─── CURATED INDICATORS ───────────────────────────────────────────────────────
-// Each entry: { id, dataset, key, name, freqFilter?, measureCol }
-// key uses OECD filter syntax: "ALL" or "A+Q+M" for freq, country filter, etc.
+// Sources for dataflow IDs: https://data-explorer.oecd.org (Developer API icon)
+// and https://db.nomics.world/OECD for dimension/key structures.
 export const POPULAR_OECD = [
-  // ── National Accounts ──
+  // ── National Accounts (OECD.SDD.NAD, DSD_NAAG) ──
+  // Dataflow DF_NAAG_I: FREQ . REF_AREA . MEASURE . UNIT_MEASURE . CHAPTER
   {
     id:      "GDP_PCAP_USD",
-    dataset: "na_main",
-    key:     "A.B1_GE.PPPPC.CPC.VLU.USD_PPP",
+    dataset: "OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I",
+    key:     "A..B1GQ_POP.USD_PPP_PS.NAAG_I",
     name:    "GDP per capita, PPP (current international $)",
     group:   "National Accounts",
   },
   {
     id:      "GDP_GROWTH",
-    dataset: "na_main",
-    key:     "A.B1_GE.PPPPC.CPC.GRW.PA",
+    dataset: "OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I",
+    key:     "A..B1GQ_R_GR.PC.NAAG_I",
     name:    "GDP growth rate (annual %)",
     group:   "National Accounts",
   },
+  // DF_NAAG (full NAAG, 88 measures): FREQ . REF_AREA . MEASURE . UNIT_MEASURE . CHAPTER
   {
     id:      "GFCF_GDP",
-    dataset: "na_main",
-    key:     "A.P51.PPPPC.CPC.SHR.PA",
+    dataset: "OECD.SDD.NAD,DSD_NAAG@DF_NAAG",
+    key:     "A..P51G.PC_GDP.",
     name:    "Gross fixed capital formation (% of GDP)",
     group:   "National Accounts",
   },
   // ── Labour & Productivity ──
+  // DF_IALFS_INDIC: REF_AREA . MEASURE . UNIT_MEASURE . TRANSFORMATION . ADJUSTMENT . SEX . AGE . ACTIVITY . FREQ
   {
     id:      "EMPLOYMENT_RATE",
-    dataset: "lfs_sexage_i_r",
-    key:     "A.EMPRATE.MW.1564.T",
-    name:    "Employment rate, 15–64 (% working-age population)",
+    dataset: "OECD.SDD.TPS,DSD_LFS@DF_IALFS_INDIC",
+    key:     ".EMP_WAP.._Z.Y._T.Y15T64._Z.A",
+    name:    "Employment rate, 15-64 (% working-age population)",
     group:   "Labour",
   },
   {
     id:      "UNEMPLOYMENT_RATE",
-    dataset: "lfs_sexage_i_r",
-    key:     "A.UNEMPRATE.MW.T.T",
+    dataset: "OECD.SDD.TPS,DSD_LFS@DF_IALFS_INDIC",
+    key:     ".UNE_LF.._Z.Y._T.Y_GE15._Z.A",
     name:    "Unemployment rate (%, harmonised)",
     group:   "Labour",
   },
+  // DF_PDB_LV: REF_AREA . FREQ . MEASURE . ACTIVITY . UNIT_MEASURE . PRICE_BASE . TRANSFORMATION . ADJUSTMENT . CONVERSION_TYPE
   {
     id:      "LABOUR_PRODUCTIVITY",
-    dataset: "pdbi_p4",
-    key:     "A.T_GDPHRS.PPPGDP.OECD2015",
-    name:    "Labour productivity per hour worked (USD PPP, 2015 = 100)",
+    dataset: "OECD.SDD.TPS,DSD_PDB@DF_PDB_LV",
+    key:     ".A.GDPHRS._T.USD_PPP.Q._Z._Z._Z",
+    name:    "Labour productivity per hour worked (USD PPP, constant prices)",
     group:   "Labour",
   },
-  // ── Government ──
-  {
-    id:      "GOV_REVENUE_GDP",
-    dataset: "rev",
-    key:     "A.TOT.TRS.TAXREV_GDPRATIO",
-    name:    "General government revenue (% of GDP)",
-    group:   "Government",
-  },
-  {
-    id:      "GOV_DEBT_GDP",
-    dataset: "gov_10dd_edpt1",
-    key:     "A.S13.GD.FY0.PC_GDP",
-    name:    "Government gross debt (% of GDP, Maastricht)",
-    group:   "Government",
-  },
-  {
-    id:      "GOV_SPENDING_EDU",
-    dataset: "eag_finance_indicators",
-    key:     "A.TOT.ED0T8.INSTEX.AS.INS_GOVTOTAL",
-    name:    "Public expenditure on education (% of GDP)",
-    group:   "Government",
-  },
-  // ── Trade ──
-  {
-    id:      "EXPORTS_GDP",
-    dataset: "na_main",
-    key:     "A.P6.PPPPC.CPC.SHR.PA",
-    name:    "Exports of goods & services (% of GDP)",
-    group:   "Trade",
-  },
-  {
-    id:      "FDI_INFLOWS",
-    dataset: "fdi_main",
-    key:     "A.INFLOWS.T_GDPRATIO",
-    name:    "FDI inflows (% of GDP)",
-    group:   "Trade",
-  },
-  // ── Prices & Finance ──
+  // ── Prices ──
+  // DF_PRICES_ALL: REF_AREA . FREQ . METHODOLOGY . MEASURE . UNIT_MEASURE . EXPENDITURE . ADJUSTMENT . TRANSFORMATION
   {
     id:      "CPI_INFLATION",
-    dataset: "prices_cpi",
-    key:     "A.CPI.TOT.ANR",
-    name:    "CPI inflation (annual rate %)",
+    dataset: "OECD.SDD.TPS,DSD_PRICES@DF_PRICES_ALL",
+    key:     ".A.N.CPI.PA.CP00.N.GY",
+    name:    "CPI inflation, all items (annual %)",
     group:   "Prices",
   },
-  {
-    id:      "INTEREST_RATE_LT",
-    dataset: "mei_fin",
-    key:     "A.IRLT.STE.T",
-    name:    "Long-term interest rate (10-year government bonds, %)",
-    group:   "Finance",
-  },
-  // ── Health ──
+  // ── Health (OECD.ELS.HD) ──
+  // DF_SHA (System of Health Accounts): complex dimensions — key selects current health expenditure % GDP
   {
     id:      "HEALTH_EXPENDITURE",
-    dataset: "health_stat",
-    key:     "A.HEXP.TOTAL.PC_GDP",
-    name:    "Health expenditure (% of GDP)",
+    dataset: "OECD.ELS.HD,DSD_SHA@DF_SHA",
+    key:     ".A.EXP_HEALTH.PC_GDP._T..HC1+HC2+HC3+HC4+HC5+HC6+HC7+HC9.._T...",
+    name:    "Current health expenditure (% of GDP)",
     group:   "Health",
   },
+  // DF_HEALTH_LVNG_AC: life expectancy and other health living conditions
   {
     id:      "LIFE_EXPECTANCY",
-    dataset: "health_stat",
-    key:     "A.LIFEEXP.TOTAL.YRS",
+    dataset: "OECD.ELS.HD,DSD_HEALTH_LVNG@DF_HEALTH_LVNG_AC",
+    key:     ".A.LE_B0...",
     name:    "Life expectancy at birth (years)",
     group:   "Health",
   },
-  // ── Education ──
+  // ── FDI (OECD.DAF.INV) ──
   {
-    id:      "PISA_MATH",
-    dataset: "pisa_2022_s",
-    key:     "A.MAT.MEAN.T",
-    name:    "PISA mean score — Mathematics",
-    group:   "Education",
+    id:      "FDI_INFLOWS",
+    dataset: "OECD.DAF.INV,DSD_FDI@DF_FDI_FLOW_AGGR",
+    key:     ".T_FA_F.USD.A.L..T.S1.W..._T.A.AGGR",
+    name:    "FDI inflows (USD millions)",
+    group:   "Trade",
   },
-  // ── Environment ──
+  // ── GHG Emissions (OECD.ENV.EPI) ──
   {
     id:      "CO2_PROD",
-    dataset: "air_ghg",
-    key:     "A.GHG.TOT.PC",
-    name:    "GHG emissions per capita (tCO₂-eq)",
-    group:   "Environment",
-  },
-  {
-    id:      "RENEWABLE_ENERGY",
-    dataset: "tsdcc310",
-    key:     "A.PC_RENEW.TOT",
-    name:    "Renewable energy share in total final consumption (%)",
+    dataset: "OECD.ENV.EPI,DSD_AIR_GHG@DF_AIR_GHG",
+    key:     ".A.GHG.CAP.TOT.",
+    name:    "GHG emissions per capita (tCO2-eq)",
     group:   "Environment",
   },
 ];
@@ -223,25 +179,17 @@ export async function fetchOECDIndicator(indicator, opts = {}) {
   // We fetch with country filter at the top-level path:
   // /data/{dataset}/{countryFilter}/{key}?format=json&startPeriod=...&endPeriod=...
   // But OECD API structure varies. Use simple approach: pass key as-is, filter post-fetch.
-  const url = [
-    `${BASE}/data/${dataset}/${key}`,
-    `?format=json`,
-    `&startPeriod=${startYear}`,
-    `&endPeriod=${endYear}`,
-    countries.length > 0 ? `&dimensionAtObservation=AllDimensions` : "",
-  ].join("");
+  const res = await fetch(PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset, key, startYear, endYear }),
+  });
 
-  const res = await fetch(url, { headers: { Accept: "application/vnd.sdmx.data+json" } });
-  if (!res.ok) {
-    // Try alternative URL format with country filter embedded
-    const altUrl = `${BASE}/data/${dataset}/${countrySegment}/${key}?format=json&startPeriod=${startYear}&endPeriod=${endYear}`;
-    const altRes = await fetch(altUrl, { headers: { Accept: "application/vnd.sdmx.data+json" } });
-    if (!altRes.ok) throw new Error(`OECD API error ${altRes.status} for ${dataset}/${key}`);
-    const json = await altRes.json();
-    const rows = parseSdmxJson(json, safeId);
-    return buildResult(rows, safeId, indicator, startYear, endYear);
-  }
+  if (!res.ok) throw new Error(`OECD proxy error ${res.status} for ${dataset}/${key}`);
+
   const json = await res.json();
+  if (json.error) throw new Error(`OECD API error: ${json.error}`);
+
   let rows = parseSdmxJson(json, safeId);
 
   // Post-filter by country if requested
@@ -279,6 +227,11 @@ export async function fetchMultipleOECD(indicators, opts = {}) {
   const results = await Promise.allSettled(
     indicators.map(ind => fetchOECDIndicator(ind, opts))
   );
+
+  const failed = results.filter(r => r.status === "rejected");
+  if (failed.length === results.length) {
+    throw new Error(failed[0]?.reason?.message ?? "All OECD indicator fetches failed.");
+  }
 
   const map = {};
   const safeIds = [];
