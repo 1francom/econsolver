@@ -2048,6 +2048,15 @@ export default function App() {
         )}
 
       </div>
+
+      <AIContextSidebar
+        isOpen={sidebarOpen}
+        onClose={()=>setSidebarOpen(false)}
+        screen={activeTab}
+        cleanedData={tabOutput(activeTab)}
+        modelResult={activeResult}
+        prefillMessage={coachPrefill}
+      />
     </div>
   );
 }
