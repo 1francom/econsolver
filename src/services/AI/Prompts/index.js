@@ -475,21 +475,17 @@ export function buildMetadataContext(meta) {
   }
 
   if (meta.columns?.length) {
-    const notable = meta.columns.filter(c =>
-      (c.skewness != null && Math.abs(c.skewness) > 1.5) ||
-      (c.kurtosis != null && Math.abs(c.kurtosis) > 3) ||
-      c.logFeasible
-    ).slice(0, 6);
-    if (notable.length) {
-      lines.push("Notable columns:");
-      notable.forEach(c => {
-        const parts = [];
-        if (c.skewness != null) parts.push(`skew=${c.skewness.toFixed(2)}`);
-        if (c.kurtosis != null) parts.push(`kurt=${c.kurtosis.toFixed(1)}`);
-        if (c.logFeasible) parts.push("log-feasible");
-        lines.push(`  ${c.col}: ${parts.join(", ")}`);
-      });
-    }
+    lines.push(`Variable stats (${meta.columns.length} numeric):`);
+    meta.columns.slice(0, 25).forEach(c => {
+      const fmt = v => (Math.abs(v) >= 1000 || (Math.abs(v) > 0 && Math.abs(v) < 0.01))
+        ? v.toExponential(2) : v.toFixed(3);
+      const flags = [];
+      if (c.skewness != null && Math.abs(c.skewness) > 1.5) flags.push(`skew=${c.skewness.toFixed(2)}`);
+      if (c.logFeasible) flags.push("log-ok");
+      const flagStr = flags.length ? `  [${flags.join(", ")}]` : "";
+      lines.push(`  ${c.col}: n=${c.n}, mean=${fmt(c.mean)}, std=${fmt(c.std)}, min=${fmt(c.min)}, max=${fmt(c.max)}${flagStr}`);
+    });
+    if (meta.columns.length > 25) lines.push(`  … (+${meta.columns.length - 25} more numeric cols)`);
   }
 
   if (meta.highCorrelations?.length) {

@@ -26,6 +26,7 @@ import {
   INTERPRET_MARGINAL_EFFECTS_PROMPT,
   buildMetadataContext,
 } from "./Prompts/index.js";
+import { getSession } from "../auth/authService.js";
 
 const API_URL       = "https://api.anthropic.com/v1/messages";
 const MODEL         = "claude-sonnet-4-6";        // orchestrator: narratives, cleaning, comparison
@@ -34,17 +35,24 @@ const MODEL_ADVISOR = "claude-opus-4-7";           // specialist: focused techni
 const MAX_TOK       = 700;
 
 // ── API routing ───────────────────────────────────────────────────────────────
-// VITE_AI_PROXY_ENABLED=true  → Supabase Edge Function (key in Vault, never in browser)
+// VITE_AI_PROXY_ENABLED=true  → /api/anthropic Vercel Function (key never reaches browser)
 // VITE_AI_PROXY_ENABLED=false → direct Anthropic call using localStorage/env key (dev only)
 const _proxyEnabled = import.meta.env.VITE_AI_PROXY_ENABLED === "true";
-const PROXY_URL = _proxyEnabled && import.meta.env.VITE_SUPABASE_URL
-  ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/Proxy-Claude-Litux`
-  : "";
-const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 
 // Dev fallback: localStorage key > env var. Only used when proxy is disabled.
 function getApiKey() {
   return localStorage.getItem("litux_api_key") || import.meta.env.VITE_ANTHROPIC_KEY || "";
+}
+
+// Retrieve the Supabase JWT for the currently signed-in user.
+// Returns empty string when no session exists (graceful — proxy will 401).
+async function getAuthToken() {
+  try {
+    const session = await getSession();
+    return session?.access_token ?? "";
+  } catch {
+    return "";
+  }
 }
 
 // ─── MOCK FALLBACKS ───────────────────────────────────────────────────────────
@@ -112,21 +120,22 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
 
   let res;
   try {
-    if (PROXY_URL) {
-      // Production: key stored in Supabase Vault — never reaches the browser.
-      res = await fetch(PROXY_URL, {
+    if (_proxyEnabled) {
+      // Production: key lives in Vercel env — never reaches the browser.
+      // JWT identifies the user; /api/anthropic validates tier server-side.
+      const token = await getAuthToken();
+      res = await fetch("/api/anthropic", {
         method:  "POST",
         headers: {
-          "Content-Type":   "application/json",
-          "apikey":         SUPABASE_ANON,
-          "anthropic-beta": "prompt-caching-2024-07-31",
+          "Content-Type":  "application/json",
+          "Authorization": token ? `Bearer ${token}` : "",
         },
         body: JSON.stringify(body),
       });
     } else {
       // Dev fallback: direct Anthropic call with localStorage / env key.
       const apiKey = getApiKey();
-      if (!apiKey) throw new Error("No API key — enter your Anthropic key in Settings (⚙), or set VITE_AI_PROXY_ENABLED=true to use the Supabase backend.");
+      if (!apiKey) throw new Error("No API key — enter your Anthropic key in Settings (⚙), or set VITE_AI_PROXY_ENABLED=true.");
       res = await fetch(API_URL, {
         method:  "POST",
         headers: {
@@ -144,8 +153,15 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
   }
 
   if (!res.ok) {
-    const err = await res.text().catch(() => res.statusText);
-    throw new Error(`Anthropic API error ${res.status}: ${err}`);
+    let errBody;
+    try { errBody = await res.json(); } catch { errBody = { error: res.statusText }; }
+    if (res.status === 403 && errBody?.error === "premium_required") {
+      throw new Error("PREMIUM_REQUIRED");
+    }
+    if (res.status === 401) {
+      throw new Error("Session expired — please sign in again.");
+    }
+    throw new Error(`API error ${res.status}: ${errBody?.error ?? res.statusText}`);
   }
 
   const data = await res.json();
@@ -691,7 +707,7 @@ function _serializeModelContext(result, dataDictionary) {
   return lines.join("\n");
 }
 
-export async function researchCoach({ question, modelResult, dataDictionary = null, history = [], metadataReport = null }) {
+export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null }) {
   if (!question?.trim()) return "";
 
   const modelContext  = _serializeModelContext(modelResult, dataDictionary);
@@ -714,22 +730,28 @@ export async function researchCoach({ question, modelResult, dataDictionary = nu
     // Incorporates Opus's specialist insight as a grounding block.
     const apiMessages = [];
     history.forEach((turn, idx) => {
-      const content = (turn.role === "user" && idx === 0)
-        ? contextPrefix + turn.text
-        : turn.text;
+      // content may be a string (text-only) or array (multipart with images)
+      const content = turn.content ?? turn.text;
       apiMessages.push({ role: turn.role, content });
     });
 
-    const specialistBlock = opusInsight
-      ? `[Specialist insight: ${opusInsight}]\n\n`
-      : "";
-    const newContent = apiMessages.length === 0
+    const specialistBlock = opusInsight ? `[Specialist insight: ${opusInsight}]\n\n` : "";
+    const textContent = apiMessages.length === 0
       ? specialistBlock + contextPrefix + question.trim()
       : specialistBlock + question.trim();
+
+    // Build last user message — multipart if images present
+    const newContent = images.length > 0
+      ? [
+          ...images.map(img => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } })),
+          { type: "text", text: textContent },
+        ]
+      : textContent;
     apiMessages.push({ role: "user", content: newContent });
 
     return await callClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 800 });
   } catch (err) {
+    if (err.message === "PREMIUM_REQUIRED") throw err; // let caller handle the gate
     console.warn("[AIService] researchCoach failed:", err.message);
     return "The research coach is unavailable — check your API key and network connection.";
   }
