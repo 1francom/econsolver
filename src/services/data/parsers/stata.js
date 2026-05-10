@@ -86,7 +86,9 @@ function parseStataOld(bytes, view) {
   const LBLNAME_LEN  = fmt >= 114 ? 33 : 9;
   const VARLABEL_LEN = fmt >= 114 ? 81 : 32;
 
-  let off = 108; // after header (10) + label (80) + timestamp (18)
+  // Header is 109 bytes: 4 (fixed fields) + 2 (K) + 4 (N) + 81 (label, null-terminated) + 18 (timestamp)
+  // The dataset label is string(80) = 81 bytes including null terminator.
+  let off = 109;
 
   // typlist
   const types = Array.from(bytes.subarray(off, off + K));
@@ -102,50 +104,109 @@ function parseStataOld(bytes, view) {
     off += NAME_LEN;
   }
 
-  // sortlist, formats, value-label names, variable labels — skip
-  off += (K + 1) * 2;         // sortlist
-  off += K * FMT_LEN;         // display formats
-  off += K * LBLNAME_LEN;     // value-label names
-  off += K * VARLABEL_LEN;    // variable labels
+  // sortlist — skip
+  off += (K + 1) * 2;
 
-  // characteristics — records of [uint32 len][payload]; len=0 terminates
-  while (off + 4 <= bytes.length) {
-    const len = view.getUint32(off, le);
-    off += 4;
-    if (len === 0) break;
-    off += len;
+  // fmtlist — read display formats to detect date columns
+  // Stata date formats: %td (daily), %tm (monthly), %tq (quarterly), %th (half-yearly), %ty (yearly)
+  const STATA_EPOCH = Date.UTC(1960, 0, 1); // 1960-01-01
+  const fmts = [];
+  for (let k = 0; k < K; k++) {
+    const chunk = bytes.subarray(off, off + FMT_LEN);
+    const end   = chunk.indexOf(0);
+    fmts.push(latin1.decode(chunk.subarray(0, end === -1 ? FMT_LEN : end)));
+    off += FMT_LEN;
   }
+  // Map column index → date converter (null = not a date)
+  const dateConv = fmts.map(f => {
+    const m = f.match(/^%(-?\d+)?t([dqmhyw])/i);
+    if (!m) return null;
+    const unit = m[2].toLowerCase();
+    return (v) => {
+      if (v === null) return null;
+      let ms;
+      if (unit === 'd') ms = STATA_EPOCH + v * 86400000;
+      else if (unit === 'w') ms = STATA_EPOCH + v * 7 * 86400000;
+      else if (unit === 'm') { const y = 1960 + Math.floor(v / 12); const mo = ((v % 12) + 12) % 12; ms = Date.UTC(y, mo, 1); }
+      else if (unit === 'q') { const y = 1960 + Math.floor(v / 4); const mo = ((v % 4) + 4) % 4 * 3; ms = Date.UTC(y, mo, 1); }
+      else if (unit === 'h') { const y = 1960 + Math.floor(v / 2); const mo = (v % 2 + 2) % 2 * 6; ms = Date.UTC(y, mo, 1); }
+      else if (unit === 'y') return String(v);  // year is itself
+      else return v;
+      return new Date(ms).toISOString().slice(0, 10);
+    };
+  });
+
+  // value-label names, variable labels — skip
+  off += K * LBLNAME_LEN;
+  off += K * VARLABEL_LEN;
+
+  // Compute expected data section size to find it safely
+  const rowWidth = types.reduce((sum, t) => {
+    if (t === 251) return sum + 1;
+    if (t === 252) return sum + 2;
+    if (t === 253 || t === 254) return sum + 4;
+    if (t === 255) return sum + 8;
+    if (t >= 1 && t <= 244) return sum + t;
+    return sum;
+  }, 0);
+  const dataSize = N * rowWidth;
+
+  // characteristics — skip safely.
+  // Record layout: int32 datasize | str[NAME_LEN] varname | str[NAME_LEN] charname | char[datasize] contents
+  // A zero datasize terminates the section.
+  const charsStart = off;
+  let charsOk = false;
+  if (off + 4 <= bytes.length) {
+    const firstLen = view.getUint32(off, le);
+    // Sanity: a valid datasize is 0 (end marker) or small enough to fit
+    if (firstLen === 0 || (firstLen < bytes.length - off && firstLen < 1_000_000)) {
+      charsOk = true;
+      while (off + 4 <= bytes.length) {
+        const datasize = view.getUint32(off, le);
+        off += 4;
+        if (datasize === 0) break;
+        // Each record also has varname + charname before the data content
+        const recBody = 2 * NAME_LEN + datasize;
+        if (recBody > bytes.length - off) { off -= 4; break; } // corrupt, stop
+        off += recBody;
+      }
+    }
+  }
+  if (!charsOk) off = charsStart; // no / corrupt characteristics — start data here
 
   // data
   const rows = [];
   for (let n = 0; n < N; n++) {
+    if (off + rowWidth > bytes.length) break;   // bounds guard — stop before overrun
     const row = {};
     for (let k = 0; k < K; k++) {
       const t = types[k];
       const h = headers[k];
+      let val;
       if (t === 251) {                          // byte (int8)
         const v = view.getInt8(off); off += 1;
-        row[h] = v >= 101 ? null : v;
+        val = v >= 101 ? null : v;
       } else if (t === 252) {                   // int (int16)
         const v = view.getInt16(off, le); off += 2;
-        row[h] = v >= 32741 ? null : v;
+        val = v >= 32741 ? null : v;
       } else if (t === 253) {                   // long (int32)
         const v = view.getInt32(off, le); off += 4;
-        row[h] = v >= 2147483621 ? null : v;
+        val = v >= 2147483621 ? null : v;
       } else if (t === 254) {                   // float
         const v = view.getFloat32(off, le); off += 4;
-        row[h] = isFloatMissing(v) ? null : v;
+        val = isFloatMissing(v) ? null : v;
       } else if (t === 255) {                   // double
         const v = view.getFloat64(off, le); off += 8;
-        row[h] = isDoubleMissing(v) ? null : v;
+        val = isDoubleMissing(v) ? null : v;
       } else if (t >= 1 && t <= 244) {          // str(N)
         const chunk = bytes.subarray(off, off + t);
         const end   = chunk.indexOf(0);
-        row[h] = latin1.decode(chunk.subarray(0, end === -1 ? t : end));
+        val = latin1.decode(chunk.subarray(0, end === -1 ? t : end));
         off += t;
       } else {
-        row[h] = null;
+        val = null;
       }
+      row[h] = dateConv[k] ? dateConv[k](val) : val;
     }
     rows.push(row);
   }

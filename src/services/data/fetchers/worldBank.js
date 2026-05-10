@@ -100,7 +100,7 @@ export async function fetchIndicator(indicatorId, opts = {}) {
     : "all";
 
   const perPage = 1000;
-  const url = `${BASE}/country/${countryFilter}/indicator/${indicatorId}?format=json&per_page=${perPage}&mrv=${endYear - startYear + 1}&date=${startYear}:${endYear}`;
+  const url = `${BASE}/country/${countryFilter}/indicator/${indicatorId}?format=json&per_page=${perPage}&date=${startYear}:${endYear}`;
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`World Bank API error: ${res.status} for indicator ${indicatorId}`);

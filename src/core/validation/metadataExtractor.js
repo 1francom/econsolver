@@ -207,8 +207,8 @@ function buildColMetadata(rows, col) {
   const vals = numVals(rows, col);
   if (!vals.length) return null;
 
-  const mn   = Math.min(...vals);
-  const mx   = Math.max(...vals);
+  const mn   = vals.reduce((a, b) => a < b ? a : b, vals[0]);
+  const mx   = vals.reduce((a, b) => a > b ? a : b, vals[0]);
   const m    = mean(vals);
   const s    = std(vals);
   const k    = kurtosis(vals);
@@ -267,18 +267,25 @@ export function buildMetadataReport(headers, rows, panelIndex = null) {
     return { temporal: null, panelQuality: null, columns: [], highCorrelations: [] };
   }
 
+  // Cap sample to 5 000 rows — prevents stack overflow on large datasets.
+  // Statistics are estimated on the sample; structural info (temporal, panel) uses full rows.
+  const SAMPLE = 5_000;
+  const sample = rows.length > SAMPLE
+    ? rows.filter((_, i) => i % Math.ceil(rows.length / SAMPLE) === 0).slice(0, SAMPLE)
+    : rows;
+
   const numericHeaders = headers.filter(h =>
-    rows.some(r => typeof r[h] === "number" && isFinite(r[h]))
+    sample.some(r => typeof r[h] === "number" && isFinite(r[h]))
   );
 
-  const temporal    = extractTemporal(headers, rows);
-  const panelQuality = buildPanelQuality(rows, panelIndex, numericHeaders);
+  const temporal     = extractTemporal(headers, rows);
+  const panelQuality = buildPanelQuality(sample, panelIndex, numericHeaders);
 
   const columns = numericHeaders
-    .map(col => buildColMetadata(rows, col))
+    .map(col => buildColMetadata(sample, col))
     .filter(Boolean);
 
-  const highCorrelations = findHighCorrelations(rows, numericHeaders);
+  const highCorrelations = findHighCorrelations(sample, numericHeaders);
 
   return { temporal, panelQuality, columns, highCorrelations };
 }

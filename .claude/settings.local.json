@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep:*)",
+      "Bash(supabase functions:*)",
+      "Bash(npx supabase:*)",
+      "WebFetch(domain:sdmx.oecd.org)",
+      "WebFetch(domain:stats.oecd.org)",
+      "WebSearch",
+      "WebFetch(domain:edwindj.github.io)",
+      "WebFetch(domain:data-explorer.oecd.org)",
+      "WebFetch(domain:db.nomics.world)",
+      "WebFetch(domain:browser.sdmx.io)",
+      "mcp__code-review-graph__get_architecture_overview_tool",
+      "mcp__code-review-graph__list_communities_tool"
+    ]
+  }
+}
