@@ -417,12 +417,25 @@ export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangu
   const D  = valid.map(r => r[runCol] >= cutoff ? 1 : 0);
   const Y  = valid.map(r => r[yCol]);
   const W  = kernelWeights(valid.map(r => r[runCol]), cutoff, h, kernelType);
-  const X  = valid.map((r, i) => [1, D[i], xc[i], D[i] * xc[i], ...controls.map(c => r[c])]);
+
+  // Drop any control that duplicates a column already in the RDD design matrix:
+  // running variable → already in as (running − c); treatment col → already in as D.
+  // Leaving them in causes exact multicollinearity and produces all-NaN results.
+  const safeControls = controls.filter(c => {
+    if (c === runCol || c === yCol) return false;
+    // If the control is binary and perfectly correlated with D, drop it.
+    const vals = valid.map(r => r[c]);
+    const isBinaryLikeD = vals.every((v, i) => v === D[i] || v === 1 - D[i]);
+    if (isBinaryLikeD) return false;
+    return true;
+  });
+
+  const X  = valid.map((r, i) => [1, D[i], xc[i], D[i] * xc[i], ...safeControls.map(c => r[c])]);
 
   const res = runWLS(X, Y, W, seOpts);
   if (!res) return null;
 
-  const varNames  = ["(Intercept)", "D (treatment)", "running − c", "D × (running − c)", ...controls];
+  const varNames  = ["(Intercept)", "D (treatment)", "running − c", "D × (running − c)", ...safeControls];
   const leftFit   = valid
     .map((r, i) => ({ x: r[runCol], yhat: res.beta[0] + res.beta[2] * xc[i] }))
     .filter((_, i) => D[i] === 0);
