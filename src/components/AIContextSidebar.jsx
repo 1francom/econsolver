@@ -51,8 +51,9 @@ function buildContext(screen, cleanedData, modelResult, sessionDatasets) {
     const { headers = [], cleanRows = [], changeLog = [], dataDictionary } = cleanedData;
     lines.push(`ACTIVE DATASET: ${cleanRows.length} obs × ${headers.length} cols`);
     if (changeLog?.length) {
-      lines.push(`Pipeline: ${changeLog.length} step(s) applied`);
-      changeLog.slice(-3).forEach(s => lines.push(`  · [${s.type}] ${s.description}`));
+      const label = screen === "model" ? "WRANGLING HISTORY" : "Pipeline";
+      lines.push(`${label}: ${changeLog.length} step(s) applied`);
+      changeLog.forEach(s => lines.push(`  · [${s.type}] ${s.description}`));
     }
     if (dataDictionary && Object.keys(dataDictionary).length) {
       const entries = Object.entries(dataDictionary).slice(0, 8);

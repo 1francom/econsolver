@@ -514,11 +514,21 @@ export default function SimulateTab({ onAddDataset }) {
 
   return (
     <div style={{ height: "100%", overflowY: "auto", padding: "1.8rem 2.2rem", fontFamily: mono, color: C.text, maxWidth: 900 }}>
-      <HintBox tips={[
-        "Define variables as normal, uniform, Bernoulli, or Poisson distributions",
-        "Add structural equations linking variables (e.g. Y = 2*X + noise)",
-        "Generate synthetic datasets for power analysis or Monte Carlo experiments",
-        "Datasets created here appear in the Data tab for further wrangling and modeling",
+      <HintBox title="How to simulate" sections={[
+        { heading: "DGP Variables", items: [
+          "Define variables with distributions: normal, uniform, Bernoulli, Poisson",
+          "Set mean, std, or probability parameters per variable",
+          "Variables can reference each other to build structural equations",
+        ]},
+        { heading: "Structural Equations", items: [
+          "Link variables with expressions: Y = 2*X + epsilon, D = 1*(Z > 0.5), etc.",
+          "Supports any JS math expression — all DGP variables are in scope",
+        ]},
+        { heading: "Output", items: [
+          "Set sample size N and click Generate",
+          "Resulting dataset appears in the Data tab for wrangling and modeling",
+          "Useful for power analysis, Monte Carlo experiments, and teaching demonstrations",
+        ]},
       ]} />
       <Lbl color={C.teal} mb={4}>Simulate</Lbl>
       <div style={{ fontSize: 17, color: C.text, marginBottom: "0.3rem", letterSpacing: "-0.01em" }}>DGP Builder</div>

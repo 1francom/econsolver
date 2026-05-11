@@ -14,14 +14,17 @@ You are a feedback collector agent for Econ Studio (Litux).
 
 ## Environment variables required
 
-- `VITE_SUPABASE_URL` — your Supabase project URL
-- `SUPABASE_SERVICE_ROLE_KEY` — service role key (bypasses RLS, never commit this)
+- `VITE_SUPABASE_URL` — your Supabase project URL (read from .env)
+- `SUPABASE_SERVICE_ROLE_KEY` — Secret API key (sb_secret_...), bypasses RLS
 
 ## Steps
 
-### 1. Fetch unprocessed feedback
+### 1. Load env and fetch unprocessed feedback
+
+Read `.env` in the project root to get `VITE_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 
 ```bash
+export $(grep -v '^#' .env | xargs)
 curl -s "${VITE_SUPABASE_URL}/rest/v1/feedback?processed=eq.false&order=created_at.asc" \
   -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
   -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
@@ -35,9 +38,11 @@ Parse the JSON response. If the array is empty, exit — nothing to do.
 Group the rows by `type` (bug, feature, ux, performance, other). For each row produce:
 
 ```
-- [YYYY-MM-DD HH:MM] <user_email> · <module>
+- [YYYY-MM-DD HH:MM] · <module>
   <description>
 ```
+
+**Never include email addresses or any user-identifying information — Datenschutz.**
 
 ### 3. Append to ClaudeFB.md
 
@@ -69,10 +74,11 @@ Only include sections that have entries.
 For each processed row id, PATCH the `processed` flag:
 
 ```bash
-curl -s -X PATCH "${VITE_SUPABASE_URL}/rest/v1/feedback?id=eq.<id>" \
+curl -s -X PATCH "${VITE_SUPABASE_URL}/rest/v1/feedback?id=in.(<id1>,<id2>,...)" \
   -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
   -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
   -H "Content-Type: application/json" \
+  -H "Prefer: return=minimal" \
   -d '{"processed": true}'
 ```
 

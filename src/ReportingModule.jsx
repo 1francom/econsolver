@@ -994,12 +994,22 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto",
                     padding: "1.4rem", paddingBottom: "3rem" }}>
 
-        <HintBox color={C.gold} tips={[
-          "Models pinned in the Model tab appear here for export",
-          "LaTeX Stargazer table: multi-column comparison of all pinned models",
-          "Forest plot: visualize coefficients and 95% CI across specifications",
-          "AI Narrative: auto-generates a 2–3 sentence academic interpretation of results",
-          "Download scripts (R/Stata/Python) for full replication of the analysis",
+        <HintBox color={C.gold} title="How to report" sections={[
+          { heading: "Requirements", items: [
+            "Pin at least one model in the Model tab first — use the ◈ pin icon next to any result",
+            "All pinned models appear here automatically",
+          ]},
+          { heading: "Outputs", items: [
+            "LaTeX Stargazer table: multi-column comparison of all pinned models, publication-ready",
+            "Forest plot: coefficient + 95% CI across all pinned specifications",
+            "AI Narrative: auto-generates 2–3 academic paragraphs interpreting the results",
+            "Replication bundle: download R + Stata + Python scripts + data as a zip",
+          ]},
+          { heading: "Tips", items: [
+            "Pin models with different SE types to compare robustness in one table",
+            "The AI Narrative uses the data dictionary — label your variables in Clean → Dictionary for better output",
+            "LaTeX output is compatible with Overleaf and standard journal templates",
+          ]},
         ]} />
 
         {/* Fit stats always visible */}

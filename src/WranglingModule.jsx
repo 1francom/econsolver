@@ -498,12 +498,44 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           </div>
         </div>
 
-        <HintBox color="#6ec8b4" tips={[
-          "Non-destructive: every step replays on raw data — undo any step from the history sidebar",
-          "Clean tab: filter rows, fill NAs, rename, drop, recode, and winsorize",
-          "Features tab: add log, lag, lead, z-score, dummies, polynomial, and interaction terms",
-          "Panel tab: declare entity (i) and time (t) columns to unlock FE, FD, DiD, and Event Study",
-          "Merge tab: LEFT/INNER join or append a second dataset",
+        <HintBox color="#6ec8b4" title="How to wrangle" sections={[
+          { heading: "Pipeline", items: [
+            "Non-destructive: every step replays on raw data — nothing is permanently changed",
+            "Undo any step from the History sidebar on the left",
+            "Steps are auto-saved and restored on reload",
+          ]},
+          { heading: "Clean", items: [
+            "Rename, drop columns / rows",
+            "Filter: keep rows matching a condition",
+            "Fill missing: mean, median, mode, forward/backward fill, constant, grouped fill",
+            "Recode: map specific values to new labels",
+            "Normalize categories: merge near-identical string variants",
+            "Winsorize / Trim outliers / Flag outliers",
+            "Extract regex: pull values from text columns",
+            "AI Transform: describe a transformation in plain English",
+          ]},
+          { heading: "Feature Engineering", items: [
+            "Log transform (log1p — safe for zeros)",
+            "Square, standardize (z-score)",
+            "Dummy encode: one-hot for a categorical column",
+            "Lag / Lead: shift by t periods — groups by entity to prevent cross-unit contamination",
+            "First difference (diff)",
+            "Interaction term: A × B",
+            "DiD interaction: creates treat × post for difference-in-differences",
+            "Date parse / extract: year, month, quarter from date strings",
+            "Mutate: custom JS expression (e.g. col_a / col_b * 100)",
+          ]},
+          { heading: "Panel Structure", items: [
+            "Panel tab: declare entity column (i) and time column (t)",
+            "Required to unlock FE, FD, TWFE, DiD, and Event Study in the Model tab",
+          ]},
+          { heading: "Reshape & Merge", items: [
+            "Arrange: sort rows by one or more columns",
+            "Group summarize: aggregate (mean, sum, count, min, max) by group",
+            "Pivot longer: wide → long format",
+            "Merge: LEFT or INNER join another dataset on a key column",
+            "Append: UNION ALL — stack rows from a second dataset",
+          ]},
         ]} />
 
         {/* ── Tab bar ── */}

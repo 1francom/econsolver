@@ -2,7 +2,7 @@
 // Central help system: TOUR_STEPS registry, HintBox, TourOverlay.
 // All new tabs, modules, and estimators should add an entry to TOUR_STEPS.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTheme } from "../ThemeContext.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
@@ -13,87 +13,96 @@ export const TOUR_STEPS = [
   {
     id: "welcome",
     tab: null,
-    title: "Welcome to Litux",
-    text: "A privacy-first econometrics platform. All computation runs in your browser — your data never leaves your machine. This tour walks through the full research workflow.",
+    title: "Welcome to Econ Studio",
+    text: "A privacy-first econometrics platform. All computation runs in your browser — your data never leaves your machine. This short tour walks through the full research workflow.",
   },
   {
     id: "data",
     tab: "data",
     title: "1 · Data",
-    text: "Upload CSV, Excel (.xlsx), Stata (.dta), or R (.rds) files via drag & drop. Fetch live data from the World Bank or OECD APIs. Column types are auto-detected — click any badge to override.",
+    text: "Upload CSV, Excel (.xlsx/.xls), Stata (.dta), R (.rds), or shapefiles (.shp) via drag & drop. Fetch live datasets from the World Bank or OECD APIs. Column types are auto-detected.",
   },
   {
     id: "clean",
     tab: "clean",
     title: "2 · Clean & Wrangle",
-    text: "Build a non-destructive pipeline — every step replays on raw data, nothing is lost. Clean (filter, fill NAs, recode) · Features (log, lag, z-score, dummies, interactions) · Panel (declare entity i & time t) · Merge (join/append datasets).",
+    text: "Build a non-destructive pipeline — every step replays on raw data, nothing is permanently changed. Tabs: Clean · Feature Engineering · Panel Structure · Reshape · Merge · Dictionary · Quality Report. Undo any step from the History sidebar.",
   },
   {
     id: "explore",
     tab: "explore",
     title: "3 · Explore",
-    text: "Explore cleaned data with summary stats, histograms, and a Pearson correlation heatmap. The ⊘ Filter bar slices data temporarily — it never touches the pipeline or raw data.",
+    text: "Descriptive stats, histograms (with live filter-aware stats), correlation heatmap, ACF/PACF, and the layered Plot Builder. The ⊘ Filter slices data temporarily — it never modifies the pipeline.",
   },
   {
     id: "model",
     tab: "model",
     title: "4 · Model",
-    text: "Choose an estimator (OLS, FE, 2SLS, RDD, DiD, Logit, GMM, Synthetic Control…). Assign Y, X, Z variables, pick SE type, and estimate. Pin results to compare specifications. Export LaTeX tables and replication scripts in R / Stata / Python.",
+    text: "14 estimators: OLS · WLS · FE · FD · TWFE · 2×2 DiD · 2SLS/IV · Sharp RDD · Logit · Probit · GMM · LIML · Synthetic Control. Assign Y, X, W variables, choose SE type (HC1–HC3, clustered, HAC), and estimate. Pin any result to compare specifications. Export LaTeX + replication scripts.",
   },
   {
     id: "report",
     tab: "report",
     title: "5 · Report",
-    text: "Generate publication-ready output: LaTeX Stargazer tables from pinned models, forest plots, and AI-written narrative paragraphs.",
+    text: "Generate publication-ready output from pinned models: LaTeX Stargazer table, forest plot (coefficients + 95% CI), AI-written narrative paragraphs, and a full replication bundle (R + Stata + Python + data).",
   },
   {
     id: "simulate",
     tab: "simulate",
     title: "Simulate",
-    text: "Build a data-generating process (DGP) and synthesize datasets. Useful for power analysis, Monte Carlo experiments, and teaching.",
+    text: "Define a data-generating process: set variable distributions (normal, uniform, Bernoulli, Poisson) and structural equations. Generate synthetic datasets for power analysis or Monte Carlo experiments. Output appears in the Data tab.",
   },
   {
     id: "calculate",
     tab: "calculate",
     title: "Calculate",
-    text: "Expression evaluator, equation solver, derivative calculator, and model prediction with 95% CI. All expressions work on your dataset variables.",
+    text: "Symbolic calculator, equation pad (define TR, TC, π and differentiate for FOC), numerical derivatives, Brent root solver, and model prediction (ŷ ± 95% CI from any pinned model). Export expressions as LaTeX.",
   },
   {
     id: "spatial",
     tab: "spatial",
     title: "Spatial",
-    text: "Load shapefiles or geographic data, visualize variables on choropleth maps, and run spatial statistics.",
+    text: "Load shapefiles or coordinate data. Assign buffer zones, grid cells (rectangular or H3), and run spatial joins. Nearest-neighbour matching and haversine/euclidean distance utilities.",
   },
 ];
 
 // ─── HINT BOX ─────────────────────────────────────────────────────────────────
-// Collapsible per-module hint panel.
-// Props: tips (string[]), title (string), color (accent color string)
-export function HintBox({ tips = [], title = "How to use", color }) {
+// Per-module help trigger.  Click → full overlay covers the main content area.
+//
+// Props:
+//   title        – overlay heading (e.g. "How to model")
+//   color        – accent color
+//   tips         – string[] fallback (simple list)
+//   sections     – {heading: string, items: string[]}[] richer format
+//   overlayLeft  – px offset from left edge where the overlay starts (default 280)
+export function HintBox({ tips = [], title = "How to use", color, sections = null, overlayLeft = 280 }) {
   const { C } = useTheme();
   const accent = color ?? C.teal;
   const [open, setOpen] = useState(false);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const hasRich = sections && sections.length > 0;
+
   return (
-    <div style={{
-      marginBottom: "1rem",
-      border: `1px solid ${C.border}`,
-      borderLeft: `3px solid ${accent}`,
-      borderRadius: 3,
-      background: C.surface,
-      fontFamily: mono,
-      fontSize: 11,
-    }}>
-      {/* Toggle button */}
+    <>
+      {/* ── Trigger button (stays in sidebar) ── */}
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen(true)}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 6,
           width: "100%",
           background: "transparent",
-          border: "none",
+          border: `1px solid ${C.border}`,
+          borderLeft: `3px solid ${accent}`,
+          borderRadius: 3,
           padding: "0.45rem 0.75rem",
           cursor: "pointer",
           fontFamily: mono,
@@ -101,39 +110,147 @@ export function HintBox({ tips = [], title = "How to use", color }) {
           color: C.textDim,
           textAlign: "left",
           letterSpacing: "0.06em",
+          marginBottom: "1rem",
+          transition: "border-color 0.12s, color 0.12s",
         }}
+        onMouseEnter={e => { e.currentTarget.style.color = accent; e.currentTarget.style.borderColor = `${accent}60`; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.textDim; e.currentTarget.style.borderColor = C.border; }}
       >
-        <span style={{ color: accent, fontSize: 9 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ color: accent, fontSize: 9 }}>▸</span>
         <span style={{ color: accent, letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 9 }}>
           {title}
         </span>
       </button>
 
-      {/* Tip list */}
+      {/* ── Overlay ── */}
       {open && (
-        <ul style={{
-          margin: 0,
-          padding: "0 0.75rem 0.65rem 1.8rem",
-          listStyle: "disc",
-          borderTop: `1px solid ${C.border}`,
-        }}>
-          {tips.map((tip, i) => (
-            <li
-              key={i}
-              style={{
-                color: C.textDim,
-                fontFamily: mono,
-                fontSize: 11,
-                lineHeight: 1.7,
-                paddingTop: i === 0 ? "0.4rem" : 0,
-              }}
-            >
-              {tip}
-            </li>
-          ))}
-        </ul>
+        <>
+          {/* Backdrop — click to close */}
+          <div
+            onClick={() => setOpen(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 498, cursor: "pointer" }}
+          />
+
+          {/* Content panel */}
+          <div style={{
+            position: "fixed",
+            top: 0,
+            left: overlayLeft,
+            right: 0,
+            bottom: 0,
+            zIndex: 499,
+            background: C.bg,
+            borderLeft: `3px solid ${accent}`,
+            overflowY: "auto",
+            fontFamily: mono,
+            boxShadow: "-8px 0 32px rgba(0,0,0,0.5)",
+          }}>
+            {/* Inner padding wrapper */}
+            <div style={{ padding: "2.5rem 3.5rem 4rem", maxWidth: 1100 }}>
+
+              {/* Header */}
+              <div style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                marginBottom: "2.2rem",
+                paddingBottom: "1.2rem",
+                borderBottom: `1px solid ${C.border}`,
+              }}>
+                <div>
+                  <div style={{ fontSize: 8, color: accent, letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: 6 }}>
+                    User Guide
+                  </div>
+                  <div style={{ fontSize: 22, color: C.text, letterSpacing: "-0.02em" }}>
+                    {title}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
+                  <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>ESC to close</span>
+                  <button
+                    onClick={() => setOpen(false)}
+                    style={{
+                      background: "transparent",
+                      border: `1px solid ${C.border2}`,
+                      borderRadius: 3,
+                      color: C.textDim,
+                      cursor: "pointer",
+                      fontFamily: mono,
+                      fontSize: 14,
+                      width: 30,
+                      height: 30,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      transition: "all 0.12s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.color = C.text; e.currentTarget.style.borderColor = accent; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = C.textDim; e.currentTarget.style.borderColor = C.border2; }}
+                  >×</button>
+                </div>
+              </div>
+
+              {/* Sections grid or flat list */}
+              {hasRich ? (
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+                  gap: "2.2rem 3rem",
+                }}>
+                  {sections.map((sec, si) => (
+                    <div key={si}>
+                      <div style={{
+                        fontSize: 8,
+                        color: accent,
+                        letterSpacing: "0.22em",
+                        textTransform: "uppercase",
+                        marginBottom: "0.7rem",
+                        paddingBottom: "0.4rem",
+                        borderBottom: `1px solid ${C.border}`,
+                      }}>
+                        {sec.heading}
+                      </div>
+                      <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                        {sec.items.map((item, ii) => (
+                          <li key={ii} style={{
+                            display: "flex",
+                            gap: 8,
+                            fontSize: 11,
+                            lineHeight: 1.75,
+                            color: C.textDim,
+                            marginBottom: "0.15rem",
+                          }}>
+                            <span style={{ color: accent, flexShrink: 0, marginTop: "0.15rem" }}>·</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                  {tips.map((tip, i) => (
+                    <li key={i} style={{
+                      display: "flex",
+                      gap: 8,
+                      fontSize: 11,
+                      lineHeight: 1.75,
+                      color: C.textDim,
+                      marginBottom: "0.5rem",
+                    }}>
+                      <span style={{ color: accent, flexShrink: 0 }}>·</span>
+                      <span>{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </>
       )}
-    </div>
+    </>
   );
 }
 
