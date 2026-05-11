@@ -41,27 +41,75 @@ function pearson(xs,ys){
 }
 
 // ─── SVG CHARTS ───────────────────────────────────────────────────────────────
-function SvgHistogram({data,color,label=""}){
+function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
   const{C}=useTheme();color=color??C.gold;
-  const W=320,H=120,PAD=24;
+  const W=480,H=160,PAD={l:44,r:16,t:8,b:36};
+  const iW=W-PAD.l-PAD.r,iH=H-PAD.t-PAD.b;
   if(!data.length)return null;
   const min=Math.min(...data),max=Math.max(...data);
   const range=max-min||1;
-  const bins=20,bw=range/bins;
-  const counts=Array(bins).fill(0);
-  data.forEach(v=>{const b=Math.min(bins-1,Math.floor((v-min)/bw));counts[b]++;});
+  const bw=range/nBins;
+  const counts=Array(nBins).fill(0);
+  data.forEach(v=>{const b=Math.min(nBins-1,Math.floor((v-min)/bw));counts[b]++;});
   const maxC=Math.max(...counts,1);
-  const barW=(W-PAD*2)/bins;
+  const barW=iW/nBins;
+  const yTicks=[0,0.25,0.5,0.75,1].map(f=>Math.round(f*maxC));
   return(
-    <svg viewBox={`0 0 ${W} ${H+PAD}`} style={{width:"100%",maxWidth:W,display:"block",fontFamily:mono}}>
-      {counts.map((c,i)=>{
-        const x=PAD+i*barW,h=(c/maxC)*(H-8),y=H-h;
-        return<rect key={i} x={x+1} y={y} width={barW-2} height={h} fill={color} opacity={0.7} rx={1}/>;
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily:mono}}>
+      <rect width={W} height={H} fill="transparent"/>
+      {/* y grid + ticks */}
+      {yTicks.map((t,i)=>{
+        const y=PAD.t+iH-(t/maxC)*iH;
+        return<g key={i}>
+          <line x1={PAD.l} x2={PAD.l+iW} y1={y} y2={y} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4}/>
+          <text x={PAD.l-4} y={y+3} textAnchor="end" fill={C.textMuted} fontSize={7} fontFamily={mono}>{t}</text>
+        </g>;
       })}
-      <line x1={PAD} y1={H} x2={W-PAD} y2={H} stroke={C.border2} strokeWidth={1}/>
-      <text x={PAD} y={H+14} fill={C.textMuted} fontSize={8} fontFamily={mono}>{min.toFixed(2)}</text>
-      <text x={W-PAD} y={H+14} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{max.toFixed(2)}</text>
-      {label&&<text x={W/2} y={H+14} fill={C.textDim} fontSize={8} fontFamily={mono} textAnchor="middle">{label}</text>}
+      {/* bars */}
+      {counts.map((c,i)=>{
+        const x=PAD.l+i*barW,h=(c/maxC)*iH,y=PAD.t+iH-h;
+        return fillMode==="outline"
+          ?<rect key={i} x={x+1} y={y} width={barW-2} height={h} fill="none" stroke={color} strokeWidth={1.5} rx={1}/>
+          :<rect key={i} x={x+1} y={y} width={barW-2} height={h} fill={color} opacity={0.75} rx={1}/>;
+      })}
+      {/* x axis */}
+      <line x1={PAD.l} y1={PAD.t+iH} x2={PAD.l+iW} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1}/>
+      {/* x labels at 0, 25, 50, 75, 100% */}
+      {[0,0.25,0.5,0.75,1].map((f,i)=>{
+        const v=min+f*range;
+        return<text key={i} x={PAD.l+f*iW} y={PAD.t+iH+12} textAnchor="middle" fill={C.textMuted} fontSize={7} fontFamily={mono}>
+          {Math.abs(v)>=1000?v.toExponential(1):v.toFixed(2)}
+        </text>;
+      })}
+      {label&&<text x={PAD.l+iW/2} y={H-2} fill={C.textDim} fontSize={8} fontFamily={mono} textAnchor="middle">{label}</text>}
+    </svg>
+  );
+}
+
+// ─── CATEGORICAL BAR CHART ────────────────────────────────────────────────────
+function SvgBarChart({items,color,fillMode="filled"}){
+  // items: [{label, count}] already sorted
+  const{C}=useTheme();
+  if(!items?.length)return null;
+  const W=480,barH=22,PAD={l:120,r:48,t:8,b:16};
+  const H=PAD.t+items.length*barH+PAD.b;
+  const maxV=Math.max(...items.map(d=>d.count),1);
+  const iW=W-PAD.l-PAD.r;
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily:mono}}>
+      <rect width={W} height={H} fill="transparent"/>
+      {items.map((d,i)=>{
+        const y=PAD.t+i*barH;
+        const bw=Math.max(2,(d.count/maxV)*iW);
+        return<g key={i}>
+          <text x={PAD.l-6} y={y+barH/2+4} textAnchor="end" fill={C.textDim} fontSize={9} fontFamily={mono}>{String(d.label).slice(0,18)}</text>
+          {fillMode==="outline"
+            ?<rect x={PAD.l} y={y+3} width={bw} height={barH-6} fill="none" stroke={color} strokeWidth={1.5} rx={2}/>
+            :<rect x={PAD.l} y={y+3} width={bw} height={barH-6} fill={color} opacity={0.75} rx={2}/>}
+          <text x={PAD.l+bw+4} y={y+barH/2+4} fill={C.textMuted} fontSize={8} fontFamily={mono}>{d.count}</text>
+        </g>;
+      })}
+      <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t+items.length*barH} stroke={C.border2} strokeWidth={1}/>
     </svg>
   );
 }
@@ -201,53 +249,208 @@ function SummaryTable({rows,headers,info,panel}){
 }
 
 // ─── DISTRIBUTION TAB ─────────────────────────────────────────────────────────
+const PALETTE = [
+  { label:"teal",  val:"#6ec8b4" },
+  { label:"gold",  val:"#c8a96e" },
+  { label:"blue",  val:"#6e9ec8" },
+  { label:"violet",val:"#a06ec8" },
+  { label:"red",   val:"#c86e6e" },
+  { label:"green", val:"#7ec86e" },
+  { label:"slate", val:"#8899aa" },
+  { label:"white", val:"#ddd8cc" },
+];
+
 function DistributionTab({rows,headers,info,panel}){
   const{C}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+  const catH=headers.filter(h=>info[h]?.isCat&&!info[h]?.isNum);
   const [histCol,setHistCol]=useState(numH[0]||"");
+  const [catCol,setCatCol]=useState(catH[0]||"");
   const [spagCol,setSpagCol]=useState(numH[0]||"");
   const [sub,setSub]=useState("hist");
+  const [barColor,setBarColor]=useState("#6ec8b4");
+  const [fillMode,setFillMode]=useState("filled");   // "filled" | "outline"
+  const [transform,setTransform]=useState("none");   // "none" | "log" | "log10" | "sqrt"
+  const [nBins,setNBins]=useState(20);
+  const [catOrder,setCatOrder]=useState("count");    // "count" | "alpha" | "rev"
   const hasPanel=panel?.entityCol&&panel?.timeCol;
-  const subTabs=[["hist","Histogram"],...(hasPanel?[["spaghetti","Spaghetti"]]:[])]
+  const subTabs=[
+    ["hist","Histogram"],
+    ...(catH.length?[["cat","Categorical"]]:[] ),
+    ...(hasPanel?[["spaghetti","Spaghetti"]]:[] ),
+  ];
+
+  // transform helper
+  function applyTransform(v){
+    if(transform==="log")  return v>0?Math.log(v):null;
+    if(transform==="log10")return v>0?Math.log10(v):null;
+    if(transform==="sqrt") return v>=0?Math.sqrt(v):null;
+    return v;
+  }
+  const transformLabel=transform==="none"?"":` (${transform})`;
+
+  // shared style helpers
+  const chip=(active,color)=>({
+    padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,
+    background:active?`${color}18`:"transparent",color:active?color:C.textDim,
+    borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+  });
 
   return(
     <div>
-      {subTabs.length > 1 && (
-        <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-          {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
-        </div>
-      )}
+      {/* sub-tab bar */}
+      <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
+        {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
+      </div>
+
+      {/* ── HISTOGRAM ── */}
       {sub==="hist"&&(
         <div>
+          {/* variable chips */}
           <Lbl>Variable</Lbl>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
-            {numH.map(h=><button key={h} onClick={()=>setHistCol(h)} style={{padding:"0.25rem 0.6rem",border:`1px solid ${histCol===h?C.teal:C.border2}`,background:histCol===h?`${C.teal}18`:"transparent",color:histCol===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>{histCol===h?"✓ ":""}{h}</button>)}
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>
+            {numH.map(h=><button key={h} onClick={()=>setHistCol(h)} style={chip(histCol===h,C.teal)}>{histCol===h?"✓ ":""}{h}</button>)}
           </div>
+
+          {/* controls row */}
+          <div style={{display:"flex",flexWrap:"wrap",gap:"1rem",alignItems:"flex-end",marginBottom:"1rem"}}>
+            {/* color palette */}
+            <div>
+              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Color</div>
+              <div style={{display:"flex",gap:3}}>
+                {PALETTE.map(p=>(
+                  <button key={p.val} onClick={()=>setBarColor(p.val)}
+                    style={{width:18,height:18,borderRadius:3,background:p.val,border:`2px solid ${barColor===p.val?"#fff":"transparent"}`,cursor:"pointer",padding:0,opacity:barColor===p.val?1:0.6}}/>
+                ))}
+              </div>
+            </div>
+            {/* fill vs outline */}
+            <div>
+              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Fill</div>
+              <div style={{display:"flex",gap:2}}>
+                {[["filled","Filled"],["outline","Outline"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>setFillMode(k)} style={chip(fillMode===k,C.teal)}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {/* transform */}
+            <div>
+              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_data</div>
+              <div style={{display:"flex",gap:2}}>
+                {[["none","None"],["log","ln"],["log10","log₁₀"],["sqrt","√"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>setTransform(k)} style={chip(transform===k,C.gold)}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {/* bins */}
+            <div>
+              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_break (bins)</div>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <input type="range" min={5} max={60} step={1} value={nBins}
+                  onChange={e=>setNBins(Number(e.target.value))}
+                  style={{width:80,accentColor:C.gold}}/>
+                <span style={{fontSize:10,color:C.gold,fontFamily:mono,minWidth:20}}>{nBins}</span>
+              </div>
+            </div>
+          </div>
+
           {histCol&&(()=>{
-            const vals=rows.map(r=>r[histCol]).filter(v=>typeof v==="number"&&isFinite(v));
-            const i=info[histCol];
+            const rawVals=rows.map(r=>r[histCol]).filter(v=>typeof v==="number"&&isFinite(v));
+            const vals=rawVals.map(v=>applyTransform(v)).filter(v=>v!=null&&isFinite(v));
+            const n=vals.length;
+            const mean=n?vals.reduce((s,v)=>s+v,0)/n:null;
+            const std=n?Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/n):null;
+            const sorted=[...vals].sort((a,b)=>a-b);
+            const median=n?sorted[Math.floor(n/2)]:null;
+            const min=n?sorted[0]:null;
+            const max=n?sorted[n-1]:null;
+            const q1=sorted[Math.floor(n*0.25)],q3=sorted[Math.floor(n*0.75)],iqr=q3-q1;
+            const outlierCount=vals.filter(v=>v<q1-1.5*iqr||v>q3+1.5*iqr).length;
             return(
               <div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1rem"}}>
-                  {[["mean",i?.mean],["std",i?.std],["median",i?.median],["min",i?.min],["max",i?.max]].map(([l,v])=>(
+                  {[["mean",mean],["std",std],["median",median],["min",min],["max",max]].map(([l,v])=>(
                     <div key={l} style={{background:C.surface,padding:"0.5rem 0.6rem"}}>
                       <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:2}}>{l}</div>
                       <div style={{fontSize:14,color:C.gold,fontFamily:mono}}>{v!=null?v.toFixed(3):"—"}</div>
                     </div>
                   ))}
                 </div>
-                <SvgHistogram data={vals} color={C.teal} label={histCol}/>
-                {i?.outliers>0&&<div style={{marginTop:8,fontSize:11,color:C.orange,fontFamily:mono}}>⚠ {i.outliers} IQR-outlier{i.outliers>1?"s":""} detected. Consider winsorizing.</div>}
+                <SvgHistogram data={vals} color={barColor} label={`${histCol}${transformLabel}`} nBins={nBins} fillMode={fillMode}/>
+                {outlierCount>0&&<div style={{marginTop:8,fontSize:11,color:C.orange,fontFamily:mono}}>⚠ {outlierCount} IQR-outlier{outlierCount>1?"s":""} detected. Consider winsorizing.</div>}
+                {vals.length<rawVals.length&&<div style={{marginTop:6,fontSize:10,color:C.textMuted,fontFamily:mono}}>ℹ {rawVals.length-vals.length} row(s) dropped (non-positive values not valid for {transform} transform).</div>}
               </div>
             );
           })()}
         </div>
       )}
+
+      {/* ── CATEGORICAL ── */}
+      {sub==="cat"&&(
+        <div>
+          <Lbl>Variable</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>
+            {catH.map(h=><button key={h} onClick={()=>setCatCol(h)} style={chip(catCol===h,C.teal)}>{catCol===h?"✓ ":""}{h}</button>)}
+          </div>
+
+          {/* controls */}
+          <div style={{display:"flex",flexWrap:"wrap",gap:"1rem",alignItems:"flex-end",marginBottom:"1rem"}}>
+            <div>
+              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Color</div>
+              <div style={{display:"flex",gap:3}}>
+                {PALETTE.map(p=>(
+                  <button key={p.val} onClick={()=>setBarColor(p.val)}
+                    style={{width:18,height:18,borderRadius:3,background:p.val,border:`2px solid ${barColor===p.val?"#fff":"transparent"}`,cursor:"pointer",padding:0,opacity:barColor===p.val?1:0.6}}/>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Fill</div>
+              <div style={{display:"flex",gap:2}}>
+                {[["filled","Filled"],["outline","Outline"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>setFillMode(k)} style={chip(fillMode===k,C.teal)}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>levels = c()</div>
+              <div style={{display:"flex",gap:2}}>
+                {[["count","By count"],["alpha","A → Z"],["rev","Z → A"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>setCatOrder(k)} style={chip(catOrder===k,C.violet)}>{l}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {catCol&&(()=>{
+            const freq={};
+            rows.forEach(r=>{
+              const v=r[catCol];
+              if(v==null)return;
+              freq[v]=(freq[v]||0)+1;
+            });
+            let items=Object.entries(freq).map(([label,count])=>({label,count}));
+            if(catOrder==="count")      items=items.sort((a,b)=>b.count-a.count);
+            else if(catOrder==="alpha") items=items.sort((a,b)=>String(a.label).localeCompare(String(b.label)));
+            else if(catOrder==="rev")   items=items.sort((a,b)=>String(b.label).localeCompare(String(a.label)));
+            return(
+              <div>
+                <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:8}}>
+                  {items.length} categories · n = {rows.filter(r=>r[catCol]!=null).length}
+                </div>
+                <SvgBarChart items={items} color={barColor} fillMode={fillMode}/>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* ── SPAGHETTI ── */}
       {sub==="spaghetti"&&hasPanel&&(
         <div>
           <Lbl>Variable to track</Lbl>
           <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
-            {numH.map(h=><button key={h} onClick={()=>setSpagCol(h)} style={{padding:"0.25rem 0.6rem",border:`1px solid ${spagCol===h?C.orange:C.border2}`,background:spagCol===h?`${C.orange}18`:"transparent",color:spagCol===h?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>{spagCol===h?"✓ ":""}{h}</button>)}
+            {numH.map(h=><button key={h} onClick={()=>setSpagCol(h)} style={chip(spagCol===h,C.orange)}>{spagCol===h?"✓ ":""}{h}</button>)}
           </div>
           {spagCol&&<div>
             <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:8}}>i={panel.entityCol} · t={panel.timeCol} · showing ≤15 random units</div>
@@ -1332,12 +1535,33 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         </div>
         {/* AI Insights */}
         <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
-        <HintBox tips={[
-          "⊘ Filter slices data temporarily — applies to all tabs but never touches the pipeline",
-          "Group By in Summary Table shows statistics split by any categorical variable",
-          "Distributions tab: histogram + 5-number summary for any numeric variable",
-          "Correlation tab: Pearson heatmap across all numeric variables",
-          "Plot Builder: compose layered visualizations (point, line, bar, histogram, smooth…)",
+        <HintBox title="How to explore" sections={[
+          { heading: "Filter", items: [
+            "⊘ Filter bar slices data temporarily — affects all tabs, never touches the pipeline",
+            "Use it to eyeball subgroups without committing to a pipeline step",
+          ]},
+          { heading: "Summary Table", items: [
+            "5-number summary (mean, SD, median, min, max) for all numeric variables",
+            "Group By: split statistics by any categorical column",
+          ]},
+          { heading: "Distributions", items: [
+            "Histogram with live stats (mean, SD, median, min, max) — updates instantly with filter",
+            "Spaghetti plot: individual panel unit trajectories over time (panel datasets only)",
+            "Outlier warning shown if IQR outliers are detected",
+          ]},
+          { heading: "Time Series", items: [
+            "Line chart: aggregate Y over time, optionally split by group",
+            "ACF / PACF correlograms for autocorrelation diagnosis",
+          ]},
+          { heading: "Correlation", items: [
+            "Pearson correlation heatmap across all numeric variables",
+            "Red = negative · Teal = positive",
+          ]},
+          { heading: "Plot Builder", items: [
+            "Layer-based chart editor: 11 geom types (point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, hline, vline)",
+            "Aesthetic mappings: x, y, color; position stacking and jitter",
+            "Palette presets; export as SVG or PNG",
+          ]},
         ]} />
         {/* Quick Filter */}
         <QuickFilter headers={headers} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>

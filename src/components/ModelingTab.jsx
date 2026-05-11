@@ -17,6 +17,7 @@ import {
   runFuzzyRDD, runEventStudy, runLSDV, runPoissonFE, runSyntheticControl,
   wrapResult,
 } from "../math/index.js";
+import { predict }              from "../math/calcEngine.js";
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
@@ -1118,6 +1119,11 @@ function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, dict = {}, ro
               node: <RDDPlot result={r.rddData ?? {}} yLabel={yVar} xLabel={runningVar} /> },
             { id: "forest", label: "Coefficient plot",
               node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
+            { id: "mccrary", label: "McCrary density",
+              node: <McCraryPlot
+                result={runMcCrary(rows, runningVar, r.rddData?.cutoff)}
+                xLabel={runningVar}
+              /> },
           ]} />
         </>
       )}
@@ -1241,6 +1247,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [compareOpen,   setCompareOpen]   = useState(false);
   const [activeBufferId, setActiveBufferId] = useState(null);
   const pinnedModels = useMemo(() => modelBuffer.getAll(), [bufferVersion]);
+
+  // ── Predict from Model ────────────────────────────────────────────────────
+  const [predOpen,     setPredOpen]    = useState(false);
+  const [predModelId,  setPredModelId] = useState("");
+  const [predInputs,   setPredInputs]  = useState({});   // { varName: stringValue }
+  const [predResult,   setPredResult]  = useState(null);
 
   // ── H8: Specification curve (state only — callback defined after _runEstimation) ──
   const [specOpen,    setSpecOpen]    = useState(false);
@@ -1630,13 +1642,47 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         {/* ── LEFT: Spec Panel ── */}
         <div style={{ width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`, overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem" }}>
 
-          <HintBox color={C.teal} title="How to model" tips={[
-            "Choose an estimator from the dropdown — grouped by strategy (linear, panel, causal…)",
-            "Assign Y (outcome), X (controls), Z (instruments), or W (weights) via the chip selectors",
-            "Panel structure (FE, FD, DiD, Event Study) requires entity & time declared in Wrangling → Panel",
-            "Inference Options: switch between classical, HC1–HC3, clustered, or HAC standard errors",
-            "Pin results to the model buffer to compare multiple specifications side by side",
-            "Export: LaTeX table, CSV coefficients, or replication scripts in R / Stata / Python",
+          <HintBox color={C.teal} title="How to model" overlayLeft={300} sections={[
+            { heading: "Estimators", items: [
+              "OLS — ordinary least squares",
+              "WLS — weighted least squares (supply a weight column in W)",
+              "FE — fixed effects within estimator (panel required)",
+              "FD — first differences (panel required)",
+              "TWFE — two-way fixed effects DiD (panel required)",
+              "2×2 DiD — classic difference-in-differences",
+              "2SLS / IV — instrumental variables; Z = instrument columns",
+              "Sharp RDD — local polynomial with IK bandwidth selection",
+              "Logit / Probit — binary outcome MLE, marginal effects at mean",
+              "GMM / LIML — generalized method of moments",
+              "Synthetic Control — Frank-Wolfe, placebo inference",
+            ]},
+            { heading: "Workflow", items: [
+              "1. Estimator sidebar (left): pick model group → estimator",
+              "2. Variable Selector: assign Y (outcome), X (regressors), W (weights / instruments / controls)",
+              "3. Model Configuration: set estimator-specific options (Z instruments, cutoff, treated unit…)",
+              "4. Inference Options: choose SE type",
+              "5. Click Estimate",
+            ]},
+            { heading: "Standard Errors", items: [
+              "Classical — homoskedastic (default)",
+              "HC1 / HC2 / HC3 — heteroskedasticity-robust (HC3 best for small N)",
+              "Clustered — one-way cluster-robust; specify the cluster column",
+              "Two-Way CGM — Cameron-Gelbach-Miller two-way clustering",
+              "Newey-West HAC — time-series robust with lag selection",
+            ]},
+            { heading: "After Estimating", items: [
+              "Pin any result to the Model Buffer (◈ icon) — compare specs side-by-side",
+              "Model Buffer bar: coefficient comparison table across all pinned models",
+              "Code Editor: view and copy R / Python / Stata replication scripts",
+              "Plot Builder: build result-augmented charts from estimated data",
+              "Spec Curve: test coefficient stability across a threshold range",
+              "Export: LaTeX table, CSV coefficients, or full replication zip bundle",
+              "AI Coach (? button): get methodological feedback on your specification",
+            ]},
+            { heading: "Panel Requirements", items: [
+              "FE, FD, TWFE, Event Study require entity + time declared in Clean → Panel Structure tab",
+              "Without panel declaration, these estimators are disabled",
+            ]},
           ]} />
 
           <EstimatorSidebar
@@ -1961,10 +2007,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <Lbl color={C.textMuted}>Coefficient Plot & Diagnostics</Lbl>
                 <PlotSelector
                   accentColor={C.green}
-                  defaultId="yhat"
+                  defaultId={[...xVars, ...wVars].length > 0 ? `partial_${[...xVars, ...wVars][0]}` : "yhat"}
                   plots={[
-                    { id: "yhat",  label: "Y vs Ŷ",
-                      node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={yVar[0]} /> },
                     ...[...xVars, ...wVars].map((xc, i) => {
                       const idx = r.varNames.indexOf(xc);
                       return {
@@ -1980,6 +2024,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                         />,
                       };
                     }),
+                    { id: "yhat",  label: "Y vs Ŷ",
+                      node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={yVar[0]} /> },
                     { id: "forest", label: "Coefficient plot",
                       node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-ols" filename="ols_coefficients.svg" /> },
                     { id: "resid",  label: "Residuals vs Fitted",
@@ -2567,6 +2613,81 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             )}
           </div>
         )}
+
+        {/* ── Predict from Model ── */}
+        {pinnedModels.length > 0 && (() => {
+          const predModel = pinnedModels.find(m => m.id === predModelId) ?? pinnedModels[pinnedModels.length - 1];
+          const predVarNames = predModel?.varNames ?? [];
+          // Ensure predInputs has entries for every var
+          const inputs = {};
+          predVarNames.forEach(v => { inputs[v] = predInputs[v] ?? "0"; });
+
+          function runPredict() {
+            if (!predModel?.beta) return;
+            const xVec = predModel.varNames.map(v => {
+              const val = parseFloat(inputs[v] ?? "0");
+              return isFinite(val) ? val : 0;
+            });
+            const res = predict(predModel.beta, xVec, predModel.XtXinv, predModel.s2, predModel.df);
+            setPredResult(res);
+          }
+
+          return (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
+              <div onClick={() => { setPredOpen(o => !o); setPredResult(null); }}
+                style={{ background: C.surface2, padding: "0.55rem 0.85rem", borderBottom: predOpen ? `1px solid ${C.border}` : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 9, color: C.textMuted }}>{predOpen ? "▾" : "▸"}</span>
+                <span style={{ fontSize: 9, color: C.textDim, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono }}>Predict from Model</span>
+                <span style={{ marginLeft: "auto", fontSize: 9, color: C.textMuted }}>{pinnedModels.length} pinned</span>
+              </div>
+              {predOpen && (
+                <div style={{ padding: "0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 10 }}>
+                  {/* Model selector */}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, letterSpacing: "0.14em", textTransform: "uppercase" }}>Model</span>
+                    <select value={predModelId || predModel?.id || ""}
+                      onChange={e => { setPredModelId(e.target.value); setPredResult(null); }}
+                      style={{ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" }}>
+                      {pinnedModels.map(m => (
+                        <option key={m.id} value={m.id}>{m.label ?? m.estimator ?? m.id}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* Variable inputs */}
+                  {predVarNames.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {predVarNames.map(v => (
+                        <div key={v} style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 90 }}>
+                          <span style={{ fontSize: 9, color: C.gold, fontFamily: mono }}>{v}</span>
+                          <input type="number" step="any" value={inputs[v]}
+                            onChange={e => setPredInputs(prev => ({ ...prev, [v]: e.target.value }))}
+                            style={{ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none", width: 90 }} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div>
+                    <button onClick={runPredict}
+                      style={{ padding: "0.45rem 0.9rem", borderRadius: 3, cursor: "pointer", fontFamily: mono, fontSize: 11, background: C.teal, color: C.bg, border: `1px solid ${C.teal}`, fontWeight: 700 }}>
+                      Predict ŷ
+                    </button>
+                  </div>
+                  {predResult && (
+                    <div style={{ background: `${C.teal}0a`, border: `1px solid ${C.teal}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: mono, fontSize: 11, color: C.text, lineHeight: 1.9 }}>
+                      <div><span style={{ color: C.textMuted }}>ŷ = </span><span style={{ color: C.teal, fontSize: 13 }}>{predResult.yhat.toFixed(6)}</span></div>
+                      {predResult.se > 0 && <>
+                        <div><span style={{ color: C.textMuted }}>SE </span>{predResult.se.toFixed(6)}</div>
+                        <div><span style={{ color: C.textMuted }}>95% CI </span>
+                          <span style={{ color: C.gold }}>[{predResult.ciLow.toFixed(4)}, {predResult.ciHigh.toFixed(4)}]</span>
+                        </div>
+                      </>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── Model Buffer Bar ── */}
         <ModelBufferBar

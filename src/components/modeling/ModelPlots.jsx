@@ -184,6 +184,7 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
 //   runOLS   — engine function passed in to avoid circular import
 export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, svgIdSuffix = "" }) {
   const { C } = useTheme();
+  const [showSE, setShowSE] = useState(false);
   if (!rows?.length || !yCol || !xCol || !runOLS) return null;
 
   // Frisch-Waugh: regress Y on otherX, take residuals
@@ -249,13 +250,34 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
   const fitY1 = slope*xLo + intercept;
   const fitY2 = slope*xHi + intercept;
 
+  // SE band: ŷ ± 1.96 * sqrt(s² * (1/n + (x−x̄)²/Sxx))
+  const n_pts = pts.length;
+  const Sxx = xVals.reduce((s,v)=>s+(v-xm)**2, 0);
+  const yhatPts = pts.map(p => slope*p.x + intercept);
+  const SSR = pts.reduce((s,p,i) => s+(p.y-yhatPts[i])**2, 0);
+  const s2 = n_pts > 2 ? SSR/(n_pts-2) : 0;
+  const seSteps = 40;
+  const seXs = Array.from({length: seSteps+1}, (_,i) => xLo + (xHi-xLo)*i/seSteps);
+  const seBand = seXs.map(x => {
+    const yFit = slope*x + intercept;
+    const se = Sxx > 0 ? Math.sqrt(s2*(1/n_pts + (x-xm)**2/Sxx)) : 0;
+    return { x, upper: yFit+1.96*se, lower: yFit-1.96*se };
+  });
+  const bandUpper = seBand.map(p => `${sx(p.x).toFixed(1)},${sy(Math.min(p.upper,yHi)).toFixed(1)}`).join(' ');
+  const bandLower = seBand.slice().reverse().map(p => `${sx(p.x).toFixed(1)},${sy(Math.max(p.lower,yLo)).toFixed(1)}`).join(' ');
+
   const sig   = pVal_i != null && pVal_i < 0.05;
   const lColor = sig ? C.teal : C.textMuted;
   const svgId  = `partial-${xCol.replace(/[^a-z0-9]/gi,"-")}${svgIdSuffix}`;
 
   return (
     <InlinePlotShell title={`Partial: ${yCol} ~ ${xCol} | others`} svgId={svgId} filename={`partial_${xCol.replace(/[^a-z0-9]/gi,"-")}${svgIdSuffix}.svg`}>
-    <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
+    <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+      <button
+        onClick={() => setShowSE(v => !v)}
+        style={{ alignSelf: "flex-end", padding: "0.2rem 0.6rem", fontFamily: mono, fontSize: 9, cursor: "pointer", background: showSE ? `${lColor}22` : C.surface, border: `1px solid ${showSE ? lColor : C.border}`, color: showSE ? lColor : C.textMuted, borderRadius: 3 }}>
+        SE {showSE ? "TRUE" : "FALSE"}
+      </button>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
         style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
         <rect width={W} height={H} fill={C.bg} />
@@ -278,6 +300,12 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
         {/* zero lines */}
         {xLo<0&&xHi>0&&<line x1={sx(0)} x2={sx(0)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />}
         {yLo<0&&yHi>0&&<line x1={PAD.l} x2={PAD.l+iW} y1={sy(0)} y2={sy(0)} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />}
+
+        {/* SE band */}
+        {showSE && Sxx > 0 && (
+          <polygon points={`${bandUpper} ${bandLower}`}
+            fill={lColor} opacity={0.12} />
+        )}
 
         {/* scatter */}
         {pts.map((p,i) => (
@@ -334,7 +362,7 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
   );
 }
 
-// ─── SHARED SVG HELPERS ───────────────────────────────────────────────────────
+// ─── SHARED SVG HELPERS ──────────────────────────────────────────────────────
 
 function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
   const { C } = useTheme();
@@ -1536,7 +1564,12 @@ export function RDDCovariateBalance({ result, controls, rows }) {
 //   theta, thetaSE, zStat, pVal, manipulation, cutoff, h, bw, n }
 export function McCraryPlot({ result, xLabel = "Running variable" }) {
   const { C } = useTheme();
-  if (!result?.bins?.length) return null;
+  if (!result?.bins?.length) return (
+    <div style={{ padding: "2rem 1.5rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontFamily: mono, fontSize: 11, lineHeight: 1.6 }}>
+      McCrary density test could not be computed.<br />
+      <span style={{ color: C.textDim, fontSize: 10 }}>Possible reasons: fewer than 20 observations, cutoff outside data range, or insufficient bins on one side. Try adjusting the cutoff or collecting more data near the threshold.</span>
+    </div>
+  );
 
   const {
     bins, leftFit, rightFit,

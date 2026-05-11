@@ -1457,6 +1457,50 @@ The current pipeline is scoped to a single dataset and lives in `runner.js` (23 
 
 ---
 
+## Phase 16: Plot Builder History (Plot Pipeline) — PENDING
+
+Persistent plot history in the Plot Builder tab within ExplorerModule. Users save named plots inside a session, navigate them with arrows, and compare two side-by-side. History persists in IndexedDB scoped to `pid` — survives tab close and project re-open.
+
+### Feature spec
+
+**Save flow:**
+- "Save plot" button in PlotBuilder toolbar saves current state: `{ id, name, layers[], title, xLabel, yLabel, scheme, savedAt }`
+- Auto-name: "Plot 1", "Plot 2", ... (editable inline after save)
+- "New plot" button clears builder (layers reset, labels reset, title reset)
+- Builder does NOT auto-clear on save — user explicitly clicks "New" to start fresh
+
+**Navigation:**
+- `← →` arrow buttons in toolbar, showing `2 / 4` counter
+- Clicking an arrow loads that plot's saved state into the builder (restores all layers + config)
+- Keyboard shortcuts: `Alt+←` / `Alt+→`
+
+**History strip (collapsible, below the plot):**
+- Horizontal row of saved plot cards
+- Each card: layer color dots + geom names + title (truncated) + `×` delete
+- Click card → load that plot into builder
+- Compare mode: checkbox on exactly 2 cards → side-by-side view below strip
+
+**Persistence:**
+- IndexedDB key: `plotHistory_<pid>` (array of saved plot objects, ordered by `savedAt`)
+- Load on mount, save on every "Save plot" / delete action
+- Uses existing `indexedDB.js` pattern (`openDB` → `get` / `put` on a general-purpose key-value store)
+
+### Files to create/modify
+
+| File | Change |
+|------|--------|
+| `src/services/Persistence/indexedDB.js` | Add `getPlotHistory(pid)` and `savePlotHistory(pid, history[])` |
+| `src/components/PlotBuilder.jsx` | Add `plotHistory` state, Save/New buttons, `← →` nav, collapsible strip, compare mode |
+
+### Build order
+
+1. `indexedDB.js` — add `getPlotHistory` / `savePlotHistory` (2 functions, follows existing `loadPipeline` pattern)
+2. PlotBuilder — history state + Save/New buttons + arrow nav
+3. History strip — collapsible, card render, delete
+4. Compare mode — side-by-side `PlotCanvas` for 2 selected history entries
+
+---
+
 ## Next unblocked tasks
 
 1. **Browser validation of Phase 4** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, all three multi-model export scripts (R/Python/Stata) generate correctly.

@@ -108,7 +108,7 @@ function mkLayer(geom, idx) {
 // ─── BUILD MARKS FOR A SINGLE LAYER ──────────────────────────────────────────
 // Returns an array of Observable Plot marks for one layer.
 // opacity is applied to every fillOpacity/strokeOpacity.
-function buildMarksForLayer(Plt, ly, rows) {
+function buildMarksForLayer(Plt, ly, rows, showSE = true) {
   const marks = [];
   const { geom, aes, fill, opacity = 1 } = ly;
   const op  = Math.max(0, Math.min(1, opacity));
@@ -168,7 +168,10 @@ function buildMarksForLayer(Plt, ly, rows) {
     case "smooth":
       if (aes.x && aes.y)
         marks.push(Plt.linearRegressionY(rows, {
-          x: aes.x, y: aes.y, stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
+          x: aes.x, y: aes.y,
+          stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
+          fill: colorVal, fillOpacity: showSE ? 0.15 * op : 0,
+          ci: showSE ? 0.95 : 0,
         }));
       break;
 
@@ -232,7 +235,7 @@ function patchDarkTheme(el) {
 
 // ─── PLOT CANVAS — renders one or more layers on a single Observable Plot ─────
 // layers: array of layer objects (for overlay/comparison) OR single-element array
-function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canvasRef }) {
+function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canvasRef, showSE = true }) {
   const { C } = useTheme();
   const ownRef = useRef(null);
   const ref    = canvasRef ?? ownRef;
@@ -250,7 +253,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
       const marks = [];
       for (const ly of layers) {
         if (!ly.visible) continue;
-        marks.push(...buildMarksForLayer(Plt, ly, rows));
+        marks.push(...buildMarksForLayer(Plt, ly, rows, showSE));
       }
       // Grid + frame always present — subtle lines on any background
       marks.push(Plt.gridX({ stroke: "#808080", strokeOpacity: 0.18 }));
@@ -418,83 +421,39 @@ function MapCanvas({ layer, rows }) {
   );
 }
 
-// ─── AES ROW ─────────────────────────────────────────────────────────────────
-function AesRow({ label, value, onChange, headers, optional }) {
-  const { C } = useTheme();
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-      <span style={{ width: 38, fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0, textAlign: "right" }}>
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{
-          flex: 1, background: C.bg, border: `1px solid ${value ? C.border2 : C.border}`,
-          borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px",
-          color: value ? C.text : C.textMuted,
-        }}
-      >
-        <option value="">{optional ? "— none —" : "— pick column —"}</option>
-        {headers.map(h => <option key={h} value={h}>{h}</option>)}
-      </select>
-    </div>
-  );
-}
-
-// ─── LAYER CARD ───────────────────────────────────────────────────────────────
-function LayerCard({ layer, isActive, onSelect, onToggle, onPin, onRemove }) {
+// ─── LAYER TAB (compact horizontal pill) ─────────────────────────────────────
+function LayerTab({ layer, isActive, onSelect, onToggle, onRemove }) {
   const { C } = useTheme();
   return (
     <div
       onClick={onSelect}
       style={{
         display: "flex", alignItems: "center", gap: 5,
-        padding: "5px 7px", borderRadius: 3, marginBottom: 3,
-        background: isActive ? `${C.teal}12` : "transparent",
-        border: `1px solid ${isActive ? C.teal + "40" : "transparent"}`,
-        cursor: "pointer",
+        padding: "4px 8px 4px 6px", borderRadius: 3, flexShrink: 0,
+        background: isActive ? `${C.teal}15` : C.bg,
+        border: `1px solid ${isActive ? C.teal + "55" : C.border}`,
+        cursor: "pointer", transition: "border-color 0.12s",
       }}
     >
-      {/* Pin checkbox for comparison */}
-      <input
-        type="checkbox"
-        checked={!!layer.pinned}
-        onChange={e => { e.stopPropagation(); onPin(); }}
-        onClick={e => e.stopPropagation()}
-        title="Include in comparison"
-        style={{ cursor: "pointer", accentColor: C.gold, margin: 0, flexShrink: 0 }}
-      />
-      <div style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: layer.fill }} />
-      <span style={{
-        flex: 1, fontFamily: mono, fontSize: 10,
-        color: isActive ? C.teal : C.text,
-        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-      }}>
-        {layer.geom}{layer.aes.x ? ` · ${layer.aes.x}` : ""}
+      <div style={{ width: 7, height: 7, borderRadius: "50%", background: layer.fill, flexShrink: 0 }} />
+      <span style={{ fontFamily: mono, fontSize: 10, color: isActive ? C.teal : C.textDim, whiteSpace: "nowrap" }}>
+        {layer.geom}{layer.aes?.x ? ` · ${layer.aes.x}` : ""}
+        {layer.opacity < 0.99 ? ` ${Math.round(layer.opacity*100)}%` : ""}
       </span>
-      {/* Opacity badge */}
-      {layer.opacity < 0.99 && (
-        <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted, flexShrink: 0 }}>
-          {Math.round(layer.opacity * 100)}%
-        </span>
-      )}
-      <button
-        onClick={e => { e.stopPropagation(); onToggle(); }}
+      <button onClick={e => { e.stopPropagation(); onToggle(); }}
         title={layer.visible ? "Hide" : "Show"}
-        style={{ background: "none", border: "none", cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px", color: layer.visible ? C.textDim : C.textMuted }}
-      >{layer.visible ? "●" : "○"}</button>
-      <button
-        onClick={e => { e.stopPropagation(); onRemove(); }}
-        title="Remove layer"
-        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1, color: C.textMuted }}
-      >×</button>
+        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, padding: "0 1px", color: layer.visible ? C.textDim : C.textMuted, lineHeight: 1 }}>
+        {layer.visible ? "●" : "○"}
+      </button>
+      <button onClick={e => { e.stopPropagation(); onRemove(); }}
+        title="Remove"
+        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, padding: "0 1px", color: C.textMuted, lineHeight: 1 }}>×</button>
     </div>
   );
 }
 
-// ─── LAYER EDITOR ─────────────────────────────────────────────────────────────
-function LayerEditor({ layer, onChange, headers }) {
+// ─── INLINE LAYER EDITOR (horizontal compact row) ─────────────────────────────
+function LayerEditorInline({ layer, onChange, headers }) {
   const { C } = useTheme();
   const isMap        = layer.geom === "map";
   const isRefLine    = ["hline", "vline"].includes(layer.geom);
@@ -502,177 +461,108 @@ function LayerEditor({ layer, onChange, headers }) {
   const noY          = ["histogram", "density", "hline", "vline"].includes(layer.geom);
   const noX          = ["hline", "vline"].includes(layer.geom);
 
-  return (
-    <div>
-      {/* Geom selector */}
-      <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono, marginBottom: 7 }}>
-        Geom
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 12 }}>
-        {GEOMS.map(g => (
-          <button
-            key={g.id}
-            onClick={() => onChange({ ...layer, geom: g.id })}
-            style={{
-              padding: "3px 7px", borderRadius: 3, fontFamily: mono, fontSize: 9,
-              cursor: "pointer",
-              background: layer.geom === g.id ? `${C.teal}18` : "transparent",
-              border: `1px solid ${layer.geom === g.id ? C.teal + "60" : C.border}`,
-              color: layer.geom === g.id ? C.teal : C.textMuted,
-            }}
-          >{g.label}</button>
-        ))}
-      </div>
+  const selStyle = active => ({
+    background: C.bg, border: `1px solid ${active ? C.border2 : C.border}`,
+    borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px",
+    color: active ? C.text : C.textMuted, minWidth: 90, maxWidth: 140,
+  });
+  const sep = <div style={{ width: 1, height: 18, background: C.border, flexShrink: 0, alignSelf: "center" }} />;
 
-      {/* Position */}
-      {!isMap && POSITION_OPTIONS[layer.geom] && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono, marginBottom: 7 }}>
-            Position
-          </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {POSITION_OPTIONS[layer.geom].map(pos => (
-              <button
-                key={pos}
-                onClick={() => onChange({ ...layer, position: pos })}
-                style={{
-                  padding: "3px 9px", borderRadius: 3, fontFamily: mono, fontSize: 9,
-                  cursor: "pointer",
-                  background: layer.position === pos ? `${C.gold}18` : "transparent",
-                  border: `1px solid ${layer.position === pos ? C.gold + "60" : C.border}`,
-                  color: layer.position === pos ? C.gold : C.textMuted,
-                }}
-              >{pos}</button>
-            ))}
-          </div>
-        </div>
-      )}
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5,
+      padding: "0.45rem 0.75rem", borderBottom: `1px solid ${C.border}`,
+      background: `${C.teal}07`,
+    }}>
+      {/* Geom chips */}
+      <span style={{ fontSize: 8, color: C.textMuted, fontFamily: mono, letterSpacing: "0.15em", textTransform: "uppercase" }}>geom</span>
+      {GEOMS.map(g => (
+        <button key={g.id} onClick={() => onChange({ ...layer, geom: g.id })}
+          style={{
+            padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+            background: layer.geom === g.id ? `${C.teal}20` : "transparent",
+            border: `1px solid ${layer.geom === g.id ? C.teal + "65" : C.border}`,
+            color: layer.geom === g.id ? C.teal : C.textMuted,
+          }}>{g.label}</button>
+      ))}
+
+      {sep}
 
       {/* Aesthetics */}
-      <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono, marginBottom: 7 }}>
-        Aesthetics
-      </div>
+      {isRefLine && <>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>value</span>
+        <input type="number" value={layer.value ?? ""} placeholder="0"
+          onChange={e => onChange({ ...layer, value: e.target.value })}
+          style={{ ...selStyle(!!layer.value), width: 60 }} />
+      </>}
+      {!noX && <>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>{isMap ? "lon" : "x"}</span>
+        <select value={layer.aes.x} onChange={e => onChange({ ...layer, aes: { ...layer.aes, x: e.target.value } })} style={selStyle(!!layer.aes.x)}>
+          <option value="">— col —</option>
+          {headers.map(h => <option key={h} value={h}>{h}</option>)}
+        </select>
+      </>}
+      {!noY && <>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>{isMap ? "lat" : "y"}</span>
+        <select value={layer.aes.y} onChange={e => onChange({ ...layer, aes: { ...layer.aes, y: e.target.value } })} style={selStyle(!!layer.aes.y)}>
+          <option value="">— col —</option>
+          {headers.map(h => <option key={h} value={h}>{h}</option>)}
+        </select>
+      </>}
+      {needsYMinMax && <>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>yMin</span>
+        <select value={layer.aes.yMin ?? ""} onChange={e => onChange({ ...layer, aes: { ...layer.aes, yMin: e.target.value } })} style={selStyle(!!layer.aes.yMin)}>
+          <option value="">— col —</option>
+          {headers.map(h => <option key={h} value={h}>{h}</option>)}
+        </select>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>yMax</span>
+        <select value={layer.aes.yMax ?? ""} onChange={e => onChange({ ...layer, aes: { ...layer.aes, yMax: e.target.value } })} style={selStyle(!!layer.aes.yMax)}>
+          <option value="">— col —</option>
+          {headers.map(h => <option key={h} value={h}>{h}</option>)}
+        </select>
+      </>}
+      {!isRefLine && <>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>color</span>
+        <select value={layer.aes.color} onChange={e => onChange({ ...layer, aes: { ...layer.aes, color: e.target.value } })} style={selStyle(!!layer.aes.color)}>
+          <option value="">— none —</option>
+          {headers.map(h => <option key={h} value={h}>{h}</option>)}
+        </select>
+      </>}
 
-      {isRefLine && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-          <span style={{ width: 38, fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0, textAlign: "right" }}>value</span>
-          <input
-            type="number"
-            value={layer.value ?? ""}
-            onChange={e => onChange({ ...layer, value: e.target.value })}
-            placeholder="0"
+      {sep}
+
+      {/* Fill color */}
+      {!layer.aes?.color && <>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>fill</span>
+        <input type="color" value={layer.fill} onChange={e => onChange({ ...layer, fill: e.target.value })}
+          style={{ width: 24, height: 20, border: "none", background: "none", cursor: "pointer", padding: 0 }} />
+      </>}
+
+      {/* Position */}
+      {POSITION_OPTIONS[layer.geom] && <>
+        {sep}
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>pos</span>
+        {POSITION_OPTIONS[layer.geom].map(pos => (
+          <button key={pos} onClick={() => onChange({ ...layer, position: pos })}
             style={{
-              flex: 1, background: C.bg, border: `1px solid ${C.border}`,
-              borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px",
-              color: C.text, outline: "none",
-            }}
-          />
-        </div>
-      )}
+              padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+              background: layer.position === pos ? `${C.gold}18` : "transparent",
+              border: `1px solid ${layer.position === pos ? C.gold + "65" : C.border}`,
+              color: layer.position === pos ? C.gold : C.textMuted,
+            }}>{pos}</button>
+        ))}
+      </>}
 
-      {!noX && (
-        <AesRow label={isMap ? "lon" : "x"} value={layer.aes.x}
-          onChange={v => onChange({ ...layer, aes: { ...layer.aes, x: v } })}
-          headers={headers} optional={["boxplot"].includes(layer.geom)} />
-      )}
-      {!noY && (
-        <AesRow label={isMap ? "lat" : "y"} value={layer.aes.y}
-          onChange={v => onChange({ ...layer, aes: { ...layer.aes, y: v } })}
-          headers={headers} />
-      )}
-      {needsYMinMax && (<>
-        <AesRow label="yMin" value={layer.aes.yMin ?? ""}
-          onChange={v => onChange({ ...layer, aes: { ...layer.aes, yMin: v } })}
-          headers={headers} />
-        <AesRow label="yMax" value={layer.aes.yMax ?? ""}
-          onChange={v => onChange({ ...layer, aes: { ...layer.aes, yMax: v } })}
-          headers={headers} />
-      </>)}
-      {!isRefLine && (
-        <AesRow label="color" value={layer.aes.color}
-          onChange={v => onChange({ ...layer, aes: { ...layer.aes, color: v } })}
-          headers={headers} optional />
-      )}
-
-      {/* Manual fill color */}
-      {!layer.aes.color && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-          <span style={{ width: 38, fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0, textAlign: "right" }}>fill</span>
-          <input
-            type="color"
-            value={layer.fill}
-            onChange={e => onChange({ ...layer, fill: e.target.value })}
-            style={{ width: 30, height: 22, border: "none", background: "none", cursor: "pointer", padding: 0 }}
-          />
-          <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>{layer.fill}</span>
-        </div>
-      )}
-
-      {/* G10.2 — Opacity slider */}
-      <div style={{ marginTop: 10 }}>
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono, marginBottom: 6 }}>
-          Opacity
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="range"
-            min={0} max={1} step={0.05}
-            value={layer.opacity ?? 1}
-            onChange={e => onChange({ ...layer, opacity: +e.target.value })}
-            style={{ flex: 1, accentColor: C.teal, cursor: "pointer" }}
-          />
-          <span style={{ fontFamily: mono, fontSize: 9, color: C.textDim, width: 28, textAlign: "right", flexShrink: 0 }}>
-            {Math.round((layer.opacity ?? 1) * 100)}%
-          </span>
-        </div>
+      {/* Opacity — right-aligned */}
+      <div style={{ display: "flex", alignItems: "center", gap: 5, marginLeft: "auto" }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>α</span>
+        <input type="range" min={0} max={1} step={0.05} value={layer.opacity ?? 1}
+          onChange={e => onChange({ ...layer, opacity: +e.target.value })}
+          style={{ width: 64, accentColor: C.teal, cursor: "pointer" }} />
+        <span style={{ fontFamily: mono, fontSize: 9, color: C.textDim, width: 26, textAlign: "right", flexShrink: 0 }}>
+          {Math.round((layer.opacity ?? 1) * 100)}%
+        </span>
       </div>
-    </div>
-  );
-}
-
-// ─── COMPARISON PANEL ─────────────────────────────────────────────────────────
-// Renders pinned layers side-by-side or overlaid
-function ComparisonPanel({ pinnedLayers, rows, xLabel, yLabel, w, scheme, overlayMode }) {
-  const { C } = useTheme();
-  const canvasRefs = [useRef(null), useRef(null), useRef(null)];
-
-  if (overlayMode) {
-    // Overlay: all pinned layers on one canvas with per-layer opacity
-    return (
-      <div>
-        <PlotCanvas
-          layers={pinnedLayers}
-          rows={rows}
-          xLabel={xLabel}
-          yLabel={yLabel}
-          width={w}
-          scheme={scheme}
-          canvasRef={canvasRefs[0]}
-        />
-      </div>
-    );
-  }
-
-  // Side-by-side: each pinned layer gets its own canvas
-  const panelW = Math.max(200, Math.floor((w - (pinnedLayers.length - 1) * 12) / pinnedLayers.length));
-  return (
-    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-      {pinnedLayers.map((ly, i) => (
-        <div key={ly.id} style={{ flex: "1 1 0", minWidth: 200 }}>
-          <div style={{ fontFamily: mono, fontSize: 9, color: ly.fill, marginBottom: 4, letterSpacing: "0.1em" }}>
-            {ly.geom}{ly.aes.x ? ` · ${ly.aes.x}` : ""}{ly.aes.y ? ` / ${ly.aes.y}` : ""}
-          </div>
-          <PlotCanvas
-            layers={[{ ...ly, opacity: ly.opacity ?? 1 }]}
-            rows={rows}
-            xLabel={xLabel}
-            yLabel={yLabel}
-            width={panelW}
-            scheme={scheme}
-            canvasRef={canvasRefs[i]}
-          />
-        </div>
-      ))}
     </div>
   );
 }
@@ -680,38 +570,26 @@ function ComparisonPanel({ pinnedLayers, rows, xLabel, yLabel, w, scheme, overla
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [] }) {
   const { C } = useTheme();
-  const [layers,      setLayers]      = useState(initialLayers);
-  const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
-  const [title,       setTitle]       = useState("");
-  const [xLabel,      setXLabel]      = useState("");
-  const [yLabel,      setYLabel]      = useState("");
-  const [scheme,      setScheme]      = useState("");
-  const [overlayMode, setOverlayMode] = useState(false); // G10.4
-  const canvasRef   = useRef(null);
-  const containerRef = useRef(null);
-  const centerRef    = useRef(null);
-  const [canvasW, setCanvasW] = useState(560);
-  const [canvasH, setCanvasH] = useState(440);
+  const [layers,   setLayers]   = useState(initialLayers);
+  const [activeId, setActiveId] = useState(initialLayers[0]?.id ?? null);
+  const [title,    setTitle]    = useState("");
+  const [xLabel,   setXLabel]   = useState("");
+  const [yLabel,   setYLabel]   = useState("");
+  const [scheme,   setScheme]   = useState("");
+  const [showSE,   setShowSE]   = useState(true);
+  const canvasRef  = useRef(null);
+  const plotRef    = useRef(null);
+  const [canvasW,  setCanvasW]  = useState(760);
+  const [canvasH,  setCanvasH]  = useState(400);
 
-  // Track container width (for canvas width calculation)
+  // Measure the plot area for responsive canvas sizing
   useEffect(() => {
-    const el = containerRef.current;
+    const el = plotRef.current;
     if (!el) return;
     const ro = new ResizeObserver(entries => {
-      const w = entries[0]?.contentRect.width;
-      if (w) setCanvasW(Math.max(280, Math.round(w) - 242));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Track center panel height (for single-layer full-height canvas)
-  useEffect(() => {
-    const el = centerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(entries => {
-      const h = entries[0]?.contentRect.height;
-      if (h) setCanvasH(Math.max(280, Math.round(h) - 48)); // subtract toolbar
+      const { width, height } = entries[0]?.contentRect ?? {};
+      if (width)  setCanvasW(Math.max(300, Math.round(width)  - 20));
+      if (height) setCanvasH(Math.max(220, Math.round(height) - 20));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -725,220 +603,153 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     });
   }, []);
 
-  const updateLayer  = useCallback(updated =>
+  const updateLayer = useCallback(updated =>
     setLayers(prev => prev.map(l => l.id === updated.id ? updated : l)), []);
 
-  const removeLayer  = useCallback(id => {
-    setLayers(prev => prev.filter(l => l.id !== id));
-    setActiveId(prev => prev === id ? null : prev);
+  const removeLayer = useCallback(id => {
+    setLayers(prev => {
+      const next = prev.filter(l => l.id !== id);
+      setActiveId(a => a === id ? (next[next.length - 1]?.id ?? null) : a);
+      return next;
+    });
   }, []);
 
-  const togglePin = useCallback(id =>
-    setLayers(prev => prev.map(l => l.id === id ? { ...l, pinned: !l.pinned } : l)), []);
-
-  const activeLayer  = layers.find(l => l.id === activeId) ?? null;
-  const pinnedLayers = layers.filter(l => l.pinned && l.visible);
-  const isComparing  = pinnedLayers.length >= 2;
+  const activeLayer    = layers.find(l => l.id === activeId) ?? null;
+  const visibleLayers  = layers.filter(l => l.visible);
+  const hasSmooth      = visibleLayers.some(l => l.geom === "smooth");
+  const hasMap         = visibleLayers.some(l => l.geom === "map");
+  const mapLayer       = visibleLayers.find(l => l.geom === "map");
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        display: "flex", background: C.surface, border: `1px solid ${C.border}`,
-        borderRadius: 4, overflow: "hidden", minHeight: 380, ...style,
-      }}
-    >
-      {/* ── LEFT PANEL ────────────────────────────────────────────────────── */}
-      <div style={{
-        width: 232, flexShrink: 0, borderRight: `1px solid ${C.border}`,
-        display: "flex", flexDirection: "column",
-      }}>
+    <div style={{
+      display: "flex", flexDirection: "column", background: C.surface,
+      border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden",
+      minHeight: 480, ...style,
+    }}>
 
-        {/* Layer list */}
-        <div style={{ padding: "0.75rem 0.65rem 0.6rem", borderBottom: `1px solid ${C.border}` }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono }}>
-              Layers
-            </span>
-            {/* Comparison hint */}
-            {layers.length > 0 && (
-              <span style={{ fontSize: 8, color: C.textMuted, fontFamily: mono }}>
-                ☐ = compare
-              </span>
-            )}
-          </div>
+      {/* ── TOP: controls ─────────────────────────────────────────────────── */}
+      <div style={{ flexShrink: 0, borderBottom: `1px solid ${C.border}` }}>
+
+        {/* Row 1: layer tabs + add-layer chips */}
+        <div style={{
+          display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5,
+          padding: "0.45rem 0.75rem", borderBottom: `1px solid ${C.border}`,
+          background: C.surface,
+        }}>
           {layers.length === 0 && (
-            <div style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginBottom: 6 }}>No layers yet.</div>
+            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginRight: 4 }}>No layers —</span>
           )}
           {layers.map(ly => (
-            <LayerCard
+            <LayerTab
               key={ly.id}
               layer={ly}
               isActive={ly.id === activeId}
               onSelect={() => setActiveId(ly.id)}
               onToggle={() => updateLayer({ ...ly, visible: !ly.visible })}
-              onPin={() => togglePin(ly.id)}
               onRemove={() => removeLayer(ly.id)}
             />
           ))}
-
-          {/* Add layer buttons */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
-            {GEOMS.map(g => (
-              <button
-                key={g.id}
-                onClick={() => addLayer(g.id)}
-                title={`Add ${g.label} layer`}
-                style={{
-                  padding: "3px 7px", borderRadius: 3, fontFamily: mono, fontSize: 9,
-                  background: "none", border: `1px dashed ${C.border2}`,
-                  color: C.textMuted, cursor: "pointer",
-                }}
-              >+{g.label}</button>
-            ))}
-          </div>
+          {/* Divider when layers exist */}
+          {layers.length > 0 && (
+            <div style={{ width: 1, height: 16, background: C.border, alignSelf: "center", margin: "0 2px" }} />
+          )}
+          {/* Add-layer chips */}
+          {GEOMS.map(g => (
+            <button key={g.id} onClick={() => addLayer(g.id)}
+              title={`Add ${g.label} layer`}
+              style={{
+                padding: "3px 7px", borderRadius: 3, fontFamily: mono, fontSize: 9,
+                background: "none", border: `1px dashed ${C.border2}`,
+                color: C.textMuted, cursor: "pointer", flexShrink: 0,
+              }}>+{g.label}</button>
+          ))}
         </div>
 
-        {/* Active layer editor */}
-        <div style={{ flex: 1, padding: "0.75rem 0.65rem", overflowY: "auto" }}>
-          {activeLayer
-            ? <LayerEditor layer={activeLayer} onChange={updateLayer} headers={headers} />
-            : <div style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Select a layer to configure its aesthetics.</div>
-          }
-        </div>
+        {/* Row 2: inline editor for active layer */}
+        {activeLayer && (
+          <LayerEditorInline layer={activeLayer} onChange={updateLayer} headers={headers} />
+        )}
 
-        {/* Labels + Palette */}
-        <div style={{ padding: "0.65rem", borderTop: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono, marginBottom: 8 }}>
-            Labels
-          </div>
+        {/* Row 3: toolbar — labels, palette, SE, export */}
+        <div style={{
+          display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8,
+          padding: "0.38rem 0.75rem", background: C.surface,
+        }}>
           {[
-            { lbl: "Title",  val: title,  set: setTitle  },
-            { lbl: "X axis", val: xLabel, set: setXLabel },
-            { lbl: "Y axis", val: yLabel, set: setYLabel },
-          ].map(({ lbl, val, set }) => (
-            <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
-              <span style={{ width: 38, fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>{lbl}</span>
-              <input
-                value={val}
-                onChange={e => set(e.target.value)}
-                placeholder={lbl.toLowerCase()}
+            { lbl: "Title",  val: title,  set: setTitle,  w: 120 },
+            { lbl: "X axis", val: xLabel, set: setXLabel, w: 80  },
+            { lbl: "Y axis", val: yLabel, set: setYLabel, w: 80  },
+          ].map(({ lbl, val, set, w }) => (
+            <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>{lbl}</span>
+              <input value={val} onChange={e => set(e.target.value)} placeholder={lbl.toLowerCase()}
                 style={{
-                  flex: 1, background: C.bg, border: `1px solid ${C.border}`,
-                  borderRadius: 3, fontFamily: mono, fontSize: 9, padding: "3px 5px",
-                  color: C.text, outline: "none",
-                }}
-              />
+                  width: w, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
+                  fontFamily: mono, fontSize: 9, padding: "3px 5px", color: C.text, outline: "none",
+                }} />
             </div>
           ))}
-          {/* G7 — palette preset */}
-          <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
-            <span style={{ width: 38, fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>palette</span>
-            <select
-              value={scheme}
-              onChange={e => setScheme(e.target.value)}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Style</span>
+            <select value={scheme} onChange={e => setScheme(e.target.value)}
               style={{
-                flex: 1, background: C.bg, border: `1px solid ${C.border}`,
-                borderRadius: 3, fontFamily: mono, fontSize: 9, padding: "3px 5px",
+                background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
+                fontFamily: mono, fontSize: 9, padding: "3px 5px",
                 color: scheme ? C.text : C.textMuted,
-              }}
-            >
-              {PALETTE_PRESETS.map(p => (
-                <option key={p.id} value={p.id}>{p.label}</option>
-              ))}
+              }}>
+              {PALETTE_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           </div>
-        </div>
-      </div>
 
-      {/* ── CENTER: plot canvas ────────────────────────────────────────────── */}
-      <div ref={centerRef} style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          {hasSmooth && (
+            <button onClick={() => setShowSE(v => !v)}
+              style={{
+                padding: "3px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9,
+                cursor: "pointer", border: `1px solid ${C.border2}`,
+                background: showSE ? `${C.teal}18` : "transparent",
+                color: showSE ? C.teal : C.textMuted, transition: "all 0.12s",
+              }}>SE {showSE ? "TRUE" : "FALSE"}</button>
+          )}
 
-        {/* Toolbar */}
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "0.4rem 0.85rem", borderBottom: `1px solid ${C.border}`, minHeight: 32,
-          gap: 8,
-        }}>
-          <span style={{ fontFamily: mono, fontSize: 12, color: C.text, letterSpacing: "0.02em" }}>
-            {title}
-          </span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {/* G10.4 — comparison mode toggle */}
-            {isComparing && (
-              <div style={{ display: "flex", gap: 4 }}>
-                {["side-by-side", "overlay"].map(mode => (
-                  <button
-                    key={mode}
-                    onClick={() => setOverlayMode(mode === "overlay")}
-                    style={{
-                      padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9,
-                      cursor: "pointer", border: `1px solid ${C.border2}`,
-                      background: (mode === "overlay") === overlayMode ? `${C.gold}18` : "transparent",
-                      color: (mode === "overlay") === overlayMode ? C.gold : C.textMuted,
-                    }}
-                  >{mode}</button>
-                ))}
-              </div>
-            )}
-            {layers.length > 0 && (
+          {visibleLayers.length > 0 && (
+            <div style={{ marginLeft: "auto" }}>
               <PlotExportBar
                 getEl={() => canvasRef.current}
                 filename={title || "plot"}
-                style={{ border: "none", padding: "0 0.35rem", background: "transparent", borderTop: "none" }}
+                style={{ border: "none", padding: 0, background: "transparent", borderTop: "none" }}
               />
-            )}
-          </div>
+            </div>
+          )}
         </div>
+      </div>
 
-        {/* Canvas area */}
-        {layers.length === 0 ? (
+      {/* ── BOTTOM: plot — all visible layers composited ────────────────────── */}
+      <div ref={plotRef} style={{ flex: 1, padding: "0.65rem", overflow: "hidden", minHeight: 220 }}>
+        {visibleLayers.length === 0 ? (
           <div style={{
-            flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-            color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "2rem", textAlign: "center",
+            height: "100%", minHeight: 180, display: "flex", alignItems: "center",
+            justifyContent: "center", flexDirection: "column", gap: 8,
+            color: C.textMuted, fontFamily: mono, fontSize: 10, textAlign: "center",
           }}>
-            Add a layer and pick X / Y columns to render a plot.
-            <br /><br />
-            <span style={{ fontSize: 9 }}>Tick the ☐ checkbox on 2–3 layers to compare them side-by-side or overlaid.</span>
+            Add a layer above, then pick x / y columns — all visible layers compose on one canvas.
           </div>
-        ) : isComparing ? (
-          /* G10.4 — comparison view */
-          <div ref={canvasRef} style={{ padding: "0.65rem", overflowX: "auto" }}>
-            <ComparisonPanel
-              pinnedLayers={pinnedLayers}
+        ) : hasMap ? (
+          <div style={{ height: Math.max(280, canvasH) }}>
+            <MapCanvas layer={mapLayer} rows={rows} />
+          </div>
+        ) : (
+          <div ref={canvasRef}>
+            <PlotCanvas
+              layers={visibleLayers}
               rows={rows}
               xLabel={xLabel}
               yLabel={yLabel}
-              w={canvasW}
+              width={canvasW}
+              height={canvasH}
               scheme={scheme}
-              overlayMode={overlayMode}
+              showSE={showSE}
             />
-          </div>
-        ) : (
-          /* Single active layer */
-          <div ref={canvasRef} style={{ padding: "0.65rem", flex: 1 }}>
-            {activeLayer ? (
-              activeLayer.geom === "map" ? (
-                /* Fixed-height wrapper breaks the ResizeObserver feedback loop */
-                <div style={{ height: 480, overflow: "hidden" }}>
-                  <MapCanvas layer={activeLayer} rows={rows} />
-                </div>
-              ) : (
-                <PlotCanvas
-                  layers={[activeLayer]}
-                  rows={rows}
-                  xLabel={xLabel}
-                  yLabel={yLabel}
-                  width={canvasW}
-                  height={canvasH}
-                  scheme={scheme}
-                />
-              )
-            ) : (
-              <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "2rem", textAlign: "center" }}>
-                Select a layer in the left panel to preview it.
-              </div>
-            )}
           </div>
         )}
       </div>

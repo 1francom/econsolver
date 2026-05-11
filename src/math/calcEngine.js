@@ -69,6 +69,55 @@ export function solveRoot(fn, a, b, tol = 1e-8, maxIter = 300) {
   return { root: b, iter: maxIter, converged: false };
 }
 
+// ─── AUTO-BRACKET SOLVER ─────────────────────────────────────────────────────
+/**
+ * Find a root of fn without requiring a manual bracket.
+ * Scans logarithmically spaced intervals on [-1e6, 1e6], picks the first
+ * sign-change found, then delegates to solveRoot (Brent's method).
+ */
+export function solveRootAuto(fn, tol = 1e-8) {
+  // Build candidate breakpoints: dense near 0, sparse at extremes
+  const pts = [];
+  for (let e = -6; e <= 6; e += 0.25) {
+    pts.push(-(10 ** e));
+    pts.push(  10 ** e);
+  }
+  pts.push(0);
+  pts.sort((a, b) => a - b);
+
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const fa = fn(a), fb = fn(b);
+    if (!isFinite(fa) || !isFinite(fb)) continue;
+    if (Math.abs(fa) < tol) return { root: a, iter: 0, converged: true };
+    if (Math.abs(fb) < tol) return { root: b, iter: 0, converged: true };
+    if (fa * fb < 0) return solveRoot(fn, a, b, tol);
+  }
+  return { error: "No root found in [−10⁶, 10⁶]. Check the expression or define variables in the workspace." };
+}
+
+// ─── NUMERICAL INTEGRATION (ADAPTIVE SIMPSON'S) ──────────────────────────────
+/**
+ * Integrate fn from a to b using composite Simpson's rule.
+ * Falls back gracefully for non-finite bounds or discontinuities.
+ * @returns {{ value, a, b, n, error? }}
+ */
+export function integrate(fn, a, b, n = 1000) {
+  if (!isFinite(a) || !isFinite(b)) return { error: "Bounds must be finite numbers." };
+  if (a === b) return { value: 0, a, b, n };
+  if (n % 2 !== 0) n++;
+  const h = (b - a) / n;
+  let sum = 0;
+  for (let i = 0; i <= n; i++) {
+    const x = a + i * h;
+    const y = fn(x);
+    if (!isFinite(y)) continue;
+    const w = i === 0 || i === n ? 1 : i % 2 === 0 ? 2 : 4;
+    sum += w * y;
+  }
+  return { value: (h / 3) * sum, a, b, n };
+}
+
 // ─── SYSTEM OF EQUATIONS — NEWTON-RAPHSON ────────────────────────────────────
 /**
  * Solve F(x) = 0 where F: R^n → R^n using Newton-Raphson with numerical Jacobian.
@@ -402,8 +451,20 @@ export function buildScope(variables) {
   for (const v of variables) {
     if (v.type === "Integer")    scope[v.name] = parseInt(v.rawValue)  || 0;
     else if (v.type === "Float") scope[v.name] = parseFloat(v.rawValue) || 0;
+    else if (v.type === "Slider") scope[v.name] = parseFloat(v.rawValue) || 0;
     else if (v.type === "Expression" && v.computed != null) scope[v.name] = v.computed;
   }
+  // Math functions — available in all expressions and the equation solver
+  Object.assign(scope, {
+    sqrt: Math.sqrt, cbrt: Math.cbrt, abs: Math.abs,
+    log: Math.log, log2: Math.log2, log10: Math.log10, ln: Math.log,
+    exp: Math.exp, pow: Math.pow,
+    sin: Math.sin, cos: Math.cos, tan: Math.tan,
+    asin: Math.asin, acos: Math.acos, atan: Math.atan, atan2: Math.atan2,
+    ceil: Math.ceil, floor: Math.floor, round: Math.round,
+    min: Math.min, max: Math.max, sign: Math.sign,
+    pi: Math.PI, e: Math.E, Inf: Infinity,
+  });
   // Probability functions available in all expressions and equation solver
   Object.assign(scope, {
     dnorm, pnorm, qnorm,
