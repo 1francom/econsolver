@@ -12,7 +12,15 @@
       "WebFetch(domain:db.nomics.world)",
       "WebFetch(domain:browser.sdmx.io)",
       "mcp__code-review-graph__get_architecture_overview_tool",
-      "mcp__code-review-graph__list_communities_tool"
+      "mcp__code-review-graph__list_communities_tool",
+      "Bash(gh api:*)",
+      "Read(//c/Users/meder/.claude/skills//**)",
+      "Read(//c/Users/meder/.claude/skills/**)",
+      "Skill(schedule)",
+      "mcp__code-review-graph__semantic_search_nodes_tool",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git fetch:*)"
     ]
   }
 }

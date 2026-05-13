@@ -2,7 +2,7 @@
 // Provides { C, theme, setTheme } to every component in the tree.
 // Preference persisted in localStorage under key "econ_theme".
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
 import { DARK, LIGHT } from "./theme.js";
 
 const LS_KEY = "econ_theme";
@@ -21,6 +21,11 @@ export function ThemeProvider({ children }) {
   }
 
   const C = theme === "light" ? LIGHT : DARK;
+
+  // Sync body background so the area outside React root matches the theme.
+  useEffect(() => {
+    document.body.style.background = C.bg;
+  }, [C.bg]);
 
   return (
     <ThemeCtx.Provider value={{ C, theme, setTheme }}>

@@ -276,7 +276,7 @@ export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
   const mean = vals.reduce((s, v) => s + v, 0) / n;
   const std  = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / n);
   const hAuto = 1.06 * Math.min(std, iqr / 1.34) * Math.pow(n, -0.2);
-  const hFit  = h ?? Math.max(hAuto, range * 0.1);
+  const hFit  = h ?? Math.max(hAuto, range * 0.15);
 
   // ── 5. Local linear WLS on density bins — evaluated at cutoff ────────────
   // Left side: fit density ~ (x - cutoff) with triangular kernel, eval at cutoff
@@ -287,7 +287,7 @@ export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
     });
 
     const active = bins.map((b, i) => ({ ...b, w: weights[i] })).filter(b => b.w > 0);
-    if (active.length < 3) return null;
+    if (active.length < 2) return null; // local linear needs ≥ 2 points (intercept + slope)
 
     // WLS: density = a + b*(x - evalPt), weighted
     const xc = active.map(b => b.x - evalPt);
@@ -321,13 +321,16 @@ export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
   const rightFit = localLinearDensity(rightBins, cutoff);
 
   if (!leftFit || !rightFit) return null;
-  if (leftFit.fhat <= 0 || rightFit.fhat <= 0) return null;
+  // Clamp to small positive value — local linear can return slightly negative
+  // density at the cutoff when data is sparse; clamping avoids killing the plot.
+  const fhatL = Math.max(leftFit.fhat,  1e-10);
+  const fhatR = Math.max(rightFit.fhat, 1e-10);
 
   // ── 6. θ = log(f̂_R / f̂_L), SE via delta method ─────────────────────────
   // Var(log f̂) ≈ Var(f̂) / f̂²  (delta method)
-  const theta   = Math.log(rightFit.fhat / leftFit.fhat);
-  const varTheta = rightFit.varFhat / rightFit.fhat ** 2
-                 + leftFit.varFhat  / leftFit.fhat  ** 2;
+  const theta   = Math.log(fhatR / fhatL);
+  const varTheta = rightFit.varFhat / fhatR ** 2
+                 + leftFit.varFhat  / fhatL ** 2;
   const seTheta  = Math.sqrt(Math.max(0, varTheta));
 
   if (!isFinite(theta) || seTheta <= 0) return null;
@@ -391,8 +394,8 @@ export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
     rightBins,
     leftFit:  leftFitLine,
     rightFit: rightFitLine,
-    fhatLeft:  leftFit.fhat,
-    fhatRight: rightFit.fhat,
+    fhatLeft:  fhatL,
+    fhatRight: fhatR,
     theta,
     thetaSE:  seTheta,
     zStat,

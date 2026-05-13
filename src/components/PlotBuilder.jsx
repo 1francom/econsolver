@@ -91,17 +91,31 @@ const POSITION_OPTIONS = {
 function genId() { return "ly_" + Math.random().toString(36).slice(2, 8); }
 
 const DEFAULT_FILLS = ["#6ec8b4","#c8a96e","#6e9ec8","#c47070","#a87ec8","#7ab896","#c88e6e"];
+
+// Per-geom defaults for the opts panel (ui-basic params per ggplot2-plot-design skill)
+const GEOM_OPTS_DEFAULTS = {
+  point:     { size: 3,   shape: "circle" },
+  line:      { strokeWidth: 1.8, dash: "none" },
+  smooth:    { showSE: true, ci: 0.95 },
+  boxplot:   { outlierShow: true, outlierSize: 3 },
+  histogram: { bins: 20 },
+  density:   { adjust: 1.0 },
+  bar:       { strokeWidth: 0 },
+  errorbar:  { strokeWidth: 1.5 },
+};
+
 function mkLayer(geom, idx) {
   return {
     id:       genId(),
     geom,
-    aes:      { x: "", y: "", color: "", yMin: "", yMax: "" },
+    aes:      { x: "", y: "", color: "", yMin: "", yMax: "", sizeCol: "", alphaCol: "" },
     value:    "",
     position: "identity",
     fill:     DEFAULT_FILLS[idx % DEFAULT_FILLS.length],
     visible:  true,
-    opacity:  1.0,   // G10.2 — per-layer alpha (0–1)
-    pinned:   false, // G10.4 — included in comparison view
+    opacity:  1.0,
+    pinned:   false,
+    opts:     { ...(GEOM_OPTS_DEFAULTS[geom] || {}) },
   };
 }
 
@@ -115,83 +129,112 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
   const colorVal = aes.color || fill;
 
   switch (geom) {
-    case "point":
+    case "point": {
       if (aes.x && aes.y) {
+        const { size = 3, shape = "circle" } = ly.opts || {};
+        // aes.sizeCol → variable mapping (ggplot aes(size=col)); else fixed opts.size
+        const rOpt  = aes.sizeCol  ? { r: aes.sizeCol }  : { r: size };
+        const sym   = shape !== "circle" ? { symbol: shape } : {};
+        const dotO  = { x: aes.x, y: aes.y, fill: colorVal, ...rOpt, ...sym, fillOpacity: 0.78 * op };
         if (ly.position === "jitter") {
-          marks.push(Plt.dot(rows, Plt.dodgeX("middle", {
-            x: aes.x, y: aes.y, fill: colorVal, r: 3,
-            fillOpacity: 0.78 * op, padding: 1,
-          })));
+          marks.push(Plt.dot(rows, Plt.dodgeX("middle", { ...dotO, padding: 1 })));
         } else {
-          marks.push(Plt.dot(rows, {
-            x: aes.x, y: aes.y, fill: colorVal, r: 3, fillOpacity: 0.78 * op,
-          }));
+          marks.push(Plt.dot(rows, dotO));
         }
       }
       break;
+    }
 
-    case "line":
-      if (aes.x && aes.y)
-        marks.push(Plt.line(rows, {
-          x: aes.x, y: aes.y, stroke: colorVal, strokeWidth: 1.8, strokeOpacity: op,
-        }));
-      break;
-
-    case "bar":
+    case "line": {
       if (aes.x && aes.y) {
+        const { strokeWidth = 1.8, dash = "none" } = ly.opts || {};
+        marks.push(Plt.line(rows, {
+          x: aes.x, y: aes.y, stroke: colorVal, strokeWidth, strokeOpacity: op,
+          ...(dash !== "none" ? { strokeDasharray: dash } : {}),
+        }));
+      }
+      break;
+    }
+
+    case "bar": {
+      if (aes.x && aes.y) {
+        const { strokeWidth: bsW = 0 } = ly.opts || {};
+        const barExtra = bsW > 0 ? { stroke: colorVal, strokeWidth: bsW } : {};
         if (ly.position === "stack") {
-          marks.push(Plt.barY(rows, Plt.stackY({ x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op })));
+          marks.push(Plt.barY(rows, Plt.stackY({ x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra })));
         } else {
-          marks.push(Plt.barY(rows, { x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op }));
+          marks.push(Plt.barY(rows, { x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra }));
         }
       }
       break;
+    }
 
-    case "histogram":
-      if (aes.x)
-        marks.push(Plt.rectY(rows, Plt.binX({ y: "count" }, {
-          x: aes.x, fill: colorVal, fillOpacity: 0.85 * op,
-        })));
-      break;
-
-    case "density":
+    case "histogram": {
       if (aes.x) {
+        const { bins = 20 } = ly.opts || {};
+        marks.push(Plt.rectY(rows, Plt.binX({ y: "count" }, {
+          x: aes.x, fill: colorVal, fillOpacity: 0.85 * op, thresholds: bins,
+        })));
+      }
+      break;
+    }
+
+    case "density": {
+      if (aes.x) {
+        const { adjust = 1.0 } = ly.opts || {};
         marks.push(Plt.areaY(rows, Plt.binX({ y: "proportion" }, {
-          x: aes.x, fill: colorVal, fillOpacity: 0.22 * op,
+          x: aes.x, fill: colorVal, fillOpacity: 0.22 * op, thresholds: Math.round(40 * adjust),
         })));
         marks.push(Plt.lineY(rows, Plt.binX({ y: "proportion" }, {
-          x: aes.x, stroke: colorVal, strokeWidth: 1.8, strokeOpacity: op,
+          x: aes.x, stroke: colorVal, strokeWidth: 1.8, strokeOpacity: op, thresholds: Math.round(40 * adjust),
         })));
       }
       break;
+    }
 
-    case "smooth":
-      if (aes.x && aes.y)
+    case "smooth": {
+      if (aes.x && aes.y) {
+        const { showSE: se = true, ci = 0.95 } = ly.opts || {};
         marks.push(Plt.linearRegressionY(rows, {
           x: aes.x, y: aes.y,
           stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
-          fill: colorVal, fillOpacity: showSE ? 0.15 * op : 0,
-          ci: showSE ? 0.95 : 0,
+          fill: colorVal, fillOpacity: se ? 0.15 * op : 0,
+          ci: se ? ci : 0,
         }));
-      break;
-
-    case "boxplot":
-      if (aes.y)
-        marks.push(Plt.boxY(rows, {
-          x: aes.x || undefined, y: aes.y, fill: colorVal, fillOpacity: 0.68 * op,
-        }));
-      break;
-
-    case "errorbar":
-      if (aes.x && aes.yMin && aes.yMax) {
-        marks.push(Plt.ruleX(rows, {
-          x: aes.x, y1: aes.yMin, y2: aes.yMax,
-          stroke: colorVal, strokeWidth: 1.5, strokeOpacity: op,
-        }));
-        marks.push(Plt.tickX(rows, { x: aes.x, y: aes.yMin, stroke: colorVal, strokeOpacity: op }));
-        marks.push(Plt.tickX(rows, { x: aes.x, y: aes.yMax, stroke: colorVal, strokeOpacity: op }));
       }
       break;
+    }
+
+    case "boxplot": {
+      if (!aes.y) break;
+      const { outlierShow = true, outlierSize = 3 } = ly.opts || {};
+      const bOpts = { r: outlierShow ? outlierSize / 2 : 0 };
+      const isGrouped = aes.color && aes.x && aes.color !== aes.x;
+      if (isGrouped) {
+        marks.push(Plt.boxY(rows, {
+          fx: aes.x, x: aes.color, y: aes.y,
+          fill: aes.color, fillOpacity: 0.72 * op, ...bOpts,
+        }));
+      } else {
+        marks.push(Plt.boxY(rows, {
+          x: aes.x || undefined, y: aes.y, fill: colorVal, fillOpacity: 0.68 * op, ...bOpts,
+        }));
+      }
+      break;
+    }
+
+    case "errorbar": {
+      if (aes.x && aes.yMin && aes.yMax) {
+        const { strokeWidth: ebW = 1.5 } = ly.opts || {};
+        marks.push(Plt.ruleX(rows, {
+          x: aes.x, y1: aes.yMin, y2: aes.yMax,
+          stroke: colorVal, strokeWidth: ebW, strokeOpacity: op,
+        }));
+        marks.push(Plt.tickX(rows, { x: aes.x, y: aes.yMin, stroke: colorVal, strokeWidth: ebW, strokeOpacity: op }));
+        marks.push(Plt.tickX(rows, { x: aes.x, y: aes.yMax, stroke: colorVal, strokeWidth: ebW, strokeOpacity: op }));
+      }
+      break;
+    }
 
     case "ribbon":
       if (aes.x && aes.yMin && aes.yMax)
@@ -250,20 +293,46 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
     if (!Plt || !ref.current) return;
     const container = ref.current;
     try {
-      const marks = [];
-      for (const ly of layers) {
-        if (!ly.visible) continue;
-        marks.push(...buildMarksForLayer(Plt, ly, rows, showSE));
-      }
-      // Grid + frame always present — subtle lines on any background
-      marks.push(Plt.gridX({ stroke: "#808080", strokeOpacity: 0.18 }));
-      marks.push(Plt.gridY({ stroke: "#808080", strokeOpacity: 0.18 }));
-      marks.push(Plt.frame({ stroke: "#252525" }));
-
       // Auto-detect ISO date x-axis for smart tick intervals
       const xAesCol = layers.find(ly => ly.visible && ly.aes?.x)?.aes.x;
       const firstXVal = xAesCol ? rows.find(r => r[xAesCol] != null)?.[xAesCol] : null;
       const xIsDate = firstXVal != null && /^\d{4}-\d{2}-\d{2}/.test(String(firstXVal));
+
+      // Build data marks first, then compose full mark stack
+      const dataMarks = [];
+      for (const ly of layers) {
+        if (!ly.visible) continue;
+        dataMarks.push(...buildMarksForLayer(Plt, ly, rows, showSE));
+      }
+
+      // Compute actual data extents to decide whether zero rules are meaningful
+      const xCol = layers.find(ly => ly.visible && ly.aes?.x)?.aes.x;
+      const yCol = layers.find(ly => ly.visible && ly.aes?.y)?.aes.y;
+      const xVals = xCol ? rows.map(r => +r[xCol]).filter(v => isFinite(v)) : [];
+      const yVals = yCol ? rows.map(r => +r[yCol]).filter(v => isFinite(v)) : [];
+      const xMin = xVals.length ? Math.min(...xVals) : 0;
+      const xMax = xVals.length ? Math.max(...xVals) : 1;
+      const yMin = yVals.length ? Math.min(...yVals) : 0;
+      const yMax = yVals.length ? Math.max(...yVals) : 1;
+      // Only draw zero rule when 0 is within ±20% of the data range (ggplot expand default)
+      const xRange = xMax - xMin;
+      const yRange = yMax - yMin;
+      const showRuleX = 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
+      const showRuleY = 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
+
+      const zeroStyle = { stroke: "#888", strokeWidth: 1.4, strokeOpacity: 0.55 };
+      const marks = [
+        // 1. Grid (background, very subtle)
+        Plt.gridX({ stroke: "#808080", strokeOpacity: 0.15 }),
+        Plt.gridY({ stroke: "#808080", strokeOpacity: 0.15 }),
+        // 2. Zero rules — only when 0 is near the data range (avoids scale compression)
+        ...(showRuleX ? [Plt.ruleX([0], zeroStyle)] : []),
+        ...(showRuleY ? [Plt.ruleY([0], zeroStyle)] : []),
+        // 3. Data marks
+        ...dataMarks,
+        // 4. Frame on top to cleanly border the plot area
+        Plt.frame({ stroke: "#333" }),
+      ];
 
       const colorOpts = scheme ? { scheme } : {};
       const el = Plt.plot({
@@ -282,9 +351,11 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
         x: {
           label:       xLabel || null,
           labelOffset: xIsDate ? 46 : 34,
+          nice:        true,
+          inset:       8,
           ...(xIsDate ? { type: "utc" } : { ticks: Math.min(10, Math.floor((width || 580) / 70)) }),
         },
-        y: { label: yLabel || null, labelOffset: 40 },
+        y: { label: yLabel || null, labelOffset: 40, nice: true, inset: 8 },
         color: colorOpts,
         marks,
       });
@@ -452,6 +523,132 @@ function LayerTab({ layer, isActive, onSelect, onToggle, onRemove }) {
   );
 }
 
+// ─── GEOM-SPECIFIC OPTIONS ROW ────────────────────────────────────────────────
+// Renders per-geom ui-basic params (ggplot2-plot-design skill classification).
+// Variable mapping: aes.sizeCol / aes.alphaCol → ggplot aes(size=col, alpha=col)
+function GeomOptsRow({ layer, onChange, headers = [] }) {
+  const { C } = useTheme();
+  const { geom, opts = {}, aes = {} } = layer;
+  const set    = (key, val) => onChange({ ...layer, opts: { ...opts, [key]: val } });
+  const setAes = (key, val) => onChange({ ...layer, aes: { ...aes, [key]: val } });
+
+  const chip = (active) => ({
+    padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+    border: `1px solid ${active ? C.teal + "65" : C.border}`,
+    background: active ? `${C.teal}18` : "transparent",
+    color: active ? C.teal : C.textMuted,
+  });
+  const chipGold = (active) => ({
+    ...chip(false),
+    border: `1px solid ${active ? C.gold + "65" : C.border}`,
+    background: active ? `${C.gold}18` : "transparent",
+    color: active ? C.gold : C.textMuted,
+  });
+  const lbl  = (t) => <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>{t}</span>;
+  const sep  = <div style={{ width: 1, height: 14, background: C.border, flexShrink: 0, alignSelf: "center" }} />;
+  const numW = { width: 26, fontFamily: mono, fontSize: 9, color: C.textDim, flexShrink: 0 };
+  const slider = (key, min, max, step, def) => (
+    <input type="range" min={min} max={max} step={step} value={opts[key] ?? def}
+      onChange={e => set(key, +e.target.value)}
+      style={{ width: 60, accentColor: C.teal, cursor: "pointer" }} />
+  );
+
+  // shared col select style
+  const colSel = (active) => ({
+    background: C.bg, border: `1px solid ${active ? C.teal + "65" : C.border}`,
+    borderRadius: 3, fontFamily: mono, fontSize: 9, padding: "2px 5px",
+    color: active ? C.text : C.textMuted, minWidth: 80, maxWidth: 120,
+  });
+  // small "var" toggle button
+  const varBtn = (isVar) => ({
+    padding: "2px 5px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer",
+    border: `1px solid ${isVar ? C.gold + "65" : C.border}`,
+    background: isVar ? `${C.gold}18` : "transparent",
+    color: isVar ? C.gold : C.textMuted,
+    title: isVar ? "Switch to fixed value" : "Map to variable",
+  });
+
+  if (geom === "point") {
+    const sizeIsVar = !!aes.sizeCol;
+    return <>
+      {lbl("size")}
+      {sizeIsVar
+        ? <select value={aes.sizeCol} onChange={e => setAes("sizeCol", e.target.value)} style={colSel(true)}>
+            <option value="">— col —</option>
+            {headers.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        : <>{slider("size", 1, 12, 0.5, 3)}<span style={numW}>{opts.size ?? 3}</span></>
+      }
+      <button onClick={() => { setAes("sizeCol", sizeIsVar ? "" : (headers[0] || "")); }} style={varBtn(sizeIsVar)}>var</button>
+      {sep}
+      {lbl("shape")}
+      {[["circle","○"],["square","□"],["triangle","△"],["diamond","◇"],["star","✦"],["times","×"]].map(([v,ic]) => (
+        <button key={v} onClick={() => set("shape", v)} style={chip((opts.shape ?? "circle") === v)}>{ic}</button>
+      ))}
+    </>;
+  }
+
+  if (geom === "line") return <>
+    {lbl("width")}
+    {slider("strokeWidth", 0.5, 6, 0.5, 1.8)}
+    <span style={numW}>{opts.strokeWidth ?? 1.8}</span>
+    {lbl("dash")}
+    {[["none","———"],["5,3","– – –"],["2,2","·····"]].map(([v,ic]) => (
+      <button key={v} onClick={() => set("dash", v)} style={chip((opts.dash ?? "none") === v)}>{ic}</button>
+    ))}
+  </>;
+
+  if (geom === "smooth") return <>
+    <button onClick={() => set("showSE", !(opts.showSE ?? true))} style={chip(opts.showSE ?? true)}>
+      SE {(opts.showSE ?? true) ? "on" : "off"}
+    </button>
+    {(opts.showSE ?? true) && <>
+      {lbl("CI")}
+      {[[0.90,"90%"],[0.95,"95%"],[0.99,"99%"]].map(([v,l]) => (
+        <button key={v} onClick={() => set("ci", v)} style={chipGold((opts.ci ?? 0.95) === v)}>{l}</button>
+      ))}
+    </>}
+  </>;
+
+  if (geom === "boxplot") return <>
+    <button onClick={() => set("outlierShow", !(opts.outlierShow ?? true))} style={chip(opts.outlierShow ?? true)}>
+      outliers {(opts.outlierShow ?? true) ? "on" : "off"}
+    </button>
+    {(opts.outlierShow ?? true) && <>
+      {lbl("size")}
+      {slider("outlierSize", 1, 8, 0.5, 3)}
+      <span style={numW}>{opts.outlierSize ?? 3}</span>
+    </>}
+  </>;
+
+  if (geom === "histogram") return <>
+    {lbl("bins")}
+    <input type="number" min={3} max={200} value={opts.bins ?? 20}
+      onChange={e => set("bins", Math.max(3, +e.target.value))}
+      style={{ width: 52, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 9, padding: "2px 4px", color: C.text, outline: "none" }} />
+  </>;
+
+  if (geom === "density") return <>
+    {lbl("adjust")}
+    {slider("adjust", 0.25, 3, 0.25, 1)}
+    <span style={{ ...numW, width: 30 }}>{opts.adjust ?? 1}×</span>
+  </>;
+
+  if (geom === "bar") return <>
+    {lbl("stroke")}
+    {slider("strokeWidth", 0, 2, 0.25, 0)}
+    <span style={numW}>{opts.strokeWidth ?? 0}</span>
+  </>;
+
+  if (geom === "errorbar") return <>
+    {lbl("width")}
+    {slider("strokeWidth", 0.5, 4, 0.25, 1.5)}
+    <span style={numW}>{opts.strokeWidth ?? 1.5}</span>
+  </>;
+
+  return null;
+}
+
 // ─── INLINE LAYER EDITOR (horizontal compact row) ─────────────────────────────
 function LayerEditorInline({ layer, onChange, headers }) {
   const { C } = useTheme();
@@ -474,20 +671,6 @@ function LayerEditorInline({ layer, onChange, headers }) {
       padding: "0.45rem 0.75rem", borderBottom: `1px solid ${C.border}`,
       background: `${C.teal}07`,
     }}>
-      {/* Geom chips */}
-      <span style={{ fontSize: 8, color: C.textMuted, fontFamily: mono, letterSpacing: "0.15em", textTransform: "uppercase" }}>geom</span>
-      {GEOMS.map(g => (
-        <button key={g.id} onClick={() => onChange({ ...layer, geom: g.id })}
-          style={{
-            padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
-            background: layer.geom === g.id ? `${C.teal}20` : "transparent",
-            border: `1px solid ${layer.geom === g.id ? C.teal + "65" : C.border}`,
-            color: layer.geom === g.id ? C.teal : C.textMuted,
-          }}>{g.label}</button>
-      ))}
-
-      {sep}
-
       {/* Aesthetics */}
       {isRefLine && <>
         <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>value</span>
@@ -551,6 +734,12 @@ function LayerEditorInline({ layer, onChange, headers }) {
               color: layer.position === pos ? C.gold : C.textMuted,
             }}>{pos}</button>
         ))}
+      </>}
+
+      {/* Geom-specific opts — inline, wraps naturally */}
+      {GEOM_OPTS_DEFAULTS[layer.geom] && <>
+        {sep}
+        <GeomOptsRow layer={layer} onChange={onChange} headers={headers} />
       </>}
 
       {/* Opacity — right-aligned */}
@@ -702,15 +891,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             </select>
           </div>
 
-          {hasSmooth && (
-            <button onClick={() => setShowSE(v => !v)}
-              style={{
-                padding: "3px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9,
-                cursor: "pointer", border: `1px solid ${C.border2}`,
-                background: showSE ? `${C.teal}18` : "transparent",
-                color: showSE ? C.teal : C.textMuted, transition: "all 0.12s",
-              }}>SE {showSE ? "TRUE" : "FALSE"}</button>
-          )}
+          {/* SE toggle moved to per-layer GeomOptsRow for smooth layers */}
 
           {visibleLayers.length > 0 && (
             <div style={{ marginLeft: "auto" }}>

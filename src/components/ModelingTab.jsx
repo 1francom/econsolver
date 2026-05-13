@@ -1121,7 +1121,7 @@ function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, dict = {}, ro
               node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
             { id: "mccrary", label: "McCrary density",
               node: <McCraryPlot
-                result={runMcCrary(rows, runningVar, r.rddData?.cutoff)}
+                result={r.rddData?.cutoff != null ? runMcCrary(rows, runningVar, r.rddData.cutoff) : null}
                 xLabel={runningVar}
               /> },
           ]} />

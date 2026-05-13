@@ -1107,7 +1107,7 @@ function WorkspaceRegistrar({ filename, rawData }) {
 // Mirrors R/Gretl workspace model — projects are first-class, datasets are children.
 
 function Dashboard({onNew, onLoad}) {
-  const { C } = useTheme();
+  const { C, theme, setTheme } = useTheme();
   const [projects,    setProjects]    = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [selected,    setSelected]    = useState(null);
@@ -1210,14 +1210,31 @@ function Dashboard({onNew, onLoad}) {
           borderBottom: `1px solid ${C.border}`,
           flexShrink: 0,
         }}>
-          <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
-            Litux
-          </div>
-          <div style={{fontSize:15,color:C.text,letterSpacing:"-0.01em",marginBottom:1}}>
-            Projects
-          </div>
-          <div style={{fontSize:10,color:C.textMuted}}>
-            {loading ? "Loading…" : `${projects.length} saved`}
+          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
+                Litux
+              </div>
+              <div style={{fontSize:15,color:C.text,letterSpacing:"-0.01em",marginBottom:1}}>
+                Projects
+              </div>
+              <div style={{fontSize:10,color:C.textMuted}}>
+                {loading ? "Loading…" : `${projects.length} saved`}
+              </div>
+            </div>
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              style={{
+                background:"transparent", border:"none", cursor:"pointer",
+                fontSize:14, color:C.textMuted, padding:"2px 4px",
+                transition:"color 0.15s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
+              onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+            >
+              {theme === "dark" ? "☀" : "☾"}
+            </button>
           </div>
         </div>
 

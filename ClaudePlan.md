@@ -1501,6 +1501,31 @@ Persistent plot history in the Plot Builder tab within ExplorerModule. Users sav
 
 ---
 
+## Phase 17: Plot Builder & Visualization Enhancements — IN PROGRESS
+
+Ongoing improvements to PlotBuilder.jsx, ModelPlots.jsx, and SpatialTab.jsx to match and exceed ggplot2 quality. Driven by ggplot2-plot-design skill.
+
+### Done
+- Grouped boxplot (`fx` facet when `color` col ≠ `x` col) — mirrors `geom_boxplot(aes(fill=group))`
+- Conditional zero rules — `ruleX/ruleY([0])` only when 0 is within ±20% of data range
+- Scale expansion — `nice: true` + `inset: 8` on both axes (matches ggplot `expand = expansion(mult=0.05)`)
+- Mark render order fixed: grid → zero rules → data → frame
+- Per-layer geom options panel in `LayerEditorInline` (GeomOptsRow): size/shape for point; width/dash for line; SE/CI for smooth; outlier show/size for boxplot; bins for histogram; adjust for density; stroke for bar; width for errorbar
+- SE toggle migrated from global toolbar to per-layer smooth opts
+- PlotBuilder height fix in ExplorerModule (70vh) — prevents flex:1 collapse in scroll container
+- Geom chips removed from LayerEditorInline row (redundant with layer tabs)
+- `layer.aes.sizeCol` variable mapping for point size (`aes(size=col)` pattern)
+
+### Pending (ordered by priority)
+1. **More arguments and labels in Plot Builder, Model, and Spatial Map** — audit all geoms and model plots for missing ggplot2-equivalent params; add labels, titles, axis formatting options
+2. **Variable mapping for alpha** — `aes(alpha=col)` for point/line/bar (toggle fixed slider ↔ column dropdown, same pattern as `sizeCol`)
+3. **Phase 2 boxplot opts** — custom boxplot implementation (rect + ruleX + dot) to enable per-layer outlier color, shape, IQR coef
+4. **Plot history (Phase 16)** — save/load named plots, ← → nav, compare mode, IndexedDB persistence
+5. **Style presets (Phase 9.9)** — Journal / Presentation / Minimal presets at export time
+6. **Spatial map labels and annotations** — add label layer, scale bar, north arrow to SpatialTab map view
+
+---
+
 ## Next unblocked tasks
 
 1. **Browser validation of Phase 4** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, all three multi-model export scripts (R/Python/Stata) generate correctly.

@@ -1588,7 +1588,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} style={{marginTop:"0.25rem"}}/>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
     </div>
   );

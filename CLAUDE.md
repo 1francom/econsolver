@@ -183,7 +183,7 @@ Merge: `join, append`
 
 ## Pending (ordered by priority)
 1. ~~**Estimator validation vs R**~~ — FE (fixest), RDD (rdrobust), 2SLS (AER), Logit/Probit (glm), GMM/LIML, Synthetic Control (Synth) — all validated with hard benchmarks in `engineValidation.js`.
-2. **DuckDB-WASM** — final compute target for datasets > 50k rows.
+2. **DuckDB-WASM** — final compute target for datasets > 50k rows. Blocked on: (a) CDN vs bundle decision (~10MB WASM binary), (b) `runner.js` dual-path dispatch (< 50k → JS engine, ≥ 50k → DuckDB), (c) fallback/error handling. Est. 3–5 days. Do not start until DataStudio file-loading layer is stable.
 3. ~~**PlotBuilder G-track complete**~~ — G1+G2+G3+G4+G5+G6+G7+G8+G9+G10+G11+G12+G13 all done. PlotBuilder.jsx: 11 geoms (point/line/bar/histogram/density/smooth/boxplot/errorbar/ribbon/hline/vline), stack+jitter positions, palette presets, SVG+PNG export. ModelingTab: collapsible ◈ Plot Builder with result-augmented rows, 4 G10 templates, G13 multi-model coefficient comparison mode (compRows from pinnedModels, mode toggle, "Coef comparison" template).
 4. ~~**Multi-subset workflow H-track**~~ — H1–H10 complete. H6: multi-subset R/Python/Stata replication scripts. H7: "Download subset bundle" button in ModelingTab. H8: Spec Curve collapsible panel (threshold col/op/range/coefVar, runSpecCurve loop, ribbon+line+point+hline chart). H9: buffer metadata. H10: script overhaul. H5: pipeline branch point UI.
 5. **Contextual export architecture (I-track)** — I1–I7: pipeline export in CleanTab, dataset export in Explorer, comparison export in ModelComparison, auto-detect map vs separate, refactor export services, LaTeX table from comparison.
