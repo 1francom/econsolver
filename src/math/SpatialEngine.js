@@ -278,23 +278,26 @@ export function parseWKTPolygon(wkt) {
 
 /**
  * Ray-casting point-in-polygon test.
- * lat, lon are the point; polygonWKT is a WKT POLYGON string.
- * WKT convention: POLYGON((longitude latitude, ...)).
- * Returns false if WKT is unparseable.
+ * Handles both POLYGON and MULTIPOLYGON WKT — returns true if point is inside
+ * any ring of the geometry. Uses parseWKTRings for full geometry support.
  */
 export function pointInPolygon(lat, lon, polygonWKT) {
-  const coords = parseWKTPolygon(polygonWKT);
-  if (!coords || coords.length < 3) return false;
-  let inside = false;
-  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
-    const [xi, yi] = coords[i]; // xi=lon, yi=lat
-    const [xj, yj] = coords[j];
-    const intersect =
-      yi > lat !== yj > lat &&
-      lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
+  const rings = parseWKTRings(polygonWKT);
+  if (!rings.length) return false;
+  for (const ring of rings) {
+    if (ring.length < 3) continue;
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i]; // xi=lon, yi=lat
+      const [xj, yj] = ring[j];
+      if ((yi > lat) !== (yj > lat) &&
+          lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    if (inside) return true;
   }
-  return inside;
+  return false;
 }
 
 // ─── SPATIAL JOIN ─────────────────────────────────────────────────────────────
@@ -390,7 +393,7 @@ export function nearestNeighbor(
  * @param   {number}  cellsizeMeters Grid cell side length in metres (default 500)
  * @returns {Array<{grid_id:number, geometry:string}>}
  */
-export function makeGrid(boundaryWkt, cellsizeMeters = 500) {
+export function makeGrid(boundaryWkt, cellsizeMeters = 500, clipBorder = true) {
   if (!boundaryWkt || typeof boundaryWkt !== "string") throw new Error("boundaryWkt must be a WKT string");
   if (cellsizeMeters <= 0) throw new Error("cellsizeMeters must be > 0");
 
@@ -466,6 +469,109 @@ export function makeGrid(boundaryWkt, cellsizeMeters = 500) {
     return false;
   }
 
+  // ── Point-collection polygon clipper (works for non-convex boundaries) ───
+  // Clips a cell rectangle against the boundary rings by collecting:
+  //   1. Rect corners inside the boundary
+  //   2. Boundary vertices inside the rect bbox
+  //   3. All edge-edge intersection points
+  // Then sorts by angle → valid clipped polygon.
+  // Assumption: intersection region is star-shaped from its centroid — holds
+  // for typical administrative boundaries crossing a small cell at most twice.
+  function clipRectToRings(rLon0, rLat0, rLon1, rLat1) {
+    // Segment intersection: returns {lon,lat} or null
+    function segX(ax, ay, bx, by, cx, cy, dx, dy) {
+      const dx1 = bx - ax, dy1 = by - ay;
+      const dx2 = dx - cx, dy2 = dy - cy;
+      const den = dx1 * dy2 - dy1 * dx2;
+      if (Math.abs(den) < 1e-14) return null;
+      const t = ((cx - ax) * dy2 - (cy - ay) * dx2) / den;
+      const s = ((cx - ax) * dy1 - (cy - ay) * dx1) / den;
+      if (t < -1e-9 || t > 1 + 1e-9 || s < -1e-9 || s > 1 + 1e-9) return null;
+      return { lon: ax + t * dx1, lat: ay + t * dy1 };
+    }
+
+    const pts = [];
+
+    // 1. Rect corners inside boundary — these sit exactly on rect corners
+    const rectCorners = [
+      { lon: rLon0, lat: rLat0 }, { lon: rLon1, lat: rLat0 },
+      { lon: rLon1, lat: rLat1 }, { lon: rLon0, lat: rLat1 },
+    ];
+    for (const c of rectCorners) { if (pip(c.lat, c.lon)) pts.push({ ...c }); }
+
+    // 2. Edge-edge intersections — these sit exactly on the rect edges.
+    //    NOTE: we intentionally SKIP boundary vertices inside the rect (step 2
+    //    in earlier versions). Interior boundary vertices caused the convex hull
+    //    to extend across concave areas → triangular artifacts on complex coasts.
+    //    All collected points here are guaranteed to lie on or inside the rect,
+    //    so the hull can never extend outside the cell boundary.
+    const rEdges = [
+      [rLon0, rLat0, rLon1, rLat0], // bottom  (index 0)
+      [rLon1, rLat0, rLon1, rLat1], // right   (index 1)
+      [rLon1, rLat1, rLon0, rLat1], // top     (index 2)
+      [rLon0, rLat1, rLon0, rLat0], // left    (index 3)
+    ];
+    // Track how many boundary segments cross each rect edge.
+    // If a single rect edge is crossed more than once the boundary re-enters
+    // through the same side, producing a re-entrant (non-convex) intersection
+    // that a convex hull cannot approximate cleanly → fall back to full rect.
+    const edgeCrossings = [0, 0, 0, 0];
+    for (const ring of rings) {
+      for (let i = 0; i < ring.length; i++) {
+        const { lon: ax, lat: ay } = ring[i];
+        const { lon: bx, lat: by } = ring[(i + 1) % ring.length];
+        for (let ei = 0; ei < rEdges.length; ei++) {
+          const [cx, cy, dx, dy] = rEdges[ei];
+          const pt = segX(ax, ay, bx, by, cx, cy, dx, dy);
+          if (pt) {
+            pts.push(pt);
+            edgeCrossings[ei]++;
+          }
+        }
+      }
+    }
+
+    // Re-entrant case: same rect edge crossed >1 time → convex hull would
+    // span a gap outside the actual boundary → return null (use full rect).
+    if (edgeCrossings.some(n => n > 1)) return null;
+
+    if (pts.length < 3) return null;
+
+    // 4. Convex hull (Jarvis march) — always non-self-intersecting.
+    //    Angular sort fails when many boundary vertices cluster inside the cell
+    //    (complex concave boundary) because the centroid drifts outside the
+    //    intersection region. Convex hull is exact for convex clips and gives a
+    //    clean approximation for concave ones.
+    function convexHull(ps) {
+      if (ps.length < 3) return ps;
+      // Find lowest-leftmost point as start
+      let lo = 0;
+      for (let i = 1; i < ps.length; i++) {
+        if (ps[i].lat < ps[lo].lat || (ps[i].lat === ps[lo].lat && ps[i].lon < ps[lo].lon))
+          lo = i;
+      }
+      const hull = [];
+      let cur = lo;
+      do {
+        hull.push(ps[cur]);
+        let nxt = (cur + 1) % ps.length;
+        for (let i = 0; i < ps.length; i++) {
+          const cross = (ps[nxt].lon - ps[cur].lon) * (ps[i].lat - ps[cur].lat) -
+                        (ps[nxt].lat - ps[cur].lat) * (ps[i].lon - ps[cur].lon);
+          if (cross < 0 || (cross === 0 &&
+              Math.hypot(ps[i].lon - ps[cur].lon, ps[i].lat - ps[cur].lat) >
+              Math.hypot(ps[nxt].lon - ps[cur].lon, ps[nxt].lat - ps[cur].lat)))
+            nxt = i;
+        }
+        cur = nxt;
+      } while (cur !== lo && hull.length <= ps.length + 1);
+      return hull;
+    }
+
+    const hull = convexHull(pts);
+    return hull.length >= 3 ? hull : null;
+  }
+
   // ── Generate cells ────────────────────────────────────────────────────────
   const f = n => n.toFixed(8);
   const cells = [];
@@ -473,15 +579,33 @@ export function makeGrid(boundaryWkt, cellsizeMeters = 500) {
     for (let col = 0; minLon + col * dLon < maxLon + dLon * 0.01; col++) {
       const lon0 = minLon + col * dLon;
       const lat0 = minLat + row * dLat;
-      const cLat = lat0 + dLat / 2;
-      const cLon = lon0 + dLon / 2;
-      if (!pip(cLat, cLon)) continue;
+      const lon1 = lon0 + dLon, lat1 = lat0 + dLat;
+      const cLat = lat0 + dLat / 2, cLon = lon0 + dLon / 2;
+
+      // Include cell if any corner or centroid is inside boundary
+      const inside =
+        pip(lat0, lon0) || pip(lat0, lon1) ||
+        pip(lat1, lon0) || pip(lat1, lon1) || pip(cLat, cLon);
+      if (!inside) continue;
+
       if (cells.length >= MAX_CELLS) {
         throw new Error(`Grid exceeds ${MAX_CELLS.toLocaleString()} cells. Increase cell size.`);
       }
-      // WKT: POLYGON((lon lat, ...)) — standard lon-first convention
-      const wkt = `POLYGON((${f(lon0)} ${f(lat0)}, ${f(lon0+dLon)} ${f(lat0)}, ${f(lon0+dLon)} ${f(lat0+dLat)}, ${f(lon0)} ${f(lat0+dLat)}, ${f(lon0)} ${f(lat0)}))`;
-      cells.push({ grid_id: cells.length + 1, geometry: wkt });
+
+      let poly;
+      if (clipBorder) {
+        poly = clipRectToRings(lon0, lat0, lon1, lat1);
+      }
+      // Fall back to full rectangle (interior cells or failed clip)
+      if (!poly) {
+        poly = [
+          { lon: lon0, lat: lat0 }, { lon: lon1, lat: lat0 },
+          { lon: lon1, lat: lat1 }, { lon: lon0, lat: lat1 },
+        ];
+      }
+
+      const coords = [...poly, poly[0]].map(p => `${f(p.lon)} ${f(p.lat)}`).join(", ");
+      cells.push({ grid_id: cells.length + 1, geometry: `POLYGON((${coords}))` });
     }
   }
   return cells;

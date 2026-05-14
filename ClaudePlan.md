@@ -1422,6 +1422,8 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 
 ### Remaining (ordered by priority)
 
+0. **Border cell clipping artifacts** — `makeGrid` `clipRectToRings` still produces diagonal artifacts at complex coastal boundaries (harbor inlets, peninsulas). Three approaches tried: angular sort (self-intersecting), convex hull (clips concave areas), same-edge re-entry detection (didn't help). Root cause: convex hull over-approximates non-convex intersections. Possible next approach: Sutherland-Hodgman polygon clipping (exact for convex clip region, i.e. the rect) applied directly to each boundary ring. The rect is convex so SH gives exact results regardless of boundary concavity.
+
 1. **Per-operation dataset selector in Analyze tab** — Distance to Point, Buffer, Grid, Spatial Join, Nearest Neighbour all use the active dataset for points. Should allow selecting any loaded dataset as the source (mirrors what Plot tab already does per layer). Needed when the enriched dataset is in a different tab than the active one.
 
 2. **Geocode — Address → Lat/Lon** — UI stub exists, marked "coming soon · phase 11.2". Uses OpenStreetMap Nominatim (1 req/sec, session-cached). Adds `lat_geocoded` + `lon_geocoded` columns.
