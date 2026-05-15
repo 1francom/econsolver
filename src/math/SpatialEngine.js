@@ -14,6 +14,8 @@
 //   aggregateToGrid   — count/sum/mean of point dataset within each grid cell
 
 const EARTH_RADIUS_KM = 6371;
+const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
+const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 
 // ─── DISTANCE ─────────────────────────────────────────────────────────────────
 
@@ -435,8 +437,8 @@ export function makeGrid(boundaryWkt, cellsizeMeters = 500, clipBorder = true) {
   // ── Bounding box ──────────────────────────────────────────────────────────
   const allLons = rings.flatMap(r => r.map(p => p.lon));
   const allLats = rings.flatMap(r => r.map(p => p.lat));
-  const minLon = Math.min(...allLons), maxLon = Math.max(...allLons);
-  const minLat = Math.min(...allLats), maxLat = Math.max(...allLats);
+  const minLon = arrMin(allLons), maxLon = arrMax(allLons);
+  const minLat = arrMin(allLats), maxLat = arrMax(allLats);
 
   // ── Degree sizes ──────────────────────────────────────────────────────────
   const centerLat = (minLat + maxLat) / 2;

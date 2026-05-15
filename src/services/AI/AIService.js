@@ -696,6 +696,17 @@ function _serializeModelContext(result, dataDictionary) {
     lines.push(`Bandwidth: ${rdd.h?.toFixed(4) ?? "N/A"}, Kernel: ${rdd.kernelType ?? "N/A"}`);
   }
 
+  // Synthetic Control specifics
+  if (result.type === "SyntheticControl") {
+    lines.push(`Treated unit: ${result.scTreatedUnit ?? "?"}, Treatment time: ${result.scTreatTime ?? "?"}`);
+    lines.push(`Pre-RMSPE: ${result.scRmspePre?.toFixed(6) ?? "N/A"}, Post-RMSPE: ${result.scRmspePost?.toFixed(6) ?? "N/A"}`);
+    if (result.scPValue != null) lines.push(`Placebo p-value: ${result.scPValue.toFixed(3)}`);
+    const topWeights = Object.entries(result.scWeights ?? {})
+      .sort(([, a], [, b]) => b - a).filter(([, w]) => w > 0.001).slice(0, 5)
+      .map(([u, w]) => `${u}:${(w * 100).toFixed(1)}%`).join(", ");
+    if (topWeights) lines.push(`Top donor weights: ${topWeights}`);
+  }
+
   // Data dictionary
   if (dataDictionary && Object.keys(dataDictionary).length) {
     lines.push("Data dictionary:");

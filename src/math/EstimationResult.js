@@ -549,6 +549,7 @@ function wrapSyntheticControl(eng, spec) {
     scDonors:     eng.donors    ?? [],
     scTreatedUnit: eng.treatedUnit ?? null,
     scTreatTime:  eng.treatTime ?? null,
+    scAtt:        eng.att        ?? null,
   };
 }
 

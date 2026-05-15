@@ -361,6 +361,15 @@ placebos[]        — jackknife gap series per donor unit
   - `SyntheticDonorWeights` — horizontal bar chart of donor weights
   - `SyntheticPlaceboPlot` — donor placebo gaps overlaid as grey lines, treated gap as colored foreground
 
+### PENDING — SC weight discrepancy vs R Synth
+Frank-Wolfe on normalized rows still produces different weights than R's Synth package.
+Root cause: R's Synth uses a **two-level nested optimization** — outer Nelder-Mead/BFGS finds predictor importance weights V, inner ipop (quadratic program) finds donor weights W given V. Frank-Wolfe is a single-level optimizer that can't replicate this exactly.
+Fix requires implementing the proper ADH two-level optimization:
+1. Outer: optimize V via Nelder-Mead minimizing pre-period outcome MSPE
+2. Inner: given V, solve quadratic program for W (requires implementing ipop-style QP in pure JS — `kernlab::ipop` equivalent)
+Alternative: integrate a small WASM QP solver (e.g. `qpsolvers` via WASM) to replace Frank-Wolfe.
+Validated R output for comparison: Region_28=0.281, Region_29=0.444 (top donors); pre-RMSPE=1.392; ATT=5.408.
+
 ---
 
 ## Phase 5 New Files Summary (1)

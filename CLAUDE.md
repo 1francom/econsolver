@@ -183,7 +183,7 @@ Merge: `join, append`
 
 ## Pending (ordered by priority)
 1. ~~**Estimator validation vs R**~~ — FE (fixest), RDD (rdrobust), 2SLS (AER), Logit/Probit (glm), GMM/LIML, Synthetic Control (Synth) — all validated with hard benchmarks in `engineValidation.js`.
-2. **DuckDB-WASM** — final compute target for datasets > 50k rows. Blocked on: (a) CDN vs bundle decision (~10MB WASM binary), (b) `runner.js` dual-path dispatch (< 50k → JS engine, ≥ 50k → DuckDB), (c) fallback/error handling. Est. 3–5 days. Do not start until DataStudio file-loading layer is stable.
+2. ~~**DuckDB-WASM**~~ — ✓ complete. `services/data/duckdb.js` singleton (jsDelivr CDN, lazy init). `DataStudio.jsx` routes CSV/TSV >10MB and .parquet to DuckDB loaders. `pipeline/duckdbRunner.js` translates 11 step types (filter, arrange, rename, drop, group_summarize, log, sq, std, lag, lead, diff) to SQL; falls back to JS for the rest. WranglingModule dual-path: async DuckDB when `rawData._duckdb` present, sync JS otherwise. ⚡ DuckDB badge + truncation notice in wrangling header.
 3. ~~**PlotBuilder G-track complete**~~ — G1+G2+G3+G4+G5+G6+G7+G8+G9+G10+G11+G12+G13 all done. PlotBuilder.jsx: 11 geoms (point/line/bar/histogram/density/smooth/boxplot/errorbar/ribbon/hline/vline), stack+jitter positions, palette presets, SVG+PNG export. ModelingTab: collapsible ◈ Plot Builder with result-augmented rows, 4 G10 templates, G13 multi-model coefficient comparison mode (compRows from pinnedModels, mode toggle, "Coef comparison" template).
 4. ~~**Multi-subset workflow H-track**~~ — H1–H10 complete. H6: multi-subset R/Python/Stata replication scripts. H7: "Download subset bundle" button in ModelingTab. H8: Spec Curve collapsible panel (threshold col/op/range/coefVar, runSpecCurve loop, ribbon+line+point+hline chart). H9: buffer metadata. H10: script overhaul. H5: pipeline branch point UI.
 5. **Contextual export architecture (I-track)** — I1–I7: pipeline export in CleanTab, dataset export in Explorer, comparison export in ModelComparison, auto-detect map vs separate, refactor export services, LaTeX table from comparison.
@@ -214,6 +214,29 @@ Merge: `join, append`
 - Patches are surgical — state what to add, what to delete, and exact location
 - Math files get validated against R to 6 decimal places on coefficients, 4 on SE
 - R validation libraries: `fixest`, `plm`, `rdrobust`, `AER`, `modelsummary`
+
+## DuckDB-Wasm performance strategy
+
+**Problem:** tab/module transitions take ~15 s with large datasets (900 k rows). Root cause: JS object allocation + React re-renders on the full table, not SQL performance.
+
+**Non-starters (break privacy-first constraint):**
+- Any server-side computation (DuckDB on server, Postgres, ClickHouse, BigQuery) — dataset never leaves the browser.
+
+**Agreed rules (enforce in all new code):**
+
+1. **DuckDB as the data boundary.** Never pull the full Arrow result into JS objects. Query only the columns needed, filter/aggregate/sort/paginate inside DuckDB. Avoid `SELECT *` on large tables.
+
+2. **Parquet as primary format for large data.** Pipeline: CSV/TSV upload → convert to Parquet in DuckDB → all subsequent queries hit the cached Parquet. Already wired for `.parquet` uploads; extend to auto-convert large CSV on first load.
+
+3. **OPFS persistence.** Cache the DuckDB Parquet file in OPFS so re-opening the same project skips re-import. Load-once, query-many.
+
+4. **Threaded Wasm (COOP/COEP headers).** `vercel.json` must include `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` to unlock `SharedArrayBuffer` and full parallel execution in DuckDB-Wasm.
+
+5. **Display limit ≠ computation limit.** Rendering is limited to 200–500 rows (virtualized table). But pipeline steps — filter, log, z-score, lag, etc. — always run on the **full dataset** (900 k rows). Never truncate `rawData` before passing it to runner.js or duckdbRunner.js.
+
+6. **Precompute summaries.** Column stats (mean, sd, min, max, n_distinct), histogram bins, and category counts are computed once via SQL and cached in component state. Never computed from the full JS array on render.
+
+7. **Split preview from full analysis.** Wrangling/Explore tabs show a 500-row sample for instant display. When the user triggers an analysis (run model, export, group_summarize), the operation runs on the full DuckDB table. Show a progress indicator for operations >1 s.
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph

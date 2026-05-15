@@ -297,6 +297,7 @@ function transpileModel(model) {
     zVars = [], postVar, treatVar,
     runningVar, cutoff, bandwidth, kernel = "triangular",
     entityCol, timeCol, factorVars = [],
+    treatedUnit, treatTime,
   } = model;
 
   const fvSet = new Set(factorVars);
@@ -521,6 +522,69 @@ function transpileModel(model) {
         ``,
         `# Pre-trend Wald test (joint significance of all pre-period coefficients)`,
         `fixest::wald(fit, keep = "rel_time::-[2-9]$|rel_time::-[0-9]{2,}")`,
+      ].join("\n");
+    }
+
+    case "SyntheticControl": {
+      const ec   = rName(entityCol ?? "unit");
+      const tc   = rName(timeCol   ?? "time");
+      const y2   = rName(yVar);
+      const tu   = treatedUnit ?? "TreatedUnit";
+      const tt   = treatTime   != null ? Number(treatTime) : "TREAT_TIME";
+      const preds = xVars.length
+        ? `c(${xVars.map(v => `"${rName(v)}"`).join(", ")})`
+        : `"${y2}"   # no explicit predictors — using outcome mean`;
+      return [
+        `# ── Synthetic Control (Synth package) ───────────────────────────────`,
+        `# Install: install.packages("Synth")`,
+        `library(Synth)`,
+        ``,
+        `# Synth requires a numeric unit ID — create one while preserving names`,
+        `df$unit_id <- as.numeric(factor(df$${ec}))`,
+        `treated_id <- df$unit_id[df$${ec} == "${tu}"][1]`,
+        `donor_ids  <- setdiff(unique(df$unit_id), treated_id)`,
+        `time_range <- sort(unique(df$${tc}))`,
+        `pre_range  <- time_range[time_range < ${tt}]`,
+        ``,
+        `dataprep.out <- dataprep(`,
+        `  foo                   = as.data.frame(df),`,
+        `  predictors            = ${preds},`,
+        `  predictors.op         = "mean",`,
+        `  time.predictors.prior = pre_range,`,
+        `  dependent             = "${y2}",`,
+        `  unit.variable         = "unit_id",`,
+        `  unit.names.variable   = "${ec}",`,
+        `  time.variable         = "${tc}",`,
+        `  treatment.identifier  = treated_id,`,
+        `  controls.identifier   = donor_ids,`,
+        `  time.optimize.ssr     = pre_range,`,
+        `  time.plot             = time_range`,
+        `)`,
+        ``,
+        `synth.out    <- synth(dataprep.out)`,
+        `synth.tables <- synth.tab(dataprep.res = dataprep.out, synth.res = synth.out)`,
+        ``,
+        `# Donor weights`,
+        `print(synth.tables$tab.w)`,
+        ``,
+        `# Path plot: treated vs synthetic`,
+        `path.plot(`,
+        `  synth.res    = synth.out,`,
+        `  dataprep.res = dataprep.out,`,
+        `  tr.intake    = ${tt},`,
+        `  Ylab         = "${y2}",`,
+        `  Xlab         = "${tc}",`,
+        `  Legend       = c("${tu}", "Synthetic ${tu}")`,
+        `)`,
+        ``,
+        `# Gap plot: treated minus synthetic`,
+        `gaps.plot(`,
+        `  synth.res    = synth.out,`,
+        `  dataprep.res = dataprep.out,`,
+        `  tr.intake    = ${tt},`,
+        `  Ylab         = "Gap in ${y2}",`,
+        `  Xlab         = "${tc}"`,
+        `)`,
       ].join("\n");
     }
 

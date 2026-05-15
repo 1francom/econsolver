@@ -8,6 +8,9 @@ import {
 } from "./LinearEngine.js";
 import { computeRobustSE } from "../core/inference/robustSE.js";
 
+const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
+const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
+
 // ─── 2SLS / IV ───────────────────────────────────────────────────────────────
 // endog: endogenous regressors  |  exog: exogenous controls  |  instr: excluded instruments
 export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
@@ -167,9 +170,9 @@ export function ikBandwidth(runningVals, yVals, cutoff) {
   const right = runningVals.map((x, i) => ({ x, y: yVals[i] })).filter(d => d.x >= cutoff);
 
   if (left.length < 5 || right.length < 5)
-    return (Math.max(...runningVals) - Math.min(...runningVals)) / 4;
+    return (arrMax(runningVals) - arrMin(runningVals)) / 4;
 
-  const pilot = (Math.max(...runningVals) - Math.min(...runningVals)) / 4;
+  const pilot = (arrMax(runningVals) - arrMin(runningVals)) / 4;
 
   const localVariance = (pts, c) => {
     const near = pts.filter(d => Math.abs(d.x - c) < pilot);
@@ -189,7 +192,7 @@ export function ikBandwidth(runningVals, yVals, cutoff) {
   const s2   = (vL.s2   + vR.s2)   / 2;
   const curv = (vL.curv + vR.curv) / 2;
   const h    = 3.4375 * Math.pow(s2 / (curv ** 2 * n), 0.2);
-  const range = Math.max(...runningVals) - Math.min(...runningVals);
+  const range = arrMax(runningVals) - arrMin(runningVals);
   return Math.min(Math.max(h, range * 0.05), range * 0.8);
 }
 
@@ -225,8 +228,8 @@ export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
   if (vals.length < 20) return null;
 
   const n    = vals.length;
-  const xMin = Math.min(...vals);
-  const xMax = Math.max(...vals);
+  const xMin = arrMin(vals);
+  const xMax = arrMax(vals);
   const range = xMax - xMin;
   if (range <= 0) return null;
 

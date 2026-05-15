@@ -21,6 +21,9 @@ import { useTheme, mono } from "./modeling/shared.jsx";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
 
+const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
+const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fb;
+
 // ─── OBSERVABLE PLOT — CACHED CDN SINGLETON ───────────────────────────────────
 let _plt = null;
 let _pltPromise = null;
@@ -459,10 +462,10 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       const yCol = layers.find(ly => ly.visible && ly.aes?.y)?.aes.y;
       const xVals = xCol ? rows.map(r => +r[xCol]).filter(v => isFinite(v)) : [];
       const yVals = yCol ? rows.map(r => +r[yCol]).filter(v => isFinite(v)) : [];
-      const xMin = xVals.length ? Math.min(...xVals) : 0;
-      const xMax = xVals.length ? Math.max(...xVals) : 1;
-      const yMin = yVals.length ? Math.min(...yVals) : 0;
-      const yMax = yVals.length ? Math.max(...yVals) : 1;
+      const xMin = arrMin(xVals);
+      const xMax = arrMax(xVals);
+      const yMin = arrMin(yVals);
+      const yMax = arrMax(yVals);
       // Only draw zero rule when 0 is within ±20% of the data range (ggplot expand default)
       const xRange = xMax - xMin;
       const yRange = yMax - yMin;
@@ -607,7 +610,7 @@ function MapCanvas({ layer, rows }) {
       const isNum = vals.every(v => v !== "" && v !== null && !isNaN(parseFloat(v)));
       if (isNum) {
         const nums = vals.map(Number);
-        const mn = Math.min(...nums), mx = Math.max(...nums), rng = mx - mn || 1;
+        const mn = arrMin(nums), mx = arrMax(nums), rng = mx - mn || 1;
         // teal (#6ec8b4) → gold (#c8a96e) gradient
         getColor = row => {
           const t = (Number(row[colorCol]) - mn) / rng;

@@ -431,6 +431,11 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
   // Ref exposed to WranglingModule so DataViewer can dispatch patch steps
   const wranglingAddStepRef = useRef(null);
 
+  // Track which dataset IDs have already been registered in sessionState.
+  // Prevents duplicate dispatches while ensuring every new dataset gets registered
+  // regardless of which code path added it (handleLoadFile, handleSaveSubset, etc).
+  const registeredIds = useRef(new Set());
+
   const [datasets, setDatasets] = useState(() => {
     // Secondary datasets scoped to this project's pid — no cross-project leakage
     const secondary = ssRead(primaryId);
@@ -487,24 +492,26 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     ssWrite(primaryId, secondary);
   }, [datasets, primaryId]);
 
-  // Register ALL initial datasets in sessionState on mount — primary + any restored from
-  // sessionStorage. Runs once so previously-loaded secondary datasets reappear in
-  // the Dataset Manager without needing to reload them.
+  // Register datasets in sessionState whenever `datasets` changes.
+  // Uses registeredIds ref so each dataset is only dispatched once (idempotent
+  // guard), but newly added datasets (from handleLoadFile, handleSaveSubset, etc.)
+  // are always caught — no stale-closure risk from useCallback [] deps.
   useEffect(() => {
     if (!dispatch) return;
     datasets.forEach(d => {
-      if (!d.rawData) return;
+      if (!d.rawData || registeredIds.current.has(d.id)) return;
+      registeredIds.current.add(d.id);
       registerDataset(dispatch, {
         id:       d.id,
         name:     d.filename,
         source:   "loaded",
-        rowCount: d.rawData.rows?.length    ?? 0,
+        // Use full DuckDB row count when available, fall back to extracted length
+        rowCount: d.rawData._duckdb?.rowCount ?? d.rawData.rows?.length    ?? 0,
         colCount: d.rawData.headers?.length ?? 0,
         headers:  d.rawData.headers         ?? [],
       });
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount only — initial snapshot includes sessionStorage-restored datasets
+  }, [datasets, dispatch]);
 
   // Expose slim dataset list to parent (for Modeling Lab dataset picker)
   useEffect(() => {
@@ -544,7 +551,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       parsed = ensureRowIds(parsed);
       if (parsed._duckdb?.truncated) {
         setLoadErr(
-          `Large file: loaded first 500,000 of ${parsed._duckdb.rowCount.toLocaleString()} rows via DuckDB.`
+          `Large file: loaded first 2,000,000 of ${parsed._duckdb.rowCount.toLocaleString()} rows via DuckDB.`
         );
       }
       const id    = genId();

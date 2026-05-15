@@ -5,6 +5,8 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
+const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
+const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import { HintBox } from "../HelpSystem.jsx";
 import { getPlotHistory, savePlotHistory } from "../../services/Persistence/plotHistory.js";
 import {
@@ -88,7 +90,7 @@ function buildColorScale(rows, col) {
   const isNum = vals.every(v => !isNaN(parseFloat(v)));
   if (isNum) {
     const nums = vals.map(Number);
-    const mn = Math.min(...nums), mx = Math.max(...nums), rng = mx - mn || 1;
+    const mn = arrMin(nums), mx = arrMax(nums), rng = mx - mn || 1;
     const getColor = row => {
       const v = row[col];
       if (v === null || v === undefined || v === "") return null;

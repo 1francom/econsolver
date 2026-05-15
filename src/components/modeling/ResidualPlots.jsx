@@ -15,6 +15,9 @@
 
 import { useTheme, mono } from "./shared.jsx";
 
+const arrMin = (a, fallback = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fallback;
+const arrMax = (a, fallback = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fallback;
+
 // ─── EXPORT SVG ───────────────────────────────────────────────────────────────
 function exportSVG(svgId, filename) {
   const el = document.getElementById(svgId);
@@ -115,7 +118,7 @@ function lowess(xs, ys, f = 0.3) {
   const h = Math.max(2, Math.floor(f * n));
 
   // evaluate at 40 evenly-spaced x points
-  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const xMin = arrMin(xs), xMax = arrMax(xs);
   const pts = Array.from({ length: 40 }, (_, i) => xMin + (i / 39) * (xMax - xMin));
 
   return pts.map(x0 => {
@@ -206,8 +209,8 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
 
   const xVals = pts.map(p => p.x);
   const yVals = pts.map(p => p.y);
-  const xMin = Math.min(...xVals), xMax = Math.max(...xVals);
-  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const xMin = arrMin(xVals), xMax = arrMax(xVals);
+  const yMin = arrMin(yVals), yMax = arrMax(yVals);
   const xPad = (xMax - xMin) * 0.04 || 1;
   const yPad = (yMax - yMin) * 0.1  || 1;
   const xLo = xMin - xPad, xHi = xMax + xPad;
@@ -342,8 +345,8 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
 
   const allX = pts.map(p => p.x);
   const allY = pts.map(p => p.y);
-  const lo = Math.min(Math.min(...allX), Math.min(...allY));
-  const hi = Math.max(Math.max(...allX), Math.max(...allY));
+  const lo = Math.min(arrMin(allX), arrMin(allY));
+  const hi = Math.max(arrMax(allX), arrMax(allY));
   const pad = (hi - lo) * 0.06 || 0.3;
   const axLo = lo - pad, axHi = hi + pad;
 
