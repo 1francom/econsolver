@@ -98,7 +98,7 @@ const GEOM_OPTS_DEFAULTS = {
   point:     { size: 3,   shape: "circle" },
   line:      { strokeWidth: 1.8, dash: "none" },
   smooth:    { method: "lm", showSE: true, ci: 0.95, span: 0.75 },
-  boxplot:   { outlierShow: true, outlierSize: 3 },
+  boxplot:   { outlierShow: true, outlierSize: 3, outlierColor: "", iqrCoef: 1.5 },
   histogram: { bins: 20 },
   density:   { adjust: 1.0 },
   bar:       { strokeWidth: 0 },
@@ -265,18 +265,105 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
 
     case "boxplot": {
       if (!aes.y) break;
-      const { outlierShow = true, outlierSize = 3 } = ly.opts || {};
-      const bOpts = { r: outlierShow ? outlierSize / 2 : 0 };
+      const {
+        outlierShow = true, outlierSize = 3,
+        outlierColor = "", iqrCoef = 1.5,
+      } = ly.opts || {};
+      const outCol = outlierColor || colorVal;
+
+      // Group rows by x category (or treat all as one group if no x)
+      const groupKey = aes.x || "__all__";
+      const groups = new Map();
+      for (const r of rows) {
+        const v = +r[aes.y];
+        if (!isFinite(v)) continue;
+        const k = aes.x ? String(r[aes.x] ?? "") : "__all__";
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(v);
+      }
+
+      // Sub-groups for grouped boxplot (aes.color ≠ aes.x)
       const isGrouped = aes.color && aes.x && aes.color !== aes.x;
+      const subKey = isGrouped ? aes.color : null;
+      const subGroups = new Map(); // "xVal::subVal" → values[]
       if (isGrouped) {
-        marks.push(Plt.boxY(rows, {
-          fx: aes.x, x: aes.color, y: aes.y,
-          fill: aes.color, fillOpacity: 0.72 * op, ...bOpts,
+        for (const r of rows) {
+          const v = +r[aes.y];
+          if (!isFinite(v)) continue;
+          const k = `${r[aes.x] ?? ""}::${r[aes.color] ?? ""}`;
+          if (!subGroups.has(k)) subGroups.set(k, []);
+          subGroups.get(k).push(v);
+        }
+      }
+
+      function quantile(sorted, q) {
+        const pos = q * (sorted.length - 1);
+        const lo = Math.floor(pos), hi = Math.ceil(pos);
+        return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+      }
+
+      function buildBoxMarks(vals, xVal, fillC) {
+        if (vals.length < 2) return;
+        const s = [...vals].sort((a, b) => a - b);
+        const q1 = quantile(s, 0.25);
+        const med = quantile(s, 0.5);
+        const q3 = quantile(s, 0.75);
+        const iqr = q3 - q1;
+        const lo = q1 - iqrCoef * iqr;
+        const hi = q3 + iqrCoef * iqr;
+        const wMin = s.find(v => v >= lo) ?? q1;
+        const wMax = [...s].reverse().find(v => v <= hi) ?? q3;
+        const outliers = outlierShow ? s.filter(v => v < lo || v > hi) : [];
+        const x = xVal === "__all__" ? undefined : xVal;
+
+        // IQR box
+        marks.push(Plt.barY([{ x, y1: q1, y2: q3 }], {
+          x: "x", y1: "y1", y2: "y2",
+          fill: fillC, fillOpacity: 0.68 * op,
+          stroke: fillC, strokeOpacity: 0.55 * op, strokeWidth: 1,
         }));
+        // Median line
+        marks.push(Plt.ruleX([{ x, y1: med, y2: med }], {
+          x: "x", y1: "y1", y2: "y2",
+          stroke: "#fff", strokeWidth: 2, strokeOpacity: 0.9 * op,
+        }));
+        // Whiskers
+        marks.push(Plt.ruleX([{ x, y1: wMin, y2: q1 }], {
+          x: "x", y1: "y1", y2: "y2",
+          stroke: fillC, strokeWidth: 1.4, strokeOpacity: 0.75 * op,
+          strokeDasharray: "3 2",
+        }));
+        marks.push(Plt.ruleX([{ x, y1: q3, y2: wMax }], {
+          x: "x", y1: "y1", y2: "y2",
+          stroke: fillC, strokeWidth: 1.4, strokeOpacity: 0.75 * op,
+          strokeDasharray: "3 2",
+        }));
+        // Whisker caps
+        marks.push(Plt.tickX([{ x, y: wMin }, { x, y: wMax }], {
+          x: "x", y: "y", stroke: fillC, strokeOpacity: 0.75 * op, strokeWidth: 1.4,
+        }));
+        // Outliers
+        if (outliers.length) {
+          marks.push(Plt.dot(outliers.map(v => ({ x, y: v })), {
+            x: "x", y: "y", fill: outCol, r: outlierSize / 2,
+            fillOpacity: 0.82 * op, stroke: "none",
+          }));
+        }
+      }
+
+      if (isGrouped) {
+        const xVals = [...new Set(rows.map(r => String(r[aes.x] ?? "")))];
+        const subVals = [...new Set(rows.map(r => String(r[aes.color] ?? "")))];
+        // Use palette colors per subgroup
+        const subColors = subVals.map((_, i) => DEFAULT_FILLS[i % DEFAULT_FILLS.length]);
+        for (const xv of xVals) {
+          subVals.forEach((sv, si) => {
+            const vals = subGroups.get(`${xv}::${sv}`) ?? [];
+            buildBoxMarks(vals, `${xv} · ${sv}`, subColors[si]);
+          });
+        }
       } else {
-        marks.push(Plt.boxY(rows, {
-          x: aes.x || undefined, y: aes.y, fill: colorVal, fillOpacity: 0.68 * op, ...bOpts,
-        }));
+        for (const [k, vals] of groups) buildBoxMarks(vals, k, colorVal);
       }
       break;
     }
@@ -711,6 +798,9 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
   </>;
 
   if (geom === "boxplot") return <>
+    {lbl("IQR ×")}
+    {slider("iqrCoef", 0.5, 3, 0.5, 1.5)}
+    <span style={numW}>{opts.iqrCoef ?? 1.5}</span>
     <button onClick={() => set("outlierShow", !(opts.outlierShow ?? true))} style={chip(opts.outlierShow ?? true)}>
       outliers {(opts.outlierShow ?? true) ? "on" : "off"}
     </button>
@@ -718,6 +808,11 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
       {lbl("size")}
       {slider("outlierSize", 1, 8, 0.5, 3)}
       <span style={numW}>{opts.outlierSize ?? 3}</span>
+      {lbl("color")}
+      <input type="color" value={opts.outlierColor || layer.fill}
+        onChange={e => set("outlierColor", e.target.value)}
+        title="Outlier dot color"
+        style={{ width: 22, height: 18, padding: 0, border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer", background: "none" }} />
     </>}
   </>;
 
