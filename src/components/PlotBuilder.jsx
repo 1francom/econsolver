@@ -336,7 +336,11 @@ function patchDarkTheme(el) {
 
 // ─── PLOT CANVAS — renders one or more layers on a single Observable Plot ─────
 // layers: array of layer objects (for overlay/comparison) OR single-element array
-function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme, canvasRef, showSE = true }) {
+function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme, canvasRef, showSE = true,
+  xScale = "linear", yScale = "linear",
+  xDomain = [null, null], yDomain = [null, null],
+  xFmt = "", yFmt = "",
+}) {
   const { C } = useTheme();
   const ownRef = useRef(null);
   const ref    = canvasRef ?? ownRef;
@@ -409,11 +413,25 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
         x: {
           label:       xLabel || null,
           labelOffset: xIsDate ? 46 : 34,
-          nice:        true,
+          nice:        xScale === "linear",
           inset:       8,
-          ...(xIsDate ? { type: "utc" } : { ticks: Math.min(10, Math.floor((width || 580) / 70)) }),
+          ...(xIsDate ? { type: "utc" }
+            : { type: xScale !== "linear" ? xScale : undefined,
+                ticks: Math.min(10, Math.floor((width || 580) / 70)) }),
+          ...(xDomain[0] != null || xDomain[1] != null
+            ? { domain: [xDomain[0] ?? xMin, xDomain[1] ?? xMax] } : {}),
+          ...(xFmt ? { tickFormat: xFmt } : {}),
         },
-        y: { label: yLabel || null, labelOffset: 40, nice: true, inset: 8 },
+        y: {
+          label:       yLabel || null,
+          labelOffset: 40,
+          nice:        yScale === "linear",
+          inset:       8,
+          ...(yScale !== "linear" ? { type: yScale } : {}),
+          ...(yDomain[0] != null || yDomain[1] != null
+            ? { domain: [yDomain[0] ?? yMin, yDomain[1] ?? yMax] } : {}),
+          ...(yFmt ? { tickFormat: yFmt } : {}),
+        },
         color: colorOpts,
         marks,
       });
@@ -423,8 +441,8 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
     } catch (e) {
       container.innerHTML = `<div style="color:${C.red};font-family:${mono};font-size:11px;padding:1rem">Plot error: ${e.message}</div>`;
     }
-    return () => { if (ref.current) ref.current.innerHTML = ""; };
-  }, [Plt, layers, rows, xLabel, yLabel, width, scheme]);
+    return () => { if (ref.current) ref.current.innerHTML = ""; }; // safe: clearing own container
+  }, [Plt, layers, rows, xLabel, yLabel, width, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt]);
 
   if (err) return <div style={{ color: C.red, fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
   if (!Plt) return <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Observable Plot…</div>;
@@ -894,10 +912,18 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   const [yLabel,      setYLabel]      = useState("");
   const [scheme,      setScheme]      = useState("");
   const [showSE,      setShowSE]      = useState(true);
-  const [plotHistory, setPlotHistory] = useState([]);
-  const [histIdx,     setHistIdx]     = useState(null); // null = editor mode
-  const [histOpen,    setHistOpen]    = useState(false);
-  const [compareIds,  setCompareIds]  = useState(new Set());
+  const [plotHistory,   setPlotHistory]   = useState([]);
+  const [histIdx,       setHistIdx]       = useState(null); // null = editor mode
+  const [histOpen,      setHistOpen]      = useState(false);
+  const [compareIds,    setCompareIds]    = useState(new Set());
+  // Axis scale options (ggplot2: scale_x_log10, xlim, scale_y_continuous(labels=…))
+  const [xScale,        setXScale]        = useState("linear"); // "linear" | "log" | "sqrt"
+  const [yScale,        setYScale]        = useState("linear");
+  const [xDomain,       setXDomain]       = useState([null, null]); // [min, max] or null=auto
+  const [yDomain,       setYDomain]       = useState([null, null]);
+  const [xFmt,          setXFmt]          = useState(""); // "" | "%" | ","
+  const [yFmt,          setYFmt]          = useState("");
+  const [showAxisOpts,  setShowAxisOpts]  = useState(false);
   const canvasRef  = useRef(null);
   const plotRef    = useRef(null);
   const [canvasW,  setCanvasW]  = useState(760);
@@ -940,26 +966,31 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setXLabel(entry.xLabel || "");
     setYLabel(entry.yLabel || "");
     setScheme(entry.scheme || "");
+    setXScale(entry.xScale || "linear");
+    setYScale(entry.yScale || "linear");
+    setXDomain(entry.xDomain || [null, null]);
+    setYDomain(entry.yDomain || [null, null]);
+    setXFmt(entry.xFmt || "");
+    setYFmt(entry.yFmt || "");
   }, []);
 
   const savePlot = useCallback(() => {
     if (layers.length === 0) return;
+    const scaleState = { xScale, yScale, xDomain, yDomain, xFmt, yFmt };
     let next;
     if (histIdx !== null && plotHistory[histIdx]) {
-      // Overwrite the currently-viewed saved plot
       const updated = {
         ...plotHistory[histIdx],
         layers: JSON.parse(JSON.stringify(layers)),
-        title, xLabel, yLabel, scheme,
+        title, xLabel, yLabel, scheme, ...scaleState,
       };
       next = plotHistory.map((e, i) => i === histIdx ? updated : e);
     } else {
-      // New save
       const entry = {
         id:      "ph_" + Math.random().toString(36).slice(2, 8),
         name:    `Plot ${plotHistory.length + 1}`,
         layers:  JSON.parse(JSON.stringify(layers)),
-        title, xLabel, yLabel, scheme,
+        title, xLabel, yLabel, scheme, ...scaleState,
         savedAt: Date.now(),
       };
       next = [...plotHistory, entry];
@@ -967,7 +998,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     }
     setPlotHistory(next);
     if (pid) savePlotHistory(pid, next).catch(() => {});
-  }, [plotHistory, histIdx, layers, title, xLabel, yLabel, scheme, pid]);
+  }, [plotHistory, histIdx, layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, pid]);
 
   const newPlot = useCallback(() => {
     setLayers([]);
@@ -976,6 +1007,12 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setXLabel("");
     setYLabel("");
     setScheme("");
+    setXScale("linear");
+    setYScale("linear");
+    setXDomain([null, null]);
+    setYDomain([null, null]);
+    setXFmt("");
+    setYFmt("");
     setHistIdx(null);
   }, []);
 
@@ -1089,7 +1126,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
           <LayerEditorInline layer={activeLayer} onChange={updateLayer} headers={headers} />
         )}
 
-        {/* Row 3: toolbar — labels, palette, SE, export */}
+        {/* Row 3: toolbar — labels, palette, axis opts, export */}
         <div style={{
           display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8,
           padding: "0.38rem 0.75rem", background: C.surface,
@@ -1122,6 +1159,15 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
           </div>
 
           {/* SE toggle moved to per-layer GeomOptsRow for smooth layers */}
+
+          {/* Axis options toggle */}
+          <button onClick={() => setShowAxisOpts(o => !o)} title="Axis scale options"
+            style={{
+              padding: "3px 7px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+              background: showAxisOpts ? "rgba(110,200,180,0.12)" : "none",
+              color: showAxisOpts ? C.teal : C.textMuted,
+              border: `1px solid ${showAxisOpts ? C.teal : C.border}`,
+            }}>⊞ Axis</button>
 
           {/* History nav + Save + New */}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -1159,6 +1205,66 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             </div>
           )}
         </div>
+
+        {/* Row 4: axis scale options — collapsible */}
+        {showAxisOpts && (
+          <div style={{
+            display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12,
+            padding: "0.35rem 0.75rem", background: C.bg, borderTop: `1px solid ${C.border}`,
+          }}>
+            {[
+              { axis: "X", scale: xScale, setScale: setXScale, domain: xDomain, setDomain: setXDomain, fmt: xFmt, setFmt: setXFmt },
+              { axis: "Y", scale: yScale, setScale: setYScale, domain: yDomain, setDomain: setYDomain, fmt: yFmt, setFmt: setYFmt },
+            ].map(({ axis, scale, setScale, domain, setDomain, fmt, setFmt }) => (
+              <div key={axis} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, width: 8 }}>{axis}</span>
+                {/* Scale type */}
+                {["linear", "log", "sqrt"].map(s => (
+                  <button key={s} onClick={() => setScale(s)}
+                    style={{
+                      padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer",
+                      background: scale === s ? C.teal : "none",
+                      color: scale === s ? C.bg : C.textMuted,
+                      border: `1px solid ${scale === s ? C.teal : C.border}`,
+                    }}>{s}</button>
+                ))}
+                {/* Limits */}
+                <span style={{ fontFamily: mono, fontSize: 8, color: C.border }}>|</span>
+                {["min", "max"].map((which, wi) => (
+                  <input key={which} type="number" placeholder={which}
+                    value={domain[wi] ?? ""}
+                    onChange={e => {
+                      const v = e.target.value === "" ? null : +e.target.value;
+                      setDomain(d => wi === 0 ? [v, d[1]] : [d[0], v]);
+                    }}
+                    style={{
+                      width: 52, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
+                      fontFamily: mono, fontSize: 8, padding: "2px 4px", color: C.text, outline: "none",
+                    }} />
+                ))}
+                {/* Tick format */}
+                <span style={{ fontFamily: mono, fontSize: 8, color: C.border }}>|</span>
+                <select value={fmt} onChange={e => setFmt(e.target.value)}
+                  style={{
+                    background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
+                    fontFamily: mono, fontSize: 8, padding: "2px 4px", color: fmt ? C.text : C.textMuted,
+                  }}>
+                  <option value="">auto</option>
+                  <option value=",">,000</option>
+                  <option value=".1%">%</option>
+                  <option value="$.2f">$</option>
+                  <option value=".2f">.2f</option>
+                  <option value=".3f">.3f</option>
+                </select>
+              </div>
+            ))}
+            {/* Reset all */}
+            <button onClick={() => { setXScale("linear"); setYScale("linear"); setXDomain([null,null]); setYDomain([null,null]); setXFmt(""); setYFmt(""); }}
+              style={{ padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer", background: "none", color: C.textMuted, border: `1px solid ${C.border}`, marginLeft: "auto" }}>
+              reset
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── BOTTOM: plot — all visible layers composited ────────────────────── */}
@@ -1187,6 +1293,12 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
               height={canvasH}
               scheme={scheme}
               showSE={showSE}
+              xScale={xScale}
+              yScale={yScale}
+              xDomain={xDomain}
+              yDomain={yDomain}
+              xFmt={xFmt}
+              yFmt={yFmt}
             />
           </div>
         )}
@@ -1242,8 +1354,8 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 display: "flex", gap: 8, padding: "0.5rem 0.75rem",
                 borderTop: `1px solid ${C.border}`, background: C.bg, overflowX: "auto",
               }}>
-                <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE />
-                <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE />
+                <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE xScale={entA.xScale||"linear"} yScale={entA.yScale||"linear"} xDomain={entA.xDomain||[null,null]} yDomain={entA.yDomain||[null,null]} xFmt={entA.xFmt||""} yFmt={entA.yFmt||""} />
+                <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE xScale={entB.xScale||"linear"} yScale={entB.yScale||"linear"} xDomain={entB.xDomain||[null,null]} yDomain={entB.yDomain||[null,null]} xFmt={entB.xFmt||""} yFmt={entB.yFmt||""} />
               </div>
             );
           })()}
