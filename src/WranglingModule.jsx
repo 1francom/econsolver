@@ -198,7 +198,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         : null,
       _duckdb: processed._duckdb ?? null,
     });
-  }, [idbReady, pipeline, processed._duckdb?.tableName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idbReady, processed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-clamp branchPointIndex when pipeline shrinks ─────────────────────
   useEffect(() => {
