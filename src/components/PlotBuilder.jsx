@@ -19,7 +19,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme, mono } from "./modeling/shared.jsx";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
-import { getPlotHistory, savePlotHistory } from "../services/persistence/plotHistory.js";
+import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
 
 // ─── OBSERVABLE PLOT — CACHED CDN SINGLETON ───────────────────────────────────
 let _plt = null;
