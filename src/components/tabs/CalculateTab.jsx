@@ -15,7 +15,9 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { HintBox } from "../HelpSystem.jsx";
-import { evalExpression, buildScope, solveRootAuto, solveSystem, derivative, nthDerivative, integrate } from "../../math/calcEngine.js";
+import { evalExpression, buildScope, solveRootAuto, solveSystem, derivative, nthDerivative, integrate,
+  dnorm, pnorm, qnorm, dt, pt, qt, dbinom, pbinom, dpois, ppois, dchisq, pchisq, qchisq,
+} from "../../math/calcEngine.js";
 import { symbolicDiff, latexName } from "../../math/symbolicDiff.js";
 import { useTheme } from "../../ThemeContext.jsx";
 
@@ -689,6 +691,229 @@ function FunctionGrapher({ C, savedEqs }) {
   );
 }
 
+// ─── PROBABILITY CALCULATOR ───────────────────────────────────────────────────
+const PROB_DISTS = [
+  { id:"normal",  label:"Normal",      params:[{k:"μ",def:"0"},{k:"σ",def:"1"}],     cont:true  },
+  { id:"t",       label:"t",           params:[{k:"df",def:"5"}],                    cont:true  },
+  { id:"chisq",   label:"Chi-squared", params:[{k:"df",def:"3"}],                    cont:true  },
+  { id:"binom",   label:"Binomial",    params:[{k:"n",def:"10"},{k:"p",def:"0.5"}],  cont:false },
+  { id:"poisson", label:"Poisson",     params:[{k:"λ",def:"3"}],                     cont:false },
+];
+function _ppdf(dist, p, x) {
+  switch(dist) {
+    case "normal":  return dnorm(x, +(p.μ??0), +(p.σ??1));
+    case "t":       return dt(x, +(p.df??5));
+    case "chisq":   return dchisq(x, +(p.df??3));
+    case "binom":   return dbinom(x, +(p.n??10), +(p.p??0.5));
+    case "poisson": return dpois(x, +(p.λ??3));
+    default: return 0;
+  }
+}
+function _pcdf(dist, p, x) {
+  switch(dist) {
+    case "normal":  return pnorm(x, +(p.μ??0), +(p.σ??1));
+    case "t":       return pt(x, +(p.df??5));
+    case "chisq":   return pchisq(x, +(p.df??3));
+    case "binom":   return pbinom(x, +(p.n??10), +(p.p??0.5));
+    case "poisson": return ppois(x, +(p.λ??3));
+    default: return 0;
+  }
+}
+function _pquant(dist, p, prob) {
+  switch(dist) {
+    case "normal": return qnorm(prob, +(p.μ??0), +(p.σ??1));
+    case "t":      return qt(prob, +(p.df??5));
+    case "chisq":  return qchisq(prob, +(p.df??3));
+    default: return null;
+  }
+}
+function _prange(dist, p) {
+  switch(dist) {
+    case "normal":  { const μ=+(p.μ??0),σ=+(p.σ??1); return [μ-4*σ, μ+4*σ]; }
+    case "t":       return [-6, 6];
+    case "chisq":   { const d=+(p.df??3); return [0, Math.max(10, d+5*Math.sqrt(2*d))]; }
+    case "binom":   return [0, +(p.n??10)];
+    case "poisson": { const λ=+(p.λ??3); return [0, Math.max(10, λ+5*Math.sqrt(λ))]; }
+    default: return [-4, 4];
+  }
+}
+
+function ProbCalc() {
+  const { C } = useTheme();
+  const [dist,   setDistId2] = useState("normal");
+  const [params, setParams]  = useState({ μ:"0", σ:"1" });
+  const [mode,   setMode]    = useState("cdf");
+  const [xVal,   setXVal]    = useState("1.96");
+  const [aVal,   setAVal]    = useState("-1.96");
+  const [bVal,   setBVal]    = useState("1.96");
+  const [pVal,   setPVal]    = useState("0.975");
+
+  const cfg    = PROB_DISTS.find(d=>d.id===dist);
+  const isCont = cfg?.cont ?? true;
+
+  function switchDist(id) {
+    const c = PROB_DISTS.find(d=>d.id===id);
+    setDistId2(id);
+    const def = {};
+    c.params.forEach(({k,def:v})=>{ def[k]=v; });
+    setParams(def);
+  }
+
+  const result = useMemo(()=>{
+    try {
+      if (mode==="cdf") {
+        const x=parseFloat(xVal); if(!isFinite(x)) return null;
+        return { val:_pcdf(dist,params,x), label:`P(X ≤ ${x})` };
+      } else if (mode==="pdf") {
+        const x=parseFloat(xVal); if(!isFinite(x)) return null;
+        return { val:_ppdf(dist,params,x), label:isCont?`f(${x})`:`P(X = ${Math.round(x)})` };
+      } else if (mode==="between") {
+        const a=parseFloat(aVal),b=parseFloat(bVal); if(!isFinite(a)||!isFinite(b)) return null;
+        return { val:_pcdf(dist,params,b)-_pcdf(dist,params,a), label:`P(${a} ≤ X ≤ ${b})` };
+      } else if (mode==="quantile") {
+        const p=parseFloat(pVal); if(!isFinite(p)||p<=0||p>=1) return null;
+        if(!isCont) return { val:null, label:"Quantile not available for discrete distributions" };
+        const x=_pquant(dist,params,p);
+        return { val:x, label:`Q(${p})` };
+      }
+    } catch { return null; }
+    return null;
+  },[dist,params,mode,xVal,aVal,bVal,pVal,isCont]);
+
+  // Mini SVG
+  const SVG_W=300, SVG_H=80, PL=4, PR=4, PT=8, PB=4;
+  const CW=SVG_W-PL-PR, CH=SVG_H-PT-PB;
+  const [rMin,rMax]=_prange(dist,params);
+  const sx=v=>PL+(v-rMin)/(rMax-rMin)*CW;
+  const svgContent=useMemo(()=>{
+    const steps=isCont?120:Math.min(60,Math.round(rMax-rMin)+1);
+    const pts=[]; let maxY=0;
+    if(isCont){
+      for(let i=0;i<=steps;i++){
+        const x=rMin+(rMax-rMin)*i/steps;
+        const y=_ppdf(dist,params,x);
+        if(isFinite(y)&&y>=0){pts.push({x,y});maxY=Math.max(maxY,y);}
+      }
+    } else {
+      for(let k=Math.round(rMin);k<=Math.round(rMax);k++){
+        const y=_ppdf(dist,params,k);
+        if(isFinite(y)){pts.push({x:k,y});maxY=Math.max(maxY,y);}
+      }
+    }
+    if(!maxY) return null;
+    const sy=v=>PT+CH-(v/maxY)*CH;
+    if(isCont){
+      const shadePts=[];
+      const sa=mode==="between"?parseFloat(aVal):mode==="cdf"?rMin:null;
+      const sb=mode==="between"?parseFloat(bVal):mode==="cdf"?parseFloat(xVal):null;
+      if(sa!=null&&sb!=null&&isFinite(sa)&&isFinite(sb)){
+        const ca=Math.max(rMin,sa),cb=Math.min(rMax,sb);
+        if(ca<cb){
+          shadePts.push(`M${sx(ca).toFixed(1)} ${sy(0).toFixed(1)}`);
+          for(let i=0;i<=40;i++){const xv=ca+(cb-ca)*i/40;shadePts.push(`L${sx(xv).toFixed(1)} ${sy(_ppdf(dist,params,xv)).toFixed(1)}`);}
+          shadePts.push(`L${sx(cb).toFixed(1)} ${sy(0).toFixed(1)}Z`);
+        }
+      }
+      const path=pts.map((pt,i)=>`${i===0?"M":"L"}${sx(pt.x).toFixed(1)} ${sy(pt.y).toFixed(1)}`).join(" ");
+      return { isCont:true, path, shade:shadePts.join(""), sy, maxY };
+    } else {
+      const bw=Math.max(2,CW/pts.length-2);
+      return { isCont:false, pts, sy, maxY, bw };
+    }
+  },[dist,params,mode,xVal,aVal,bVal,rMin,rMax,isCont,CW,CH]);
+
+  return (
+    <div style={{ padding:"0.85rem" }}>
+      {/* Distribution + params */}
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end", marginBottom:10 }}>
+        <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+          <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
+          <select value={dist} onChange={e=>switchDist(e.target.value)} style={{...fieldStyle(C),width:122}}>
+            {PROB_DISTS.map(d=><option key={d.id} value={d.id}>{d.label}</option>)}
+          </select>
+        </label>
+        {cfg?.params.map(({k})=>(
+          <label key={k} style={{ display:"flex", flexDirection:"column", gap:3 }}>
+            <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
+            <input value={params[k]??""} onChange={e=>setParams(p=>({...p,[k]:e.target.value}))}
+              style={{...fieldStyle(C),width:68}}/>
+          </label>
+        ))}
+      </div>
+      {/* Mode tabs */}
+      <div style={{ display:"flex", borderBottom:`1px solid ${C.border}`, marginBottom:10 }}>
+        {[["cdf","P(X ≤ x)"],["pdf",isCont?"f(x)":"P(X=k)"],["between","P(a ≤ X ≤ b)"],["quantile","Quantile"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setMode(id)}
+            style={{ padding:"0.28rem 0.6rem", background:"transparent", border:"none",
+              borderBottom:mode===id?`2px solid ${C.teal}`:"2px solid transparent",
+              color:mode===id?C.teal:C.textMuted,
+              cursor:"pointer", fontFamily:mono, fontSize:9, letterSpacing:"0.06em", transition:"all 0.1s" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {/* Inputs */}
+      <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:10, flexWrap:"wrap" }}>
+        {(mode==="cdf"||mode==="pdf") && (
+          <label style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>x =</span>
+            <input value={xVal} onChange={e=>setXVal(e.target.value)} style={{...fieldStyle(C),width:100}}/>
+          </label>
+        )}
+        {mode==="between" && <>
+          <label style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>a =</span>
+            <input value={aVal} onChange={e=>setAVal(e.target.value)} style={{...fieldStyle(C),width:88}}/>
+          </label>
+          <label style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>b =</span>
+            <input value={bVal} onChange={e=>setBVal(e.target.value)} style={{...fieldStyle(C),width:88}}/>
+          </label>
+        </>}
+        {mode==="quantile" && (
+          <label style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>p =</span>
+            <input value={pVal} onChange={e=>setPVal(e.target.value)} style={{...fieldStyle(C),width:100}}/>
+          </label>
+        )}
+      </div>
+      {/* Result */}
+      {result && (
+        <div style={{ marginBottom:10, display:"flex", alignItems:"baseline", gap:10 }}>
+          <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>{result.label} =</span>
+          {result.val!=null
+            ? <span style={{ fontSize:16, color:C.teal, fontFamily:mono }}>{result.val.toFixed(6)}</span>
+            : <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>{result.label}</span>}
+        </div>
+      )}
+      {/* Mini curve */}
+      {svgContent && (
+        <svg width={SVG_W} height={SVG_H} style={{ display:"block", overflow:"visible" }}>
+          {svgContent.isCont ? <>
+            {svgContent.shade && <path d={svgContent.shade} fill={C.teal} opacity={0.22}/>}
+            <path d={svgContent.path} fill="none" stroke={C.teal} strokeWidth={1.5}/>
+            {(mode==="cdf"||mode==="pdf")&&isFinite(parseFloat(xVal))&&(
+              <line x1={sx(parseFloat(xVal)).toFixed(1)} x2={sx(parseFloat(xVal)).toFixed(1)}
+                y1={PT} y2={PT+CH} stroke={C.gold} strokeWidth={1} strokeDasharray="3,2"/>
+            )}
+          </> : <>
+            {svgContent.pts.map(({x,y})=>{
+              const bh=y/svgContent.maxY*CH;
+              const hl=(mode==="between"&&x>=parseFloat(aVal)&&x<=parseFloat(bVal))
+                     ||(mode==="cdf"&&x<=parseFloat(xVal))
+                     ||(mode==="pdf"&&Math.round(x)===Math.round(parseFloat(xVal)));
+              return <rect key={x} x={(sx(x)-svgContent.bw/2).toFixed(1)} y={(PT+CH-bh).toFixed(1)}
+                width={svgContent.bw.toFixed(1)} height={bh.toFixed(1)}
+                fill={hl?C.teal:C.border2} opacity={hl?0.8:0.45} rx={1}/>;
+            })}
+          </>}
+          <line x1={PL} x2={PL+CW} y1={PT+CH} y2={PT+CH} stroke={C.border} strokeWidth={1}/>
+        </svg>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function CalculateTab({ rows = [], headers = [], onAddDataset }) {
   const { C } = useTheme();
@@ -713,6 +938,7 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
   // ── Active tool + grapher ─────────────────────────────────────────────────
   const [activeTool,   setActiveTool]  = useState("solver"); // "solver"|"derivative"|"symbolic"|"algebra"|"integral"
   const [grapherOpen,  setGrapherOpen] = useState(false);
+  const [probOpen,     setProbOpen]    = useState(false);
 
   // ── Equation solver ────────────────────────────────────────────────────────
   const [solverMode,   setSolverMode]  = useState("single"); // "single" | "system"
@@ -1206,7 +1432,13 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
         {grapherOpen && <div style={{ background: C.surface }}><FunctionGrapher C={C} savedEqs={savedEqs} /></div>}
       </div>
 
-      {/* ── 5. Math Tools ─────────────────────────────────────────────────────── */}
+      {/* ── 5. Probability Calculator ───────────────────────────────────────── */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
+        <SectionHeader label="Probability Calculator" open={probOpen} onToggle={() => setProbOpen(o => !o)} />
+        {probOpen && <div style={{ background: C.surface }}><ProbCalc /></div>}
+      </div>
+
+      {/* ── 6. Math Tools ─────────────────────────────────────────────────────── */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
 
         {/* Tool selector strip */}
