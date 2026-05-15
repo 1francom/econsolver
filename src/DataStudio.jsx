@@ -33,7 +33,7 @@ function genId() {
 // Handles: RFC 4180 quoting, embedded commas/newlines, CRLF/LF, type inference.
 // Detects and handles TSV automatically.
 function parseCSV(text, delimiter = ",") {
-  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|#na|\.\.?|\s*)$/i;
 
   function tokenize(line) {
     const fields = [];
