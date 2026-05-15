@@ -186,7 +186,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     const ci = {};
     headers.forEach(h => {
       const s = rows.find(r => r[h] !== undefined && r[h] !== null);
-      ci[h] = { isNumeric: typeof s?.[h] === "number" };
+      const v = s?.[h];
+      ci[h] = {
+        isNumeric: typeof v === "number",
+        isDate:    typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v),
+      };
     });
     onReady({
       headers, cleanRows: rows, colInfo: ci,
