@@ -78,6 +78,90 @@ function drawSamples(rng, n, dist, params) {
   return arr;
 }
 
+// ─── SCOPE BUILDER (pure — no React; shared by generate() and runMonteCarlo) ──
+function buildScope(variables, nObs, rng) {
+  const scope = {};
+  for (const v of variables) {
+    if (!v.name.trim()) return { error: "Variable with empty name." };
+    if (v.dist === "Expression") {
+      const expr = (v.params.expr || "").trim();
+      if (!expr) return { error: `${v.name}: expression is empty.` };
+      try {
+        const varNames = Object.keys(scope), varArrays = Object.values(scope);
+        // The expression evaluator is intentional — user-defined DGP expressions
+        // are evaluated in a sandboxed scope with only DGP variables exposed.
+        // eslint-disable-next-line no-new-func
+        const fn = new Function(...varNames, "N", "observations", `"use strict"; return (${expr});`);
+        const arr = [];
+        for (let i = 0; i < nObs; i++) arr.push(fn(...varArrays.map(a => a[i]), nObs, nObs));
+        scope[v.name] = arr;
+      } catch (e) { return { error: `${v.name}: ${e.message}` }; }
+    } else if (v.dist === "Constant") {
+      const raw = (v.params.value ?? "0").trim();
+      try {
+        // eslint-disable-next-line no-new-func
+        const val = new Function("N", "observations", `"use strict"; return (${raw});`)(nObs, nObs);
+        scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
+      } catch (e) { return { error: `${v.name}: ${e.message}` }; }
+    } else if (v.dist === "Sequence") {
+      const from = +(v.params.from ?? 1), by = +(v.params.by ?? 1);
+      scope[v.name] = Array.from({ length: nObs }, (_, i) => from + i * by);
+    } else if (v.dist === "ForLoop") {
+      const initExpr = (v.params.init || "0").trim(), updExpr = (v.params.update || "prev").trim();
+      const varNames = Object.keys(scope), varArrays = Object.values(scope);
+      try {
+        const arr = new Array(nObs);
+        // eslint-disable-next-line no-new-func
+        const initFn = new Function(...varNames, "N", "observations", `"use strict"; return (${initExpr});`);
+        arr[0] = initFn(...varArrays.map(a => a[0]), nObs, nObs);
+        // eslint-disable-next-line no-new-func
+        const updFn = new Function("prev", "i", ...varNames, "N", "observations", `"use strict"; return (${updExpr});`);
+        for (let i = 1; i < nObs; i++) arr[i] = updFn(arr[i - 1], i, ...varArrays.map(a => a[i]), nObs, nObs);
+        scope[v.name] = arr;
+      } catch (e) { return { error: `${v.name}: ${e.message}` }; }
+    } else if (v.dist === "WhileLoop") {
+      const initExpr = (v.params.init || "1").trim(), updExpr = (v.params.update || "prev").trim();
+      const condExpr = (v.params.condition || "false").trim();
+      const maxIter = Math.max(1, Math.min(100000, +(v.params.maxIter) || 1000));
+      try {
+        // eslint-disable-next-line no-new-func
+        let val = new Function(`"use strict"; return (${initExpr});`)();
+        let iter = 0;
+        // eslint-disable-next-line no-new-func
+        const condFn = new Function("prev", `"use strict"; return !!(${condExpr});`);
+        // eslint-disable-next-line no-new-func
+        const updFn  = new Function("prev", `"use strict"; return (${updExpr});`);
+        while (condFn(val) && iter < maxIter) { val = updFn(val); iter++; }
+        scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
+      } catch (e) { return { error: `${v.name}: ${e.message}` }; }
+    } else {
+      scope[v.name] = drawSamples(rng, nObs, v.dist, v.params);
+    }
+  }
+  return { scope };
+}
+
+// ─── FAST OLS (single regressor + intercept, for MC loop) ─────────────────────
+function tCrit95(df) {
+  if (df >= 120) return 1.960;
+  const lut = { 1:12.706,2:4.303,3:3.182,5:2.571,10:2.228,15:2.131,20:2.086,25:2.060,30:2.042,40:2.021,60:2.000,80:1.990,100:1.984 };
+  const keys = Object.keys(lut).map(Number).sort((a,b)=>a-b);
+  for (const k of keys) if (df <= k) return lut[k];
+  return 1.960;
+}
+function fastOLS1(ys, xs) {
+  const n = ys.length; if (n < 3) return null;
+  let sx=0,sy=0,sxx=0,sxy=0;
+  for(let i=0;i<n;i++){sx+=xs[i];sy+=ys[i];sxx+=xs[i]*xs[i];sxy+=xs[i]*ys[i];}
+  const xb=sx/n,yb=sy/n,sxx2=sxx-n*xb*xb;
+  if(Math.abs(sxx2)<1e-12) return null;
+  const b1=(sxy-n*xb*yb)/sxx2, b0=yb-b1*xb;
+  let ssr=0;
+  for(let i=0;i<n;i++){const e=ys[i]-(b0+b1*xs[i]);ssr+=e*e;}
+  const se=Math.sqrt((ssr/(n-2))/sxx2);
+  return {b1, se, t:b1/se};
+}
+
 // ─── PARAM DEFAULTS ───────────────────────────────────────────────────────────
 const DIST_DEFAULTS = {
   Normal:      { mean: 0, sd: 1 },
@@ -200,6 +284,33 @@ function ParamEditor({ dist, params, onChange }) {
     </div>
   );
   return null;
+}
+
+// ─── MC HISTOGRAM ─────────────────────────────────────────────────────────────
+function MCHistogram({ betas, trueVal, meanVal }) {
+  const { C } = useTheme();
+  const W=400, H=110, BINS=24, pad={l:4,r:4,t:14,b:22};
+  const mn=Math.min(...betas), mx=Math.max(...betas);
+  const range=mx-mn||1, binW=range/BINS;
+  const counts=new Array(BINS).fill(0);
+  betas.forEach(b=>{let idx=Math.floor((b-mn)/binW);if(idx>=BINS)idx=BINS-1;counts[idx]++;});
+  const maxC=Math.max(...counts)||1;
+  const bW=(W-pad.l-pad.r)/BINS, cH=H-pad.t-pad.b;
+  const xp=v=>pad.l+(v-mn)/range*(W-pad.l-pad.r);
+  return (
+    <svg width={W} height={H} style={{display:"block",overflow:"visible",fontFamily:mono}}>
+      {counts.map((c,i)=>{
+        const bh=c/maxC*cH;
+        return <rect key={i} x={pad.l+i*bW+0.5} y={pad.t+cH-bh} width={Math.max(0,bW-1)} height={bh} fill={C.teal} opacity={0.65} rx={1}/>;
+      })}
+      <line x1={xp(meanVal)} x2={xp(meanVal)} y1={pad.t} y2={pad.t+cH+4} stroke={C.gold} strokeWidth={1.5} strokeDasharray="3,2"/>
+      <text x={xp(meanVal)} y={pad.t+cH+14} fill={C.gold} fontSize={8} textAnchor="middle">x̄={meanVal.toFixed(3)}</text>
+      {trueVal!=null && xp(trueVal)>=0 && xp(trueVal)<=W && <>
+        <line x1={xp(trueVal)} x2={xp(trueVal)} y1={pad.t} y2={pad.t+cH+4} stroke="#c86e6e" strokeWidth={1.5}/>
+        <text x={xp(trueVal)} y={pad.t-3} fill="#c86e6e" fontSize={8} textAnchor="middle">β={trueVal}</text>
+      </>}
+    </svg>
+  );
 }
 
 // ─── SCRIPT GENERATOR ─────────────────────────────────────────────────────────
@@ -371,6 +482,13 @@ export default function SimulateTab({ onAddDataset }) {
   const [saved,      setSaved]      = useState(false);
   const [scriptLang, setScriptLang] = useState("r");
   const [scriptOpen, setScriptOpen] = useState(false);
+  const [mcOpen,     setMcOpen]     = useState(false);
+  const [mcY,        setMcY]        = useState("");
+  const [mcX,        setMcX]        = useState("");
+  const [mcTrueBeta, setMcTrueBeta] = useState("2");
+  const [mcReps,     setMcReps]     = useState(1000);
+  const [mcResult,   setMcResult]   = useState(null);
+  const [mcRunning,  setMcRunning]  = useState(false);
 
   const DIST_COLOR = distColor(C);
 
@@ -379,96 +497,13 @@ export default function SimulateTab({ onAddDataset }) {
     setGenErr(""); setSaved(false);
     const rng = mulberry32(+seed || 0);
     const nObs = Math.max(1, Math.min(100000, +n || 500));
-    const scope = {};
-
-    for (const v of variables) {
-      if (!v.name.trim()) { setGenErr(`Variable with empty name — fix before generating.`); return; }
-      if (v.dist === "Expression") {
-        const expr = (v.params.expr || "").trim();
-        if (!expr) { setGenErr(`${v.name}: expression is empty.`); return; }
-        try {
-          const varNames = Object.keys(scope);
-          const varArrays = Object.values(scope);
-          const arr = [];
-          for (let i = 0; i < nObs; i++) {
-            const scalars = varArrays.map(a => a[i]);
-            // eslint-disable-next-line no-new-func
-            const val = new Function(...varNames, "N", "observations", `"use strict"; return (${expr});`)(...scalars, nObs, nObs);
-            arr.push(typeof val === "number" ? val : 0);
-          }
-          scope[v.name] = arr;
-        } catch (e) {
-          setGenErr(`${v.name}: expression error — ${e.message}`);
-          return;
-        }
-      } else if (v.dist === "Constant") {
-        const raw = (v.params.value ?? "0").trim();
-        try {
-          // eslint-disable-next-line no-new-func
-          const val = new Function("N", "observations", `"use strict"; return (${raw});`)(nObs, nObs);
-          scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
-        } catch (e) {
-          setGenErr(`${v.name} (Constant): ${e.message}`);
-          return;
-        }
-      } else if (v.dist === "Sequence") {
-        const from = +(v.params.from ?? 1);
-        const by   = +(v.params.by   ?? 1);
-        scope[v.name] = Array.from({ length: nObs }, (_, i) => from + i * by);
-      } else if (v.dist === "ForLoop") {
-        const initExpr  = (v.params.init   || "0").trim();
-        const updExpr   = (v.params.update || "prev").trim();
-        const varNames  = Object.keys(scope);
-        const varArrays = Object.values(scope);
-        try {
-          const arr = new Array(nObs);
-          // eslint-disable-next-line no-new-func
-          const initFn = new Function(...varNames, "N", "observations", `"use strict"; return (${initExpr});`);
-          const scalarsAt0 = varArrays.map(a => a[0]);
-          arr[0] = initFn(...scalarsAt0, nObs, nObs);
-          for (let i = 1; i < nObs; i++) {
-            const prev = arr[i - 1];
-            const scalars = varArrays.map(a => a[i]);
-            // eslint-disable-next-line no-new-func
-            arr[i] = new Function("prev", "i", ...varNames, "N", "observations", `"use strict"; return (${updExpr});`)(prev, i, ...scalars, nObs, nObs);
-          }
-          scope[v.name] = arr;
-        } catch (e) {
-          setGenErr(`${v.name} (ForLoop): ${e.message}`);
-          return;
-        }
-      } else if (v.dist === "WhileLoop") {
-        const initExpr  = (v.params.init      || "1").trim();
-        const updExpr   = (v.params.update    || "prev").trim();
-        const condExpr  = (v.params.condition || "false").trim();
-        const maxIter   = Math.max(1, Math.min(100000, +(v.params.maxIter) || 1000));
-        try {
-          // eslint-disable-next-line no-new-func
-          let val = new Function(`"use strict"; return (${initExpr});`)();
-          let iter = 0;
-          // eslint-disable-next-line no-new-func
-          const condFn = new Function("prev", `"use strict"; return !!(${condExpr});`);
-          // eslint-disable-next-line no-new-func
-          const updFn  = new Function("prev", `"use strict"; return (${updExpr});`);
-          while (condFn(val) && iter < maxIter) {
-            val = updFn(val);
-            iter++;
-          }
-          scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
-        } catch (e) {
-          setGenErr(`${v.name} (WhileLoop): ${e.message}`);
-          return;
-        }
-      } else {
-        scope[v.name] = drawSamples(rng, nObs, v.dist, v.params);
-      }
-    }
-
+    const { scope, error } = buildScope(variables, nObs, rng);
+    if (error) { setGenErr(error); return; }
     const headers = variables.map(v => v.name);
     const rows = [];
     for (let i = 0; i < nObs; i++) {
       const row = {};
-      headers.forEach(h => { row[h] = scope[h][i]; });
+      headers.forEach(h => { row[h] = scope[h]?.[i] ?? 0; });
       rows.push(row);
     }
     setGenerated({ rows, headers });
@@ -508,6 +543,37 @@ export default function SimulateTab({ onAddDataset }) {
     const name = (dsName.trim() || "simulated_data") + ".csv";
     onAddDataset?.(name, generated.rows, generated.headers);
     setSaved(true);
+  }
+
+  // ── Monte Carlo ─────────────────────────────────────────────────────────────
+  async function runMonteCarlo() {
+    if (!mcY || !mcX) return;
+    setMcRunning(true); setMcResult(null);
+    const nObs  = Math.max(1, Math.min(100000, +n || 500));
+    const reps  = Math.max(10, Math.min(10000, +mcReps || 1000));
+    const trueBeta = parseFloat(mcTrueBeta);
+    const crit  = tCrit95(nObs - 2);
+    const betas = [];
+    const BATCH = 100;
+    for (let r = 0; r < reps; r++) {
+      const rng = mulberry32((+seed || 0) + r * 1_000_037);
+      const { scope, error } = buildScope(variables, nObs, rng);
+      if (error) { setMcRunning(false); return; }
+      const ys = scope[mcY], xs = scope[mcX];
+      if (!ys || !xs) continue;
+      const res = fastOLS1(ys, xs);
+      if (res) betas.push(res);
+      if ((r + 1) % BATCH === 0) await new Promise(res => setTimeout(res, 0));
+    }
+    if (!betas.length) { setMcRunning(false); return; }
+    const bs   = betas.map(b => b.b1);
+    const mean = bs.reduce((a,v)=>a+v,0)/bs.length;
+    const sd   = Math.sqrt(bs.reduce((a,v)=>a+(v-mean)**2,0)/bs.length);
+    const bias  = isFinite(trueBeta) ? mean - trueBeta : null;
+    const rmse  = isFinite(trueBeta) ? Math.sqrt(bs.reduce((a,v)=>a+(v-trueBeta)**2,0)/bs.length) : null;
+    const rejectRate = betas.filter(b=>Math.abs(b.t)>crit).length/betas.length;
+    setMcResult({ betas:bs, mean, sd, bias, rmse, rejectRate, reps:betas.length, trueBeta:isFinite(trueBeta)?trueBeta:null });
+    setMcRunning(false);
   }
 
   const previewRows = generated?.rows.slice(0, 5) ?? [];
@@ -704,6 +770,81 @@ export default function SimulateTab({ onAddDataset }) {
           </div>
         </div>
       )}
+
+      {/* ── Monte Carlo ── */}
+      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "1.2rem", marginBottom: "0.8rem" }}>
+        <button onClick={() => setMcOpen(o=>!o)}
+          style={{ background:"transparent", border:"none", color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:10, padding:0, display:"flex", alignItems:"center", gap:6 }}>
+          <span style={{ fontSize:8 }}>{mcOpen?"▾":"▸"}</span>
+          Monte Carlo
+        </button>
+        {mcOpen && (
+          <div style={{ marginTop:12 }}>
+            {variables.length < 2
+              ? <div style={{ fontSize:10, color:C.textMuted }}>Need at least 2 variables (Y and X) to run Monte Carlo.</div>
+              : <>
+                <div style={{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-end", marginBottom:12 }}>
+                  <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                    <Lbl mb={1}>Y variable</Lbl>
+                    <select value={mcY} onChange={e=>setMcY(e.target.value)} style={{...fieldStyle(C),width:110}}>
+                      <option value="">— select —</option>
+                      {variables.map(v=><option key={v.id} value={v.name}>{v.name}</option>)}
+                    </select>
+                  </label>
+                  <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                    <Lbl mb={1}>X variable</Lbl>
+                    <select value={mcX} onChange={e=>setMcX(e.target.value)} style={{...fieldStyle(C),width:110}}>
+                      <option value="">— select —</option>
+                      {variables.filter(v=>v.name!==mcY).map(v=><option key={v.id} value={v.name}>{v.name}</option>)}
+                    </select>
+                  </label>
+                  <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                    <Lbl mb={1}>True β (for bias)</Lbl>
+                    <input value={mcTrueBeta} onChange={e=>setMcTrueBeta(e.target.value)} placeholder="e.g. 2" style={{...fieldStyle(C),width:70}}/>
+                  </label>
+                  <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                    <Lbl mb={1}>Replications</Lbl>
+                    <input type="number" min={10} max={10000} value={mcReps} onChange={e=>setMcReps(e.target.value)} style={{...fieldStyle(C),width:80}}/>
+                  </label>
+                  <Btn onClick={runMonteCarlo} dis={!mcY||!mcX||mcRunning} v="solid" color={C.blue} ch={mcRunning?"Running…":"Run MC"}/>
+                </div>
+                {mcRunning && <div style={{ fontSize:10, color:C.textMuted, fontFamily:mono, marginBottom:8 }}>Running {mcReps} replications…</div>}
+                {mcResult && (
+                  <div>
+                    <div style={{ overflowX:"auto", marginBottom:14 }}>
+                      <table style={{ borderCollapse:"collapse", fontSize:11 }}>
+                        <thead>
+                          <tr>
+                            {["Reps","Mean β̂","Bias","SD","RMSE","Reject H₀ (5%)"].map(h=>(
+                              <th key={h} style={thStyle(C)}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td style={tdStyle(C)}>{mcResult.reps}</td>
+                            <td style={{...tdStyle(C),color:C.teal}}>{mcResult.mean.toFixed(4)}</td>
+                            <td style={{...tdStyle(C),color:mcResult.bias!=null&&Math.abs(mcResult.bias)>0.05?C.gold:C.text}}>
+                              {mcResult.bias!=null ? (mcResult.bias>=0?"+":"")+mcResult.bias.toFixed(4) : "—"}
+                            </td>
+                            <td style={tdStyle(C)}>{mcResult.sd.toFixed(4)}</td>
+                            <td style={tdStyle(C)}>{mcResult.rmse!=null?mcResult.rmse.toFixed(4):"—"}</td>
+                            <td style={{...tdStyle(C),color:Math.abs(mcResult.rejectRate-0.05)>0.015?(C.gold??C.text):(C.green??C.text)}}>
+                              {(mcResult.rejectRate*100).toFixed(1)}%
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <Lbl mb={6}>Sampling distribution of β̂ ({mcResult.reps} reps, n={+n||500})</Lbl>
+                    <MCHistogram betas={mcResult.betas} trueVal={mcResult.trueBeta} meanVal={mcResult.mean}/>
+                  </div>
+                )}
+              </>
+            }
+          </div>
+        )}
+      </div>
 
       {/* ── Script export ── */}
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "1.2rem" }}>
