@@ -6,6 +6,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import { HintBox } from "../HelpSystem.jsx";
+import { getPlotHistory, savePlotHistory } from "../../services/Persistence/plotHistory.js";
 import {
   haversine,
   assignDistance,
@@ -743,7 +744,7 @@ function MapLegend({ legend, C }) {
   );
 }
 
-function SpatialMapSection({ rows, headers, C }) {
+function SpatialMapSection({ rows, headers, C, pid }) {
   const wktHeaders = useMemo(() => headers.filter(h => {
     const sample = rows.find(r => r[h] != null)?.[h];
     return typeof sample === "string" && /^(POINT|POLYGON|MULTIPOLYGON)/i.test(sample.trim());
@@ -759,6 +760,44 @@ function SpatialMapSection({ rows, headers, C }) {
   const [polyColorCol,setPolyColorCol]= useState("");
   const [showPolygons,setShowPolygons]= useState(true);
   const [polyOpacity, setPolyOpacity] = useState(0.45);
+
+  // ── Map history ──────────────────────────────────────────────────────────────
+  const [mapHistory, setMapHistory] = useState([]);
+  const [histOpen,   setHistOpen]   = useState(false);
+
+  useEffect(() => {
+    if (!pid) return;
+    getPlotHistory(pid).then(h => setMapHistory(h ?? [])).catch(() => {});
+  }, [pid]);
+
+  function getCurrentConfig() {
+    return { latCol, lonCol, ptColorCol, showPoints, ptRadius, wktCol, polyColorCol, showPolygons, polyOpacity };
+  }
+
+  async function saveMap() {
+    if (!pid) return;
+    const name = window.prompt("Map name:", `Map ${mapHistory.length + 1}`);
+    if (!name) return;
+    const entry = { id: Date.now(), name, config: getCurrentConfig(), savedAt: Date.now() };
+    const next = [...mapHistory, entry];
+    setMapHistory(next);
+    await savePlotHistory(pid, next);
+  }
+
+  async function loadMapEntry(entry) {
+    const c = entry.config;
+    setLatCol(c.latCol ?? ""); setLonCol(c.lonCol ?? "");
+    setPtColorCol(c.ptColorCol ?? ""); setShowPoints(c.showPoints ?? true);
+    setPtRadius(c.ptRadius ?? 5); setWktCol(c.wktCol ?? "");
+    setPolyColorCol(c.polyColorCol ?? ""); setShowPolygons(c.showPolygons ?? true);
+    setPolyOpacity(c.polyOpacity ?? 0.45);
+  }
+
+  async function deleteMapEntry(id) {
+    const next = mapHistory.filter(e => e.id !== id);
+    setMapHistory(next);
+    if (pid) await savePlotHistory(pid, next);
+  }
 
   const [L,    setL]   = useState(null);
   const [err,  setErr] = useState(null);
@@ -909,6 +948,37 @@ function SpatialMapSection({ rows, headers, C }) {
           </div>
         </div>
       </div>
+
+      {/* ── Save / History row ── */}
+      {pid && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={saveMap}
+            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal, cursor: "pointer" }}
+          >Save map</button>
+          {mapHistory.length > 0 && (
+            <button onClick={() => setHistOpen(o => !o)}
+              style={{ padding: "3px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
+            >{histOpen ? "▲" : "▼"} {mapHistory.length} saved</button>
+          )}
+        </div>
+      )}
+
+      {/* ── History cards ── */}
+      {pid && histOpen && mapHistory.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {mapHistory.map(entry => (
+            <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border2}`, background: C.surface }}>
+              <span style={{ fontFamily: mono, fontSize: 9, color: C.text }}>{entry.name}</span>
+              <button onClick={() => loadMapEntry(entry)}
+                style={{ padding: "1px 6px", borderRadius: 2, fontFamily: mono, fontSize: 8, background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal, cursor: "pointer" }}
+              >Load</button>
+              <button onClick={() => deleteMapEntry(entry.id)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, lineHeight: 1, color: C.textMuted, padding: "0 2px" }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {err && <div style={{ color: "#c47070", fontFamily: mono, fontSize: 10 }}>{err}</div>}
       {!L   && <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }}>Loading Leaflet…</div>}
@@ -1202,7 +1272,7 @@ function mkSLayer(type, idx) {
   return { id, type, visible: true };
 }
 
-function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
+function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid }) {
   const wrapRef    = useRef(null);
   const mapDivRef  = useRef(null);
   const leafMapRef = useRef(null);
@@ -1212,6 +1282,55 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
   const [layers,   setLayers]  = useState([]);
   const [activeId, setActiveId]= useState(null);
   const [saveName, setSaveName]= useState("grid_cells");
+
+  // ── Download as HTML ─────────────────────────────────────────────────────────
+  function downloadMapHtml() {
+    const visibleLayers = layers.filter(ly => ly.visible);
+    const layerData = visibleLayers.map(ly => {
+      const lyRows = (!ly.datasetId || ly.datasetId === "active")
+        ? rows
+        : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+      return { ...ly, _data: lyRows };
+    });
+
+    const html = `<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8" /><title>Spatial Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<style>body{margin:0}#map{width:100vw;height:100vh}</style>
+</head><body><div id="map"></div><script>
+const LAYERS=${JSON.stringify(layerData)};
+function parseWkt(wkt){
+  if(!wkt||typeof wkt!=="string")return null;
+  const s=wkt.trim().toUpperCase();
+  function parseRing(s){return s.replace(/[()]/g,"").trim().split(",").map(p=>{const[x,y]=p.trim().split(/\s+/);return[parseFloat(y),parseFloat(x)];});}
+  if(s.startsWith("POINT")){const c=s.match(/POINT\s*\(([^)]+)\)/);if(!c)return null;const[x,y]=c[1].trim().split(/\s+/);return{type:"point",latlng:[parseFloat(y),parseFloat(x)]};}
+  if(s.startsWith("POLYGON")){const m=s.match(/\((\([^)]+\)(?:\s*,\s*\([^)]+\))*)\)/);if(!m)return null;const rings=m[1].match(/\([^)]+\)/g).map(r=>parseRing(r));return{type:"polygon",rings};}
+  if(s.startsWith("MULTIPOLYGON")){const parts=s.match(/\(\([^)]+\)\)/g)||[];const rings=parts.map(p=>{const inner=p.match(/\(([^)]+)\)/g)||[];return inner.map(r=>parseRing(r));});return{type:"multipolygon",rings};}
+  return null;
+}
+const map=L.map("map");
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap"}).addTo(map);
+const group=L.featureGroup().addTo(map);
+for(const ly of LAYERS){
+  if(ly.type==="points"&&ly.latCol&&ly.lonCol){
+    for(const row of ly._data){const lat=parseFloat(row[ly.latCol]),lon=parseFloat(row[ly.lonCol]);if(isNaN(lat)||isNaN(lon))continue;L.circleMarker([lat,lon],{radius:ly.radius??4,fillColor:ly.fillColor??"#6ec8b4",color:ly.fillColor??"#6ec8b4",weight:1,fillOpacity:0.78}).addTo(group);}
+  }else if(ly.type==="boundary"&&ly.wktCol){
+    for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type==="point"){L.circleMarker(geo.latlng,{radius:6,fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}else{const rings=geo.type==="multipolygon"?geo.rings.map(r=>r[0]):geo.rings;L.polygon(rings,{fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
+  }else if(ly.type==="grid"&&ly.wktCol){
+    for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type!=="point"){const rings=geo.type==="multipolygon"?geo.rings.map(r=>r[0]):geo.rings;L.polygon(rings,{fillColor:ly.fillColor??"#6ec8b4",color:ly.borderColor??"#d73027",weight:ly.borderWidth??0.15,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
+  }
+}
+try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map.setView([20,0],2);}catch(_){map.setView([20,0],2);}
+<\/script></body></html>`;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = "spatial_map.html"; a.click();
+    URL.revokeObjectURL(url);
+  }
 
   useEffect(() => {
     loadLeaflet().then(setL).catch(() => setMapErr("Could not load Leaflet."));
@@ -1403,6 +1522,15 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
               >+{lbl}</button>
             ))}
           </div>
+
+          {/* ── Download as HTML ── */}
+          {layers.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <button onClick={downloadMapHtml}
+                style={{ width: "100%", padding: "3px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.gold}15`, border: `1px solid ${C.gold}55`, color: C.gold, cursor: "pointer" }}
+              >⬇ Download map.html</button>
+            </div>
+          )}
         </div>
 
         {/* Layer editor */}
@@ -1460,9 +1588,454 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
   );
 }
 
+// ─── SPATIAL GEO PLOT — Observable Plot / ggplot2+sf style ───────────────────
+
+let _geoPlt = null, _geoPltPromise = null;
+function loadGeoPlt() {
+  if (_geoPlt) return Promise.resolve(_geoPlt);
+  if (_geoPltPromise) return _geoPltPromise;
+  _geoPltPromise = import("https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm")
+    .then(m => { _geoPlt = m; _geoPltPromise = null; return m; })
+    .catch(e => { _geoPltPromise = null; throw e; });
+  return _geoPltPromise;
+}
+
+function parseWktRings(wkt) {
+  if (!wkt || typeof wkt !== "string") return null;
+  const s = wkt.trim().toUpperCase();
+  const coords = str => str.trim().split(",").map(p => {
+    const [x, y] = p.trim().split(/\s+/);
+    return [parseFloat(x), parseFloat(y)];
+  }).filter(([x, y]) => !isNaN(x) && !isNaN(y));
+  const allGroups = [...s.matchAll(/\(([^()]+)\)/g)].map(m => coords(m[1])).filter(r => r.length >= 2);
+  if (s.startsWith("POINT")) {
+    const m = s.match(/POINT\s*\(([^)]+)\)/);
+    if (!m) return null;
+    const [x, y] = m[1].trim().split(/\s+/).map(Number);
+    return { type: "point", rings: [[[x, y]]] };
+  }
+  if (s.startsWith("MULTIPOLYGON") || s.startsWith("POLYGON")) return allGroups.length ? { type: "polygon", rings: allGroups } : null;
+  if (s.startsWith("LINESTRING") || s.startsWith("MULTILINESTRING")) return allGroups.length ? { type: "line", rings: allGroups } : null;
+  return null;
+}
+
+function geoBbox(layers, defaultRows, availableDatasets) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  const exp = (x, y) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); };
+  for (const ly of layers) {
+    if (!ly.visible) continue;
+    const r = (!ly.datasetId || ly.datasetId === "active") ? defaultRows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? defaultRows;
+    if (ly.type === "point" && ly.latCol && ly.lonCol) {
+      for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
+    } else if (ly.wktCol) {
+      for (const row of r) { const p = parseWktRings(row[ly.wktCol]); if (p) for (const ring of p.rings) for (const [x, y] of ring) exp(x, y); }
+    }
+  }
+  if (!isFinite(x0)) return [-180, 180, -90, 90];
+  const xp = (x1 - x0) * 0.06 || 0.1, yp = (y1 - y0) * 0.06 || 0.1;
+  return [x0 - xp, x1 + xp, y0 - yp, y1 + yp];
+}
+
+const GEO_COLORS = ["#6e9ec8", "#c8a96e", "#6ec8b4", "#c87070", "#a96ec8", "#c8c86e"];
+
+function mkGeoLayer(type, idx) {
+  const id = `g${Date.now()}_${idx}`;
+  const col = GEO_COLORS[idx % GEO_COLORS.length];
+  if (type === "polygon")  return { id, type, visible: true, datasetId: "active", wktCol: "", fill: col, fillOpacity: 0.3, stroke: "#444", strokeWidth: 0.6 };
+  if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", fillOpacity: 0, stroke: "#222", strokeWidth: 0.8 };
+  if (type === "point")    return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", fill: col, radius: 4, fillOpacity: 0.78 };
+  if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", stroke: col, strokeWidth: 1.2 };
+  return { id, type, visible: true, datasetId: "active" };
+}
+
+function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, C }) {
+  const upd = patch => onChange({ ...ly, ...patch });
+
+  // Resolve headers for the currently selected dataset
+  const dsHeaders = useMemo(() => {
+    if (!ly.datasetId || ly.datasetId === "active") return headers;
+    const ds = availableDatasets.find(d => d.id === ly.datasetId);
+    return ds?.headers ?? headers;
+  }, [ly.datasetId, headers, availableDatasets]);
+
+  const dsWktHeaders = useMemo(() =>
+    dsHeaders.filter(h => {
+      const ds = (!ly.datasetId || ly.datasetId === "active") ? null : availableDatasets.find(d => d.id === ly.datasetId);
+      const rows = ds?.rows ?? [];
+      const s = rows.find(r => r[h] != null)?.[h];
+      return typeof s === "string" && /^(POINT|POLYGON|MULTI|LINE)/i.test(s.trim());
+    }),
+  [dsHeaders, ly.datasetId, availableDatasets]);
+
+  const geomCols = dsWktHeaders.length ? dsWktHeaders : (wktHeaders.length ? wktHeaders : dsHeaders);
+
+  const Sel = ({ label, value, onChg, opts }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 80 }}>
+      <div style={{ fontSize: 7, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.11em", fontFamily: mono }}>{label}</div>
+      <select value={value} onChange={e => onChg(e.target.value)}
+        style={{ padding: "2px 4px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: mono, fontSize: 9, color: C.text, outline: "none" }}>
+        <option value="">— none —</option>
+        {opts.map(h => <option key={h} value={h}>{h}</option>)}
+      </select>
+    </div>
+  );
+  const Rng = ({ label, value, onChg, min, max, step, fmt }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+      <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>{label}</span>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChg(parseFloat(e.target.value))}
+        style={{ width: 60, accentColor: C.teal }} />
+      <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted, minWidth: 28 }}>{fmt ? fmt(value) : value}</span>
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* Dataset selector */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ fontSize: 7, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.11em", fontFamily: mono }}>Dataset</div>
+        <select value={ly.datasetId ?? "active"} onChange={e => upd({ datasetId: e.target.value, wktCol: "", latCol: "", lonCol: "" })}
+          style={{ padding: "2px 4px", background: C.surface, border: `1px solid ${C.teal}55`, borderRadius: 3, fontFamily: mono, fontSize: 9, color: C.text, outline: "none" }}>
+          <option value="active">— active dataset —</option>
+          {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
+        </select>
+      </div>
+      {(ly.type === "polygon" || ly.type === "boundary" || ly.type === "line") && (
+        <Sel label="Geometry (WKT)" value={ly.wktCol} onChg={v => upd({ wktCol: v })} opts={geomCols} />
+      )}
+      {ly.type === "point" && (
+        <div style={{ display: "flex", gap: 6 }}>
+          <Sel label="Latitude" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
+          <Sel label="Longitude" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
+        </div>
+      )}
+      {(ly.type === "polygon" || ly.type === "point") && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em" }}>Fill</span>
+            <input type="color" value={ly.fill === "none" ? "#6e9ec8" : (ly.fill ?? "#6e9ec8")}
+              onChange={e => upd({ fill: e.target.value })}
+              style={{ width: 26, height: 18, cursor: "pointer", border: "none", padding: 0, background: "none" }} />
+          </div>
+          <Rng label="Opacity" value={ly.fillOpacity ?? 0.3} onChg={v => upd({ fillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} />
+        </div>
+      )}
+      {ly.type !== "point" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em" }}>Stroke</span>
+            <input type="color" value={ly.stroke ?? "#333333"} onChange={e => upd({ stroke: e.target.value })}
+              style={{ width: 26, height: 18, cursor: "pointer", border: "none", padding: 0, background: "none" }} />
+          </div>
+          <Rng label="Width" value={ly.strokeWidth ?? 0.8} onChg={v => upd({ strokeWidth: v })} min={0.1} max={4} step={0.1} fmt={v => v.toFixed(1) + "px"} />
+        </div>
+      )}
+      {ly.type === "point" && (
+        <Rng label="Radius" value={ly.radius ?? 4} onChg={v => upd({ radius: v })} min={1} max={14} step={0.5} fmt={v => v.toFixed(1)} />
+      )}
+    </div>
+  );
+}
+
+function GeoPlotCanvas({ Plt, layers, rows, availableDatasets, title, subtitle, caption, width = 700, maxH = 0, forceH = 0 }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    if (!Plt || !canvasRef.current || layers.length === 0) return;
+    const el = canvasRef.current;
+    while (el.firstChild) el.removeChild(el.firstChild);
+
+    const [xMin, xMax, yMin, yMax] = geoBbox(layers, rows, availableDatasets);
+    const midLat = (yMin + yMax) / 2;
+    const cosLat = Math.max(0.1, Math.cos(midLat * Math.PI / 180));
+
+    // Compute height: user override → auto-computed capped to container
+    const xRange = xMax - xMin, yRange = yMax - yMin;
+    const innerW = width - 60;
+    const idealH = Math.round(innerW * (yRange / Math.max(xRange, 1e-9)) / cosLat) + 40;
+    const plotH  = forceH > 0 ? forceH
+                 : maxH  > 0 ? Math.min(Math.max(idealH, 180), maxH)
+                 : Math.max(idealH, 180);
+
+    const marks = [Plt.frame({ stroke: "#bbb", strokeWidth: 0.5 })];
+
+    for (const ly of layers) {
+      if (!ly.visible) continue;
+      const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+      if (ly.type === "point" && ly.latCol && ly.lonCol) {
+        marks.push(Plt.dot(r.filter(row => !isNaN(parseFloat(row[ly.latCol])) && !isNaN(parseFloat(row[ly.lonCol]))), {
+          x: row => parseFloat(row[ly.lonCol]), y: row => parseFloat(row[ly.latCol]),
+          fill: ly.fill ?? "#6ec8b4", r: ly.radius ?? 4,
+          fillOpacity: ly.fillOpacity ?? 0.78, stroke: "none",
+        }));
+      } else if (ly.wktCol) {
+        for (const row of r) {
+          const parsed = parseWktRings(row[ly.wktCol]);
+          if (!parsed) continue;
+          for (const ring of parsed.rings) {
+            if (ring.length < 2) continue;
+            const closed = parsed.type === "polygon" ? [...ring, ring[0]] : ring;
+            marks.push(Plt.line(closed, {
+              x: d => d[0], y: d => d[1],
+              fill: (parsed.type === "polygon" && ly.fill !== "none") ? (ly.fill ?? "none") : "none",
+              fillOpacity: ly.fillOpacity ?? 0,
+              stroke: ly.stroke ?? "#333", strokeWidth: ly.strokeWidth ?? 0.8,
+              strokeLinejoin: "round", strokeLinecap: "round",
+            }));
+          }
+        }
+      }
+    }
+
+    try {
+      const svg = Plt.plot({
+        width,
+        height: plotH,
+        style: { background: "white", color: "#444", fontFamily: "serif", fontSize: "11px" },
+        x: { domain: [xMin, xMax], label: null, nice: false, grid: true,
+             tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°W` : `${d.toFixed(2)}°E` },
+        y: { domain: [yMin, yMax], label: null, nice: false, grid: true,
+             tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°S` : `${d.toFixed(2)}°N` },
+        marks,
+      });
+      el.appendChild(svg);
+    } catch (e) {
+      const errDiv = document.createElement("div");
+      errDiv.style.cssText = "color:#c47070;font-family:monospace;font-size:10px;padding:8px";
+      errDiv.textContent = e.message;
+      el.appendChild(errDiv);
+    }
+
+    return () => { while (el.firstChild) el.removeChild(el.firstChild); };
+  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, width, maxH, forceH]);
+
+  return (
+    <div style={{ fontFamily: "serif", color: "#333", background: "white", padding: "12px 8px 8px", borderRadius: 4, border: "1px solid #ddd" }}>
+      {title    && <div style={{ textAlign: "center", fontSize: 15, fontWeight: "bold", marginBottom: 2 }}>{title}</div>}
+      {subtitle && <div style={{ textAlign: "center", fontSize: 11, color: "#666", marginBottom: 6 }}>{subtitle}</div>}
+      <div ref={canvasRef} />
+      {caption  && <div style={{ textAlign: "right", fontSize: 9, color: "#999", marginTop: 4 }}>{caption}</div>}
+    </div>
+  );
+}
+
+function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
+  const [Plt,     setPlt]     = useState(null);
+  const [pltErr,  setPltErr]  = useState(null);
+  const [layers,  setLayers]  = useState([]);
+  const [activeId,setActiveId]= useState(null);
+  const [title,   setTitle]   = useState("");
+  const [subtitle,setSubtitle]= useState("");
+  const [caption, setCaption] = useState("");
+  const [plotHistory, setPlotHistory] = useState([]);
+  const [histIdx,     setHistIdx]     = useState(null);
+  const [histOpen,    setHistOpen]    = useState(false);
+  const [compareIds,  setCompareIds]  = useState(new Set());
+  const [userH,       setUserH]       = useState(null); // null = auto
+  const wrapRef = useRef(null);
+  const [canvasW, setCanvasW] = useState(700);
+  const [canvasH, setCanvasH] = useState(500);
+
+  useEffect(() => { loadGeoPlt().then(setPlt).catch(e => setPltErr(e.message)); }, []);
+  useEffect(() => { if (!pid) return; getPlotHistory(pid).then(h => setPlotHistory(h ?? [])).catch(() => {}); }, [pid]);
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const ro = new ResizeObserver(([e]) => {
+      setCanvasW(e.contentRect.width);
+      setCanvasH(e.contentRect.height);
+    });
+    ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const wktHeaders = useMemo(() => headers.filter(h => {
+    const s = rows.find(r => r[h] != null)?.[h];
+    return typeof s === "string" && /^(POINT|POLYGON|MULTI|LINE)/i.test(s.trim());
+  }), [rows, headers]);
+
+  const addLayer    = type => { const ly = mkGeoLayer(type, layers.length); setLayers(p => [...p, ly]); setActiveId(ly.id); setHistIdx(null); };
+  const updateLayer = upd  => setLayers(p => p.map(l => l.id === upd.id ? upd : l));
+  const removeLayer = id   => { setLayers(p => p.filter(l => l.id !== id)); setActiveId(p => p === id ? null : p); };
+  const activeLayer = layers.find(l => l.id === activeId) ?? null;
+
+  const currentEntry = () => ({ layers, title, subtitle, caption });
+
+  async function savePlot() {
+    if (!pid) return;
+    const name = window.prompt("Plot name:", `Map ${plotHistory.length + 1}`);
+    if (!name) return;
+    let next;
+    if (histIdx !== null) {
+      next = plotHistory.map((e, i) => i === histIdx ? { ...e, ...currentEntry(), name } : e);
+    } else {
+      next = [...plotHistory, { id: Date.now(), name, ...currentEntry(), savedAt: Date.now() }];
+      setHistIdx(next.length - 1);
+    }
+    setPlotHistory(next);
+    await savePlotHistory(pid, next);
+  }
+
+  async function deletePlot(id) {
+    const next = plotHistory.filter(e => e.id !== id);
+    setPlotHistory(next); setHistIdx(null);
+    if (pid) await savePlotHistory(pid, next);
+  }
+
+  function newPlot() { setLayers([]); setActiveId(null); setTitle(""); setSubtitle(""); setCaption(""); setHistIdx(null); }
+
+  const view      = histIdx !== null ? plotHistory[histIdx] : null;
+  const dLayers   = view ? view.layers   : layers;
+  const dTitle    = view ? view.title    : title;
+  const dSubtitle = view ? view.subtitle : subtitle;
+  const dCaption  = view ? view.caption  : caption;
+  const comparePlots = plotHistory.filter(e => compareIds.has(e.id));
+  const plotW = Math.max(280, canvasW - 48);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto" }}>
+
+      {/* Toolbar */}
+      <div style={{ padding: "8px 14px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+
+        {/* Row 1 — layer chips + add buttons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+          {layers.map(ly => (
+            <div key={ly.id} onClick={() => { setActiveId(ly.id); setHistIdx(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px 2px 6px", borderRadius: 12, cursor: "pointer",
+                background: activeId === ly.id ? `${C.teal}18` : C.surface,
+                border: `1px solid ${activeId === ly.id ? C.teal + "55" : C.border2}` }}
+            >
+              <div style={{ width: 8, height: 8, borderRadius: ly.type === "point" ? "50%" : 1, flexShrink: 0,
+                background: ly.fill !== "none" ? (ly.fill ?? ly.stroke) : ly.stroke }} />
+              <span style={{ fontFamily: mono, fontSize: 9, color: activeId === ly.id ? C.teal : C.text }}>
+                {ly.type}{(ly.wktCol || ly.latCol) ? ` · ${ly.wktCol || ly.latCol}` : ""}
+              </span>
+              <button onClick={e => { e.stopPropagation(); removeLayer(ly.id); }}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.textMuted, padding: "0 0 0 2px", lineHeight: 1 }}>×</button>
+            </div>
+          ))}
+          {[["polygon","Polygon"], ["boundary","Boundary"], ["point","Point"], ["line","Line"]].map(([t, lbl]) => (
+            <button key={t} onClick={() => addLayer(t)}
+              style={{ padding: "2px 8px", borderRadius: 12, fontFamily: mono, fontSize: 9, background: "none", border: `1px dashed ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
+            >+{lbl}</button>
+          ))}
+        </div>
+
+        {/* Row 2 — active layer config */}
+        {activeLayer && histIdx === null && (
+          <div style={{ padding: "8px 10px", background: C.surface, borderRadius: 4, border: `1px solid ${C.border2}` }}>
+            <GeoLayerConfig ly={activeLayer} onChange={updateLayer} headers={headers} wktHeaders={wktHeaders} availableDatasets={availableDatasets} C={C} />
+          </div>
+        )}
+
+        {/* Row 3 — title/subtitle/source + save/nav */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {[["TITLE", title, setTitle, "title", 110], ["SUBTITLE", subtitle, setSubtitle, "subtitle", 140], ["SOURCE", caption, setCaption, "source / caption", 140]].map(([lbl, val, set, ph, w]) => (
+            <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono }}>{lbl}</span>
+              <input value={val} onChange={e => set(e.target.value)} placeholder={ph}
+                style={{ padding: "2px 6px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: "serif", fontSize: 10, color: C.text, outline: "none", width: w }} />
+            </div>
+          ))}
+          {/* Height slider */}
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono }}>H</span>
+            <input type="range" min={150} max={1200} step={20}
+              value={userH ?? Math.max(200, canvasH - 60)}
+              onChange={e => setUserH(parseInt(e.target.value))}
+              style={{ width: 70, accentColor: C.teal }} />
+            <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted, minWidth: 32 }}>
+              {userH ?? "auto"}
+            </span>
+            {userH !== null && (
+              <button onClick={() => setUserH(null)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, color: C.textMuted, padding: 0, lineHeight: 1 }}>↺</button>
+            )}
+          </div>
+
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5 }}>
+            {plotHistory.length > 0 && (<>
+              <button onClick={() => setHistIdx(i => i === null ? plotHistory.length - 1 : Math.max(0, i - 1))}
+                style={{ padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}>←</button>
+              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+                {histIdx !== null ? `${histIdx + 1}/${plotHistory.length}` : `–/${plotHistory.length}`}
+              </span>
+              <button onClick={() => setHistIdx(i => i === null ? 0 : Math.min(plotHistory.length - 1, i + 1))}
+                style={{ padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}>→</button>
+            </>)}
+            {pid && <button onClick={savePlot}
+              style={{ padding: "2px 10px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}18`, border: `1px solid ${C.teal}60`, color: C.teal, cursor: "pointer" }}>Save</button>}
+            <button onClick={newPlot}
+              style={{ padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}>New</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Canvas + history */}
+      <div ref={wrapRef} style={{ padding: "16px 20px", background: "#f5f5f5" }}>
+        {pltErr && <div style={{ color: "#c47070", fontFamily: mono, fontSize: 10, marginBottom: 8 }}>Observable Plot load error: {pltErr}</div>}
+        {!Plt && !pltErr && <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }}>Loading Observable Plot…</div>}
+        {Plt && dLayers.length === 0 && (
+          <div style={{ textAlign: "center", color: C.textMuted, fontFamily: mono, fontSize: 10, marginTop: 60 }}>
+            Add a +Polygon / +Boundary / +Point / +Line layer to build your map.
+          </div>
+        )}
+        {Plt && dLayers.length > 0 && (
+          <GeoPlotCanvas Plt={Plt} layers={dLayers} rows={rows} availableDatasets={availableDatasets}
+            title={dTitle} subtitle={dSubtitle} caption={dCaption} width={plotW}
+            maxH={Math.max(200, (typeof window !== "undefined" ? window.innerHeight : 700) - 260)}
+            forceH={userH ?? 0} />
+        )}
+
+        {/* History strip */}
+        {plotHistory.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.15em" }}>Saved</span>
+              <button onClick={() => setHistOpen(o => !o)}
+                style={{ padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}>
+                {histOpen ? "▲" : "▼"} {plotHistory.length}
+              </button>
+            </div>
+            {histOpen && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {plotHistory.map((entry, i) => (
+                  <div key={entry.id} onClick={() => setHistIdx(histIdx === i ? null : i)}
+                    style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 4, cursor: "pointer",
+                      background: histIdx === i ? `${C.teal}15` : C.surface,
+                      border: `1px solid ${histIdx === i ? C.teal + "50" : C.border2}` }}
+                  >
+                    <input type="checkbox" checked={compareIds.has(entry.id)} onClick={e => e.stopPropagation()}
+                      onChange={e => setCompareIds(prev => { const s = new Set(prev); e.target.checked ? s.add(entry.id) : s.delete(entry.id); return s; })}
+                      style={{ accentColor: C.teal, cursor: "pointer" }} />
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.text }}>{entry.name}</span>
+                    <button onClick={e => { e.stopPropagation(); deletePlot(entry.id); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.textMuted, padding: "0 0 0 2px", lineHeight: 1 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {comparePlots.length >= 2 && Plt && (
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 16 }}>
+                {comparePlots.map(entry => (
+                  <div key={entry.id} style={{ flex: "1 1 340px" }}>
+                    <div style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginBottom: 6 }}>{entry.name}</div>
+                    <GeoPlotCanvas Plt={Plt} layers={entry.layers ?? []} rows={rows} availableDatasets={availableDatasets}
+                      title={entry.title} subtitle={entry.subtitle} caption={entry.caption}
+                      width={Math.max(240, (plotW - 32) / 2)}
+                      forceH={userH ?? 0} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset }) {
+export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset, pid }) {
   const { C } = useTheme();
   const [mainTab,     setMainTab]     = useState("analyze");
   const [pendingRows, setPendingRows] = useState(null);
@@ -1534,7 +2107,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
         )}
         {/* Tab toggle */}
         <div style={{ display: "flex", gap: 3, marginLeft: "auto" }}>
-          {[["analyze", "Analyze"], ["plot", "Plot"]].map(([tab, lbl]) => (
+          {[["analyze", "Analyze"], ["map", "Map"], ["plot", "Plot"]].map(([tab, lbl]) => (
             <button key={tab} onClick={() => setMainTab(tab)}
               style={{
                 padding: "3px 12px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
@@ -1561,14 +2134,26 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
         </div>
       )}
 
-      {/* ── Plot tab ── */}
-      {hasData && mainTab === "plot" && (
+      {/* ── Map tab (Leaflet layer builder) ── */}
+      {hasData && mainTab === "map" && (
         <div style={{ flex: 1, overflow: "hidden" }}>
           <SpatialPlotTab
             rows={rows} headers={headers}
             availableDatasets={availableDatasets}
             onAddDataset={onAddDataset}
             C={C}
+          />
+        </div>
+      )}
+
+      {/* ── Plot tab (ggplot2+sf style static map, with history) ── */}
+      {hasData && mainTab === "plot" && (
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <SpatialGeoPlot
+            rows={rows} headers={headers}
+            availableDatasets={availableDatasets}
+            C={C}
+            pid={pid}
           />
         </div>
       )}
@@ -1612,10 +2197,6 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
                 availableDatasets={availableDatasets}
                 C={C} onResult={handleResult}
               />
-            </Section>
-
-            <Section title="Map Viewer" badge="points · boundaries · choropleth" C={C}>
-              <SpatialMapSection rows={rows} headers={headers} C={C} />
             </Section>
 
             <Section title="Geocode — Address → Lat/Lon" badge="coming soon · phase 11.2" C={C}>

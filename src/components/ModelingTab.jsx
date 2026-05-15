@@ -1223,7 +1223,7 @@ function applyFactors(rows, vars, factorVars) {
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion }) {
+export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion, pid }) {
   const { C } = useTheme();
   const rows    = cleanedData?.cleanRows ?? [];
   const dict    = cleanedData?.dataDictionary ?? {};
@@ -1943,6 +1943,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     <div style={{ marginTop: 10 }}>
                       <PlotBuilder
                         key={specRows.length}
+                        pid={pid && `${pid}_spec`}
                         headers={["threshold", "estimate", "se", "ciLow", "ciHigh", "n"]}
                         rows={specRows}
                         initialLayers={[
@@ -2688,6 +2689,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 {/* PlotBuilder — key resets when template applied (G12+G13) */}
                 <PlotBuilder
                   key={plotTemplateKey}
+                  pid={pid && `${pid}_model`}
                   headers={activePlotHeaders}
                   rows={activePlotRows}
                   initialLayers={plotInitLayers}

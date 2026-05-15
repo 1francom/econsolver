@@ -1990,6 +1990,7 @@ export default function App() {
                         onBack={()=>navigateToTab("explore")}
                         onResultChange={r=>setActiveResult(r)}
                         onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
+                        pid={tabDsId("model")}
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
@@ -2001,6 +2002,7 @@ export default function App() {
                     rows={tabOutput("spatial")?.cleanRows ?? rawData?.rows ?? []}
                     headers={tabOutput("spatial")?.headers ?? rawData?.headers ?? []}
                     availableDatasets={availableDatasets}
+                    pid={tabDsId("spatial")}
                     onAddDataset={(name, rows, headers) => {
                       const newId = studioRef.current?.addApiData(name, rows, headers);
                       if (newId) selectDataset("spatial", newId);

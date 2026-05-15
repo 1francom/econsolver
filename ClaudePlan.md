@@ -1094,7 +1094,7 @@ Each `<td>` gets `data-ri={row.__ri} data-col={h} data-val={row[h]}`. The `<tbod
 
 ---
 
-## Phase 13: Project Isolation & User Authentication — PENDING
+## Phase 13: Project Isolation & User Authentication — PARTIALLY DONE
 
 Pre-condition for the web launch. Two distinct problems: (1) projects are not properly scoped — files loaded inside one project can leak into the project list as separate projects, and (2) there is no user identity, so the app is single-user only.
 
@@ -1122,7 +1122,7 @@ Pre-condition for the web launch. Two distinct problems: (1) projects are not pr
 
 ---
 
-### 13.2 — User Authentication — PENDING
+### 13.2 — User Authentication — DEFERRED (web launch already live without auth)
 
 **Backend choice: Supabase** — open-source, free tier covers the test launch, has auth + PostgreSQL + row-level security. No custom server needed to ship v0.1.
 
@@ -1419,6 +1419,8 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 - `SpatialTab.jsx`: Analyze tab (Distance to Point, Buffer, Grid, Spatial Join, Nearest Neighbour, Distance to Boundary) + Plot tab (Boundary/Grid/Points layers with per-layer dataset selector)
 - CSV auto-delimiter detection fixed (header-only sampling avoids WKT coordinate pollution)
 - Delete sync: Data tab ↔ DatasetManager now bidirectional
+- **SpatialTab 3-tab restructure** — Analyze / Map / Plot tabs; Map tab = Leaflet layer builder (renamed from "Plot") + "Download map.html" self-contained Leaflet HTML export; Plot tab = SpatialGeoPlot (Observable Plot static maps, WKT geometry layers, geographic axes, Mercator aspect ratio, per-layer dataset selector, height slider, full save/history/compare)
+- **`pid` threading** — App.jsx passes `pid` to ModelingTab and SpatialTab; ModelingTab PlotBuilder instances namespaced `_model` / `_spec`; SpatialTab PlotBuilder namespaced `_spatial`
 
 ### Remaining (ordered by priority)
 
@@ -1517,15 +1519,15 @@ Ongoing improvements to PlotBuilder.jsx, ModelPlots.jsx, and SpatialTab.jsx to m
 - PlotBuilder height fix in ExplorerModule (70vh) — prevents flex:1 collapse in scroll container
 - Geom chips removed from LayerEditorInline row (redundant with layer tabs)
 - `layer.aes.sizeCol` variable mapping for point size (`aes(size=col)` pattern)
+- **Axis scale panel** — log/sqrt scale, manual domain limits (xlim/ylim), tick format (%, ,000, $) per axis — commit `cdf30fd`
+- ~~**AI coach tab names**~~ — SHARED_CONTEXT + RESEARCH_COACH_PROMPT updated: Fuzzy RDD, factor_interactions, pivot_longer, trim/flag, Plot Builder nav — commit `fa195f6`
+- ~~**Phase 2 boxplot opts**~~ — custom IQR implementation (Q1/Q3/whiskers/outlier dots), IQR coef slider, per-layer outlier color picker — commit `fa195f6`
 
 ### Pending (ordered by priority)
-0. **AI coach tab names outdated** — `ResearchCoach.jsx` prompts reference old tab/subtab names (e.g. "Clean tab → Feature subtab → mutate", "Reshape tab → group_summarize"). Audit all hardcoded navigation strings in the coach response and update to current UI tab structure.
-1. **More arguments and labels in Plot Builder, Model, and Spatial Map** — audit all geoms and model plots for missing ggplot2-equivalent params; add labels, titles, axis formatting options
-2. **Variable mapping for alpha** — `aes(alpha=col)` for point/line/bar (toggle fixed slider ↔ column dropdown, same pattern as `sizeCol`)
-3. **Phase 2 boxplot opts** — custom boxplot implementation (rect + ruleX + dot) to enable per-layer outlier color, shape, IQR coef
-4. ~~**Plot history (Phase 16)**~~ — save/load named plots, ← → nav, compare mode, IndexedDB persistence — DONE
-5. **Style presets (Phase 9.9)** — Journal / Presentation / Minimal presets at export time
-6. **Spatial map labels and annotations** — add label layer, scale bar, north arrow to SpatialTab map view
+1. **More arguments and labels in Plot Builder, Model, and Spatial Map** — audit model plots for missing ggplot2-equivalent params; spatial map labels/annotations
+2. ~~**Variable mapping for alpha**~~ — DONE (per user confirmation)
+3. **Style presets (Phase 9.9)** — Journal / Presentation / Minimal presets at export time
+4. ~~**Spatial map labels and annotations**~~ — DONE: SpatialTab restructured to 3 tabs (Analyze / Map / Plot); Map tab = Leaflet layer builder + "Download map.html" self-contained export; Plot tab = new SpatialGeoPlot component (Observable Plot, WKT geometry, geographic axes °N/S/°W/E, Mercator aspect ratio, per-layer dataset selector, height slider, save/history/compare pattern); `pid` threaded from App.jsx → ModelingTab + SpatialTab with `_model`/`_spec` namespace suffixes
 
 ---
 

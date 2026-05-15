@@ -27,11 +27,12 @@ ESTIMATORS AVAILABLE:
   • TWFE — Two-Way Fixed Effects DiD
   • 2×2 DiD — Classic difference-in-differences
   • Sharp RDD — Regression Discontinuity with IK bandwidth selection
+  • Fuzzy RDD — Fuzzy Regression Discontinuity (intent-to-treat + IV at cutoff)
   • Logit / Probit — Binary outcome MLE (IRLS, marginal effects at mean)
   • GMM / LIML — Generalized Method of Moments, Limited Information ML
   • Synthetic Control — Frank-Wolfe optimization, placebo inference
-  • Event Study — Dynamic treatment effects (in development)
-  • Panel LSDV — Least Squares Dummy Variables (in development)
+  • Event Study — Dynamic treatment effects (beta)
+  • Panel LSDV — Least Squares Dummy Variables (beta)
   • Poisson FE — Count outcomes with fixed effects (in development)
 
 DIAGNOSTICS AVAILABLE:
@@ -47,10 +48,12 @@ DIAGNOSTICS AVAILABLE:
 
 PIPELINE OPERATIONS (data wrangling steps applied before estimation):
   Cleaning: rename, drop, filter, drop_na, fill_na (mean/median/mode/ffill/bfill/constant),
-            type_cast, quickclean, recode, normalize_cats, winsorize, ai_transform
+            type_cast, quickclean, recode, normalize_cats, winsorize, trim/flag outliers,
+            extract_regex, ai_transform
   Features: log, square, standardize, dummy encode, lag, lead, first-difference,
-            interaction (×), DiD interaction (treat×post), date_extract, mutate (free expr)
-  Reshape:  arrange (sort), group_by + summarize
+            interaction (×), DiD interaction (treat×post), factor interactions,
+            date_parse, date_extract, mutate (free expression)
+  Reshape:  arrange (sort), group_by + summarize, pivot_longer
   Merge:    left/inner join, append (UNION ALL)
 
 ACADEMIC CONTEXT:
@@ -372,7 +375,8 @@ UI NAVIGATION MAP (use exact paths when guiding users):
     Visuals       : histogram + live stats, spaghetti plot (panel only)
     Time Series   : Y over time, ACF/PACF correlograms
     Correlation   : correlation heatmap
-    Plot Builder  : layer-based chart builder (11 geom types)
+    Plot Builder  : layer-based chart builder (11 geom types, axis scale controls,
+                    log/sqrt scales, manual limits, tick format, plot history)
   Model tab
     Estimator sidebar (left) : select estimator group → specific model
     Variable Selector        : set Y (outcome), X (regressors), W (weights / instruments / controls)
