@@ -46,16 +46,59 @@ function loadLeaflet() {
   return _leafletPromiseST;
 }
 
+// ─── PROJ4 CDN LOADER ─────────────────────────────────────────────────────────
+let _proj4Promise = null;
+function loadProj4() {
+  if (typeof window !== "undefined" && window.proj4) return Promise.resolve(window.proj4);
+  if (_proj4Promise) return _proj4Promise;
+  _proj4Promise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/proj4@2.9.0/dist/proj4.js";
+    s.onload = () => { _proj4Promise = null; resolve(window.proj4); };
+    s.onerror = () => { _proj4Promise = null; reject(new Error("proj4 load failed")); };
+    document.head.appendChild(s);
+  });
+  return _proj4Promise;
+}
+
+// Proj4 string presets for common projected CRS.
+const PRESET_CRS = {
+  "UTM 31N": "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs",
+  "UTM 32N": "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs",
+  "UTM 33N": "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs",
+  "UTM 34N": "+proj=utm +zone=34 +datum=WGS84 +units=m +no_defs",
+  "GK4 (DE)": "+proj=tmerc +lat_0=0 +lon_0=12 +k=1 +x_0=4500000 +y_0=0 +ellps=bessel +datum=potsdam +units=m +no_defs",
+  "RD New (NL)": "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.38720621111111 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.417,50.3319,465.552,-0.398957,0.343988,-1.8774,4.0725 +units=m +no_defs",
+  "OSGB36 (UK)": "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +datum=OSGB36 +units=m +no_defs",
+};
+
+// Detect if a WKT string contains projected (non-WGS84) coordinates by
+// sampling the first coordinate pair.
+function isProjectedWKT(wkt) {
+  if (!wkt || typeof wkt !== "string") return false;
+  const m = wkt.match(/(-?[\d.]+)\s+(-?[\d.]+)/);
+  if (!m) return false;
+  const x = parseFloat(m[1]), y = parseFloat(m[2]);
+  return Math.abs(x) > 180 || Math.abs(y) > 90;
+}
+
 // ─── WKT PARSER ──────────────────────────────────────────────────────────────
 // Returns Leaflet-compatible [lat, lon] ring arrays from a WKT string.
 // Handles POINT, POLYGON, MULTIPOLYGON.
-function wktToLeaflet(wkt) {
+// projectFn: optional (xy: [x,y]) => [lon, lat] transform for projected CRS.
+function wktToLeaflet(wkt, projectFn) {
   if (!wkt || typeof wkt !== "string") return null;
   const s = wkt.trim().toUpperCase();
 
   const coordPair = str => {
-    const [lon, lat] = str.trim().split(/\s+/).map(Number);
-    return isNaN(lat) || isNaN(lon) ? null : [lat, lon];
+    const parts = str.trim().split(/\s+/);
+    const x = parseFloat(parts[0]), y = parseFloat(parts[1]);
+    if (isNaN(x) || isNaN(y)) return null;
+    if (projectFn) {
+      const [lon, lat] = projectFn([x, y]);
+      return isNaN(lon) || isNaN(lat) ? null : [lat, lon];
+    }
+    return [y, x]; // WGS84: x=lon, y=lat → Leaflet [lat, lon]
   };
   const ring = str => str.split(",").map(coordPair).filter(Boolean);
 
@@ -1351,6 +1394,47 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
     return typeof s === "string" && /^(POINT|POLYGON|MULTIPOLYGON)/i.test(s.trim());
   }), [rows, headers]);
 
+  // ── CRS reprojection ─────────────────────────────────────────────────────────
+  const [crsInput,   setCrsInput]   = useState("");
+  const [activeCrs,  setActiveCrs]  = useState(null);   // null = WGS84
+  const [proj4fn,    setProj4fn]    = useState(null);   // ([x,y]) => [lon,lat]
+  const [crsErr,     setCrsErr]     = useState("");
+  const [crsLoading, setCrsLoading] = useState(false);
+
+  // Detect if any visible dataset contains projected WKT.
+  const hasProjected = useMemo(() => {
+    const allRows = [
+      ...rows,
+      ...availableDatasets.flatMap(d => d.rows ?? []),
+    ];
+    const checkRow = r => Object.values(r).some(v => typeof v === "string" && isProjectedWKT(v));
+    return allRows.slice(0, 200).some(checkRow);
+  }, [rows, availableDatasets]);
+
+  async function applyCrs(crsStr) {
+    const proj4str = (crsStr ?? crsInput).trim();
+    if (!proj4str) return;
+    setCrsErr(""); setCrsLoading(true);
+    try {
+      const p4 = await loadProj4();
+      // Validate — try projecting a sample point
+      const out = p4(proj4str, "WGS84", [500000, 5000000]);
+      if (!Array.isArray(out) || isNaN(out[0])) throw new Error("bad output");
+      setActiveCrs(proj4str);
+      // Store as a stable function reference (useState setter form prevents double-call)
+      const fn = xy => p4(proj4str, "WGS84", xy);
+      setProj4fn(() => fn);
+      setCrsInput(proj4str);
+    } catch (e) {
+      setCrsErr("Invalid proj4 string — paste a +proj=… definition.");
+    }
+    setCrsLoading(false);
+  }
+
+  function clearCrs() {
+    setActiveCrs(null); setProj4fn(null); setCrsInput(""); setCrsErr("");
+  }
+
   const addLayer    = type => setLayers(prev => { const ly = mkSLayer(type, prev.length); setActiveId(ly.id); return [...prev, ly]; });
   const updateLayer = upd  => setLayers(prev => prev.map(l => l.id === upd.id ? upd : l));
   const removeLayer = id   => { setLayers(prev => prev.filter(l => l.id !== id)); setActiveId(prev => prev === id ? null : prev); };
@@ -1393,7 +1477,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
       // ── Boundary ──────────────────────────────────────────────────────────
       if (ly.type === "boundary" && ly.wktCol) {
         for (const row of lyRows(ly)) {
-          const geo = wktToLeaflet(row[ly.wktCol]);
+          const geo = wktToLeaflet(row[ly.wktCol], proj4fn);
           if (!geo) continue;
           if (geo.type === "point") {
             L.circleMarker(geo.latlng, { radius: 6, fillColor: ly.fillColor, color: ly.borderColor, weight: ly.borderWidth, fillOpacity: ly.fillOpacity }).addTo(group);
@@ -1411,7 +1495,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           cells = lyRows(ly).filter(r => r[ly.wktCol]);
           const { getColor } = buildColorScale(cells, ly.colorByCol);
           for (const cell of cells) {
-            const geo = wktToLeaflet(cell[ly.wktCol]);
+            const geo = wktToLeaflet(cell[ly.wktCol], proj4fn);
             if (!geo || geo.type === "point") continue;
             const rings = geo.type === "multipolygon" ? geo.rings.map(r => r[0]) : geo.rings;
             const fc = ly.colorByCol ? (getColor(cell) ?? ly.fillColor) : ly.fillColor;
@@ -1423,7 +1507,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         } else if (ly.mode === "generate" && generatedGrid?.cells) {
           cells = generatedGrid.cells;
           for (const cell of cells) {
-            const geo = wktToLeaflet(cell.geometry);
+            const geo = wktToLeaflet(cell.geometry, proj4fn);
             if (!geo || geo.type === "point") continue;
             const rings = geo.type === "multipolygon" ? geo.rings.map(r => r[0]) : geo.rings;
             L.polygon(rings, { fillColor: ly.fillColor, fillOpacity: ly.fillOpacity, color: ly.borderColor, weight: ly.borderWidth })
@@ -1457,7 +1541,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
     } catch (_) { map.setView([20, 0], 2); }
 
     return () => { if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; } };
-  }, [L, layers, rows, availableDatasets, generatedGrid]);
+  }, [L, layers, rows, availableDatasets, generatedGrid, proj4fn]);
 
   // Active legend
   const activeLegend = useMemo(() => {
@@ -1477,6 +1561,62 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
 
       {/* ── LEFT PANEL ─────────────────────────────────────────────────────── */}
       <div style={{ width: 252, flexShrink: 0, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+        {/* CRS Banner — shown when projected coordinates detected or CRS active */}
+        {(hasProjected || activeCrs) && (
+          <div style={{
+            padding: "7px 10px", borderBottom: `1px solid ${C.border}`,
+            background: activeCrs ? `${C.teal}08` : `${C.gold}0c`,
+            flexShrink: 0,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+              <span style={{ fontSize: 8, letterSpacing: "0.12em", textTransform: "uppercase",
+                color: activeCrs ? C.teal : C.gold, fontFamily: mono }}>
+                {activeCrs ? "✓ CRS active" : "⚠ Projected CRS detected"}
+              </span>
+              {activeCrs && (
+                <button onClick={clearCrs} style={{
+                  marginLeft: "auto", padding: "1px 6px", borderRadius: 2, fontFamily: mono, fontSize: 7,
+                  background: "transparent", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer",
+                }}>clear</button>
+              )}
+            </div>
+            {/* Preset chip row */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 5 }}>
+              {Object.entries(PRESET_CRS).map(([name, proj4str]) => (
+                <button key={name} onClick={() => applyCrs(proj4str)}
+                  style={{
+                    padding: "2px 5px", borderRadius: 2, fontFamily: mono, fontSize: 7,
+                    background: activeCrs === proj4str ? `${C.gold}22` : "transparent",
+                    border: `1px solid ${activeCrs === proj4str ? C.gold : C.border2}`,
+                    color: activeCrs === proj4str ? C.gold : C.textMuted,
+                    cursor: "pointer", whiteSpace: "nowrap",
+                  }}
+                >{name}</button>
+              ))}
+            </div>
+            {/* Custom proj4 input */}
+            <div style={{ display: "flex", gap: 4 }}>
+              <input value={crsInput} onChange={e => setCrsInput(e.target.value)}
+                placeholder="+proj=utm +zone=32 +datum=WGS84 …"
+                style={{
+                  flex: 1, padding: "3px 5px", background: C.bg,
+                  border: `1px solid ${C.border2}`, borderRadius: 2,
+                  color: C.text, fontFamily: mono, fontSize: 8, outline: "none",
+                  minWidth: 0,
+                }}
+              />
+              <button onClick={() => applyCrs()} disabled={crsLoading || !crsInput.trim()}
+                style={{
+                  padding: "3px 7px", borderRadius: 2, fontFamily: mono, fontSize: 8,
+                  background: `${C.teal}18`, border: `1px solid ${C.teal}55`,
+                  color: C.teal, cursor: "pointer", flexShrink: 0,
+                }}
+              >{crsLoading ? "…" : "Apply"}</button>
+            </div>
+            {crsErr && <div style={{ fontSize: 7, color: "#c47070", fontFamily: mono, marginTop: 3 }}>{crsErr}</div>}
+          </div>
+        )}
 
         {/* Layer list */}
         <div style={{ padding: "0.75rem 0.65rem 0.6rem", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
