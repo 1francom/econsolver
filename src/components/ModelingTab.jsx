@@ -1151,6 +1151,28 @@ function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, dict = {}, ro
           ]} />
         </>
       )}
+      <ExportBar
+        yVar={yVar}
+        results={r}
+        model="FuzzyRDD"
+        onReport={() => openReport({
+          ...r,
+          modelLabel: "Fuzzy RDD (IV-LATE)",
+          yVar,
+          xVars: r.spec?.wVars ?? [],
+        })}
+        replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: {
+          ...baseReplicateConfig.model,
+          type: "FuzzyRDD",
+          yVar,
+          wVars: r.spec?.wVars ?? [],
+          treatVar: treatVarName,
+          runningVar,
+          cutoff: r.cutoff,
+          bandwidth: r.bandwidth,
+          kernel: r.kernel,
+        }} : null}
+      />
     </div>
   );
 }
@@ -1179,6 +1201,27 @@ function buildModelHint(panel, panelOk) {
   };
 }
 
+// ─── FACTOR EXPANSION HELPER ──────────────────────────────────────────────────
+function applyFactors(rows, vars, factorVars) {
+  const toExpand = vars.filter(v => factorVars.has(v));
+  if (!toExpand.length) return { rows, vars };
+  let expandedVars = [...vars];
+  let expandedRows = rows;
+  for (const col of toExpand) {
+    const levels = [...new Set(rows.map(r => r[col]).filter(v => v != null))]
+      .map(String).sort();
+    const dummyLevels = levels.slice(1); // drop first = reference category
+    const dummyCols   = dummyLevels.map(lv => `${col}_${lv.replace(/\s+/g, "_")}`);
+    expandedRows = expandedRows.map(r => {
+      const val    = String(r[col] ?? "");
+      const dummies = Object.fromEntries(dummyCols.map((dc, i) => [dc, val === dummyLevels[i] ? 1 : 0]));
+      return { ...r, ...dummies };
+    });
+    expandedVars = expandedVars.flatMap(v => v === col ? dummyCols : [v]);
+  }
+  return { rows: expandedRows, vars: expandedVars };
+}
+
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion }) {
   const { C } = useTheme();
@@ -1195,6 +1238,15 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     () => headers.filter(h => rows.some(r => typeof r[h] === "number" && isFinite(r[h]))),
     [headers, rows]
   );
+
+  // ── Factor variables ─────────────────────────────────────────────────────────
+  const [factorVars, setFactorVars] = useState(
+    () => new Set(headers.filter(h => !numericCols.includes(h)))
+  );
+  // Re-initialize when dataset changes
+  useEffect(() => {
+    setFactorVars(new Set(headers.filter(h => !numericCols.includes(h))));
+  }, [cleanedData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Spec state ───────────────────────────────────────────────────────────────
   const [model,      setModel]      = useState("OLS");
@@ -1335,14 +1387,35 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setModel(id); setResult(null); setErr(null); setSeType("classical");
   }, []);
 
+  const toggleFactor = useCallback((col) => {
+    setFactorVars(prev => {
+      const next = new Set(prev);
+      if (next.has(col)) {
+        next.delete(col);
+        // String columns must be factored to be usable — deselect if un-factored
+        if (!numericCols.includes(col)) {
+          setXVars(v => v.filter(x => x !== col));
+          setWVars(v => v.filter(x => x !== col));
+        }
+      } else {
+        next.add(col);
+      }
+      return next;
+    });
+  }, [numericCols]);
+
   // ── PURE ESTIMATION HELPER (no setState) ────────────────────────────────────
   // Returns { result, panelFE, panelFD } on success, { error } on failure.
   // dataRows is passed explicitly so runAllSubsets can call it on filtered data.
   const _runEstimation = useCallback((dataRows) => {
     const y = yVar[0];
     if (!y) return { error: "Select a dependent variable (Y)." };
+    // ── Factor expansion (outside try to avoid TDZ) ──────────────────────────
+    const { rows: _r1, vars: expX } = applyFactors(dataRows, xVars, factorVars);
+    const { rows: expRows, vars: expW } = applyFactors(_r1, wVars, factorVars);
+    dataRows = expRows; // parameter reassignment: safe in JS
     try {
-      const allX = [...xVars, ...wVars];
+      const allX = [...expX, ...expW];
 
       if (model === "OLS") {
         if (!allX.length) return { error: "Select at least one regressor." };
@@ -1361,7 +1434,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         }
         if (!res) return { error: "Matrix is singular or insufficient data." };
         const olsType = wCol ? "WLS" : "OLS";
-        return { result: wrapResult(olsType, res, { yVar: y, xVars, wVars, weightCol: wCol ?? null }), panelFE: null, panelFD: null };
+        return { result: wrapResult(olsType, res, { yVar: y, xVars: expX, wVars: expW, weightCol: wCol ?? null }), panelFE: null, panelFD: null };
 
       } else if (model === "FE" || model === "FD") {
         if (!allX.length) return { error: "Select at least one regressor." };
@@ -1372,30 +1445,30 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const fd = fdRaw?.error ? null : fdRaw;
         if (!fe && !fd)
           return { error: feRaw?.error ?? fdRaw?.error ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid." };
-        const panelSpec = { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc };
+        const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc };
         const feRes = fe ? wrapResult("FE", fe, panelSpec) : null;
         const fdRes = fd ? wrapResult("FD", fd, panelSpec) : null;
         return { result: { type: model, fe: feRes, fd: fdRes }, panelFE: feRes, panelFD: fdRes };
 
       } else if (model === "2SLS") {
-        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!expX.length) return { error: "Select endogenous regressor(s) in Features (X)." };
         if (!zVars.length) return { error: "Select at least one instrument (Z)." };
-        const res = run2SLS(dataRows, y, xVars, wVars, zVars, seOpts);
+        const res = run2SLS(dataRows, y, expX, expW, zVars, seOpts);
         if (!res || res.error) return { error: res?.error ?? "2SLS failed. Check that instruments are valid (not in X) and data is sufficient." };
-        return { result: wrapResult("2SLS", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
+        return { result: wrapResult("2SLS", res, { yVar: y, xVars: expX, wVars: expW, zVars }), panelFE: null, panelFD: null };
 
       } else if (model === "DiD") {
         if (!postVar[0] || !treatVar[0]) return { error: "Select Post and Treated binary columns for DiD." };
-        const res = run2x2DiD(dataRows, y, postVar[0], treatVar[0], wVars, seOpts);
+        const res = run2x2DiD(dataRows, y, postVar[0], treatVar[0], expW, seOpts);
         if (!res) return { error: "DiD failed. Post and Treated must be 0/1 binary variables." };
-        return { result: wrapResult("DiD", res, { yVar: y, wVars, postVar: postVar[0], treatVar: treatVar[0] }), panelFE: null, panelFD: null };
+        return { result: wrapResult("DiD", res, { yVar: y, wVars: expW, postVar: postVar[0], treatVar: treatVar[0] }), panelFE: null, panelFD: null };
 
       } else if (model === "TWFE") {
         if (!treatVar[0]) return { error: "Select the treatment indicator column." };
         const ec = panel.entityCol, tc = panel.timeCol;
-        const res = runTWFEDiD(dataRows, y, ec, tc, treatVar[0], wVars, seOpts);
+        const res = runTWFEDiD(dataRows, y, ec, tc, treatVar[0], expW, seOpts);
         if (!res) return { error: "TWFE DiD failed. Check panel structure and treatment variable." };
-        return { result: wrapResult("TWFE", res, { yVar: y, wVars, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }), panelFE: null, panelFD: null };
+        return { result: wrapResult("TWFE", res, { yVar: y, wVars: expW, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }), panelFE: null, panelFD: null };
 
       } else if (model === "RDD") {
         if (!runningVar[0]) return { error: "Select a running variable." };
@@ -1405,9 +1478,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
         const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
         if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
-        const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, wVars, seOpts);
+        const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, expW, seOpts);
         if (!res) return { error: "RDD failed. Not enough observations within bandwidth." };
-        return { result: wrapResult("RDD", res, { yVar: y, wVars, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }, { h }), panelFE: null, panelFD: null };
+        return { result: wrapResult("RDD", res, { yVar: y, wVars: expW, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }, { h }), panelFE: null, panelFD: null };
 
       } else if (model === "Logit" || model === "Probit") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
@@ -1415,21 +1488,21 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const res = fn(dataRows, y, allX, seOpts);
         if (!res || res.error) return { error: res?.error ?? `${model} failed. Ensure Y is binary (0/1) and X columns are numeric.` };
         if (!res.converged) console.warn(`${model} did not converge after ${res.iterations} iterations.`);
-        return { result: wrapResult(model, res, { yVar: y, xVars, wVars }), panelFE: null, panelFD: null };
+        return { result: wrapResult(model, res, { yVar: y, xVars: expX, wVars: expW }), panelFE: null, panelFD: null };
 
       } else if (model === "GMM") {
-        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!expX.length) return { error: "Select endogenous regressor(s) in Features (X)." };
         if (!zVars.length) return { error: "Select at least one excluded instrument (Z)." };
-        const res = runGMM(dataRows, y, xVars, wVars, zVars, seOpts);
+        const res = runGMM(dataRows, y, expX, expW, zVars, seOpts);
         if (!res || res.error) return { error: res?.error ?? "GMM failed. Check instruments and data." };
-        return { result: wrapResult("GMM", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
+        return { result: wrapResult("GMM", res, { yVar: y, xVars: expX, wVars: expW, zVars }), panelFE: null, panelFD: null };
 
       } else if (model === "LIML") {
-        if (!xVars.length) return { error: "Select endogenous regressor(s) in Features (X)." };
+        if (!expX.length) return { error: "Select endogenous regressor(s) in Features (X)." };
         if (!zVars.length) return { error: "Select at least one excluded instrument (Z)." };
-        const res = runLIML(dataRows, y, xVars, wVars, zVars, seOpts);
+        const res = runLIML(dataRows, y, expX, expW, zVars, seOpts);
         if (!res || res.error) return { error: res?.error ?? "LIML failed. Check instruments and data." };
-        return { result: wrapResult("LIML", res, { yVar: y, xVars, wVars, zVars }), panelFE: null, panelFD: null };
+        return { result: wrapResult("LIML", res, { yVar: y, xVars: expX, wVars: expW, zVars }), panelFE: null, panelFD: null };
 
       } else if (model === "WLS") {
         if (!allX.length) return { error: "Select at least one regressor." };
@@ -1443,23 +1516,23 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           return { error: `Weight column '${wCol}' has no valid positive values.` };
         const res = runWLS(dataRows, y, allX, weights, seOpts);
         if (!res) return { error: "Matrix is singular or insufficient data." };
-        return { result: wrapResult("WLS", res, { yVar: y, xVars, wVars, weightCol: wCol }), panelFE: null, panelFD: null };
+        return { result: wrapResult("WLS", res, { yVar: y, xVars: expX, wVars: expW, weightCol: wCol }), panelFE: null, panelFD: null };
 
       } else if (model === "LSDV") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const res = runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts);
         if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };
-        return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars, entityCol: ec, timeCol: tc }), panelFE: null, panelFD: null };
+        return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc }), panelFE: null, panelFD: null };
 
       } else if (model === "EventStudy") {
         if (!treatTimeCol[0]) return { error: "Select the treatment time column (period when each unit was first treated)." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const pre  = Math.max(1, kPre  || 3);
         const post = Math.max(1, kPost || 3);
-        const res = runEventStudy(dataRows, y, ec, tc, treatTimeCol[0], pre, post, wVars, seOpts);
+        const res = runEventStudy(dataRows, y, ec, tc, treatTimeCol[0], pre, post, expW, seOpts);
         if (!res || res.error) return { error: res?.error ?? "Event Study failed. Check panel structure and treatment time column." };
-        return { result: wrapResult("EventStudy", res, { yVar: y, xVars, wVars, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }), panelFE: null, panelFD: null };
+        return { result: wrapResult("EventStudy", res, { yVar: y, xVars: expX, wVars: expW, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }), panelFE: null, panelFD: null };
 
       } else if (model === "FuzzyRDD") {
         if (!treatVar[0])   return { error: "Select the treatment receipt column (D: actual 0/1 take-up)." };
@@ -1472,7 +1545,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
         const res = runFuzzyRDD(dataRows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts });
         if (!res || res.error) return { error: res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth." };
-        return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }), panelFE: null, panelFD: null };
+        return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars: expW, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }), panelFE: null, panelFD: null };
 
       } else if (model === "PoissonFE") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
@@ -1480,7 +1553,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const ec = panel.entityCol;
         const res = runPoissonFE(dataRows, y, allX, ec, seOpts);
         if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
-        return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars, entityCol: ec }), panelFE: null, panelFD: null };
+        return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec }), panelFE: null, panelFD: null };
 
       } else if (model === "SyntheticControl") {
         if (!panel?.entityCol || !panel?.timeCol) return { error: "Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control." };
@@ -1488,16 +1561,16 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const synthTime = parseFloat(synthTreatTime);
         if (isNaN(synthTime)) return { error: "Enter a valid treatment time period (numeric)." };
         const ec = panel.entityCol, tc = panel.timeCol;
-        const predictors = xVars.length ? xVars : [];
+        const predictors = expX.length ? expX : [];
         const res = runSyntheticControl(dataRows, y, ec, tc, treatedUnit, synthTime, { predictorCols: predictors });
-        return { result: wrapResult("SyntheticControl", res, { yVar: y, xVars, entityCol: ec, timeCol: tc, treatedUnit, treatTime: synthTime }), panelFE: null, panelFD: null };
+        return { result: wrapResult("SyntheticControl", res, { yVar: y, xVars: expX, entityCol: ec, timeCol: tc, treatedUnit, treatTime: synthTime }), panelFE: null, panelFD: null };
       }
 
       return { error: `Unknown estimator: ${model}` };
     } catch (e) {
       return { error: `Estimation error: ${e.message}` };
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE]);
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -1592,10 +1665,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     dataDictionary:  cleanedData?.dataDictionary ?? null,
     auditTrail:      null,  // auditor runs on-demand inside generateRScript
     model: {
-      entityCol: panel?.entityCol ?? null,
-      timeCol:   panel?.timeCol   ?? null,
+      entityCol:  panel?.entityCol ?? null,
+      timeCol:    panel?.timeCol   ?? null,
+      factorVars: Array.from(factorVars),
     },
-  }), [cleanedData, panel]);
+  }), [cleanedData, panel, factorVars]);
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
   return (
@@ -1696,9 +1770,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           <VariableSelector
             model={model}
             numericCols={numericCols}
+            allCols={headers}
             yVar={yVar}   setYVar={setYVar}
             xVars={xVars} setXVars={setXVars}
             wVars={wVars} setWVars={setWVars}
+            factorVars={factorVars}
+            onToggleFactor={toggleFactor}
           />
 
           <ModelConfiguration
@@ -2110,6 +2187,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
                 <Lbl color={C.textMuted}>Coefficient Table</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <ExportBar yVar={yVar[0]} results={r} model="EventStudy"
+                  onReport={() => openReport({ ...r, modelLabel: "Event Study", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: {
+                    ...baseReplicateConfig.model, type: "EventStudy",
+                    yVar: yVar[0], xVars, wVars, entityCol: panel?.entityCol, timeCol: panel?.timeCol,
+                  }} : null}
+                />
               </div>
             );
           })()}

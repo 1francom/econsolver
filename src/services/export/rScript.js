@@ -296,12 +296,15 @@ function transpileModel(model) {
     type, yVar, xVars = [], wVars = [],
     zVars = [], postVar, treatVar,
     runningVar, cutoff, bandwidth, kernel = "triangular",
-    entityCol, timeCol,
+    entityCol, timeCol, factorVars = [],
   } = model;
 
-  const y       = rName(yVar);
-  const allX    = [...xVars, ...wVars].map(rName);
-  const xStr    = allX.join(" + ") || "1";
+  const fvSet = new Set(factorVars);
+  const fmtR  = v => fvSet.has(v) ? `factor(${rName(v)})` : rName(v);
+
+  const y    = rName(yVar);
+  const allX = [...xVars, ...wVars].map(fmtR);
+  const xStr = allX.join(" + ") || "1";
 
   switch (type) {
 
@@ -344,8 +347,8 @@ function transpileModel(model) {
       ].join("\n");
 
     case "2SLS": {
-      const endog  = xVars.map(rName).join(" + ") || "endog_var";
-      const ctrls  = wVars.map(rName).join(" + ");
+      const endog  = xVars.map(fmtR).join(" + ") || "endog_var";
+      const ctrls  = wVars.map(fmtR).join(" + ");
       const instrs = zVars.map(rName).join(" + ") || "instrument";
       const rhs    = ctrls ? `${endog} + ${ctrls}` : endog;
       const iv_rhs = ctrls ? `${instrs} + ${ctrls}` : instrs;
@@ -362,7 +365,7 @@ function transpileModel(model) {
     case "DiD": {
       const post  = rName(postVar);
       const treat = rName(treatVar);
-      const ctrls = wVars.map(rName).join(" + ");
+      const ctrls = wVars.map(fmtR).join(" + ");
       const rhs   = ctrls ? `${post} * ${treat} + ${ctrls}` : `${post} * ${treat}`;
       return [
         `# ── 2×2 Difference-in-Differences ───────────────────────────────────`,
@@ -380,7 +383,7 @@ function transpileModel(model) {
       const treat = rName(treatVar);
       const ec    = rName(entityCol);
       const tc    = rName(timeCol);
-      const ctrls = wVars.length ? " + " + wVars.map(rName).join(" + ") : "";
+      const ctrls = wVars.length ? " + " + wVars.map(fmtR).join(" + ") : "";
       return [
         `# ── Two-Way Fixed Effects DiD ────────────────────────────────────────`,
         `fit <- fixest::feols(${y} ~ ${treat}${ctrls} | ${ec} + ${tc},`,
@@ -416,8 +419,8 @@ function transpileModel(model) {
     case "Logit":
     case "Probit": {
       const link   = type === "Logit" ? "logit" : "probit";
-      const ctrls  = wVars.map(rName).join(" + ");
-      const regs   = xVars.map(rName).join(" + ");
+      const ctrls  = wVars.map(fmtR).join(" + ");
+      const regs   = xVars.map(fmtR).join(" + ");
       const rhs    = [regs, ctrls].filter(Boolean).join(" + ") || "1";
       return [
         `# ── ${type} (MLE via glm) ───────────────────────────────────────────`,
@@ -447,6 +450,77 @@ function transpileModel(model) {
         `cat("McFadden R2:", 1 - (fit$deviance / fit$null.deviance), "\\n")`,
         `cat("AIC:", AIC(fit), "\\n")`,
         `cat("BIC:", BIC(fit), "\\n")`,
+      ].join("\n");
+    }
+
+    case "LSDV": {
+      const ec = rName(entityCol);
+      const tc = rName(timeCol);
+      return [
+        `# ── Panel LSDV (Least Squares Dummy Variables) ───────────────────────`,
+        `# LSDV is numerically equivalent to within (FE) estimation`,
+        tc
+          ? `fit <- fixest::feols(${y} ~ ${xStr} | ${ec} + ${tc}, data = df, vcov = ~${ec})`
+          : `fit <- fixest::feols(${y} ~ ${xStr} | ${ec}, data = df, vcov = ~${ec})`,
+        ``,
+        `fixest::etable(fit)`,
+        ``,
+        `# Unit fixed effects (intercepts)`,
+        `fixest::fixef(fit)`,
+      ].join("\n");
+    }
+
+    case "FuzzyRDD": {
+      const rv    = rName(runningVar);
+      const c0    = Number(cutoff).toFixed(6);
+      const h     = bandwidth ? Number(bandwidth).toFixed(6) : null;
+      const kernR = kernel === "epanechnikov" ? "epanechnikov"
+                  : kernel === "uniform"      ? "uniform"
+                  : "triangular";
+      const dVar  = rName(treatVar ?? "D");
+      const covOpt = wVars.length
+        ? `, covs = df[, c(${wVars.map(v => `"${rName(v)}"`).join(", ")})]` : "";
+      return [
+        `# ── Fuzzy RDD (IV-LATE via rdrobust) ─────────────────────────────────`,
+        h
+          ? `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, fuzzy = df$${dVar},`
+          : `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, fuzzy = df$${dVar},`,
+        h
+          ? `  c = ${c0}, h = ${h}, kernel = ${rStr(kernR)}${covOpt})`
+          : `  c = ${c0}, kernel = ${rStr(kernR)}${covOpt})`,
+        ``,
+        `summary(fit)  # LATE = tau_SRD for compliers`,
+        `rdrobust::rdplot(y = df$${y}, x = df$${rv}, c = ${c0})`,
+        ``,
+        `# First-stage: does being above the cutoff predict treatment take-up?`,
+        `df$_Z <- as.integer(df$${rv} >= ${c0})`,
+        h ? `df_bw <- df[abs(df$${rv} - ${c0}) <= ${h}, ]` : `df_bw <- df  # set bandwidth filter`,
+        `fs <- lm(${dVar} ~ _Z, data = df_bw)`,
+        `cat("First-stage F:", summary(fs)$fstatistic[1], "\\n")`,
+      ].join("\n");
+    }
+
+    case "EventStudy": {
+      const ec    = rName(entityCol);
+      const tc    = rName(timeCol);
+      const ctrls = wVars.map(fmtR).join(" + ");
+      const ctrlStr = ctrls ? ` + ${ctrls}` : "";
+      return [
+        `# ── Event Study (relative-time dummies via fixest) ───────────────────`,
+        `# Replace 'treat_time' below with the column holding each unit's treatment year`,
+        `library(fixest)`,
+        ``,
+        `df <- df |> dplyr::mutate(rel_time = ${tc} - treat_time)`,
+        ``,
+        `# Estimate — ref = -1 (last pre-period)`,
+        `fit <- fixest::feols(${y} ~ i(rel_time, ref = -1)${ctrlStr} | ${ec} + ${tc},`,
+        `  data = df, vcov = ~${ec})`,
+        ``,
+        `fixest::iplot(fit, main = "Event Study")   # coefficient plot with CI`,
+        `fixest::etable(fit)`,
+        ``,
+        `# Pre-trend Wald test (joint significance of all pre-period coefficients)`,
+        `fixest::wald(fit, keep = "rel_time::-[2-9]$|rel_time::-[0-9]{2,}")`,
       ].join("\n");
     }
 

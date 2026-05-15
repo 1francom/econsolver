@@ -110,3 +110,29 @@
 
 - [2026-05-11 09:45] · Clean
   How could the pipeline be exported and replicated in other sessions with a single click? (truncated in source)
+
+---
+
+## 2026-05-13 batch
+
+### Bugs
+
+- [2026-05-13 12:06] · Data
+  .dta files are wrong loaded and readed
+
+- [2026-05-13 13:03] · Spatial
+  Multipolygon geometry does not work
+
+- [2026-05-13 13:38] · Spatial
+  Grids: adjust the size of border grids by cutting them
+
+- [2026-05-13 15:13] · Model
+  Show clearer errors than this: Matrix is singular or insufficient data. It must be more specific
+
+### Features
+
+- [2026-05-13 13:04] · Spatial
+  Add geometry (multilinestrings, polygons, coordinates in WKT) to point plots
+
+- [2026-05-13 15:10] · Clean
+  Add multiple joins at the same time

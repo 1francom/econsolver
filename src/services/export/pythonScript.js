@@ -100,7 +100,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push("# ── Estimation ─────────────────────────────────────────────────────────────");
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars: model.factorVars ?? [] }));
   lines.push("");
 
   return lines.join("\n");
@@ -242,13 +242,15 @@ function transpileStep(step) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [] }) {
   const lines = [];
+  const fvSet    = new Set(factorVars);
+  const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
   const xFormula = allX.map(v => `"${v}"`).join(", ");
 
   switch (type) {
     case "OLS": {
-      const formula = `"${yVar} ~ ${allX.join(" + ")}"`;
+      const formula = `"${yVar} ~ ${allX.map(fmtPy).join(" + ")}"`;
       lines.push(`model = smf.ols(${formula}, data=df).fit(cov_type="HC3")`);
       lines.push(`print(model.summary())`);
       break;
@@ -331,13 +333,72 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "Logit":
     case "Probit": {
-      const formula = `"${yVar} ~ ${allX.join(" + ")}"`;
+      const formula = `"${yVar} ~ ${allX.map(fmtPy).join(" + ")}"`;
       const fn = type === "Logit" ? "logit" : "probit";
       lines.push(`# ${type} regression`);
       lines.push(`model = smf.${fn}(${formula}, data=df).fit()`);
       lines.push(`print(model.summary())`);
       lines.push(`# Marginal effects at the mean`);
       lines.push(`print(model.get_margeff().summary())`);
+      break;
+    }
+
+    case "LSDV": {
+      lines.push(`# Panel LSDV (numerically equivalent to within/FE)`);
+      lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+      lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
+      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True${timeCol ? ", time_effects=True" : ""}).fit(cov_type="clustered", cluster_entity=True)`);
+      lines.push(`print(model.summary)`);
+      break;
+    }
+
+    case "FuzzyRDD": {
+      const kernelStr = kernel === "epanechnikov" ? "epanechnikov"
+                      : kernel === "uniform"      ? "uniform"
+                      : "triangular";
+      const dVar   = treatVar ?? "D";
+      const extraCols = wVars.length ? ` + ${wVars.join(" + ")}` : "";
+      lines.push(`# Fuzzy RDD via 2SLS within bandwidth`);
+      lines.push(`cutoff = ${cutoff ?? 0}`);
+      lines.push(`bw     = ${bandwidth ?? "None  # set bandwidth"}`);
+      lines.push(`df_bw = df[(df["${runningVar}"] >= cutoff - bw) & (df["${runningVar}"] <= cutoff + bw)].copy()`);
+      lines.push(`df_bw["_Z"]     = (df_bw["${runningVar}"] >= cutoff).astype(int)`);
+      lines.push(`df_bw["_run_c"] = df_bw["${runningVar}"] - cutoff`);
+      if (kernelStr === "triangular") {
+        lines.push(`df_bw["_w"] = np.maximum(0, 1 - np.abs(df_bw["_run_c"]) / bw)`);
+      } else if (kernelStr === "epanechnikov") {
+        lines.push(`df_bw["_w"] = np.where(np.abs(df_bw["_run_c"] / bw) <= 1, 0.75 * (1 - (df_bw["_run_c"]/bw)**2), 0)`);
+      } else {
+        lines.push(`df_bw["_w"] = 1.0`);
+      }
+      lines.push(`# First stage: Z -> D`);
+      lines.push(`fs = smf.wls("${dVar} ~ _Z + _run_c + _Z:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(cov_type="HC3")`);
+      lines.push(`print(f"First-stage F-stat: {fs.fvalue:.2f}  (p={fs.f_pvalue:.4f})")`);
+      lines.push(`# Second stage: use D_hat as instrument`);
+      lines.push(`df_bw["_D_hat"] = fs.fittedvalues`);
+      lines.push(`ss = smf.wls("${yVar} ~ _D_hat + _run_c + _D_hat:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(cov_type="HC3")`);
+      lines.push(`print(ss.summary())`);
+      lines.push(`print(f"LATE = {ss.params['_D_hat']:.4f}  SE = {ss.bse['_D_hat']:.4f}  p = {ss.pvalues['_D_hat']:.4f}")`);
+      break;
+    }
+
+    case "EventStudy": {
+      const extraCols = wVars.map(v => `"${v}"`).join(", ");
+      lines.push(`# Event Study — relative-time dummies`);
+      lines.push(`# Replace 'treat_time' with the column holding each unit's treatment period`);
+      lines.push(`df["rel_time"] = df["${timeCol}"] - df["treat_time"]`);
+      lines.push(`df["rel_time"] = df["rel_time"].clip(-5, 5)  # truncate distant periods`);
+      lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+      lines.push(`rel_dummies = pd.get_dummies(df_panel["rel_time"], prefix="rt", drop_first=False)`);
+      lines.push(`rel_dummies = rel_dummies.drop(columns=["rt_-1"], errors="ignore")  # ref = -1`);
+      if (wVars.length) {
+        lines.push(`exog = sm.add_constant(pd.concat([rel_dummies, df_panel[[${extraCols}]]], axis=1))`);
+      } else {
+        lines.push(`exog = sm.add_constant(rel_dummies)`);
+      }
+      lines.push(`from linearmodels.panel import PanelOLS`);
+      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
+      lines.push(`print(model.summary)`);
       break;
     }
 

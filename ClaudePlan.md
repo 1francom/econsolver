@@ -1459,7 +1459,7 @@ The current pipeline is scoped to a single dataset and lives in `runner.js` (23 
 
 ---
 
-## Phase 16: Plot Builder History (Plot Pipeline) — PENDING
+## Phase 16: Plot Builder History (Plot Pipeline) — DONE
 
 Persistent plot history in the Plot Builder tab within ExplorerModule. Users save named plots inside a session, navigate them with arrows, and compare two side-by-side. History persists in IndexedDB scoped to `pid` — survives tab close and project re-open.
 
@@ -1519,10 +1519,11 @@ Ongoing improvements to PlotBuilder.jsx, ModelPlots.jsx, and SpatialTab.jsx to m
 - `layer.aes.sizeCol` variable mapping for point size (`aes(size=col)` pattern)
 
 ### Pending (ordered by priority)
+0. **AI coach tab names outdated** — `ResearchCoach.jsx` prompts reference old tab/subtab names (e.g. "Clean tab → Feature subtab → mutate", "Reshape tab → group_summarize"). Audit all hardcoded navigation strings in the coach response and update to current UI tab structure.
 1. **More arguments and labels in Plot Builder, Model, and Spatial Map** — audit all geoms and model plots for missing ggplot2-equivalent params; add labels, titles, axis formatting options
 2. **Variable mapping for alpha** — `aes(alpha=col)` for point/line/bar (toggle fixed slider ↔ column dropdown, same pattern as `sizeCol`)
 3. **Phase 2 boxplot opts** — custom boxplot implementation (rect + ruleX + dot) to enable per-layer outlier color, shape, IQR coef
-4. **Plot history (Phase 16)** — save/load named plots, ← → nav, compare mode, IndexedDB persistence
+4. ~~**Plot history (Phase 16)**~~ — save/load named plots, ← → nav, compare mode, IndexedDB persistence — DONE
 5. **Style presets (Phase 9.9)** — Journal / Presentation / Minimal presets at export time
 6. **Spatial map labels and annotations** — add label layer, scale bar, north arrow to SpatialTab map view
 

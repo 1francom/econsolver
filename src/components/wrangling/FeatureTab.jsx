@@ -5,159 +5,348 @@ import FormatTab from "./FormatTab.jsx";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
 // dplyr-style free-form expression evaluator.
-// Exposes all column names as variables + a whitelist of helper functions.
-// Generates a pipeline step {type:"mutate", nn, expr, desc}.
+// Group by: when set, column variables become arrays and group helpers
+// (any/all/sum/mean/min/max/count/first/last) are injected.
+// Security: new Function() is an intentional expression sandbox here —
+// same pattern used throughout runner.js, FormatTab, CalculateTab.
 function MutateSubTab({rows, headers, info, onAdd}){
   const { C } = useTheme();
-  const [name,   setName]   = useState("");
-  const [expr,   setExpr]   = useState("");
-  const [refOpen,setRefOpen]= useState(false);
-  const nameRef = useRef("");
+  const [steps,     setSteps]  = useState([{name:"",expr:""}]);
+  const [activeIdx, setActive] = useState(0);
+  const [refOpen,   setRefOpen]= useState(false);
+  const [gmBy,      setGmBy]   = useState([]);
+  const [gmFilter,  setGmFilter]= useState([]);
+  const isGrouped = gmBy.length > 0;
 
-  // ── Live preview ────────────────────────────────────────────────────────────
-  const preview = useMemo(()=>{
-    const n=name.trim(), e=expr.trim();
-    if(!e) return null;
-    const helpers={
-      ifelse:(c,t,f)=>c?t:f,
-      between:(x,lo,hi)=>(typeof x==="number"&&x>=lo&&x<=hi)?1:0,
-      log:(x)=>(typeof x==="number"&&x>0)?Math.log(x):null,
-      log2:(x)=>(typeof x==="number"&&x>0)?Math.log2(x):null,
-      log10:(x)=>(typeof x==="number"&&x>0)?Math.log10(x):null,
-      sqrt:(x)=>(typeof x==="number"&&x>=0)?Math.sqrt(x):null,
-      exp:(x)=>typeof x==="number"?Math.exp(x):null,
-      abs:(x)=>typeof x==="number"?Math.abs(x):null,
-      round:(x,d=0)=>typeof x==="number"?Math.round(x*10**d)/10**d:null,
-      floor:(x)=>typeof x==="number"?Math.floor(x):null,
-      ceil:(x)=>typeof x==="number"?Math.ceil(x):null,
-      sign:(x)=>typeof x==="number"?Math.sign(x):null,
-      isna:(x)=>(x===null||x===undefined)?1:0,
-      notna:(x)=>(x!==null&&x!==undefined)?1:0,
-      coalesce:(...args)=>args.find(v=>v!==null&&v!==undefined)??null,
-      pmin:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.min(a,b):null,
-      pmax:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.max(a,b):null,
-      clamp:(x,lo,hi)=>typeof x==="number"?Math.max(lo,Math.min(hi,x)):null,
-      rescale:(x,oMin,oMax,nMin=0,nMax=1)=>(typeof x==="number"&&oMax!==oMin)?(nMin+(x-oMin)*(nMax-nMin)/(oMax-oMin)):null,
-      case_when:(...pairs)=>{for(let i=0;i<pairs.length-1;i+=2){if(pairs[i])return pairs[i+1];}return pairs.length%2===1?pairs[pairs.length-1]:null;},
+  // Helpers to edit the steps list
+  const setStepField = (i, field, val) => setSteps(ss => ss.map((s,j) => j===i ? {...s,[field]:val} : s));
+  const addStep      = ()  => { setSteps(ss => [...ss, {name:"",expr:""}]); setActive(steps.length); };
+  const removeStep   = (i) => { setSteps(ss => ss.filter((_,j) => j!==i)); setActive(a => Math.min(a, Math.max(0, steps.length-2))); };
+
+  // Active step shorthand
+  const activeName = steps[activeIdx]?.name ?? "";
+  const activeExpr = steps[activeIdx]?.expr ?? "";
+  const safeH = useMemo(()=>headers.filter(h=>/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h)),[headers]);
+
+  // Per-row helpers (scalar context)
+  const ROW_H={
+    ifelse:(c,t,f)=>c?t:f,
+    between:(x,lo,hi)=>(typeof x==="number"&&x>=lo&&x<=hi)?1:0,
+    log:(x)=>(typeof x==="number"&&x>0)?Math.log(x):null,
+    log2:(x)=>(typeof x==="number"&&x>0)?Math.log2(x):null,
+    log10:(x)=>(typeof x==="number"&&x>0)?Math.log10(x):null,
+    sqrt:(x)=>(typeof x==="number"&&x>=0)?Math.sqrt(x):null,
+    exp:(x)=>typeof x==="number"?Math.exp(x):null,
+    abs:(x)=>typeof x==="number"?Math.abs(x):null,
+    round:(x,d=0)=>typeof x==="number"?Math.round(x*10**d)/10**d:null,
+    floor:(x)=>typeof x==="number"?Math.floor(x):null,
+    ceil:(x)=>typeof x==="number"?Math.ceil(x):null,
+    sign:(x)=>typeof x==="number"?Math.sign(x):null,
+    isna:(x)=>(x===null||x===undefined)?1:0,
+    notna:(x)=>(x!==null&&x!==undefined)?1:0,
+    coalesce:(...a)=>a.find(v=>v!==null&&v!==undefined)??null,
+    pmin:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.min(a,b):null,
+    pmax:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.max(a,b):null,
+    clamp:(x,lo,hi)=>typeof x==="number"?Math.max(lo,Math.min(hi,x)):null,
+    rescale:(x,o0,o1,n0=0,n1=1)=>(typeof x==="number"&&o1!==o0)?(n0+(x-o0)*(n1-n0)/(o1-o0)):null,
+    case_when:(...p)=>{for(let i=0;i<p.length-1;i+=2){if(p[i])return p[i+1];}return p.length%2===1?p[p.length-1]:null;},
+  };
+
+  // Group-aware helpers (array context) — injected when Group by is set
+  function makeGH(filtRows){
+    const ns=col=>filtRows.map(r=>r[col]).filter(v=>v!==null&&v!==undefined&&isFinite(+v)).map(Number);
+    const arr2n=a=>Array.isArray(a)?a.filter(v=>isFinite(+v)).map(Number):ns(a);
+    const truthy=v=>v!==null&&v!==undefined&&v!==0&&v!==false&&v!=="";
+    return{
+      any:  a=>Array.isArray(a)?(a.some(truthy)?1:0):typeof a==="string"?(filtRows.some(r=>truthy(r[a]))?1:0):(a?1:0),
+      all:  a=>Array.isArray(a)?((a.length>0&&a.every(truthy))?1:0):typeof a==="string"?((filtRows.length>0&&filtRows.every(r=>truthy(r[a])))?1:0):(a?1:0),
+      sum:  a=>{const n=arr2n(a);return n.reduce((s,v)=>s+v,0);},
+      mean: a=>{const n=arr2n(a);return n.length?n.reduce((s,v)=>s+v,0)/n.length:null;},
+      min:  a=>{const n=arr2n(a);return n.length?Math.min(...n):null;},
+      max:  a=>{const n=arr2n(a);return n.length?Math.max(...n):null;},
+      count:()=>filtRows.length,
+      first:a=>Array.isArray(a)?(a[0]??null):(filtRows[0]?.[a]??null),
+      last: a=>{if(Array.isArray(a))return a[a.length-1]??null;return filtRows[filtRows.length-1]?.[a]??null;},
     };
-    const safeH=headers.filter(h=>/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
-    const pNames=[...Object.keys(helpers),"row",...safeH];
-    let fn, parseErr=null;
-    try{ fn=new Function(...pNames,`"use strict";return (${e});`); }
-    catch(err){ return{error:`Syntax: ${err.message}`,vals:[]}; }
-    const vals=[], errs=[];
-    rows.slice(0,6).forEach(r=>{
-      try{
-        const pVals=[...Object.values(helpers),r,...safeH.map(h=>r[h]??null)];
-        let v=fn(...pVals);
-        if(v===undefined||(typeof v==="number"&&!isFinite(v)))v=null;
-        vals.push(v);
-      }catch(err){ errs.push(err.message); vals.push(null); }
-    });
-    const runtimeErr=errs.length===rows.slice(0,6).length?errs[0]:null;
-    return{vals, error:runtimeErr, hasResult:vals.some(v=>v!==null)};
-  },[expr,rows,headers]);
-
-  function doAdd(){
-    const n=name.trim(), e=expr.trim();
-    if(!n||!e||preview?.error) return;
-    onAdd({type:"mutate",nn:n,expr:e,desc:`${n} = ${e}`});
-    setName(""); setExpr(""); nameRef.current="";
   }
 
-  const canAdd=name.trim()&&expr.trim()&&preview?.hasResult&&!preview?.error;
+  function matchFilt(r,{col:c,op,val}){
+    const rv=r[c],nv=Number(val);
+    if(op==="notna")return rv!==null&&rv!==undefined;
+    if(op==="isna") return rv===null||rv===undefined;
+    if(op==="=="||op==="=")return String(rv)===String(val)||rv===nv;
+    if(op==="!="||op==="<>")return String(rv)!==String(val)&&rv!==nv;
+    if(op===">") return Number(rv)> nv;
+    if(op===">=")return Number(rv)>=nv;
+    if(op==="<") return Number(rv)< nv;
+    if(op==="<=")return Number(rv)<=nv;
+    return true;
+  }
+
+  // Live preview — tracks active step
+  const preview=useMemo(()=>{
+    const e=activeExpr.trim();if(!e)return null;
+    if(!isGrouped){
+      const pN=[...Object.keys(ROW_H),"row",...safeH];
+      let fn;try{fn=new Function(...pN,`"use strict";return(${e});`);}catch(err){return{error:`Syntax: ${err.message}`,vals:[],grouped:false};}
+      const vals=[],errs=[];
+      rows.slice(0,6).forEach(r=>{
+        try{let v=fn(...Object.values(ROW_H),r,...safeH.map(h=>r[h]??null));if(v===undefined||(typeof v==="number"&&!isFinite(v)))v=null;vals.push(v);}
+        catch(err){errs.push(err.message);vals.push(null);}
+      });
+      const rawErr=errs.length===rows.slice(0,6).length?errs[0]:null;
+      const GRP_FNS=['any','all','sum','mean','min','max','count','first','last'];
+      const matchedFn=rawErr&&GRP_FNS.find(f=>rawErr.includes(`${f} is not defined`));
+      const err=matchedFn?`${matchedFn}() is a group function — enable "Group by" above`:rawErr;
+      return{vals,error:err,hasResult:vals.some(v=>v!==null),grouped:false};
+    }
+    // Group mode — evaluate once per group
+    const makeKey=r=>gmBy.map(b=>String(r[b]??"")).join("\x00");
+    const gMap=new Map();
+    rows.forEach(r=>{const k=makeKey(r);if(!gMap.has(k))gMap.set(k,[]);gMap.get(k).push(r);});
+    const gKeys=[...gMap.keys()].slice(0,4);
+    const vals=[],labels=[];
+    for(const k of gKeys){
+      const grp=gMap.get(k);
+      const filt=gmFilter.length?grp.filter(r=>gmFilter.every(c=>matchFilt(r,c))):grp;
+      const gh=makeGH(filt);
+      const colArrs={};safeH.forEach(h=>{colArrs[h]=filt.map(r=>r[h]);});
+      const pN=[...Object.keys(gh),...safeH];
+      const pV=[...Object.values(gh),...safeH.map(h=>colArrs[h])];
+      let v=null;
+      try{const fn2=new Function(...pN,`"use strict";return(${e});`);v=fn2(...pV);if(v===undefined||(typeof v==="number"&&!isFinite(v)))v=null;}catch(_){}
+      vals.push(v);labels.push(gmBy.map(b=>String(grp[0][b]??"")).join(" · "));
+    }
+    return{vals,labels,hasResult:vals.some(v=>v!==null),grouped:true,error:null};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[activeExpr,rows,safeH,isGrouped,gmBy,gmFilter]);
+
+  function doAddAll(){
+    const valid = steps.filter(s => s.name.trim() && s.expr.trim());
+    if(!valid.length) return;
+    const byStr = gmBy.join(", ");
+    const filtStr = gmFilter.length ? ` | ${gmFilter.map(c=>`${c.col}${c.op}${c.val}`).join(" & ")}` : "";
+    valid.forEach(({name:n, expr:e}) => {
+      if(!isGrouped){
+        onAdd({type:"mutate", nn:n, expr:e, desc:`${n} = ${e}`});
+      } else {
+        onAdd({type:"grouped_mutate", by:gmBy, fn:"expr", expr:e, filter:gmFilter, newCol:n,
+          desc:`group_by(${byStr})${filtStr} → ${n} = ${e}`});
+      }
+    });
+    setSteps([{name:"",expr:""}]); setActive(0);
+  }
+
+  const canAdd = steps.some(s => s.name.trim() && s.expr.trim()) && !preview?.error;
   const inpS={width:"100%",boxSizing:"border-box",padding:"0.45rem 0.7rem",background:C.surface2,
     border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"};
 
-  // Helper reference data
-  const HELPERS=[
-    ["ifelse(cond, true_val, false_val)", "Conditional — like R's ifelse()"],
-    ["between(x, lo, hi)",               "Returns 1 if lo ≤ x ≤ hi, else 0"],
-    ["log(x)  log2(x)  log10(x)",        "Natural / base-2 / base-10 log"],
-    ["sqrt(x)  exp(x)  abs(x)",          "Square root, exponential, absolute value"],
-    ["round(x, digits)  floor(x)  ceil(x)", "Rounding functions"],
-    ["sign(x)",                           "−1, 0, or 1"],
-    ["isna(x)  notna(x)",                "Returns 1/0 for null check"],
-    ["coalesce(a, b, ...)",              "First non-null value — like SQL COALESCE"],
-    ["pmin(a, b)  pmax(a, b)",           "Element-wise min/max of two values"],
-    ["clamp(x, lo, hi)",                 "Clip x to [lo, hi] range"],
-    ["rescale(x, oMin, oMax)",           "Rescale to [0, 1] — or pass nMin, nMax"],
-    ["case_when(c1, v1, c2, v2, ..., default)", "Multi-condition recode"],
+  const OPS=[["==","=="],["!=","!="],[">=",">="],["<=","<="],[">"," >"],["<"," <"]];
+  function addFilt(){setGmFilter(fs=>[...fs,{col:headers[0]||"",op:"==",val:""}]);}
+  function rmFilt(i){setGmFilter(fs=>fs.filter((_,j)=>j!==i));}
+  function setFilt(i,k,v){setGmFilter(fs=>fs.map((f,j)=>j===i?{...f,[k]:v}:f));}
+
+  // items: [display, description, insertOnClick]
+  //   insertOnClick omitted → insert fn name + "("
+  //   insertOnClick = null  → reference only, not clickable
+  const H_SECTIONS=[
+    {label:"Operators",color:C.gold,items:[
+      ["== and !=","Equality / inequality  ·  col == 0  ·  col != 'yes'",null],
+      ["&& and ||","Logical AND / OR  ·  a > 0 && b < 10  ·  not & or |",null],
+      ["> < >= <=","Numeric comparisons  ·  year >= 2015  ·  age < 65",null],
+      ["** * / + -","Arithmetic  ·  gdp ** 2  ·  income / cpi * 100",null],
+      ["!","Logical NOT  ·  !isna(x)  ·  !(a == b)",null],
+    ]},
+    {label:"Conditional",color:C.gold,items:[
+      ["ifelse(cond, a, b)","cond uses == && etc.  ·  a and b can be columns  ·  ifelse(muni == 47, 1, treat)"],
+      ["between(x, lo, hi)","1 if lo ≤ x ≤ hi, else 0  ·  between(age, 18, 65)"],
+      ["case_when(c1,v1, c2,v2, …, fallback)","First matching condition wins  ·  last arg is default value"],
+    ]},
+    {label:"Math",color:C.blue,items:[
+      ["log(x)  log2(x)  log10(x)","Natural / base-2 / base-10 log  ·  null if x ≤ 0"],
+      ["sqrt(x)  exp(x)  abs(x)  sign(x)","√x · eˣ · |x| · sign (−1/0/1)"],
+      ["round(x, d)  floor(x)  ceil(x)","d = decimal places  ·  round(price, 2)"],
+      ["clamp(x, lo, hi)","Cap x to range [lo, hi]  ·  clamp(wage, 0, 500)"],
+      ["pmin(a, b)  pmax(a, b)","Row-wise min / max of two values"],
+      ["rescale(x, oMin, oMax, nMin=0, nMax=1)","Linear remap  ·  rescale(score, 0, 100)"],
+    ]},
+    {label:"Null handling",color:C.teal,items:[
+      ["isna(x)  notna(x)","1 if null · 1 if not null"],
+      ["coalesce(a, b, …)","First non-null arg  ·  coalesce(val, 0)"],
+    ]},
+    {label:"Group functions — active when Group by is set",color:C.purple,items:[
+      ["any(col)","1 if any row in group has a non-zero value  ·  use Filter for row conditions"],
+      ["all(col)","1 if all rows in group have a non-zero value"],
+      ["sum(col)  mean(col)","Sum / mean of col across the group"],
+      ["min(col)  max(col)","Min / max of col within the group"],
+      ["count()","Number of rows in group (respects Filter)"],
+      ["first(col)  last(col)","First / last value of col in the group"],
+    ]},
   ];
-  const EXAMPLES=[
-    ["gdp_per_cap","gdp / population"],
-    ["log_wage","log(wage)"],
-    ["treat_post","treated * post"],
-    ["income_real","income / cpi * 100"],
-    ["age_sq","age ** 2"],
-    ["hi_edu","ifelse(educ >= 16, 1, 0)"],
-    ["wage_clamp","clamp(wage, 0, 500)"],
-    ["size_cat","case_when(area < 10, 'small', area < 50, 'medium', 'large')"],
-  ];
+  const EXAMPLES=[["gdp_per_cap","gdp / population"],["log_wage","log(wage)"],["treat_post","treated * post"],
+    ["income_real","income / cpi * 100"],["age_sq","age ** 2"],["hi_edu","ifelse(educ >= 16, 1, 0)"],
+    ["wage_clamp","clamp(wage, 0, 500)"],["size_cat","case_when(area < 10, 'small', area < 50, 'medium', 'large')"]];
+  const G_EXAMPLES=[["treat","any(trarrprop)"],["muni_gdp","sum(gdp)"],["avg_income","mean(income)"],["n_obs","count()"]];
 
   return(
     <div>
-      {/* ── Context note ── */}
-      <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
-        borderLeft:`3px solid ${C.green}`,borderRadius:4,marginBottom:"1.4rem",
+      {/* Context note */}
+      <div style={{padding:"0.5rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
+        borderLeft:`3px solid ${isGrouped?C.purple:C.green}`,borderRadius:4,marginBottom:"1rem",
         fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
-        Equivalent to dplyr's <span style={{color:C.green}}>mutate()</span>.
-        Column names are available as variables. All math operators (+, −, *, /, **) supported.
-        New column is appended; existing columns are overwritten if name matches.
+        {isGrouped
+          ?<>Grouped mutate — <span style={{color:C.purple}}>group_by() %&gt;% mutate()</span>. Columns become <b>arrays</b> within each group. Use <span style={{color:C.purple}}>any/all/sum/mean/min/max/count/first/last</span>. All rows kept.</>
+          :<>dplyr <span style={{color:C.green}}>mutate()</span> — columns are per-row scalars. All math operators (+, −, *, /, **) supported.</>}
       </div>
 
-      {/* ── Name + Expression inputs ── */}
-      <div style={{display:"grid",gridTemplateColumns:"200px 1fr",gap:8,marginBottom:8,alignItems:"end"}}>
-        <div>
-          <Lbl color={C.green}>New column name</Lbl>
-          <input value={name} onChange={e=>setName(e.target.value)}
-            placeholder="e.g. gdp_per_cap"
-            style={inpS}/>
+      {/* Group by + filter */}
+      <div style={{marginBottom:"1rem",padding:"0.65rem 0.85rem",
+        background:isGrouped?`${C.purple}06`:C.surface2,
+        border:`1px solid ${isGrouped?C.purple+"40":C.border}`,borderRadius:4}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+          <span style={{fontSize:9,color:isGrouped?C.purple:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,fontWeight:isGrouped?700:400}}>
+            Group by
+          </span>
+          {isGrouped&&<button onClick={()=>{setGmBy([]);setGmFilter([]);}}
+            style={{fontSize:9,color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontFamily:mono}}>✕ clear</button>}
         </div>
-        <div>
-          <Lbl color={C.green}>Expression</Lbl>
-          <input value={expr} onChange={e=>setExpr(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter"&&canAdd)doAdd();}}
-            placeholder="e.g. gdp / population"
-            style={inpS}/>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+          {headers.map(h=>(
+            <button key={h} onClick={()=>setGmBy(bs=>bs.includes(h)?bs.filter(b=>b!==h):[...bs,h])}
+              style={{padding:"0.2rem 0.5rem",border:`1px solid ${gmBy.includes(h)?C.purple:C.border}`,
+                background:gmBy.includes(h)?`${C.purple}18`:"transparent",
+                color:gmBy.includes(h)?C.purple:C.textMuted,
+                borderRadius:3,cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.1s"}}>
+              {gmBy.includes(h)?"✓ ":""}{h}
+            </button>
+          ))}
         </div>
-      </div>
-
-      {/* ── Formula display + Add button ── */}
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.2rem"}}>
-        {name.trim()&&expr.trim()?(
-          <div style={{flex:1,padding:"0.42rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,
-            borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono}}>
-            <span style={{color:C.green}}>{name.trim()||"?"}</span>
-            <span style={{color:C.border2,margin:"0 6px"}}>=</span>
-            <span style={{color:C.text}}>{expr.trim()||"…"}</span>
+        {isGrouped&&(
+          <div style={{marginTop:"0.65rem",borderTop:`1px solid ${C.purple}20`,paddingTop:"0.65rem"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:gmFilter.length?6:0}}>
+              <span style={{fontSize:9,color:C.textMuted,letterSpacing:"0.15em",textTransform:"uppercase",fontFamily:mono}}>Filter within group</span>
+              <button onClick={addFilt} style={{fontSize:9,color:C.purple,background:"none",border:`1px solid ${C.purple}40`,borderRadius:3,cursor:"pointer",fontFamily:mono,padding:"0.1rem 0.35rem"}}>+ condition</button>
+              {!gmFilter.length&&<span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>— none (aggregates use all group rows)</span>}
+            </div>
+            {gmFilter.map((f,i)=>(
+              <div key={i} style={{display:"flex",gap:4,alignItems:"center",marginBottom:4}}>
+                <select value={f.col} onChange={e=>setFilt(i,"col",e.target.value)}
+                  style={{flex:2,padding:"0.22rem 0.4rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10}}>
+                  {headers.map(h=><option key={h} value={h}>{h}</option>)}
+                </select>
+                <select value={f.op} onChange={e=>setFilt(i,"op",e.target.value)}
+                  style={{flex:"0 0 48px",padding:"0.22rem 0.3rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10}}>
+                  {OPS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                </select>
+                <input value={f.val} onChange={e=>setFilt(i,"val",e.target.value)} placeholder="value"
+                  style={{flex:2,padding:"0.22rem 0.4rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>
+                <button onClick={()=>rmFilt(i)} style={{color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontSize:11}}>✕</button>
+              </div>
+            ))}
           </div>
-        ):<div style={{flex:1}}/>}
-        <Btn onClick={doAdd} color={C.green} v="solid" dis={!canAdd} ch="Add to pipeline →"/>
+        )}
       </div>
 
-      {/* ── Live preview ── */}
+      {/* Multi-step list */}
+      <div style={{marginBottom:8}}>
+        {steps.length===1&&(
+          <div style={{display:"grid",gridTemplateColumns:"9px 200px 1fr",gap:6,marginBottom:4,paddingLeft:2,alignItems:"center"}}>
+            <span/>
+            <Lbl color={C.green}>New column name</Lbl>
+            <Lbl color={C.green}>Expression</Lbl>
+          </div>
+        )}
+        {steps.length>1&&(
+          <div style={{display:"grid",gridTemplateColumns:"9px 200px 1fr 22px",gap:6,marginBottom:4,paddingLeft:2,alignItems:"center"}}>
+            <span/>
+            <Lbl color={C.green}>New column name</Lbl>
+            <Lbl color={C.green}>Expression</Lbl>
+            <span/>
+          </div>
+        )}
+        {steps.map((s,i)=>(
+          <div key={i} onClick={()=>setActive(i)}
+            style={{display:"grid",gridTemplateColumns:steps.length>1?"9px 200px 1fr 22px":"9px 200px 1fr",
+              gap:6,marginBottom:5,alignItems:"center",
+              background:i===activeIdx?`${C.green}06`:"transparent",
+              borderRadius:3,padding:"0 0 0 0"}}>
+            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,textAlign:"right",paddingRight:2}}>{i+1}</span>
+            <input value={s.name} placeholder="e.g. treat"
+              onChange={e=>{setStepField(i,"name",e.target.value);setActive(i);}}
+              onFocus={()=>setActive(i)}
+              style={{...inpS,borderColor:i===activeIdx?`${C.green}70`:inpS.borderColor}}/>
+            <input value={s.expr}
+              placeholder={isGrouped?"e.g. any(trarrprop)":"e.g. gdp / population"}
+              onChange={e=>{setStepField(i,"expr",e.target.value);setActive(i);}}
+              onFocus={()=>setActive(i)}
+              onKeyDown={e=>{if(e.key==="Enter"&&canAdd)doAddAll();}}
+              style={{...inpS,borderColor:i===activeIdx?`${C.green}70`:inpS.borderColor}}/>
+            {steps.length>1&&(
+              <button onClick={e=>{e.stopPropagation();removeStep(i);}}
+                style={{background:"none",border:"none",cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,padding:0}}>✕</button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Script preview + actions */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1rem",flexWrap:"wrap"}}>
+        <div style={{flex:1,padding:"0.4rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.9,minHeight:28}}>
+          {steps.filter(s=>s.name.trim()&&s.expr.trim()).length===0
+            ? <span style={{color:C.textMuted,fontStyle:"italic"}}>formula preview</span>
+            : steps.filter(s=>s.name.trim()&&s.expr.trim()).map((s,i)=>(
+                <div key={i}>
+                  {isGrouped&&i===0&&<span style={{color:C.purple,marginRight:6,fontSize:9}}>group_by({gmBy.join(",")})</span>}
+                  <span style={{color:C.green}}>{s.name.trim()}</span>
+                  <span style={{color:C.border2,margin:"0 6px"}}>=</span>
+                  <span style={{color:C.text}}>{s.expr.trim()}</span>
+                </div>
+              ))
+          }
+        </div>
+        <button onClick={addStep}
+          style={{padding:"0.38rem 0.75rem",background:"none",border:`1px solid ${C.border2}`,borderRadius:3,
+            color:C.textMuted,fontFamily:mono,fontSize:10,cursor:"pointer",whiteSpace:"nowrap"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=C.green;e.currentTarget.style.color=C.green;}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textMuted;}}>
+          + Add step
+        </button>
+        <Btn onClick={doAddAll} color={C.green} v="solid" dis={!canAdd}
+          ch={steps.filter(s=>s.name.trim()&&s.expr.trim()).length>1
+            ? `Add ${steps.filter(s=>s.name.trim()&&s.expr.trim()).length} steps to pipeline →`
+            : "Add to pipeline →"}/>
+      </div>
+
+      {/* Live preview */}
       {preview&&(
-        <div style={{marginBottom:"1.4rem",padding:"0.75rem",
-          background:preview.error?`${C.red}08`:`${C.green}08`,
-          border:`1px solid ${preview.error?C.red+"30":C.green+"30"}`,
-          borderRadius:4}}>
-          <div style={{fontSize:9,color:preview.error?C.red:C.green,
+        <div style={{marginBottom:"1.2rem",padding:"0.7rem",
+          background:preview.error?`${C.red}08`:isGrouped?`${C.purple}08`:`${C.green}08`,
+          border:`1px solid ${preview.error?C.red+"30":isGrouped?C.purple+"30":C.green+"30"}`,borderRadius:4}}>
+          <div style={{fontSize:9,color:preview.error?C.red:isGrouped?C.purple:C.green,
             letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:6}}>
-            {preview.error?"✕ Error":"✓ Preview — first 6 values"}
+            {preview.error?"✕ Error":isGrouped?"✓ Preview — first 4 groups":"✓ Preview — first 6 rows"}
           </div>
-          {preview.error?(
-            <div style={{fontSize:11,color:C.red,fontFamily:mono}}>{preview.error}</div>
+          {preview.error?<div style={{fontSize:11,color:C.red,fontFamily:mono}}>{preview.error}</div>
+          :isGrouped?(
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {preview.vals.map((v,i)=>(
+                <div key={i} style={{display:"flex",gap:10,alignItems:"center"}}>
+                  <span style={{fontSize:10,color:C.textMuted,fontFamily:mono,minWidth:100,flexShrink:0}}>{preview.labels[i]}</span>
+                  <span style={{fontSize:11,fontFamily:mono,padding:"2px 8px",borderRadius:2,
+                    border:`1px solid ${v===null?C.border:C.purple+"40"}`,
+                    color:v===null?C.textMuted:C.purple,background:v===null?"transparent":`${C.purple}0a`}}>
+                    {v===null?"·":typeof v==="boolean"?String(v):typeof v==="number"?(Number.isInteger(v)?v:v.toFixed(4).replace(/\.?0+$/,"")):String(v)}
+                  </span>
+                </div>
+              ))}
+            </div>
           ):(
             <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
               {preview.vals.map((v,i)=>(
-                <span key={i} style={{fontSize:11,fontFamily:mono,padding:"2px 8px",
-                  borderRadius:2,border:`1px solid ${v===null?C.border:C.green+"40"}`,
-                  color:v===null?C.textMuted:C.green,
-                  background:v===null?"transparent":`${C.green}0a`}}>
-                  {v===null?"·":typeof v==="number"?
-                    (Number.isInteger(v)?v:v.toFixed(4).replace(/\.?0+$/,"")):
-                    String(v)}
+                <span key={i} style={{fontSize:11,fontFamily:mono,padding:"2px 8px",borderRadius:2,
+                  border:`1px solid ${v===null?C.border:C.green+"40"}`,
+                  color:v===null?C.textMuted:C.green,background:v===null?"transparent":`${C.green}0a`}}>
+                  {v===null?"·":typeof v==="number"?(Number.isInteger(v)?v:v.toFixed(4).replace(/\.?0+$/,"")):String(v)}
                 </span>
               ))}
             </div>
@@ -165,16 +354,14 @@ function MutateSubTab({rows, headers, info, onAdd}){
         </div>
       )}
 
-      {/* ── Quick examples ── */}
-      <div style={{marginBottom:"1.2rem"}}>
-        <Lbl color={C.textMuted}>Quick examples — click to load</Lbl>
+      {/* Quick examples */}
+      <div style={{marginBottom:"1.1rem"}}>
+        <Lbl color={C.textMuted}>{isGrouped?"Group examples":"Quick examples"} — click to load</Lbl>
         <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-          {EXAMPLES.map(([n,e])=>(
-            <button key={n} onClick={()=>{setName(n);setExpr(e);}}
-              style={{padding:"0.25rem 0.6rem",border:`1px solid ${C.border2}`,
-                background:"transparent",color:C.textMuted,borderRadius:3,
-                cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.1s",
-                textAlign:"left"}}
+          {(isGrouped?G_EXAMPLES:EXAMPLES).map(([n,e])=>(
+            <button key={n} onClick={()=>{setStepField(activeIdx,"name",n);setStepField(activeIdx,"expr",e);}}
+              style={{padding:"0.22rem 0.55rem",border:`1px solid ${C.border2}`,background:"transparent",
+                color:C.textMuted,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.1s"}}
               onMouseEnter={e2=>{e2.currentTarget.style.borderColor=C.green;e2.currentTarget.style.color=C.green;}}
               onMouseLeave={e2=>{e2.currentTarget.style.borderColor=C.border2;e2.currentTarget.style.color=C.textMuted;}}>
               {n}
@@ -183,48 +370,55 @@ function MutateSubTab({rows, headers, info, onAdd}){
         </div>
       </div>
 
-      {/* ── Column reference ── */}
-      <div style={{marginBottom:"1.2rem"}}>
+      {/* Column reference */}
+      <div style={{marginBottom:"1.1rem"}}>
         <Lbl color={C.textMuted}>Available columns</Lbl>
         <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
           {headers.map(h=>(
-            <button key={h}
-              onClick={()=>setExpr(p=>p+(p&&!p.endsWith(" ")?" ":"")+h)}
-              title={info[h]?.isNum
-                ? `μ=${info[h].mean?.toFixed(2)} · [${info[h].min?.toFixed(2)}, ${info[h].max?.toFixed(2)}]`
-                : `${info[h]?.uCount} unique vals`}
-              style={{padding:"0.22rem 0.55rem",border:`1px solid ${C.border}`,
-                background:"transparent",color:info[h]?.isNum?C.blue:C.purple,
-                borderRadius:2,cursor:"pointer",fontSize:10,fontFamily:mono,
-                transition:"all 0.1s"}}
+            <button key={h} onClick={()=>{const p=steps[activeIdx]?.expr??"";setStepField(activeIdx,"expr",p+(p&&!p.endsWith(" ")?" ":"")+h);}}
+              title={info[h]?.isNum?`μ=${info[h].mean?.toFixed(2)} · [${info[h].min?.toFixed(2)}, ${info[h].max?.toFixed(2)}]`:`${info[h]?.uCount} unique vals`}
+              style={{padding:"0.2rem 0.5rem",border:`1px solid ${C.border}`,background:"transparent",
+                color:info[h]?.isNum?C.blue:C.purple,borderRadius:2,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.1s"}}
               onMouseEnter={e=>{e.currentTarget.style.background=`${info[h]?.isNum?C.blue:C.purple}18`;}}
               onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
               {h}
             </button>
           ))}
         </div>
-        <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:4}}>
-          Click to insert into expression · <span style={{color:C.blue}}>blue</span> = numeric · <span style={{color:C.purple}}>purple</span> = categorical
+        <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:3}}>
+          Click to insert · <span style={{color:C.blue}}>blue</span> = numeric · <span style={{color:C.purple}}>purple</span> = categorical
+          {isGrouped&&<span style={{color:C.purple,marginLeft:8}}>· arrays in group mode</span>}
         </div>
       </div>
 
-      {/* ── Helper function reference (collapsible) ── */}
+      {/* Helper reference — categorized, collapsible, group section only shown when active */}
       <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
         <button onClick={()=>setRefOpen(o=>!o)}
-          style={{width:"100%",padding:"0.55rem 0.85rem",background:C.surface2,border:"none",
-            display:"flex",alignItems:"center",gap:8,cursor:"pointer",
-            color:C.textMuted,fontFamily:mono,fontSize:10,textAlign:"left"}}>
-          <span style={{fontSize:9,letterSpacing:"0.18em",textTransform:"uppercase"}}>
-            {refOpen?"▾":"▸"} Helper functions reference
-          </span>
+          style={{width:"100%",padding:"0.5rem 0.85rem",background:C.surface2,border:"none",
+            display:"flex",alignItems:"center",cursor:"pointer",color:C.textMuted,fontFamily:mono,fontSize:10}}>
+          <span style={{fontSize:9,letterSpacing:"0.18em",textTransform:"uppercase"}}>{refOpen?"▾":"▸"} Helper functions reference</span>
         </button>
         {refOpen&&(
-          <div style={{padding:"0.75rem",background:C.surface}}>
-            {HELPERS.map(([sig,desc])=>(
-              <div key={sig} style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,
-                padding:"0.35rem 0",borderBottom:`1px solid ${C.border}`}}>
-                <code style={{fontSize:10,color:C.green,fontFamily:mono}}>{sig}</code>
-                <span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>{desc}</span>
+          <div style={{background:C.surface}}>
+            {H_SECTIONS.filter(s=>!s.label.startsWith("Group")||isGrouped).map(sec=>(
+              <div key={sec.label} style={{borderBottom:`1px solid ${C.border}`}}>
+                <div style={{padding:"0.35rem 0.85rem",background:`${sec.color}0a`,
+                  fontSize:9,color:sec.color,letterSpacing:"0.16em",textTransform:"uppercase",fontFamily:mono,fontWeight:700}}>
+                  {sec.label}
+                </div>
+                {sec.items.map(([sig,desc,ins])=>{
+                  const clickable=ins!==null;
+                  return(
+                  <div key={sig} style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,
+                    padding:"0.28rem 0.85rem",borderTop:`1px solid ${C.border}20`}}>
+                    <code style={{fontSize:10,color:sec.color,fontFamily:mono,cursor:clickable?"pointer":"default",opacity:clickable?1:0.75}}
+                      onClick={clickable?()=>{const p=steps[activeIdx]?.expr??"";const token=ins!==undefined?ins:sig.split("(")[0].trim()+"(";setStepField(activeIdx,"expr",p+(p&&!p.endsWith(" ")?" ":"")+token);}:undefined}
+                      title={clickable?"Click to insert":undefined}>
+                      {sig}
+                    </code>
+                    <span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>{desc}</span>
+                  </div>
+                );})}
               </div>
             ))}
           </div>
@@ -637,6 +831,132 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
 
       {/* ── Mutate ── */}
       {vt==="mutate"&&<MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>}
+
+      {/* ── Group mutate (removed — integrated into ƒ Mutate tab) ── */}
+      {vt==="group_REMOVED"&&(()=>{
+        const OPS=[["==","=="],["!=","!="],[">=",">="],["<=","<="],[">"," >"],["<"," <"]];
+        const FNS=[
+          ["any","any(condition)","boolean — true for all rows in group if any row matches"],
+          ["all","all(condition)","boolean — true if every row in group matches"],
+          ["sum","sum(col)","sum of column within group"],
+          ["mean","mean(col)","mean of column within group"],
+          ["min","min(col)","minimum within group"],
+          ["max","max(col)","maximum within group"],
+          ["count","count()","number of rows in group"],
+          ["first","first(col)","first observed value in group"],
+          ["last","last(col)","last observed value in group"],
+        ];
+        const chip=(active,color)=>({padding:"0.22rem 0.55rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"});
+        const selFn=FNS.find(f=>f[0]===gmFn)||FNS[0];
+        const needsCond=gmFn==="any"||gmFn==="all";
+        const needsCol=!needsCond&&gmFn!=="count";
+        const numC2=headers.filter(h=>info[h]?.isNum);
+        const canApply=gmBy.length>0&&gmNewCol.trim()&&(needsCond?gmConds.length>0&&gmConds.every(c=>c.col&&c.val!==undefined):(!needsCol||gmCol));
+
+        function addCond(){setGmConds(cs=>[...cs,{col:headers[0]||"",op:"==",val:""}]);}
+        function rmCond(i){setGmConds(cs=>cs.filter((_,j)=>j!==i));}
+        function setCond(i,k,v){setGmConds(cs=>cs.map((c,j)=>j===i?{...c,[k]:v}:c));}
+
+        function apply(){
+          if(!canApply) return;
+          const step={
+            type:"grouped_mutate",
+            by:gmBy,fn:gmFn,
+            newCol:gmNewCol.trim(),
+          };
+          if(needsCond) step.condition=gmConds.map(c=>({col:c.col,op:c.op,val:isNaN(+c.val)?c.val:+c.val}));
+          else if(needsCol) step.col=gmCol;
+          const byStr=gmBy.join(", ");
+          const fStr=needsCond?`${gmFn}(${gmConds.map(c=>`${c.col} ${c.op} ${c.val}`).join(" & ")})`
+            :needsCol?`${gmFn}(${gmCol})`:"count()";
+          step.desc=`group_by(${byStr}) mutate(${gmNewCol} = ${fStr})`;
+          onAdd(step);
+          setGmBy([]);setGmNewCol("");setGmConds([{col:headers[0]||"",op:"==",val:""}]);
+        }
+
+        return(
+          <div style={{marginTop:"0.8rem"}}>
+            <div style={{fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.65,marginBottom:"1.2rem",padding:"0.6rem 0.8rem",background:C.surface2,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
+              Like dplyr <span style={{color:C.teal}}>group_by() %&gt;% mutate()</span> — computes a new column per group and broadcasts it back to every row. Dataset shape is unchanged.
+            </div>
+
+            {/* Group by */}
+            <div style={{marginBottom:"1.2rem"}}>
+              <Lbl color={C.teal}>Group by</Lbl>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                {headers.map(h=>(
+                  <button key={h} onClick={()=>setGmBy(bs=>bs.includes(h)?bs.filter(b=>b!==h):[...bs,h])} style={chip(gmBy.includes(h),C.teal)}>
+                    {gmBy.includes(h)?"✓ ":""}{h}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Function */}
+            <div style={{marginBottom:"1.2rem"}}>
+              <Lbl>Function</Lbl>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6}}>
+                {FNS.map(([k,label])=>(
+                  <button key={k} onClick={()=>setGmFn(k)} style={chip(gmFn===k,C.gold)}>{label}</button>
+                ))}
+              </div>
+              <div style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>{selFn[2]}</div>
+            </div>
+
+            {/* Source column (for non-conditional fns) */}
+            {needsCol&&(
+              <div style={{marginBottom:"1.2rem"}}>
+                <Lbl>Source column</Lbl>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                  {numC2.map(h=>(
+                    <button key={h} onClick={()=>setGmCol(h)} style={chip(gmCol===h,C.blue)}>{h}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Conditions (for any/all) */}
+            {needsCond&&(
+              <div style={{marginBottom:"1.2rem"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <Lbl mb={0}>Conditions (AND)</Lbl>
+                  <button onClick={addCond} style={{fontSize:9,color:C.teal,background:"none",border:`1px solid ${C.teal}40`,borderRadius:3,cursor:"pointer",fontFamily:mono,padding:"0.15rem 0.45rem"}}>+ add</button>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {gmConds.map((c,i)=>(
+                    <div key={i} style={{display:"flex",gap:5,alignItems:"center"}}>
+                      <select value={c.col} onChange={e=>setCond(i,"col",e.target.value)}
+                        style={{flex:2,padding:"0.28rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10}}>
+                        {headers.map(h=><option key={h} value={h}>{h}</option>)}
+                      </select>
+                      <select value={c.op} onChange={e=>setCond(i,"op",e.target.value)}
+                        style={{flex:"0 0 52px",padding:"0.28rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10}}>
+                        {OPS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <input value={c.val} onChange={e=>setCond(i,"val",e.target.value)}
+                        placeholder="value"
+                        style={{flex:2,padding:"0.28rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>
+                      {gmConds.length>1&&<button onClick={()=>rmCond(i)} style={{color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontSize:12}}>✕</button>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* New column name */}
+            <div style={{marginBottom:"1.2rem"}}>
+              <Lbl>New column name</Lbl>
+              <input value={gmNewCol} onChange={e=>setGmNewCol(e.target.value)}
+                placeholder="e.g. treat"
+                style={{width:"100%",boxSizing:"border-box",padding:"0.42rem 0.65rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+            </div>
+
+            <div style={{display:"flex",gap:8}}>
+              <Btn onClick={apply} color={C.teal} v="solid" dis={!canApply} ch="⊞ Add to pipeline →" sm/>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Numbers / Strings (FormatTab sub-tabs) ── */}
       {vt==="numbers"&&<FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="numbers"/>}

@@ -194,56 +194,151 @@ function SummaryTable({rows,headers,info,panel}){
   const{C}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   const catH=headers.filter(h=>info[h]?.isCat&&!info[h]?.isNum);
-  const [groupBy,setGroupBy]=useState("");
+  const [groupBy,  setGroupBy]  = useState("");
+  const [view,     setView]     = useState("stats"); // "stats"|"head"|"tail"
+  const [viewN,    setViewN]    = useState(6);
+  const [extraQs,  setExtraQs]  = useState([]);      // custom percentiles e.g. [5,95]
+  const [qInput,   setQInput]   = useState("");
   const groups=groupBy?[...new Set(rows.map(r=>r[groupBy]).filter(v=>v!=null))].sort():["All"];
 
+  function qtile(sorted,p){
+    if(!sorted.length)return null;
+    const i=p*(sorted.length-1),lo=Math.floor(i),hi=Math.ceil(i);
+    return lo===hi?sorted[lo]:sorted[lo]+(sorted[hi]-sorted[lo])*(i-lo);
+  }
   function statsFor(subset,col){
     const vals=subset.map(r=>r[col]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
-    if(!vals.length)return{mean:null,std:null,min:null,max:null,median:null,n:0};
+    if(!vals.length)return{mean:null,std:null,min:null,max:null,median:null,q1:null,q3:null,n:0};
     const mean=vals.reduce((a,b)=>a+b,0)/vals.length;
     const std=Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length);
-    const median=vals.length%2===0?(vals[vals.length/2-1]+vals[vals.length/2])/2:vals[Math.floor(vals.length/2)];
-    return{mean,std,min:vals[0],max:vals[vals.length-1],median,n:vals.length};
+    const extra={};
+    extraQs.forEach(p=>{extra[`p${p}`]=qtile(vals,p/100);});
+    return{mean,std,min:vals[0],max:vals[vals.length-1],median:qtile(vals,0.5),q1:qtile(vals,0.25),q3:qtile(vals,0.75),n:vals.length,...extra};
   }
+  function addQ(){
+    const p=parseInt(qInput,10);
+    if(!isNaN(p)&&p>0&&p<100&&!extraQs.includes(p))setExtraQs(q=>[...q,p].sort((a,b)=>a-b));
+    setQInput("");
+  }
+
   const fmt=v=>v!=null?v.toFixed(3):"—";
+  // Column order matches R summary(): Min | Q1 | Median | Mean | Q3 | Max | SD
+  const baseCols=[["min","Min"],["q1","Q1"],["median","Median"],["mean","Mean"],["q3","Q3"],["max","Max"],["std","SD"]];
+  const extraCols=extraQs.map(p=>[`p${p}`,`P${p}`]);
+  const allCols=[...baseCols,...extraCols];
+  const nCols=allCols.length;
+
   const thS={padding:"0.35rem 0.6rem",fontFamily:mono,fontSize:9,color:C.textMuted,fontWeight:400,letterSpacing:"0.1em",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,background:C.surface2,textAlign:"right",whiteSpace:"nowrap"};
   const tdS={padding:"0.32rem 0.6rem",fontFamily:mono,fontSize:10,color:C.text,borderBottom:`1px solid ${C.border}`,textAlign:"right",whiteSpace:"nowrap"};
+  const chipBtn=(active,color,onClick,label)=>(
+    <button onClick={onClick} style={{padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{label}</button>
+  );
+
+  const previewRows=view==="head"?rows.slice(0,viewN):view==="tail"?rows.slice(-viewN):[];
+  const prevH=headers.slice(0,8);
+
   return(
     <div>
-      <div style={{marginBottom:"1.2rem",display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-        <Lbl mb={0}>Group by</Lbl>
-        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-          <button onClick={()=>setGroupBy("")} style={{padding:"0.22rem 0.6rem",border:`1px solid ${!groupBy?C.gold:C.border2}`,background:!groupBy?C.goldFaint:"transparent",color:!groupBy?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>None</button>
-          {catH.map(h=><button key={h} onClick={()=>setGroupBy(h)} style={{padding:"0.22rem 0.6rem",border:`1px solid ${groupBy===h?C.gold:C.border2}`,background:groupBy===h?C.goldFaint:"transparent",color:groupBy===h?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{h}</button>)}
+      {/* ── Toolbar ── */}
+      <div style={{marginBottom:"1.2rem",display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
+        {/* Group by */}
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <Lbl mb={0}>Group by</Lbl>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+            {chipBtn(!groupBy,C.gold,()=>setGroupBy(""),"None")}
+            {catH.map(h=>chipBtn(groupBy===h,C.gold,()=>setGroupBy(h),h))}
+          </div>
         </div>
-      </div>
-      <div style={{overflowX:"auto",borderRadius:4,border:`1px solid ${C.border}`}}>
-        <table style={{borderCollapse:"collapse",width:"100%",fontSize:11}}>
-          <thead>
-            <tr>
-              <th style={{...thS,textAlign:"left",minWidth:80}}>Variable</th>
-              {groups.map(g=><th key={g} colSpan={5} style={{...thS,textAlign:"center",color:C.gold,minWidth:groupBy?320:260}}>{groupBy?String(g):"Full sample"} {groupBy&&<span style={{color:C.textMuted}}>({rows.filter(r=>r[groupBy]===g).length})</span>}</th>)}
-            </tr>
-            <tr>
-              <th style={{...thS,textAlign:"left"}}/>
-              {groups.map(g=>["Mean","SD","Median","Min","Max"].map(l=><th key={g+l} style={thS}>{l}</th>))}
-            </tr>
-          </thead>
-          <tbody>
-            {numH.map((h,ri)=>(
-              <tr key={h} style={{background:ri%2?C.surface2:C.surface}}>
-                <td style={{...tdS,textAlign:"left",color:C.teal}}>{h}</td>
-                {groups.map(g=>{
-                  const subset=groupBy?rows.filter(r=>r[groupBy]===g):rows;
-                  const s=statsFor(subset,h);
-                  return["mean","std","median","min","max"].map(k=><td key={g+k} style={tdS}>{fmt(s[k])}</td>);
-                })}
-              </tr>
+        <div style={{width:1,height:20,background:C.border,flexShrink:0}}/>
+        {/* View */}
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <Lbl mb={0}>View</Lbl>
+          <div style={{display:"flex",gap:4,alignItems:"center"}}>
+            {[["stats","Stats"],["head","head(n)"],["tail","tail(n)"]].map(([k,l])=>chipBtn(view===k,C.teal,()=>setView(k),l))}
+            {view!=="stats"&&<input type="number" min={1} max={500} value={viewN} onChange={e=>setViewN(Math.max(1,parseInt(e.target.value)||6))}
+              style={{width:44,padding:"0.2rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>}
+          </div>
+        </div>
+        {/* Custom quantiles — only in stats view */}
+        {view==="stats"&&<><div style={{width:1,height:20,background:C.border,flexShrink:0}}/>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <Lbl mb={0}>Quantiles</Lbl>
+          <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
+            {extraQs.map(p=>(
+              <span key={p} style={{display:"flex",alignItems:"center",gap:2,padding:"0.18rem 0.5rem",border:`1px solid ${C.teal}60`,borderRadius:3,fontSize:10,fontFamily:mono,color:C.teal}}>
+                P{p}<button onClick={()=>setExtraQs(q=>q.filter(x=>x!==p))} style={{background:"none",border:"none",cursor:"pointer",color:C.textMuted,fontSize:12,lineHeight:1,padding:"0 0 0 3px"}}>×</button>
+              </span>
             ))}
-          </tbody>
-        </table>
+            <input type="number" min={1} max={99} value={qInput} onChange={e=>setQInput(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&addQ()} placeholder="%"
+              style={{width:40,padding:"0.2rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>
+            <button onClick={addQ} style={{padding:"0.2rem 0.5rem",border:`1px solid ${C.border2}`,borderRadius:3,background:"transparent",color:C.textDim,fontFamily:mono,fontSize:10,cursor:"pointer"}}>+P</button>
+          </div>
+        </div></>}
       </div>
-      <div style={{marginTop:8,fontSize:10,color:C.textMuted,fontFamily:mono}}>N={rows.length} total observations · {numH.length} numeric variables</div>
+
+      {/* ── Stats table ── */}
+      {view==="stats"&&(
+        <div style={{overflowX:"auto",borderRadius:4,border:`1px solid ${C.border}`}}>
+          <table style={{borderCollapse:"collapse",width:"100%",fontSize:11}}>
+            <thead>
+              <tr>
+                <th style={{...thS,textAlign:"left",minWidth:80}}>Variable</th>
+                {groups.map(g=><th key={g} colSpan={nCols} style={{...thS,textAlign:"center",color:C.gold}}>
+                  {groupBy?String(g):"Full sample"}{groupBy&&<span style={{color:C.textMuted}}> ({rows.filter(r=>r[groupBy]===g).length})</span>}
+                </th>)}
+              </tr>
+              <tr>
+                <th style={{...thS,textAlign:"left"}}/>
+                {groups.map(g=>allCols.map(([k,l])=><th key={g+k} style={thS}>{l}</th>))}
+              </tr>
+            </thead>
+            <tbody>
+              {numH.map((h,ri)=>(
+                <tr key={h} style={{background:ri%2?C.surface2:C.surface}}>
+                  <td style={{...tdS,textAlign:"left",color:C.teal}}>{h}</td>
+                  {groups.map(g=>{
+                    const subset=groupBy?rows.filter(r=>r[groupBy]===g):rows;
+                    const s=statsFor(subset,h);
+                    return allCols.map(([k])=><td key={g+k} style={tdS}>{fmt(s[k])}</td>);
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── head / tail preview ── */}
+      {view!=="stats"&&(
+        <div style={{overflowX:"auto",borderRadius:4,border:`1px solid ${C.border}`}}>
+          <table style={{borderCollapse:"collapse",width:"100%",fontSize:11}}>
+            <thead>
+              <tr>
+                <th style={{...thS,textAlign:"right",minWidth:32}}>#</th>
+                {prevH.map(h=><th key={h} style={thS}>{h}</th>)}
+                {headers.length>8&&<th style={{...thS,color:C.textMuted}}>+{headers.length-8}</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {previewRows.map((row,ri)=>{
+                const absIdx=view==="head"?ri:rows.length-viewN+ri;
+                return(
+                  <tr key={ri} style={{background:ri%2?C.surface2:C.surface}}>
+                    <td style={{...tdS,textAlign:"right",color:C.textMuted}}>{absIdx+1}</td>
+                    {prevH.map(h=>{const v=row[h];return<td key={h} style={{...tdS,color:typeof v==="number"?C.blue:C.text}}>{v==null?"—":typeof v==="number"?v.toFixed(3):String(v)}</td>;})}
+                    {headers.length>8&&<td style={tdS}/>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{marginTop:8,fontSize:10,color:C.textMuted,fontFamily:mono}}>
+        {view==="stats"?`N=${rows.length} total observations · ${numH.length} numeric variables`:`Showing ${view}(${viewN}) of ${rows.length} rows`}
+      </div>
     </div>
   );
 }
@@ -274,6 +369,7 @@ function DistributionTab({rows,headers,info,panel}){
   const [nBins,setNBins]=useState(20);
   const [catOrder,setCatOrder]=useState("count");    // "count" | "alpha" | "rev"
   const hasPanel=panel?.entityCol&&panel?.timeCol;
+  const histRef=useRef(null);
   const subTabs=[
     ["hist","Histogram"],
     ...(catH.length?[["cat","Categorical"]]:[] ),
@@ -366,6 +462,16 @@ function DistributionTab({rows,headers,info,panel}){
             const max=n?sorted[n-1]:null;
             const q1=sorted[Math.floor(n*0.25)],q3=sorted[Math.floor(n*0.75)],iqr=q3-q1;
             const outlierCount=vals.filter(v=>v<q1-1.5*iqr||v>q3+1.5*iqr).length;
+            const histLabel=`${histCol}${transformLabel}`;
+            function downloadHistLatex(){
+              const bw2=(max-min||1)/nBins;
+              const coords=counts.map((c,i)=>`(${(min+i*bw2).toFixed(4)},${c})`).join(" ");
+              const tex=`% pgfplots histogram — generated by Econ Studio\n\\begin{figure}[htbp]\n\\centering\n\\begin{tikzpicture}\n\\begin{axis}[\n  title={Histogram of ${histLabel}},\n  xlabel={${histLabel}},\n  ylabel={Count},\n  ybar interval,\n  xtick style={draw=none},\n  ymajorgrids=true,\n  grid style=dashed,\n]\n\\addplot[fill=teal!60,draw=teal!80] coordinates {\n  ${coords}\n};\n\\end{axis}\n\\end{tikzpicture}\n\\caption{Histogram of ${histLabel} (n=${n})}\n\\end{figure}`;
+              const a=document.createElement("a");
+              a.href=URL.createObjectURL(new Blob([tex],{type:"text/plain"}));
+              a.download=`histogram_${histCol}.tex`;
+              a.click();URL.revokeObjectURL(a.href);
+            }
             return(
               <div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1rem"}}>
@@ -376,7 +482,19 @@ function DistributionTab({rows,headers,info,panel}){
                     </div>
                   ))}
                 </div>
-                <SvgHistogram data={vals} color={barColor} label={`${histCol}${transformLabel}`} nBins={nBins} fillMode={fillMode}/>
+                <div ref={histRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
+                  <div style={{padding:"0.5rem"}}>
+                    <SvgHistogram data={vals} color={barColor} label={histLabel} nBins={nBins} fillMode={fillMode}/>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,padding:"0.3rem 0.65rem",borderTop:`1px solid ${C.border}`,background:C.bg}}>
+                    <PlotExportBar getEl={()=>histRef.current?.querySelector("svg")} filename={`histogram_${histCol}`} style={{flex:1,padding:0,background:"transparent",border:"none"}}/>
+                    <button onClick={downloadHistLatex} title="Download pgfplots LaTeX" style={{padding:"0.2rem 0.6rem",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:9,flexShrink:0,transition:"all 0.12s"}}
+                      onMouseEnter={e=>{e.currentTarget.style.borderColor=C.gold;e.currentTarget.style.color=C.gold;}}
+                      onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}>
+                      ↓ LaTeX
+                    </button>
+                  </div>
+                </div>
                 {outlierCount>0&&<div style={{marginTop:8,fontSize:11,color:C.orange,fontFamily:mono}}>⚠ {outlierCount} IQR-outlier{outlierCount>1?"s":""} detected. Consider winsorizing.</div>}
                 {vals.length<rawVals.length&&<div style={{marginTop:6,fontSize:10,color:C.textMuted,fontFamily:mono}}>ℹ {rawVals.length-vals.length} row(s) dropped (non-positive values not valid for {transform} transform).</div>}
               </div>
@@ -1475,7 +1593,7 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
 }
 
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
-export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset}) {
+export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset, pid}) {
   const{C}=useTheme();
   const {headers, cleanRows:rows, panelIndex:panel, filename} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
@@ -1567,13 +1685,20 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         <QuickFilter headers={headers} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-          {[["summary","⊞ Summary Table"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"],["summarize","⊞ Summarize"]].map(([k,l])=>(
+          {[["summary","⊞ Summary"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"]].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"0.6rem 0.7rem",background:tab===k?C.goldFaint:C.surface,border:"none",color:tab===k?C.gold:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,borderBottom:tab===k?`2px solid ${C.gold}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>
           ))}
         </div>
-        {tab==="summary"&&<SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="summary"&&(
+          <>
+            <SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel}/>
+            <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
+              <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily:mono}}>Group Summarize</div>
+              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset}/>
+            </div>
+          </>
+        )}
         {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
-        {tab==="summarize"&&<GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset}/>}
         {tab==="corr"&&(
           <div>
             <div style={{fontSize:11,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
@@ -1588,7 +1713,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
     </div>
   );

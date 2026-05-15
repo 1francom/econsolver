@@ -36,12 +36,21 @@ function safeNum(val, dp = 4) {
 function normaliseResult(raw) {
   if (!raw) return null;
   if (raw.error) return { __error: raw.error };
+  // Panel FE/FD: top-level result is { type:"FE"|"FD", fe:{…}, fd:{…} }
+  // when opened from the Report tab (App.jsx). Flatten to the FE sub-result.
+  const resolved = (raw.type === "FE" || raw.type === "FD") && (raw.fe || raw.fd)
+    ? { ...(raw.fe ?? raw.fd), type: raw.type }
+    : raw;
   return {
-    ...raw,
-    modelLabel: raw.label      ?? raw.modelLabel ?? "OLS",
-    yVar:       raw.spec?.yVar ?? raw.yVar        ?? "y",
-    xVars:      raw.spec?.xVars ?? raw.xVars      ?? [],
-    tStats:     raw.testStats  ?? raw.tStats       ?? [],
+    ...resolved,
+    varNames:   resolved.varNames ?? [],
+    modelLabel: resolved.label ?? resolved.modelLabel
+                  ?? (raw.type === "FE" ? "Fixed Effects"
+                    : raw.type === "FD" ? "First Differences"
+                    : "OLS"),
+    yVar:       resolved.spec?.yVar  ?? resolved.yVar  ?? "y",
+    xVars:      resolved.spec?.xVars ?? resolved.xVars ?? [],
+    tStats:     resolved.testStats   ?? resolved.tStats ?? [],
   };
 }
 

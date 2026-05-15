@@ -38,24 +38,44 @@ export function Badge({ label, color }) {
   );
 }
 
-export function Chip({ label, selected, color, onClick, disabled, title }) {
+export function Chip({ label, selected, color, onClick, disabled, title, factored, onFactor }) {
   const { C } = useTheme();
+  const showF = onFactor !== undefined;
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       title={title}
       style={{
-        padding: "0.35rem 0.8rem",
+        padding: showF ? "0.35rem 0.5rem 0.35rem 0.8rem" : "0.35rem 0.8rem",
         border: `1px solid ${selected ? color : C.border2}`,
         background: selected ? `${color}1a` : "transparent",
         color: selected ? color : disabled ? C.textMuted : C.textDim,
         borderRadius: 3, cursor: disabled ? "not-allowed" : "pointer",
         fontSize: 11, fontFamily: mono, transition: "all 0.12s",
         opacity: disabled ? 0.45 : 1,
+        display: "inline-flex", alignItems: "center", gap: 0,
       }}
     >
-      {selected ? "✓ " : ""}{label}
+      <span>{selected ? "✓ " : ""}{label}</span>
+      {showF && (
+        <span
+          onClick={e => { e.stopPropagation(); onFactor(); }}
+          title={factored ? "Remove factor encoding" : "Treat as factor (categorical)"}
+          style={{
+            marginLeft: 5,
+            paddingLeft: 5,
+            borderLeft: `1px solid ${selected ? `${color}50` : C.border2}`,
+            color: factored ? C.gold : C.textMuted,
+            fontSize: 9,
+            fontWeight: factored ? "bold" : "normal",
+            cursor: "pointer",
+            lineHeight: 1,
+          }}
+        >
+          f
+        </span>
+      )}
     </button>
   );
 }
@@ -114,7 +134,7 @@ export function InfoBox({ children, color, bg }) {
 }
 
 // ─── VAR PANEL ────────────────────────────────────────────────────────────────
-export function VarPanel({ title, color, vars, selected, onToggle, multi = true, info }) {
+export function VarPanel({ title, color, vars, selected, onToggle, multi = true, info, factorVars, onToggleFactor }) {
   const { C } = useTheme();
   return (
     <Section title={`${title} — ${selected.length > 0 ? selected.join(", ") : "none"}`} color={color}>
@@ -141,6 +161,8 @@ export function VarPanel({ title, color, vars, selected, onToggle, multi = true,
                 );
               }
             }}
+            factored={factorVars ? factorVars.has(v) : undefined}
+            onFactor={onToggleFactor ? () => onToggleFactor(v) : undefined}
           />
         ))}
       </div>

@@ -765,6 +765,146 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    // ── grouped_mutate ────────────────────────────────────────────────────────
+    // dplyr group_by() %>% mutate() equivalent. All rows stay; a new column is
+    // computed per group and broadcast back to every row in that group.
+    //
+    // s.by        – string[] — grouping columns
+    // s.fn        – "any"|"all"|"sum"|"mean"|"min"|"max"|"count"|"first"|"last"
+    // s.col       – source column (required for non-conditional fns)
+    // s.condition – [{col, op, val}][] — filter conditions for any/all
+    // s.newCol    – output column name
+    case "grouped_mutate": {
+      const { by, fn, col, condition, newCol } = s;
+      if (!by?.length || !newCol) { R = rows; break; }
+
+      // Build group membership
+      const makeKey = r => by.map(b => String(r[b] ?? "")).join("\x00");
+      const groupMap = new Map();
+      rows.forEach(r => {
+        const k = makeKey(r);
+        if (!groupMap.has(k)) groupMap.set(k, []);
+        groupMap.get(k).push(r);
+      });
+
+      // Evaluate one condition against a row
+      function matchOne(r, { col: c, op, val }) {
+        const rv = r[c], nv = Number(val);
+        if (op === "notna") return rv !== null && rv !== undefined;
+        if (op === "isna")  return rv === null  || rv === undefined;
+        if (op === "==" || op === "=")   return String(rv) === String(val) || rv === nv;
+        if (op === "!=" || op === "<>") return String(rv) !== String(val) && rv !== nv;
+        if (op === ">")  return Number(rv) >  nv;
+        if (op === ">=") return Number(rv) >= nv;
+        if (op === "<")  return Number(rv) <  nv;
+        if (op === "<=") return Number(rv) <= nv;
+        return true;
+      }
+
+      // ── fn:"expr" mode — group-aware expression evaluation ────────────────
+      if (fn === "expr") {
+        const { expr: exprStr, filter: filt, newCol: nc } = s;
+        if (!exprStr || !nc) { R = rows; break; }
+
+        function makeGH(filtRows) {
+          const toArr = v => {
+            if (Array.isArray(v)) return v;
+            if (typeof v === "string") return filtRows.map(r => r[v]);
+            return [];
+          };
+          const nums = v => toArr(v).filter(x => x !== null && x !== undefined && isFinite(+x)).map(Number);
+          return {
+            any:   v => Array.isArray(v) ? (v.some(x=>x&&x!=="0"&&x!=="false")?1:0) : typeof v==="string" ? (filtRows.map(r=>r[v]).some(x=>x&&x!=="0"&&x!=="false")?1:0) : (v?1:0),
+            all:   v => Array.isArray(v) ? ((v.length>0&&v.every(x=>x&&x!=="0"&&x!=="false"))?1:0) : typeof v==="string" ? (()=>{const a=filtRows.map(r=>r[v]);return(a.length>0&&a.every(x=>x&&x!=="0"&&x!=="false"))?1:0;})() : (v?1:0),
+            sum:   v => nums(v).reduce((a, b) => a + b, 0),
+            mean:  v => { const a = nums(v); return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null; },
+            min:   v => { const a = nums(v); return a.length ? Math.min(...a) : null; },
+            max:   v => { const a = nums(v); return a.length ? Math.max(...a) : null; },
+            count: ()=> filtRows.length,
+            first: v => toArr(v)[0] ?? null,
+            last:  v => { const a = toArr(v); return a[a.length-1] ?? null; },
+          };
+        }
+
+        function matchFilt(r, { col: c, op, val }) {
+          const rv = r[c], nv = Number(val);
+          if (op === "notna") return rv !== null && rv !== undefined;
+          if (op === "isna")  return rv === null  || rv === undefined;
+          if (op === "==" || op === "=")   return String(rv) === String(val) || rv === nv;
+          if (op === "!=" || op === "<>") return String(rv) !== String(val) && rv !== nv;
+          if (op === ">")  return Number(rv) >  nv;
+          if (op === ">=") return Number(rv) >= nv;
+          if (op === "<")  return Number(rv) <  nv;
+          if (op === "<=") return Number(rv) <= nv;
+          return true;
+        }
+
+        const rowValsExpr = new Map();
+        for (const [, grp] of groupMap) {
+          const filtRows = filt?.length ? grp.filter(r => filt.every(c => matchFilt(r, c))) : grp;
+          const colArrays = {};
+          const allHeaders = grp.length ? Object.keys(grp[0]) : [];
+          allHeaders.forEach(h => { colArrays[h] = filtRows.map(r => r[h]); });
+          const gh = makeGH(filtRows);
+          const ROW_H = {
+            ifelse:(t,a,b)=>t?a:b, between:(v,lo,hi)=>v>=lo&&v<=hi,
+            log:Math.log, log2:Math.log2, log10:Math.log10, sqrt:Math.sqrt,
+            exp:Math.exp, abs:Math.abs, round:Math.round, floor:Math.floor,
+            ceil:Math.ceil, sign:Math.sign,
+            isna:  v=>v===null||v===undefined||(typeof v==="number"&&isNaN(v)),
+            notna: v=>v!==null&&v!==undefined&&!(typeof v==="number"&&isNaN(v)),
+            coalesce:(...a)=>a.find(v=>v!==null&&v!==undefined)??null,
+            pmin:Math.min, pmax:Math.max,
+            clamp:(v,lo,hi)=>Math.min(Math.max(v,lo),hi),
+            rescale:(v,omin,omax,nmin=0,nmax=1)=>nmin+((v-omin)/(omax-omin))*(nmax-nmin),
+            case_when:(...pairs)=>{for(let i=0;i<pairs.length-1;i+=2)if(pairs[i])return pairs[i+1];return pairs.length%2===1?pairs[pairs.length-1]:null;},
+          };
+          let groupVal;
+          try {
+            // NOTE: new Function() is the intentional sandbox used throughout this
+            // codebase for user-authored math expressions (same pattern in mutate,
+            // ai_tr, CalculateTab, SimulateTab). Input is researcher-typed formula,
+            // not external/untrusted data. Scope is locked to injected column arrays
+            // and helper functions — no globals accessible.
+            const evalFn = new Function( // eslint-disable-line no-new-func
+              ...Object.keys(colArrays), ...Object.keys(gh), ...Object.keys(ROW_H),
+              `"use strict"; return (${exprStr});`
+            );
+            groupVal = evalFn(...Object.values(colArrays), ...Object.values(gh), ...Object.values(ROW_H));
+          } catch { groupVal = null; }
+          if (typeof groupVal === "boolean") groupVal = groupVal ? 1 : 0;
+          grp.forEach(r => rowValsExpr.set(r, groupVal));
+        }
+        R = rows.map(r => ({ ...r, [nc]: rowValsExpr.get(r) ?? null }));
+        if (!H.includes(nc)) H = [...H, nc];
+        break;
+      }
+
+      const rowVals = new Map();
+      for (const [, grp] of groupMap) {
+        let val;
+        if (fn === "any" || fn === "all") {
+          const flags = grp.map(r => !condition?.length || condition.every(c => matchOne(r, c)));
+          val = fn === "any" ? flags.some(Boolean) : flags.every(Boolean);
+        } else if (fn === "count") {
+          val = grp.length;
+        } else {
+          const nums = grp.map(r => r[col]).filter(v => v !== null && v !== undefined && isFinite(+v)).map(Number);
+          if      (fn === "sum")   val = nums.reduce((a, b) => a + b, 0);
+          else if (fn === "mean")  val = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+          else if (fn === "min")   val = nums.length ? Math.min(...nums) : null;
+          else if (fn === "max")   val = nums.length ? Math.max(...nums) : null;
+          else if (fn === "first") val = grp[0]?.[col] ?? null;
+          else if (fn === "last")  val = grp[grp.length - 1]?.[col] ?? null;
+        }
+        grp.forEach(r => rowVals.set(r, val));
+      }
+
+      R = rows.map(r => ({ ...r, [newCol]: rowVals.get(r) ?? null }));
+      if (!H.includes(newCol)) H = [...H, newCol];
+      break;
+    }
+
     // ── trim_outliers ─────────────────────────────────────────────────────────
     // Row-dropping complement to winsorize. Removes rows where the value lies
     // outside [lo, hi]. Bounds are stored at step-creation time for full

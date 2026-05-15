@@ -19,6 +19,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme, mono } from "./modeling/shared.jsx";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
+import { getPlotHistory, savePlotHistory } from "../services/persistence/plotHistory.js";
 
 // ─── OBSERVABLE PLOT — CACHED CDN SINGLETON ───────────────────────────────────
 let _plt = null;
@@ -96,7 +97,7 @@ const DEFAULT_FILLS = ["#6ec8b4","#c8a96e","#6e9ec8","#c47070","#a87ec8","#7ab89
 const GEOM_OPTS_DEFAULTS = {
   point:     { size: 3,   shape: "circle" },
   line:      { strokeWidth: 1.8, dash: "none" },
-  smooth:    { showSE: true, ci: 0.95 },
+  smooth:    { method: "lm", showSE: true, ci: 0.95, span: 0.75 },
   boxplot:   { outlierShow: true, outlierSize: 3 },
   histogram: { bins: 20 },
   density:   { adjust: 1.0 },
@@ -117,6 +118,39 @@ function mkLayer(geom, idx) {
     pinned:   false,
     opts:     { ...(GEOM_OPTS_DEFAULTS[geom] || {}) },
   };
+}
+
+// ─── LOESS SMOOTHER ───────────────────────────────────────────────────────────
+// Local polynomial (degree 1) smoother with tricube kernel, O(n·k).
+// Returns [{x, y}] sorted by x, evaluated at min(n,120) equally-spaced points.
+function loessSmooth(pairs, span = 0.75) {
+  if (pairs.length < 2) return pairs;
+  const n = pairs.length;
+  const k = Math.max(4, Math.round(span * n));
+  const xMin = pairs[0].x, xMax = pairs[n - 1].x;
+  const steps = Math.min(n, 120);
+  const xs = Array.from({ length: steps }, (_, i) => xMin + (i / (steps - 1)) * (xMax - xMin));
+  return xs.map(x0 => {
+    const dists = pairs.map((p, j) => ({ j, d: Math.abs(p.x - x0) }));
+    dists.sort((a, b) => a.d - b.d);
+    const nbrs = dists.slice(0, k);
+    const maxD = nbrs[nbrs.length - 1].d || 1;
+    const pts = nbrs.map(({ j, d }) => {
+      const u = d / maxD;
+      const w = Math.pow(1 - Math.pow(u, 3), 3);
+      return { x: pairs[j].x, y: pairs[j].y, w };
+    });
+    const sw = pts.reduce((s, p) => s + p.w, 0);
+    const swx = pts.reduce((s, p) => s + p.w * p.x, 0);
+    const swy = pts.reduce((s, p) => s + p.w * p.y, 0);
+    const swxx = pts.reduce((s, p) => s + p.w * p.x * p.x, 0);
+    const swxy = pts.reduce((s, p) => s + p.w * p.x * p.y, 0);
+    const det = sw * swxx - swx * swx;
+    if (Math.abs(det) < 1e-10) return { x: x0, y: sw > 0 ? swy / sw : 0 };
+    const b = (sw * swxy - swx * swy) / det;
+    const a = (swy - b * swx) / sw;
+    return { x: x0, y: a + b * x0 };
+  });
 }
 
 // ─── BUILD MARKS FOR A SINGLE LAYER ──────────────────────────────────────────
@@ -194,13 +228,37 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
 
     case "smooth": {
       if (aes.x && aes.y) {
-        const { showSE: se = true, ci = 0.95 } = ly.opts || {};
-        marks.push(Plt.linearRegressionY(rows, {
-          x: aes.x, y: aes.y,
-          stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
-          fill: colorVal, fillOpacity: se ? 0.15 * op : 0,
-          ci: se ? ci : 0,
-        }));
+        const { method = "lm", showSE: se = true, ci = 0.95, span = 0.75 } = ly.opts || {};
+        if (method === "lm") {
+          marks.push(Plt.linearRegressionY(rows, {
+            x: aes.x, y: aes.y,
+            stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
+            fill: colorVal, fillOpacity: se ? 0.15 * op : 0,
+            ci: se ? ci : 0,
+          }));
+        } else if (method === "loess") {
+          const pairs = rows
+            .map(r => ({ x: +r[aes.x], y: +r[aes.y] }))
+            .filter(p => isFinite(p.x) && isFinite(p.y))
+            .sort((a, b) => a.x - b.x);
+          if (pairs.length > 1) {
+            const smoothed = loessSmooth(pairs, span);
+            marks.push(Plt.line(smoothed, {
+              x: "x", y: "y",
+              stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
+              curve: "catmull-rom",
+            }));
+          }
+        } else if (method === "mean") {
+          const yVals = rows.map(r => +r[aes.y]).filter(isFinite);
+          if (yVals.length) {
+            const ymean = yVals.reduce((s, v) => s + v, 0) / yVals.length;
+            marks.push(Plt.ruleY([ymean], {
+              stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
+              strokeDasharray: "6 3",
+            }));
+          }
+        }
       }
       break;
     }
@@ -278,7 +336,7 @@ function patchDarkTheme(el) {
 
 // ─── PLOT CANVAS — renders one or more layers on a single Observable Plot ─────
 // layers: array of layer objects (for overlay/comparison) OR single-element array
-function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canvasRef, showSE = true }) {
+function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme, canvasRef, showSE = true }) {
   const { C } = useTheme();
   const ownRef = useRef(null);
   const ref    = canvasRef ?? ownRef;
@@ -370,7 +428,17 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, width, height, scheme, canva
 
   if (err) return <div style={{ color: C.red, fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
   if (!Plt) return <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Observable Plot…</div>;
-  return <div ref={ref} style={{ width: "100%", overflow: "visible" }} />;
+  return (
+    <div style={{ width: "100%", overflow: "visible" }}>
+      {title && (
+        <div style={{
+          textAlign: "center", fontFamily: mono, fontSize: 12,
+          color: C.text, paddingBottom: 4, fontWeight: 600,
+        }}>{title}</div>
+      )}
+      <div ref={ref} style={{ width: "100%", overflow: "visible" }} />
+    </div>
+  );
 }
 
 // ─── MAP CANVAS — Leaflet + OSM tile underlay ─────────────────────────────────
@@ -599,14 +667,28 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
   </>;
 
   if (geom === "smooth") return <>
-    <button onClick={() => set("showSE", !(opts.showSE ?? true))} style={chip(opts.showSE ?? true)}>
-      SE {(opts.showSE ?? true) ? "on" : "off"}
-    </button>
-    {(opts.showSE ?? true) && <>
-      {lbl("CI")}
-      {[[0.90,"90%"],[0.95,"95%"],[0.99,"99%"]].map(([v,l]) => (
-        <button key={v} onClick={() => set("ci", v)} style={chipGold((opts.ci ?? 0.95) === v)}>{l}</button>
-      ))}
+    {lbl("method")}
+    {[["lm","lm"],["loess","loess"],["mean","mean"]].map(([v,l]) => (
+      <button key={v} onClick={() => set("method", v)} style={chipGold((opts.method ?? "lm") === v)}>{l}</button>
+    ))}
+    {(opts.method ?? "lm") === "loess" && <>
+      {lbl("span")}
+      <input type="range" min={0.1} max={1} step={0.05} value={opts.span ?? 0.75}
+        onChange={e => set("span", +e.target.value)}
+        style={{ width: 64, accentColor: "#c8a96e", verticalAlign: "middle" }}/>
+      <span style={{ fontSize: 9, color: "#c8a96e", fontFamily: mono }}>{(opts.span ?? 0.75).toFixed(2)}</span>
+    </>}
+    {(opts.method ?? "lm") === "lm" && <>
+      {lbl("SE")}
+      <button onClick={() => set("showSE", !(opts.showSE ?? true))} style={chip(opts.showSE ?? true)}>
+        {(opts.showSE ?? true) ? "on" : "off"}
+      </button>
+      {(opts.showSE ?? true) && <>
+        {lbl("CI")}
+        {[[0.90,"90%"],[0.95,"95%"],[0.99,"99%"]].map(([v,l]) => (
+          <button key={v} onClick={() => set("ci", v)} style={chipGold((opts.ci ?? 0.95) === v)}>{l}</button>
+        ))}
+      </>}
     </>}
   </>;
 
@@ -756,16 +838,66 @@ function LayerEditorInline({ layer, onChange, headers }) {
   );
 }
 
+// ─── PLOT HISTORY CARD ────────────────────────────────────────────────────────
+function PlotHistoryCard({ entry, isCompared, onLoad, onDelete, onCompare, C: Cp }) {
+  const geomNames = [...new Set(entry.layers.map(l => l.geom))].slice(0, 3).join(", ");
+  return (
+    <div
+      onClick={onLoad}
+      style={{
+        flexShrink: 0, width: 140, cursor: "pointer", borderRadius: 4, padding: "6px 8px",
+        background: isCompared ? "rgba(110,200,180,0.08)" : Cp.bg,
+        border: `1px solid ${isCompared ? Cp.teal : Cp.border}`,
+        display: "flex", flexDirection: "column", gap: 4, position: "relative",
+      }}>
+      {/* Color dots */}
+      <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+        {entry.layers.slice(0, 5).map((l, i) => (
+          <span key={i} style={{
+            width: 8, height: 8, borderRadius: "50%", background: l.fill, flexShrink: 0, display: "inline-block",
+          }} />
+        ))}
+      </div>
+      {/* Geom names */}
+      <div style={{ fontFamily: mono, fontSize: 8, color: Cp.textMuted, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+        {geomNames || "empty"}
+      </div>
+      {/* Title */}
+      <div style={{ fontFamily: mono, fontSize: 9, color: Cp.text, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 }}>
+        {entry.name}
+      </div>
+      {/* Compare checkbox + delete */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+        <label onClick={e => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }}>
+          <input type="checkbox" checked={isCompared} onChange={onCompare}
+            style={{ accentColor: Cp.teal, cursor: "pointer", width: 10, height: 10 }} />
+          <span style={{ fontFamily: mono, fontSize: 7, color: Cp.textMuted }}>compare</span>
+        </label>
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(); }}
+          style={{
+            marginLeft: "auto", background: "none", border: "none", color: Cp.textMuted,
+            cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px", lineHeight: 1,
+          }}>×</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [] }) {
+export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid }) {
   const { C } = useTheme();
-  const [layers,   setLayers]   = useState(initialLayers);
-  const [activeId, setActiveId] = useState(initialLayers[0]?.id ?? null);
-  const [title,    setTitle]    = useState("");
-  const [xLabel,   setXLabel]   = useState("");
-  const [yLabel,   setYLabel]   = useState("");
-  const [scheme,   setScheme]   = useState("");
-  const [showSE,   setShowSE]   = useState(true);
+  const [layers,      setLayers]      = useState(initialLayers);
+  const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
+  const [title,       setTitle]       = useState("");
+  const [xLabel,      setXLabel]      = useState("");
+  const [yLabel,      setYLabel]      = useState("");
+  const [scheme,      setScheme]      = useState("");
+  const [showSE,      setShowSE]      = useState(true);
+  const [plotHistory, setPlotHistory] = useState([]);
+  const [histIdx,     setHistIdx]     = useState(null); // null = editor mode
+  const [histOpen,    setHistOpen]    = useState(false);
+  const [compareIds,  setCompareIds]  = useState(new Set());
   const canvasRef  = useRef(null);
   const plotRef    = useRef(null);
   const [canvasW,  setCanvasW]  = useState(760);
@@ -783,6 +915,104 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Load plot history from IndexedDB on mount / pid change
+  useEffect(() => {
+    if (!pid) return;
+    getPlotHistory(pid).then(h => setPlotHistory(h ?? [])).catch(() => {});
+  }, [pid]);
+
+  // Keyboard nav: Alt+← / Alt+→
+  useEffect(() => {
+    const handler = (e) => {
+      if (!e.altKey) return;
+      if (e.key === "ArrowLeft")  { e.preventDefault(); navPrev(); }
+      if (e.key === "ArrowRight") { e.preventDefault(); navNext(); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });  // intentionally no dep array — navPrev/navNext are always current via closure
+
+  const loadPlotEntry = useCallback((entry) => {
+    setLayers(entry.layers.map(l => ({ ...l })));
+    setActiveId(entry.layers[0]?.id ?? null);
+    setTitle(entry.title || "");
+    setXLabel(entry.xLabel || "");
+    setYLabel(entry.yLabel || "");
+    setScheme(entry.scheme || "");
+  }, []);
+
+  const savePlot = useCallback(() => {
+    if (layers.length === 0) return;
+    let next;
+    if (histIdx !== null && plotHistory[histIdx]) {
+      // Overwrite the currently-viewed saved plot
+      const updated = {
+        ...plotHistory[histIdx],
+        layers: JSON.parse(JSON.stringify(layers)),
+        title, xLabel, yLabel, scheme,
+      };
+      next = plotHistory.map((e, i) => i === histIdx ? updated : e);
+    } else {
+      // New save
+      const entry = {
+        id:      "ph_" + Math.random().toString(36).slice(2, 8),
+        name:    `Plot ${plotHistory.length + 1}`,
+        layers:  JSON.parse(JSON.stringify(layers)),
+        title, xLabel, yLabel, scheme,
+        savedAt: Date.now(),
+      };
+      next = [...plotHistory, entry];
+      setHistOpen(true);
+    }
+    setPlotHistory(next);
+    if (pid) savePlotHistory(pid, next).catch(() => {});
+  }, [plotHistory, histIdx, layers, title, xLabel, yLabel, scheme, pid]);
+
+  const newPlot = useCallback(() => {
+    setLayers([]);
+    setActiveId(null);
+    setTitle("");
+    setXLabel("");
+    setYLabel("");
+    setScheme("");
+    setHistIdx(null);
+  }, []);
+
+  const deleteFromHistory = useCallback((id) => {
+    setPlotHistory(prev => {
+      const idx  = prev.findIndex(e => e.id === id);
+      const next = prev.filter(e => e.id !== id);
+      if (pid) savePlotHistory(pid, next).catch(() => {});
+      setHistIdx(hi => {
+        if (hi === null) return null;
+        if (idx < hi)  return hi - 1;
+        if (idx === hi) return next.length > 0 ? Math.min(hi, next.length - 1) : null;
+        return hi;
+      });
+      setCompareIds(c => { const s = new Set(c); s.delete(id); return s; });
+      return next;
+    });
+  }, [pid]);
+
+  const toggleCompare = useCallback((id) => {
+    setCompareIds(prev => {
+      const s = new Set(prev);
+      if (s.has(id)) { s.delete(id); return s; }
+      if (s.size >= 2) return prev;
+      s.add(id); return s;
+    });
+  }, []);
+
+  function navPrev() {
+    const i = histIdx === null ? plotHistory.length - 1 : Math.max(0, histIdx - 1);
+    if (plotHistory[i]) { loadPlotEntry(plotHistory[i]); setHistIdx(i); }
+  }
+  function navNext() {
+    if (histIdx === null) return;
+    if (histIdx < plotHistory.length - 1) { loadPlotEntry(plotHistory[histIdx + 1]); setHistIdx(histIdx + 1); }
+    else setHistIdx(null);
+  }
 
   const addLayer = useCallback((geom) => {
     setLayers(prev => {
@@ -812,7 +1042,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   return (
     <div style={{
       display: "flex", flexDirection: "column", background: C.surface,
-      border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden",
+      border: `1px solid ${C.border}`, borderRadius: 4, overflowX: "hidden", overflowY: "auto",
       minHeight: 480, ...style,
     }}>
 
@@ -893,6 +1123,32 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
 
           {/* SE toggle moved to per-layer GeomOptsRow for smooth layers */}
 
+          {/* History nav + Save + New */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {plotHistory.length > 0 && (<>
+              <button onClick={navPrev} title="Previous saved plot (Alt+←)"
+                disabled={plotHistory.length === 0}
+                style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "2px 6px", lineHeight: 1 }}>←</button>
+              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, minWidth: 38, textAlign: "center" }}>
+                {histIdx !== null ? `${histIdx + 1}/${plotHistory.length}` : `—/${plotHistory.length}`}
+              </span>
+              <button onClick={navNext} title="Next saved plot (Alt+→)"
+                disabled={histIdx === null}
+                style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: histIdx !== null ? C.textMuted : C.border, cursor: histIdx !== null ? "pointer" : "default", fontFamily: mono, fontSize: 10, padding: "2px 6px", lineHeight: 1 }}>→</button>
+            </>)}
+            <button onClick={savePlot} disabled={layers.length === 0} title="Save current plot to history"
+              style={{
+                padding: "3px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: layers.length > 0 ? "pointer" : "not-allowed",
+                background: layers.length > 0 ? C.teal : "none", color: layers.length > 0 ? C.bg : C.border,
+                border: `1px solid ${layers.length > 0 ? C.teal : C.border}`,
+              }}>Save</button>
+            <button onClick={newPlot} title="Clear builder to start a new plot"
+              style={{
+                padding: "3px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                background: "none", color: C.textMuted, border: `1px solid ${C.border}`,
+              }}>New</button>
+          </div>
+
           {visibleLayers.length > 0 && (
             <div style={{ marginLeft: "auto" }}>
               <PlotExportBar
@@ -924,6 +1180,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             <PlotCanvas
               layers={visibleLayers}
               rows={rows}
+              title={title}
               xLabel={xLabel}
               yLabel={yLabel}
               width={canvasW}
@@ -934,6 +1191,64 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
           </div>
         )}
       </div>
+
+      {/* ── HISTORY STRIP ──────────────────────────────────────────────────── */}
+      {plotHistory.length > 0 && (
+        <div style={{ flexShrink: 0, borderTop: `1px solid ${C.border}` }}>
+          {/* Collapsible header */}
+          <div
+            onClick={() => setHistOpen(o => !o)}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "0.28rem 0.75rem", cursor: "pointer", userSelect: "none",
+              background: C.surface,
+            }}>
+            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+              ◈ Plot History ({plotHistory.length})
+              {compareIds.size === 2 && <span style={{ color: C.teal, marginLeft: 8 }}>▸ compare</span>}
+            </span>
+            <span style={{ fontFamily: mono, fontSize: 9, color: C.border }}>{histOpen ? "▲" : "▼"}</span>
+          </div>
+
+          {/* Cards */}
+          {histOpen && (
+            <div style={{
+              display: "flex", gap: 8, padding: "0.5rem 0.75rem",
+              overflowX: "auto", background: C.bg,
+            }}>
+              {plotHistory.map((entry, i) => (
+                <PlotHistoryCard
+                  key={entry.id}
+                  entry={entry}
+                  isCompared={compareIds.has(entry.id)}
+                  C={C}
+                  onLoad={() => { loadPlotEntry(entry); setHistIdx(i); }}
+                  onDelete={() => deleteFromHistory(entry.id)}
+                  onCompare={() => toggleCompare(entry.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Compare mode — 2 plots side-by-side */}
+          {compareIds.size === 2 && (() => {
+            const [idA, idB] = [...compareIds];
+            const entA = plotHistory.find(e => e.id === idA);
+            const entB = plotHistory.find(e => e.id === idB);
+            if (!entA || !entB) return null;
+            const hw = Math.max(280, Math.floor(canvasW / 2) - 12);
+            return (
+              <div style={{
+                display: "flex", gap: 8, padding: "0.5rem 0.75rem",
+                borderTop: `1px solid ${C.border}`, background: C.bg, overflowX: "auto",
+              }}>
+                <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE />
+                <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE />
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }

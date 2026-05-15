@@ -1134,6 +1134,12 @@ function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders, availa
             onChange={v => onChange({ ...layer, boundaryCol: v })} headers={geomCols} C={C} allowNone />
           <NumInput label="Cell size (meters)" value={layer.cellsize}
             onChange={v => onChange({ ...layer, cellsize: Number(v) })} C={C} min={50} max={10000} step={50} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
+            <input type="checkbox" checked={layer.clipBorder !== false}
+              onChange={e => onChange({ ...layer, clipBorder: e.target.checked })}
+              style={{ accentColor: C.teal, cursor: "pointer" }} />
+            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Clip border cells to boundary</span>
+          </label>
         </>)}
 
         {layer.mode === "wkt" && (<>
@@ -1191,7 +1197,7 @@ function mkSLayer(type, idx) {
   const col = LAYER_COLORS[idx % LAYER_COLORS.length];
   const id  = "sl_" + Math.random().toString(36).slice(2, 7);
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fillColor: "#d0d0d0", fillOpacity: 0.12, borderColor: "#222222", borderWidth: 0.5 };
-  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "generate", wktCol: "", boundaryCol: "", cellsize: 500, fillColor: col, fillOpacity: 0, borderColor: "#d73027", borderWidth: 0.15, colorByCol: "", colorFillOpacity: 0.55 };
+  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "generate", wktCol: "", boundaryCol: "", cellsize: 500, clipBorder: true, fillColor: col, fillOpacity: 0, borderColor: "#d73027", borderWidth: 0.15, colorByCol: "", colorFillOpacity: 0.55 };
   if (type === "points")   return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", colorCol: "", fillColor: col, radius: 4, opacity: 0.78 };
   return { id, type, visible: true };
 }
@@ -1242,7 +1248,7 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C }) {
     const glRows = (!gl.datasetId || gl.datasetId === "active") ? rows : availableDatasets.find(d => d.id === gl.datasetId)?.rows ?? rows;
     const wkt = glRows.find(r => r[gl.boundaryCol])?.[gl.boundaryCol];
     if (!wkt) return null;
-    try { return { cells: makeGrid(wkt, gl.cellsize), error: null }; }
+    try { return { cells: makeGrid(wkt, gl.cellsize, gl.clipBorder !== false), error: null }; }
     catch (e) { return { cells: null, error: e.message }; }
   }, [layers, rows, availableDatasets]);
 

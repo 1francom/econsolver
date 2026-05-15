@@ -151,28 +151,27 @@ function parseStataOld(bytes, view) {
   }, 0);
   const dataSize = N * rowWidth;
 
-  // characteristics — skip safely.
-  // Record layout: int32 datasize | str[NAME_LEN] varname | str[NAME_LEN] charname | char[datasize] contents
-  // A zero datasize terminates the section.
-  const charsStart = off;
-  let charsOk = false;
-  if (off + 4 <= bytes.length) {
-    const firstLen = view.getUint32(off, le);
-    // Sanity: a valid datasize is 0 (end marker) or small enough to fit
-    if (firstLen === 0 || (firstLen < bytes.length - off && firstLen < 1_000_000)) {
-      charsOk = true;
-      while (off + 4 <= bytes.length) {
-        const datasize = view.getUint32(off, le);
+  // characteristics (Expansion Fields) — skip safely.
+  try {
+    while (off < bytes.length) {
+      const marker = view.getUint8(off);
+      off += 1;
+
+      if (marker === 0) {
+        break;
+      }
+
+      if (marker === 1) {
+        const length = view.getInt32(off, le);
         off += 4;
-        if (datasize === 0) break;
-        // Each record also has varname + charname before the data content
-        const recBody = 2 * NAME_LEN + datasize;
-        if (recBody > bytes.length - off) { off -= 4; break; } // corrupt, stop
-        off += recBody;
+        off += length;
+      } else {
+        break;
       }
     }
+  } catch (e) {
+    console.warn("Warning skipping characteristics:", e);
   }
-  if (!charsOk) off = charsStart; // no / corrupt characteristics — start data here
 
   // data
   const rows = [];

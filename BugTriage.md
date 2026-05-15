@@ -14,3 +14,7 @@
 | 2026-05-11 | Data | Edit cells button does not work | high | ui | `src/ExplorerModule.jsx` | open |
 | 2026-05-11 | Explore | The graph does not fit the screen | medium | ui | `src/components/PlotBuilder.jsx`, `src/components/ModelingTab.jsx` | open |
 | 2026-05-11 | Model | McRary plot does not work — McCrary density test could not be computed | high | math | `src/math/CausalEngine.js`, `src/components/modeling/ModelPlots.jsx` | fixed |
+| 2026-05-13 | Data | .dta files are wrong loaded and readed | high | data | `src/services/data/parsers/stata.js` | open |
+| 2026-05-13 | Spatial | Multipolygon geometry does not work | high | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | open |
+| 2026-05-13 | Spatial | Grids: adjust the size of border grids by cutting them | medium | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | open |
+| 2026-05-13 | Model | Show clearer errors — "Matrix is singular or insufficient data" too vague | medium | ui | `src/components/ModelingTab.jsx`, `src/math/LinearEngine.js` | open |

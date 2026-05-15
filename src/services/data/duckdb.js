@@ -105,6 +105,9 @@ export async function loadParquet(file) {
  * Load a large CSV/TSV via DuckDB's fast scanner.
  * Intended for files too large for the JS text parser.
  */
+// Common missing-value sentinels across World Bank, OECD, Stata, Excel exports.
+const NULL_STRINGS = `['..', '.', 'NA', 'N/A', 'n/a', 'na', 'NULL', 'null', 'None', 'none', 'missing', '#N/A', '#NA', 'NaN']`;
+
 export async function loadLargeCSV(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   const tableName = `csv_${Date.now()}`;
@@ -112,7 +115,7 @@ export async function loadLargeCSV(file) {
   const { tableName: tbl, rowCount } = await registerAndCreate(
     file,
     tableName,
-    `CREATE OR REPLACE TABLE "${tableName}" AS SELECT * FROM read_csv('${file.name}', ${delim}header=true, auto_detect=true)`
+    `CREATE OR REPLACE TABLE "${tableName}" AS SELECT * FROM read_csv('${file.name}', ${delim}header=true, auto_detect=true, nullstr=${NULL_STRINGS})`
   );
 
   const limit = Math.min(rowCount, MAX_ROWS);

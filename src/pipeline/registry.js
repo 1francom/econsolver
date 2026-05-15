@@ -482,6 +482,16 @@ export const STEP_REGISTRY = [
   },
 
   {
+    type: "grouped_mutate",
+    label: "Grouped mutate",
+    category: "features",
+    description: "group_by() %>% mutate() — compute a new column per group and broadcast to all rows. Row count never changes.",
+    schema: [],
+    toLabel: s => `grouped_mutate: ${s.fn}(${s.col||""}) by [${(s.by||[]).join(",")}] → ${s.newCol}`,
+    defaultStep: () => ({ type: "grouped_mutate", by: [], fn: "any", condition: [], newCol: "" }),
+  },
+
+  {
     type: "trim_outliers",
     label: "Trim outliers (drop rows)",
     category: "cleaning",

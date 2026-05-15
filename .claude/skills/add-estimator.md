@@ -11,6 +11,19 @@ description: Wire a new econometric estimator end-to-end in EconSolver. Use this
 - Pure JS. No React, no UI. Validate vs R to 6 decimal places on coefficients, 4 on SE.
 - R libs: `fixest`, `plm`, `rdrobust`, `AER`, `modelsummary`, base `glm`.
 - Export from `src/math/index.js` barrel.
+- **Reference PDFs** at `.claude/skills/Estimators/` — read **only the PDF(s) for the estimator being implemented**, not all of them:
+  | Estimator | PDF(s) to read |
+  |-----------|---------------|
+  | RDD (Sharp/Fuzzy) | `rdrobust.pdf`, `RDD_Calonico-Cattaneo-Titiunik_2015_R.pdf` |
+  | GMM / LIML | `gmm_R.pdf` |
+  | Panel FE / FD / TWFE | `fixest.pdf`, `plm_R.pdf` |
+  | Synthetic Control | `synthetic_control.pdf` |
+
+  Each PDF covers all four areas — read once, extract all four:
+  - **β (coefficients)**: estimator-specific derivations
+  - **SE (standard errors)**: variance formulas, sandwich estimators, bandwidth-dependent SE — cross-check with `src/core/inference/robustSE.js`
+  - **Distributions & p-values**: t vs z vs chi², two-sided vs one-sided CDF — set `testStatLabel` in `EstimationResult` to match
+  - **Plots**: canonical diagnostic plots for this estimator (e.g. RD plot with bins/CI, SC gap chart, GMM moment conditions) — use as spec for `ModelPlots.jsx` component
 
 **2. EstimationResult wrapper** (`src/math/EstimationResult.js`)
 - Add `wrapXxx(engineOutput, spec)` internal function.

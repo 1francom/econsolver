@@ -6,14 +6,9 @@ import { useTheme, mono, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { detectNumberLocale, parseSmartNumber } from "../../pipeline/runner.js";
 
-// ─── NORMALIZE TEXT CATEGORIES PANEL ─────────────────────────────────────────
-// Standalone tool in the Cleaning tab.
-// Scans all categorical columns for fuzzy-similar values and lets the user
-// confirm a canonical name for each cluster, then emits a recode step.
-//
-// Algorithm: Levenshtein fuzzy-groups (already in fuzzyGroups()) + frequency-
-// ranked canonical suggestion. The user can override any canonical inline.
-function NormalizePanel({headers, rows, info, onAdd}){
+// ─── STANDARDIZE DIALOG (inline) ─────────────────────────────────────────────
+// NormalizePanel was removed; ColCard recode action covers that use case.
+function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
   const { C } = useTheme();
   const [selCol, setSelCol]     = useState("");
   const [clusters, setClusters] = useState([]);
@@ -1606,8 +1601,6 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
         <StandardizeDialog col={normTarget.col} clusters={normTarget.clusters} rawVals={normTarget.rawVals}
           rows={rows} onConfirm={handleNormConfirm} onCancel={()=>setNormTarget(null)}/>
       )}
-      {/* ─ Standalone Text Normalizer ─ */}
-      <NormalizePanel headers={headers} rows={rows} info={info} onAdd={onAdd}/>
       {/* ─ Smart Clean ─ */}
       <SmartCleanSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
       {/* Standalone filter button */}

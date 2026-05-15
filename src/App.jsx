@@ -1771,7 +1771,8 @@ export default function App() {
 
   // ── Called by DataTab when user loads the first (primary) dataset ─────────
   const handlePrimaryLoad = async (data, fname) => {
-    setRawData(data);
+    const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
+    setRawData(ensRi(data));
     setFilename(fname);
     // Update project metadata with real row/col counts
     if (pid) {
@@ -1967,6 +1968,7 @@ export default function App() {
                   {tabOutput("explore")
                     ? <ExplorerModule
                         key={tabDsId("explore")}
+                        pid={tabDsId("explore")}
                         cleanedData={tabOutput("explore")}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}

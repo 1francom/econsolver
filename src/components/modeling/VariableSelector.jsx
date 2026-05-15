@@ -24,17 +24,21 @@ const SHOW_W = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probi
 export default function VariableSelector({
   model,
   numericCols,
+  allCols,
   yVar,
   setYVar,
   xVars,
   setXVars,
   wVars,
   setWVars,
+  factorVars,
+  onToggleFactor,
 }) {
   const { C } = useTheme();
-  // Exclude already-assigned columns from downstream pickers
-  const availForX = numericCols.filter(h => !yVar.includes(h));
-  const availForW = numericCols.filter(h => !yVar.includes(h) && !xVars.includes(h));
+  // X/W pickers show all columns (numeric + categorical); Y picker is numeric-only
+  const xwCols = allCols ?? numericCols;
+  const availForX = xwCols.filter(h => !yVar.includes(h));
+  const availForW = xwCols.filter(h => !yVar.includes(h) && !xVars.includes(h));
 
   return (
     <>
@@ -66,6 +70,8 @@ export default function VariableSelector({
             model === "LIML" ? "Endogenous regressors — LIML k-class correction applied." :
             undefined
           }
+          factorVars={factorVars}
+          onToggleFactor={onToggleFactor}
         />
       )}
 
@@ -77,6 +83,8 @@ export default function VariableSelector({
           vars={availForW}
           selected={wVars}
           onToggle={setWVars}
+          factorVars={factorVars}
+          onToggleFactor={onToggleFactor}
         />
       )}
     </>

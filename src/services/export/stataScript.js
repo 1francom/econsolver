@@ -76,7 +76,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars: model.factorVars ?? [] }));
   lines.push("");
 
   return lines.join("\n");
@@ -220,9 +220,11 @@ function transpileStep(step) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [] }) {
   const lines = [];
-  const xList = allX.join(" ");
+  const fvSet = new Set(factorVars);
+  const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
+  const xList = allX.map(fmtS).join(" ");
 
   switch (type) {
     case "OLS":
@@ -305,6 +307,47 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`* Marginal effects at the mean`);
       lines.push(`margins, dydx(*) atmeans`);
       break;
+
+    case "LSDV": {
+      lines.push(`* Panel LSDV (numerically equivalent to within/FE)`);
+      lines.push(`xtset ${entityCol} ${timeCol}`);
+      lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
+      lines.push(`estimates store m_lsdv`);
+      lines.push(`* Alternatively: areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
+      break;
+    }
+
+    case "FuzzyRDD": {
+      const kernelOpt = kernel === "uniform" ? "nw(1)"
+                      : kernel === "epanechnikov" ? "kernel(epanechnikov)"
+                      : "kernel(triangular)";
+      const dVar  = treatVar ?? "D";
+      const extra = wVars.length ? ` covs(${wVars.join(" ")})` : "";
+      lines.push(`* Fuzzy RDD via rdrobust`);
+      lines.push(`* If not installed: ssc install rdrobust`);
+      lines.push(`rdrobust ${yVar} ${runningVar}, fuzzy(${dVar}) c(${cutoff ?? 0}) h(${bandwidth ?? "# set bandwidth"}) ${kernelOpt}${extra}`);
+      lines.push(`* First-stage jump in take-up probability`);
+      lines.push(`gen _Z = (${runningVar} >= ${cutoff ?? 0})`);
+      lines.push(`gen _run_c = ${runningVar} - ${cutoff ?? 0}`);
+      lines.push(`ivregress 2sls ${yVar} _run_c (${dVar} = _Z), robust`);
+      lines.push(`drop _Z _run_c`);
+      break;
+    }
+
+    case "EventStudy": {
+      const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      lines.push(`* Event Study — relative-time dummies`);
+      lines.push(`* Replace treat_time with the variable holding each unit's treatment period`);
+      lines.push(`xtset ${entityCol} ${timeCol}`);
+      lines.push(`gen rel_time = ${timeCol} - treat_time`);
+      lines.push(`* Estimate with unit + time FE, ref = -1`);
+      lines.push(`* If reghdfe not installed: ssc install reghdfe`);
+      lines.push(`reghdfe ${yVar} ib(-1).rel_time${extra}, absorb(${entityCol} ${timeCol}) vce(cluster ${entityCol})`);
+      lines.push(`estimates store m_eventstudy`);
+      lines.push(`* Plot coefficients`);
+      lines.push(`coefplot m_eventstudy, keep(*rel_time*) vertical yline(0) xline(# replace with ref period index)`);
+      break;
+    }
 
     default:
       lines.push(`* Model type "${type}" — add estimation command here`);
