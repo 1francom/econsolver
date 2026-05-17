@@ -649,6 +649,20 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         desc: `edit row ${ri + 1} · ${col} → ${value ?? "NA"}`,
       });
     },
+    // Called by DataViewer "Fill column" panel — dispatches an ai_tr step
+    addFillColumnStep: (col, op, text) => {
+      let js;
+      const escaped = JSON.stringify(text);
+      if (op === "set")     js = `v => ${escaped}`;
+      else if (op === "append")  js = `v => v == null ? ${escaped} : String(v) + ${escaped}`;
+      else if (op === "prepend") js = `v => v == null ? ${escaped} : ${escaped} + String(v)`;
+      else js = `v => ${escaped}`;
+      const opLabel = op === "set" ? "set" : op === "append" ? "append to" : "prepend to";
+      wranglingAddStepRef.current?.({
+        type: "ai_tr", col, js,
+        desc: `Fill: ${opLabel} "${col}" → ${text.length > 40 ? text.slice(0, 40) + "…" : text}`,
+      });
+    },
   }), [handleLoadFile, handleSaveSubset, primaryId]);
 
   return (

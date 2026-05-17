@@ -316,7 +316,7 @@ function colStats(col, rows) {
   return { type: "string", n: vals.length, nulls, unique: Object.keys(freq).length, top };
 }
 
-function DataViewer({ rows, headers, filename, onPatch, duckdbMeta }) {
+function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta }) {
   const { C } = useTheme();
   const [page,         setPage]        = useState(0);
   const [selCol,       setSelCol]      = useState(null);
@@ -324,10 +324,19 @@ function DataViewer({ rows, headers, filename, onPatch, duckdbMeta }) {
   const [editMode,     setEditMode]    = useState(false);
   const [editingCell,  setEditingCell] = useState(null); // { ri, col }
   const [editValue,    setEditValue]   = useState("");
+  const [fillCol,      setFillCol]     = useState("");
+  const [fillOp,       setFillOp]      = useState("set");
+  const [fillText,     setFillText]    = useState("");
   const [dbPageRows,   setDbPageRows]  = useState([]);  // DuckDB-fetched page
 
   // When the table changes (new dataset or pipeline step), reset to page 0
   useEffect(() => { setPage(0); setDbPageRows([]); }, [duckdbMeta?.tableName]);
+
+  // Initialize fillCol to first non-internal column when headers change
+  useEffect(() => {
+    const first = headers.find(h => !h.startsWith("__")) ?? headers[0] ?? "";
+    setFillCol(first);
+  }, [headers]);
 
   // Async page fetch from DuckDB
   useEffect(() => {
@@ -396,7 +405,7 @@ function DataViewer({ rows, headers, filename, onPatch, duckdbMeta }) {
         <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{totalCount.toLocaleString()} × {headers.length}</span>
         {onPatch && (
           <button
-            onClick={() => { setEditMode(m => !m); setEditingCell(null); }}
+            onClick={() => { setEditMode(m => { if (m) { setEditingCell(null); setFillText(""); } return !m; }); }}
             title={editMode ? "Exit cell editing mode" : "Enable cell editing (double-click to edit cells)"}
             style={{
               padding:"2px 8px", borderRadius:3, fontFamily:mono, fontSize:9,
@@ -431,6 +440,53 @@ function DataViewer({ rows, headers, filename, onPatch, duckdbMeta }) {
           </div>
         )}
       </div>
+
+      {/* Fill Column panel — shown only in edit mode */}
+      {editMode && onFillColumn && (
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"0.4rem 0.9rem",
+                     borderBottom:`1px solid ${C.border}`,flexShrink:0,background:`${C.teal}0d`,flexWrap:"wrap"}}>
+          <span style={{fontSize:9,color:C.teal,fontFamily:mono,whiteSpace:"nowrap"}}>Fill column:</span>
+          <select
+            value={fillCol || headers[0] || ""}
+            onChange={e => setFillCol(e.target.value)}
+            style={{padding:"2px 6px",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,
+                    color:C.text,fontFamily:mono,fontSize:9,maxWidth:160}}>
+            {headers.filter(h => !h.startsWith("__")).map(h => (
+              <option key={h} value={h}>{h}</option>
+            ))}
+          </select>
+          {/* Op chips */}
+          {[["set","Set"],["append","Append"],["prepend","Prepend"]].map(([op, label]) => (
+            <button key={op} onClick={() => setFillOp(op)}
+              style={{padding:"2px 7px",borderRadius:3,fontFamily:mono,fontSize:9,cursor:"pointer",
+                      background: fillOp === op ? `${C.teal}33` : "transparent",
+                      border:`1px solid ${fillOp === op ? C.teal : C.border2}`,
+                      color: fillOp === op ? C.teal : C.textMuted,transition:"all 0.1s"}}>
+              {label}
+            </button>
+          ))}
+          <input
+            value={fillText}
+            onChange={e => setFillText(e.target.value)}
+            placeholder="value to fill…"
+            style={{flex:1,minWidth:160,padding:"3px 8px",background:C.surface,
+                    border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,
+                    fontFamily:mono,fontSize:10,outline:"none"}}
+          />
+          <button
+            disabled={!fillText && fillOp === "set"}
+            onClick={() => {
+              const col = fillCol || headers.find(h => !h.startsWith("__")) || "";
+              if (!col) return;
+              onFillColumn(col, fillOp, fillText);
+            }}
+            style={{padding:"3px 10px",borderRadius:3,fontFamily:mono,fontSize:9,cursor:"pointer",
+                    background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,
+                    opacity:(!fillText && fillOp==="set") ? 0.4 : 1}}>
+            Apply to all
+          </button>
+        </div>
+      )}
 
       <div style={{display:"flex",flex:1,minHeight:0}}>
         {/* Grid */}
@@ -1053,6 +1109,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
           headers={viewHeaders}
           filename={viewFile}
           onPatch={(ri, col, value) => studioRef.current?.addPatchStep?.(ri, col, value)}
+          onFillColumn={(col, op, text) => studioRef.current?.addFillColumnStep?.(col, op, text)}
           duckdbMeta={cleanedData?._duckdb ?? rawData?._duckdb ?? null}
         />
       )}
