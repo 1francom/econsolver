@@ -220,7 +220,7 @@ function transpileStep(step) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [] }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
@@ -349,6 +349,35 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "SyntheticControl": {
+      const ec = entityCol ?? "unit";
+      const tc = timeCol   ?? "time";
+      const tu = treatedUnit ?? "TreatedUnit";
+      const tt = treatTime != null ? Number(treatTime) : "TREAT_TIME";
+      const predsStr = (xVars ?? []).length
+        ? (xVars ?? []).join(" ")
+        : `${yVar}  /* no explicit predictors — outcome mean used */`;
+      lines.push(`* ── Synthetic Control (synth package) ──────────────────────────────`);
+      lines.push(`* Install: ssc install synth, replace`);
+      lines.push(`tsset ${ec} ${tc}`);
+      lines.push(``);
+      lines.push(`* synth requires balanced panel — verify before running`);
+      lines.push(`synth ${yVar} ${predsStr}, ///`);
+      lines.push(`    trunit("${tu}") trperiod(${tt}) ///`);
+      lines.push(`    xperiod(#pre_start(#)${tt - 1}) ///`);
+      lines.push(`    nested allopt figure`);
+      lines.push(``);
+      lines.push(`* Donor weights are stored in e(W_weights)`);
+      lines.push(`mat weights = e(W_weights)`);
+      lines.push(`mat list weights`);
+      lines.push(``);
+      lines.push(`* MSPE ratio (post/pre) for inference`);
+      lines.push(`* Use synth_runner for automated placebo inference:`);
+      lines.push(`* ssc install synth_runner, replace`);
+      lines.push(`* synth_runner ${yVar} ${predsStr}, trunit("${tu}") trperiod(${tt}) gen_vars`);
+      break;
+    }
+
     default:
       lines.push(`* Model type "${type}" — add estimation command here`);
   }
@@ -394,10 +423,11 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     const estName = `m_${i + 1}`;
     estoreNames.push({ name: estName, label: c.label ?? c.model?.type ?? `Model ${i+1}` });
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
-            entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel } = c.model ?? {};
+            entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
+            treatedUnit, treatTime } = c.model ?? {};
     const allX = [...xVars, ...wVars];
     lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-    const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel });
+    const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
     // Override the estimates store command if present, else append one
     let hasStore = false;
     modelLines.forEach(l => {

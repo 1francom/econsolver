@@ -81,6 +81,40 @@ function projectSimplex(w) {
   }
 }
 
+// ─── ROW NORMALIZER ───────────────────────────────────────────────────────────
+/**
+ * Scale each row of Y0 (and corresponding Y1 entry) by 1/sqrt(row variance
+ * across all J+1 units, including treated). This matches R Synth package's
+ * divisor <- sqrt(apply(cbind(X0, X1), 1, var)) scaling step.
+ *
+ * @param {Float64Array[]} Y0  — (m × J) matrix
+ * @param {Float64Array}   Y1  — (m,) treated vector
+ * @returns {{ Y0n, Y1n }} — normalised copies (originals unchanged)
+ */
+function normalizeRows(Y0, Y1) {
+  const m = Y0.length;
+  const J = Y0[0].length;
+  const Y0n = Array.from({ length: m }, () => new Float64Array(J));
+  const Y1n = new Float64Array(m);
+
+  for (let i = 0; i < m; i++) {
+    // Row mean across J donors + 1 treated
+    let sum = Y1[i];
+    for (let j = 0; j < J; j++) sum += Y0[i][j];
+    const mean = sum / (J + 1);
+
+    // Row variance (population, matching R's `var` which uses n-1)
+    let sse = (Y1[i] - mean) ** 2;
+    for (let j = 0; j < J; j++) sse += (Y0[i][j] - mean) ** 2;
+    // Use n-1 denominator to match R
+    const sd = sse > 0 ? Math.sqrt(sse / J) : 1;  // guard against zero-variance rows
+
+    Y1n[i] = Y1[i] / sd;
+    for (let j = 0; j < J; j++) Y0n[i][j] = Y0[i][j] / sd;
+  }
+  return { Y0n, Y1n };
+}
+
 // ─── FRANK-WOLFE OPTIMIZER ────────────────────────────────────────────────────
 
 /**
@@ -311,7 +345,9 @@ export function runSyntheticControl(rows, yCol, unitCol, timeCol, treatedUnit, t
   const nOutcomeRows = preTimes.length; // rows that are pure Y (not predictors)
 
   // ── 3. Optimise weights (Frank-Wolfe) ─────────────────────────────────────
-  const W = frankWolfe(Y0_pre, Y1_pre, maxIter, tol);
+  // Normalise before optimisation (matches R Synth row-scaling)
+  const { Y0n, Y1n } = normalizeRows(Y0_pre, Y1_pre);
+  const W = frankWolfe(Y0n, Y1n, maxIter, tol);
 
   // ── 4. Compute pre-fit ────────────────────────────────────────────────────
   const rmspe_pre = computeRMSPE(Y1_pre, Y0_pre, W, nOutcomeRows);
@@ -334,6 +370,9 @@ export function runSyntheticControl(rows, yCol, unitCol, timeCol, treatedUnit, t
   const rmspe_post = Math.sqrt(sse_post / postTimes.length);
   const treatedAvgAbsGap = postGap.reduce((s, d) => s + Math.abs(d.gap), 0) / postGap.length;
 
+  // Average Treatment Effect on the Treated (post-period)
+  const att = postGap.reduce((s, d) => s + d.gap, 0) / postGap.length;
+
   // ── 6. In-space placebo inference ─────────────────────────────────────────
   const placebos = [];
   for (const fakeUnit of donors) {
@@ -347,14 +386,20 @@ export function runSyntheticControl(rows, yCol, unitCol, timeCol, treatedUnit, t
         remainingDonors, predictorCols,
       );
 
-      const pbW        = frankWolfe(pb.Y0_pre, pb.Y1_pre, maxIter, tol);
-      const pbRmspe    = computeRMSPE(pb.Y1_pre, pb.Y0_pre, pbW, pb.preTimes.length);
+      const { Y0n: pbY0n, Y1n: pbY1n } = normalizeRows(pb.Y0_pre, pb.Y1_pre);
+      const pbW        = frankWolfe(pbY0n, pbY1n, maxIter, tol);
+      const nPbOutcome = pb.preTimes.length;
+      const pbRmspe    = computeRMSPE(pb.Y1_pre, pb.Y0_pre, pbW, nPbOutcome);
+      const pbPreFit   = pb.preTimes.map((t, i) => ({
+        t,
+        gap: pb.Y1_pre[i] - dot(pb.Y0_pre[i], pbW),
+      }));
       const pbPostGap  = pb.postTimes.map((t, i) => ({
         t,
         gap: pb.Y1_post[i] - dot(pb.Y0_post[i], pbW),
       }));
 
-      placebos.push({ unit: fakeUnit, gaps: pbPostGap, rmspe_pre: pbRmspe });
+      placebos.push({ unit: fakeUnit, preFit: pbPreFit, gaps: pbPostGap, rmspe_pre: pbRmspe });
     } catch {
       // Silently skip placebos that fail (e.g. insufficient pre-period data)
     }
@@ -383,6 +428,7 @@ export function runSyntheticControl(rows, yCol, unitCol, timeCol, treatedUnit, t
     rmspe_post,
     placebos,
     pValue,
+    att,
     donors,
     treatedUnit,
     treatTime,

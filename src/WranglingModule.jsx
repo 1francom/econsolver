@@ -82,12 +82,62 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     datasets: Object.fromEntries((allDatasets || []).map(d => [d.id, d.rawData]))
   }), [allDatasets]);
 
-  const { rows, headers } = useMemo(() => {
-    const init = rawData.rows.map(r => {
-      const c = {}; rawData.headers.forEach(h => { c[h] = r[h] ?? null; }); return c;
-    });
-    return runPipeline(init, rawData.headers, pipeline, context);
+  // ── Pipeline execution: DuckDB path (async) or JS path (deferred) ──────────
+  // Initial state: raw rows, no cloning — pipeline runs after first paint.
+  // All applyStep handlers use .map() and never mutate rawData.rows in-place,
+  // so passing the reference directly is safe.
+  const [processed,    setProcessed]    = useState({ rows: rawData.rows, headers: rawData.headers });
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [elapsedMs,    setElapsedMs]    = useState(0);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // ── start spinner + elapsed clock ──────────────────────────────────────
+    const t0 = Date.now();
+    setIsProcessing(true);
+    setElapsedMs(0);
+    timerRef.current = setInterval(() => {
+      if (!cancelled) setElapsedMs(Date.now() - t0);
+    }, 250);
+    const done = result => {
+      if (cancelled) return;
+      clearInterval(timerRef.current);
+      setElapsedMs(Date.now() - t0);
+      setProcessed(result);
+      setIsProcessing(false);
+    };
+
+    if (rawData._duckdb?.tableName) {
+      // Large dataset loaded via DuckDB — run pipeline as SQL (non-blocking)
+      import("./pipeline/duckdbRunner.js").then(({ runPipelineDuck }) =>
+        import("./services/data/duckdb.js").then(({ getDuckDB }) =>
+          getDuckDB().then(({ conn }) =>
+            runPipelineDuck(rawData._duckdb.tableName, rawData.headers, pipeline, conn)
+              .then(done)
+              .catch(e => {
+                console.error("[WranglingModule] DuckDB pipeline failed, falling to JS:", e);
+                // JS fallback — still deferred so spinner renders first
+                setTimeout(() => {
+                  if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+                }, 0);
+              })
+          )
+        )
+      );
+    } else {
+      // JS path — defer by one frame so the spinner renders before we block
+      const timerId = setTimeout(() => {
+        if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+      }, 0);
+      return () => { cancelled = true; clearTimeout(timerId); clearInterval(timerRef.current); };
+    }
+
+    return () => { cancelled = true; clearInterval(timerRef.current); };
   }, [rawData, pipeline, context]);
+
+  const { rows, headers } = processed;
 
   const info        = useMemo(() => buildInfo(headers, rows),                    [headers, rows]);
   const panelReport = useMemo(() => panel ? validatePanel(rows, panel.entityCol, panel.timeCol) : null, [rows, panel]);
@@ -136,7 +186,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     const ci = {};
     headers.forEach(h => {
       const s = rows.find(r => r[h] !== undefined && r[h] !== null);
-      ci[h] = { isNumeric: typeof s?.[h] === "number" };
+      const v = s?.[h];
+      ci[h] = {
+        isNumeric: typeof v === "number",
+        isDate:    typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v),
+      };
     });
     onReady({
       headers, cleanRows: rows, colInfo: ci,
@@ -146,8 +200,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
             balance: panel.validation?.balance, blockFE: panel.validation?.blockFE }
         : null,
+      _duckdb: processed._duckdb ?? null,
     });
-  }, [idbReady, pipeline]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idbReady, processed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-clamp branchPointIndex when pipeline shrinks ─────────────────────
   useEffect(() => {
@@ -341,16 +396,30 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             </div>
             <div style={{ fontSize:19, letterSpacing:"-0.02em", marginBottom:3 }}>{filename}</div>
             <div style={{ fontSize:11, color:"#888" }}>
-              <span style={{ color:"#c8a96e" }}>{rawData.rows.length}</span> raw ·{" "}
+              <span style={{ color:"#c8a96e" }}>
+                {rawData._duckdb ? rawData._duckdb.rowCount.toLocaleString() : rawData.rows.length}
+              </span> raw ·{" "}
               <span>{rows.length}</span> current ·{" "}
               <span style={{ color: headers.length > rawData.headers.length ? "#7ab896" : "#444" }}>
                 {headers.length}
               </span> cols
               {naCount > 0 && <span style={{ color:"#c8b46e" }}> · {naCount} rows with NAs</span>}
+              {isProcessing && (
+                <span style={{ color:"#6ec8b4", marginLeft:6 }}>
+                  {" "}· ⏳ {(elapsedMs / 1000).toFixed(1)}s
+                </span>
+              )}
             </div>
           </div>
 
           <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+            {rawData._duckdb && (
+              <span style={{ fontSize:9, padding:"2px 6px", border:"1px solid #6ec8b4",
+                color:"#6ec8b4", borderRadius:2, letterSpacing:"0.1em",
+                fontFamily:mono, whiteSpace:"nowrap" }}>
+                ⚡ DuckDB{rawData._duckdb.truncated ? ` · showing 2,000,000 of ${rawData._duckdb.rowCount.toLocaleString()}` : ""}
+              </span>
+            )}
             {panel && (
               <span style={{ fontSize:9, padding:"2px 6px", border:"1px solid #6e9ec8",
                 color:"#6e9ec8", borderRadius:2, letterSpacing:"0.1em",
@@ -571,7 +640,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           <PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>
         )}
         {tab === "transform" && (
-          <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep}/>
+          <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep} duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "reshape" && (
           <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>

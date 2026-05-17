@@ -16,6 +16,7 @@ import {
   saveProject, listProjects, deleteProject, clearAllProjects,
 } from "./services/Persistence/indexedDB.js";
 import { useTheme } from "./ThemeContext.jsx";
+import { getTablePage } from "./services/data/duckdb.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
 import SimulateTab      from './components/tabs/SimulateTab.jsx';
 import SpatialTab       from './components/tabs/SpatialTab.jsx';
@@ -303,8 +304,8 @@ function colStats(col, rows) {
   if (nums.length > 0) {
     const sum  = nums.reduce((a, b) => a + b, 0);
     const mean = sum / nums.length;
-    const min  = Math.min(...nums);
-    const max  = Math.max(...nums);
+    const min  = nums.reduce((m, v) => v < m ? v : m, nums[0]);
+    const max  = nums.reduce((m, v) => v > m ? v : m, nums[0]);
     const sd   = Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length);
     return { type: "numeric", n: vals.length, nulls, mean, min, max, sd };
   }
@@ -315,7 +316,7 @@ function colStats(col, rows) {
   return { type: "string", n: vals.length, nulls, unique: Object.keys(freq).length, top };
 }
 
-function DataViewer({ rows, headers, filename, onPatch }) {
+function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta }) {
   const { C } = useTheme();
   const [page,         setPage]        = useState(0);
   const [selCol,       setSelCol]      = useState(null);
@@ -323,18 +324,47 @@ function DataViewer({ rows, headers, filename, onPatch }) {
   const [editMode,     setEditMode]    = useState(false);
   const [editingCell,  setEditingCell] = useState(null); // { ri, col }
   const [editValue,    setEditValue]   = useState("");
-  // Pre-compute which columns are numeric once per rows change.
+  const [fillCol,      setFillCol]     = useState("");
+  const [fillOp,       setFillOp]      = useState("set");
+  const [fillText,     setFillText]    = useState("");
+  const [dbPageRows,   setDbPageRows]  = useState([]);  // DuckDB-fetched page
+
+  // When the table changes (new dataset or pipeline step), reset to page 0
+  useEffect(() => { setPage(0); setDbPageRows([]); }, [duckdbMeta?.tableName]);
+
+  // Initialize fillCol to first non-internal column when headers change
+  useEffect(() => {
+    const first = headers.find(h => !h.startsWith("__")) ?? headers[0] ?? "";
+    setFillCol(first);
+  }, [headers]);
+
+  // Async page fetch from DuckDB
+  useEffect(() => {
+    if (!duckdbMeta?.tableName) return;
+    let cancelled = false;
+    getTablePage(duckdbMeta.tableName, page * PAGE_SIZE, PAGE_SIZE)
+      .then(r => { if (!cancelled) setDbPageRows(r); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [duckdbMeta?.tableName, page]);
+
+  const isDuck     = !!duckdbMeta?.tableName;
+  const totalCount = isDuck ? (duckdbMeta.rowCount ?? 0) : rows.length;
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+  const pageRows   = isDuck ? dbPageRows : rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  // Pre-compute which columns are numeric (from preview rows — stable enough).
   const numCols = useMemo(() => {
     const s = new Set();
-    headers.forEach(h => { if (rows.slice(0, 20).some(r => typeof r[h] === "number")) s.add(h); });
+    const sample = rows.slice(0, 20);
+    headers.forEach(h => { if (sample.some(r => typeof r[h] === "number")) s.add(h); });
     return s;
   }, [rows, headers]);
 
   const visHeaders = colFilter
     ? headers.filter(h => h.toLowerCase().includes(colFilter.toLowerCase()))
     : headers;
-  const totalPages = Math.ceil(rows.length / PAGE_SIZE);
-  const pageRows   = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  // Stats computed from preview rows (approximate for large DuckDB datasets)
   const stats      = selCol ? colStats(selCol, rows) : null;
   const fmt = v => {
     if (v === null || v === undefined) return <span style={{color:C.textMuted,fontStyle:"italic"}}>NA</span>;
@@ -372,10 +402,10 @@ function DataViewer({ rows, headers, filename, onPatch }) {
       {/* Toolbar */}
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"0.5rem 0.9rem",borderBottom:`1px solid ${C.border}`,flexShrink:0,background:C.surface2}}>
         <span style={{fontSize:10,color:C.text,fontFamily:mono}}>{filename}</span>
-        <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{rows.length.toLocaleString()} × {headers.length}</span>
+        <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{totalCount.toLocaleString()} × {headers.length}</span>
         {onPatch && (
           <button
-            onClick={() => { setEditMode(m => !m); setEditingCell(null); }}
+            onClick={() => { setEditMode(m => { if (m) { setEditingCell(null); setFillText(""); } return !m; }); }}
             title={editMode ? "Exit cell editing mode" : "Enable cell editing (double-click to edit cells)"}
             style={{
               padding:"2px 8px", borderRadius:3, fontFamily:mono, fontSize:9,
@@ -410,6 +440,53 @@ function DataViewer({ rows, headers, filename, onPatch }) {
           </div>
         )}
       </div>
+
+      {/* Fill Column panel — shown only in edit mode */}
+      {editMode && onFillColumn && (
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"0.4rem 0.9rem",
+                     borderBottom:`1px solid ${C.border}`,flexShrink:0,background:`${C.teal}0d`,flexWrap:"wrap"}}>
+          <span style={{fontSize:9,color:C.teal,fontFamily:mono,whiteSpace:"nowrap"}}>Fill column:</span>
+          <select
+            value={fillCol || headers[0] || ""}
+            onChange={e => setFillCol(e.target.value)}
+            style={{padding:"2px 6px",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,
+                    color:C.text,fontFamily:mono,fontSize:9,maxWidth:160}}>
+            {headers.filter(h => !h.startsWith("__")).map(h => (
+              <option key={h} value={h}>{h}</option>
+            ))}
+          </select>
+          {/* Op chips */}
+          {[["set","Set"],["append","Append"],["prepend","Prepend"]].map(([op, label]) => (
+            <button key={op} onClick={() => setFillOp(op)}
+              style={{padding:"2px 7px",borderRadius:3,fontFamily:mono,fontSize:9,cursor:"pointer",
+                      background: fillOp === op ? `${C.teal}33` : "transparent",
+                      border:`1px solid ${fillOp === op ? C.teal : C.border2}`,
+                      color: fillOp === op ? C.teal : C.textMuted,transition:"all 0.1s"}}>
+              {label}
+            </button>
+          ))}
+          <input
+            value={fillText}
+            onChange={e => setFillText(e.target.value)}
+            placeholder="value to fill…"
+            style={{flex:1,minWidth:160,padding:"3px 8px",background:C.surface,
+                    border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,
+                    fontFamily:mono,fontSize:10,outline:"none"}}
+          />
+          <button
+            disabled={!fillText && fillOp === "set"}
+            onClick={() => {
+              const col = fillCol || headers.find(h => !h.startsWith("__")) || "";
+              if (!col) return;
+              onFillColumn(col, fillOp, fillText);
+            }}
+            style={{padding:"3px 10px",borderRadius:3,fontFamily:mono,fontSize:9,cursor:"pointer",
+                    background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,
+                    opacity:(!fillText && fillOp==="set") ? 0.4 : 1}}>
+            Apply to all
+          </button>
+        </div>
+      )}
 
       <div style={{display:"flex",flex:1,minHeight:0}}>
         {/* Grid */}
@@ -1032,6 +1109,8 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
           headers={viewHeaders}
           filename={viewFile}
           onPatch={(ri, col, value) => studioRef.current?.addPatchStep?.(ri, col, value)}
+          onFillColumn={(col, op, text) => studioRef.current?.addFillColumnStep?.(col, op, text)}
+          duckdbMeta={cleanedData?._duckdb ?? rawData?._duckdb ?? null}
         />
       )}
       {view === "grid" && viewRows.length === 0 && (

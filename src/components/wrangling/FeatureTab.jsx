@@ -1,6 +1,9 @@
 // ─── ECON STUDIO · components/wrangling/FeatureTab.jsx ─────────────────────
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useTheme, mono, Lbl, Tabs, Btn } from "./shared.jsx";
+import { computeColStats } from "../../services/data/duckdb.js";
+const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
+const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import FormatTab from "./FormatTab.jsx";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
@@ -62,8 +65,8 @@ function MutateSubTab({rows, headers, info, onAdd}){
       all:  a=>Array.isArray(a)?((a.length>0&&a.every(truthy))?1:0):typeof a==="string"?((filtRows.length>0&&filtRows.every(r=>truthy(r[a])))?1:0):(a?1:0),
       sum:  a=>{const n=arr2n(a);return n.reduce((s,v)=>s+v,0);},
       mean: a=>{const n=arr2n(a);return n.length?n.reduce((s,v)=>s+v,0)/n.length:null;},
-      min:  a=>{const n=arr2n(a);return n.length?Math.min(...n):null;},
-      max:  a=>{const n=arr2n(a);return n.length?Math.max(...n):null;},
+      min:  a=>{const n=arr2n(a);return n.length?arrMin(n):null;},
+      max:  a=>{const n=arr2n(a);return n.length?arrMax(n):null;},
       count:()=>filtRows.length,
       first:a=>Array.isArray(a)?(a[0]??null):(filtRows[0]?.[a]??null),
       last: a=>{if(Array.isArray(a))return a[a.length-1]??null;return filtRows[filtRows.length-1]?.[a]??null;},
@@ -431,7 +434,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
 
 
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
-function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
+function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   const { C } = useTheme();
   const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
   const [qt,setQt]=useState("log"),[qc,setQc]=useState(""),[xc2,setXc2]=useState("");
@@ -509,16 +512,23 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd}){
 
   function resetQuick(){setNm("");setQc("");setXc2("");prevAutoRef.current="";}
 
-  const doQ=()=>{
+  const doQ=async()=>{
     if(!qc) return;
 
     const n=nm.trim();if(!n)return;
     if(qt==="log") onAdd({type:"log",col:qc,nn:n,desc:`ln(${qc}) → ${n}`});
     else if(qt==="sq") onAdd({type:"sq",col:qc,nn:n,desc:`${qc}² → ${n}`});
     else if(qt==="std"){
-      const vals=rows.map(r=>r[qc]).filter(v=>typeof v==="number"&&isFinite(v));
-      const mu=vals.reduce((a,b)=>a+b,0)/vals.length;
-      const sd=Math.sqrt(vals.reduce((s,v)=>s+(v-mu)**2,0)/vals.length);
+      let mu, sd;
+      if (duckdbTableName) {
+        const stats = await computeColStats(duckdbTableName, qc).catch(() => null);
+        if (stats) { mu = stats.mean; sd = stats.sd; }
+      }
+      if (mu == null) {
+        const vals=rows.map(r=>r[qc]).filter(v=>typeof v==="number"&&isFinite(v));
+        mu=vals.reduce((a,b)=>a+b,0)/vals.length;
+        sd=Math.sqrt(vals.reduce((s,v)=>s+(v-mu)**2,0)/vals.length);
+      }
       onAdd({type:"std",col:qc,nn:n,mu,sd,desc:`z(${qc}) → ${n}`});
     } else if(qt==="ix"&&xc2) onAdd({type:"ix",c1:qc,c2:xc2,nn:n,desc:`${qc}×${xc2} → ${n}`});
     resetQuick();

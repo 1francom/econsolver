@@ -20,6 +20,10 @@ import { useState, useRef } from "react";
 import { useTheme, mono } from "./shared.jsx";
 import PlotExportBar from "../shared/PlotExportBar.jsx";
 
+// Safe min/max for large arrays — Math.min(...bigArray) blows the call stack
+const arrMin = (a, fallback = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fallback;
+const arrMax = (a, fallback = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fallback;
+
 // ─── PLOT SELECTOR ────────────────────────────────────────────────────────────
 // Tabbed shell that renders one plot at a time.
 // plots: [{ id, label, node }]  — node is a pre-built React element
@@ -90,7 +94,7 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
   const sd   = (() => { const m = resid.reduce((s,v)=>s+v,0)/n; return Math.sqrt(resid.reduce((s,v)=>s+(v-m)**2,0)/Math.max(1,n-1)); })();
 
   const allV = [...pts.map(p=>p.y), ...pts.map(p=>p.yh)];
-  const vMin = Math.min(...allV), vMax = Math.max(...allV);
+  const vMin = arrMin(allV), vMax = arrMax(allV);
   const vPad = (vMax - vMin) * 0.06 || 1;
   const vLo = vMin - vPad, vHi = vMax + vPad;
 
@@ -227,8 +231,8 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
   const iH = H - PAD.t - PAD.b;
 
   const xVals = pts.map(p=>p.x), yVals = pts.map(p=>p.y);
-  const xMin = Math.min(...xVals), xMax = Math.max(...xVals);
-  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const xMin = arrMin(xVals), xMax = arrMax(xVals);
+  const yMin = arrMin(yVals), yMax = arrMax(yVals);
   const xPad = (xMax-xMin)*0.05||1, yPad = (yMax-yMin)*0.08||1;
   const xLo=xMin-xPad, xHi=xMax+xPad, yLo=yMin-yPad, yHi=yMax+yPad;
 
@@ -569,8 +573,8 @@ export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
 
   const allX = allBins.map(b => b.x);
   const allY = allBins.map(b => b.y);
-  const xMin = Math.min(...allX), xMax = Math.max(...allX);
-  const yMin = Math.min(...allY), yMax = Math.max(...allY);
+  const xMin = arrMin(allX), xMax = arrMax(allX);
+  const yMin = arrMin(allY), yMax = arrMax(allY);
   const xPad = (xMax - xMin) * 0.04 || 0.5;
   const yPad = (yMax - yMin) * 0.08 || 0.5;
   const xLo = xMin - xPad, xHi = xMax + xPad;
@@ -710,8 +714,8 @@ export function DiDPlot({ result, yLabel = "Y" }) {
   const iH = H - PAD.t - PAD.b;
 
   const allY  = [ctrl_pre, ctrl_post, trt_pre, trt_post];
-  const yMin  = Math.min(...allY);
-  const yMax  = Math.max(...allY);
+  const yMin  = arrMin(allY);
+  const yMax  = arrMax(allY);
   const yPad  = (yMax - yMin) * 0.2 || 1;
   const yLo   = yMin - yPad;
   const yHi   = yMax + yPad;
@@ -887,15 +891,15 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
   const iH = H - PAD.t - PAD.b;
 
   const times = pts.map(e => e.t);
-  const tMin  = Math.min(...times);
-  const tMax  = Math.max(...times);
+  const tMin  = arrMin(times);
+  const tMax  = arrMax(times);
 
   const allY = [
     ...pts.flatMap(e => [e.ctrl, e.trt].filter(v => v != null)),
     ...cfPts.map(p => p.cf),
   ].filter(isFinite);
-  const yMin  = Math.min(...allY);
-  const yMax  = Math.max(...allY);
+  const yMin  = arrMin(allY);
+  const yMax  = arrMax(allY);
   const yPad  = (yMax - yMin) * 0.15 || 1;
   const yLo   = yMin - yPad;
   const yHi   = yMax + yPad;
@@ -1076,8 +1080,8 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
 
       const xs = pts.map(p => p.x);
       const ys = pts.map(p => p.y);
-      const xMin = Math.min(...xs), xMax = Math.max(...xs);
-      const yMin = Math.min(...ys), yMax = Math.max(...ys);
+      const xMin = arrMin(xs), xMax = arrMax(xs);
+      const yMin = arrMin(ys), yMax = arrMax(ys);
       const xPad = (xMax - xMin) * 0.05 || 1;
       const yPad = (yMax - yMin) * 0.08 || 1;
 
@@ -1274,8 +1278,8 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
 
   const hVals    = results.map(r => r.h);
   const allY     = results.flatMap(r => [r.lo, r.hi]).filter(isFinite);
-  const hMin = Math.min(...hVals), hMax = Math.max(...hVals);
-  const yMin = Math.min(...allY),  yMax = Math.max(...allY);
+  const hMin = arrMin(hVals), hMax = arrMax(hVals);
+  const yMin = arrMin(allY),  yMax = arrMax(allY);
   const yPad = (yMax - yMin) * 0.1 || 0.1;
   const yLo  = yMin - yPad, yHi = yMax + yPad;
 
@@ -1444,7 +1448,7 @@ export function RDDCovariateBalance({ result, controls, rows }) {
 
   // scale: centered on 0, symmetric
   const allVals = stats.flatMap(s => [s.lMean - 1.96 * s.lSE, s.lMean + 1.96 * s.lSE, s.rMean - 1.96 * s.rSE, s.rMean + 1.96 * s.rSE]);
-  const vMin = Math.min(...allVals), vMax = Math.max(...allVals);
+  const vMin = arrMin(allVals), vMax = arrMax(allVals);
   const vPad = (vMax - vMin) * 0.05 || 1;
   const vLo = vMin - vPad, vHi = vMax + vPad;
 
@@ -1587,8 +1591,8 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
   const allY = bins.map(b => b.density);
   const fitY = [...leftFit.map(p => p.yhat), ...rightFit.map(p => p.yhat)];
 
-  const xMin = Math.min(...allX), xMax = Math.max(...allX);
-  const yMax = Math.max(...allY, ...fitY) * 1.15;
+  const xMin = arrMin(allX), xMax = arrMax(allX);
+  const yMax = Math.max(arrMax(allY), arrMax(fitY)) * 1.15;
   const xPad = (xMax - xMin) * 0.02;
   const xLo = xMin - xPad, xHi = xMax + xPad;
   const yLo = 0, yHi = yMax || 1;
@@ -1764,8 +1768,8 @@ export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂"
   const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
 
   const xVals = pts.map(p => p.x), yVals = pts.map(p => p.y);
-  const xMin = Math.min(...xVals), xMax = Math.max(...xVals);
-  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const xMin = arrMin(xVals), xMax = arrMax(xVals);
+  const yMin = arrMin(yVals), yMax = arrMax(yVals);
   const xPad = (xMax - xMin) * 0.05 || 1, yPad = (yMax - yMin) * 0.08 || 1;
   const xLo = xMin - xPad, xHi = xMax + xPad, yLo = yMin - yPad, yHi = yMax + yPad;
   const sx = v => PAD.l + ((v - xLo) / (xHi - xLo)) * iW;
@@ -1821,7 +1825,7 @@ export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" 
   const PAD = { l: 56, r: 24, t: 28, b: 48 };
   const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
   const allV = [...pts.map(p=>p.x),...pts.map(p=>p.xh)];
-  const vMin = Math.min(...allV), vMax = Math.max(...allV);
+  const vMin = arrMin(allV), vMax = arrMax(allV);
   const vPad = (vMax-vMin)*0.05||1, vLo = vMin-vPad, vHi = vMax+vPad;
   const sx = v => PAD.l + ((v-vLo)/(vHi-vLo))*iW;
   const sy = v => PAD.t + iH - ((v-vLo)/(vHi-vLo))*iH;
@@ -1867,7 +1871,7 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
   const PAD = { l: 58, r: 24, t: 28, b: 48 };
   const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
   const xVals = pts.map(p=>p.x), yVals = pts.map(p=>p.y);
-  const xMin=Math.min(...xVals),xMax=Math.max(...xVals),yMin=Math.min(...yVals),yMax=Math.max(...yVals);
+  const xMin=arrMin(xVals),xMax=arrMax(xVals),yMin=arrMin(yVals),yMax=arrMax(yVals);
   const xPad=(xMax-xMin)*0.05||1,yPad=(yMax-yMin)*0.08||1;
   const xLo=xMin-xPad,xHi=xMax+xPad,yLo=yMin-yPad,yHi=yMax+yPad;
   const sx = v => PAD.l+((v-xLo)/(xHi-xLo))*iW;
@@ -2015,7 +2019,7 @@ export function PredProbHistogram({ fitted, Y }) {
     const bin = Math.min(nBins - 1, Math.floor(p * nBins));
     if (Y[i] === 0) bins0[bin]++; else bins1[bin]++;
   });
-  const maxCount = Math.max(...bins0, ...bins1, 1);
+  const maxCount = Math.max(arrMax(bins0), arrMax(bins1), 1);
 
   const W = 460, H = 280;
   const PAD = { l: 48, r: 20, t: 24, b: 50 };
@@ -2096,8 +2100,8 @@ export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
   const ciHigh = e => (e.isRef ? 0 : (e.beta ?? 0) + 1.96 * (e.se ?? 0));
 
   const allVals = sorted.flatMap(e => [ciLow(e), ciHigh(e), 0]);
-  const yMin = Math.min(...allVals.filter(isFinite));
-  const yMax = Math.max(...allVals.filter(isFinite));
+  const yMin = arrMin(allVals.filter(isFinite));
+  const yMax = arrMax(allVals.filter(isFinite));
   const yPad = Math.max((yMax - yMin) * 0.15, 0.01);
 
   const W = 560, H = 280;
@@ -2152,10 +2156,15 @@ export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
   );
 }
 
-// ─── SYNTHETIC CONTROL GAP PLOT ───────────────────────────────────────────────
+// ─── SYNTHETIC CONTROL PLOTS ──────────────────────────────────────────────────
+// SyntheticGapPlot   — observed vs synthetic trends (plot_trends equivalent)
+// SyntheticDiffPlot  — gap = Y1 − synthetic over time (plot_differences)
+// SyntheticPlaceboPlot — placebo gaps + treated gap (plot_placebos)
+// SyntheticMSPEPlot  — post/pre RMSPE ratio bar chart (plot_mspe_ratio)
+
 // preFit:  [{ t, actual, synthetic }]
 // postGap: [{ t, actual, synthetic, gap }]
-export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel = "Y" }) {
+export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel = "Y", treatedUnit = "Treated unit" }) {
   const { C } = useTheme();
   const allPoints = [
     ...preFit.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
@@ -2166,8 +2175,8 @@ export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel 
 
   const times    = allPoints.map(d => d.t);
   const allY     = allPoints.flatMap(d => [d.actual, d.synthetic]).filter(isFinite);
-  const tMin     = Math.min(...times), tMax = Math.max(...times);
-  const yMin     = Math.min(...allY),  yMax = Math.max(...allY);
+  const tMin     = arrMin(times), tMax = arrMax(times);
+  const yMin     = arrMin(allY),  yMax = arrMax(allY);
   const yPad     = (yMax - yMin) * 0.12 || 0.01;
 
   const W = 560, H = 280;
@@ -2202,10 +2211,173 @@ export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel 
       <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
             transform={`rotate(-90, ${PAD.l - 8}, ${PAD.t + ph / 2})`}>{yLabel}</text>
       {/* Legend */}
-      <line x1={W - 130} x2={W - 110} y1={PAD.t + 10} y2={PAD.t + 10} stroke={C.gold} strokeWidth={2} />
-      <text x={W - 106} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Treated unit</text>
-      <line x1={W - 130} x2={W - 110} y1={PAD.t + 24} y2={PAD.t + 24} stroke={C.teal} strokeWidth={1.5} strokeDasharray="5 4" />
-      <text x={W - 106} y={PAD.t + 28} fill={C.textDim} fontSize={9}>Synthetic</text>
+      <line x1={W - 150} x2={W - 130} y1={PAD.t + 10} y2={PAD.t + 10} stroke={C.gold} strokeWidth={2} />
+      <text x={W - 126} y={PAD.t + 14} fill={C.textDim} fontSize={9}>{treatedUnit}</text>
+      <line x1={W - 150} x2={W - 130} y1={PAD.t + 24} y2={PAD.t + 24} stroke={C.teal} strokeWidth={1.5} strokeDasharray="5 4" />
+      <text x={W - 126} y={PAD.t + 28} fill={C.textDim} fontSize={9}>Synthetic {treatedUnit}</text>
+    </svg>
+  );
+}
+
+// Gap = treated − synthetic over full time span (plot_differences)
+export function SyntheticDiffPlot({ preFit = [], postGap = [], treatTime, yLabel = "Y" }) {
+  const { C } = useTheme();
+  const allRows = [
+    ...preFit.map(d  => ({ t: d.t,  gap: d.actual - d.synthetic })),
+    ...postGap.map(d => ({ t: d.t,  gap: d.gap ?? (d.actual - d.synthetic) })),
+  ].sort((a, b) => a.t - b.t);
+
+  if (!allRows.length) return null;
+
+  const times = allRows.map(d => d.t);
+  const gaps  = allRows.map(d => d.gap).filter(isFinite);
+  const tMin  = arrMin(times), tMax = arrMax(times);
+  const gMin  = Math.min(0, ...gaps), gMax = Math.max(0, ...gaps);
+  const pad   = (Math.abs(gMax - gMin) * 0.12) || 0.01;
+
+  const W = 560, H = 260;
+  const PAD = { t: 20, b: 40, l: 58, r: 20 };
+  const pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+
+  const xS = t => PAD.l + ((t - tMin) / Math.max(tMax - tMin, 1)) * pw;
+  const yS = v => PAD.t + ph - ((v - (gMin - pad)) / (gMax - gMin + 2 * pad)) * ph;
+  const y0  = yS(0);
+
+  const linePath = allRows.map((d, i) => `${i === 0 ? "M" : "L"}${xS(d.t)},${yS(d.gap)}`).join(" ");
+  const fillPath = `${linePath} L${xS(tMax)},${y0} L${xS(tMin)},${y0} Z`;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+      <rect width={W} height={H} fill={C.bg} />
+      <line x1={PAD.l} x2={W - PAD.r} y1={y0} y2={y0} stroke={C.textMuted} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />
+      {treatTime != null && (
+        <line x1={xS(treatTime)} x2={xS(treatTime)} y1={PAD.t} y2={H - PAD.b}
+              stroke={C.gold} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.8} />
+      )}
+      <path d={fillPath} fill={C.gold} opacity={0.18} />
+      <path d={linePath} stroke={C.gold} strokeWidth={2} fill="none" />
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Time</text>
+      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+            transform={`rotate(-90, ${PAD.l - 8}, ${PAD.t + ph / 2})`}>Treated − Synthetic</text>
+      <text x={W - 20} y={PAD.t + 14} textAnchor="end" fill={C.textDim} fontSize={8}>Gap ({yLabel})</text>
+    </svg>
+  );
+}
+
+// Placebo gaps (grey) + treated gap (gold) — Abadie filter applied (plot_placebos)
+export function SyntheticPlaceboPlot({ preFit = [], postGap = [], placebos = [], treatTime, rmspePre = 0 }) {
+  const { C } = useTheme();
+
+  // Treated gap series
+  const treatedRows = [
+    ...preFit.map(d  => ({ t: d.t, gap: d.actual - d.synthetic })),
+    ...postGap.map(d => ({ t: d.t, gap: d.gap ?? (d.actual - d.synthetic) })),
+  ].sort((a, b) => a.t - b.t);
+
+  // Abadie filter: keep placebos with pre-RMSPE ≤ 2× treated
+  const filtered = placebos.filter(p => !rmspePre || p.rmspe_pre <= 2 * rmspePre);
+
+  const times   = treatedRows.map(d => d.t);
+  const tMin    = arrMin(times), tMax = arrMax(times);
+  const allGaps = [
+    ...treatedRows.map(d => d.gap),
+    ...filtered.flatMap(p => [...(p.preFit || []), ...(p.postGap || [])].map(d => d.gap ?? (d.actual - d.synthetic))),
+  ].filter(isFinite);
+  const gMin  = Math.min(0, ...allGaps), gMax = Math.max(0, ...allGaps);
+  const padY  = (Math.abs(gMax - gMin) * 0.12) || 0.01;
+
+  const W = 560, H = 280;
+  const PAD = { t: 20, b: 40, l: 58, r: 20 };
+  const pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+
+  const xS = t => PAD.l + ((t - tMin) / Math.max(tMax - tMin, 1)) * pw;
+  const yS = v => PAD.t + ph - ((v - (gMin - padY)) / (gMax - gMin + 2 * padY)) * ph;
+  const y0  = yS(0);
+
+  const makePath = rows =>
+    rows.sort((a, b) => a.t - b.t)
+        .map((d, i) => `${i === 0 ? "M" : "L"}${xS(d.t)},${yS(d.gap ?? (d.actual - d.synthetic))}`).join(" ");
+
+  const treatedPath = makePath([...treatedRows]);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+      <rect width={W} height={H} fill={C.bg} />
+      <line x1={PAD.l} x2={W - PAD.r} y1={y0} y2={y0} stroke={C.textMuted} strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
+      {filtered.map((p, i) => {
+        const rows = [...(p.preFit || []), ...(p.postGap || [])];
+        return <path key={i} d={makePath(rows)} stroke={C.textMuted} strokeWidth={1} fill="none" opacity={0.35} />;
+      })}
+      {treatTime != null && (
+        <line x1={xS(treatTime)} x2={xS(treatTime)} y1={PAD.t} y2={H - PAD.b}
+              stroke={C.gold} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.8} />
+      )}
+      <path d={treatedPath} stroke={C.gold} strokeWidth={2.5} fill="none" />
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Time</text>
+      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+            transform={`rotate(-90, ${PAD.l - 8}, ${PAD.t + ph / 2})`}>Gap</text>
+      <line x1={W - 130} x2={W - 110} y1={PAD.t + 10} y2={PAD.t + 10} stroke={C.gold} strokeWidth={2.5} />
+      <text x={W - 106} y={PAD.t + 14} fill={C.textDim} fontSize={8}>Treated</text>
+      <line x1={W - 130} x2={W - 110} y1={PAD.t + 24} y2={PAD.t + 24} stroke={C.textMuted} strokeWidth={1} opacity={0.6} />
+      <text x={W - 106} y={PAD.t + 28} fill={C.textDim} fontSize={8}>Placebos (n={filtered.length})</text>
+    </svg>
+  );
+}
+
+// Post/pre RMSPE ratio bar chart, ranked descending (plot_mspe_ratio)
+export function SyntheticMSPEPlot({ preFit = [], postGap = [], placebos = [], treatTime, treatedUnit = "Treated" }) {
+  const { C } = useTheme();
+
+  const rmspe = (rows) => {
+    const gaps = rows.map(d => d.gap ?? (d.actual - d.synthetic)).filter(isFinite);
+    if (!gaps.length) return 0;
+    return Math.sqrt(gaps.reduce((s, g) => s + g * g, 0) / gaps.length);
+  };
+
+  const preRows  = preFit.map(d  => ({ ...d, gap: d.actual - d.synthetic }));
+  const postRows = postGap.map(d => ({ ...d, gap: d.gap ?? (d.actual - d.synthetic) }));
+  const treatedRatio = rmspe(postRows) / Math.max(rmspe(preRows), 1e-10);
+
+  const bars = [
+    { label: treatedUnit, ratio: treatedRatio, treated: true },
+    ...placebos.map(p => ({
+      label: p.unit ?? p.donor ?? "donor",
+      ratio: rmspe(p.postGap || []) / Math.max(p.rmspe_pre || rmspe(p.preFit || []), 1e-10),
+      treated: false,
+    })),
+  ].sort((a, b) => b.ratio - a.ratio);
+
+  if (!bars.length) return null;
+
+  const maxRatio = Math.max(arrMax(bars.map(b => b.ratio)), 1);
+  const W = 560, barH = 18, gap = 4;
+  const H = bars.length * (barH + gap) + 50;
+  const PAD = { t: 20, b: 26, l: 80, r: 20 };
+  const pw = W - PAD.l - PAD.r;
+
+  const xS = v => PAD.l + (v / maxRatio) * pw;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+      <rect width={W} height={H} fill={C.bg} />
+      {bars.map((b, i) => {
+        const y = PAD.t + i * (barH + gap);
+        return (
+          <g key={i}>
+            <text x={PAD.l - 6} y={y + barH / 2 + 4} textAnchor="end"
+                  fill={b.treated ? C.gold : C.textMuted} fontSize={8}
+                  fontWeight={b.treated ? 600 : 400}>
+              {String(b.label).length > 10 ? String(b.label).slice(0, 10) + "…" : b.label}
+            </text>
+            <rect x={PAD.l} y={y} width={Math.max(xS(b.ratio) - PAD.l, 2)} height={barH}
+                  fill={b.treated ? C.gold : C.textMuted} opacity={b.treated ? 0.85 : 0.3} rx={2} />
+            <text x={xS(b.ratio) + 4} y={y + barH / 2 + 4} fill={b.treated ? C.gold : C.textDim} fontSize={8}>
+              {b.ratio.toFixed(2)}
+            </text>
+          </g>
+        );
+      })}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Post/Pre RMSPE Ratio</text>
     </svg>
   );
 }

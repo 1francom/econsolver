@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useTheme, mono, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { detectNumberLocale, parseSmartNumber } from "../../pipeline/runner.js";
+import { computeColStats } from "../../services/data/duckdb.js";
 
 // ─── STANDARDIZE DIALOG (inline) ─────────────────────────────────────────────
 // NormalizePanel was removed; ColCard recode action covers that use case.
@@ -991,26 +992,47 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
 // ─── WINSORIZE SECTION ────────────────────────────────────────────────────────
 // Collapsible panel in CleanTab. Clamps extreme values to [p1, p99] bounds.
 // Moved from Features — conceptually data cleaning, not feature engineering.
-function WinsorizeSection({ headers, info, rows, onAdd }) {
+function WinsorizeSection({ headers, info, rows, onAdd, duckdbTableName }) {
   const { C } = useTheme();
-  const [open,    setOpen]    = useState(false);
-  const [col,     setCol]     = useState("");
-  const [mode,    setMode]    = useState("inplace"); // "inplace" | "newcol"
-  const [newName, setNewName] = useState("");
+  const [open,       setOpen]    = useState(false);
+  const [col,        setCol]     = useState("");
+  const [mode,       setMode]    = useState("inplace"); // "inplace" | "newcol"
+  const [newName,    setNewName] = useState("");
+  const [wLo,        setWLo]     = useState(null);
+  const [wHi,        setWHi]     = useState(null);
+  const [nClipped,   setNClipped] = useState(0);
+  const [statsLoading, setStatsLoading] = useState(false);
 
   const numCols = headers.filter(h => info[h]?.isNum);
-  const colInfo = col ? info[col] : null;
-
-  const wVals = col
-    ? rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v)).sort((a,b)=>a-b)
-    : [];
-  const wLo = wVals[Math.floor(wVals.length * 0.01)] ?? wVals[0];
-  const wHi = wVals[Math.floor(wVals.length * 0.99)] ?? wVals[wVals.length - 1];
-  const nClipped = wVals.filter(v => v < wLo || v > wHi).length;
   const targetCol = mode === "inplace" ? col : (newName.trim() || `winsor_${col}`);
 
+  // Compute p1/p99 — exact via DuckDB SQL if available, otherwise from preview rows
+  useEffect(() => {
+    if (!col) { setWLo(null); setWHi(null); setNClipped(0); return; }
+
+    if (duckdbTableName) {
+      setStatsLoading(true);
+      computeColStats(duckdbTableName, col)
+        .then(({ p1, p99 }) => {
+          setWLo(p1); setWHi(p99); setNClipped(null); setStatsLoading(false);
+        })
+        .catch(() => fromRows());
+    } else {
+      fromRows();
+    }
+
+    function fromRows() {
+      const vals = rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v)).sort((a,b)=>a-b);
+      const lo = vals[Math.floor(vals.length * 0.01)] ?? vals[0] ?? null;
+      const hi = vals[Math.floor(vals.length * 0.99)] ?? vals[vals.length - 1] ?? null;
+      setWLo(lo); setWHi(hi);
+      setNClipped(lo != null && hi != null ? vals.filter(v => v < lo || v > hi).length : 0);
+      setStatsLoading(false);
+    }
+  }, [col, duckdbTableName]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function apply() {
-    if (!col) return;
+    if (!col || wLo == null || wHi == null) return;
     onAdd({ type:"winz", col, nn:targetCol, lo:wLo, hi:wHi,
       desc:`Winsorize '${col}' [p1,p99] → '${targetCol}'${mode==="inplace"?" (in-place)":""}` });
     setCol(""); setNewName("");
@@ -1091,13 +1113,13 @@ function WinsorizeSection({ headers, info, rows, onAdd }) {
                 lineHeight:1.8 }}>
                 <div>Clip <span style={{color:C.gold}}>{col}</span> to [p1={wLo?.toFixed(3)}, p99={wHi?.toFixed(3)}]</div>
                 <div style={{color:C.textMuted}}>
-                  {nClipped} value{nClipped!==1?"s":""} will be clamped
-                  {" · "}range [{wVals[0]?.toFixed(2)}, {wVals[wVals.length-1]?.toFixed(2)}]
+                  {statsLoading ? "computing…" : nClipped != null ? `${nClipped} value${nClipped!==1?"s":""} will be clamped` : "bounds computed from full dataset"}
                 </div>
                 <div style={{color:C.textMuted}}>→ output: <span style={{color:C.orange}}>{targetCol}</span></div>
               </div>
               <Btn onClick={apply} color={C.orange} v="solid"
-                dis={!col} ch={mode==="inplace"?"Winsorize in-place →":"Winsorize → new col →"}/>
+                dis={!col || wLo == null || statsLoading}
+                ch={statsLoading ? "computing bounds…" : mode==="inplace"?"Winsorize in-place →":"Winsorize → new col →"}/>
             </>
           )}
         </div>
@@ -1565,12 +1587,20 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
     setSug(p=>p.filter(x=>!(x.col===normTarget.col&&x.type==="variant")));
     setNormTarget(null);
   }
-  function applyAudit(s){
+  async function applyAudit(s){
     if(s.act==="drop")onAdd({type:"drop",col:s.col,desc:`Drop '${s.col}'`});
     else if(s.act==="filter_na")onAdd({type:"filter",predicate:{type:"condition",col:s.col,op:"notna"},desc:`Remove NAs in '${s.col}'`});
     else if(s.act==="winz"){
-      const vals=rows.map(r=>r[s.col]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
-      const lo=vals[Math.floor(vals.length*.01)]??vals[0],hi=vals[Math.floor(vals.length*.99)]??vals[vals.length-1];
+      let lo, hi;
+      if (rawData?._duckdb?.tableName) {
+        const stats = await computeColStats(rawData._duckdb.tableName, s.col).catch(() => null);
+        if (stats) { lo = stats.p1; hi = stats.p99; }
+      }
+      if (lo == null) {
+        const vals=rows.map(r=>r[s.col]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
+        lo=vals[Math.floor(vals.length*.01)]??vals[0];
+        hi=vals[Math.floor(vals.length*.99)]??vals[vals.length-1];
+      }
       onAdd({type:"winz",col:s.col,nn:s.col,lo,hi,desc:`Winsorize '${s.col}' [p1,p99] in-place`});
     }
     else if(s.act==="ai_std"&&s.aip)onAdd({type:"ai_tr",col:s.col,js:s.aip.js,desc:`AI standardize '${s.col}': ${s.aip.description}`});
@@ -1693,7 +1723,8 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
         </div>
       )}
       {/* ── Fill Missing Values ── */}
-      <WinsorizeSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
+      <WinsorizeSection headers={headers} rows={rows} info={info} onAdd={onAdd}
+        duckdbTableName={rawData?._duckdb?.tableName}/>
       <FillNaSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
 
       <Lbl>Preview — pipeline output</Lbl>

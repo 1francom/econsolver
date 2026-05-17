@@ -38,7 +38,7 @@ export const MODELS = [
   { id: "GMM",             label: "Two-Step GMM",       group: "IV/GMM",            desc: "Efficient GMM — HC-robust Ω̂ + J-test",         color: "#c8a96e" },
   { id: "LIML",            label: "LIML",               group: "IV/GMM",            desc: "Limited Info. Max. Likelihood / k-class",       color: "#c8a96e" },
   // Synthetic
-  { id: "SyntheticControl",label: "Synthetic Control",  group: "Synthetic",         desc: "Synthetic control method (planned)",            color: "#6e9ec8" },
+  { id: "SyntheticControl",label: "Synthetic Control",  group: "Synthetic",         desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)", color: "#6e9ec8" },
 ];
 
 // ordered group list (controls render order)

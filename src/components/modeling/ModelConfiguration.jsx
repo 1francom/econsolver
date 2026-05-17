@@ -273,7 +273,7 @@ function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit
     <>
       <Section title="Treated Unit" color={C.gold}>
         <select value={treatedUnit} onChange={e => setTreatedUnit(e.target.value)}
-          style={{ ...INPUT_STYLE, cursor: "pointer" }}>
+          style={{ ...inputStyle(C), cursor: "pointer" }}>
           <option value="">— select treated unit —</option>
           {uniqueUnits.map(u => <option key={u} value={u}>{u}</option>)}
         </select>

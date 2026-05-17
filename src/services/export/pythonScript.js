@@ -242,7 +242,7 @@ function transpileStep(step) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [] }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
   const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
@@ -402,6 +402,51 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "SyntheticControl": {
+      const ec = entityCol ?? "unit";
+      const tc = timeCol   ?? "time";
+      const tu = treatedUnit ?? "TreatedUnit";
+      const tt = treatTime != null ? Number(treatTime) : "TREAT_TIME";
+      const predsStr = (xVars ?? []).length
+        ? `[${(xVars ?? []).map(v => `"${v}"`).join(", ")}]`
+        : "[]  # no explicit predictors — outcome mean used";
+      lines.push(`# ── Synthetic Control (pysynth / scipy fallback) ─────────────────────`);
+      lines.push(`# Install: pip install pysynth  (or use scipy.optimize directly)`);
+      lines.push(`# pysynth wraps the Frank-Wolfe algorithm used by the Synth R package`);
+      lines.push(`try:`);
+      lines.push(`    from pysynth import Synth`);
+      lines.push(`    sc = Synth()`);
+      lines.push(`    sc.fit(`);
+      lines.push(`        df,`);
+      lines.push(`        outcome_var="${yVar}",`);
+      lines.push(`        id_var="${ec}",`);
+      lines.push(`        time_var="${tc}",`);
+      lines.push(`        treatment_identifier="${tu}",`);
+      lines.push(`        treatment_time=${tt},`);
+      lines.push(`        predictors=${predsStr},`);
+      lines.push(`    )`);
+      lines.push(`    sc.plot()          # path plot`);
+      lines.push(`    sc.gaps_plot()     # gap plot`);
+      lines.push(`    print(sc.weights)  # donor weights`);
+      lines.push(`except ImportError:`);
+      lines.push(`    # ── Manual Frank-Wolfe via scipy ─────────────────────────────────`);
+      lines.push(`    import numpy as np`);
+      lines.push(`    from scipy.optimize import minimize`);
+      lines.push(`    pre = df[df["${tc}"] < ${tt}]`);
+      lines.push(`    donors = df["${ec}"].unique().tolist()`);
+      lines.push(`    donors = [d for d in donors if d != "${tu}"]`);
+      lines.push(`    Y_treated = pre[pre["${ec}"] == "${tu}"]["${yVar}"].values`);
+      lines.push(`    Y_donors  = np.column_stack([pre[pre["${ec}"] == d]["${yVar}"].values for d in donors])`);
+      lines.push(`    def loss(w): return np.sum((Y_treated - Y_donors @ w) ** 2)`);
+      lines.push(`    w0     = np.ones(len(donors)) / len(donors)`);
+      lines.push(`    cons   = {"type": "eq", "fun": lambda w: np.sum(w) - 1}`);
+      lines.push(`    bounds = [(0, 1)] * len(donors)`);
+      lines.push(`    res    = minimize(loss, w0, method="SLSQP", bounds=bounds, constraints=cons)`);
+      lines.push(`    weights = dict(zip(donors, res.x))`);
+      lines.push(`    print("Donor weights:", {k: round(v, 4) for k, v in weights.items() if v > 0.001})`);
+      break;
+    }
+
     default:
       lines.push(`# Model type "${type}" — add estimation code here`);
   }
@@ -451,12 +496,13 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   const fitNames = [];
   configs.forEach((c, i) => {
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
-            entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel } = c.model ?? {};
+            entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
+            treatedUnit, treatTime } = c.model ?? {};
     const allX = [...xVars, ...wVars];
     const fitName = `model_${i + 1}`;
     fitNames.push(fitName);
     lines.push(`# Model ${i+1}: ${c.label ?? type}`);
-    const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel });
+    const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
     modelLines.forEach(l => lines.push(l.replace(/\bmodel\b/g, fitName)));
     lines.push("");
   });
@@ -546,9 +592,10 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
   }
 
   const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
-          entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel } = model;
+          entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
+          treatedUnit, treatTime } = model;
   const allX = [...(xVars ?? []), ...(wVars ?? [])];
-  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel });
+  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
 
   lines.push(`# ── Model function ───────────────────────────────────────────────────────`);
   lines.push(`def run_model(d):`);

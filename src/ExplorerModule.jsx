@@ -3,6 +3,9 @@
 // Consumes cleanedData emitted by WranglingModule.
 import { useState, useMemo, useRef } from "react";
 import { useTheme } from "./ThemeContext.jsx";
+
+const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
+const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fb;
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
@@ -46,7 +49,7 @@ function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
   const W=480,H=160,PAD={l:44,r:16,t:8,b:36};
   const iW=W-PAD.l-PAD.r,iH=H-PAD.t-PAD.b;
   if(!data.length)return null;
-  const min=Math.min(...data),max=Math.max(...data);
+  const min=arrMin(data),max=arrMax(data);
   const range=max-min||1;
   const bw=range/nBins;
   const counts=Array(nBins).fill(0);
@@ -125,7 +128,7 @@ function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
   if(times.length<2||sampled.length<2)return<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Need ≥2 periods and ≥2 units.</div>;
   const allVals=rows.filter(r=>sampled.includes(r[entityCol])&&typeof r[col]==="number").map(r=>r[col]);
   if(!allVals.length)return null;
-  const minV=Math.min(...allVals),maxV=Math.max(...allVals);
+  const minV=arrMin(allVals),maxV=arrMax(allVals);
   const rV=maxV-minV||1;
   const toX=t=>PAD+(times.indexOf(t)/(times.length-1))*(W-PAD*2);
   const toY=v=>(H-PAD)-(v-minV)/rV*(H-PAD*2);
@@ -784,8 +787,8 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
     if (!series.length) return null;
     const allT = series.flatMap(s => s.pts.map(p => p.t));
     const allY = series.flatMap(s => s.pts.map(p => p.y));
-    const tMin = Math.min(...allT), tMax = Math.max(...allT);
-    const yMin = Math.min(...allY), yMax = Math.max(...allY);
+    const tMin = arrMin(allT), tMax = arrMax(allT);
+    const yMin = arrMin(allY), yMax = arrMax(allY);
     const yPad = (yMax - yMin) * 0.1 || 1;
     const yLo = yMin - yPad, yHi = yMax + yPad;
     const sx = t => PAD.l + ((t - tMin) / (tMax - tMin || 1)) * iW;

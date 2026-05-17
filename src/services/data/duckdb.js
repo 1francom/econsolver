@@ -11,7 +11,8 @@
 
 import * as duckdb from "@duckdb/duckdb-wasm";
 
-const MAX_ROWS = 500_000; // rows extracted into JS memory
+const MAX_ROWS    = 2_000_000; // hard cap (legacy, not used for DuckDB tables)
+const PREVIEW_ROWS = 500;      // rows extracted into JS memory; rest served via getTablePage
 
 // ── Singleton ──────────────────────────────────────────────────────────────────
 let _db   = null;
@@ -67,6 +68,50 @@ function arrowRowToObj(row) {
   return obj;
 }
 
+/**
+ * Fetch one page of rows from a DuckDB table — used by DataViewer for pagination.
+ * Never materialises the full dataset into JS.
+ */
+export async function getTablePage(tableName, offset, limit) {
+  const { conn } = await getDuckDB();
+  const result = await conn.query(
+    `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`
+  );
+  return result.toArray().map(arrowRowToObj);
+}
+
+/**
+ * Compute exact column statistics via SQL — used at step-creation time
+ * so that winsorize bounds and z-score params are based on the full dataset.
+ * Returns { mean, sd, p1, p99 } (all numbers, null if column has no valid values).
+ */
+export async function computeColStats(tableName, col) {
+  const { conn } = await getDuckDB();
+  const c = col.replace(/"/g, '""');
+  const result = await conn.query(`
+    SELECT
+      avg("${c}")                         AS mean,
+      stddev_pop("${c}")                  AS sd,
+      percentile_cont(0.01) WITHIN GROUP (ORDER BY "${c}") AS p1,
+      percentile_cont(0.99) WITHIN GROUP (ORDER BY "${c}") AS p99
+    FROM "${tableName}"
+    WHERE "${c}" IS NOT NULL
+  `);
+  const row = result.toArray()[0];
+  const n = v => (v === null || v === undefined) ? null : Number(v);
+  return { mean: n(row.mean), sd: n(row.sd), p1: n(row.p1), p99: n(row.p99) };
+}
+
+/**
+ * Extract ALL rows from a DuckDB table into JS.
+ * Only called at estimation time — never on tab transitions.
+ */
+export async function extractAllRows(tableName) {
+  const { conn } = await getDuckDB();
+  const result = await conn.query(`SELECT * FROM "${tableName}"`);
+  return result.toArray().map(arrowRowToObj);
+}
+
 export async function queryDuckDB(sql) {
   const { conn } = await getDuckDB();
   const result = await conn.query(sql);
@@ -89,15 +134,14 @@ export async function loadParquet(file) {
     `CREATE OR REPLACE TABLE "${tableName}" AS SELECT * FROM parquet_scan('${file.name}')`
   );
 
-  const limit = Math.min(rowCount, MAX_ROWS);
   const { headers, rows } = await queryDuckDB(
-    `SELECT * FROM "${tbl}" LIMIT ${limit}`
+    `SELECT * FROM "${tbl}" LIMIT ${PREVIEW_ROWS}`
   );
 
   return {
     headers,
-    rows,
-    _duckdb: { tableName: tbl, rowCount, truncated: rowCount > MAX_ROWS },
+    rows, // preview only — full data served via getTablePage / extractAllRows
+    _duckdb: { tableName: tbl, rowCount, truncated: true },
   };
 }
 
@@ -118,14 +162,13 @@ export async function loadLargeCSV(file) {
     `CREATE OR REPLACE TABLE "${tableName}" AS SELECT * FROM read_csv('${file.name}', ${delim}header=true, auto_detect=true, nullstr=${NULL_STRINGS})`
   );
 
-  const limit = Math.min(rowCount, MAX_ROWS);
   const { headers, rows } = await queryDuckDB(
-    `SELECT * FROM "${tbl}" LIMIT ${limit}`
+    `SELECT * FROM "${tbl}" LIMIT ${PREVIEW_ROWS}`
   );
 
   return {
     headers,
-    rows,
-    _duckdb: { tableName: tbl, rowCount, truncated: rowCount > MAX_ROWS },
+    rows, // preview only — full data served via getTablePage / extractAllRows
+    _duckdb: { tableName: tbl, rowCount, truncated: true },
   };
 }

@@ -21,6 +21,9 @@ import { useTheme, mono } from "./modeling/shared.jsx";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
 
+const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
+const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fb;
+
 // ─── OBSERVABLE PLOT — CACHED CDN SINGLETON ───────────────────────────────────
 let _plt = null;
 let _pltPromise = null;
@@ -447,26 +450,41 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       const firstXVal = xAesCol ? rows.find(r => r[xAesCol] != null)?.[xAesCol] : null;
       const xIsDate = firstXVal != null && /^\d{4}-\d{2}-\d{2}/.test(String(firstXVal));
 
+      // For date columns, convert ISO strings → Date objects so Observable Plot
+      // receives proper Date values (not strings that could be misinterpreted).
+      const plotRows = (xIsDate && xAesCol)
+        ? rows.map(r => {
+            const v = r[xAesCol];
+            if (v == null || v instanceof Date) return r;
+            const d = new Date(v);
+            return isNaN(d.getTime()) ? r : { ...r, [xAesCol]: d };
+          })
+        : rows;
+
       // Build data marks first, then compose full mark stack
       const dataMarks = [];
       for (const ly of layers) {
         if (!ly.visible) continue;
-        dataMarks.push(...buildMarksForLayer(Plt, ly, rows, showSE));
+        dataMarks.push(...buildMarksForLayer(Plt, ly, plotRows, showSE));
       }
 
       // Compute actual data extents to decide whether zero rules are meaningful
       const xCol = layers.find(ly => ly.visible && ly.aes?.x)?.aes.x;
       const yCol = layers.find(ly => ly.visible && ly.aes?.y)?.aes.y;
-      const xVals = xCol ? rows.map(r => +r[xCol]).filter(v => isFinite(v)) : [];
+      const xVals = xCol
+        ? (xIsDate
+          ? plotRows.map(r => { const v = r[xCol]; return v instanceof Date ? v.getTime() : NaN; }).filter(isFinite)
+          : rows.map(r => +r[xCol]).filter(v => isFinite(v)))
+        : [];
       const yVals = yCol ? rows.map(r => +r[yCol]).filter(v => isFinite(v)) : [];
-      const xMin = xVals.length ? Math.min(...xVals) : 0;
-      const xMax = xVals.length ? Math.max(...xVals) : 1;
-      const yMin = yVals.length ? Math.min(...yVals) : 0;
-      const yMax = yVals.length ? Math.max(...yVals) : 1;
+      const xMin = arrMin(xVals);
+      const xMax = arrMax(xVals);
+      const yMin = arrMin(yVals);
+      const yMax = arrMax(yVals);
       // Only draw zero rule when 0 is within ±20% of the data range (ggplot expand default)
       const xRange = xMax - xMin;
       const yRange = yMax - yMin;
-      const showRuleX = 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
+      const showRuleX = !xIsDate && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
       const showRuleY = 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
 
       const zeroStyle = { stroke: "#888", strokeWidth: 1.4, strokeOpacity: 0.55 };
@@ -475,8 +493,14 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
         Plt.gridX({ stroke: "#808080", strokeOpacity: 0.15 }),
         Plt.gridY({ stroke: "#808080", strokeOpacity: 0.15 }),
         // 2. Zero rules — only when 0 is near the data range (avoids scale compression)
+        //    For date x-axis, skip ruleX entirely (epoch 0 = 1970 would corrupt the domain).
+        //    For ruleY on date axes, anchor x1/x2 explicitly to avoid domain bleed.
         ...(showRuleX ? [Plt.ruleX([0], zeroStyle)] : []),
-        ...(showRuleY ? [Plt.ruleY([0], zeroStyle)] : []),
+        ...(showRuleY
+          ? [xIsDate && xVals.length
+              ? Plt.ruleY([0], { ...zeroStyle, x1: new Date(xMin), x2: new Date(xMax) })
+              : Plt.ruleY([0], zeroStyle)]
+          : []),
         // 3. Data marks
         ...dataMarks,
         // 4. Frame on top to cleanly border the plot area
@@ -607,7 +631,7 @@ function MapCanvas({ layer, rows }) {
       const isNum = vals.every(v => v !== "" && v !== null && !isNaN(parseFloat(v)));
       if (isNum) {
         const nums = vals.map(Number);
-        const mn = Math.min(...nums), mx = Math.max(...nums), rng = mx - mn || 1;
+        const mn = arrMin(nums), mx = arrMax(nums), rng = mx - mn || 1;
         // teal (#6ec8b4) → gold (#c8a96e) gradient
         getColor = row => {
           const t = (Number(row[colorCol]) - mn) / rng;

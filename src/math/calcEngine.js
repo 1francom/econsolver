@@ -440,6 +440,23 @@ export function pchisq(x, df) {
   if (df <= 0) return NaN;
   return _regGammaP(df / 2, x / 2);
 }
+export function qchisq(p, df) {
+  if (p <= 0) return 0;
+  if (p >= 1) return Infinity;
+  if (df <= 0) return NaN;
+  // Wilson-Hilferty normal approximation as starting point
+  const z = _qnormStd(p), h = 2 / (9 * df);
+  let x = Math.max(1e-10, df * Math.pow(1 - h + z * Math.sqrt(h), 3));
+  // Newton refinement
+  for (let i = 0; i < 60; i++) {
+    const fx = pchisq(x, df) - p, dfx = dchisq(x, df);
+    if (Math.abs(dfx) < 1e-15) break;
+    const xn = Math.max(1e-10, x - fx / dfx);
+    if (Math.abs(xn - x) < 1e-10) return xn;
+    x = xn;
+  }
+  return x;
+}
 
 // ─── SCOPE BUILDER ───────────────────────────────────────────────────────────
 /**

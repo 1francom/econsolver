@@ -18,6 +18,7 @@ import {
   wrapResult,
 } from "../math/index.js";
 import { predict }              from "../math/calcEngine.js";
+import { extractAllRows }       from "../services/data/duckdb.js";
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
@@ -38,7 +39,7 @@ import { useTheme, mono }  from "../components/modeling/shared.jsx";
 import PlotBuilder          from "./PlotBuilder.jsx";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
-import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
+import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, SyntheticDiffPlot, SyntheticPlaceboPlot, SyntheticMSPEPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
 import { HintBox } from "./HelpSystem.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
@@ -1646,13 +1647,25 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
   // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
-  const estimate = useCallback(() => {
+  const estimate = useCallback(async () => {
     setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
-    const out = _runEstimation(rows);
-    if (out.error) { setErr(out.error); }
-    else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
-    setRunning(false);
-  }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
+    try {
+      // For DuckDB datasets, `rows` is only a 500-row preview.
+      // Extract the full dataset before estimating.
+      let estimationRows = rows;
+      const duckTable = cleanedData?._duckdb?.tableName;
+      if (duckTable && rows.length < (cleanedData._duckdb.rowCount ?? Infinity)) {
+        estimationRows = await extractAllRows(duckTable);
+      }
+      const out = _runEstimation(estimationRows);
+      if (out.error) { setErr(out.error); }
+      else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
+    } catch (e) {
+      setErr("Failed to load dataset for estimation: " + (e?.message ?? e));
+    } finally {
+      setRunning(false);
+    }
+  }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -2288,6 +2301,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     Pre-RMSPE: {r.scRmspePre?.toFixed(6) ?? "—"} · Post-RMSPE: {r.scRmspePost?.toFixed(6) ?? "—"}
                     {r.scPValue != null && <span> · Placebo p-value: {r.scPValue?.toFixed(3)}</span>}
                   </div>
+                  {r.scAtt != null && (
+                    <div style={{ fontSize: 11, color: C.gold, fontFamily: mono, marginTop: 4 }}>
+                      ATT (avg. post-treatment effect): <span style={{ fontWeight: 600 }}>{r.scAtt.toFixed(4)}</span>
+                    </div>
+                  )}
                 </div>
                 <Lbl color={C.textMuted}>Donor Weights</Lbl>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: "1.2rem" }}>
@@ -2300,8 +2318,25 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       </div>
                     ))}
                 </div>
-                <Lbl color={C.textMuted}>Outcome Trajectory (Pre + Post)</Lbl>
-                <SyntheticGapPlot preFit={r.scPreFit} postGap={r.scPostGap} treatTime={r.scTreatTime} yLabel={yVar[0]} />
+                <PlotSelector accentColor={C.gold} defaultId="trends" plots={[
+                  { id: "trends",   label: "Trends",
+                    node: <SyntheticGapPlot preFit={r.scPreFit} postGap={r.scPostGap} treatTime={r.scTreatTime} yLabel={yVar[0]} treatedUnit={r.scTreatedUnit} /> },
+                  { id: "gap",      label: "Gap",
+                    node: <SyntheticDiffPlot preFit={r.scPreFit} postGap={r.scPostGap} treatTime={r.scTreatTime} yLabel={yVar[0]} /> },
+                  { id: "placebos", label: "Placebos",
+                    node: <SyntheticPlaceboPlot preFit={r.scPreFit} postGap={r.scPostGap} placebos={r.scPlacebos} treatTime={r.scTreatTime} rmspePre={r.scRmspePre} /> },
+                  { id: "mspe",     label: "MSPE Ratio",
+                    node: <SyntheticMSPEPlot preFit={r.scPreFit} postGap={r.scPostGap} placebos={r.scPlacebos} treatTime={r.scTreatTime} treatedUnit={r.scTreatedUnit} /> },
+                ]} />
+                <ExportBar yVar={yVar[0]} results={r} model="SyntheticControl"
+                  onReport={() => openReport({ ...r, modelLabel: "Synthetic Control", yVar: yVar[0], xVars })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: {
+                    ...baseReplicateConfig.model, type: "SyntheticControl",
+                    yVar: yVar[0], xVars,
+                    entityCol: panel?.entityCol, timeCol: panel?.timeCol,
+                    treatedUnit: r.scTreatedUnit, treatTime: r.scTreatTime,
+                  }} : null}
+                />
               </div>
             );
           })()}
