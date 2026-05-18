@@ -711,10 +711,13 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
   // Appears immediately in the sidebar with its own empty pipeline.
   const handleSaveSubset = useCallback((name, rows, headers) => {
     const id    = genId();
+    // ensureRowIds: assign __ri so cell editing (patch step) works for
+    // simulated / API-loaded / derived datasets, not just file uploads
+    const rawData = ensureRowIds({ rows, headers });
     const entry = {
       id,
       filename: name,
-      rawData:  { rows, headers },
+      rawData,
       origin:   activeId,   // informational — which dataset it came from
     };
     setDatasets(prev => [...prev, entry]);
@@ -757,7 +760,9 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       setDatasets(prev => prev.map(d => {
         if (d.id !== id) return d;
         const allHeaders = [...new Set([...(d.rawData?.headers ?? []), ...newCols])];
-        const updated = { ...d, rawData: { rows: newRows, headers: allHeaders } };
+        // ensureRowIds: spatial joins / merges may produce rows without __ri;
+        // assign them so edit-cells works post-merge
+        const updated = { ...d, rawData: ensureRowIds({ rows: newRows, headers: allHeaders }) };
         return updated;
       }));
       if (dispatch) dispatch({
