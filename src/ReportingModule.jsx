@@ -33,24 +33,18 @@ function safeNum(val, dp = 4) {
 }
 
 // ─── RESULT NORMALISER ────────────────────────────────────────────────────────
+// Thin alias shim — wrapResult() in EstimationResult.js already produces the
+// canonical shape. We just hoist convenience fields so the rest of the module
+// doesn't have to reach into spec.* or rename testStats everywhere.
 function normaliseResult(raw) {
   if (!raw) return null;
   if (raw.error) return { __error: raw.error };
-  // Panel FE/FD: top-level result is { type:"FE"|"FD", fe:{…}, fd:{…} }
-  // when opened from the Report tab (App.jsx). Flatten to the FE sub-result.
-  const resolved = (raw.type === "FE" || raw.type === "FD") && (raw.fe || raw.fd)
-    ? { ...(raw.fe ?? raw.fd), type: raw.type }
-    : raw;
   return {
-    ...resolved,
-    varNames:   resolved.varNames ?? [],
-    modelLabel: resolved.label ?? resolved.modelLabel
-                  ?? (raw.type === "FE" ? "Fixed Effects"
-                    : raw.type === "FD" ? "First Differences"
-                    : "OLS"),
-    yVar:       resolved.spec?.yVar  ?? resolved.yVar  ?? "y",
-    xVars:      resolved.spec?.xVars ?? resolved.xVars ?? [],
-    tStats:     resolved.testStats   ?? resolved.tStats ?? [],
+    ...raw,
+    modelLabel: raw.label,
+    yVar:       raw.spec?.yVar  ?? "y",
+    xVars:      raw.spec?.xVars ?? [],
+    tStats:     raw.testStats   ?? [],
   };
 }
 
@@ -257,14 +251,33 @@ function ForestPlot({ varNames, beta, se, pVals }) {
 
 function LatexPanel({ result, modelLabel, yVar }) {
   const { C } = useTheme();
+  const [customLabel,    setCustomLabel]    = useState(modelLabel);
+  const [showFirstStage, setShowFirstStage] = useState(false);
+
+  // Keep in sync if parent modelLabel changes (e.g. new estimation)
+  useEffect(() => setCustomLabel(modelLabel), [modelLabel]);
+
+  const isIV = result?.type === "2SLS" || result?.type === "GMM" || result?.type === "LIML";
+  const canShowFS = isIV && (result?.firstStages?.length > 0) && (result?.spec?.zVars?.length > 0);
+
   const latex = useMemo(
-    () => buildStargazer([{ label: modelLabel, result, yVar }]),
-    [result, modelLabel, yVar]
+    () => buildStargazer(
+      [{ label: customLabel, result, yVar }],
+      { showFirstStage: canShowFS && showFirstStage }
+    ),
+    [result, yVar, customLabel, showFirstStage, canShowFS]
   );
+
+  const inputStyle = {
+    background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3,
+    color: C.text, fontFamily: mono, fontSize: 10, padding: "3px 7px",
+    outline: "none", width: 180,
+  };
+
   return (
     <div>
       <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.7,
-                    marginBottom: "1rem", padding: "0.65rem 1rem",
+                    marginBottom: "0.75rem", padding: "0.65rem 1rem",
                     background: C.surface, border: `1px solid ${C.border}`,
                     borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
         Stargazer-style table. Paste directly into your{" "}
@@ -272,10 +285,36 @@ function LatexPanel({ result, modelLabel, yVar }) {
         Add <code style={{ color: C.teal, fontSize: 10 }}>{"\\usepackage{booktabs}"}</code>{" "}
         to your preamble if you use <code style={{ color: C.teal, fontSize: 10 }}>\\toprule</code>.
       </div>
+
+      {/* Controls row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>Column label</span>
+          <input
+            value={customLabel}
+            onChange={e => setCustomLabel(e.target.value)}
+            style={inputStyle}
+            spellCheck={false}
+          />
+        </div>
+        {canShowFS && (
+          <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
+                          fontSize: 9, color: C.textDim, fontFamily: mono }}>
+            <input
+              type="checkbox"
+              checked={showFirstStage}
+              onChange={e => setShowFirstStage(e.target.checked)}
+              style={{ accentColor: C.teal }}
+            />
+            Include first stage
+          </label>
+        )}
+      </div>
+
       <div style={{ position: "relative" }}>
         <pre style={{
           background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4,
-          padding: "1rem 1rem 1rem 1rem", fontSize: 10.5, color: C.text,
+          padding: "1rem", fontSize: 10.5, color: C.text,
           fontFamily: mono, overflowX: "auto", lineHeight: 1.65,
           maxHeight: 440, overflowY: "auto", margin: 0,
         }}>
@@ -751,7 +790,7 @@ function AIUnifiedScript({ result, cleanedData }) {
     try {
       const dsName  = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
       const cleanSc = generateCleanScript({
-        language,
+        language:    lang,
         datasetName: dsName,
         filename:    cleanedData?.filename ?? "dataset.csv",
         pipeline:    cleanedData?.pipeline ?? [],

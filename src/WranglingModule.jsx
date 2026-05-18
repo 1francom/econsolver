@@ -18,6 +18,7 @@ import MergeTab        from "./components/wrangling/MergeTab.jsx";
 import DictionaryTab   from "./components/wrangling/DictionaryTab.jsx";
 import History         from "./components/wrangling/History.jsx";
 import ExportMenu      from "./components/wrangling/ExportMenu.jsx";
+import ImportPipelineButton from "./components/wrangling/ImportPipelineButton.jsx";
 import DataQualityReport from "./components/wrangling/DataQualityReport.jsx";
 import AuditTrail        from "./components/validation/AuditTrail.jsx";
 import { auditPipeline } from "./pipeline/auditor.js";
@@ -198,11 +199,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       dataDictionary: dataDictionary || {},
       panelIndex: panel
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
-            balance: panel.validation?.balance, blockFE: panel.validation?.blockFE }
+            balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
         : null,
       _duckdb: processed._duckdb ?? null,
     });
-  }, [idbReady, processed]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idbReady, processed, panel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-clamp branchPointIndex when pipeline shrinks ─────────────────────
   useEffect(() => {
@@ -309,6 +310,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     setBranchPointIndex(null);
   }, [snapshot]);
 
+  // One-click pipeline replication — atomically replaces the entire pipeline
+  // with steps from an imported pipeline.json. Undoable via the History panel.
+  const replacePipeline = useCallback(next => {
+    if (!Array.isArray(next)) return;
+    setPipeline(p => { snapshot(p); return next; });
+    setBranchPointIndex(null);
+  }, [snapshot]);
+
   const undo = useCallback(() => {
     if (!undoStack.current.length) return;
     setPipeline(current => {
@@ -365,7 +374,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       dataDictionary: dataDictionary || {},
       panelIndex: panel
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
-            balance: panel.validation?.balance, blockFE: panel.validation?.blockFE }
+            balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
         : null,
       changeLog: pipeline.map(s => ({
         type: s.type, description: s.desc,
@@ -492,6 +501,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}
               datasetName={filename ? filename.replace(/\.[^.]+$/, "") : "dataset"}
               allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}/>
+            <ImportPipelineButton currentLength={pipeline.length} onImport={replacePipeline} />
             {onSaveSubset && (
               <div style={{ position:"relative" }}>
                 <button

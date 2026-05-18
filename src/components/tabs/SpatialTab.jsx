@@ -24,6 +24,34 @@ import {
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
+const BASEMAPS = {
+  light: {
+    label: "Light",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+  },
+  dark: {
+    label: "Dark",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+  },
+  osm: {
+    label: "OSM",
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>",
+  },
+};
+
+function addBasemap(L, map, basemap = "light") {
+  const cfg = BASEMAPS[basemap] ?? BASEMAPS.light;
+  return L.tileLayer(cfg.url, {
+    attribution: cfg.attribution,
+    maxZoom: 19,
+    detectRetina: true,
+    crossOrigin: true,
+  }).addTo(map);
+}
+
 // ─── LEAFLET CDN LOADER ───────────────────────────────────────────────────────
 let _leafletPromiseST = null;
 function loadLeaflet() {
@@ -82,9 +110,35 @@ function isProjectedWKT(wkt) {
   return Math.abs(x) > 180 || Math.abs(y) > 90;
 }
 
+function splitParenGroups(s) {
+  const groups = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === ")") {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        groups.push(s.slice(start + 1, i));
+        start = -1;
+      }
+    }
+  }
+  return groups;
+}
+
+function leafletPolygonLatLngs(geo) {
+  if (!geo || geo.type === "point") return null;
+  return geo.type === "multipolygon" ? geo.rings : geo.rings;
+}
+
 // ─── WKT PARSER ──────────────────────────────────────────────────────────────
-// Returns Leaflet-compatible [lat, lon] ring arrays from a WKT string.
-// Handles POINT, POLYGON, MULTIPOLYGON.
+// Returns Leaflet-compatible [lat, lon] coordinates from WKT.
+// POLYGON:      { type:"polygon",      rings:[[lat,lon], ...][] }
+// MULTIPOLYGON: { type:"multipolygon", rings:[ polygonRings[] ] }
 // projectFn: optional (xy: [x,y]) => [lon, lat] transform for projected CRS.
 function wktToLeaflet(wkt, projectFn) {
   if (!wkt || typeof wkt !== "string") return null;
@@ -108,17 +162,20 @@ function wktToLeaflet(wkt, projectFn) {
     const p = coordPair(m[1]);
     return p ? { type: "point", latlng: p } : null;
   }
+
+  const body = wkt.slice(wkt.indexOf("("));
+  const inner = splitParenGroups(body)[0];
+  if (!inner) return null;
+
   if (s.startsWith("MULTIPOLYGON")) {
-    const polys = [];
-    const re = /\(\(([^()]+)\)\)/g;
-    let m;
-    while ((m = re.exec(wkt)) !== null) polys.push([ring(m[1])]);
+    const polys = splitParenGroups(inner)
+      .map(polyStr => splitParenGroups(polyStr).map(ring).filter(r => r.length >= 3))
+      .filter(poly => poly.length);
     return polys.length ? { type: "multipolygon", rings: polys } : null;
   }
   if (s.startsWith("POLYGON")) {
-    const outer = wkt.match(/POLYGON\s*\(\(([^()]+)\)/i);
-    if (!outer) return null;
-    return { type: "polygon", rings: [ring(outer[1])] };
+    const rings = splitParenGroups(inner).map(ring).filter(r => r.length >= 3);
+    return rings.length ? { type: "polygon", rings } : null;
   }
   return null;
 }
@@ -805,6 +862,7 @@ function SpatialMapSection({ rows, headers, C, pid }) {
   const [polyColorCol,setPolyColorCol]= useState("");
   const [showPolygons,setShowPolygons]= useState(true);
   const [polyOpacity, setPolyOpacity] = useState(0.45);
+  const [basemap,     setBasemap]     = useState("light");
 
   // ── Map history ──────────────────────────────────────────────────────────────
   const [mapHistory, setMapHistory] = useState([]);
@@ -871,10 +929,7 @@ function SpatialMapSection({ rows, headers, C, pid }) {
     const map = L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
     leafMapRef.current = map;
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>",
-      maxZoom: 19,
-    }).addTo(map);
+    addBasemap(L, map, basemap);
 
     const layerGroup = L.featureGroup().addTo(map);
     const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -895,9 +950,7 @@ function SpatialMapSection({ rows, headers, C, pid }) {
             fillOpacity: polyOpacity, opacity: 1,
           }).addTo(layerGroup);
         } else {
-          const rings = geo.type === "multipolygon"
-            ? geo.rings.map(r => r[0])
-            : geo.rings;
+          const rings = leafletPolygonLatLngs(geo);
           const tip = polyColorCol
             ? `${esc(polyColorCol)}: ${esc(row[polyColorCol])}`
             : (row.name ?? row.NAME ?? "");
@@ -934,7 +987,7 @@ function SpatialMapSection({ rows, headers, C, pid }) {
     } catch (_) { map.setView([20, 0], 2); }
 
     return () => { if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; } };
-  }, [L, rows, latCol, lonCol, ptColorCol, showPoints, ptRadius, wktCol, polyColorCol, showPolygons, polyOpacity]);
+  }, [L, rows, latCol, lonCol, ptColorCol, showPoints, ptRadius, wktCol, polyColorCol, showPolygons, polyOpacity, basemap]);
 
   // Derive active legend (polygon takes priority over points)
   const { legend } = useMemo(() => {
@@ -947,6 +1000,21 @@ function SpatialMapSection({ rows, headers, C, pid }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* Controls */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            Basemap
+          </span>
+          {Object.entries(BASEMAPS).map(([key, cfg]) => (
+            <button key={key} onClick={() => setBasemap(key)}
+              style={{
+                padding: "3px 9px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                background: basemap === key ? `${C.teal}18` : "transparent",
+                border: `1px solid ${basemap === key ? C.teal + "60" : C.border2}`,
+                color: basemap === key ? C.teal : C.textMuted,
+              }}
+            >{cfg.label}</button>
+          ))}
+        </div>
 
         {/* Point layer */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1327,6 +1395,7 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid
   const [layers,   setLayers]  = useState([]);
   const [activeId, setActiveId]= useState(null);
   const [saveName, setSaveName]= useState("grid_cells");
+  const [basemap,  setBasemap] = useState("light");
 
   // ── Download as HTML ─────────────────────────────────────────────────────────
   function downloadMapHtml() {
@@ -1346,25 +1415,28 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid
 <style>body{margin:0}#map{width:100vw;height:100vh}</style>
 </head><body><div id="map"></div><script>
 const LAYERS=${JSON.stringify(layerData)};
+const BASEMAP=${JSON.stringify(BASEMAPS[basemap] ?? BASEMAPS.light)};
 function parseWkt(wkt){
   if(!wkt||typeof wkt!=="string")return null;
   const s=wkt.trim().toUpperCase();
   function parseRing(s){return s.replace(/[()]/g,"").trim().split(",").map(p=>{const[x,y]=p.trim().split(/\s+/);return[parseFloat(y),parseFloat(x)];});}
   if(s.startsWith("POINT")){const c=s.match(/POINT\s*\(([^)]+)\)/);if(!c)return null;const[x,y]=c[1].trim().split(/\s+/);return{type:"point",latlng:[parseFloat(y),parseFloat(x)]};}
-  if(s.startsWith("POLYGON")){const m=s.match(/\((\([^)]+\)(?:\s*,\s*\([^)]+\))*)\)/);if(!m)return null;const rings=m[1].match(/\([^)]+\)/g).map(r=>parseRing(r));return{type:"polygon",rings};}
-  if(s.startsWith("MULTIPOLYGON")){const parts=s.match(/\(\([^)]+\)\)/g)||[];const rings=parts.map(p=>{const inner=p.match(/\(([^)]+)\)/g)||[];return inner.map(r=>parseRing(r));});return{type:"multipolygon",rings};}
+  function groups(s){const out=[];let d=0,st=-1;for(let i=0;i<s.length;i++){const ch=s[i];if(ch==="("){if(d===0)st=i;d++;}else if(ch===")"){d--;if(d===0&&st>=0){out.push(s.slice(st+1,i));st=-1;}}}return out;}
+  const body=wkt.slice(wkt.indexOf("("));const inner=groups(body)[0];if(!inner)return null;
+  if(s.startsWith("POLYGON")){const rings=groups(inner).map(parseRing).filter(r=>r.length>=3);return rings.length?{type:"polygon",rings}:null;}
+  if(s.startsWith("MULTIPOLYGON")){const rings=groups(inner).map(p=>groups(p).map(parseRing).filter(r=>r.length>=3)).filter(p=>p.length);return rings.length?{type:"multipolygon",rings}:null;}
   return null;
 }
 const map=L.map("map");
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap"}).addTo(map);
+L.tileLayer(BASEMAP.url,{attribution:BASEMAP.attribution,maxZoom:19,detectRetina:true,crossOrigin:true}).addTo(map);
 const group=L.featureGroup().addTo(map);
 for(const ly of LAYERS){
   if(ly.type==="points"&&ly.latCol&&ly.lonCol){
     for(const row of ly._data){const lat=parseFloat(row[ly.latCol]),lon=parseFloat(row[ly.lonCol]);if(isNaN(lat)||isNaN(lon))continue;L.circleMarker([lat,lon],{radius:ly.radius??4,fillColor:ly.fillColor??"#6ec8b4",color:ly.fillColor??"#6ec8b4",weight:1,fillOpacity:0.78}).addTo(group);}
   }else if(ly.type==="boundary"&&ly.wktCol){
-    for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type==="point"){L.circleMarker(geo.latlng,{radius:6,fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}else{const rings=geo.type==="multipolygon"?geo.rings.map(r=>r[0]):geo.rings;L.polygon(rings,{fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
+    for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type==="point"){L.circleMarker(geo.latlng,{radius:6,fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}else{L.polygon(geo.rings,{fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
   }else if(ly.type==="grid"&&ly.wktCol){
-    for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type!=="point"){const rings=geo.type==="multipolygon"?geo.rings.map(r=>r[0]):geo.rings;L.polygon(rings,{fillColor:ly.fillColor??"#6ec8b4",color:ly.borderColor??"#d73027",weight:ly.borderWidth??0.15,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
+    for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type!=="point"){L.polygon(geo.rings,{fillColor:ly.fillColor??"#6ec8b4",color:ly.borderColor??"#d73027",weight:ly.borderWidth??0.15,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
   }
 }
 try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map.setView([20,0],2);}catch(_){map.setView([20,0],2);}
@@ -1464,9 +1536,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
 
     const map = L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
     leafMapRef.current = map;
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>", maxZoom: 19,
-    }).addTo(map);
+    addBasemap(L, map, basemap);
 
     const group = L.featureGroup().addTo(map);
     const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -1482,8 +1552,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           if (geo.type === "point") {
             L.circleMarker(geo.latlng, { radius: 6, fillColor: ly.fillColor, color: ly.borderColor, weight: ly.borderWidth, fillOpacity: ly.fillOpacity }).addTo(group);
           } else {
-            const rings = geo.type === "multipolygon" ? geo.rings.map(r => r[0]) : geo.rings;
-            L.polygon(rings, { fillColor: ly.fillColor, fillOpacity: ly.fillOpacity, color: ly.borderColor, weight: ly.borderWidth }).addTo(group);
+            L.polygon(leafletPolygonLatLngs(geo), { fillColor: ly.fillColor, fillOpacity: ly.fillOpacity, color: ly.borderColor, weight: ly.borderWidth }).addTo(group);
           }
         }
       }
@@ -1497,10 +1566,9 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           for (const cell of cells) {
             const geo = wktToLeaflet(cell[ly.wktCol], proj4fn);
             if (!geo || geo.type === "point") continue;
-            const rings = geo.type === "multipolygon" ? geo.rings.map(r => r[0]) : geo.rings;
             const fc = ly.colorByCol ? (getColor(cell) ?? ly.fillColor) : ly.fillColor;
             const fo = ly.colorByCol ? ly.colorFillOpacity : ly.fillOpacity;
-            L.polygon(rings, { fillColor: fc, fillOpacity: fo, color: ly.borderColor, weight: ly.borderWidth })
+            L.polygon(leafletPolygonLatLngs(geo), { fillColor: fc, fillOpacity: fo, color: ly.borderColor, weight: ly.borderWidth })
               .bindTooltip(ly.colorByCol ? `${esc(ly.colorByCol)}: ${esc(cell[ly.colorByCol])}` : `grid #${cell.grid_id ?? ""}`)
               .addTo(group);
           }
@@ -1509,8 +1577,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           for (const cell of cells) {
             const geo = wktToLeaflet(cell.geometry, proj4fn);
             if (!geo || geo.type === "point") continue;
-            const rings = geo.type === "multipolygon" ? geo.rings.map(r => r[0]) : geo.rings;
-            L.polygon(rings, { fillColor: ly.fillColor, fillOpacity: ly.fillOpacity, color: ly.borderColor, weight: ly.borderWidth })
+            L.polygon(leafletPolygonLatLngs(geo), { fillColor: ly.fillColor, fillOpacity: ly.fillOpacity, color: ly.borderColor, weight: ly.borderWidth })
               .bindTooltip(`grid #${cell.grid_id}`)
               .addTo(group);
           }
@@ -1541,7 +1608,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
     } catch (_) { map.setView([20, 0], 2); }
 
     return () => { if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; } };
-  }, [L, layers, rows, availableDatasets, generatedGrid, proj4fn]);
+  }, [L, layers, rows, availableDatasets, generatedGrid, proj4fn, basemap]);
 
   // Active legend
   const activeLegend = useMemo(() => {
@@ -1620,6 +1687,24 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
 
         {/* Layer list */}
         <div style={{ padding: "0.75rem 0.65rem 0.6rem", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 8, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono, marginBottom: 5 }}>
+              Basemap
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4 }}>
+              {Object.entries(BASEMAPS).map(([key, cfg]) => (
+                <button key={key} onClick={() => setBasemap(key)}
+                  style={{
+                    padding: "3px 5px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer",
+                    background: basemap === key ? `${C.teal}18` : "transparent",
+                    border: `1px solid ${basemap === key ? C.teal + "60" : C.border2}`,
+                    color: basemap === key ? C.teal : C.textMuted,
+                  }}
+                >{cfg.label}</button>
+              ))}
+            </div>
+          </div>
+
           <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono, marginBottom: 8 }}>
             Map Layers
           </div>

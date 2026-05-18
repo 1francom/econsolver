@@ -1,0 +1,175 @@
+// ─── ECON STUDIO · src/math/Resampling.js ────────────────────────────────────
+// Resampling-based inference for the sample mean and for the difference of two
+// sample means. Pure JS, no React, no side effects — engine layer.
+//
+// Three estimators are exposed:
+//
+//   1. bootstrapMean(values, B, alpha)
+//        Standard nonparametric bootstrap WITH REPLACEMENT (Efron 1979).
+//        Draws B samples of size n with replacement, computes the mean of each,
+//        reports the bootstrap SE = sd(replicates) and the percentile CI.
+//        Treats `values` as an iid sample from the population.
+//
+//   2. subsampleMean(values, m, B, alpha)
+//        Subsampling WITHOUT REPLACEMENT (Politis & Romano 1994). For each of
+//        B draws, samples m < n distinct observations (no replacement) and
+//        computes their mean. Reports:
+//          - seSubsample  = sd of subsample means (SE at sample size m)
+//          - seNScaled    = seSubsample · √(m/n)  — rescaled SE for the full
+//                            n-sample mean, valid under iid (n large, m/n → 0)
+//          - percentile CI from the rescaled, recentered replicates
+//        Requires m < n; if m == n, only one subsample exists and there is no
+//        variation, so the function returns an error.
+//
+//   3. permutationTwoSampleMean(valuesA, valuesB, B)
+//        Combinatorial inference for H0: μ_A = μ_B. Pools all observations,
+//        randomly reassigns the group labels B times, and recomputes the
+//        difference of means each time. Two-sided p-value uses the standard
+//        +1 correction: p = (1 + #{|Δ_b| ≥ |Δ_obs|}) / (B + 1).
+//
+// Numerical notes:
+//   - All RNG calls go through Math.random. For reproducible runs the caller
+//     should snapshot results; an explicit seed parameter is intentionally
+//     omitted from this MVP (deterministic seeding requires a custom PRNG).
+//   - Replicates are kept in memory for the caller (histogram, diagnostics).
+//     Practical B ≤ 100_000.
+//   - Non-finite values in `values` are filtered before resampling. The caller
+//     receives `nUsed` to confirm how many observations actually entered the
+//     analysis.
+
+function clean(values) {
+  return values.filter(v => typeof v === "number" && isFinite(v));
+}
+
+function mean(arr) {
+  if (!arr.length) return NaN;
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) s += arr[i];
+  return s / arr.length;
+}
+
+function sd(arr) {
+  if (arr.length < 2) return NaN;
+  const m = mean(arr);
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) { const d = arr[i] - m; s += d * d; }
+  return Math.sqrt(s / (arr.length - 1));
+}
+
+// Linear-interpolated empirical quantile.
+function quantile(sorted, p) {
+  if (!sorted.length) return NaN;
+  if (p <= 0) return sorted[0];
+  if (p >= 1) return sorted[sorted.length - 1];
+  const idx = p * (sorted.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (idx - lo) * (sorted[hi] - sorted[lo]);
+}
+
+// Fisher-Yates partial shuffle: returns first m elements of a shuffled copy
+// without paying O(n) when m ≪ n is unusual here; we shuffle the whole array.
+function shuffleInPlace(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+// ─── 1. Bootstrap mean (with replacement) ─────────────────────────────────────
+export function bootstrapMean(values, B = 2000, alpha = 0.05) {
+  const v = clean(values);
+  const n = v.length;
+  if (n < 2) return { error: "Need at least 2 finite observations." };
+  if (!(B >= 50)) return { error: "B must be ≥ 50." };
+
+  const meanHat = mean(v);
+  const replicates = new Float64Array(B);
+  for (let b = 0; b < B; b++) {
+    let s = 0;
+    for (let i = 0; i < n; i++) s += v[Math.floor(Math.random() * n)];
+    replicates[b] = s / n;
+  }
+  const arr = Array.from(replicates);
+  const seBoot = sd(arr);
+  const sorted = arr.slice().sort((a, b) => a - b);
+  const ciLo = quantile(sorted, alpha / 2);
+  const ciHi = quantile(sorted, 1 - alpha / 2);
+
+  return { method: "bootstrap", meanHat, seBoot, ciLo, ciHi, alpha, B, nUsed: n, replicates: arr };
+}
+
+// ─── 2. Subsample mean (without replacement) ──────────────────────────────────
+export function subsampleMean(values, m, B = 2000, alpha = 0.05) {
+  const v = clean(values);
+  const n = v.length;
+  if (n < 3) return { error: "Need at least 3 finite observations." };
+  if (!(m >= 2 && m < n)) return { error: `Subsample size m must satisfy 2 ≤ m < n (n = ${n}).` };
+
+  const meanHat = mean(v);
+  const scratch = v.slice();
+  const replicates = new Float64Array(B);
+  for (let b = 0; b < B; b++) {
+    // Partial Fisher-Yates: pick m distinct values from scratch.
+    let s = 0;
+    for (let i = 0; i < m; i++) {
+      const j = i + Math.floor(Math.random() * (n - i));
+      const t = scratch[i]; scratch[i] = scratch[j]; scratch[j] = t;
+      s += scratch[i];
+    }
+    replicates[b] = s / m;
+  }
+  const arr = Array.from(replicates);
+  const seSubsample = sd(arr);
+  // Politis–Romano scaling: SE of n-sample mean ≈ SE_subsample · √(m/n).
+  const seNScaled = seSubsample * Math.sqrt(m / n);
+
+  // Percentile CI on the rescaled, recentered replicates (subsampling CI):
+  //   x̄_n ± √(m/n) · (Q_p(replicates) − meanHat)
+  const sorted = arr.slice().sort((a, b) => a - b);
+  const qLo = quantile(sorted, alpha / 2);
+  const qHi = quantile(sorted, 1 - alpha / 2);
+  const scale = Math.sqrt(m / n);
+  const ciLo = meanHat - scale * (qHi - meanHat);
+  const ciHi = meanHat - scale * (qLo - meanHat);
+
+  return { method: "subsample", meanHat, m, seSubsample, seNScaled, ciLo, ciHi, alpha, B, nUsed: n, replicates: arr };
+}
+
+// ─── 3. Permutation test (two-sample mean difference) ─────────────────────────
+export function permutationTwoSampleMean(valuesA, valuesB, B = 2000) {
+  const a = clean(valuesA);
+  const b = clean(valuesB);
+  if (a.length < 2 || b.length < 2) return { error: "Each group needs at least 2 finite observations." };
+  if (!(B >= 50)) return { error: "B must be ≥ 50." };
+
+  const nA = a.length, nB = b.length;
+  const meanA = mean(a), meanB = mean(b);
+  const diffObserved = meanA - meanB;
+
+  const pooled = a.concat(b);
+  const replicates = new Float64Array(B);
+  let countAtLeast = 0;
+  const absObs = Math.abs(diffObserved);
+
+  for (let bi = 0; bi < B; bi++) {
+    shuffleInPlace(pooled);
+    let sA = 0;
+    for (let i = 0; i < nA; i++) sA += pooled[i];
+    let sB = 0;
+    for (let i = nA; i < nA + nB; i++) sB += pooled[i];
+    const d = sA / nA - sB / nB;
+    replicates[bi] = d;
+    if (Math.abs(d) >= absObs) countAtLeast++;
+  }
+  const pTwoSided = (1 + countAtLeast) / (B + 1);
+
+  return {
+    method: "permutation",
+    meanA, meanB, diffObserved,
+    nA, nB, B,
+    pTwoSided,
+    replicates: Array.from(replicates),
+  };
+}

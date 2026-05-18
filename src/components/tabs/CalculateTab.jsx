@@ -18,7 +18,9 @@ import { HintBox } from "../HelpSystem.jsx";
 import { evalExpression, buildScope, solveRootAuto, solveSystem, derivative, nthDerivative, integrate,
   dnorm, pnorm, qnorm, dt, pt, qt, dbinom, pbinom, dpois, ppois, dchisq, pchisq, qchisq,
 } from "../../math/calcEngine.js";
+import { bootstrapMean, subsampleMean, permutationTwoSampleMean } from "../../math/Resampling.js";
 import { symbolicDiff, latexName } from "../../math/symbolicDiff.js";
+import { solveAlgebraicEquation } from "../../math/symbolicSolve.js";
 import { useTheme } from "../../ThemeContext.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
@@ -121,6 +123,49 @@ function defaultVal(type) {
 function fmt(n, d = 6) {
   if (n == null || !isFinite(n)) return "—";
   return Number(n).toFixed(d);
+}
+
+// ─── REPLICATE HISTOGRAM ──────────────────────────────────────────────────────
+// Tiny SVG histogram of resampling replicates. Bin count fixed (~28 — a clean
+// Sturges-ish default for B ∈ [500, 50_000]). Optional vertical marker for the
+// observed statistic (e.g. permutation Δ_obs) and shaded CI band.
+function ReplicateHistogram({ replicates, marker, ciLo, ciHi, color }) {
+  const { C } = useTheme();
+  const col = color ?? C.teal;
+  if (!replicates?.length) return null;
+  const W = 360, H = 90, PAD = { l: 8, r: 8, t: 6, b: 14 };
+  const lo = Math.min(...replicates), hi = Math.max(...replicates);
+  const span = hi - lo || 1;
+  const NBINS = 28;
+  const w = span / NBINS;
+  const counts = new Array(NBINS).fill(0);
+  for (const v of replicates) {
+    const i = Math.min(NBINS - 1, Math.max(0, Math.floor((v - lo) / w)));
+    counts[i]++;
+  }
+  const maxC = Math.max(...counts);
+  const x = v => PAD.l + (W - PAD.l - PAD.r) * (v - lo) / span;
+  const y = c => H - PAD.b - (H - PAD.t - PAD.b) * (c / maxC);
+  const bw = (W - PAD.l - PAD.r) / NBINS;
+  return (
+    <svg width={W} height={H} style={{ display: "block", marginTop: 6 }}>
+      {ciLo != null && ciHi != null && (
+        <rect x={x(ciLo)} y={PAD.t} width={x(ciHi) - x(ciLo)} height={H - PAD.t - PAD.b}
+          fill={col} opacity={0.08}/>
+      )}
+      {counts.map((c, i) => (
+        <rect key={i} x={PAD.l + i * bw + 0.5} y={y(c)} width={Math.max(0, bw - 1)}
+          height={H - PAD.b - y(c)} fill={col} opacity={0.55}/>
+      ))}
+      {marker != null && isFinite(marker) && marker >= lo && marker <= hi && (
+        <line x1={x(marker)} x2={x(marker)} y1={PAD.t} y2={H - PAD.b}
+          stroke={C.gold} strokeWidth={1.5}/>
+      )}
+      <line x1={PAD.l} x2={W - PAD.r} y1={H - PAD.b} y2={H - PAD.b} stroke={C.border} />
+      <text x={PAD.l} y={H - 2} fontSize={8} fontFamily={mono} fill={C.textMuted}>{lo.toFixed(3)}</text>
+      <text x={W - PAD.r} y={H - 2} textAnchor="end" fontSize={8} fontFamily={mono} fill={C.textMuted}>{hi.toFixed(3)}</text>
+    </svg>
+  );
 }
 
 // ─── RESULT BOX ───────────────────────────────────────────────────────────────
@@ -930,6 +975,19 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
   const [newCFn,       setNewCFn]      = useState("mean");
   const [newCCol,      setNewCCol]     = useState("");
 
+  // ── Resampling & permutation inference ────────────────────────────────────
+  // mode: "boot" (with replacement) | "subsample" (without replacement) | "perm" (two-sample)
+  const [rsOpen,    setRsOpen]    = useState(false);
+  const [rsMode,    setRsMode]    = useState("boot");
+  const [rsCol,     setRsCol]     = useState("");
+  const [rsGroupCol,setRsGroupCol]= useState("");
+  const [rsLevelA,  setRsLevelA]  = useState("");
+  const [rsLevelB,  setRsLevelB]  = useState("");
+  const [rsB,       setRsB]       = useState(2000);
+  const [rsM,       setRsM]       = useState(0); // subsample size, 0 → auto = ⌊n/2⌋
+  const [rsResult,  setRsResult]  = useState(null);
+  const [rsBusy,    setRsBusy]    = useState(false);
+
   // ── Math Pad bridge: lifted JS expression + active field ref ─────────────
   const [padJsExpr,    setPadJsExpr]   = useState("");
   const activeFieldRef = useRef(null); // holds setter fn of the last focused expression input
@@ -941,9 +999,12 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
   const [probOpen,     setProbOpen]    = useState(false);
 
   // ── Equation solver ────────────────────────────────────────────────────────
-  const [solverMode,   setSolverMode]  = useState("single"); // "single" | "system"
+  const [solverMode,   setSolverMode]  = useState("single"); // "single" | "algebraic" | "system"
   const [solExpr,      setSolExpr]     = useState("x**2 - 4");
   const [solResult,    setSolResult]   = useState(null);
+  const [algSolveExpr, setAlgSolveExpr] = useState("p = a - b*q");
+  const [algSolveVar,  setAlgSolveVar]  = useState("q");
+  const [algSolveResult, setAlgSolveResult] = useState(null);
   // System solver state
   const [sysVarStr,     setSysVarStr]    = useState("x, y");
   const [sysGuesses,    setSysGuesses]   = useState({ x: "1", y: "1" });
@@ -1097,6 +1158,10 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
   }
 
   // ── Integral ────────────────────────────────────────────────────────────────
+  function runAlgebraicSolver() {
+    setAlgSolveResult(solveAlgebraicEquation(algSolveExpr, algSolveVar));
+  }
+
   function runIntegral() {
     try {
       const a = parseFloat(intA), b = parseFloat(intB);
@@ -1393,6 +1458,169 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
         )}
       </div>
 
+      {/* ── 2b. Resampling & permutation inference ─────────────────────────── */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
+        <SectionHeader label="Resampling & permutation" open={rsOpen} onToggle={() => setRsOpen(o => !o)} badge={!rows.length ? "no active dataset" : null} />
+        {rsOpen && (() => {
+          const modeBtn = (id, label) => (
+            <button key={id} onClick={() => { setRsMode(id); setRsResult(null); }}
+              style={{
+                background: rsMode === id ? `${C.teal}18` : "transparent",
+                border: `1px solid ${rsMode === id ? C.teal : C.border2}`,
+                color: rsMode === id ? C.teal : C.textDim,
+                fontFamily: mono, fontSize: 10, letterSpacing: "0.08em",
+                padding: "0.3rem 0.7rem", borderRadius: 2, cursor: "pointer",
+              }}>{label}</button>
+          );
+          const colVals = (col) => rows.map(r => Number(r[col])).filter(v => isFinite(v));
+          const levelsOf = (col) => {
+            const seen = new Set();
+            for (const r of rows) {
+              const v = r[col]; if (v == null || v === "") continue;
+              seen.add(String(v));
+              if (seen.size > 200) break;
+            }
+            return [...seen];
+          };
+          const groupCandidates = headers.filter(h => {
+            const lv = levelsOf(h);
+            return lv.length >= 2 && lv.length <= 50;
+          });
+          const levels = rsGroupCol ? levelsOf(rsGroupCol) : [];
+          const n = rsCol ? colVals(rsCol).length : 0;
+          const mEffective = rsMode === "subsample"
+            ? (rsM > 0 ? rsM : Math.max(2, Math.floor(n / 2)))
+            : null;
+          const ratioWarn = rsMode === "subsample" && n > 0 && mEffective / n > 0.5;
+
+          function runRS() {
+            if (!rsCol) return;
+            setRsBusy(true); setRsResult(null);
+            setTimeout(() => {
+              try {
+                let res;
+                if (rsMode === "boot") {
+                  res = bootstrapMean(colVals(rsCol), rsB, 0.05);
+                } else if (rsMode === "subsample") {
+                  res = subsampleMean(colVals(rsCol), mEffective, rsB, 0.05);
+                } else {
+                  if (!rsGroupCol || !rsLevelA || !rsLevelB || rsLevelA === rsLevelB) {
+                    res = { error: "Pick two distinct levels of the group column." };
+                  } else {
+                    const a = [], b = [];
+                    for (const r of rows) {
+                      const v = Number(r[rsCol]); if (!isFinite(v)) continue;
+                      const g = String(r[rsGroupCol]);
+                      if (g === rsLevelA) a.push(v);
+                      else if (g === rsLevelB) b.push(v);
+                    }
+                    res = permutationTwoSampleMean(a, b, rsB);
+                  }
+                }
+                setRsResult(res);
+              } catch (e) {
+                setRsResult({ error: e.message });
+              } finally {
+                setRsBusy(false);
+              }
+            }, 0);
+          }
+
+          return (
+            <div style={{ padding: "0.8rem 0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", gap: 6 }}>
+                {modeBtn("boot", "Bootstrap (with replacement)")}
+                {modeBtn("subsample", "Subsample (without replacement)")}
+                {modeBtn("perm", "Permutation (2-sample)")}
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>variable</span>
+                <select value={rsCol} onChange={e => { setRsCol(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 220 }}>
+                  <option value="">— pick numeric column —</option>
+                  {numericHeaders.map(h => <option key={h}>{h}</option>)}
+                </select>
+
+                {rsMode === "perm" && (
+                  <>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>group</span>
+                    <select value={rsGroupCol} onChange={e => { setRsGroupCol(e.target.value); setRsLevelA(""); setRsLevelB(""); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 200 }}>
+                      <option value="">— pick group column —</option>
+                      {groupCandidates.map(h => <option key={h}>{h}</option>)}
+                    </select>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>A</span>
+                    <select value={rsLevelA} onChange={e => { setRsLevelA(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 140 }} disabled={!levels.length}>
+                      <option value="">—</option>
+                      {levels.map(l => <option key={l}>{l}</option>)}
+                    </select>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>B</span>
+                    <select value={rsLevelB} onChange={e => { setRsLevelB(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 140 }} disabled={!levels.length}>
+                      <option value="">—</option>
+                      {levels.map(l => <option key={l}>{l}</option>)}
+                    </select>
+                  </>
+                )}
+
+                {rsMode === "subsample" && (
+                  <>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>m</span>
+                    <input type="number" min={2} step={1} value={rsM || ""} placeholder={n ? `${Math.max(2, Math.floor(n/2))}` : "auto"}
+                      onChange={e => setRsM(Math.max(0, parseInt(e.target.value) || 0))}
+                      style={{ ...fieldStyle(C), width: 72 }} />
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>of n={n || "—"}</span>
+                  </>
+                )}
+
+                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginLeft: 8 }}>replicates B</span>
+                <input type="number" min={50} step={100} value={rsB}
+                  onChange={e => setRsB(Math.max(50, parseInt(e.target.value) || 50))}
+                  style={{ ...fieldStyle(C), width: 80 }} />
+
+                <Btn ch={rsBusy ? "Running…" : "Run"} v="solid" color={C.teal} onClick={runRS} sm
+                  dis={rsBusy || !rsCol || (rsMode === "perm" && (!rsGroupCol || !rsLevelA || !rsLevelB || rsLevelA === rsLevelB))} />
+              </div>
+
+              {ratioWarn && (
+                <div style={{ fontFamily: mono, fontSize: 10, color: C.gold }}>
+                  ⚠ Subsample ratio m/n = {(mEffective/n).toFixed(2)} &gt; 0.5 — Politis–Romano SE assumes m/n → 0; rescaled SE may be biased.
+                </div>
+              )}
+
+              {rsResult?.error && <ErrBox msg={rsResult.error} />}
+
+              {rsResult && !rsResult.error && rsResult.method === "bootstrap" && (
+                <ResultBox color={C.teal}>
+                  <div>mean      = <span style={{ color: C.teal }}>{fmt(rsResult.meanHat, 4)}</span> &nbsp;&nbsp; n = {rsResult.nUsed} &nbsp;&nbsp; B = {rsResult.B}</div>
+                  <div>SE_boot   = {fmt(rsResult.seBoot, 4)}</div>
+                  <div>95% CI    = [{fmt(rsResult.ciLo, 4)}, {fmt(rsResult.ciHi, 4)}] &nbsp;(percentile)</div>
+                  <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.meanHat} ciLo={rsResult.ciLo} ciHi={rsResult.ciHi} />
+                </ResultBox>
+              )}
+
+              {rsResult && !rsResult.error && rsResult.method === "subsample" && (
+                <ResultBox color={C.teal}>
+                  <div>mean       = <span style={{ color: C.teal }}>{fmt(rsResult.meanHat, 4)}</span> &nbsp;&nbsp; n = {rsResult.nUsed} &nbsp;&nbsp; m = {rsResult.m} &nbsp;&nbsp; B = {rsResult.B}</div>
+                  <div>SE_sub(m)  = {fmt(rsResult.seSubsample, 4)} &nbsp;(SE at sample size m)</div>
+                  <div>SE_n       = {fmt(rsResult.seNScaled, 4)} &nbsp;(rescaled · √(m/n))</div>
+                  <div>95% CI     = [{fmt(rsResult.ciLo, 4)}, {fmt(rsResult.ciHi, 4)}] &nbsp;(Politis–Romano)</div>
+                  <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.meanHat} ciLo={rsResult.ciLo} ciHi={rsResult.ciHi} />
+                </ResultBox>
+              )}
+
+              {rsResult && !rsResult.error && rsResult.method === "permutation" && (
+                <ResultBox color={C.gold}>
+                  <div>mean(A)   = {fmt(rsResult.meanA, 4)} &nbsp;&nbsp; n_A = {rsResult.nA}</div>
+                  <div>mean(B)   = {fmt(rsResult.meanB, 4)} &nbsp;&nbsp; n_B = {rsResult.nB}</div>
+                  <div>Δ_obs     = <span style={{ color: C.gold }}>{fmt(rsResult.diffObserved, 4)}</span></div>
+                  <div>p (2-sided) = <span style={{ color: rsResult.pTwoSided < 0.05 ? C.gold : C.textDim }}>{fmt(rsResult.pTwoSided, 4)}</span> &nbsp; B = {rsResult.B}</div>
+                  <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.diffObserved} color={C.gold} />
+                </ResultBox>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+
       {/* ── 3. Dataset from vectors ─────────────────────────────────────────── */}
       {vectorVars.length > 0 && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
@@ -1459,8 +1687,8 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
         {activeTool === "solver" && (
           <div style={{ background: C.surface }}>
             <div style={{ display: "flex", borderBottom: `1px solid ${C.border}` }}>
-              {[["single","Single equation"],["system","System of equations"]].map(([id, label]) => (
-                <button key={id} onClick={() => { setSolverMode(id); setSolResult(null); setSysResult(null); }}
+              {[["single","Single equation"],["algebraic","Algebraic"],["system","System of equations"]].map(([id, label]) => (
+                <button key={id} onClick={() => { setSolverMode(id); setSolResult(null); setAlgSolveResult(null); setSysResult(null); }}
                   style={{ flex: 1, padding: "0.4rem 0.7rem", background: "transparent", border: "none",
                     borderBottom: solverMode === id ? `2px solid ${C.gold}` : "2px solid transparent",
                     color: solverMode === id ? C.gold : C.textMuted,
@@ -1492,6 +1720,79 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
                       {!solResult.converged && <div style={{ color: C.red, fontSize: 10 }}>Warning: did not fully converge.</div>}
                     </ResultBox>
                 )}
+              </div>
+            )}
+            {solverMode === "algebraic" && (
+              <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>solve for</span>
+                  <input value={algSolveVar} onChange={e => { setAlgSolveVar(e.target.value); setAlgSolveResult(null); }}
+                    placeholder="q" style={{ ...fieldStyle(C), width: 70 }} />
+                  <input value={algSolveExpr} onChange={e => { setAlgSolveExpr(e.target.value); setAlgSolveResult(null); }}
+                    placeholder="p = a - b*q"
+                    onKeyDown={e => e.key === "Enter" && runAlgebraicSolver()}
+                    onFocus={() => focusField(setAlgSolveExpr)}
+                    style={{ ...fieldStyle(C), flex: 1, minWidth: 220 }} />
+                  <EquationPicker savedEqs={savedEqs} onLoad={expr => { setAlgSolveExpr(expr); setAlgSolveResult(null); }} />
+                  <Btn ch="Solve algebraically" v="solid" color={C.gold} sm onClick={runAlgebraicSolver} />
+                </div>
+                <div style={{ fontSize: 9, color: C.textMuted, lineHeight: 1.5 }}>
+                  Symbolic parameters stay symbolic. Supports linear and quadratic equations before falling back to numeric solving.
+                </div>
+
+                {algSolveResult && (algSolveResult.error ? (
+                  <ResultBox color={C.gold}>
+                    <div style={{ color: C.red, fontSize: 10 }}>{algSolveResult.error}</div>
+                    {algSolveResult.normalized && <div><span style={{ color: C.textMuted }}>normalized </span>{algSolveResult.normalized}</div>}
+                    {(algSolveResult.recommendation ?? []).map((line, i) => (
+                      <div key={i} style={{ fontSize: 9, color: C.textMuted }}>{line}</div>
+                    ))}
+                  </ResultBox>
+                ) : (
+                  <ResultBox color={C.gold}>
+                    <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, letterSpacing: "0.14em" }}>
+                      {String(algSolveResult.method ?? "ALGEBRAIC").toUpperCase()} {algSolveResult.degree != null ? `- DEGREE ${algSolveResult.degree}` : ""}
+                    </div>
+                    <div><span style={{ color: C.textMuted }}>normalized </span>{algSolveResult.normalized}</div>
+                    {algSolveResult.discriminant && <div><span style={{ color: C.textMuted }}>discriminant </span>{algSolveResult.discriminant}</div>}
+                    {(algSolveResult.solutions ?? []).length > 0
+                      ? (algSolveResult.solutions ?? []).map((s, i) => (
+                          <div key={i}>
+                            <span style={{ color: C.gold }}>{algSolveResult.variable}{algSolveResult.solutions.length > 1 ? `_${i + 1}` : ""} = </span>
+                            <span style={{ color: C.text }}>{s.expr}</span>
+                            {s.condition && <span style={{ color: C.textMuted, fontSize: 9 }}> ; {s.condition}</span>}
+                          </div>
+                        ))
+                      : <div style={{ color: C.textMuted }}>{algSolveResult.message}</div>}
+                    {algSolveResult.coefficients && (
+                      <div style={{ marginTop: 8, fontSize: 9, color: C.textMuted }}>
+                        coefficients: {Object.entries(algSolveResult.coefficients).map(([k, v]) => `${k}=${v}`).join(", ")}
+                      </div>
+                    )}
+                    {(algSolveResult.recommendation ?? []).map((line, i) => (
+                      <div key={i} style={{ fontSize: 9, color: C.textMuted }}>{line}</div>
+                    ))}
+                  </ResultBox>
+                ))}
+
+                <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+                  <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 6, letterSpacing: "0.14em" }}>EXAMPLES</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {[
+                      ["p = a - b*q", "q", "Inverse demand"],
+                      ["MR - MC = 0", "q", "FOC isolation"],
+                      ["a*q^2 + b*q + c = 0", "q", "Quadratic"],
+                      ["w = MPL", "L", "Factor condition"],
+                    ].map(([eq, v, label]) => (
+                      <button key={`${eq}-${v}`} onClick={() => { setAlgSolveExpr(eq); setAlgSolveVar(v); setAlgSolveResult(null); }}
+                        style={{ padding: "0.22rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.color = C.gold; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
             {solverMode === "system" && (() => {

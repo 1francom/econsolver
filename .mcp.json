@@ -2,7 +2,7 @@
   "mcpServers": {
     "code-review-graph": {
       "type": "stdio",
-      "command": "code-review-graph",
+      "command": "C:\\Franco\\econsolver\\.venv-crg\\Scripts\\code-review-graph.exe",
       "args": [
         "serve"
       ]

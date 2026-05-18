@@ -150,10 +150,10 @@ src/
 | McCrary density test | CausalEngine.js | ✓ |
 | Logit / Probit | NonLinearEngine.js | ✓ validated vs R 4.4.1 glm() (6dp coef, 4dp SE) — IRLS/Newton-Raphson MLE |
 | GMM / LIML | GMMEngine.js | ✓ validated vs R (6dp coef, 4dp SE) — hard benchmarks in engineValidation.js; just-id + overid cases; SE bug fixed: was /n, now ×n |
-| Fuzzy RDD | CausalEngine.js | planned |
-| Event Study | PanelEngine.js | planned |
-| Panel LSDV | PanelEngine.js | planned |
-| Poisson FE | NonLinearEngine.js | planned |
+| Fuzzy RDD | CausalEngine.js | ✓ |
+| Event Study | PanelEngine.js | ✓ |
+| Panel LSDV | PanelEngine.js | ✓ |
+| Poisson FE | NonLinearEngine.js | ✓ |
 | Synthetic Control | SyntheticControlEngine.js | ✓ validated vs R Synth package (weights 2dp, gaps 2dp) — Frank-Wolfe vs ipop; hard benchmarks in engineValidation.js |
 
 ## Pipeline step types (runner.js) — 23 total

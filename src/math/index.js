@@ -60,6 +60,9 @@ export { wrapResult, getCoeffBlock } from "./EstimationResult.js";
 // ── Fit-failure diagnostics ──────────────────────────────────────────────────
 export { diagnoseFit } from "./diagnoseFit.js";
 
+// Symbolic algebra for the Calculate module
+export { solveAlgebraicEquation } from "./symbolicSolve.js";
+
 // ── Spatial Analytics (Phase 11) ─────────────────────────────────────────────
 export {
   haversine, euclidean,
@@ -68,3 +71,10 @@ export {
   pointInPolygon, parseWKTPolygon, spatialJoin,
   nearestNeighbor,
 } from "./SpatialEngine.js";
+
+// ── Resampling / permutation inference ───────────────────────────────────────
+export {
+  bootstrapMean,
+  subsampleMean,
+  permutationTwoSampleMean,
+} from "./Resampling.js";

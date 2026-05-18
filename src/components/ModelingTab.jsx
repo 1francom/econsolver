@@ -753,6 +753,40 @@ function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}, ope
           <div style={{ marginBottom: "1.2rem" }}>
             <CoeffTable dict={dict} rows={rows} varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.testStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
           </div>
+          {second.arCI && xVars.length === 1 && (() => {
+            const fmt = v => (v == null || !isFinite(v)) ? "—" : v.toFixed(4);
+            const ar = second.arCI;
+            const idx = second.varNames.indexOf(xVars[0]);
+            const wald = idx >= 0 && isFinite(second.beta[idx]) && isFinite(second.se[idx])
+              ? [second.beta[idx] - 1.96 * second.se[idx], second.beta[idx] + 1.96 * second.se[idx]]
+              : null;
+            const arText =
+              ar.type === "bounded"   ? `[${fmt(ar.lo)}, ${fmt(ar.hi)}]` :
+              ar.type === "unbounded" ? `(−∞, ${fmt(ar.lo)}] ∪ [${fmt(ar.hi)}, +∞)` :
+              ar.type === "all"       ? "(−∞, +∞)  — unidentified" :
+              ar.type === "empty"     ? "∅  — rejects all values" :
+              "—";
+            return (
+              <div style={{ marginBottom: "1.2rem", padding: "0.7rem 0.9rem", border: `1px solid ${C.border}`, background: C.surface, borderRadius: 4 }}>
+                <div style={{ fontSize: 10, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6 }}>
+                  Weak-IV robust CI (Anderson-Rubin, 95%)
+                </div>
+                <div style={{ fontSize: 12, color: C.text, fontFamily: mono }}>
+                  β<sub>{xVars[0]}</sub> ∈ {arText}
+                </div>
+                {wald && (
+                  <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono, marginTop: 4 }}>
+                    Wald (asymptotic): [{fmt(wald[0])}, {fmt(wald[1])}]
+                  </div>
+                )}
+                {ar.type !== "bounded" && (
+                  <div style={{ fontSize: 10, color: C.textDim, marginTop: 6, lineHeight: 1.5 }}>
+                    Non-convex / unbounded AR region signals weak identification — the Wald CI is unreliable here.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <PlotSelector
             accentColor={C.gold}
             defaultId="yhat"

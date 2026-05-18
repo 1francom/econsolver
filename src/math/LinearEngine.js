@@ -81,6 +81,26 @@ export function pValue(t, df) {
   return Math.min(1, tCDF(Math.abs(t), df));
 }
 
+// Inverse F CDF (quantile) — bisection.
+// fInv(p, df1, df2) returns the F value with CDF = p (lower-tail prob).
+// NB: fCDF in this module returns the *upper-tail* probability (used as p-value
+// throughout), so internally we solve fCDF(F) = 1 - p.
+export function fInv(p, df1, df2) {
+  if (!(p > 0) || !(p < 1)) return NaN;
+  const target = 1 - p; // upper-tail prob we want fCDF to hit
+  let lo = 0, hi = 100;
+  // Expand upper bracket until fCDF(hi) drops below target (upper-tail is decreasing).
+  for (let i = 0; i < 30 && fCDF(hi, df1, df2) > target; i++) hi *= 2;
+  for (let i = 0; i < 80; i++) {
+    const mid = 0.5 * (lo + hi);
+    const c = fCDF(mid, df1, df2);
+    // fCDF(F) decreases in F; we want fCDF(F_crit) = target.
+    if (c > target) lo = mid; else hi = mid;
+    if (hi - lo < 1e-6) break;
+  }
+  return 0.5 * (lo + hi);
+}
+
 export function stars(p) {
   return p < 0.01 ? "***" : p < 0.05 ? "**" : p < 0.1 ? "*" : "";
 }

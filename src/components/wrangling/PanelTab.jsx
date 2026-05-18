@@ -62,8 +62,8 @@ function PanelTab({rows,headers,panel,setPanel}){
             <span style={{fontSize:12,color:bc[v.balance]||C.textMuted,fontFamily:mono}}>{bl[v.balance]||v.balance}</span>
             {v.attrition>0&&<span style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>· t₀: {v.at0} → tN: {v.atN} ({(v.attrition*100).toFixed(0)}% lost)</span>}
           </div>
-          {v.dups.length>0&&<div style={{padding:"0.65rem 1rem",borderTop:`1px solid ${C.border}`,background:`${C.red}20`,borderLeft:`3px solid ${C.red}`}}>
-            <div style={{fontSize:11,color:C.red,fontWeight:700,marginBottom:3,fontFamily:mono}}>⚠ Duplicate (i,t) pairs — FE/FD blocked</div>
+          {v.dups.length>0&&<div style={{padding:"0.65rem 1rem",borderTop:`1px solid ${C.border}`,background:`${C.yellow}18`,borderLeft:`3px solid ${C.yellow}`}}>
+            <div style={{fontSize:11,color:C.yellow,fontWeight:700,marginBottom:3,fontFamily:mono}}>⚠ Duplicate (i,t) pairs — FD blocked, FE/TWFE unaffected</div>
             {v.dups.slice(0,3).map((d,i)=><div key={i} style={{fontSize:11,color:C.textDim,fontFamily:mono}}>e={String(d.e)}, t={String(d.t)} → rows {d.rows.join(" & ")}</div>)}
           </div>}
           <div style={{padding:"0.65rem 1rem",borderTop:`1px solid ${C.border}`}}>
@@ -77,7 +77,7 @@ function PanelTab({rows,headers,panel,setPanel}){
         {panel&&<Btn onClick={()=>setPanel(null)} color={C.red} ch="Clear"/>}
       </div>
       {panel&&<div style={{marginTop:"1rem",padding:"0.5rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono}}>
-        i=<span style={{color:C.gold}}>{panel.entityCol}</span> · t=<span style={{color:C.blue}}>{panel.timeCol}</span>{panel.validation?.blockFE&&<span style={{color:C.red}}> · ⚠ FE blocked</span>}
+        i=<span style={{color:C.gold}}>{panel.entityCol}</span> · t=<span style={{color:C.blue}}>{panel.timeCol}</span>{panel.validation?.blockFD&&<span style={{color:C.yellow}}> · ⚠ FD blocked</span>}
       </div>}
     </div>
   );
