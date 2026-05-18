@@ -126,6 +126,57 @@ export function runOLS(rows, yCol, xCols, seOpts = {}) {
   return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames, XtXinv };
 }
 
+// ─── OLS FROM SUFFICIENT STATISTICS ───────────────────────────────────────────
+// Same output shape as runOLS, computed from { n, XtX, XtY, YtY, sumY, varNames }
+// produced by buildOLSSuffStats() in services/data/duckdbOLS.js. Lets DuckDB
+// aggregate cross-products in SQL and avoids extracting all rows into JS.
+//
+// LIMITATIONS:
+//   - Classical SE only — robust SE (HC1/HC2/HC3, clustered, HAC) needs per-row
+//     residuals and X, so the caller must fall back to runOLS in that case.
+//   - resid and Yhat are null — diagnostics that need them (residual plots,
+//     Breusch-Pagan, Jarque-Bera, etc.) must extract rows separately.
+export function runOLSFromSuffStats({ n, XtX, XtY, YtY, sumY, varNames }) {
+  const k = XtX.length;          // includes intercept
+  if (!Number.isFinite(n) || n < k + 1) return null;
+
+  const XtXinv = matInv(XtX);
+  if (!XtXinv) return null;
+
+  // β = (X'X)⁻¹ X'Y
+  const beta = XtXinv.map(row => row.reduce((s, v, j) => s + v * XtY[j], 0));
+
+  // SSR = Y'Y − β' X'Y  (algebraic identity for OLS — no per-row residuals needed)
+  const betaXtY = beta.reduce((s, b, i) => s + b * XtY[i], 0);
+  const SSR = YtY - betaXtY;
+
+  const df = n - k;
+  const s2 = SSR / Math.max(1, df);
+
+  // SST = Σ(y − ȳ)² = Y'Y − (Σy)² / n
+  const SST = YtY - (sumY * sumY) / n;
+  const R2 = SST > 0 ? 1 - SSR / SST : 0;
+  const adjR2 = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
+
+  // Classical SE: SE_i = √(σ² · (X'X)⁻¹_{ii})
+  const se     = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  const tStats = beta.map((b, i) => b / se[i]);
+  const pVals  = tStats.map(t => pValue(t, df));
+
+  // F-stat against intercept-only null (k − 1 regressor restrictions)
+  const kReg  = k - 1;
+  const Fstat = kReg > 0 ? ((SST - SSR) / kReg) / s2 : 0;
+  const Fpval = kReg > 0 ? fCDF(Fstat, kReg, df)    : 1;
+
+  return {
+    beta, se, tStats, pVals, R2, adjR2,
+    n, df, SSR, s2,
+    resid: null, Yhat: null,    // not available in suff-stats path
+    Fstat, Fpval, varNames, XtXinv,
+    _suffStats: true,           // marker for downstream code (diagnostics gating)
+  };
+}
+
 // ─── WLS ENGINE ──────────────────────────────────────────────────────────────
 // Weighted Least Squares: β = (X'WX)⁻¹X'WY
 // weights: array of non-negative numbers, one per row (e.g. sampling weights).

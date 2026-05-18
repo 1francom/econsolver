@@ -8,17 +8,19 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
-  runOLS, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
+  runOLS, runOLSFromSuffStats, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
   runGMM, runLIML,
-  runFuzzyRDD, runEventStudy, runLSDV, runPoissonFE, runSyntheticControl,
+  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runSyntheticControl,
   wrapResult,
+  diagnoseFit,
 } from "../math/index.js";
 import { predict }              from "../math/calcEngine.js";
 import { extractAllRows }       from "../services/data/duckdb.js";
+import { buildOLSSuffStats }    from "../services/data/duckdbOLS.js";
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
@@ -1179,26 +1181,26 @@ function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, dict = {}, ro
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
-function buildModelAvail(panelOk) {
+function buildModelAvail(panelOk, panelFdOk) {
   return {
     OLS: true, WLS: true,
-    FE: panelOk, FD: panelOk,
+    FE: panelOk, FD: panelFdOk,
     LSDV: panelOk, TWFE: panelOk, EventStudy: panelOk,
     "2SLS": true, RDD: true, FuzzyRDD: true, DiD: true,
-    Logit: true, Probit: true, PoissonFE: true,
+    Logit: true, Probit: true, Poisson: true, PoissonFE: true,
     GMM: true, LIML: true,
     SyntheticControl: true,
   };
 }
-function buildModelHint(panel, panelOk) {
-  const noPanel = "No panel structure declared — set Entity & Time columns in Wrangling.";
-  const dupObs  = "Duplicate observations detected — fix in Wrangling.";
+function buildModelHint(panel, panelOk, panelFdOk) {
+  const noPanel   = "No panel structure declared — set Entity & Time columns in Wrangling.";
+  const dupObsFD  = "Duplicate (i,t) pairs — FD requires unique observations per cell.";
   return {
-    FE:        panelOk ? "" : panel ? dupObs : noPanel,
-    FD:        panelOk ? "" : panel ? dupObs : noPanel,
-    TWFE:      panelOk ? "" : noPanel,
-    LSDV:      panelOk ? "" : noPanel,
-    EventStudy:panelOk ? "" : noPanel,
+    FE:        panelOk  ? "" : noPanel,
+    FD:        panelFdOk ? "" : panel ? dupObsFD : noPanel,
+    TWFE:      panelOk  ? "" : noPanel,
+    LSDV:      panelOk  ? "" : noPanel,
+    EventStudy:panelOk  ? "" : noPanel,
   };
 }
 
@@ -1271,6 +1273,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [lsdvTimeFE,     setLsdvTimeFE]     = useState(false);
   const [treatedUnit,    setTreatedUnit]    = useState("");
   const [synthTreatTime, setSynthTreatTime] = useState("");
+  const [poissonEntityCol, setPoissonEntityCol] = useState("");
+  const [poissonOffsetCol, setPoissonOffsetCol] = useState("");
 
   // ── Inference / SE options ────────────────────────────────────────────────
   const [seType,      setSeType]      = useState("classical");
@@ -1367,9 +1371,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
 
-  const panelOk    = !!panel && !panel.blockFE;
-  const modelAvail = useMemo(() => buildModelAvail(panelOk),        [panelOk]);
-  const modelHint  = useMemo(() => buildModelHint(panel, panelOk),  [panel, panelOk]);
+  const panelOk    = !!panel;
+  const panelFdOk  = !!panel && !panel.blockFD;
+  const modelAvail = useMemo(() => buildModelAvail(panelOk, panelFdOk),        [panelOk, panelFdOk]);
+  const modelHint  = useMemo(() => buildModelHint(panel, panelOk, panelFdOk), [panel, panelOk, panelFdOk]);
 
   // ── Metadata & coaching signals ──────────────────────────────────────────────
   const metadataReport = useMemo(
@@ -1433,23 +1438,27 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         } else {
           res = runOLS(dataRows, y, allX, seOpts);
         }
-        if (!res) return { error: "Matrix is singular or insufficient data." };
+        if (!res) return { error: diagnoseFit(dataRows, y, allX, wCol) };
         const olsType = wCol ? "WLS" : "OLS";
         return { result: wrapResult(olsType, res, { yVar: y, xVars: expX, wVars: expW, weightCol: wCol ?? null }), panelFE: null, panelFD: null };
 
-      } else if (model === "FE" || model === "FD") {
+      } else if (model === "FE") {
         if (!allX.length) return { error: "Select at least one regressor." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const feRaw = runFE(dataRows, y, allX, ec, tc, seOpts);
-        const fdRaw = runFD(dataRows, y, allX, ec, tc, seOpts);
-        const fe = feRaw?.error ? null : feRaw;
-        const fd = fdRaw?.error ? null : fdRaw;
-        if (!fe && !fd)
-          return { error: feRaw?.error ?? fdRaw?.error ?? "Panel estimation failed. Check that Y and X are numeric and the panel is valid." };
+        if (!feRaw || feRaw.error) return { error: feRaw?.error ?? "Fixed Effects estimation failed." };
         const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc };
-        const feRes = fe ? wrapResult("FE", fe, panelSpec) : null;
-        const fdRes = fd ? wrapResult("FD", fd, panelSpec) : null;
-        return { result: { type: model, fe: feRes, fd: fdRes }, panelFE: feRes, panelFD: fdRes };
+        const feRes = wrapResult("FE", feRaw, panelSpec);
+        return { result: { type: "FE", fe: feRes, fd: null }, panelFE: feRes, panelFD: null };
+
+      } else if (model === "FD") {
+        if (!allX.length) return { error: "Select at least one regressor." };
+        const ec = panel.entityCol, tc = panel.timeCol;
+        const fdRaw = runFD(dataRows, y, allX, ec, tc, seOpts);
+        if (!fdRaw || fdRaw.error) return { error: fdRaw?.error ?? "First Differences estimation failed." };
+        const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc };
+        const fdRes = wrapResult("FD", fdRaw, panelSpec);
+        return { result: { type: "FD", fe: null, fd: fdRes }, panelFE: null, panelFD: fdRes };
 
       } else if (model === "2SLS") {
         if (!expX.length) return { error: "Select endogenous regressor(s) in Features (X)." };
@@ -1516,7 +1525,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (weights.every(w => w === null))
           return { error: `Weight column '${wCol}' has no valid positive values.` };
         const res = runWLS(dataRows, y, allX, weights, seOpts);
-        if (!res) return { error: "Matrix is singular or insufficient data." };
+        if (!res) return { error: diagnoseFit(dataRows, y, allX, wCol) };
         return { result: wrapResult("WLS", res, { yVar: y, xVars: expX, wVars: expW, weightCol: wCol }), panelFE: null, panelFD: null };
 
       } else if (model === "LSDV") {
@@ -1548,10 +1557,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (!res || res.error) return { error: res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth." };
         return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars: expW, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }), panelFE: null, panelFD: null };
 
+      } else if (model === "Poisson") {
+        if (!allX.length) return { error: "Select at least one regressor (X)." };
+        const offCol = poissonOffsetCol || null;
+        const res = runPoisson(dataRows, y, allX, seOpts, offCol);
+        if (!res || res.error) return { error: res?.error ?? "Poisson GLM failed. Ensure Y is a non-negative count or rate variable." };
+        return { result: wrapResult("Poisson", res, { yVar: y, xVars: allX, wVars: expW, offsetCol: offCol }), panelFE: null, panelFD: null };
+
       } else if (model === "PoissonFE") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
-        if (!panel?.entityCol) return { error: "Declare a panel structure (Entity column) in Wrangling before running Poisson FE." };
-        const ec = panel.entityCol;
+        const ec = panel?.entityCol || poissonEntityCol;
+        if (!ec) return { error: "Select an Entity (i) column in the configuration panel below." };
         const res = runPoissonFE(dataRows, y, allX, ec, seOpts);
         if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
         return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec }), panelFE: null, panelFD: null };
@@ -1571,7 +1587,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } catch (e) {
       return { error: `Estimation error: ${e.message}` };
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars]);
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -1650,11 +1666,43 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const estimate = useCallback(async () => {
     setErr(null); setResult(null); setPanelFE(null); setPanelFD(null); setRunning(true);
     try {
-      // For DuckDB datasets, `rows` is only a 500-row preview.
-      // Extract the full dataset before estimating.
-      let estimationRows = rows;
       const duckTable = cleanedData?._duckdb?.tableName;
-      if (duckTable && rows.length < (cleanedData._duckdb.rowCount ?? Infinity)) {
+      const rowCount  = cleanedData?._duckdb?.rowCount ?? 0;
+
+      // ── Fast path: DuckDB sufficient-statistics OLS ────────────────────────
+      // SQL computes X'X, X'Y, Y'Y, n; JS only does the inversion + scaling.
+      // Avoids materializing the full dataset into JS memory.
+      // Gated to plain OLS — no weights, no factor expansion, classical SE.
+      const wantSuffStats =
+        duckTable &&
+        rowCount > rows.length &&            // full data not already in memory
+        model === "OLS" &&
+        !weightVar[0] &&
+        factorVars.size === 0 &&
+        (!seType || seType === "classical");
+
+      if (wantSuffStats && yVar[0] && (xVars.length + wVars.length) > 0) {
+        try {
+          const allX = [...xVars, ...wVars];
+          const suff = await buildOLSSuffStats(duckTable, yVar[0], allX);
+          const raw  = runOLSFromSuffStats(suff);
+          if (raw) {
+            const wrapped = wrapResult("OLS", raw, {
+              yVar: yVar[0], xVars, wVars, weightCol: null,
+            });
+            setResult(wrapped);
+            return;
+          }
+          // raw === null → singular X'X or n < k; fall through to full extraction
+        } catch (e) {
+          console.warn("[ModelingTab] DuckDB suff-stats path failed, falling back to full extraction:", e);
+        }
+      }
+
+      // ── Standard path: extract full rows into JS, run engine ───────────────
+      // For DuckDB datasets, `rows` is only a 500-row preview.
+      let estimationRows = rows;
+      if (duckTable && rows.length < (rowCount || Infinity)) {
         estimationRows = await extractAllRows(duckTable);
       }
       const out = _runEstimation(estimationRows);
@@ -1665,7 +1713,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } finally {
       setRunning(false);
     }
-  }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
+  }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
+      model, yVar, xVars, wVars, weightVar, factorVars, seType]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -1812,7 +1861,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             lsdvTimeFE={lsdvTimeFE}         setLsdvTimeFE={setLsdvTimeFE}
             treatedUnit={treatedUnit}       setTreatedUnit={setTreatedUnit}
             synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime}
+            poissonEntityCol={poissonEntityCol} setPoissonEntityCol={setPoissonEntityCol}
+            poissonOffsetCol={poissonOffsetCol} setPoissonOffsetCol={setPoissonOffsetCol}
             rows={rows}
+            headers={headers}
             panel={panel}
           />
 
@@ -2245,6 +2297,47 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             );
           })()}
 
+          {/* Poisson GLM */}
+          {result?.type === "Poisson" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson GLM Results</span>
+                  {r.hasOffset && <Badge label="rate model (offset)" color={C.teal} />}
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
+                               : <Badge label="⚠ did not converge" color={C.red} />}
+                </div>
+                <FitBar items={[
+                  { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: "#9e7ec8" },
+                  { label: "Log-lik", value: r.logLik?.toFixed(3)     ?? "—", color: C.textDim },
+                  { label: "AIC",     value: r.AIC?.toFixed(1)         ?? "—", color: C.textDim },
+                  { label: "BIC",     value: r.BIC?.toFixed(1)         ?? "—", color: C.textDim },
+                  { label: "n",       value: r.n,                              color: C.text },
+                ]} />
+                <Lbl color={C.textMuted}>Coefficient Table (log-linear; IRR = exp(β))</Lbl>
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                {r.IRR?.length > 0 && (
+                  <div style={{ marginTop: "1rem" }}>
+                    <Lbl color={C.textMuted}>Incidence Rate Ratios (IRR = exp(β))</Lbl>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {r.varNames.map((v, i) => (
+                        <div key={v} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                          {v}: <span style={{ color: C.text }}>{r.IRR[i]?.toFixed(4) ?? "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <PlotSelector accentColor={"#9e7ec8"} defaultId="forest" plots={[
+                  { id: "forest", label: "Coefficient plot",
+                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
+                ]} />
+              </div>
+            );
+          })()}
+
           {/* Poisson FE */}
           {result?.type === "PoissonFE" && (() => {
             const r = result;
@@ -2255,6 +2348,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
                                : <Badge label="⚠ did not converge" color={C.red} />}
+                  {r.droppedZeroUnits > 0 && <Badge label={`${r.droppedZeroUnits} zero-Y units dropped`} color={C.yellow} />}
                 </div>
                 <FitBar items={[
                   { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: "#9e7ec8" },
