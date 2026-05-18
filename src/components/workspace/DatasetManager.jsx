@@ -345,6 +345,16 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
                           <span style={{ color: C.violet, marginLeft: 6 }}>{ds.source}</span>
                         )}
                       </div>
+                      {ds.crs?.label && (
+                        <div
+                          style={{ fontSize: 9, color: ds.crs.reprojected ? C.gold : C.teal, marginTop: 2, opacity: 0.85 }}
+                          title={ds.crs.reprojected
+                            ? `Reprojected from ${ds.crs.label} → ${ds.crs.target}`
+                            : `CRS: ${ds.crs.label}`}
+                        >
+                          {ds.crs.reprojected ? "↻ " : "◇ "}{ds.crs.label}
+                        </div>
+                      )}
                     </div>
 
                     {isActive && (

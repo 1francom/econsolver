@@ -138,6 +138,90 @@ function detectDelimiter(text) {
 
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
 export async function parseFileForPrimary(file) { return parseFile(file); }
+
+// Multi-file entrypoint. Groups shapefile companions (.shp/.dbf/.prj/.shx/.cpg)
+// by basename so a single shapefile loaded as separate files (instead of a .zip)
+// produces one dataset with its CRS detected, just like R sf::st_read() would.
+// All other files are parsed independently — one dataset each.
+// Returns: [{ filename, parsed?, error? }]
+export async function parseFiles(fileList) {
+  const files = Array.from(fileList || []);
+  const groups = groupShapefileFiles(files);
+  const out = [];
+  for (const g of groups) {
+    try {
+      const parsed = await g.parse();
+      if (parsed && parsed.rows?.length) out.push({ filename: g.filename, parsed });
+      else out.push({ filename: g.filename, error: "No rows parsed." });
+    } catch (e) {
+      out.push({ filename: g.filename, error: e?.message || String(e) });
+    }
+  }
+  return out;
+}
+
+// Group a flat list of File objects into logical datasets.
+// Returns: [{ filename, parse: () => Promise<parsed> }]
+function groupShapefileFiles(files) {
+  const SHAPE_EXTS = new Set(["shp", "dbf", "prj", "shx", "cpg"]);
+  const shapeBuckets = {};       // basename → { shp?, dbf?, prj?, ... }
+  const singles      = [];
+
+  for (const f of files) {
+    const dot = f.name.lastIndexOf(".");
+    const ext = dot >= 0 ? f.name.slice(dot + 1).toLowerCase() : "";
+    const base = dot >= 0 ? f.name.slice(0, dot) : f.name;
+    if (SHAPE_EXTS.has(ext)) {
+      // Use lowercase basename so "x.SHP" and "x.dbf" group together
+      const key = base.toLowerCase();
+      if (!shapeBuckets[key]) shapeBuckets[key] = { _base: base };
+      shapeBuckets[key][ext] = f;
+    } else {
+      singles.push(f);
+    }
+  }
+
+  const out = [];
+
+  // Singles — each is its own dataset
+  for (const f of singles) {
+    out.push({ filename: f.name, parse: () => parseFile(f) });
+  }
+
+  // Shapefile groups
+  for (const key of Object.keys(shapeBuckets)) {
+    const g = shapeBuckets[key];
+    const base = g._base;
+    if (g.dbf) {
+      // dbf (+ optional shp + optional prj) → parseShapefile
+      out.push({
+        filename: `${base}.shp`,
+        parse: async () => {
+          const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
+          const dbfBuf = await g.dbf.arrayBuffer();
+          const shpBuf = g.shp ? await g.shp.arrayBuffer() : null;
+          const prjTxt = g.prj ? await g.prj.text() : null;
+          return parseShapefile(dbfBuf, shpBuf, prjTxt);
+        },
+      });
+    } else if (g.shp) {
+      // .shp-only with optional .prj
+      out.push({
+        filename: `${base}.shp`,
+        parse: async () => {
+          const { parseSHPOnly } = await import("./services/data/parsers/shapefile.js");
+          const shpBuf = await g.shp.arrayBuffer();
+          const prjTxt = g.prj ? await g.prj.text() : null;
+          return parseSHPOnly(shpBuf, prjTxt);
+        },
+      });
+    }
+    // (.prj or .shx alone with no .dbf/.shp → silently dropped)
+  }
+
+  return out;
+}
+
 async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   if (["csv", "txt"].includes(ext)) {
@@ -185,6 +269,7 @@ async function parseFile(file) {
     const keys = Object.keys(files);
     const shpKey = keys.find(k => k.toLowerCase().endsWith(".shp"));
     const dbfKey = keys.find(k => k.toLowerCase().endsWith(".dbf"));
+    const prjKey = keys.find(k => k.toLowerCase().endsWith(".prj"));
     if (!dbfKey) throw new Error("ZIP contains no .dbf file. Upload a shapefile ZIP with both .shp and .dbf.");
     const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
     const dbfArr = files[dbfKey];
@@ -194,7 +279,12 @@ async function parseFile(file) {
       const shpArr = files[shpKey];
       shpBuf = shpArr.buffer.slice(shpArr.byteOffset, shpArr.byteOffset + shpArr.byteLength);
     }
-    return parseShapefile(dbfBuf, shpBuf);
+    let prjText = null;
+    if (prjKey) {
+      const prjArr = files[prjKey];
+      prjText = new TextDecoder("utf-8").decode(prjArr);
+    }
+    return parseShapefile(dbfBuf, shpBuf, prjText);
   }
   if (ext === "shp") {
     const { parseSHPOnly } = await import("./services/data/parsers/shapefile.js");
@@ -217,8 +307,8 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
   function handleDrop(e) {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) onLoadFile(file);
+    const files = e.dataTransfer.files;
+    if (files && files.length) onLoadFile(files);
   }
 
   return (
@@ -340,9 +430,10 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.parquet,.zip"
+          multiple
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
           style={{ display: "none" }}
-          onChange={e => { if (e.target.files[0]) onLoadFile(e.target.files[0]); e.target.value = ""; }}
+          onChange={e => { if (e.target.files?.length) onLoadFile(e.target.files); e.target.value = ""; }}
         />
         <button
           onClick={() => fileRef.current?.click()}
@@ -539,6 +630,29 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     [datasets, activeId],
   );
 
+  // Add a single already-parsed dataset to the session. Shared by single-file
+  // and multi-file load paths so they stay in sync.
+  const addParsedDataset = useCallback((filename, parsed) => {
+    parsed = ensureRowIds(parsed);
+    const id    = genId();
+    const entry = { id, filename, rawData: parsed, crs: parsed._crs ?? null };
+    setDatasets(prev => [...prev, entry]);
+    setActiveId(id);
+    saveRawData(id, parsed);
+    if (dispatch) {
+      registerDataset(dispatch, {
+        id:       entry.id,
+        name:     filename,
+        source:   "loaded",
+        rowCount: parsed.rows.length,
+        colCount: parsed.headers.length,
+        headers:  parsed.headers,
+        crs:      parsed._crs ?? null,
+      });
+    }
+    return id;
+  }, [dispatch]);
+
   const handleLoadFile = useCallback(async (file) => {
     setLoading(true);
     setLoadErr("");
@@ -547,36 +661,44 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       if (!parsed || !parsed.rows.length) {
         throw new Error("Could not parse file — no rows found. Check the file format.");
       }
-      // Assign stable row IDs for cell editing
-      parsed = ensureRowIds(parsed);
       if (parsed._duckdb?.truncated) {
         setLoadErr(
           `Large file: loaded first 2,000,000 of ${parsed._duckdb.rowCount.toLocaleString()} rows via DuckDB.`
         );
       }
-      const id    = genId();
-      const entry = { id, filename: file.name, rawData: parsed };
-      setDatasets(prev => [...prev, entry]);
-      setActiveId(id);
-      // Persist so this secondary dataset survives a reload if promoted to primary
-      saveRawData(id, parsed);
-      if (dispatch) {
-        registerDataset(dispatch, {
-          id:       entry.id,
-          name:     file.name,
-          source:   "loaded",
-          rowCount: parsed.rows.length,
-          colCount: parsed.headers.length,
-          headers:  parsed.headers,
-        });
-      }
+      addParsedDataset(file.name, parsed);
     } catch (e) {
       setLoadErr("Parse error: " + (e?.message || "unknown"));
       throw e;
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [addParsedDataset]);
+
+  // Multi-file path — groups shapefile siblings into single datasets, loads
+  // all valid entries, and reports per-file errors without throwing.
+  const handleLoadFiles = useCallback(async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    if (files.length === 1) { await handleLoadFile(files[0]); return; }
+    setLoading(true);
+    setLoadErr("");
+    try {
+      const results = await parseFiles(files);
+      const ok     = results.filter(r => r.parsed);
+      const errors = results.filter(r => r.error);
+      for (const r of ok) addParsedDataset(r.filename, r.parsed);
+      if (errors.length) {
+        setLoadErr(`${errors.length} file(s) failed: ` + errors.map(e => `${e.filename} (${e.error})`).join("; "));
+      } else if (ok.length > 1) {
+        setLoadErr(`Loaded ${ok.length} datasets.`);
+      }
+    } catch (e) {
+      setLoadErr("Parse error: " + (e?.message || "unknown"));
+    } finally {
+      setLoading(false);
+    }
+  }, [addParsedDataset, handleLoadFile]);
 
   const handleRemove = useCallback((id) => {
     if (id === primaryId) return; // primary dataset is protected
@@ -614,6 +736,8 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
   // Must come after handleLoadFile and handleSaveSubset are defined.
   useImperativeHandle(ref, () => ({
     addFile:          handleLoadFile,
+    addFiles:         handleLoadFiles,
+    addParsed:        addParsedDataset,
     addApiData:       (fname, rows, headers) => handleSaveSubset(fname, rows, headers),
     switchToDataset:  (id) => setActiveId(id),
     removeDataset:    (id) => {
@@ -663,7 +787,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         desc: `Fill: ${opLabel} "${col}" → ${text.length > 40 ? text.slice(0, 40) + "…" : text}`,
       });
     },
-  }), [handleLoadFile, handleSaveSubset, primaryId]);
+  }), [handleLoadFile, handleLoadFiles, addParsedDataset, handleSaveSubset, primaryId]);
 
   return (
     <div style={{
