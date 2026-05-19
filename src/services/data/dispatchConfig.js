@@ -14,6 +14,10 @@ export const CACHE_MAX_ENTRIES = 50;
 // Sets grow per fase as estimators / SE types get SQL coverage.
 // Fase 0:  {OLS}, {classical}
 // Fase 1: + HC0/HC1/HC2/HC3 + factor expansion
-// Fase 2: + cluster, twoway, HAC
+// Fase 2: + clustered, twoway, HAC (lowercase = matches UI seType)
 export const SQL_SUPPORTED_ESTIMATORS = new Set(["OLS"]);
-export const SQL_SUPPORTED_SE         = new Set(["classical", "HC0", "HC1", "HC2", "HC3"]);
+export const SQL_SUPPORTED_SE         = new Set([
+  "classical",
+  "HC0", "HC1", "HC2", "HC3",
+  "clustered", "twoway", "HAC",
+]);
