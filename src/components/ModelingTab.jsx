@@ -23,6 +23,9 @@ import { extractAllRows }       from "../services/data/duckdb.js";
 import { buildOLSSuffStats }    from "../services/data/duckdbOLS.js";
 import { shouldUseSQLPath }     from "../services/data/duckdbDispatch.js";
 import { CACHE_MAX_ENTRIES }    from "../services/data/dispatchConfig.js";
+import { expandFactors }        from "../services/data/duckdbFactors.js";
+import { computeHCMeat, computeHCMeatWithLeverage } from "../services/data/duckdbRobustSE.js";
+import { sampleResiduals }      from "../services/data/duckdbResiduals.js";
 import {
   createSuffStatsCache, makeCacheKey, validateSuffStatsEntry,
 } from "../services/data/suffStatsCache.js";
@@ -1746,23 +1749,72 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
       if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
         try {
-          const cache = suffStatsCacheRef.current;
-          const key   = makeCacheKey(duckTable, yVar[0], allX);
-          let suff    = cache.get(key);
-          let cacheHit = suff != null && validateSuffStatsEntry(suff, allX);
-          if (!cacheHit) {
-            const m = await measure(() => buildOLSSuffStats(duckTable, yVar[0], allX));
-            suff = m.result;
-            cache.set(key, suff);
-            logEstimate({ path: "sql", phase: "suffStats", n: rowCount, k: allX.length, msTotal: m.ms });
+          const { xColsExpanded, dummySQL } = await expandFactors({
+            xCols: allX, tableName: duckTable,
+          });
+          // Re-check post-expansion k against threshold
+          if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded })) {
+            throw new Error("Post-expansion k exceeds threshold — fallback to JS");
           }
-          const m2 = await measure(async () => runOLSFromSuffStats(suff));
+
+          const cache = suffStatsCacheRef.current;
+          const key   = makeCacheKey(duckTable, yVar[0], xColsExpanded);
+          let entry   = cache.get(key);
+          let cacheHit = entry != null && validateSuffStatsEntry(entry, xColsExpanded);
+          if (!cacheHit) {
+            const m = await measure(() => buildOLSSuffStats(duckTable, yVar[0], xColsExpanded, { dummySQL }));
+            entry = { ...m.result, dummySQL };
+            cache.set(key, entry);
+            logEstimate({ path: "sql", phase: "suffStats", n: rowCount, k: xColsExpanded.length, msTotal: m.ms });
+          }
+
+          // Compute β and Ainv once (needed for HC2/HC3 leverage). Cached on entry.
+          if (!entry.beta) {
+            const classicalRaw = runOLSFromSuffStats({
+              n: entry.n, XtX: entry.XtX, XtY: entry.XtY,
+              YtY: entry.YtY, sumY: entry.sumY, varNames: entry.varNames,
+            });
+            if (!classicalRaw) throw new Error("Suff-stats solve returned null (singular X'X)");
+            entry.beta = classicalRaw.beta;
+            entry.Ainv = classicalRaw.XtXinv;
+          }
+
+          // Meat pass (only if non-classical)
+          let meat = null;
+          const hc = seType && seType !== "classical" ? seType : null;
+          if (hc) {
+            const mm = await measure(async () => {
+              if (hc === "HC0" || hc === "HC1") {
+                return computeHCMeat({
+                  tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL, beta: entry.beta,
+                });
+              }
+              return computeHCMeatWithLeverage({
+                tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+                beta: entry.beta, Ainv: entry.Ainv, hcType: hc,
+              });
+            });
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: `meat-${hc}`, n: rowCount, k: xColsExpanded.length, msTotal: mm.ms });
+          }
+
+          const m2 = await measure(async () => runOLSFromSuffStats({
+            n: entry.n, XtX: entry.XtX, XtY: entry.XtY,
+            YtY: entry.YtY, sumY: entry.sumY, varNames: entry.varNames,
+            meat, hcType: hc,
+          }));
           const raw = m2.result;
           logEstimate({
-            path: "sql", phase: "solve", n: rowCount, k: allX.length,
-            seType: dispatchCtx.seType, cacheHit, msTotal: m2.ms,
+            path: "sql", phase: "solve", n: rowCount, k: xColsExpanded.length,
+            seType, cacheHit, msTotal: m2.ms,
           });
+
           if (raw) {
+            raw._hasLazyResiduals = true;
+            raw._residualsThunk   = () => sampleResiduals({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: raw.beta, sampleSize: 5000,
+            });
             const wrapped = wrapResult("OLS", raw, {
               yVar: yVar[0], xVars, wVars, weightCol: null,
             });
