@@ -1,5 +1,7 @@
 # Fase 1 — OLS Complete in SQL Implementation Plan
 
+**Status:** DONE (2026-05-19) — see commits b616510 → a24a307. HC0–HC3 + factors + lazy residuals + BP/DW/JB shipped and validated against R `sandwich::vcovHC`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Push the rest of the OLS workflow (HC0–HC3 robust SE, factor expansion, lazy residuals, cheap diagnostics) into DuckDB SQL so large-n OLS estimation never materializes the full dataset in JS.

@@ -1,5 +1,7 @@
 # DuckDB Fase 0 — Dispatcher, Cache, perfLog Implementation Plan
 
+**Status:** DONE (2026-05-19) — see commits a05c232 → 653da6f.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the ad-hoc OLS SQL gate in `ModelingTab.jsx` with a single `shouldUseSQLPath()` dispatcher, add a suff-stats cache, and add per-estimate performance instrumentation. No new estimators yet — Fase 0 is foundation only.
