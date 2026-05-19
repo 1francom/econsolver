@@ -16,4 +16,4 @@ export const CACHE_MAX_ENTRIES = 50;
 // Fase 1: + HC0/HC1/HC2/HC3 + factor expansion
 // Fase 2: + cluster, twoway, HAC
 export const SQL_SUPPORTED_ESTIMATORS = new Set(["OLS"]);
-export const SQL_SUPPORTED_SE         = new Set(["classical"]);
+export const SQL_SUPPORTED_SE         = new Set(["classical", "HC0", "HC1", "HC2", "HC3"]);

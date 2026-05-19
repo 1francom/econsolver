@@ -26,6 +26,5 @@ export function shouldUseSQLPath(ctx) {
   const se = ctx.seType ?? "classical";
   if (!SQL_SUPPORTED_SE.has(se)) return false;
   if (ctx.hasWeights) return false;
-  if (ctx.hasFactors) return false;
   return true;
 }

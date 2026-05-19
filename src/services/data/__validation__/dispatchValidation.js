@@ -23,7 +23,9 @@ function validateConfig() {
   check("CACHE_MAX_ENTRIES = 50",       cfg.CACHE_MAX_ENTRIES === 50);
   check("SQL_SUPPORTED_ESTIMATORS has OLS", cfg.SQL_SUPPORTED_ESTIMATORS.has("OLS"));
   check("SQL_SUPPORTED_SE has classical",   cfg.SQL_SUPPORTED_SE.has("classical"));
-  check("SQL_SUPPORTED_SE does not have HC1", !cfg.SQL_SUPPORTED_SE.has("HC1"));
+  check("SQL_SUPPORTED_SE has HC0", cfg.SQL_SUPPORTED_SE.has("HC0"));
+  check("SQL_SUPPORTED_SE has HC3", cfg.SQL_SUPPORTED_SE.has("HC3"));
+  check("SQL_SUPPORTED_SE does not have clustered", !cfg.SQL_SUPPORTED_SE.has("clustered"));
 }
 
 async function validatePerfLog() {
@@ -129,12 +131,16 @@ function validateDispatch() {
     shouldUseSQLPath({ ...baseCtx, xColsExpanded: new Array(100).fill("x") }) === true);
   check("unsupported estimator (FE) → false",
     shouldUseSQLPath({ ...baseCtx, estimator: "FE" }) === false);
-  check("unsupported seType (HC1) → false",
-    shouldUseSQLPath({ ...baseCtx, seType: "HC1" }) === false);
+  check("HC0 → true", shouldUseSQLPath({ ...baseCtx, seType: "HC0" }) === true);
+  check("HC1 → true", shouldUseSQLPath({ ...baseCtx, seType: "HC1" }) === true);
+  check("HC2 → true", shouldUseSQLPath({ ...baseCtx, seType: "HC2" }) === true);
+  check("HC3 → true", shouldUseSQLPath({ ...baseCtx, seType: "HC3" }) === true);
+  check("clustered → false (Fase 2)",
+    shouldUseSQLPath({ ...baseCtx, seType: "clustered" }) === false);
   check("hasWeights=true → false",
     shouldUseSQLPath({ ...baseCtx, hasWeights: true }) === false);
-  check("hasFactors=true → false",
-    shouldUseSQLPath({ ...baseCtx, hasFactors: true }) === false);
+  check("hasFactors=true → true (Fase 1)",
+    shouldUseSQLPath({ ...baseCtx, hasFactors: true }) === true);
   check("seType undefined defaults to classical → true",
     shouldUseSQLPath({ ...baseCtx, seType: undefined }) === true);
 }
