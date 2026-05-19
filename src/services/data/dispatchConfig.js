@@ -14,7 +14,10 @@ export const CACHE_MAX_ENTRIES = 50;
 // Sets grow per fase as estimators / SE types get SQL coverage.
 // Fase 0:  {OLS}, {classical}
 // Fase 1: + HC0/HC1/HC2/HC3 + factor expansion
-// Fase 2: + clustered, twoway, HAC (lowercase = matches UI seType)
+// Fase 2: + clustered, twoway, HAC
+// Values stored here are canonical (post-normalization). ModelingTab.estimate()
+// canonicalizes UI seType before calling shouldUseSQLPath: hc[0-3] → uppercase,
+// hac → HAC, clustered/twoway pass through lowercase.
 export const SQL_SUPPORTED_ESTIMATORS = new Set(["OLS"]);
 export const SQL_SUPPORTED_SE         = new Set([
   "classical",
