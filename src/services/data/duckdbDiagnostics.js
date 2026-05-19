@@ -166,3 +166,79 @@ export async function breuschPaganSQL(args) {
   }
   return { n, XtX, Xte, sst_e2: num(r.sst_e2), df: dim - 1 };
 }
+
+/**
+ * White (1980) heteroskedasticity test via aux regression e² ~ [X, X², X⊗X].
+ * Returns suff stats; caller solves aux β in JS to compute R²_aux and the
+ * test statistic n·R²_aux ~ χ²(df).
+ *
+ * We do not run the aux regression here — the orchestrator in ModelingTab
+ * already imports runOLSFromSuffStats and can solve the small aux problem.
+ *
+ * @param {object} args  — same shape as breuschPaganSQL
+ * @returns {Promise<{
+ *   n: number,
+ *   XtXAux: number[][],
+ *   XtYAux: number[],      // Xaux' (e²)
+ *   YtYAux: number,        // Σ(e²)²
+ *   sumYAux: number,       // Σ(e²)
+ *   varNamesAux: string[], // labels (just for symmetry with engine API)
+ *   pAux: number,
+ * }>}
+ */
+export async function whiteTestSQL(args) {
+  const { conn } = await getDuckDB();
+  const { cteSQL, boundParams, dim } = buildCTE(args);
+  const k = dim - 1;  // number of non-intercept regressors
+
+  // Aux column expressions. Index 0 = intercept (1.0). Then x_i (i=1..k),
+  // then x_i² (i=1..k), then x_i*x_j (i<j, both 1..k).
+  const auxCols = [];          // SQL expressions, one per aux column
+  const auxNames = [];
+  auxCols.push("1.0"); auxNames.push("(Intercept)");
+  for (let i = 1; i <= k; i++) { auxCols.push(`_x_${i}`);                 auxNames.push(`x${i}`);        }
+  for (let i = 1; i <= k; i++) { auxCols.push(`_x_${i} * _x_${i}`);       auxNames.push(`x${i}_sq`);     }
+  for (let i = 1; i <= k; i++)
+    for (let j = i + 1; j <= k; j++) {
+      auxCols.push(`_x_${i} * _x_${j}`);
+      auxNames.push(`x${i}_x${j}`);
+    }
+  const pAux = auxCols.length;
+
+  // Aggregates: X'X upper tri, X'(e²), Σe², Σ(e²)²
+  const aggs = ["COUNT(*) AS n",
+                "SUM(POWER(_e, 2))           AS sumY",
+                "SUM(POWER(POWER(_e, 2), 2)) AS YtY"];
+  for (let i = 0; i < pAux; i++) {
+    aggs.push(`SUM((${auxCols[i]}) * POWER(_e, 2)) AS xy_${i}`);
+    for (let j = i; j < pAux; j++) {
+      aggs.push(`SUM((${auxCols[i]}) * (${auxCols[j]})) AS xx_${i}_${j}`);
+    }
+  }
+
+  const sql = `WITH ${cteSQL} SELECT ${aggs.join(", ")} FROM mf`;
+  const stmt = await conn.prepare(sql);
+  const r = (await stmt.query(...boundParams)).toArray()[0];
+  await stmt.close();
+
+  const n = num(r.n);
+  const XtXAux = Array.from({ length: pAux }, () => Array(pAux).fill(0));
+  const XtYAux = Array(pAux).fill(0);
+  for (let i = 0; i < pAux; i++) {
+    XtYAux[i] = num(r[`xy_${i}`]);
+    for (let j = i; j < pAux; j++) {
+      const v = num(r[`xx_${i}_${j}`]);
+      XtXAux[i][j] = v;
+      if (i !== j) XtXAux[j][i] = v;
+    }
+  }
+  return {
+    n,
+    XtXAux,
+    XtYAux,
+    YtYAux: num(r.YtY),
+    sumYAux: num(r.sumY),
+    varNamesAux: auxNames,
+    pAux,
+  };
+}
