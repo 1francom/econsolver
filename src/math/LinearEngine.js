@@ -152,11 +152,15 @@ export function runOLS(rows, yCol, xCols, seOpts = {}) {
 // aggregate cross-products in SQL and avoids extracting all rows into JS.
 //
 // LIMITATIONS:
-//   - Classical SE only — robust SE (HC1/HC2/HC3, clustered, HAC) needs per-row
-//     residuals and X, so the caller must fall back to runOLS in that case.
+//   - Robust SE (HC0/HC1/HC2/HC3) supported when caller passes precomputed
+//     `meat` matrix (computed by duckdbRobustSE.computeHCMeat or
+//     computeHCMeatWithLeverage in SQL). hcType="HC1" applies n/(n-k) scaling.
 //   - resid and Yhat are null — diagnostics that need them (residual plots,
 //     Breusch-Pagan, Jarque-Bera, etc.) must extract rows separately.
-export function runOLSFromSuffStats({ n, XtX, XtY, YtY, sumY, varNames }) {
+export function runOLSFromSuffStats({
+  n, XtX, XtY, YtY, sumY, varNames,
+  meat = null, hcType = null,
+}) {
   const k = XtX.length;          // includes intercept
   if (!Number.isFinite(n) || n < k + 1) return null;
 
@@ -178,8 +182,26 @@ export function runOLSFromSuffStats({ n, XtX, XtY, YtY, sumY, varNames }) {
   const R2 = SST > 0 ? 1 - SSR / SST : 0;
   const adjR2 = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
 
-  // Classical SE: SE_i = √(σ² · (X'X)⁻¹_{ii})
-  const se     = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  // SE: classical or sandwich (robust)
+  let se;
+  if (meat !== null) {
+    // Sandwich: V = (X'X)⁻¹ · meat · (X'X)⁻¹
+    const dim = k;
+    const tmp = Array.from({ length: dim }, () => Array(dim).fill(0));
+    for (let i = 0; i < dim; i++)
+      for (let j = 0; j < dim; j++)
+        for (let l = 0; l < dim; l++) tmp[i][j] += XtXinv[i][l] * meat[l][j];
+    const V = Array.from({ length: dim }, () => Array(dim).fill(0));
+    for (let i = 0; i < dim; i++)
+      for (let j = 0; j < dim; j++)
+        for (let l = 0; l < dim; l++) V[i][j] += tmp[i][l] * XtXinv[l][j];
+    const scale = hcType === "HC1" ? n / Math.max(1, df) : 1;
+    se = V.map((row, i) => Math.sqrt(Math.max(0, row[i] * scale)));
+  } else {
+    // Classical SE: SE_i = √(σ² · (X'X)⁻¹_{ii})
+    se = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  }
+
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals  = tStats.map(t => pValue(t, df));
 
@@ -194,6 +216,7 @@ export function runOLSFromSuffStats({ n, XtX, XtY, YtY, sumY, varNames }) {
     resid: null, Yhat: null,    // not available in suff-stats path
     Fstat, Fpval, varNames, XtXinv,
     _suffStats: true,           // marker for downstream code (diagnostics gating)
+    _hcType: hcType,            // track which robust SE type was used
   };
 }
 
