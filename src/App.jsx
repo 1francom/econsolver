@@ -812,18 +812,49 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
     Math.round((viewRows?.length ?? 0) * (viewHeaders?.length ?? 0) * 8 / 1024),
   [viewRows, viewHeaders]);
 
-  async function handleFile(file) {
-    if (!file) return;
+  async function handleFile(fileOrList) {
+    // Accept either a single File (legacy) or a FileList / array.
+    const list = fileOrList && fileOrList.length !== undefined && !(fileOrList instanceof File)
+      ? Array.from(fileOrList)
+      : [fileOrList].filter(Boolean);
+    if (!list.length) return;
     setLoading(true); setErr(""); setSuccess("");
     try {
+      // parseFiles groups shapefile siblings (.shp+.dbf+.prj) into one dataset
+      // so the user can drop the whole shapefile at once instead of zipping it.
+      const { parseFiles } = await import("./DataStudio.jsx");
+      const results = await parseFiles(list);
+      const ok     = results.filter(r => r.parsed);
+      const errors = results.filter(r => r.error);
+      if (!ok.length) {
+        throw new Error(errors.map(e => `${e.filename}: ${e.error}`).join("; ") || "No files could be parsed.");
+      }
+
+      let firstName = ok[0].filename;
+      let queue = ok;
+
       if (!rawData && onLoadPrimary) {
-        // No primary dataset yet — parse and promote to primary.
-        const parsed = await parseFileForPrimary(file);
-        await onLoadPrimary(parsed, file.name);
-        setSuccess(`"${file.name}" loaded.`);
-      } else {
-        await studioRef.current?.addFile(file);
-        setSuccess(`"${file.name}" loaded — visible in Dataset Manager.`);
+        // First parsed entry becomes the primary dataset.
+        await onLoadPrimary(ok[0].parsed, ok[0].filename);
+        queue = ok.slice(1);
+      }
+
+      // Remaining entries go to the studio as secondary datasets. studioRef
+      // may not be mounted yet on the very first load — wait a frame so the
+      // ref settles after onLoadPrimary triggers the studio mount.
+      if (queue.length) {
+        if (!studioRef.current) await new Promise(r => requestAnimationFrame(r));
+        for (const r of queue) {
+          if (studioRef.current?.addParsed) studioRef.current.addParsed(r.filename, r.parsed);
+        }
+      }
+
+      const errSuffix = errors.length ? ` (${errors.length} failed)` : "";
+      setSuccess(ok.length === 1
+        ? `"${firstName}" loaded.${errSuffix}`
+        : `Loaded ${ok.length} datasets.${errSuffix}`);
+      if (errors.length) {
+        setErr(errors.map(e => `${e.filename}: ${e.error}`).join("; "));
       }
     } catch (e) {
       setErr("Parse error: " + (e?.message || "unknown"));
@@ -870,7 +901,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
             <div
               onDragOver={e=>{e.preventDefault();setDragOver(true);}}
               onDragLeave={()=>setDragOver(false)}
-              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files);}}
               onClick={()=>fileRef.current?.click()}
               style={{
                 border:`2px dashed ${dragOver ? C.gold : C.teal}40`,
@@ -878,15 +909,15 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
                 cursor:"pointer", background: dragOver ? C.goldFaint : `${C.teal}06`,
                 transition:"all 0.15s",
               }}>
-              <input ref={fileRef} type="file"
-                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.parquet,.zip"
-                onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
+              <input ref={fileRef} type="file" multiple
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
+                onChange={e=>handleFile(e.target.files)} style={{display:"none"}}/>
               {loading
                 ? <div style={{fontSize:11,color:C.textDim}}>Parsing…</div>
                 : <>
                     <div style={{fontSize:22,color:C.teal,marginBottom:8,opacity:0.6}}>↑</div>
-                    <div style={{fontSize:12,color:C.textDim,marginBottom:4}}>Drop file or click to browse</div>
-                    <div style={{fontSize:9,color:C.textMuted}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
+                    <div style={{fontSize:12,color:C.textDim,marginBottom:4}}>Drop file(s) or click to browse</div>
+                    <div style={{fontSize:9,color:C.textMuted}}>CSV · TSV · XLSX · Stata · R .rds · Shapefile (.shp+.dbf+.prj or .zip)</div>
                   </>
               }
             </div>
@@ -1040,21 +1071,21 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
             <div
               onDragOver={e=>{e.preventDefault();setDragOver(true);}}
               onDragLeave={()=>setDragOver(false)}
-              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files);}}
               onClick={()=>fileRef.current?.click()}
               style={{border:`2px dashed ${dragOver ? C.gold : C.border2}`,borderRadius:4,
                       padding:"1rem 0.75rem",textAlign:"center",cursor:"pointer",
                       background: dragOver ? C.goldFaint : "transparent",
                       transition:"all 0.15s",marginBottom:10}}>
-              <input ref={fileRef} type="file"
-                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.parquet,.zip"
-                onChange={e=>handleFile(e.target.files[0])}
+              <input ref={fileRef} type="file" multiple
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
+                onChange={e=>handleFile(e.target.files)}
                 style={{display:"none"}}/>
               {loading
                 ? <div style={{fontSize:10,color:C.textDim,fontFamily:mono}}>Parsing…</div>
                 : <>
-                    <div style={{fontSize:10,color:C.text,marginBottom:2}}>+ Load dataset</div>
-                    <div style={{fontSize:9,color:C.textMuted}}>Drop file or click to browse</div>
+                    <div style={{fontSize:10,color:C.text,marginBottom:2}}>+ Load dataset(s)</div>
+                    <div style={{fontSize:9,color:C.textMuted}}>Drop file(s) or click — supports .shp+.dbf+.prj</div>
                   </>
               }
             </div>
@@ -1175,6 +1206,7 @@ function WorkspaceRegistrar({ filename, rawData }) {
       rowCount: rawData.rows.length,
       colCount: rawData.headers.length,
       headers:  rawData.headers,
+      crs:      rawData._crs ?? null,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

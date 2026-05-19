@@ -259,7 +259,7 @@ function findHighCorrelations(rows, numericHeaders, threshold = 0.85) {
  *
  * @param {string[]} headers        — column names
  * @param {Object[]} rows           — data rows (post-pipeline)
- * @param {Object|null} panelIndex  — { entityCol, timeCol, blockFE } from panelIndex
+ * @param {Object|null} panelIndex  — { entityCol, timeCol, blockFD } from panelIndex
  * @returns {MetadataReport}
  */
 export function buildMetadataReport(headers, rows, panelIndex = null) {

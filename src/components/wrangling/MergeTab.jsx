@@ -2,38 +2,65 @@
 import { useState, useMemo } from "react";
 import { useTheme, mono, Lbl, Tabs, Btn, Grid } from "./shared.jsx";
 
+const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suffix:"_r" });
+
 // ─── MERGE TAB ───────────────────────────────────────────────────────────────
 // JOIN and APPEND operations against other loaded datasets.
 // RHS always uses raw (pre-pipeline) data of the referenced dataset.
 function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   const { C } = useTheme();
   const [subTab, setSubTab]       = useState("join");
-  // JOIN state
-  const [rightId, setRightId]     = useState("");
-  const [leftKey, setLeftKey]     = useState("");
-  const [rightKey, setRightKey]   = useState("");
-  const [how, setHow]             = useState("left");
-  const [suffix, setSuffix]       = useState("_r");
+  // JOIN state — array of staged joins, runs in order through runner.js
+  const [joins, setJoins]         = useState([emptyJoin()]);
   // APPEND state
   const [appendId, setAppendId]   = useState("");
 
-  const rightDs   = allDatasets.find(d => d.id === rightId);
   const appendDs  = allDatasets.find(d => d.id === appendId);
-  const rightHdrs = rightDs?.rawData?.headers || [];
 
-  const matchPreview = useMemo(() => {
-    if (!rightDs || !leftKey || !rightKey) return null;
-    const rKeys = new Set(rightDs.rawData.rows.map(r => String(r[rightKey] ?? "")));
+  const updateJoin = (i, patch) =>
+    setJoins(js => js.map((j, k) => k === i ? { ...j, ...patch } : j));
+  const removeJoin = i =>
+    setJoins(js => js.length > 1 ? js.filter((_, k) => k !== i) : [emptyJoin()]);
+  const addJoin = () =>
+    setJoins(js => [...js, emptyJoin()]);
+
+  // Simulate header chain through staged joins so each row's left-key picker
+  // can reference columns added by earlier joins.
+  const headerChain = useMemo(() => {
+    const chain = [headers.slice()];
+    for (let i = 0; i < joins.length; i++) {
+      const sj = joins[i];
+      const right = allDatasets.find(d => d.id === sj.rightId);
+      const prev = chain[i];
+      if (!right || !sj.rightKey) { chain.push(prev.slice()); continue; }
+      const next = prev.slice();
+      for (const h of right.rawData.headers) {
+        if (h === sj.rightKey) continue;
+        const dest = next.includes(h) ? `${h}${sj.suffix || "_r"}` : h;
+        if (!next.includes(dest)) next.push(dest);
+      }
+      chain.push(next);
+    }
+    return chain; // chain[i] = headers available as left side for staged join i
+  }, [joins, headers, allDatasets]);
+
+  // Match preview for the first staged join only (against the actual live `rows`).
+  // Subsequent joins act on a chained intermediate dataset we don't materialize here.
+  const firstMatchPreview = useMemo(() => {
+    const j0 = joins[0];
+    const r0 = allDatasets.find(d => d.id === j0?.rightId);
+    if (!r0 || !j0.leftKey || !j0.rightKey) return null;
+    const rKeys = new Set(r0.rawData.rows.map(r => String(r[j0.rightKey] ?? "")));
     let matched = 0, keyNulls = 0;
     rows.forEach(r => {
-      const v = r[leftKey];
+      const v = r[j0.leftKey];
       if (v === null || v === undefined) { keyNulls++; return; }
       if (rKeys.has(String(v))) matched++;
     });
     const validRows = rows.length - keyNulls;
-    const pct = validRows ? matched / validRows : 0;
-    return { matched, total: rows.length, validRows, keyNulls, pct };
-  }, [rightDs, leftKey, rightKey, rows]);
+    return { matched, total: rows.length, validRows, keyNulls,
+             pct: validRows ? matched / validRows : 0 };
+  }, [joins, allDatasets, rows]);
 
   const appendPreview = useMemo(() => {
     if (!appendDs) return null;
@@ -47,11 +74,17 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
     };
   }, [appendDs, headers]);
 
-  function doJoin() {
-    if (!rightId || !leftKey || !rightKey) return;
-    onAdd({ type:"join", rightId, leftKey, rightKey, how, suffix,
-      desc:`${how.toUpperCase()} JOIN ${rightDs?.filename} on ${leftKey} = ${rightKey}` });
-    setRightId(""); setLeftKey(""); setRightKey("");
+  const completeJoins = joins.filter(j => j.rightId && j.leftKey && j.rightKey);
+
+  function doJoinAll() {
+    if (!completeJoins.length) return;
+    for (const j of completeJoins) {
+      const rDs = allDatasets.find(d => d.id === j.rightId);
+      onAdd({ type:"join", rightId:j.rightId, leftKey:j.leftKey, rightKey:j.rightKey,
+        how:j.how, suffix:j.suffix,
+        desc:`${j.how.toUpperCase()} JOIN ${rDs?.filename} on ${j.leftKey} = ${j.rightKey}` });
+    }
+    setJoins([emptyJoin()]);
   }
   function doAppend() {
     if (!appendId) return;
@@ -66,14 +99,6 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
     borderRadius:2, cursor:"pointer", fontSize:10, fontFamily:mono,
     textAlign:"left", transition:"all 0.1s",
   });
-  const joinTypBtn = (k,l) => (
-    <button key={k} onClick={()=>setHow(k)}
-      style={{padding:"0.32rem 0.75rem",border:`1px solid ${how===k?C.teal:C.border2}`,
-        background:how===k?`${C.teal}18`:"transparent",color:how===k?C.teal:C.textDim,
-        borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.1s"}}>
-      {how===k?"✓ ":""}{l}
-    </button>
-  );
 
   // ── Empty state — no other datasets loaded ──
   if (!allDatasets.length) {
@@ -102,130 +127,165 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             borderLeft:`3px solid ${C.blue}`,borderRadius:4,marginBottom:"1.2rem",
             fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
             Equivalent to dplyr's <span style={{color:C.blue}}>left_join()</span> / <span style={{color:C.blue}}>inner_join()</span>.
-            The right dataset is joined against its <em>raw</em> (pre-pipeline) state.
-            Apply cleaning to it first if needed.
+            Stage multiple joins below — they apply sequentially, so a later join can use
+            a column added by an earlier one. Each right dataset is referenced in its
+            <em> raw</em> (pre-pipeline) state.
           </div>
 
-          {/* Right dataset picker */}
-          <Lbl color={C.teal}>Right dataset</Lbl>
-          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:"1.4rem"}}>
-            {allDatasets.map(d=>(
-              <button key={d.id}
-                onClick={()=>{ setRightId(d.id); setLeftKey(""); setRightKey(""); }}
-                style={{padding:"0.4rem 0.9rem",border:`1px solid ${rightId===d.id?C.teal:C.border2}`,
-                  background:rightId===d.id?`${C.teal}18`:"transparent",
-                  color:rightId===d.id?C.teal:C.textDim,borderRadius:3,cursor:"pointer",
-                  fontSize:11,fontFamily:mono,transition:"all 0.1s"}}>
-                {rightId===d.id?"✓ ":""}{d.filename}
-                <span style={{fontSize:9,color:C.textMuted,marginLeft:6}}>
-                  {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
-                </span>
-              </button>
-            ))}
-          </div>
+          {/* ── Staged joins ────────────────────────────────────────────── */}
+          {joins.map((j, idx) => {
+            const rDs = allDatasets.find(d => d.id === j.rightId);
+            const rHdrs = rDs?.rawData?.headers || [];
+            const leftHdrs = headerChain[idx] || headers;
+            return (
+              <div key={idx} style={{
+                marginBottom:"1.2rem", padding:"0.9rem", background:C.surface,
+                border:`1px solid ${C.border}`, borderRadius:4,
+              }}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.7rem"}}>
+                  <span style={{fontSize:10,color:C.teal,letterSpacing:"0.18em",
+                    textTransform:"uppercase",fontFamily:mono}}>Join {idx+1}</span>
+                  <span style={{flex:1}}/>
+                  {joins.length > 1 && (
+                    <button onClick={()=>removeJoin(idx)}
+                      style={{padding:"0.18rem 0.55rem",border:`1px solid ${C.border2}`,
+                        background:"transparent",color:C.textMuted,borderRadius:3,
+                        cursor:"pointer",fontSize:10,fontFamily:mono}}
+                      title="Remove this join">× Remove</button>
+                  )}
+                </div>
 
-          {rightDs && (<>
-            {/* Key column selectors — two-column grid */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.2rem",marginBottom:"1.2rem"}}>
-              <div>
-                <Lbl color={C.gold}>Left key — this dataset</Lbl>
-                <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:180,overflowY:"auto",
-                  padding:"0.4rem",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:3}}>
-                  {headers.map(h=>(
-                    <button key={h} onClick={()=>setLeftKey(h)} style={colBtnStyle(leftKey===h,C.gold)}>
-                      {leftKey===h?"✓ ":""}{h}
+                {/* Right dataset picker */}
+                <Lbl color={C.teal}>Right dataset</Lbl>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:"1rem"}}>
+                  {allDatasets.map(d=>(
+                    <button key={d.id}
+                      onClick={()=>updateJoin(idx,{rightId:d.id,leftKey:"",rightKey:""})}
+                      style={{padding:"0.35rem 0.75rem",border:`1px solid ${j.rightId===d.id?C.teal:C.border2}`,
+                        background:j.rightId===d.id?`${C.teal}18`:"transparent",
+                        color:j.rightId===d.id?C.teal:C.textDim,borderRadius:3,cursor:"pointer",
+                        fontSize:11,fontFamily:mono,transition:"all 0.1s"}}>
+                      {j.rightId===d.id?"✓ ":""}{d.filename}
+                      <span style={{fontSize:9,color:C.textMuted,marginLeft:6}}>
+                        {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                      </span>
                     </button>
                   ))}
                 </div>
-              </div>
-              <div>
-                <Lbl color={C.blue}>Right key — {rightDs.filename}</Lbl>
-                <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:180,overflowY:"auto",
-                  padding:"0.4rem",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:3}}>
-                  {rightHdrs.map(h=>(
-                    <button key={h} onClick={()=>setRightKey(h)} style={colBtnStyle(rightKey===h,C.blue)}>
-                      {rightKey===h?"✓ ":""}{h}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
 
-            {/* Match preview bar */}
-            {matchPreview && (() => {
-              const mc = matchPreview.pct > 0.8 ? C.green : matchPreview.pct > 0.4 ? C.yellow : C.red;
-              return (
-                <div style={{padding:"0.65rem 0.9rem",background:C.surface,
-                  border:`1px solid ${mc}30`,borderLeft:`3px solid ${mc}`,
-                  borderRadius:4,marginBottom:"1.2rem"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-                    <div style={{flex:1,height:4,background:C.border,borderRadius:2,overflow:"hidden"}}>
-                      <div style={{width:`${matchPreview.pct*100}%`,height:"100%",background:mc,borderRadius:2,transition:"width 0.3s"}}/>
+                {rDs && (<>
+                  {/* Key column selectors */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1rem"}}>
+                    <div>
+                      <Lbl color={C.gold}>Left key — {idx===0?"this dataset":"after prior joins"}</Lbl>
+                      <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:160,overflowY:"auto",
+                        padding:"0.4rem",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:3}}>
+                        {leftHdrs.map(h=>(
+                          <button key={h} onClick={()=>updateJoin(idx,{leftKey:h})} style={colBtnStyle(j.leftKey===h,C.gold)}>
+                            {j.leftKey===h?"✓ ":""}{h}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <span style={{fontSize:11,color:mc,fontFamily:mono,flexShrink:0}}>
-                      {(matchPreview.pct*100).toFixed(1)}%
-                    </span>
+                    <div>
+                      <Lbl color={C.blue}>Right key — {rDs.filename}</Lbl>
+                      <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:160,overflowY:"auto",
+                        padding:"0.4rem",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:3}}>
+                        {rHdrs.map(h=>(
+                          <button key={h} onClick={()=>updateJoin(idx,{rightKey:h})} style={colBtnStyle(j.rightKey===h,C.blue)}>
+                            {j.rightKey===h?"✓ ":""}{h}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                  <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
-                    <span style={{color:mc}}>{matchPreview.matched.toLocaleString()}</span>
-                    {" of "}{matchPreview.validRows.toLocaleString()} left rows matched
+
+                  {/* Match preview — only for join 0 (we don't materialize the chain) */}
+                  {idx===0 && firstMatchPreview && (() => {
+                    const mc = firstMatchPreview.pct > 0.8 ? C.green : firstMatchPreview.pct > 0.4 ? C.yellow : C.red;
+                    return (
+                      <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
+                        border:`1px solid ${mc}30`,borderLeft:`3px solid ${mc}`,
+                        borderRadius:4,marginBottom:"1rem"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                          <div style={{flex:1,height:4,background:C.border,borderRadius:2,overflow:"hidden"}}>
+                            <div style={{width:`${firstMatchPreview.pct*100}%`,height:"100%",background:mc,borderRadius:2,transition:"width 0.3s"}}/>
+                          </div>
+                          <span style={{fontSize:11,color:mc,fontFamily:mono,flexShrink:0}}>
+                            {(firstMatchPreview.pct*100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
+                          <span style={{color:mc}}>{firstMatchPreview.matched.toLocaleString()}</span>
+                          {" of "}{firstMatchPreview.validRows.toLocaleString()} left rows matched
+                        </div>
+                        {firstMatchPreview.keyNulls > 0 && (
+                          <div style={{fontSize:10,color:C.orange,fontFamily:mono,marginTop:4}}>
+                            ⚠ {firstMatchPreview.keyNulls} row{firstMatchPreview.keyNulls!==1?"s":""} have null in key column '{j.leftKey}'.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Join type + suffix */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1rem"}}>
+                    <div>
+                      <Lbl color={C.teal}>Join type</Lbl>
+                      <div style={{display:"flex",gap:4}}>
+                        {[["left","LEFT"],["inner","INNER"]].map(([k,l])=>(
+                          <button key={k} onClick={()=>updateJoin(idx,{how:k})}
+                            style={{padding:"0.3rem 0.7rem",border:`1px solid ${j.how===k?C.teal:C.border2}`,
+                              background:j.how===k?`${C.teal}18`:"transparent",color:j.how===k?C.teal:C.textDim,
+                              borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>
+                            {j.how===k?"✓ ":""}{l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Lbl color={C.textDim}>Suffix for column conflicts</Lbl>
+                      <input value={j.suffix} onChange={e=>updateJoin(idx,{suffix:e.target.value})} placeholder="_r"
+                        style={{width:"100%",boxSizing:"border-box",padding:"0.35rem 0.55rem",
+                          background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,
+                          color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+                    </div>
                   </div>
-                  {matchPreview.keyNulls > 0 && (
-                    <div style={{fontSize:10,color:C.orange,fontFamily:mono,marginTop:4}}>
-                      ⚠ {matchPreview.keyNulls} row{matchPreview.keyNulls!==1?"s":""} have null in key column '{leftKey}' — excluded from join, kept with null right-side values in LEFT JOIN.
+
+                  {/* Formula preview */}
+                  {j.leftKey && j.rightKey && (
+                    <div style={{padding:"0.42rem 0.7rem",background:C.surface2,border:`1px solid ${C.border}`,
+                      borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono}}>
+                      <span style={{color:C.gold}}>{idx===0?"this":`(after ${idx} join${idx>1?"s":""})`}</span>{" "}
+                      {j.how.toUpperCase()} JOIN{" "}
+                      <span style={{color:C.teal}}>{rDs.filename}</span>
+                      {" ON "}<span style={{color:C.gold}}>{j.leftKey}</span>
+                      {" = "}<span style={{color:C.teal}}>{j.rightKey}</span>
+                      {" → "}<span style={{color:C.green}}>
+                        +{rHdrs.filter(h=>h!==j.rightKey).length} columns
+                      </span>
                     </div>
                   )}
-                  {matchPreview.pct < 0.5 && (
-                    <div style={{fontSize:10,color:C.yellow,fontFamily:mono,marginTop:4}}>
-                      ⚠ Low match rate — verify key columns use compatible formats (e.g. "DEU" vs "Germany").
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+                </>)}
+              </div>
+            );
+          })}
 
-            {/* Join type + suffix */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.2rem",marginBottom:"1.2rem"}}>
-              <div>
-                <Lbl color={C.teal}>Join type</Lbl>
-                <div style={{display:"flex",gap:4}}>
-                  {[["left","LEFT"],["inner","INNER"]].map(([k,l])=>joinTypBtn(k,l))}
-                </div>
-                <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:5,lineHeight:1.5}}>
-                  {how==="left"
-                    ? "Keep all left rows. Right columns = null when unmatched."
-                    : "Keep only rows that matched on both sides."}
-                </div>
-              </div>
-              <div>
-                <Lbl color={C.textDim}>Suffix for column conflicts</Lbl>
-                <input value={suffix} onChange={e=>setSuffix(e.target.value)} placeholder="_r"
-                  style={{width:"100%",boxSizing:"border-box",padding:"0.38rem 0.6rem",
-                    background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,
-                    color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
-                <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:4}}>
-                  Added to right columns whose name already exists in left.
-                </div>
-              </div>
-            </div>
-
-            {/* Formula preview */}
-            {leftKey && rightKey && (
-              <div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,
-                borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
-                <span style={{color:C.gold}}>this</span> {how.toUpperCase()} JOIN{" "}
-                <span style={{color:C.teal}}>{rightDs.filename}</span>
-                {" ON "}<span style={{color:C.gold}}>{leftKey}</span>
-                {" = "}<span style={{color:C.teal}}>{rightKey}</span>
-                {" → "}<span style={{color:C.green}}>
-                  +{rightHdrs.filter(h=>h!==rightKey).length} columns
-                </span>
-              </div>
-            )}
-            <Btn onClick={doJoin} color={C.teal} v="solid"
-              dis={!leftKey||!rightKey}
-              ch={`Add ${how.toUpperCase()} JOIN to pipeline →`}/>
-          </>)}
+          {/* Add-another + submit */}
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1rem"}}>
+            <button onClick={addJoin}
+              style={{padding:"0.4rem 0.85rem",border:`1px dashed ${C.teal}`,
+                background:"transparent",color:C.teal,borderRadius:3,
+                cursor:"pointer",fontSize:11,fontFamily:mono}}>
+              + Add another join
+            </button>
+            <span style={{flex:1}}/>
+            <Btn onClick={doJoinAll} color={C.teal} v="solid"
+              dis={completeJoins.length===0}
+              ch={completeJoins.length<=1
+                ? `Add JOIN to pipeline →`
+                : `Add ${completeJoins.length} joins to pipeline →`}/>
+          </div>
         </div>
       )}
 

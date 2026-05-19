@@ -287,6 +287,138 @@ function _runBinaryModel(rows, yCol, xCols, family, seOpts = {}) {
   };
 }
 
+// ─── POISSON GLM ──────────────────────────────────────────────────────────────
+// Standard Poisson regression (cross-sectional, no fixed effects).
+// E[Y | X] = exp(offset + X·β),   link = log.
+//
+// offsetCol (optional): column holding exposure / population at risk.
+//   Its natural log is added to the linear predictor with a fixed coefficient
+//   of 1, turning the model into a model of per-capita rates rather than counts
+//   (Osgood 2000, Eq. 3).  Values must be strictly positive.
+//
+// Default SE: Fisher information matrix (X'WX)^{-1}, matching R glm().
+// Robust / clustered SE available via seOpts.
+export function runPoisson(rows, yCol, xCols, seOpts = {}, offsetCol = null) {
+  const valid = rows.filter(r => {
+    const y      = r[yCol];
+    const offOk  = offsetCol == null ||
+      (typeof r[offsetCol] === 'number' && r[offsetCol] > 0);
+    return typeof y === 'number' && isFinite(y) && y >= 0 &&
+      offOk &&
+      xCols.every(c => typeof r[c] === 'number' && isFinite(r[c]));
+  });
+
+  const kParam = xCols.length + 1; // +1 for intercept
+  if (valid.length < kParam + 1)
+    return { error: `Insufficient observations: need at least ${kParam + 1}.` };
+
+  const n      = valid.length;
+  const Y      = valid.map(r => r[yCol]);
+  const offset = offsetCol
+    ? valid.map(r => Math.log(r[offsetCol]))
+    : new Array(n).fill(0);
+  const X = valid.map(r => [1, ...xCols.map(c => r[c])]);
+
+  // Warm-start: intercept = log(ȳ) − mean(offset), others = 0
+  const yBar   = Y.reduce((s, y) => s + y, 0) / n;
+  const offBar = offset.reduce((s, o) => s + o, 0) / n;
+  let beta     = Array(kParam).fill(0);
+  beta[0]      = Math.log(Math.max(yBar, 1e-8)) - offBar;
+
+  let converged  = false;
+  let iterations = 0;
+
+  for (let iter = 0; iter < 200; iter++) {
+    const eta = X.map((xi, i) =>
+      offset[i] + xi.reduce((s, v, j) => s + v * beta[j], 0)
+    );
+    const mu = eta.map(e => Math.max(Math.exp(e), 1e-300));
+    const Z  = eta.map((e, i) => e + (Y[i] - mu[i]) / Math.max(mu[i], 1e-300));
+
+    // X'WX and X'WZ  (Poisson IRLS weights W_i = μ_i)
+    const XtWX = Array.from({ length: kParam }, () => Array(kParam).fill(0));
+    const XtWZ = Array(kParam).fill(0);
+    for (let i = 0; i < n; i++) {
+      const wi = mu[i];
+      if (!isFinite(wi) || wi <= 0) continue;
+      for (let j = 0; j < kParam; j++) {
+        XtWZ[j] += wi * X[i][j] * Z[i];
+        for (let l = 0; l < kParam; l++) XtWX[j][l] += wi * X[i][j] * X[i][l];
+      }
+    }
+
+    const XtWXinv = matInv(XtWX);
+    if (!XtWXinv) return { error: 'Singular matrix — check for perfect collinearity.' };
+
+    const betaNew = XtWXinv.map(row => row.reduce((s, v, j) => s + v * XtWZ[j], 0));
+    const maxDiff = betaNew.reduce((mx, b, i) => Math.max(mx, Math.abs(b - beta[i])), 0);
+    beta       = betaNew;
+    iterations = iter + 1;
+    if (maxDiff < 1e-8) { converged = true; break; }
+  }
+
+  // ── Final quantities ─────────────────────────────────────────────────────────
+  const etaFinal = X.map((xi, i) =>
+    offset[i] + xi.reduce((s, v, j) => s + v * beta[j], 0)
+  );
+  const muFinal = etaFinal.map(e => Math.exp(e));
+  const resid   = Y.map((y, i) => y - muFinal[i]);
+
+  // Log-likelihood: Σ(Y·η − μ − lgamma(Y+1))
+  const logLik = etaFinal.reduce(
+    (s, eta, i) => s + Y[i] * eta - muFinal[i] - lgamma(Y[i] + 1), 0
+  );
+
+  // Null LL: intercept + offset only.
+  // MLE for intercept-only: β₀ = log(ΣY / Σexp(offset))
+  const eps        = 1e-300;
+  const sumY       = Y.reduce((s, y) => s + y, 0);
+  const sumExpOff  = offset.reduce((s, o) => s + Math.exp(o), 0);
+  const beta0Null  = Math.log(Math.max(sumY / Math.max(sumExpOff, eps), eps));
+  const logLikNull = Y.reduce((s, y, i) => {
+    const muNull = Math.exp(offset[i] + beta0Null);
+    return s + y * Math.log(Math.max(muNull, eps)) - muNull - lgamma(y + 1);
+  }, 0);
+
+  // Vcov = (X'WX)^{-1} at MLE  (Fisher information)
+  const XtWXf = Array.from({ length: kParam }, () => Array(kParam).fill(0));
+  for (let i = 0; i < n; i++) {
+    const wi = muFinal[i];
+    if (!isFinite(wi) || wi <= 0) continue;
+    for (let j = 0; j < kParam; j++)
+      for (let l = 0; l < kParam; l++)
+        XtWXf[j][l] += wi * X[i][j] * X[i][l];
+  }
+  const Vcov = matInv(XtWXf);
+  if (!Vcov) return { error: 'Variance-covariance matrix singular at convergence.' };
+
+  // SE: robust if seOpts requests it, else Fisher information
+  let se;
+  const robSE = computeRobustSE(seOpts, Vcov, X, resid, n, kParam, valid);
+  se = robSE ?? Vcov.map((row, i) => Math.sqrt(Math.max(0, row[i])));
+
+  const varNames   = ['(Intercept)', ...xCols];
+  const zStats     = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
+  const pVals      = zStats.map(z => isFinite(z) ? zPValue(z) : NaN);
+  const df         = n - kParam;
+  const McFaddenR2 = logLikNull !== 0 ? 1 - logLik / logLikNull : 0;
+  const AIC        = -2 * logLik + 2 * kParam;
+  const BIC        = -2 * logLik + kParam * Math.log(n);
+
+  return {
+    family: 'poisson',
+    beta, se, zStats, pVals,
+    varNames,
+    n, k: kParam, df,
+    logLik, nullLogLik: logLikNull, McFaddenR2,
+    AIC, BIC,
+    fitted: muFinal,
+    resid,
+    converged, iterations,
+    hasOffset: offsetCol != null,
+  };
+}
+
 // ─── POISSON FIXED EFFECTS (PPML) ────────────────────────────────────────────
 // Poisson Pseudo-Maximum-Likelihood with entity fixed effects.
 // Used for count data and gravity models. Absorbs entity FE via iterative
@@ -320,15 +452,65 @@ export function runPoissonFE(rows, yCol, xCols, unitCol, seOpts = {}) {
       xCols.every(c => typeof r[c] === "number" && isFinite(r[c]));
   });
 
-  const n = valid.length;
+  if (valid.length < xCols.length + 2)
+    return { error: `Insufficient observations: need at least ${xCols.length + 2}.` };
+
+  // Build unit Y sums to identify all-zero-Y entities (they are uninformative
+  // for PPML — Santos Silva & Tenrejo standard practice: drop them).
+  const _unitYCheck = new Map();
+  for (const r of valid) {
+    const u = r[unitCol];
+    _unitYCheck.set(u, (_unitYCheck.get(u) ?? 0) + r[yCol]);
+  }
+  const zeroUnits = new Set([..._unitYCheck.entries()].filter(([, s]) => s === 0).map(([u]) => u));
+  const droppedZeroUnits = zeroUnits.size;
+
+  // Keep only rows whose entity has at least one positive Y observation
+  const keptRaw = valid.filter(r => !zeroUnits.has(r[unitCol]));
+
+  // Drop singleton units (exactly 1 observation — no within variation possible).
+  // After within-demeaning their X rows become all-zeros, making X̃'WX̃ singular.
+  const _unitObsCnt = new Map();
+  for (const r of keptRaw)
+    _unitObsCnt.set(r[unitCol], (_unitObsCnt.get(r[unitCol]) ?? 0) + 1);
+  const singletonUnits   = new Set(
+    [..._unitObsCnt.entries()].filter(([, c]) => c === 1).map(([u]) => u)
+  );
+  const droppedSingletons = singletonUnits.size;
+  const kept = keptRaw.filter(r => !singletonUnits.has(r[unitCol]));
+
+  const n = kept.length;
   const k = xCols.length;
   if (n < k + 2)
-    return { error: `Insufficient observations: need at least ${k + 2}.` };
+    return { error: `Insufficient observations after dropping all-zero-Y entities (${droppedZeroUnits}) and singleton units (${droppedSingletons}).` };
+
+  // Pre-flight: check each X column has within-unit variation.
+  // A time-invariant regressor demeans to zero for every obs and is collinear
+  // with the unit FE — estimation is impossible.
+  const _unitSumMap  = new Map();   // unit → { sum[col], count }
+  for (const r of kept) {
+    const u = r[unitCol];
+    if (!_unitSumMap.has(u)) _unitSumMap.set(u, { sums: new Array(k).fill(0), cnt: 0 });
+    const entry = _unitSumMap.get(u);
+    entry.cnt++;
+    for (let j = 0; j < k; j++) entry.sums[j] += r[xCols[j]];
+  }
+  const zeroWithinCols = xCols.filter((col, j) => {
+    let totalVar = 0;
+    for (const r of kept) {
+      const entry = _unitSumMap.get(r[unitCol]);
+      const mean  = entry.sums[j] / entry.cnt;
+      totalVar += (r[col] - mean) ** 2;
+    }
+    return totalVar < 1e-12;
+  });
+  if (zeroWithinCols.length > 0)
+    return { error: `No within-unit variation for: ${zeroWithinCols.join(', ')}. These variables are absorbed by unit fixed effects — drop them from the model.` };
 
   // Build arrays
-  const Y    = valid.map(r => r[yCol]);
-  const X    = valid.map(r => xCols.map(c => r[c]));
-  const unit = valid.map(r => r[unitCol]);
+  const Y    = kept.map(r => r[yCol]);
+  const X    = kept.map(r => xCols.map(c => r[c]));
+  const unit = kept.map(r => r[unitCol]);
 
   // Unique units
   const unitIds  = [...new Set(unit)];
@@ -358,8 +540,8 @@ export function runPoissonFE(rows, yCol, xCols, unitCol, seOpts = {}) {
     // (a) linear predictor η_i = α_{unit_i} + X_i·β
     const eta = X.map((xi, i) => alphas[rowUnit[i]] + xi.reduce((s, v, j) => s + v * beta[j], 0));
 
-    // (b) mu_i = exp(η_i)
-    let mu = eta.map(e => Math.exp(e));
+    // (b) mu_i = exp(η_i), clamped to [1e-300, Inf] to prevent exact zeros
+    let mu = eta.map(e => Math.max(Math.exp(e), 1e-300));
 
     // (c) Iterative proportional scaling to update α_i
     //     α_i ← α_i + log( Σ_{j∈i} Y_j / Σ_{j∈i} mu_j )
@@ -367,7 +549,8 @@ export function runPoissonFE(rows, yCol, xCols, unitCol, seOpts = {}) {
     for (let i = 0; i < n; i++) unitMuSum[rowUnit[i]] += mu[i];
     for (let u = 0; u < nUnits; u++) {
       const ratio = unitYSum[u] / Math.max(unitMuSum[u], 1e-300);
-      alphas[u] += Math.log(ratio);
+      // Guard: if all Y for this unit = 0, ratio = 0 → log = -Inf. Skip update.
+      if (ratio > 0) alphas[u] += Math.log(ratio);
     }
 
     // (d) Recompute mu with updated alphas
@@ -411,7 +594,7 @@ export function runPoissonFE(rows, yCol, xCols, unitCol, seOpts = {}) {
     const XtWZ = Array(k).fill(0);
     for (let i = 0; i < n; i++) {
       const wi = W[i];
-      if (!isFinite(wi) || wi <= 0) continue;
+      if (!isFinite(wi) || wi < 1e-12) continue;
       for (let j = 0; j < k; j++) {
         XtWZ[j] += wi * Xtilde[i][j] * Ztilde[i];
         for (let l = 0; l < k; l++) XtWX[j][l] += wi * Xtilde[i][j] * Xtilde[i][l];
@@ -540,6 +723,8 @@ export function runPoissonFE(rows, yCol, xCols, unitCol, seOpts = {}) {
     resid,
     n, k, df,
     converged, iterations,
+    droppedZeroUnits,      // entities with all-zero Y dropped pre-flight
+    droppedSingletons,     // singleton units dropped (no within variation)
   };
 }
 

@@ -18,31 +18,125 @@ import { useTheme } from "../ThemeContext.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
+// Module-aware starters — Litux how-to + methodology, tailored to the active tab.
 const SCREEN_STARTERS = {
-  studio: [
-    "What cleaning steps should I prioritize before modeling?",
-    "Are there any variables I should engineer before running FE?",
-    "How should I handle missing values in panel data?",
-    "What does winsorizing do to my coefficient estimates?",
+  data: [
+    "How do I load a dataset in Litux?",
+    "Can I fetch directly from World Bank or OECD?",
+    "What file formats does Litux support (.csv, .dta, .rds, .xlsx, .parquet, .shp)?",
+    "How do I switch between multiple datasets in this session?",
   ],
-  modeling: [
-    "Which estimator is most appropriate for my research design?",
-    "What identification assumptions am I relying on?",
-    "How do I interpret a fixed-effects regression with a binary outcome?",
-    "What robustness checks are standard for this type of model?",
+  clean: [
+    "How do I declare a panel structure (entity × time) here?",
+    "Where do I winsorize or trim outliers in a column?",
+    "How do I drop rows with NAs only in specific columns?",
+    "How do I merge or append two datasets in the Merge tab?",
   ],
-  explorer: [
-    "What patterns in this data should I investigate before modeling?",
-    "Are there potential outliers I should address?",
-    "What does the distribution of my outcome variable imply for my model choice?",
+  explore: [
+    "How do I open the Plot Builder and add a color-by-group aesthetic?",
+    "Where do I export a chart as PNG or LaTeX?",
+    "Which variables in this dataset look like they have outliers?",
+    "How do I create a histogram or density plot here?",
+  ],
+  model: [
+    "Which estimator should I use for my research design?",
+    "How do I add fixed effects and cluster the SEs in Litux?",
+    "Where do I add instruments for 2SLS, and how do I read the first-stage F?",
+    "How do I export the replication R / Stata / Python script?",
+  ],
+  spatial: [
+    "How do I load a shapefile in the Spatial tab?",
+    "How do I join points to polygons in Litux?",
+    "How do I assign units to a grid or buffer here?",
+    "How do I compute nearest-neighbor distances?",
+  ],
+  simulate: [
+    "How do I set up a DGP to test an estimator?",
+    "What does the Simulate tab compute, and how do I read the output?",
+    "How do I export simulation results to a script?",
+  ],
+  calculate: [
+    "How do I run a probability or quantile calculation?",
+    "What distributions does the calculator support?",
+    "How do I invert a CDF (e.g., qchisq) in Litux?",
+  ],
+  report: [
+    "How do I generate a Stargazer-style LaTeX table?",
+    "Where do I get the replication bundle (R + Stata + Python + data)?",
+    "How do I add the AI-written narrative to my paper?",
+    "How do I export a forest plot for my models?",
+  ],
+  output: [
+    "How do I generate a Stargazer-style LaTeX table?",
+    "Where do I get the replication bundle (R + Stata + Python + data)?",
+    "How do I add the AI-written narrative to my paper?",
   ],
   default: [
-    "What estimator should I use for my research question?",
-    "How do I test for parallel trends in DiD?",
-    "What is the difference between FE and FD estimators?",
-    "How do I interpret a log-level regression?",
+    "What can Litux do — give me a 30-second tour?",
+    "Which estimator should I use for my research question?",
+    "How do I move from cleaned data to a final LaTeX table?",
+    "Where do I find the replication script for my model?",
   ],
 };
+
+// Per-estimator starters — used when screen === "model" and a model result exists.
+const ESTIMATOR_STARTERS = {
+  "2SLS": [
+    "Is my instrument strong enough — where does Litux show the first-stage F?",
+    "How do I add LIML as a robustness check in Litux?",
+    "How do I verify the exclusion restriction holds for this design?",
+    "How do I cluster SEs by entity in 2SLS here?",
+  ],
+  DiD: [
+    "How do I test the parallel trends assumption in Litux?",
+    "Where do I switch from 2x2 DiD to Event Study?",
+    "How do I interpret the ATT for my policy question?",
+    "Should I be worried about anticipation effects in this design?",
+  ],
+  TWFE: [
+    "Am I affected by the negative weighting problem in TWFE?",
+    "How do I add unit + time fixed effects in Litux?",
+    "How do I test for pre-trends with Event Study here?",
+    "Should I use Callaway-Sant'Anna or Sun-Abraham instead?",
+  ],
+  RDD: [
+    "How do I change the bandwidth in the RDD config?",
+    "Where do I find the McCrary density test in Litux?",
+    "How do I test for manipulation at the cutoff?",
+    "How sensitive are my results to the bandwidth choice?",
+  ],
+  FE: [
+    "How do I cluster SEs at the entity level in Litux?",
+    "Where do I declare the panel structure for FE?",
+    "What variation in the data identifies these coefficients?",
+    "Should I use a Hausman test to choose between FE and RE?",
+  ],
+  Logit: [
+    "How do I view marginal effects (MEM) in Litux?",
+    "How do I interpret the McFadden R² for this model?",
+    "How do I export odds ratios for a paper?",
+    "When should I prefer logit over probit here?",
+  ],
+  Probit: [
+    "How do I view marginal effects (MEM) in Litux?",
+    "How do I interpret the McFadden R² for this model?",
+    "When should I prefer probit over logit here?",
+    "Are the marginal effects economically meaningful?",
+  ],
+};
+
+function pickEstimatorStarters(modelResult) {
+  if (!modelResult) return null;
+  const t = modelResult.type ?? modelResult.second?.modelLabel ?? modelResult.modelLabel ?? "";
+  if (t === "2SLS" || t === "IV") return ESTIMATOR_STARTERS["2SLS"];
+  if (t === "DiD" || t === "2x2DiD") return ESTIMATOR_STARTERS.DiD;
+  if (t === "TWFE") return ESTIMATOR_STARTERS.TWFE;
+  if (t === "RDD") return ESTIMATOR_STARTERS.RDD;
+  if (t === "FE" || t === "FD") return ESTIMATOR_STARTERS.FE;
+  if (t === "Logit" || modelResult.second?.modelLabel === "Logistic Regression") return ESTIMATOR_STARTERS.Logit;
+  if (t === "Probit" || modelResult.second?.modelLabel === "Probit") return ESTIMATOR_STARTERS.Probit;
+  return null;
+}
 
 function buildContext(screen, cleanedData, modelResult, sessionDatasets) {
   const lines = [`CURRENT MODULE: ${screen ?? "unknown"}`];
@@ -198,7 +292,9 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
     }
   }, [history, loading, isOpen]);
 
-  const starters = SCREEN_STARTERS[screen] ?? SCREEN_STARTERS.default;
+  const starters = (screen === "model" && modelResult && pickEstimatorStarters(modelResult))
+    || SCREEN_STARTERS[screen]
+    || SCREEN_STARTERS.default;
   const contextStr = useMemo(
     () => buildContext(screen, cleanedData, modelResult, sessionState?.datasets),
     [screen, cleanedData, modelResult, sessionState?.datasets]

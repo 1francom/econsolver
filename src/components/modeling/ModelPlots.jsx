@@ -1061,6 +1061,7 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
 
 export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
   const { C } = useTheme();
+  const svgRef = useRef(null);
   if (!firstStages?.length || !rows?.length) return null;
 
   const W = 420, H = 300;
@@ -1110,34 +1111,21 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
   const totalW = cols * W + (cols - 1) * 1;
   const totalH = rows_ * H + (rows_ - 1) * 1;
 
-  const svgId = "first-stage-plot";
+  const svgId  = "first-stage-plot";
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
+        display: "flex", alignItems: "center",
         padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
           First Stage — Instrument Relevance
         </span>
-        <button
-          onClick={() => {
-            const el = document.getElementById(svgId);
-            if (!el) return;
-            const src = new XMLSerializer().serializeToString(el);
-            const blob = new Blob([src], { type: "image/svg+xml" });
-            const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-            a.download = "first_stage.svg"; a.click(); URL.revokeObjectURL(a.href);
-          }}
-          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-        >↓ SVG</button>
       </div>
       <div style={{ background: C.bg, overflowX: "auto", padding: "0.5rem", display: "flex", justifyContent: "center" }}>
-        <svg id={svgId} viewBox={`0 0 ${totalW} ${totalH}`}
+        <svg ref={svgRef} id={svgId} viewBox={`0 0 ${totalW} ${totalH}`}
           style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
           <rect width={totalW} height={totalH} fill={C.bg} />
           {panels.map((p, pi) => {
@@ -1243,6 +1231,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
       <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
         Stock-Yogo weak instrument threshold: F &gt; 10 · gold line = OLS fit · each panel = one instrument
       </div>
+      <PlotExportBar getEl={() => svgRef.current} filename="first_stage" />
     </div>
   );
 }
@@ -1258,6 +1247,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
 
 export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "triangular", controls = [], runSharpRDD }) {
   const { C } = useTheme();
+  const svgRef = useRef(null);
   if (!rows?.length || !optH || !runSharpRDD) return null;
 
   // evaluate at 15 bandwidths: 0.4h to 1.8h
@@ -1294,35 +1284,21 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
   const bandBot = [...results].reverse().map((r, i) => `${i === 0 ? "M" : "L"}${sx(r.h).toFixed(1)},${sy(r.lo).toFixed(1)}`).join(" ");
   const latePath = results.map((r, i) => `${i === 0 ? "M" : "L"}${sx(r.h).toFixed(1)},${sy(r.late).toFixed(1)}`).join(" ");
 
-  const svgId = "rdd-bw-plot";
+  const svgId  = "rdd-bw-plot";
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
+        display: "flex", alignItems: "center",
         padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
         <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
           RDD Bandwidth Sensitivity · LATE(h) ± 1.96 SE
         </span>
-        <button
-          onClick={() => {
-            const el = document.getElementById(svgId);
-            if (!el) return;
-            const src = new XMLSerializer().serializeToString(el);
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml" }));
-            a.download = "rdd_bandwidth_sensitivity.svg"; a.click();
-            URL.revokeObjectURL(a.href);
-          }}
-          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-        >↓ SVG</button>
       </div>
       <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
-        <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+        <svg ref={svgRef} id={svgId} viewBox={`0 0 ${W} ${H}`}
           style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
           <rect width={W} height={H} fill={C.bg} />
 
@@ -1396,6 +1372,7 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
       <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
         15 bandwidths from 0.4h to 1.8h · filled = p&lt;0.05 · band = ±1.96 SE · gold = IK-optimal
       </div>
+      <PlotExportBar getEl={() => svgRef.current} filename="rdd_bandwidth_sensitivity" />
     </div>
   );
 }
@@ -1568,6 +1545,7 @@ export function RDDCovariateBalance({ result, controls, rows }) {
 //   theta, thetaSE, zStat, pVal, manipulation, cutoff, h, bw, n }
 export function McCraryPlot({ result, xLabel = "Running variable" }) {
   const { C } = useTheme();
+  const svgRef = useRef(null);
   if (!result?.bins?.length) return (
     <div style={{ padding: "2rem 1.5rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontFamily: mono, fontSize: 11, lineHeight: 1.6 }}>
       McCrary density test could not be computed.<br />
@@ -1607,7 +1585,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
   const barW = Math.max(1, (sx(xLo + bw) - sx(xLo)) * 0.85);
 
   const accentColor = manipulation ? C.red : C.green;
-  const svgId = "mccrary-plot";
+  const svgId  = "mccrary-plot";
 
   // fit line paths
   const leftPath = leftFit
@@ -1641,24 +1619,10 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
             θ = {theta.toFixed(3)} · SE = {thetaSE.toFixed(3)} · z = {zStat.toFixed(3)} · p = {pVal < 0.001 ? "<0.001" : pVal.toFixed(4)}
           </span>
         </div>
-        <button
-          onClick={() => {
-            const el = document.getElementById(svgId);
-            if (!el) return;
-            const src = new XMLSerializer().serializeToString(el);
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml" }));
-            a.download = "mccrary_density.svg"; a.click();
-            URL.revokeObjectURL(a.href);
-          }}
-          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-        >↓ SVG</button>
       </div>
 
       <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
-        <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
+        <svg ref={svgRef} id={svgId} viewBox={`0 0 ${W} ${H}`}
           style={{ width: "100%", maxWidth: 700, minWidth: 340, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
           <rect width={W} height={H} fill={C.bg} />
 
@@ -1750,6 +1714,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
         <span>n = {n} · bins = {result.nBins} · bw = {bw.toFixed(4)} · fit bandwidth = {h.toFixed(4)}</span>
         <span>H₀: density continuous at cutoff · McCrary (2008, JOE)</span>
       </div>
+      <PlotExportBar getEl={() => svgRef.current} filename="mccrary_density" />
     </div>
   );
 }

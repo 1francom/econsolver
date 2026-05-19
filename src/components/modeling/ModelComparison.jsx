@@ -6,7 +6,7 @@
 //   dataDictionary Record<string,string> | null
 //   onClose()
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import { stars } from "../../math/index.js";
 import { compareModels } from "../../services/AI/AIService.js";
@@ -323,15 +323,30 @@ function FitGrid({ models }) {
 // ─── MULTI-MODEL EXPORT ───────────────────────────────────────────────────────
 function ExportBlock({ models, dataDictionary }) {
   const { C } = useTheme();
-  const [lang, setLang] = useState("r");
+  const [lang,           setLang]           = useState("r");
+  const [customLabels,   setCustomLabels]   = useState(() => models.map((m, i) => m.label ?? m.type ?? `M${i + 1}`));
+  const [showFirstStage, setShowFirstStage] = useState(false);
+
+  // Sync label array when models change (pin/unpin)
+  useEffect(() => {
+    setCustomLabels(prev => models.map((m, i) => prev[i] ?? m.label ?? m.type ?? `M${i + 1}`));
+  }, [models]);
+
+  const hasIV = models.some(m =>
+    (m.type === "2SLS" || m.type === "GMM" || m.type === "LIML") &&
+    m.firstStages?.length && m.spec?.zVars?.length
+  );
 
   const script = useMemo(() => {
     if (lang === "latex") {
-      return buildStargazer(models.map((m, i) => ({
-        label:  m.label ?? m.type ?? `M${i + 1}`,
-        result: m,
-        yVar:   m.spec?.yVar ?? m.yVar ?? "y",
-      })));
+      return buildStargazer(
+        models.map((m, i) => ({
+          label:  customLabels[i] ?? m.label ?? m.type ?? `M${i + 1}`,
+          result: m,
+          yVar:   m.spec?.yVar ?? m.yVar ?? "y",
+        })),
+        { showFirstStage: hasIV && showFirstStage }
+      );
     }
     const configs = models.map(m => ({
       model: {
@@ -355,7 +370,7 @@ function ExportBlock({ models, dataDictionary }) {
     if (lang === "python") return generateMultiModelPythonScript(configs, dataDictionary);
     if (lang === "stata")  return generateMultiModelStataScript(configs, dataDictionary);
     return "";
-  }, [models, dataDictionary, lang]);
+  }, [models, dataDictionary, lang, customLabels, showFirstStage, hasIV]);
 
   const ext = lang === "r" ? ".R" : lang === "python" ? ".py" : lang === "stata" ? ".do" : ".tex";
   const LANGS = [
@@ -394,10 +409,49 @@ function ExportBlock({ models, dataDictionary }) {
         </button>
       </div>
       {lang === "latex" && (
-        <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, fontFamily: mono }}>
-          Add <span style={{ color: C.gold }}>{"\\usepackage{booktabs}"}</span> to your preamble if needed.
-          Paste into your <span style={{ color: C.gold }}>\\begin{"{document}"}</span> body.
-        </div>
+        <>
+          <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, fontFamily: mono }}>
+            Add <span style={{ color: C.gold }}>{"\\usepackage{booktabs}"}</span> to your preamble if needed.
+            Paste into your <span style={{ color: C.gold }}>\\begin{"{document}"}</span> body.
+          </div>
+
+          {/* Editable column labels */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+            <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, flexShrink: 0 }}>
+              Labels:
+            </span>
+            {models.map((m, i) => (
+              <input
+                key={m.id ?? i}
+                value={customLabels[i] ?? ""}
+                onChange={e => setCustomLabels(prev => {
+                  const next = [...prev];
+                  next[i] = e.target.value;
+                  return next;
+                })}
+                style={{
+                  background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3,
+                  color: C.text, fontFamily: mono, fontSize: 9, padding: "2px 6px",
+                  outline: "none", width: 130,
+                }}
+                placeholder={`Col ${i + 1}`}
+                spellCheck={false}
+              />
+            ))}
+            {hasIV && (
+              <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
+                              fontSize: 9, color: C.textDim, fontFamily: mono, marginLeft: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={showFirstStage}
+                  onChange={e => setShowFirstStage(e.target.checked)}
+                  style={{ accentColor: C.teal }}
+                />
+                First stage
+              </label>
+            )}
+          </div>
+        </>
       )}
       <pre style={{
         background: C.surface2, border: `1px solid ${C.border}`,

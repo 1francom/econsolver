@@ -93,6 +93,8 @@ function buildFirstStages(valid, xCols, wCols, zCols) {
 
 // ─── TWO-STEP EFFICIENT GMM ───────────────────────────────────────────────────
 export function runGMM(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
+  if (xCols.includes(yCol))
+    return { error: `"${yCol}" is selected as both outcome (Y) and endogenous regressor (X). Remove it from X.` };
   const overidDf = zCols.length - xCols.length;
   if (overidDf < 0) return { error: ERR_UNDERIDENTIFIED };
 
@@ -202,6 +204,8 @@ export function runGMM(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
 // SE: σ̂² = ε′ε/(n−k);  Var(β) = σ̂²(X′P_Z X)⁻¹
 //
 export function runLIML(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
+  if (xCols.includes(yCol))
+    return { error: `"${yCol}" is selected as both outcome (Y) and endogenous regressor (X). Remove it from X.` };
   const overidDf = zCols.length - xCols.length;
   if (overidDf < 0) return { error: ERR_UNDERIDENTIFIED };
 

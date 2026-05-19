@@ -4,16 +4,105 @@
 
 import {
   transpose, matMul, matInv,
-  runOLS, pValue, fCDF,
+  runOLS, pValue, fCDF, fInv,
 } from "./LinearEngine.js";
 import { computeRobustSE } from "../core/inference/robustSE.js";
 
 const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 
+// ─── Anderson-Rubin CI (weak-instrument robust) ──────────────────────────────
+// Single-endogenous-regressor closed-form AR confidence interval.
+//
+// AR test inverts the joint significance of instruments in
+//   (y - β₀·x_endog) ~ exog + instruments
+// The acceptance region is a quadratic in β₀: A·β² + B·β + C ≤ 0, where
+//   a(β) = ε(β)' P_z̃ ε(β),    b(β) = ε(β)' M_z̃ ε(β)
+//   F(β) = (a(β)/q) / (b(β)/(n-k_W-q))
+//   accept iff F(β) ≤ F_crit  ⇔  a(β) - c·b(β) ≤ 0,  c = F_crit · q / (n-k_W-q)
+//
+// All inner products are computed after residualizing y, x_endog, and Z against
+// W = [intercept, ...exog] (FWL). Returns:
+//   { lo, hi, type: "bounded" | "unbounded" | "empty" | "all", F_crit }
+// "unbounded" means CI = (-∞, lo] ∪ [hi, ∞); "all" means full real line.
+function andersonRubinCI(valid, yCol, endogCol, exogCols, instrCols, alpha = 0.05) {
+  const n = valid.length;
+  const q = instrCols.length;
+  const kW = 1 + exogCols.length;          // dim(W) with intercept
+  const dfDen = n - kW - q;
+  if (q < 1 || dfDen <= 0) return null;
+
+  // FWL: residualize a column against W = [1, ...exogCols].
+  const W = valid.map(r => [1, ...exogCols.map(c => r[c])]);
+  const WtWinv = matInv(matMul(transpose(W), W));
+  if (!WtWinv) return null;
+  const resid = (vec) => {
+    const Wtv = matMul(transpose(W), vec.map(v => [v])).map(r => r[0]);
+    const coef = WtWinv.map(row => row.reduce((s, v, j) => s + v * Wtv[j], 0));
+    return vec.map((v, i) => v - W[i].reduce((s, w, j) => s + w * coef[j], 0));
+  };
+
+  const y_t = resid(valid.map(r => r[yCol]));
+  const x_t = resid(valid.map(r => r[endogCol]));
+  const Z_t = instrCols.map(c => resid(valid.map(r => r[c])));
+
+  // Project ỹ and x̃ onto residualized instrument space Z̃: P_Z̃ = Z̃(Z̃'Z̃)⁻¹Z̃'.
+  const Zmat = Z_t[0].map((_, i) => Z_t.map(col => col[i])); // n × q
+  const ZtZinv = matInv(matMul(transpose(Zmat), Zmat));
+  if (!ZtZinv) return null;
+  const proj = (v) => {
+    const Ztv = matMul(transpose(Zmat), v.map(s => [s])).map(r => r[0]);
+    const coef = ZtZinv.map(row => row.reduce((s, w, j) => s + w * Ztv[j], 0));
+    return v.map((_, i) => Zmat[i].reduce((s, w, j) => s + w * coef[j], 0));
+  };
+  const yp = proj(y_t);
+  const xp = proj(x_t);
+
+  const dot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
+  const Pyy = dot(yp, yp), Pxx = dot(xp, xp), Pxy = dot(yp, xp);
+  const Syy = dot(y_t, y_t), Sxx = dot(x_t, x_t), Sxy = dot(y_t, x_t);
+  const Myy = Syy - Pyy, Mxx = Sxx - Pxx, Mxy = Sxy - Pxy;
+
+  const F_crit = fInv(1 - alpha, q, dfDen);
+  const c = F_crit * q / dfDen;
+  const A = Pxx - c * Mxx;
+  const B = -2 * (Pxy - c * Mxy);
+  const C = Pyy - c * Myy;
+  const D = B * B - 4 * A * C;
+
+  const TOL = 1e-12;
+  // A > 0 → upward parabola, accept region is interior (bounded CI)
+  // A < 0 → downward parabola, accept region is exterior (unbounded CI)
+  if (Math.abs(A) < TOL) {
+    // Linear: B·β + C ≤ 0 → half-line. Rare; report as unbounded with NaN cap.
+    if (Math.abs(B) < TOL) return { type: C <= 0 ? "all" : "empty", lo: NaN, hi: NaN, F_crit };
+    const root = -C / B;
+    return B > 0
+      ? { type: "unbounded", lo: NaN, hi: root, F_crit }
+      : { type: "unbounded", lo: root, hi: NaN, F_crit };
+  }
+  if (D < 0) {
+    return A > 0
+      ? { type: "empty", lo: NaN, hi: NaN, F_crit }
+      : { type: "all",   lo: NaN, hi: NaN, F_crit };
+  }
+  const r1 = (-B - Math.sqrt(D)) / (2 * A);
+  const r2 = (-B + Math.sqrt(D)) / (2 * A);
+  const lo = Math.min(r1, r2), hi = Math.max(r1, r2);
+  return A > 0
+    ? { type: "bounded",   lo, hi, F_crit }
+    : { type: "unbounded", lo, hi, F_crit };
+}
+
 // ─── 2SLS / IV ───────────────────────────────────────────────────────────────
 // endog: endogenous regressors  |  exog: exogenous controls  |  instr: excluded instruments
 export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
+  // Guard: outcome cannot also appear as an endogenous regressor.
+  // If it does, the "first stage" becomes Y ~ Z (reduced form), not X ~ Z.
+  const yInEndog = endog.filter(e => e === yCol);
+  if (yInEndog.length > 0)
+    return { error: `"${yCol}" is selected as both the outcome (Y) and an endogenous regressor (X). Remove it from X — the first stage would otherwise be the reduced form.` };
+
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     [...endog, ...exog, ...instr].every(c => typeof r[c] === "number" && isFinite(r[c]))
@@ -107,6 +196,12 @@ export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
   const beta     = secondRes.beta.slice(0, k);
   const Yhat2SLS = X2.map(row => row.reduce((s, v, j) => s + v * beta[j], 0));
 
+  // Anderson-Rubin CI — only for the single-endogenous-regressor case.
+  // Weak-instrument robust: valid even when the first-stage F is small.
+  const arCI = endog.length === 1
+    ? andersonRubinCI(valid, yCol, endog[0], exog, instr, 0.05)
+    : null;
+
   return {
     firstStages,
     second: {
@@ -114,6 +209,7 @@ export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
       R2, adjR2, n, df, varNames,
       resid: trueResid,
       Yhat:  Yhat2SLS,
+      arCI, // null for multi-endog; else { type, lo, hi, F_crit }
     },
   };
 }

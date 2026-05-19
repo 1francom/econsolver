@@ -72,6 +72,12 @@
 //   -- Binary model flags --
 //   converged    boolean
 //   iterations   number|null
+//
+//   -- Hybrid-schema additions (always populated by finalize()) --
+//   vcov         number[][]|null  — k×k variance-covariance matrix (OLS-family: s² · (X'X)⁻¹)
+//   ci95         { lo:number[], hi:number[] } | null  — 95% CI per coefficient (t-based for "t" labels, z-based for "z")
+//   warnings     string[]         — engine-emitted warnings (collinearity dropped, weak IV, non-convergence, …)
+//   formula      string|null      — human-readable spec, e.g. "wage ~ educ + exper | entity"
 
 // ─── ESTIMATOR METADATA (id, label, color) ───────────────────────────────────
 // Duplicated from EstimatorSidebar.jsx to avoid a circular dependency.
@@ -92,6 +98,7 @@ const ESTIMATOR_META = {
   FuzzyRDD:        { label: "Fuzzy RDD",          color: "#c88e6e" },
   EventStudy:      { label: "Event Study",         color: "#6ec8b4" },
   LSDV:            { label: "Panel LSDV",          color: "#6e9ec8" },
+  Poisson:         { label: "Poisson GLM",          color: "#9e7ec8" },
   PoissonFE:       { label: "Poisson FE",          color: "#9e7ec8" },
   SyntheticControl:{ label: "Synthetic Control",   color: "#c8b46e" },
 };
@@ -107,6 +114,7 @@ const FAMILY_MAP = {
   FuzzyRDD: "rdd",
   EventStudy: "panel",
   LSDV: "panel",
+  Poisson: "count",
   PoissonFE: "count",
   SyntheticControl: "sc",
 };
@@ -114,6 +122,93 @@ const FAMILY_MAP = {
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function clean(arr) {
   return (arr ?? []).map(v => (v == null ? NaN : v));
+}
+
+// Two-tailed t critical value at α=0.05. Linear-interpolated lookup table; falls
+// back to 1.96 for df>200 or unknown. Used only for ci95 fallback when the engine
+// does not emit one directly.
+function tCrit95(df) {
+  if (df == null || df <= 0 || df > 200) return 1.96;
+  const T = [
+    [1,12.706],[2,4.303],[3,3.182],[4,2.776],[5,2.571],
+    [6,2.447],[7,2.365],[8,2.306],[9,2.262],[10,2.228],
+    [12,2.179],[15,2.131],[20,2.086],[25,2.060],[30,2.042],
+    [40,2.021],[60,2.000],[80,1.990],[120,1.980],[200,1.972],
+  ];
+  for (let i=0; i<T.length; i++) {
+    if (df <= T[i][0]) {
+      if (i === 0) return T[0][1];
+      const [d1,c1] = T[i-1], [d2,c2] = T[i];
+      return c1 + (c2-c1) * (df-d1) / (d2-d1);
+    }
+  }
+  return 1.96;
+}
+
+function buildCI95(beta, se, df, label) {
+  if (!beta?.length || !se?.length) return null;
+  const crit = label === "z" ? 1.96 : tCrit95(df);
+  const lo = beta.map((b,i) => Number.isFinite(b) && Number.isFinite(se[i]) ? b - crit*se[i] : NaN);
+  const hi = beta.map((b,i) => Number.isFinite(b) && Number.isFinite(se[i]) ? b + crit*se[i] : NaN);
+  return { lo, hi };
+}
+
+// vcov for OLS-family: σ̂² · (X'X)⁻¹. Engines store XtXinv + s2; others can pass
+// eng.vcov directly and finalize() will use it instead.
+function vcovFromOLS(XtXinv, s2) {
+  if (!XtXinv?.length || s2 == null || !Number.isFinite(s2)) return null;
+  return XtXinv.map(row => row.map(v => v * s2));
+}
+
+// Human-readable formula string per estimator. Falls back to `yVar ~ xList` when
+// the type is unknown. Always returns null if yVar is missing.
+function buildFormula(type, spec) {
+  if (!spec || !spec.yVar) return null;
+  const { yVar, xVars=[], zVars=[], entityCol, timeCol,
+          treatVar, postVar, runningVar, cutoff, weightCol,
+          treatedUnit, treatTime, kPre, kPost } = spec;
+  const x = xVars.length ? xVars.join(" + ") : "1";
+  const z = zVars.length ? zVars.join(" + ") : "?";
+  switch (type) {
+    case "OLS":   return `${yVar} ~ ${x}`;
+    case "WLS":   return `${yVar} ~ ${x}  [weights: ${weightCol ?? "?"}]`;
+    case "FE":    return `${yVar} ~ ${x} | ${entityCol ?? "?"}`;
+    case "FD":    return `${yVar} ~ Δ(${x}) | ${entityCol ?? "?"}`;
+    case "2SLS":
+    case "GMM":
+    case "LIML":  return `${yVar} ~ ${x} | ${z}`;
+    case "DiD":   return `${yVar} ~ ${treatVar ?? "treat"} × ${postVar ?? "post"}`;
+    case "TWFE":  return `${yVar} ~ ${treatVar ?? "treat"} × ${postVar ?? "post"} | ${entityCol ?? "?"} + ${timeCol ?? "?"}`;
+    case "RDD":       return `${yVar} ~ rdd(${runningVar ?? "?"}, c=${cutoff ?? "?"})`;
+    case "FuzzyRDD":  return `${yVar} ~ fuzzy_rdd(${runningVar ?? "?"}, Z, c=${cutoff ?? "?"})`;
+    case "Logit":     return `Logit(${yVar}) ~ ${x}`;
+    case "Probit":    return `Probit(${yVar}) ~ ${x}`;
+    case "Poisson":   return `Poisson(${yVar}) ~ ${x}`;
+    case "PoissonFE": return `Poisson(${yVar}) ~ ${x} | ${entityCol ?? "?"}`;
+    case "EventStudy": return `${yVar} ~ event(${kPre ?? "-K"}…${kPost ?? "+K"}) | ${entityCol ?? "?"} + ${timeCol ?? "?"}`;
+    case "LSDV":      return `${yVar} ~ ${x} + α_i${spec.lsdvTimeFE ? " + γ_t" : ""}`;
+    case "SyntheticControl": return `${yVar} ~ SC(${treatedUnit ?? "?"}, t₀=${treatTime ?? "?"})`;
+    default:          return `${yVar} ~ ${x}`;
+  }
+}
+
+// finalize — populate the hybrid-schema fields after the per-type wrapXxx() has
+// run. Reads engine-emitted overrides first (warnings / vcov / ci95), then derives
+// safe fallbacks. Never overwrites a value the engine explicitly set.
+function finalize(result, eng) {
+  if (eng?.warnings?.length) result.warnings = eng.warnings;
+  if (eng?.vcov)             result.vcov     = eng.vcov;
+  if (eng?.ci95)             result.ci95     = eng.ci95;
+
+  // Derived CI95 fallback when engine did not emit one.
+  if (!result.ci95 && result.beta?.length && result.se?.length) {
+    result.ci95 = buildCI95(result.beta, result.se, result.df, result.testStatLabel);
+  }
+  // Derived vcov fallback for OLS-family (uses stored XtXinv + s2).
+  if (!result.vcov && result.XtXinv && result.s2 != null) {
+    result.vcov = vcovFromOLS(result.XtXinv, result.s2);
+  }
+  return result;
 }
 
 function base(type, spec) {
@@ -138,6 +233,8 @@ function base(type, spec) {
     alphas: null, eventMeans: null, means: null, rddData: null,
     converged: true, iterations: null,
     XtXinv: null, s2: null,   // for model prediction in CalculateTab
+    // Hybrid-schema additions — populated by finalize()
+    vcov: null, ci95: null, warnings: [], formula: buildFormula(type, spec),
   };
 }
 
@@ -494,6 +591,35 @@ function wrapLSDV(eng, spec) {
   };
 }
 
+// ─── POISSON GLM ─────────────────────────────────────────────────────────────
+// eng shape: { family, beta, se, zStats, pVals, varNames, n, k, df,
+//              logLik, nullLogLik, McFaddenR2, AIC, BIC, fitted, resid,
+//              converged, iterations, hasOffset }
+function wrapPoisson(eng, spec) {
+  return {
+    ...base("Poisson", spec),
+    varNames:      eng.varNames      ?? [],
+    beta:          clean(eng.beta),
+    se:            clean(eng.se),
+    testStats:     clean(eng.zStats),
+    testStatLabel: "z",
+    pVals:         clean(eng.pVals),
+    n:             eng.n             ?? 0,
+    df:            eng.df            ?? 0,
+    logLik:        eng.logLik        ?? null,
+    mcFaddenR2:    eng.McFaddenR2    ?? null,
+    AIC:           eng.AIC           ?? null,
+    BIC:           eng.BIC           ?? null,
+    resid:         eng.resid         ?? [],
+    Yhat:          eng.fitted        ?? [],
+    converged:     eng.converged     ?? false,
+    iterations:    eng.iterations    ?? null,
+    hasOffset:     eng.hasOffset     ?? false,
+    // IRR: exp(β) — proportional rate ratios
+    IRR: (eng.beta ?? []).map(b => Math.exp(b)),
+  };
+}
+
 // ─── POISSON FE ──────────────────────────────────────────────────────────────
 // eng shape: { beta, se, zStats, pVals, varNames, n, k, df, logLik, nullLogLik,
 //              McFaddenR2, AIC, BIC, alphas, fitted, resid, converged, iterations }
@@ -565,28 +691,34 @@ function wrapSyntheticControl(eng, spec) {
  * @returns {EstimationResult}
  */
 export function wrapResult(type, engineOutput, spec, extras = {}) {
+  let r;
   switch (type) {
-    case "OLS":    return wrapLinear("OLS",  engineOutput, spec);
-    case "WLS":    return wrapLinear("WLS",  engineOutput, spec);
-    case "FE":     return wrapFE(engineOutput, spec);
-    case "FD":     return wrapFD(engineOutput, spec);
-    case "2SLS":   return wrap2SLS(engineOutput, spec);
-    case "DiD":    return wrapDiD(engineOutput, spec);
-    case "TWFE":   return wrapTWFE(engineOutput, spec);
-    case "RDD":    return wrapRDD(engineOutput, spec, extras.h);
-    case "Logit":  return wrapBinary("Logit",  engineOutput, spec);
-    case "Probit": return wrapBinary("Probit", engineOutput, spec);
-    case "GMM":    return wrapGMM(engineOutput, spec);
-    case "LIML":   return wrapLIML(engineOutput, spec);
-    case "FuzzyRDD":        return wrapFuzzyRDD(engineOutput, spec);
-    case "EventStudy":      return wrapEventStudy(engineOutput, spec);
-    case "LSDV":            return wrapLSDV(engineOutput, spec);
-    case "PoissonFE":       return wrapPoissonFE(engineOutput, spec);
-    case "SyntheticControl":return wrapSyntheticControl(engineOutput, spec);
+    case "OLS":    r = wrapLinear("OLS",  engineOutput, spec); break;
+    case "WLS":    r = wrapLinear("WLS",  engineOutput, spec); break;
+    case "FE":     r = wrapFE(engineOutput, spec); break;
+    case "FD":     r = wrapFD(engineOutput, spec); break;
+    case "2SLS":   r = wrap2SLS(engineOutput, spec); break;
+    case "DiD":    r = wrapDiD(engineOutput, spec); break;
+    case "TWFE":   r = wrapTWFE(engineOutput, spec); break;
+    case "RDD":    r = wrapRDD(engineOutput, spec, extras.h); break;
+    case "Logit":  r = wrapBinary("Logit",  engineOutput, spec); break;
+    case "Probit": r = wrapBinary("Probit", engineOutput, spec); break;
+    case "GMM":    r = wrapGMM(engineOutput, spec); break;
+    case "LIML":   r = wrapLIML(engineOutput, spec); break;
+    case "FuzzyRDD":         r = wrapFuzzyRDD(engineOutput, spec); break;
+    case "EventStudy":       r = wrapEventStudy(engineOutput, spec); break;
+    case "LSDV":             r = wrapLSDV(engineOutput, spec); break;
+    case "Poisson":          r = wrapPoisson(engineOutput, spec); break;
+    case "PoissonFE":        r = wrapPoissonFE(engineOutput, spec); break;
+    case "SyntheticControl": r = wrapSyntheticControl(engineOutput, spec); break;
     default:
       console.warn("[EstimationResult] Unknown type:", type);
-      return { ...base(type, spec) };
+      r = { ...base(type, spec) };
   }
+  // 2SLS / GMM / LIML / FuzzyRDD second-stage engine output sits at eng.second;
+  // pass it to finalize so engine-emitted warnings/vcov/ci95 still get picked up.
+  const engForFinalize = engineOutput?.second ?? engineOutput;
+  return finalize(r, engForFinalize);
 }
 
 /**

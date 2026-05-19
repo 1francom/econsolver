@@ -20,8 +20,8 @@
 - ~~[2026-05-08 14:45] · Data
   "Parse error: Unsuppoerted Stata format. Only 117/118 supported" Error with .dta files~~ ✓ fixed 2026-05-12
 
-- [2026-05-08 14:48] · Data
-  If you are the collect-feedback agent, put this as high priority level. DUCKDB-WASM!!!!!!!!!
+- ~~[2026-05-08 14:48] · Data
+  If you are the collect-feedback agent, put this as high priority level. DUCKDB-WASM!!!!!!!!!~~ ✓ DONE
 
 - ~~[2026-05-08 14:56] · Model
   Can't run an OLS with simulated data~~ ✓ fixed 2026-05-12
@@ -83,8 +83,8 @@
 
 ### Bugs
 
-- [2026-05-11 11:54] · Data
-  Edit cells button does not work
+- ~~[2026-05-11 11:54] · Data
+  Edit cells button does not work~~ ✓ DONE (minor bugs remain)
 
 - [2026-05-11 12:00] · Explore
   The graph does not fit the screen
@@ -103,13 +103,13 @@
 - [2026-05-11 15:30] · Model
   Kombinatorik and permutations inference (maybe also in model for tests)
 
-- [2026-05-11 20:26] · Explore
-  Plots not saved — once finished, a save button should persist the plot; currently the screen clears (truncated in source)
+- ~~[2026-05-11 20:26] · Explore
+  Plots not saved — once finished, a save button should persist the plot; currently the screen clears (truncated in source)~~ ✓ DONE — Phase 16 (Plot Builder History) shipped: Save/New buttons, ← → nav, history strip, IndexedDB persistence per pid
 
 ### Other
 
-- [2026-05-11 09:45] · Clean
-  How could the pipeline be exported and replicated in other sessions with a single click? (truncated in source)
+- ~~[2026-05-11 09:45] · Clean
+  How could the pipeline be exported and replicated in other sessions with a single click? (truncated in source)~~ ✓ DONE 2026-05-18 — ExportMenu already writes pipeline.json; added ImportPipelineButton next to it: file picker → STEP_TYPES validation → confirm-replace modal → atomic replacePipeline in WranglingModule (undoable)
 
 ---
 
@@ -120,19 +120,19 @@
 - [2026-05-13 12:06] · Data
   .dta files are wrong loaded and readed
 
-- [2026-05-13 13:03] · Spatial
-  Multipolygon geometry does not work
+- ~~[2026-05-13 13:03] · Spatial
+  Multipolygon geometry does not work~~ ✓ DONE
 
 - [2026-05-13 13:38] · Spatial
   Grids: adjust the size of border grids by cutting them
 
-- [2026-05-13 15:13] · Model
-  Show clearer errors than this: Matrix is singular or insufficient data. It must be more specific
+- ~~[2026-05-13 15:13] · Model
+  Show clearer errors than this: Matrix is singular or insufficient data. It must be more specific~~ ✓ DONE
 
 ### Features
 
-- [2026-05-13 13:04] · Spatial
-  Add geometry (multilinestrings, polygons, coordinates in WKT) to point plots
+- ~~[2026-05-13 13:04] · Spatial
+  Add geometry (multilinestrings, polygons, coordinates in WKT) to point plots~~ ✓ DONE — WKT LINESTRING/MULTILINESTRING/POLYGON/MULTIPOLYGON rendering in SpatialTab/PlotBuilder
 
-- [2026-05-13 15:10] · Clean
-  Add multiple joins at the same time
+- ~~[2026-05-13 15:10] · Clean
+  Add multiple joins at the same time~~ ✓ DONE 2026-05-18 — MergeTab refactored to stage N joins as cards; "+ Add another join" stacks rows; one onAdd per row; runner chains them sequentially; left-key picker shows headers-after-prior-joins for each row

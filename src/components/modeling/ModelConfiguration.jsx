@@ -343,9 +343,13 @@ export default function ModelConfiguration({
   lsdvTimeFE,     setLsdvTimeFE,
   treatedUnit,    setTreatedUnit,
   synthTreatTime, setSynthTreatTime,
+  poissonEntityCol, setPoissonEntityCol,
+  poissonOffsetCol, setPoissonOffsetCol,
   rows,
+  headers,
   panel,
 }) {
+  const { C } = useTheme();
   if (model === "2SLS" || model === "GMM" || model === "LIML") {
     return (
       <InstrumentSelector
@@ -432,6 +436,60 @@ export default function ModelConfiguration({
         weightVar={weightVar}
         setWeightVar={setWeightVar}
       />
+    );
+  }
+
+  if (model === "Poisson") {
+    // Optional: offset column (exposure / population at risk).
+    // ln(offset) is added to the linear predictor with coefficient = 1,
+    // converting the count model to a per-capita rate model (Osgood 2000, Eq. 3).
+    return (
+      <Section title="Exposure (optional)">
+        <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 6, fontFamily: mono }}>
+          Select a column holding population size or observation length to model rates rather than counts.
+          Its log will be added as an offset with coefficient fixed at 1.
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          <button
+            onClick={() => setPoissonOffsetCol("")}
+            style={{ padding: "0.28rem 0.6rem", border: `1px solid ${!poissonOffsetCol ? C.teal : C.border2}`, background: !poissonOffsetCol ? `${C.teal}18` : "transparent", color: !poissonOffsetCol ? C.teal : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+            {!poissonOffsetCol ? "✓ " : ""}None (count model)
+          </button>
+          {(headers ?? []).map(h => (
+            <button key={h} onClick={() => setPoissonOffsetCol(h)}
+              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonOffsetCol === h ? C.gold : C.border2}`, background: poissonOffsetCol === h ? `${C.gold}18` : "transparent", color: poissonOffsetCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+              {poissonOffsetCol === h ? "✓ " : ""}{h}
+            </button>
+          ))}
+        </div>
+      </Section>
+    );
+  }
+
+  if (model === "PoissonFE") {
+    // If panel entity is already declared in Wrangling, show it read-only.
+    // Otherwise let the user pick the entity column inline.
+    if (panel?.entityCol) {
+      return (
+        <Section title="Entity Column">
+          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+            i = <span style={{ color: C.gold }}>{panel.entityCol}</span>
+            <span style={{ color: C.textMuted }}> (from panel structure)</span>
+          </div>
+        </Section>
+      );
+    }
+    return (
+      <Section title="Entity Column (i)">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {(headers ?? []).map(h => (
+            <button key={h} onClick={() => setPoissonEntityCol(h)}
+              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonEntityCol === h ? C.gold : C.border2}`, background: poissonEntityCol === h ? `${C.gold}18` : "transparent", color: poissonEntityCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+              {poissonEntityCol === h ? "✓ " : ""}{h}
+            </button>
+          ))}
+        </div>
+      </Section>
     );
   }
 

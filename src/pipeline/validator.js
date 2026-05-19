@@ -15,7 +15,7 @@
 //   balance         "strongly_balanced" | "unbalanced"
 //   dups            { e, t, rows }[]  — up to 5 duplicate (entity × time) pairs
 //   gaps            { e, m[] }[]      — entities with missing time periods (up to 8)
-//   blockFE         boolean           — true if duplicates prevent FE estimation
+//   blockFD         boolean           — true if duplicates prevent FD estimation
 //   pres            Record<e, Record<t, boolean>>
 //   attrition       number            — share of t0 entities absent at tN
 //   at0             number            — entity count at first period
@@ -59,7 +59,7 @@ export function validatePanel(rows, ec, tc) {
     balance: allHave ? "strongly_balanced" : "unbalanced",
     dups: dups.slice(0, 5),
     gaps,
-    blockFE: dups.length > 0,
+    blockFD: dups.length > 0,
     pres,
     attrition, at0, atN,
   };

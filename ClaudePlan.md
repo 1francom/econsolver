@@ -882,9 +882,9 @@ Updates live as inputs change (no "run" button). Calls the functions from 10.1.
 
 | File | Changes | Status |
 |------|---------|--------|
-| `src/math/calcEngine.js` | Add `dnorm`, `pnorm`, `qnorm`, `dt`, `pt`, `qt`, `dbinom`, `pbinom`, `dpois`, `ppois`, `dchisq`, `pchisq`; register in `buildScope()` | PENDING |
-| `src/components/tabs/SimulateTab.jsx` | Add Monte Carlo section (10.2) | PENDING |
-| `src/components/tabs/CalculateTab.jsx` | Add Probability Calculator section (10.3) | PENDING |
+| `src/math/calcEngine.js` | Add `dnorm`, `pnorm`, `qnorm`, `dt`, `pt`, `qt`, `dbinom`, `pbinom`, `dpois`, `ppois`, `dchisq`, `pchisq`; register in `buildScope()` | DONE |
+| `src/components/tabs/SimulateTab.jsx` | Add Monte Carlo section (10.2) | DONE |
+| `src/components/tabs/CalculateTab.jsx` | Add Probability Calculator section (10.3) | DONE |
 
 ---
 
@@ -1214,13 +1214,13 @@ Gate implementation: thin `usePremium()` hook returning `{ canUse: bool, showUpg
 
 ---
 
-## Phase 14: Web Launch (v0.1 Public Beta) — PENDING
+## Phase 14: Web Launch (v0.1 Public Beta) — DONE
 
 **Goal:** a hosted URL to share with test users (friends, thesis group, LMU contacts). Fast feedback loop. Not production — some rough edges expected.
 
 ---
 
-### 14.1 — Frontend Deployment — PENDING
+### 14.1 — Frontend Deployment — DONE (Vercel live)
 
 **Host: Vercel** (free tier, auto-deploy from main branch, CDN-edge delivery).
 
@@ -1241,7 +1241,7 @@ Gate implementation: thin `usePremium()` hook returning `{ canUse: bool, showUpg
 
 ---
 
-### 14.2 — Anthropic Key Handling for Web — PENDING
+### 14.2 — Anthropic Key Handling for Web — DONE
 
 **v0.1 approach (fast):** user enters their own Anthropic API key in a Settings modal. Key stored in `sessionStorage` only — cleared on tab close.
 
@@ -1256,7 +1256,7 @@ Gate implementation: thin `usePremium()` hook returning `{ canUse: bool, showUpg
 
 ---
 
-### 14.3 — Landing Page & Marketing Site — PENDING
+### 14.3 — Landing Page & Marketing Site — DONE
 
 **Separate from the app.** Hosted at `litux.io` (root domain). Built with the same Vite + React stack but as a standalone page — no app logic, no Supabase dependency.
 
@@ -1295,7 +1295,7 @@ Gate implementation: thin `usePremium()` hook returning `{ canUse: bool, showUpg
 
 ---
 
-### 14.4 — Feedback Collection — PENDING
+### 14.4 — Feedback Collection — DONE
 
 Built into the app for v0.1 beta users. Lightweight — no external service needed.
 
@@ -1399,24 +1399,24 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 
 ---
 
-## Overall Status Summary (last updated 2026-05-04)
+## Overall Status Summary (last updated 2026-05-16)
 
 | Phase | Title | Status |
 |-------|-------|--------|
 | 1 | Standardised Estimation Result | DONE |
 | 2 | Advanced Context-Aware AI Coach | DONE |
 | 3 | Multi-Model Comparison System | DONE |
-| 4 | Integration | IN PROGRESS |
+| 4 | Integration | IN PROGRESS — multi-model export scripts only |
 | 5 | New Estimators | DONE |
 | 6 | Robust Standard Errors | DONE |
 | 7 | New File Format Support | DONE |
 | 8 | Modeling UI Overhaul | DONE |
 | 9 | Workspace Architecture | DONE |
-| 10 | Probability & Simulation Analytics | IN PROGRESS (10.1 done) |
-| 11 | Spatial Analytics | IN PROGRESS — see Phase 11 remaining below |
-| 12 | Excel-style Cell Editing | PENDING — double-click focus bug |
-| 13 | Project Isolation & User Auth | IN PROGRESS (13.1 done) |
-| 14 | Web Launch v0.1 Beta | PENDING — blocked on 13 |
+| 10 | Probability & Simulation Analytics | DONE |
+| 11 | Spatial Analytics | IN PROGRESS — border clipping + Moran's I + Aggregate-to-Grid UI + Spatial RD shortcut remaining (Geocoding DONE) |
+| 12 | Excel-style Cell Editing | DEFERRED |
+| 13 | Project Isolation & User Auth | DONE |
+| 14 | Web Launch v0.1 Beta | DONE — Vercel deployed, API key settings, landing page, feedback modal all live |
 | 15 | Local Installable Version (Tauri) | PENDING — blocked on 14 validation |
 
 ---
@@ -1435,9 +1435,23 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 
 0. **Border cell clipping artifacts** — `makeGrid` `clipRectToRings` still produces diagonal artifacts at complex coastal boundaries (harbor inlets, peninsulas). Three approaches tried: angular sort (self-intersecting), convex hull (clips concave areas), same-edge re-entry detection (didn't help). Root cause: convex hull over-approximates non-convex intersections. Possible next approach: Sutherland-Hodgman polygon clipping (exact for convex clip region, i.e. the rect) applied directly to each boundary ring. The rect is convex so SH gives exact results regardless of boundary concavity.
 
+0a. **Shapefile geometry — Italy ITA admin shapefile** — Fixes landed in `src/services/data/parsers/shapefile.js`:
+    - **DONE — ESRI multi-ring → MULTIPOLYGON split**: shape-type 5 records with multiple disjoint outer rings (mainland + islands) were previously emitted as one POLYGON with rings 2…N reinterpreted as holes. Now correctly emitted as POLYGON or MULTIPOLYGON.
+    - **DONE — Robust point-in-polygon ring classification**: real-world shapefiles (ISTAT, GADM, Natural Earth) ship rings in arbitrary orientation, so the previous signed-area heuristic dropped or misclassified rings whose orientation did not match the ESRI CW-outer convention. Replaced with GDAL/OGR/sf/PostGIS-style geometric containment: for each ring count enclosing rings via ray-cast point-in-polygon; even depth = outer, odd depth = hole of nearest enclosing outer. Output normalised to OGC SFS orientation (outer CCW, holes CW).
+    - **DONE — Resilient SHP record loop**: a single malformed record header used to `break` the whole record loop, silently dropping every subsequent geometry (suspected cause of Sicily missing). Now emits `null` for the bad slot and continues.
+    - **DONE — Ring closure + degenerate filter**: rings with < 4 vertices are dropped; open rings (first ≠ last vertex) are explicitly closed before classification.
+    - **Open — `.prj` sidecar reprojection**: parse the `.prj` WKT alongside `.dbf`/`.shp`, feed to proj4js to reproject coords to WGS-84 inside the parser. Not the cause of the current visible offsets (data already in WGS-84 lon/lat), but needed for shapefiles delivered in UTM / ED50 / Roma40 / ETRS89-LAEA.
+    - **Open — Italy fixture self-test**: load a known-good ITA shapefile and assert Sicily, Sardinia, mainland, Elba are each present as separate outer rings of the country MULTIPOLYGON.
+    - **Note on residual coast offsets**: the ~100–300 m gap between rendered polygon edges and the OSM coastline (Elba, Liguria, Tuscan coast) is the normal mismatch between *administrative boundary* (the shapefile polygon — comune of Venezia includes the lagoon, coastal comuni include port basins and offshore territorial water) and *coastline* (the OSM tile basemap). `sf::st_read()` on the same source produces the same edges; this is expected, not a bug.
+
+0a-legacy. — Previous symptom list, kept for history:
+    - **Sicily renders with no boundary** at all (mainland + Sardinia outlined, Sicily missing) — see screenshot. Suspect: the Sicily record may be reaching `wktToLeaflet` as null or as a polygon whose first ring fails the `r.length >= 3` filter after `splitParenGroups` parsing; or its `__geometry` field is empty in the DBF row (record ordering mismatch).
+    - **Systematic ~100–300 m offsets** between rendered polygon edges and the OSM coastline (Elba, Liguria, Tuscan coast). Likely candidates: (i) shapefile uses a non-WGS84 datum (ED50, Roma40, ETRS89-LAEA) and we never read the `.prj` sidecar — projected CRS reprojection was added but only triggers for explicit UTM/GK/RD/OSGB36 detection in `metadataExtractor.js`; (ii) lower-resolution coastline definition in the source shapefile.
+    - **Next steps (when picked up):** (a) log per-record geometry parse results for the Italy shapefile and identify which record(s) drop out (Sicily); add a guard so `MULTIPOLYGON` parsing doesn't silently drop polygons whose first ring is CCW with no preceding CW outer; (b) parse `.prj` sidecar in the upload flow (DataStudio.jsx accepts .shp/.dbf/.shx — extend to .prj) and feed the WKT CRS into proj4js for reprojection to WGS-84; (c) add a self-test that loads a known-good Italy shapefile and asserts Sicily, Sardinia, mainland, Elba are all present as separate outer rings.
+
 1. **Per-operation dataset selector in Analyze tab** — Distance to Point, Buffer, Grid, Spatial Join, Nearest Neighbour all use the active dataset for points. Should allow selecting any loaded dataset as the source (mirrors what Plot tab already does per layer). Needed when the enriched dataset is in a different tab than the active one.
 
-2. **Geocode — Address → Lat/Lon** — UI stub exists, marked "coming soon · phase 11.2". Uses OpenStreetMap Nominatim (1 req/sec, session-cached). Adds `lat_geocoded` + `lon_geocoded` columns.
+2. ~~**Geocode — Address → Lat/Lon**~~ — DONE. Uses OpenStreetMap Nominatim, session-cached, adds `lat_geocoded` + `lon_geocoded` columns.
 
 3. **Spatial autocorrelation (Moran's I)** — listed in HintBox tips but not implemented. Pure math: weight matrix (k-NN or distance band) + I statistic + permutation p-value. Needed for spatial econometrics diagnostics.
 
@@ -1542,14 +1556,30 @@ Ongoing improvements to PlotBuilder.jsx, ModelPlots.jsx, and SpatialTab.jsx to m
 
 ## Next unblocked tasks
 
-1. **Browser validation of Phase 4** — pin 3 models (OLS, FE, 2SLS), open ModelComparison, verify stargazer table shows 3 columns, AI narrative references all three, all three multi-model export scripts (R/Python/Stata) generate correctly.
+1. **Open bug backlog (ClaudeFB.md)** — work through remaining bugs:
+   - ~~`[2026-05-08] Data` — Big datasets crashes (>900k rows) → DuckDB model-frame builder~~ ✓ DONE
+   - `[2026-05-10] Data` — CSV parse error line 1583 (DuckDB CSV reader edge case)
+   - ~~`[2026-05-11] Data` — Edit cells button does not work~~ ✓ DONE (minor bugs remain)
+   - `[2026-05-11] Explore` — Graph does not fit screen
+   - `[2026-05-13] Data` — .dta files wrongly loaded/read — **PENDING**
+   - ~~`[2026-05-13] Spatial` — Multipolygon geometry does not work~~ ✓ DONE
+   - `[2026-05-13] Spatial` — Grids: clip border cells (Sutherland-Hodgman)
+   - ~~`[2026-05-13] Model` — "Matrix is singular" needs specific error~~ ✓ DONE
 
-2. **Phase 9 remaining** — ~~cascade delete dialog in DatasetManager~~ (DONE), ~~`runner.js` datasetId field~~ (DONE), ~~AI unified script export in Report tab~~ (DONE — `AIUnifiedScript` collapsible in ReportingModule, calls `generateUnifiedScript` via AIService).
+2. **Phase 4 — multi-model export scripts** — verify R/Python/Stata export buttons in ModelComparison generate correctly for 3+ pinned models.
 
-3. **Phase 10.1** — add probability functions (`dnorm`, `pnorm`, `qnorm`, `dt`, `pt`, `qt`, `dbinom`, `pbinom`, `dpois`, `ppois`) to `calcEngine.js` and register in `buildScope()`. Unblocks 10.2 and 10.3.
+3. **Phase 13.3 — tier & access control** — `usePremium()` hook + upgrade modal. Unblocks premium gating for AI features.
 
-4. **Phase 13.1** — fix project isolation bug. Fast, no dependencies, unblocks auth.
+4. **Codex stabilization sprint remaining items**:
+   - Edit-cells E2E verification + `patch` step tests (Codex §2)
+   - DuckDB model-frame builder for OLS (Codex §3)
+   - Lock Supabase `claude-proxy` (JWT + tier + rate limits) (Codex §4)
+   - Smoke tests for pipeline replay, patch, group_summarize, OLS (Codex §3 of stabilization)
 
-5. **Phase 13.2** — Supabase auth. Unblocks web deployment.
+5. **Phase 15 — Tauri** — after 14 is validated in production.
 
-6. **Phase 12** — Excel-style cell editing. Infrastructure complete; blocker is double-click → focus handoff. Use native DOM listener on `<tbody>` — see Phase 12 notes above.
+### Completed since last update (2026-05-18)
+- ✓ Codex §1 lint cleanup — 55 bugs surfaced, 7 critical runtime bombs fixed (no-undef, hook-order)
+- ✓ Geocoding (Phase 11.2) — Nominatim integration
+- ✓ Web Launch (Phase 14) — Vercel deployed
+- ✓ README replaced (Vite-template → user/dev docs)

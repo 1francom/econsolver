@@ -8,13 +8,13 @@
 | 2026-05-08 | Data | In the data viewer I cannot see all columns, the arrows are for the rows instead. | medium | ui | `src/components/` (DataViewer / ExplorerModule.jsx) | fixed |
 | 2026-05-08 | Explore | Values of distributions don't change with the filter, just the graph | high | pipeline | `src/ExplorerModule.jsx` | fixed |
 | 2026-05-08 | Data | "Parse error: Unsuppoerted Stata format. Only 117/118 supported" Error with .dta files | high | data | `src/services/data/parsers/stata.js` | fixed |
-| 2026-05-08 | Data | DuckDB-WASM integration missing (user-flagged high priority) | high | pipeline | `src/` (no DuckDB-WASM file yet — pending roadmap item) | open |
+| 2026-05-08 | Data | DuckDB-WASM integration missing (user-flagged high priority) | high | pipeline | `src/services/data/duckdb.js`, `src/pipeline/duckdbRunner.js` | fixed |
 | 2026-05-08 | Model | Can't run an OLS with simulated data | critical | math | `src/math/LinearEngine.js`, `src/components/ModelingTab.jsx` | fixed |
 | 2026-05-10 | Model | Allow the light theme button in the project session | low | ui | `src/App.jsx`, `src/components/workspace/WorkspaceBar.jsx` | fixed |
-| 2026-05-11 | Data | Edit cells button does not work | high | ui | `src/ExplorerModule.jsx` | open |
-| 2026-05-11 | Explore | The graph does not fit the screen | medium | ui | `src/components/PlotBuilder.jsx`, `src/components/ModelingTab.jsx` | open |
+| 2026-05-11 | Data | Edit cells button does not work | high | ui | `src/ExplorerModule.jsx` | fixed (minor bugs remain) |
+| 2026-05-11 | Explore | The graph does not fit the screen | medium | ui | `src/components/PlotBuilder.jsx`, `src/components/ModelingTab.jsx` | fixed |
 | 2026-05-11 | Model | McRary plot does not work — McCrary density test could not be computed | high | math | `src/math/CausalEngine.js`, `src/components/modeling/ModelPlots.jsx` | fixed |
-| 2026-05-13 | Data | .dta files are wrong loaded and readed | high | data | `src/services/data/parsers/stata.js` | open |
-| 2026-05-13 | Spatial | Multipolygon geometry does not work | high | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | open |
-| 2026-05-13 | Spatial | Grids: adjust the size of border grids by cutting them | medium | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | open |
-| 2026-05-13 | Model | Show clearer errors — "Matrix is singular or insufficient data" too vague | medium | ui | `src/components/ModelingTab.jsx`, `src/math/LinearEngine.js` | open |
+| 2026-05-13 | Data | .dta files are wrong loaded and readed | high | data | `src/services/data/parsers/stata.js` | pending |
+| 2026-05-13 | Spatial | Multipolygon geometry does not work | high | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | fixed |
+| 2026-05-13 | Spatial | Grids: adjust the size of border grids by cutting them | medium | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | fixed (2026-05-18 — Sutherland-Hodgman polygon clipping in `clipRectToRings`) |
+| 2026-05-13 | Model | Show clearer errors — "Matrix is singular or insufficient data" too vague | medium | ui | `src/components/ModelingTab.jsx`, `src/math/LinearEngine.js` | fixed |

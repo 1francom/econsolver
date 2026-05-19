@@ -21,7 +21,8 @@ export const MODELS = [
   { id: "OLS",             label: "OLS",                group: "Linear",            desc: "Ordinary Least Squares",                       color: "#7ab896" },
   { id: "WLS",             label: "WLS",                group: "Linear",            desc: "Weighted Least Squares",                        color: "#7ab896" },
   // Panel
-  { id: "FE",              label: "FE / FD",            group: "Panel",             desc: "Within estimator — panel required",             color: "#6e9ec8" },
+  { id: "FE",              label: "FE",                 group: "Panel",             desc: "Fixed Effects (within estimator) — panel required",  color: "#6e9ec8" },
+  { id: "FD",              label: "FD",                 group: "Panel",             desc: "First Differences — unique (i,t) pairs required",     color: "#6e9ec8" },
   { id: "LSDV",            label: "LSDV",               group: "Panel",             desc: "Least Squares Dummy Variables — panel required", color: "#6e9ec8" },
   { id: "TWFE",            label: "TWFE DiD",           group: "Panel",             desc: "Two-Way Fixed Effects DiD — panel required",    color: "#6ec8b4" },
   { id: "EventStudy",      label: "Event Study",        group: "Panel",             desc: "Dynamic DiD / event study — panel required",   color: "#6ec8b4" },
@@ -33,7 +34,8 @@ export const MODELS = [
   // Limited Dependent
   { id: "Logit",           label: "Logit",              group: "Limited Dependent", desc: "Binary Logistic Regression (MLE)",              color: "#9e7ec8" },
   { id: "Probit",          label: "Probit",             group: "Limited Dependent", desc: "Probit — Normal Link (MLE)",                    color: "#9e7ec8" },
-  { id: "PoissonFE",       label: "Poisson FE",         group: "Limited Dependent", desc: "Poisson with Fixed Effects (planned)",          color: "#9e7ec8" },
+  { id: "Poisson",         label: "Poisson GLM",        group: "Limited Dependent", desc: "Poisson GLM — count/rate data, optional offset", color: "#9e7ec8" },
+  { id: "PoissonFE",       label: "Poisson FE (PPML)",  group: "Limited Dependent", desc: "Poisson PPML with entity fixed effects",        color: "#9e7ec8" },
   // IV / GMM
   { id: "GMM",             label: "Two-Step GMM",       group: "IV/GMM",            desc: "Efficient GMM — HC-robust Ω̂ + J-test",         color: "#c8a96e" },
   { id: "LIML",            label: "LIML",               group: "IV/GMM",            desc: "Limited Info. Max. Likelihood / k-class",       color: "#c8a96e" },
@@ -203,9 +205,9 @@ export default function EstimatorSidebar({
           No panel declared. Go to Wrangling → Panel Structure to enable FE, FD, and TWFE DiD.
         </InfoBox>
       )}
-      {panel && panel.blockFE && (
-        <InfoBox color={C.red}>
-          Panel has duplicate observations — Fixed Effects blocked. Fix in Wrangling.
+      {panel && panel.blockFD && (
+        <InfoBox color={C.yellow}>
+          Duplicate (i,t) pairs detected — First Differences blocked. FE/TWFE are unaffected.
         </InfoBox>
       )}
     </>

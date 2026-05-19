@@ -256,7 +256,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
             <div>
               <Lbl color={C.teal}>Columns to pivot</Lbl>
               <div style={{marginBottom:"0.5rem",display:"flex",gap:6}}>
-                <button onClick={()=>setPivCols(numC)}
+                <button onClick={()=>setPivCols(headers.filter(h=>info[h]?.isNum))}
                   style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
                     background:"transparent",color:C.textDim,borderRadius:2,
                     cursor:"pointer",fontSize:9,fontFamily:mono}}>select all numeric</button>

@@ -19,10 +19,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme, mono } from "./modeling/shared.jsx";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
+import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
 const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fb;
+
+const MAP_BASEMAPS = {
+  light: {
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+  },
+  dark: {
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+  },
+};
 
 // ─── OBSERVABLE PLOT — CACHED CDN SINGLETON ───────────────────────────────────
 let _plt = null;
@@ -575,7 +587,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
 // avoid the feedback loop: Leaflet fills container → parent ResizeObserver fires
 // → canvasH grows → Leaflet grows → repeat.
 function MapCanvas({ layer, rows }) {
-  const { C } = useTheme();
+  const { C, theme } = useTheme();
   const wrapRef     = useRef(null);  // fixed-size wrapper — ResizeObserver target
   const mapDivRef   = useRef(null);  // inner div Leaflet mounts into
   const leafMapRef  = useRef(null);
@@ -618,9 +630,12 @@ function MapCanvas({ layer, rows }) {
     const map = L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
     leafMapRef.current = map;
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>",
+    const basemap = MAP_BASEMAPS[theme === "light" ? "light" : "dark"];
+    L.tileLayer(basemap.url, {
+      attribution: basemap.attribution,
       maxZoom: 19,
+      detectRetina: true,
+      crossOrigin: true,
     }).addTo(map);
 
     // Color scale
@@ -670,7 +685,7 @@ function MapCanvas({ layer, rows }) {
     try { map.fitBounds(group.getBounds().pad(0.08)); } catch (_) { map.setView([0, 0], 2); }
 
     return () => { if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; } };
-  }, [L, layer, rows]);
+  }, [L, layer, rows, theme]);
 
   if (err) return <div style={{ color: "#c47070", fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
   if (!L)  return <div style={{ color: "#666", fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Leaflet…</div>;
@@ -1021,6 +1036,71 @@ function PlotHistoryCard({ entry, isCompared, onLoad, onDelete, onCompare, C: Cp
   );
 }
 
+// ─── COMBINED EXPORT BAR ──────────────────────────────────────────────────────
+// Single export row for compare mode — exports both plots as one PNG.
+function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
+  const { C } = useTheme();
+  const [preset, setPreset] = useState("default");
+  const [busy, setBusy] = useState(false);
+
+  const btnBase = {
+    padding: "0.2rem 0.6rem",
+    background: "transparent",
+    border: `1px solid ${C.border2}`,
+    borderRadius: 3,
+    color: C.textDim,
+    cursor: "pointer",
+    fontFamily: mono,
+    fontSize: 9,
+    transition: "all 0.12s",
+    flexShrink: 0,
+  };
+
+  async function handleCombined() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await downloadCombinedPNG(getElA(), getElB(), filename, preset);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 6,
+      padding: "0.3rem 0.65rem",
+      borderTop: `1px solid ${C.border}`,
+      background: C.bg,
+    }}>
+      <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>Style</span>
+      <select
+        value={preset}
+        onChange={e => setPreset(e.target.value)}
+        style={{
+          background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 3,
+          fontFamily: mono, fontSize: 9, padding: "2px 5px", color: C.text, cursor: "pointer",
+        }}
+      >
+        {Object.entries(PRESETS).map(([key, { label }]) => (
+          <option key={key} value={key}>{label}</option>
+        ))}
+      </select>
+      <div style={{ flex: 1 }} />
+      <button
+        onClick={handleCombined}
+        disabled={busy}
+        title="Download both plots as one PNG"
+        style={{ ...btnBase, opacity: busy ? 0.5 : 1 }}
+        onMouseEnter={e => { if (!busy) { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; } }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+      >
+        {busy ? "…" : "↓ PNG"}
+      </button>
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid }) {
   const { C } = useTheme();
@@ -1043,8 +1123,10 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   const [xFmt,          setXFmt]          = useState(""); // "" | "%" | ","
   const [yFmt,          setYFmt]          = useState("");
   const [showAxisOpts,  setShowAxisOpts]  = useState(false);
-  const canvasRef  = useRef(null);
-  const plotRef    = useRef(null);
+  const canvasRef   = useRef(null);
+  const plotRef     = useRef(null);
+  const compareRefA = useRef(null);
+  const compareRefB = useRef(null);
   const [canvasW,  setCanvasW]  = useState(760);
   const [canvasH,  setCanvasH]  = useState(400);
 
@@ -1469,12 +1551,22 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             if (!entA || !entB) return null;
             const hw = Math.max(280, Math.floor(canvasW / 2) - 12);
             return (
-              <div style={{
-                display: "flex", gap: 8, padding: "0.5rem 0.75rem",
-                borderTop: `1px solid ${C.border}`, background: C.bg, overflowX: "auto",
-              }}>
-                <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE xScale={entA.xScale||"linear"} yScale={entA.yScale||"linear"} xDomain={entA.xDomain||[null,null]} yDomain={entA.yDomain||[null,null]} xFmt={entA.xFmt||""} yFmt={entA.yFmt||""} />
-                <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE xScale={entB.xScale||"linear"} yScale={entB.yScale||"linear"} xDomain={entB.xDomain||[null,null]} yDomain={entB.yDomain||[null,null]} xFmt={entB.xFmt||""} yFmt={entB.yFmt||""} />
+              <div style={{ display: "flex", flexDirection: "column", borderTop: `1px solid ${C.border}`, background: C.bg }}>
+                {/* Side-by-side canvases */}
+                <div style={{ display: "flex", gap: 8, padding: "0.5rem 0.75rem", overflowX: "auto" }}>
+                  <div style={{ flex: "1 1 0" }}>
+                    <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE xScale={entA.xScale||"linear"} yScale={entA.yScale||"linear"} xDomain={entA.xDomain||[null,null]} yDomain={entA.yDomain||[null,null]} xFmt={entA.xFmt||""} yFmt={entA.yFmt||""} canvasRef={compareRefA} />
+                  </div>
+                  <div style={{ flex: "1 1 0" }}>
+                    <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE xScale={entB.xScale||"linear"} yScale={entB.yScale||"linear"} xDomain={entB.xDomain||[null,null]} yDomain={entB.yDomain||[null,null]} xFmt={entB.xFmt||""} yFmt={entB.yFmt||""} canvasRef={compareRefB} />
+                  </div>
+                </div>
+                {/* Single combined export bar */}
+                <CombinedExportBar
+                  getElA={() => compareRefA.current}
+                  getElB={() => compareRefB.current}
+                  filename={`${entA.name || "plot_A"}_${entB.name || "plot_B"}`}
+                />
               </div>
             );
           })()}

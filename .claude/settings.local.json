@@ -20,7 +20,28 @@
       "mcp__code-review-graph__semantic_search_nodes_tool",
       "Bash(git add:*)",
       "Bash(git commit -m ':*)",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git push:*)",
+      "Bash(curl:*)",
+      "Bash(mkdir -p \"C:/Users/meder/.claude/skills/caveman\")",
+      "Bash(mkdir -p \"C:/Users/meder/.claude/skills/frontend-design\")",
+      "Bash(npm run:*)",
+      "Bash(git commit:*)",
+      "Bash(git rebase:*)",
+      "Bash(git stash:*)",
+      "Bash(git cherry-pick:*)",
+      "mcp__code-review-graph__query_graph_tool",
+      "Bash(node --input-type=module)",
+      "Bash(npx vite:*)",
+      "Bash(npx.cmd eslint:*)",
+      "Bash(node C:/Users/meder/lint_summary.js)",
+      "Bash(node -e ':*)",
+      "Read(//c/Users/meder/**)",
+      "Bash(node:*)",
+      "Bash(npm.cmd run:*)",
+      "Bash(git pull:*)"
     ]
   }
 }

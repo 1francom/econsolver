@@ -159,3 +159,65 @@ export function downloadPNG(el, filename = "plot", preset = "default", scale = 2
   img.onerror = () => URL.revokeObjectURL(url);
   img.src = url;
 }
+
+// ─── DOWNLOAD COMBINED PNG (two plots side-by-side) ───────────────────────────
+/**
+ * Render two SVG elements side-by-side on a single canvas and download as PNG.
+ * @param {SVGElement|HTMLElement} elA
+ * @param {SVGElement|HTMLElement} elB
+ * @param {string} filename
+ * @param {string} preset
+ * @param {number} gap     — pixel gap between plots (unscaled)
+ * @param {number} scale   — pixel multiplier (default 2 for retina)
+ */
+export async function downloadCombinedPNG(elA, elB, filename = "plot_combined", preset = "default", gap = 16, scale = 2) {
+  const svgA = getSVGElement(elA);
+  const svgB = getSVGElement(elB);
+  if (!svgA || !svgB) return;
+
+  function prep(svg) {
+    const { width: rawW, height: rawH } = svg.getBoundingClientRect();
+    const w = rawW || 600;
+    const h = rawH || 360;
+    const clone = svg.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width",  String(w));
+    clone.setAttribute("height", String(h));
+    let src = new XMLSerializer().serializeToString(clone);
+    src = applyPreset(src, preset);
+    return { src, w, h };
+  }
+
+  function loadImg(src) {
+    return new Promise((resolve, reject) => {
+      const blob = new Blob([src], { type: "image/svg+xml" });
+      const url  = URL.createObjectURL(blob);
+      const img  = new Image();
+      img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("SVG load failed")); };
+      img.src = url;
+    });
+  }
+
+  const { src: srcA, w: wA, h: hA } = prep(svgA);
+  const { src: srcB, w: wB, h: hB } = prep(svgB);
+  const [imgA, imgB] = await Promise.all([loadImg(srcA), loadImg(srcB)]);
+
+  const totalW = wA + gap + wB;
+  const totalH = Math.max(hA, hB);
+  const canvas  = document.createElement("canvas");
+  canvas.width  = totalW * scale;
+  canvas.height = totalH * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  const bgColor = PRESETS[preset]?.bg ?? "#080808";
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, totalW, totalH);
+  ctx.drawImage(imgA, 0,       0, wA, hA);
+  ctx.drawImage(imgB, wA + gap, 0, wB, hB);
+
+  const a = document.createElement("a");
+  a.href     = canvas.toDataURL("image/png");
+  a.download = filename + ".png";
+  a.click();
+}

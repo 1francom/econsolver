@@ -10,6 +10,7 @@ export {
   tCDF, fCDF, pValue, stars,
   // OLS
   runOLS,
+  runOLSFromSuffStats,
   runWLS,
   // Diagnostics
   breuschPagan, computeVIF, hausmanTest,
@@ -36,10 +37,11 @@ export {
   runMcCrary,
 } from "./CausalEngine.js";
 
-// ── Binary outcome models + Poisson FE ───────────────────────────────────────
+// ── Binary outcome models + Poisson GLM + Poisson FE ─────────────────────────
 export {
   runLogit,
   runProbit,
+  runPoisson,
   runPoissonFE,
   normCDF,
   buildBinaryLatex,
@@ -55,6 +57,12 @@ export { runSyntheticControl } from "./SyntheticControlEngine.js";
 // ── Canonical result wrapper ──────────────────────────────────────────────────
 export { wrapResult, getCoeffBlock } from "./EstimationResult.js";
 
+// ── Fit-failure diagnostics ──────────────────────────────────────────────────
+export { diagnoseFit } from "./diagnoseFit.js";
+
+// Symbolic algebra for the Calculate module
+export { solveAlgebraicEquation } from "./symbolicSolve.js";
+
 // ── Spatial Analytics (Phase 11) ─────────────────────────────────────────────
 export {
   haversine, euclidean,
@@ -63,3 +71,10 @@ export {
   pointInPolygon, parseWKTPolygon, spatialJoin,
   nearestNeighbor,
 } from "./SpatialEngine.js";
+
+// ── Resampling / permutation inference ───────────────────────────────────────
+export {
+  bootstrapMean,
+  subsampleMean,
+  permutationTwoSampleMean,
+} from "./Resampling.js";

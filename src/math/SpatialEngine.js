@@ -91,31 +91,63 @@ export function assignDistance(rows, latCol, lonCol, refLat, refLon, outCol) {
 // ─── BOUNDARY DISTANCE (SPATIAL RD) ──────────────────────────────────────────
 
 /**
- * Parses a WKT POLYGON or MULTIPOLYGON into an array of rings.
- * Each ring is an array of [lon, lat] pairs.
- * Internal helper — handles both geometry types.
+ * Splits a string into its top-level parenthesised groups using a paren counter.
+ * "((a),(b)),((c))" → ["(a),(b)", "(c)"]. Used to parse nested WKT structures.
+ */
+function splitParenGroups(s) {
+  const groups = [];
+  let depth = 0, start = -1;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(") { if (depth === 0) start = i; depth++; }
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0 && start >= 0) { groups.push(s.slice(start + 1, i)); start = -1; }
+    }
+  }
+  return groups;
+}
+
+function _parseRingStr(s) {
+  return s.split(",").map(p => {
+    const [lon, lat] = p.trim().split(/\s+/).map(Number);
+    return [lon, lat];
+  }).filter(([x, y]) => !isNaN(x) && !isNaN(y));
+}
+
+/**
+ * Parses a WKT POLYGON or MULTIPOLYGON into a flat array of rings (outer + holes,
+ * across all polygon components for MULTIPOLYGON). Each ring is an array of [lon, lat]
+ * pairs. Used by boundary-distance: every ring contributes boundary segments,
+ * including hole rings.
+ *
+ * Replaces the previous regex-based parser, which silently dropped any
+ * MULTIPOLYGON component containing holes.
  */
 function parseWKTRings(wkt) {
   if (!wkt || typeof wkt !== "string") return [];
   const w = wkt.trim();
   const rings = [];
-  if (/^MULTIPOLYGON/i.test(w)) {
-    const re = /\(\(([^()]+)\)\)/g;
-    let m;
-    while ((m = re.exec(w)) !== null) {
-      const r = m[1].split(",").map(p => {
-        const [lon, lat] = p.trim().split(/\s+/).map(Number);
-        return [lon, lat];
-      }).filter(([x, y]) => !isNaN(x) && !isNaN(y));
-      if (r.length >= 3) rings.push(r);
+  const isMulti = /^MULTIPOLYGON/i.test(w);
+  const isPoly  = /^POLYGON/i.test(w);
+  if (!isMulti && !isPoly) return [];
+
+  const body = w.slice(w.indexOf("("));
+  const inner = splitParenGroups(body)[0]; // strip outermost ( )
+  if (!inner) return [];
+
+  if (isMulti) {
+    // inner = "((r1),(h1)), ((r2))"  → each polygon at top level
+    for (const polyStr of splitParenGroups(inner)) {
+      for (const ringStr of splitParenGroups(polyStr)) {
+        const r = _parseRingStr(ringStr);
+        if (r.length >= 3) rings.push(r);
+      }
     }
-  } else if (/^POLYGON/i.test(w)) {
-    const m = w.match(/POLYGON\s*\(\(([^()]+)\)/i);
-    if (m) {
-      const r = m[1].split(",").map(p => {
-        const [lon, lat] = p.trim().split(/\s+/).map(Number);
-        return [lon, lat];
-      }).filter(([x, y]) => !isNaN(x) && !isNaN(y));
+  } else {
+    // inner = "(outer), (hole), ..."
+    for (const ringStr of splitParenGroups(inner)) {
+      const r = _parseRingStr(ringStr);
       if (r.length >= 3) rings.push(r);
     }
   }
@@ -471,107 +503,77 @@ export function makeGrid(boundaryWkt, cellsizeMeters = 500, clipBorder = true) {
     return false;
   }
 
-  // ── Point-collection polygon clipper (works for non-convex boundaries) ───
-  // Clips a cell rectangle against the boundary rings by collecting:
-  //   1. Rect corners inside the boundary
-  //   2. Boundary vertices inside the rect bbox
-  //   3. All edge-edge intersection points
-  // Then sorts by angle → valid clipped polygon.
-  // Assumption: intersection region is star-shaped from its centroid — holds
-  // for typical administrative boundaries crossing a small cell at most twice.
+  // ── Sutherland-Hodgman polygon clipping ──────────────────────────────────
+  // Exact intersection of each boundary ring with the cell rect. The rect is
+  // convex, so SH gives the geometrically exact clip even when the boundary
+  // ring is non-convex (harbors, fjords, peninsulas). Replaces an earlier
+  // convex-hull approximation that produced diagonal artifacts on complex coasts.
+  //
+  // Returns:
+  //   - null if no ring's interior intersects the rect
+  //   - array of polygon point-arrays (one per ring with a non-empty result);
+  //     each polygon is CCW or matches the source ring orientation
   function clipRectToRings(rLon0, rLat0, rLon1, rLat1) {
-    // Segment intersection: returns {lon,lat} or null
-    function segX(ax, ay, bx, by, cx, cy, dx, dy) {
-      const dx1 = bx - ax, dy1 = by - ay;
-      const dx2 = dx - cx, dy2 = dy - cy;
-      const den = dx1 * dy2 - dy1 * dx2;
-      if (Math.abs(den) < 1e-14) return null;
-      const t = ((cx - ax) * dy2 - (cy - ay) * dx2) / den;
-      const s = ((cx - ax) * dy1 - (cy - ay) * dx1) / den;
-      if (t < -1e-9 || t > 1 + 1e-9 || s < -1e-9 || s > 1 + 1e-9) return null;
-      return { lon: ax + t * dx1, lat: ay + t * dy1 };
+    // Four half-planes defining the rect interior (interior is "inside" each):
+    //   bottom: lat ≥ rLat0
+    //   right:  lon ≤ rLon1
+    //   top:    lat ≤ rLat1
+    //   left:   lon ≥ rLon0
+    // Each plane has an axis-aligned boundary value and an inequality direction.
+    const planes = [
+      { axis: "lat", side: 1, val: rLat0 },  // keep lat >= rLat0
+      { axis: "lon", side: -1, val: rLon1 }, // keep lon <= rLon1
+      { axis: "lat", side: -1, val: rLat1 }, // keep lat <= rLat1
+      { axis: "lon", side: 1, val: rLon0 },  // keep lon >= rLon0
+    ];
+    const inside = (p, pl) => {
+      const v = pl.axis === "lat" ? p.lat : p.lon;
+      return pl.side > 0 ? v >= pl.val : v <= pl.val;
+    };
+    // Linear interpolation of segment s→e where it crosses the plane boundary.
+    const interp = (s, e, pl) => {
+      if (pl.axis === "lat") {
+        const t = (pl.val - s.lat) / (e.lat - s.lat);
+        return { lon: s.lon + t * (e.lon - s.lon), lat: pl.val };
+      }
+      const t = (pl.val - s.lon) / (e.lon - s.lon);
+      return { lon: pl.val, lat: s.lat + t * (e.lat - s.lat) };
+    };
+    // One SH pass: clip a subject polygon against a single half-plane.
+    function clipOne(subj, pl) {
+      if (!subj.length) return subj;
+      const out = [];
+      let s = subj[subj.length - 1]; // wrap-around edge: last → first
+      for (const e of subj) {
+        const eIn = inside(e, pl);
+        const sIn = inside(s, pl);
+        if (eIn) {
+          if (!sIn) out.push(interp(s, e, pl));
+          out.push(e);
+        } else if (sIn) {
+          out.push(interp(s, e, pl));
+        }
+        s = e;
+      }
+      return out;
     }
 
-    const pts = [];
-
-    // 1. Rect corners inside boundary — these sit exactly on rect corners
-    const rectCorners = [
-      { lon: rLon0, lat: rLat0 }, { lon: rLon1, lat: rLat0 },
-      { lon: rLon1, lat: rLat1 }, { lon: rLon0, lat: rLat1 },
-    ];
-    for (const c of rectCorners) { if (pip(c.lat, c.lon)) pts.push({ ...c }); }
-
-    // 2. Edge-edge intersections — these sit exactly on the rect edges.
-    //    NOTE: we intentionally SKIP boundary vertices inside the rect (step 2
-    //    in earlier versions). Interior boundary vertices caused the convex hull
-    //    to extend across concave areas → triangular artifacts on complex coasts.
-    //    All collected points here are guaranteed to lie on or inside the rect,
-    //    so the hull can never extend outside the cell boundary.
-    const rEdges = [
-      [rLon0, rLat0, rLon1, rLat0], // bottom  (index 0)
-      [rLon1, rLat0, rLon1, rLat1], // right   (index 1)
-      [rLon1, rLat1, rLon0, rLat1], // top     (index 2)
-      [rLon0, rLat1, rLon0, rLat0], // left    (index 3)
-    ];
-    // Track how many boundary segments cross each rect edge.
-    // If a single rect edge is crossed more than once the boundary re-enters
-    // through the same side, producing a re-entrant (non-convex) intersection
-    // that a convex hull cannot approximate cleanly → fall back to full rect.
-    const edgeCrossings = [0, 0, 0, 0];
+    const results = [];
     for (const ring of rings) {
-      for (let i = 0; i < ring.length; i++) {
-        const { lon: ax, lat: ay } = ring[i];
-        const { lon: bx, lat: by } = ring[(i + 1) % ring.length];
-        for (let ei = 0; ei < rEdges.length; ei++) {
-          const [cx, cy, dx, dy] = rEdges[ei];
-          const pt = segX(ax, ay, bx, by, cx, cy, dx, dy);
-          if (pt) {
-            pts.push(pt);
-            edgeCrossings[ei]++;
-          }
-        }
+      // Drop the closing duplicate vertex if present (POLYGON((... x1 y1)) has
+      // first == last) — SH already wraps via the last→first edge.
+      let poly = ring.slice();
+      if (poly.length > 1) {
+        const a = poly[0], b = poly[poly.length - 1];
+        if (a.lon === b.lon && a.lat === b.lat) poly.pop();
       }
-    }
-
-    // Re-entrant case: same rect edge crossed >1 time → convex hull would
-    // span a gap outside the actual boundary → return null (use full rect).
-    if (edgeCrossings.some(n => n > 1)) return null;
-
-    if (pts.length < 3) return null;
-
-    // 4. Convex hull (Jarvis march) — always non-self-intersecting.
-    //    Angular sort fails when many boundary vertices cluster inside the cell
-    //    (complex concave boundary) because the centroid drifts outside the
-    //    intersection region. Convex hull is exact for convex clips and gives a
-    //    clean approximation for concave ones.
-    function convexHull(ps) {
-      if (ps.length < 3) return ps;
-      // Find lowest-leftmost point as start
-      let lo = 0;
-      for (let i = 1; i < ps.length; i++) {
-        if (ps[i].lat < ps[lo].lat || (ps[i].lat === ps[lo].lat && ps[i].lon < ps[lo].lon))
-          lo = i;
+      for (const pl of planes) {
+        poly = clipOne(poly, pl);
+        if (!poly.length) break;
       }
-      const hull = [];
-      let cur = lo;
-      do {
-        hull.push(ps[cur]);
-        let nxt = (cur + 1) % ps.length;
-        for (let i = 0; i < ps.length; i++) {
-          const cross = (ps[nxt].lon - ps[cur].lon) * (ps[i].lat - ps[cur].lat) -
-                        (ps[nxt].lat - ps[cur].lat) * (ps[i].lon - ps[cur].lon);
-          if (cross < 0 || (cross === 0 &&
-              Math.hypot(ps[i].lon - ps[cur].lon, ps[i].lat - ps[cur].lat) >
-              Math.hypot(ps[nxt].lon - ps[cur].lon, ps[nxt].lat - ps[cur].lat)))
-            nxt = i;
-        }
-        cur = nxt;
-      } while (cur !== lo && hull.length <= ps.length + 1);
-      return hull;
+      if (poly.length >= 3) results.push(poly);
     }
-
-    const hull = convexHull(pts);
-    return hull.length >= 3 ? hull : null;
+    return results.length ? results : null;
   }
 
   // ── Generate cells ────────────────────────────────────────────────────────
@@ -594,20 +596,23 @@ export function makeGrid(boundaryWkt, cellsizeMeters = 500, clipBorder = true) {
         throw new Error(`Grid exceeds ${MAX_CELLS.toLocaleString()} cells. Increase cell size.`);
       }
 
-      let poly;
+      let polys;
       if (clipBorder) {
-        poly = clipRectToRings(lon0, lat0, lon1, lat1);
+        polys = clipRectToRings(lon0, lat0, lon1, lat1);
       }
       // Fall back to full rectangle (interior cells or failed clip)
-      if (!poly) {
-        poly = [
+      if (!polys) {
+        polys = [[
           { lon: lon0, lat: lat0 }, { lon: lon1, lat: lat0 },
           { lon: lon1, lat: lat1 }, { lon: lon0, lat: lat1 },
-        ];
+        ]];
       }
 
-      const coords = [...poly, poly[0]].map(p => `${f(p.lon)} ${f(p.lat)}`).join(", ");
-      cells.push({ grid_id: cells.length + 1, geometry: `POLYGON((${coords}))` });
+      const ringWkt = p => [...p, p[0]].map(v => `${f(v.lon)} ${f(v.lat)}`).join(", ");
+      const geometry = polys.length === 1
+        ? `POLYGON((${ringWkt(polys[0])}))`
+        : `MULTIPOLYGON(${polys.map(p => `((${ringWkt(p)}))`).join(", ")})`;
+      cells.push({ grid_id: cells.length + 1, geometry });
     }
   }
   return cells;
