@@ -6,6 +6,7 @@
 
 import * as cfg from "../dispatchConfig.js";
 import { logEstimate, getEntries, clearLog, measure } from "../perfLog.js";
+import { createSuffStatsCache, makeCacheKey, validateSuffStatsEntry } from "../suffStatsCache.js";
 
 let passes = 0, fails = 0;
 function check(name, cond) {
@@ -58,10 +59,56 @@ async function validatePerfLog() {
   check("getEntries returns snapshot copy", snap.length === 1);
 }
 
+function validateSuffStatsCache() {
+  console.log("\n[suffStatsCache]");
+  const c = createSuffStatsCache(3);
+  check("new cache size 0", c.size() === 0);
+
+  c.set("a", { v: 1 });
+  c.set("b", { v: 2 });
+  check("get hit returns value", c.get("a")?.v === 1);
+  check("get miss returns null", c.get("z") === null);
+  check("size reflects entries", c.size() === 2);
+
+  // LRU canonical test: fill cache to capacity, touch one entry, add one more,
+  // verify the untouched-oldest got evicted and the touched one survives.
+  // After previous get("a"), order is [b, a]. Add c → cache full at 3: [b, a, c].
+  c.set("c", { v: 3 });
+  check("size capped at maxEntries", c.size() === 3);
+  c.get("a");                  // touch a → order: [b, c, a]
+  c.set("d", { v: 4 });        // overflow → evict oldest (b). order: [c, a, d]
+  check("LRU evicts oldest unused (b)", c.get("b") === null);
+  check("LRU keeps recently used (a)",  c.get("a")?.v === 1);
+  check("LRU keeps newest (d)",         c.get("d")?.v === 4);
+
+  c.invalidate();
+  check("invalidate clears cache", c.size() === 0);
+
+  // Cache key
+  check("makeCacheKey deterministic across xCols order",
+    makeCacheKey("t", "y", ["b", "a"]) === makeCacheKey("t", "y", ["a", "b"]));
+  check("makeCacheKey distinguishes tables",
+    makeCacheKey("t1", "y", ["x"]) !== makeCacheKey("t2", "y", ["x"]));
+  check("makeCacheKey distinguishes y",
+    makeCacheKey("t", "y1", ["x"]) !== makeCacheKey("t", "y2", ["x"]));
+
+  // Entry validation
+  const goodEntry = { XtX: [[1,2],[3,4]], n: 100 };
+  check("validateSuffStatsEntry accepts matching dim (k=1)",
+    validateSuffStatsEntry(goodEntry, ["x1"]));
+  check("validateSuffStatsEntry rejects mismatched dim",
+    !validateSuffStatsEntry(goodEntry, ["x1", "x2"]));
+  check("validateSuffStatsEntry rejects null",
+    !validateSuffStatsEntry(null, ["x1"]));
+  check("validateSuffStatsEntry rejects missing XtX",
+    !validateSuffStatsEntry({ n: 100 }, ["x1"]));
+}
+
 export async function runDispatchValidation() {
   passes = 0; fails = 0;
   validateConfig();
   await validatePerfLog();
+  validateSuffStatsCache();
   console.log(`\n${passes} passed, ${fails} failed`);
   return fails === 0;
 }
