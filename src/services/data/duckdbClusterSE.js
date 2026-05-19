@@ -126,10 +126,20 @@ export async function computeClusterMeat({
     FROM clusters
   `;
 
-  // yhatSQL appears twice inside mf CTE → bind params twice.
-  const fromMfCount = (sql.match(/\(\s*\?\s*\*\s*_x_0\s/g) || []).length;
+  // yhatSQL appears exactly twice in the mf CTE (once for _yhat, once for _e).
+  // Use sql.split(yhatSQL) to count occurrences — matches the Fase 1 pattern
+  // in duckdbRobustSE.computeHCMeat. If a future refactor changes the mf CTE,
+  // this guard throws with an actionable message.
+  const yhatOccurrences = sql.split(yhatSQL).length - 1;
+  if (yhatOccurrences !== 2) {
+    throw new Error(
+      `computeClusterMeat: yhatSQL occurrence count mismatch ` +
+      `(found ${yhatOccurrences}, expected 2). ` +
+      `If you refactored the mf CTE, update this guard.`,
+    );
+  }
   const boundParams = [];
-  for (let i = 0; i < fromMfCount; i++) boundParams.push(...params);
+  for (let i = 0; i < yhatOccurrences; i++) boundParams.push(...params);
 
   const stmt = await conn.prepare(sql);
   const r = (await stmt.query(...boundParams)).toArray()[0];
@@ -137,8 +147,14 @@ export async function computeClusterMeat({
 
   const G = num(r.G);
   const n = num(r.n);
-  const k = dim;  // number of parameters
-  const scale = (G / (G - 1)) * ((n - 1) / (n - k));
+  const numParams = dim;
+  if (G <= 1) {
+    throw new Error(
+      `computeClusterMeat: need at least 2 clusters for clustered SE (found G=${G}). ` +
+      `Use HC1 instead.`,
+    );
+  }
+  const scale = (G / (G - 1)) * ((n - 1) / (n - numParams));
 
   const meat = Array.from({ length: dim }, () => Array(dim).fill(0));
   for (let j = 0; j < dim; j++) {
