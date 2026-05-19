@@ -242,3 +242,94 @@ export async function whiteTestSQL(args) {
     pAux,
   };
 }
+
+/**
+ * Breusch-Godfrey serial correlation test. Aux regression
+ * e_t ~ X + LAG(e_t, 1) + ... + LAG(e_t, p).
+ * Returns suff stats; caller solves aux β and computes n·R²_aux ~ χ²(p).
+ *
+ * For panel data, pass entityCol to partition the LAG window (avoids
+ * cross-unit residual leakage). orderCol defaults to "__ri".
+ *
+ * @param {object} args
+ * @param {number} args.maxLag       — p, default 1
+ * @param {string} [args.orderCol]   — default "__ri"
+ * @param {string|null} [args.entityCol]
+ * @returns {Promise<{n, XtXAux, XtYAux, YtYAux, sumYAux, varNamesAux, pAux, p}>}
+ */
+export async function breuschGodfreySQL({
+  maxLag = 1, orderCol = "__ri", entityCol = null, ...args
+}) {
+  const { conn } = await getDuckDB();
+  const { cteSQL, boundParams, dim } = buildCTE(args);
+  const k = dim - 1;
+  const p = Math.max(1, Math.floor(maxLag));
+
+  const partition = entityCol ? `PARTITION BY ${esc(entityCol)} ` : "";
+  const orderBy   = `${partition}ORDER BY ${esc(orderCol)}`;
+
+  // Aux column expressions. Index 0=intercept, 1..k=x_i, k+1..k+p=lag residuals.
+  const auxCols = ["1.0"];
+  const auxNames = ["(Intercept)"];
+  for (let i = 1; i <= k; i++) { auxCols.push(`_x_${i}`);       auxNames.push(`x${i}`); }
+  for (let l = 1; l <= p; l++) { auxCols.push(`_e_lag_${l}`);   auxNames.push(`e_lag_${l}`); }
+  const pAux = auxCols.length;
+
+  // CTE addition: laggedE adds e_lag_1..e_lag_p over the mf window.
+  const lagProjections = [];
+  for (let l = 1; l <= p; l++) {
+    lagProjections.push(`LAG(_e, ${l}) OVER (${orderBy}) AS _e_lag_${l}`);
+  }
+
+  // Aggregates restricted to rows where all lag values are present.
+  const aggs = ["COUNT(*) AS n",
+                "SUM(_e)             AS sumY",
+                "SUM(POWER(_e, 2))   AS YtY"];
+  for (let i = 0; i < pAux; i++) {
+    aggs.push(`SUM((${auxCols[i]}) * _e) AS xy_${i}`);
+    for (let j = i; j < pAux; j++) {
+      aggs.push(`SUM((${auxCols[i]}) * (${auxCols[j]})) AS xx_${i}_${j}`);
+    }
+  }
+
+  const lagNotNull = [];
+  for (let l = 1; l <= p; l++) lagNotNull.push(`_e_lag_${l} IS NOT NULL`);
+
+  const sql = `
+    WITH ${cteSQL},
+    laggedE AS (
+      SELECT *, ${lagProjections.join(", ")}
+      FROM mf
+    )
+    SELECT ${aggs.join(", ")}
+    FROM laggedE
+    WHERE ${lagNotNull.join(" AND ")}
+  `;
+
+  // laggedE CTE references mf exactly once via SELECT *. The mf CTE itself
+  // contains yhatSQL twice (once for _yhat, once for _e). buildCTE has already
+  // returned boundParams as [...beta, ...beta] — exactly the two-β-sets the
+  // SQL needs. Bind directly.
+  const stmt = await conn.prepare(sql);
+  const r = (await stmt.query(...boundParams)).toArray()[0];
+  await stmt.close();
+
+  const n = num(r.n);
+  const XtXAux = Array.from({ length: pAux }, () => Array(pAux).fill(0));
+  const XtYAux = Array(pAux).fill(0);
+  for (let i = 0; i < pAux; i++) {
+    XtYAux[i] = num(r[`xy_${i}`]);
+    for (let j = i; j < pAux; j++) {
+      const v = num(r[`xx_${i}_${j}`]);
+      XtXAux[i][j] = v;
+      if (i !== j) XtXAux[j][i] = v;
+    }
+  }
+  return {
+    n, XtXAux, XtYAux,
+    YtYAux: num(r.YtY),
+    sumYAux: num(r.sumY),
+    varNamesAux: auxNames,
+    pAux, p,
+  };
+}
