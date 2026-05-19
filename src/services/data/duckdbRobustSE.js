@@ -73,6 +73,14 @@ export async function computeHCMeat({ tableName, yCol, xColsExpanded, dummySQL =
   // occurrence consumes one full β param vector. Count occurrences in the
   // final SQL string and replicate params accordingly.
   const literalCount = sql.split(residSQL).length - 1;
+  const aggCount = (dim * (dim + 1)) / 2; // one POWER(residSQL,2) per upper-tri agg
+  if (literalCount !== aggCount) {
+    throw new Error(
+      `computeHCMeat: residSQL occurrence count mismatch ` +
+      `(found ${literalCount}, expected ${aggCount}). ` +
+      `If you refactored the SQL (e.g. added WHERE or extra agg), update this guard.`,
+    );
+  }
   const boundParams = [];
   for (let i = 0; i < literalCount; i++) boundParams.push(...params);
 

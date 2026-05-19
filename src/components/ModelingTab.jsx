@@ -1737,12 +1737,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       // ── Single dispatch point (Fase 0) ─────────────────────────────────────
       // shouldUseSQLPath decides between SQL suff-stats fast path and the
       // classic JS path (extractAllRows + runOLS et al). Cheap checks first.
+      // Normalize SE casing — UI emits lowercase "hc1", dispatcher + engine
+      // compare uppercase "HC1". core/inference/robustSE.js does the same.
+      const seTypeNorm = typeof seType === "string"
+        ? (/^hc[0-3]$/i.test(seType) ? seType.toUpperCase() : seType)
+        : seType;
       const dispatchCtx = {
         tableName:     duckTable ?? null,
         n:             rowCount > rows.length ? rowCount : rows.length,
         xColsExpanded: allX,
         estimator:     model,
-        seType,
+        seType:        seTypeNorm,
         hasWeights:    !!weightVar[0],
         hasFactors:    factorVars.size > 0,
       };
@@ -1781,7 +1786,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           // Meat pass (only if non-classical)
           let meat = null;
-          const hc = seType && seType !== "classical" ? seType : null;
+          const hc = seTypeNorm && seTypeNorm !== "classical" ? seTypeNorm : null;
           if (hc) {
             const mm = await measure(async () => {
               if (hc === "HC0" || hc === "HC1") {
@@ -1806,7 +1811,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           const raw = m2.result;
           logEstimate({
             path: "sql", phase: "solve", n: rowCount, k: xColsExpanded.length,
-            seType, cacheHit, msTotal: m2.ms,
+            seType: seTypeNorm, cacheHit, msTotal: m2.ms,
           });
 
           if (raw) {

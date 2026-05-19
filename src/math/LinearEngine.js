@@ -161,6 +161,9 @@ export function runOLSFromSuffStats({
   n, XtX, XtY, YtY, sumY, varNames,
   meat = null, hcType = null,
 }) {
+  // Normalize hcType casing — UI emits "hc1" but engine compares "HC1".
+  // computeRobustSE() in core/inference does the same uppercase at its boundary.
+  if (typeof hcType === "string") hcType = hcType.toUpperCase();
   const k = XtX.length;          // includes intercept
   if (!Number.isFinite(n) || n < k + 1) return null;
 
