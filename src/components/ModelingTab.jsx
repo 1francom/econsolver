@@ -21,6 +21,14 @@ import {
 import { predict }              from "../math/calcEngine.js";
 import { extractAllRows }       from "../services/data/duckdb.js";
 import { buildOLSSuffStats }    from "../services/data/duckdbOLS.js";
+import { shouldUseSQLPath }     from "../services/data/duckdbDispatch.js";
+import { CACHE_MAX_ENTRIES }    from "../services/data/dispatchConfig.js";
+import {
+  createSuffStatsCache, makeCacheKey, validateSuffStatsEntry,
+} from "../services/data/suffStatsCache.js";
+import {
+  logEstimate, measure, getEntries as getPerfEntries, clearLog as clearPerfLog,
+} from "../services/data/perfLog.js";
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
@@ -1285,6 +1293,25 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setFactorVars(new Set(headers.filter(h => !numericCols.includes(h))));
   }, [cleanedData]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Sufficient-statistics cache (Fase 0) ─────────────────────────────────────
+  // LRU cache keyed by (table, y, sorted xCols). Invalidated whenever the
+  // dataset/pipeline changes. Held in a ref so it survives renders without
+  // triggering re-renders on set/get.
+  const suffStatsCacheRef = useRef(null);
+  if (suffStatsCacheRef.current === null) {
+    suffStatsCacheRef.current = createSuffStatsCache(CACHE_MAX_ENTRIES);
+  }
+  useEffect(() => {
+    suffStatsCacheRef.current?.invalidate();
+  }, [cleanedData]);
+
+  // Expose the perf log for DevTools inspection. Hidden from regular users.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.__perfLog = { getEntries: getPerfEntries, clear: clearPerfLog };
+    }
+  }, []);
+
   // ── Spec state ───────────────────────────────────────────────────────────────
   const [model,      setModel]      = useState("OLS");
   const [yVar,       setYVar]       = useState([]);
@@ -1702,24 +1729,39 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     try {
       const duckTable = cleanedData?._duckdb?.tableName;
       const rowCount  = cleanedData?._duckdb?.rowCount ?? 0;
+      const allX      = [...xVars, ...wVars];
 
-      // ── Fast path: DuckDB sufficient-statistics OLS ────────────────────────
-      // SQL computes X'X, X'Y, Y'Y, n; JS only does the inversion + scaling.
-      // Avoids materializing the full dataset into JS memory.
-      // Gated to plain OLS — no weights, no factor expansion, classical SE.
-      const wantSuffStats =
-        duckTable &&
-        rowCount > rows.length &&            // full data not already in memory
-        model === "OLS" &&
-        !weightVar[0] &&
-        factorVars.size === 0 &&
-        (!seType || seType === "classical");
+      // ── Single dispatch point (Fase 0) ─────────────────────────────────────
+      // shouldUseSQLPath decides between SQL suff-stats fast path and the
+      // classic JS path (extractAllRows + runOLS et al). Cheap checks first.
+      const dispatchCtx = {
+        tableName:     duckTable ?? null,
+        n:             rowCount > rows.length ? rowCount : rows.length,
+        xColsExpanded: allX,
+        estimator:     model,
+        seType,
+        hasWeights:    !!weightVar[0],
+        hasFactors:    factorVars.size > 0,
+      };
 
-      if (wantSuffStats && yVar[0] && (xVars.length + wVars.length) > 0) {
+      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
         try {
-          const allX = [...xVars, ...wVars];
-          const suff = await buildOLSSuffStats(duckTable, yVar[0], allX);
-          const raw  = runOLSFromSuffStats(suff);
+          const cache = suffStatsCacheRef.current;
+          const key   = makeCacheKey(duckTable, yVar[0], allX);
+          let suff    = cache.get(key);
+          let cacheHit = suff != null && validateSuffStatsEntry(suff, allX);
+          if (!cacheHit) {
+            const m = await measure(() => buildOLSSuffStats(duckTable, yVar[0], allX));
+            suff = m.result;
+            cache.set(key, suff);
+            logEstimate({ path: "sql", phase: "suffStats", n: rowCount, k: allX.length, msTotal: m.ms });
+          }
+          const m2 = await measure(async () => runOLSFromSuffStats(suff));
+          const raw = m2.result;
+          logEstimate({
+            path: "sql", phase: "solve", n: rowCount, k: allX.length,
+            seType: dispatchCtx.seType, cacheHit, msTotal: m2.ms,
+          });
           if (raw) {
             const wrapped = wrapResult("OLS", raw, {
               yVar: yVar[0], xVars, wVars, weightCol: null,
@@ -1727,9 +1769,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             setResult(wrapped);
             return;
           }
-          // raw === null → singular X'X or n < k; fall through to full extraction
+          // raw === null → singular X'X or n < k; fall through to JS path
         } catch (e) {
-          console.warn("[ModelingTab] DuckDB suff-stats path failed, falling back to full extraction:", e);
+          console.warn("[ModelingTab] SQL path failed, falling back to JS:", e);
         }
       }
 
@@ -1737,9 +1779,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       // For DuckDB datasets, `rows` is only a 500-row preview.
       let estimationRows = rows;
       if (duckTable && rows.length < (rowCount || Infinity)) {
-        estimationRows = await extractAllRows(duckTable);
+        const me = await measure(() => extractAllRows(duckTable));
+        estimationRows = me.result;
+        logEstimate({ path: "js", phase: "extract", n: rowCount, msTotal: me.ms });
       }
-      const out = _runEstimation(estimationRows);
+      const mj = await measure(async () => _runEstimation(estimationRows));
+      const out = mj.result;
+      logEstimate({
+        path: "js", phase: "estimate",
+        n: estimationRows.length, k: allX.length,
+        estimator: model, seType, msTotal: mj.ms,
+      });
       if (out.error) { setErr(out.error); }
       else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
     } catch (e) {
