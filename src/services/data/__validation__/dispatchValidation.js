@@ -7,6 +7,7 @@
 import * as cfg from "../dispatchConfig.js";
 import { logEstimate, getEntries, clearLog, measure } from "../perfLog.js";
 import { createSuffStatsCache, makeCacheKey, validateSuffStatsEntry } from "../suffStatsCache.js";
+import { shouldUseSQLPath } from "../duckdbDispatch.js";
 
 let passes = 0, fails = 0;
 function check(name, cond) {
@@ -104,11 +105,46 @@ function validateSuffStatsCache() {
     !validateSuffStatsEntry({ n: 100 }, ["x1"]));
 }
 
+function validateDispatch() {
+  console.log("\n[duckdbDispatch]");
+  const baseCtx = {
+    tableName:       "data_abc",
+    n:               100_000,
+    xColsExpanded:   ["x1", "x2"],
+    estimator:       "OLS",
+    seType:          "classical",
+    hasWeights:      false,
+    hasFactors:      false,
+  };
+  check("baseline (large OLS classical) → true", shouldUseSQLPath(baseCtx) === true);
+  check("no tableName → false",
+    shouldUseSQLPath({ ...baseCtx, tableName: null }) === false);
+  check("n below threshold → false",
+    shouldUseSQLPath({ ...baseCtx, n: 10_000 }) === false);
+  check("n exactly at threshold → true",
+    shouldUseSQLPath({ ...baseCtx, n: 50_000 }) === true);
+  check("k above threshold → false",
+    shouldUseSQLPath({ ...baseCtx, xColsExpanded: new Array(150).fill("x") }) === false);
+  check("k exactly at threshold → true",
+    shouldUseSQLPath({ ...baseCtx, xColsExpanded: new Array(100).fill("x") }) === true);
+  check("unsupported estimator (FE) → false",
+    shouldUseSQLPath({ ...baseCtx, estimator: "FE" }) === false);
+  check("unsupported seType (HC1) → false",
+    shouldUseSQLPath({ ...baseCtx, seType: "HC1" }) === false);
+  check("hasWeights=true → false",
+    shouldUseSQLPath({ ...baseCtx, hasWeights: true }) === false);
+  check("hasFactors=true → false",
+    shouldUseSQLPath({ ...baseCtx, hasFactors: true }) === false);
+  check("seType undefined defaults to classical → true",
+    shouldUseSQLPath({ ...baseCtx, seType: undefined }) === true);
+}
+
 export async function runDispatchValidation() {
   passes = 0; fails = 0;
   validateConfig();
   await validatePerfLog();
   validateSuffStatsCache();
+  validateDispatch();
   console.log(`\n${passes} passed, ${fails} failed`);
   return fails === 0;
 }
