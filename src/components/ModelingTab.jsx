@@ -25,6 +25,10 @@ import { shouldUseSQLPath }     from "../services/data/duckdbDispatch.js";
 import { CACHE_MAX_ENTRIES }    from "../services/data/dispatchConfig.js";
 import { expandFactors }        from "../services/data/duckdbFactors.js";
 import { computeHCMeat, computeHCMeatWithLeverage } from "../services/data/duckdbRobustSE.js";
+import {
+  countClusters, computeClusterMeat, computeTwowayClusterMeat,
+} from "../services/data/duckdbClusterSE.js";
+import { computeHACMeat } from "../services/data/duckdbHACSE.js";
 import { sampleResiduals }      from "../services/data/duckdbResiduals.js";
 import {
   createSuffStatsCache, makeCacheKey, validateSuffStatsEntry,
@@ -1737,11 +1741,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       // ── Single dispatch point (Fase 0) ─────────────────────────────────────
       // shouldUseSQLPath decides between SQL suff-stats fast path and the
       // classic JS path (extractAllRows + runOLS et al). Cheap checks first.
-      // Normalize SE casing — UI emits lowercase "hc1", dispatcher + engine
-      // compare uppercase "HC1". core/inference/robustSE.js does the same.
-      const seTypeNorm = typeof seType === "string"
-        ? (/^hc[0-3]$/i.test(seType) ? seType.toUpperCase() : seType)
-        : seType;
+      // Normalize SE casing — UI emits lowercase. dispatcher + engine compare
+      // uppercase HC*, lowercase clustered/twoway, uppercase HAC (matching
+      // core/inference/robustSE.js dispatch).
+      const rawSE = (seType ?? "classical").toLowerCase();
+      const seTypeNorm =
+          rawSE === "hac"        ? "HAC"
+        : rawSE.startsWith("hc") ? rawSE.toUpperCase()
+        : rawSE;
       const dispatchCtx = {
         tableName:     duckTable ?? null,
         n:             rowCount > rows.length ? rowCount : rows.length,
@@ -1750,6 +1757,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         seType:        seTypeNorm,
         hasWeights:    !!weightVar[0],
         hasFactors:    factorVars.size > 0,
+        clusterVar:    clusterVar ?? null,
+        clusterVar2:   clusterVar2 ?? null,
+        timeVar:       seTypeNorm === "HAC" ? (panel?.timeCol ?? null) : null,
       };
 
       if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
@@ -1784,34 +1794,73 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             entry.Ainv = classicalRaw.XtXinv;
           }
 
-          // Meat pass (only if non-classical)
+          // Meat pass — unified branch over all robust SE types
           let meat = null;
-          const hc = seTypeNorm && seTypeNorm !== "classical" ? seTypeNorm : null;
-          if (hc) {
-            const mm = await measure(async () => {
-              if (hc === "HC0" || hc === "HC1") {
-                return computeHCMeat({
-                  tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL, beta: entry.beta,
-                });
-              }
-              return computeHCMeatWithLeverage({
-                tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
-                beta: entry.beta, Ainv: entry.Ainv, hcType: hc,
-              });
-            });
-            meat = mm.result.meat;
-            logEstimate({ path: "sql", phase: `meat-${hc}`, n: rowCount, k: xColsExpanded.length, msTotal: mm.ms });
-          }
+          const seUp = seTypeNorm;  // canonicalized above
 
-          const m2 = await measure(async () => runOLSFromSuffStats({
+          if (seUp === "HC0" || seUp === "HC1") {
+            const mm = await measure(() => computeHCMeat({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL, beta: entry.beta,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: `meat-${seUp}`, n: rowCount, k: xColsExpanded.length, msTotal: mm.ms });
+          }
+          else if (seUp === "HC2" || seUp === "HC3") {
+            const mm = await measure(() => computeHCMeatWithLeverage({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: entry.beta, Ainv: entry.Ainv, hcType: seUp,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: `meat-${seUp}`, n: rowCount, k: xColsExpanded.length, msTotal: mm.ms });
+          }
+          else if (seUp === "clustered") {
+            // Preflight: G > n/2 → fallback (too many clusters for SQL path)
+            const { G, n: nC } = await countClusters(duckTable, clusterVar);
+            if (G > nC / 2) {
+              throw new Error(`cluster degenerate (G=${G}, n=${nC}) — fallback to JS`);
+            }
+            const mm = await measure(() => computeClusterMeat({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: entry.beta, clusterCol: clusterVar,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: "meat-clustered", n: rowCount, k: xColsExpanded.length, G, msTotal: mm.ms });
+          }
+          else if (seUp === "twoway") {
+            const mm = await measure(() => computeTwowayClusterMeat({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: entry.beta, clusterCol: clusterVar, clusterCol2: clusterVar2,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: "meat-twoway", n: rowCount, k: xColsExpanded.length,
+                          G1: mm.result.G1, G2: mm.result.G2, G12: mm.result.G12, msTotal: mm.ms });
+          }
+          else if (seUp === "HAC") {
+            const orderCol = panel?.timeCol ?? null;
+            const entityCol = panel?.entityCol ?? null;
+            const mm = await measure(() => computeHACMeat({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: entry.beta, orderCol, entityCol,
+              maxLag: maxLag != null ? Number(maxLag) : undefined,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: "meat-HAC", n: rowCount, k: xColsExpanded.length, L: mm.result.L, msTotal: mm.ms });
+          }
+          // classical → meat stays null; engine reports classical SE only
+
+          // Engine: pass hcType only for HC1 (engine applies n/(n-k) scaling there).
+          // For clustered/twoway/HAC the meat is already pre-scaled inside the builder.
+          const engineHcType = (seUp === "HC1") ? "HC1" : null;
+
+          const m2 = await measure(() => runOLSFromSuffStats({
             n: entry.n, XtX: entry.XtX, XtY: entry.XtY,
             YtY: entry.YtY, sumY: entry.sumY, varNames: entry.varNames,
-            meat, hcType: hc,
+            meat, hcType: engineHcType,
           }));
           const raw = m2.result;
           logEstimate({
             path: "sql", phase: "solve", n: rowCount, k: xColsExpanded.length,
-            seType: seTypeNorm, cacheHit, msTotal: m2.ms,
+            seType: seUp, cacheHit, msTotal: m2.ms,
           });
 
           if (raw) {
@@ -1855,7 +1904,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       setRunning(false);
     }
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
-      model, yVar, xVars, wVars, weightVar, factorVars, seType]);
+      model, yVar, xVars, wVars, weightVar, factorVars, seType,
+      clusterVar, clusterVar2, maxLag]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
