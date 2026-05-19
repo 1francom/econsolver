@@ -8,6 +8,10 @@ const check = (n, c) => c ? (passes++, console.log(`  ✓ ${n}`)) : (fails++, co
 async function validateImport() {
   console.log("\n[computeHCMeat]");
   check("computeHCMeat is a function", typeof computeHCMeat === "function");
+
+  const mod = await import("../duckdbRobustSE.js");
+  check("computeHCMeatWithLeverage is a function",
+    typeof mod.computeHCMeatWithLeverage === "function");
 }
 
 export async function runRobustSEValidation() {
