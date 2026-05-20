@@ -1,7 +1,7 @@
 # DuckDB Sufficient-Statistics Roadmap — Design
 
 **Date:** 2026-05-19
-**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fase 3a (2SLS) DONE (2026-05-20). Fase 3c (WLS) DONE (2026-05-21). Fase 3b (GMM/LIML), 4–7 pending.
+**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fase 3 (3a 2SLS + 3b GMM/LIML + 3c WLS) DONE (2026-05-21). Fases 4–7 pending.
 **Owner:** Franco Medero
 
 ## Problem
@@ -265,6 +265,16 @@ Detailed design for each fase deferred to its own implementation plan. Only the 
   - Dispatcher: `hasWeights = true` allowed iff `estimator === "WLS"` AND `weightCol` is non-empty; SE restricted to `{classical, HC0, HC1}` for WLS in Fase 3c.
   - Validated vs R `lm(..., weights = w)` + `sandwich::vcovHC` at 6dp coef / 4dp SE (`fase3cBenchmarks.json`, `window.__validation.fase3c`).
   - Deferred to a later fase: HC2/HC3, clustered, twoway, HAC × WLS.
+
+**Fase 3b status (2026-05-21):** GMM (two-step efficient) + LIML implemented, classical SE only.
+  - `duckdbGMM.js` `buildGMMSuffStats` — single SQL pass producing X'X, Z'Z, Z'X, X'Y, Z'Y, Y'Y over the full GMM design (X = [1, wCols, xCols]; Z = [1, wCols, zCols]).
+  - `duckdbGMMOmega.js` `computeGMMOmega` — (1/n)·Σ êᵢ² zᵢ zⱼ in SQL with β̂₁ as prepared params.
+  - `GMMSuffStatsEngine.js` `runGMMFromSuffStats` — step-2 solve β = (X'Z Ω̂⁻¹ Z'X)⁻¹ X'Z Ω̂⁻¹ Z'Y; SE = √(n·diag(Ainv)) (matches `GMMEngine`); Hansen J = n·g'Ω̂⁻¹g with g = (Z'Y − Z'X β)/n on small matrices.
+  - `duckdbLIML.js` `buildLIMLSuffStats` — extends GMM aggregates with W-block (W'W, W'X, W'Y, Z'W) needed for M_W projections.
+  - `LIMLSuffStatsEngine.js` `runLIMLFromSuffStats` — assembles A = [Y, X_endo]' M_Z [Y, X_endo] and B = [Y, X_endo]' M_W [Y, X_endo] via closed forms `v'Mu = v'u − v'P(P'P)⁻¹P'u` on small matrices; reuses existing `limlKappa2x2` / `limlKappaPower` from `GMMEngine.js` for κ.
+  - Dispatcher: GMM/LIML routed when zVars, xVars present, order condition holds, and (k+l) ≤ K_THRESHOLD; SE restricted to "classical" only.
+  - Validated vs `gmm::gmm()` and hand-coded LIML (over-id case, κ ≥ 1) at 6dp coef / 4dp SE (`fase3bBenchmarks.json`, `window.__validation.fase3b`).
+  - Deferred to a later sub-fase: HC0/HC1 + clustered/HAC for LIML (parallel to 2SLS); GMM HC overrides (GMM's classical SE is already heteroskedasticity-robust via Ω̂, so this is genuinely deferred).
 
 ### Fase 4 — FE / FD / TWFE
 
