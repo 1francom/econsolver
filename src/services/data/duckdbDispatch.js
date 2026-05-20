@@ -41,7 +41,7 @@ export function shouldUseSQLPath(ctx) {
   if (se === "twoway"    && (!ctx.clusterVar || !ctx.clusterVar2)) return false;
   if (se === "HAC"       && !ctx.timeVar) return false;
 
-  if (ctx.estimator === "2SLS") {
+  if (["2SLS", "GMM", "LIML"].includes(ctx.estimator)) {
     if (!Array.isArray(ctx.zVars) || ctx.zVars.length === 0) return false;
     if (!Array.isArray(ctx.xColsEndog) || ctx.xColsEndog.length === 0) return false;
     // Order condition: at least one instrument per endogenous regressor
@@ -50,6 +50,10 @@ export function shouldUseSQLPath(ctx) {
     const totalK = (ctx.xColsExpanded?.length ?? 0) + ctx.zVars.length;
     if (totalK > K_THRESHOLD) return false;
   }
+
+  // GMM 2-step efficient SE is heteroskedasticity-robust via Ω̂; HC overrides not
+  // supported. LIML HC variants deferred to a later sub-fase.
+  if (["GMM", "LIML"].includes(ctx.estimator) && se !== "classical") return false;
 
   if (ctx.estimator === "WLS") {
     if (!ctx.weightCol || typeof ctx.weightCol !== "string") return false;
