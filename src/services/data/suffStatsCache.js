@@ -39,28 +39,36 @@ export function createSuffStatsCache(maxEntries = 50) {
 }
 
 /**
- * Deterministic key from (tableName, yCol, xCols [, zCols]).
+ * Deterministic key from (tableName, yCol, xCols [, zCols [, wCol]]).
  * Order of xCols / zCols irrelevant. When zCols is provided (2SLS suff-stats),
  * the instrument tuple is appended after a `|Z|` sentinel so OLS keys remain
- * disjoint from IV keys with the same X.
+ * disjoint from IV keys with the same X. When wCol is provided (WLS suff-stats),
+ * the weight column is appended after a `|W|` sentinel so WLS keys remain
+ * disjoint from unweighted keys.
  */
-export function makeCacheKey(tableName, yCol, xCols, zCols = null) {
+export function makeCacheKey(tableName, yCol, xCols, zCols = null, wCol = null) {
   const xs = [...xCols].sort().join(",");
-  if (!zCols) return `${tableName}|${yCol}|${xs}`;
-  const zs = [...zCols].sort().join(",");
-  return `${tableName}|${yCol}|${xs}|Z|${zs}`;
+  let key = `${tableName}|${yCol}|${xs}`;
+  if (zCols) key += `|Z|${[...zCols].sort().join(",")}`;
+  if (wCol)  key += `|W|${wCol}`;
+  return key;
 }
 
 /**
  * Defensive check: dim of XtX must match k+1 (k = xCols.length). When zCols is
- * provided, also verify ZtZ dim matches q+1.
+ * provided, also verify ZtZ dim matches q+1. When wCol is provided, verify
+ * XtWX dim matches k+1 (WLS suff-stats entry).
  */
-export function validateSuffStatsEntry(entry, xCols, zCols = null) {
+export function validateSuffStatsEntry(entry, xCols, zCols = null, wCol = null) {
   if (!entry || !entry.XtX) return false;
   if (entry.XtX.length !== xCols.length + 1) return false;
   if (zCols) {
     if (!entry.ZtZ) return false;
     if (entry.ZtZ.length !== zCols.length + 1) return false;
+  }
+  if (wCol) {
+    if (!entry.XtWX) return false;
+    if (entry.XtWX.length !== xCols.length + 1) return false;
   }
   return true;
 }
