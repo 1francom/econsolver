@@ -215,7 +215,7 @@ export function runOLSFromSuffStats({
 
   return {
     beta, se, tStats, pVals, R2, adjR2,
-    n, df, SSR, s2,
+    n, df, SSR, ssr: SSR, s2,
     resid: null, Yhat: null,    // not available in suff-stats path
     Fstat, Fpval, varNames, XtXinv,
     _suffStats: true,           // marker for downstream code (diagnostics gating)
