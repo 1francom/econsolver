@@ -24,6 +24,9 @@ export { run2SLSFromSuffStats, firstStageFFromSuffStats } from "./IV2SLSEngine.j
 // ── GMM sufficient-statistics solver ──────────────────────────────────────────
 export { runGMMFromSuffStats } from "./GMMSuffStatsEngine.js";
 
+// ── LIML sufficient-statistics solver ─────────────────────────────────────────
+export { runLIMLFromSuffStats } from "./LIMLSuffStatsEngine.js";
+
 // ── WLS sufficient-statistics solver ──────────────────────────────────────────
 export { runWLSFromSuffStats } from "./WLSEngine.js";
 

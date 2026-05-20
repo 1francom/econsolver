@@ -309,7 +309,7 @@ export function runLIML(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
 
 // Exact min eigenvalue of A⁻¹B for 2×2 symmetric matrices.
 // Solves det(B − κA) = 0  →  det(A)κ² − c₁κ + det(B) = 0
-function limlKappa2x2(A, B) {
+export function limlKappa2x2(A, B) {
   const [A00, A01, A11] = [A[0][0], A[0][1], A[1][1]];
   const [B00, B01, B11] = [B[0][0], B[0][1], B[1][1]];
   const detA = A00 * A11 - A01 * A01;
@@ -323,7 +323,7 @@ function limlKappa2x2(A, B) {
 
 // Power iteration for min eigenvalue of A⁻¹B (general m×m).
 // Iterates on M = B⁻¹A; max eigenvalue of M = 1/κ_min.
-function limlKappaPower(A, B, m, maxIter = 120) {
+export function limlKappaPower(A, B, m, maxIter = 120) {
   const Binv = matInv(B);
   if (!Binv) return NaN;
   const M = matMul(Binv, A);
