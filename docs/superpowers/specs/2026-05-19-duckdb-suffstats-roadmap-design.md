@@ -1,7 +1,7 @@
 # DuckDB Sufficient-Statistics Roadmap — Design
 
 **Date:** 2026-05-19
-**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fases 3–7 pending.
+**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fase 3a (2SLS) DONE (2026-05-20). Fases 3b/3c (GMM/LIML, WLS), 4–7 pending.
 **Owner:** Franco Medero
 
 ## Problem
@@ -245,6 +245,17 @@ Detailed design for each fase deferred to its own implementation plan. Only the 
 - `duckdbIV.js`: `buildIVSuffStats(tableName, yCol, xCols, zCols)` — adds `Z'Z`, `Z'X`, `Z'Y`, `X'X`. `run2SLSFromSuffStats` applies `(X'PzX)⁻¹ X'PzY` with `Pz = Z(Z'Z)⁻¹Z'`, all on small matrices in JS.
 - `duckdbGMM.js`: reuses `duckdbIV` with weighting matrix W; LIML uses eigen-problem on small matrices.
 - Dispatcher: removes `!hasWeights` restriction, adds support for `WLS`, `2SLS`, `IV`, `GMM`, `LIML`.
+
+**Fase 3a status (2026-05-20):** 2SLS classical + HC0/HC1 implemented.
+  - `duckdbIV.js` `buildIVSuffStats` — Z'Z / Z'X / X'X / Z'Y / X'Y / Y'Y in one SQL pass.
+  - `IV2SLSEngine.js` `run2SLSFromSuffStats` — Pz on small matrices; SSR closed-form on suff-stats.
+  - `duckdbIVRobustSE.js` `computeIVHCMeat` — structural residuals × first-stage x̂ outer products in SQL; β + per-endogenous α prepared as params.
+  - First-stage F per endogenous regressor via paired `buildOLSSuffStats` calls (`firstStageFFromSuffStats`).
+  - Cache: `makeCacheKey` / `validateSuffStatsEntry` extended with optional `zCols` (single LRU for OLS + IV, keys disjoint).
+  - Dispatcher (`duckdbDispatch.shouldUseSQLPath`) routes 2SLS when `zVars`, `xColsEndog` present, order condition `q ≥ endogCount`, `k + q ≤ K_THRESHOLD`.
+  - Guards in `ModelingTab` 2SLS branch: seType ∈ {classical, HC0, HC1} only, endogenous factor variables forbid HC0/HC1.
+  - Validated vs `AER::ivreg` + `sandwich::vcovHC` at 6dp coef / 4dp SE (`fase3aBenchmarks.json`, `window.__validation.fase3a`).
+  - Deferred to 3b/3c: HC2/HC3, clustered, twoway, HAC for 2SLS; WLS; GMM/LIML.
 
 ### Fase 4 — FE / FD / TWFE
 
