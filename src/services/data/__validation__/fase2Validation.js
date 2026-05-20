@@ -50,10 +50,11 @@ export async function runFase2NumericalValidation(tableName = "fase2") {
   B.se_twoway.forEach((s, i) =>
     c(`SE twoway[${i}] (4dp)`, close4(rTw.se[i], s)));
 
-  // ── HAC (Newey-West, auto bandwidth, ordered by __ri inside firm) ────────
+  // ── HAC (Newey-West, auto bandwidth, ordered by __ri) ────────
+  // orderCol only — R's NeweyWest treats residuals as one time series, no panel partitioning
   const hac = await computeHACMeat({
     tableName, yCol: "y", xColsExpanded, dummySQL,
-    beta: classical.beta, orderCol: "__ri", entityCol: "firm",
+    beta: classical.beta, orderCol: "__ri",
   });
   const rHac = runOLSFromSuffStats({ ...suff, meat: hac.meat, hcType: null });
   c(`HAC bandwidth L matches R (${B.L_hac})`, hac.L === B.L_hac);
@@ -79,9 +80,10 @@ export async function runFase2NumericalValidation(tableName = "fase2") {
   c(`White df matches`, w.pAux - 1 === B.white_df);
 
   // ── Breusch-Godfrey lag 1 ────────────────────────────────────────────────
+  // no entityCol — R's lmtest::bgtest does not partition by panel unit
   const bg = await breuschGodfreySQL({
     tableName, yCol: "y", xColsExpanded, dummySQL, beta: classical.beta,
-    maxLag: 1, orderCol: "__ri", entityCol: "firm",
+    maxLag: 1, orderCol: "__ri",
   });
   const auxBG = runOLSFromSuffStats({
     n: bg.n, XtX: bg.XtXAux, XtY: bg.XtYAux,
