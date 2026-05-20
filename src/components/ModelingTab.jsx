@@ -8,7 +8,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
-  runOLS, runOLSFromSuffStats, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
+  runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
@@ -21,6 +21,7 @@ import {
 import { predict }              from "../math/calcEngine.js";
 import { extractAllRows }       from "../services/data/duckdb.js";
 import { buildOLSSuffStats }    from "../services/data/duckdbOLS.js";
+import { buildIVSuffStats }     from "../services/data/duckdbIV.js";
 import { shouldUseSQLPath }     from "../services/data/duckdbDispatch.js";
 import { CACHE_MAX_ENTRIES }    from "../services/data/dispatchConfig.js";
 import { expandFactors }        from "../services/data/duckdbFactors.js";
@@ -1761,10 +1762,57 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         clusterVar:    clusterVar ?? null,
         clusterVar2:   clusterVar2 ?? null,
         timeVar:       seTypeNorm === "HAC" ? (timeVar ?? panel?.timeCol ?? null) : null,
+        xColsEndog:    model === "2SLS" ? xVars : [],
+        zVars:         model === "2SLS" ? zVars : [],
+        endogCount:    model === "2SLS" ? xVars.length : 0,
       };
 
       if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
         try {
+          if (model === "2SLS") {
+            // ── 2SLS SQL branch (Fase 3a classical only) ──
+            // X = endogenous + exogenous controls; Z = exogenous + excluded instruments.
+            const xAll2 = [...xVars, ...wVars];
+            const zAll2 = [...wVars, ...zVars];
+
+            // Expand factors for X and Z separately. If a column appears in both,
+            // its dummySQL definition is identical — last write wins, no conflict.
+            const xExpansion = await expandFactors({ xCols: xAll2, tableName: duckTable });
+            const zExpansion = await expandFactors({ xCols: zAll2, tableName: duckTable });
+            const xExp = xExpansion.xColsExpanded;
+            const zExp = zExpansion.xColsExpanded;
+            const dummySQL2 = { ...xExpansion.dummySQL, ...zExpansion.dummySQL };
+
+            // Re-check (k+q) post-expansion against K_THRESHOLD via the dispatcher.
+            if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: xExp })) {
+              throw new Error("Post-expansion k+q exceeds threshold — fallback to JS");
+            }
+
+            const mSS = await measure(() => buildIVSuffStats(duckTable, yVar[0], xExp, zExp, { dummySQL: dummySQL2 }));
+            logEstimate({
+              path: "sql", phase: "ivSuffStats",
+              n: rowCount, k: xExp.length, q: zExp.length, msTotal: mSS.ms,
+            });
+
+            // Classical only in Task 4 — robust SE wired in Task 7.
+            const mSolve = await measure(() => run2SLSFromSuffStats({
+              ...mSS.result, meat: null, hcType: null,
+            }));
+            const second = mSolve.result;
+            if (!second) throw new Error("Suff-stats 2SLS solve returned null (singular)");
+            logEstimate({
+              path: "sql", phase: "engine-2SLS",
+              n: rowCount, k: xExp.length, seType: "classical", msTotal: mSolve.ms,
+            });
+
+            const wrapped = wrapResult("2SLS",
+              { firstStages: [], second: { ...second, resid: [], Yhat: [] } },
+              { yVar: yVar[0], xVars, wVars, zVars }
+            );
+            setResult(wrapped);
+            return;
+          }
+          // ── OLS SQL branch (existing) ──
           const { xColsExpanded, dummySQL } = await expandFactors({
             xCols: allX, tableName: duckTable,
           });
