@@ -12,6 +12,9 @@
 //   setClusterVar {fn}
 //   clusterVar2  {string|null}
 //   setClusterVar2 {fn}
+//   timeVar      {string|null} — HAC ordering column (overrides panel.timeCol)
+//   setTimeVar   {fn}
+//   panelTimeCol {string|null} — declared panel time column (used as default hint)
 //   maxLag       {string|null}  — stored as string for <input>, null = auto
 //   setMaxLag    {fn}
 
@@ -71,6 +74,9 @@ export default function InferenceOptions({
   setClusterVar,
   clusterVar2,
   setClusterVar2,
+  timeVar,
+  setTimeVar,
+  panelTimeCol = null,
   maxLag,
   setMaxLag,
 }) {
@@ -185,6 +191,24 @@ export default function InferenceOptions({
                 options={headers.filter(h => h !== clusterVar)}
                 placeholder="— select column —"
               />
+            </div>
+          )}
+
+          {/* Time variable for HAC */}
+          {showHac && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+                Time Variable
+              </div>
+              <ColSelect
+                value={timeVar}
+                onChange={setTimeVar}
+                options={headers}
+                placeholder={panelTimeCol ? `— default: ${panelTimeCol} —` : "— select column —"}
+              />
+              <div style={{ fontSize: 9, color: C.textMuted, marginTop: 4, fontFamily: mono }}>
+                Column used to ORDER residuals for LAG. {panelTimeCol ? "Falls back to declared panel time column." : "Required when no panel is declared."}
+              </div>
             </div>
           )}
 

@@ -30,6 +30,11 @@ function num(v) {
  * @param {string}   tableName  DuckDB table name (from cleanedData._duckdb.tableName)
  * @param {string}   yCol       outcome column name
  * @param {string[]} xCols      regressor column names (intercept handled implicitly)
+ * @param {object}   [opts]
+ * @param {Record<string,string>} [opts.dummySQL]  — CASE WHEN expressions keyed
+ *   by synthetic dummy name (from expandFactors). When xCols contains a name
+ *   that appears in this map, the SQL expression is used instead of casting
+ *   a literal column name.
  * @returns {Promise<{ n, XtX, XtY, YtY, sumY, varNames }>}
  *   n         — number of valid rows (after NA / non-finite filter)
  *   XtX       — (k+1)×(k+1) symmetric matrix, row/col 0 corresponds to intercept
@@ -40,7 +45,7 @@ function num(v) {
  *
  * One round-trip to DuckDB; no row materialization in JS.
  */
-export async function buildOLSSuffStats(tableName, yCol, xCols) {
+export async function buildOLSSuffStats(tableName, yCol, xCols, opts = {}) {
   const { conn } = await getDuckDB();
   const k = xCols.length;
   if (k < 1) throw new Error("buildOLSSuffStats: need at least one regressor");
@@ -50,7 +55,13 @@ export async function buildOLSSuffStats(tableName, yCol, xCols) {
   // rows where any value is NULL / NaN / infinite. isfinite(NULL) is NULL
   // which evaluates as false in WHERE, so NULLs are also dropped.
   const yExpr  = `TRY_CAST(${esc(yCol)} AS DOUBLE)`;
-  const xExprs = xCols.map(c => `TRY_CAST(${esc(c)} AS DOUBLE)`);
+  const dummySQL = opts.dummySQL ?? {};
+  const xExprs = xCols.map(c => {
+    if (Object.prototype.hasOwnProperty.call(dummySQL, c)) {
+      return `CAST((${dummySQL[c]}) AS DOUBLE)`;
+    }
+    return `TRY_CAST(${esc(c)} AS DOUBLE)`;
+  });
 
   const projections = [`${yExpr} AS _y_`];
   xExprs.forEach((e, i) => projections.push(`${e} AS _x_${i}`));

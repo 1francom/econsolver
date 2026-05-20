@@ -21,6 +21,21 @@ import {
 import { predict }              from "../math/calcEngine.js";
 import { extractAllRows }       from "../services/data/duckdb.js";
 import { buildOLSSuffStats }    from "../services/data/duckdbOLS.js";
+import { shouldUseSQLPath }     from "../services/data/duckdbDispatch.js";
+import { CACHE_MAX_ENTRIES }    from "../services/data/dispatchConfig.js";
+import { expandFactors }        from "../services/data/duckdbFactors.js";
+import { computeHCMeat, computeHCMeatWithLeverage } from "../services/data/duckdbRobustSE.js";
+import {
+  countClusters, computeClusterMeat, computeTwowayClusterMeat,
+} from "../services/data/duckdbClusterSE.js";
+import { computeHACMeat } from "../services/data/duckdbHACSE.js";
+import { sampleResiduals }      from "../services/data/duckdbResiduals.js";
+import {
+  createSuffStatsCache, makeCacheKey, validateSuffStatsEntry,
+} from "../services/data/suffStatsCache.js";
+import {
+  logEstimate, measure, getEntries as getPerfEntries, clearLog as clearPerfLog,
+} from "../services/data/perfLog.js";
 import { generateRScript }      from "../services/export/rScript.js";
 import { generatePythonScript } from "../services/export/pythonScript.js";
 import { generateStataScript }  from "../services/export/stataScript.js";
@@ -1285,6 +1300,25 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setFactorVars(new Set(headers.filter(h => !numericCols.includes(h))));
   }, [cleanedData]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Sufficient-statistics cache (Fase 0) ─────────────────────────────────────
+  // LRU cache keyed by (table, y, sorted xCols). Invalidated whenever the
+  // dataset/pipeline changes. Held in a ref so it survives renders without
+  // triggering re-renders on set/get.
+  const suffStatsCacheRef = useRef(null);
+  if (suffStatsCacheRef.current === null) {
+    suffStatsCacheRef.current = createSuffStatsCache(CACHE_MAX_ENTRIES);
+  }
+  useEffect(() => {
+    suffStatsCacheRef.current?.invalidate();
+  }, [cleanedData]);
+
+  // Expose the perf log for DevTools inspection. Hidden from regular users.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.__perfLog = { getEntries: getPerfEntries, clear: clearPerfLog };
+    }
+  }, []);
+
   // ── Spec state ───────────────────────────────────────────────────────────────
   const [model,      setModel]      = useState("OLS");
   const [yVar,       setYVar]       = useState([]);
@@ -1314,13 +1348,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [seType,      setSeType]      = useState("classical");
   const [clusterVar,  setClusterVar]  = useState(null);
   const [clusterVar2, setClusterVar2] = useState(null);
+  const [timeVar,     setTimeVar]     = useState(null);
   const [maxLag,      setMaxLag]      = useState(null);
 
   const seOpts = useMemo(() => ({
     seType, clusterVar, clusterVar2,
-    timeVar: panel?.timeCol ?? null,
+    timeVar: timeVar ?? panel?.timeCol ?? null,
     maxLag: maxLag ? parseInt(maxLag) : null,
-  }), [seType, clusterVar, clusterVar2, maxLag, panel]);
+  }), [seType, clusterVar, clusterVar2, timeVar, maxLag, panel]);
 
   // ── Results state ─────────────────────────────────────────────────────────
   const [result,       setResult]       = useState(null);
@@ -1702,34 +1737,148 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     try {
       const duckTable = cleanedData?._duckdb?.tableName;
       const rowCount  = cleanedData?._duckdb?.rowCount ?? 0;
+      const allX      = [...xVars, ...wVars];
 
-      // ── Fast path: DuckDB sufficient-statistics OLS ────────────────────────
-      // SQL computes X'X, X'Y, Y'Y, n; JS only does the inversion + scaling.
-      // Avoids materializing the full dataset into JS memory.
-      // Gated to plain OLS — no weights, no factor expansion, classical SE.
-      const wantSuffStats =
-        duckTable &&
-        rowCount > rows.length &&            // full data not already in memory
-        model === "OLS" &&
-        !weightVar[0] &&
-        factorVars.size === 0 &&
-        (!seType || seType === "classical");
+      // ── Single dispatch point (Fase 0) ─────────────────────────────────────
+      // shouldUseSQLPath decides between SQL suff-stats fast path and the
+      // classic JS path (extractAllRows + runOLS et al). Cheap checks first.
+      // Normalize SE casing — UI emits lowercase. dispatcher + engine compare
+      // uppercase HC*, lowercase clustered/twoway, uppercase HAC (matching
+      // core/inference/robustSE.js dispatch).
+      const rawSE = (seType ?? "classical").toLowerCase();
+      const seTypeNorm =
+          rawSE === "hac"        ? "HAC"
+        : rawSE.startsWith("hc") ? rawSE.toUpperCase()
+        : rawSE;
+      const dispatchCtx = {
+        tableName:     duckTable ?? null,
+        n:             rowCount > rows.length ? rowCount : rows.length,
+        xColsExpanded: allX,
+        estimator:     model,
+        seType:        seTypeNorm,
+        hasWeights:    !!weightVar[0],
+        hasFactors:    factorVars.size > 0,
+        clusterVar:    clusterVar ?? null,
+        clusterVar2:   clusterVar2 ?? null,
+        timeVar:       seTypeNorm === "HAC" ? (timeVar ?? panel?.timeCol ?? null) : null,
+      };
 
-      if (wantSuffStats && yVar[0] && (xVars.length + wVars.length) > 0) {
+      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
         try {
-          const allX = [...xVars, ...wVars];
-          const suff = await buildOLSSuffStats(duckTable, yVar[0], allX);
-          const raw  = runOLSFromSuffStats(suff);
+          const { xColsExpanded, dummySQL } = await expandFactors({
+            xCols: allX, tableName: duckTable,
+          });
+          // Re-check post-expansion k against threshold
+          if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded })) {
+            throw new Error("Post-expansion k exceeds threshold — fallback to JS");
+          }
+
+          const cache = suffStatsCacheRef.current;
+          const key   = makeCacheKey(duckTable, yVar[0], xColsExpanded);
+          let entry   = cache.get(key);
+          let cacheHit = entry != null && validateSuffStatsEntry(entry, xColsExpanded);
+          if (!cacheHit) {
+            const m = await measure(() => buildOLSSuffStats(duckTable, yVar[0], xColsExpanded, { dummySQL }));
+            entry = { ...m.result, dummySQL };
+            cache.set(key, entry);
+            logEstimate({ path: "sql", phase: "suffStats", n: rowCount, k: xColsExpanded.length, msTotal: m.ms });
+          }
+
+          // Compute β and Ainv once (needed for HC2/HC3 leverage). Cached on entry.
+          if (!entry.beta) {
+            const classicalRaw = runOLSFromSuffStats({
+              n: entry.n, XtX: entry.XtX, XtY: entry.XtY,
+              YtY: entry.YtY, sumY: entry.sumY, varNames: entry.varNames,
+            });
+            if (!classicalRaw) throw new Error("Suff-stats solve returned null (singular X'X)");
+            entry.beta = classicalRaw.beta;
+            entry.Ainv = classicalRaw.XtXinv;
+          }
+
+          // Meat pass — unified branch over all robust SE types
+          let meat = null;
+          const seUp = seTypeNorm;  // canonicalized above
+
+          if (seUp === "HC0" || seUp === "HC1") {
+            const mm = await measure(() => computeHCMeat({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL, beta: entry.beta,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: `meat-${seUp}`, n: rowCount, k: xColsExpanded.length, msTotal: mm.ms });
+          }
+          else if (seUp === "HC2" || seUp === "HC3") {
+            const mm = await measure(() => computeHCMeatWithLeverage({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: entry.beta, Ainv: entry.Ainv, hcType: seUp,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: `meat-${seUp}`, n: rowCount, k: xColsExpanded.length, msTotal: mm.ms });
+          }
+          else if (seUp === "clustered") {
+            // Preflight: G > n/2 → fallback (too many clusters for SQL path)
+            const { G, n: nC } = await countClusters(duckTable, clusterVar);
+            if (G > nC / 2) {
+              throw new Error(`cluster degenerate (G=${G}, n=${nC}) — fallback to JS`);
+            }
+            const mm = await measure(() => computeClusterMeat({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: entry.beta, clusterCol: clusterVar,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: "meat-clustered", n: rowCount, k: xColsExpanded.length, G, msTotal: mm.ms });
+          }
+          else if (seUp === "twoway") {
+            const mm = await measure(() => computeTwowayClusterMeat({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: entry.beta, clusterCol: clusterVar, clusterCol2: clusterVar2,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: "meat-twoway", n: rowCount, k: xColsExpanded.length,
+                          G1: mm.result.G1, G2: mm.result.G2, G12: mm.result.G12, msTotal: mm.ms });
+          }
+          else if (seUp === "HAC") {
+            const orderCol = timeVar ?? panel?.timeCol ?? null;
+            const entityCol = panel?.entityCol ?? null;
+            const mm = await measure(() => computeHACMeat({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: entry.beta, orderCol, entityCol,
+              maxLag: maxLag != null ? Number(maxLag) : undefined,
+            }));
+            meat = mm.result.meat;
+            logEstimate({ path: "sql", phase: "meat-HAC", n: rowCount, k: xColsExpanded.length, L: mm.result.L, msTotal: mm.ms });
+          }
+          // classical → meat stays null; engine reports classical SE only
+
+          // Engine: pass hcType only for HC1 (engine applies n/(n-k) scaling there).
+          // For clustered/twoway/HAC the meat is already pre-scaled inside the builder.
+          const engineHcType = (seUp === "HC1") ? "HC1" : null;
+
+          const m2 = await measure(() => runOLSFromSuffStats({
+            n: entry.n, XtX: entry.XtX, XtY: entry.XtY,
+            YtY: entry.YtY, sumY: entry.sumY, varNames: entry.varNames,
+            meat, hcType: engineHcType,
+          }));
+          const raw = m2.result;
+          logEstimate({
+            path: "sql", phase: "solve", n: rowCount, k: xColsExpanded.length,
+            seType: seUp, cacheHit, msTotal: m2.ms,
+          });
+
           if (raw) {
+            raw._hasLazyResiduals = true;
+            raw._residualsThunk   = () => sampleResiduals({
+              tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
+              beta: raw.beta, sampleSize: 5000,
+            });
             const wrapped = wrapResult("OLS", raw, {
               yVar: yVar[0], xVars, wVars, weightCol: null,
             });
             setResult(wrapped);
             return;
           }
-          // raw === null → singular X'X or n < k; fall through to full extraction
+          // raw === null → singular X'X or n < k; fall through to JS path
         } catch (e) {
-          console.warn("[ModelingTab] DuckDB suff-stats path failed, falling back to full extraction:", e);
+          console.warn("[ModelingTab] SQL path failed, falling back to JS:", e);
         }
       }
 
@@ -1737,9 +1886,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       // For DuckDB datasets, `rows` is only a 500-row preview.
       let estimationRows = rows;
       if (duckTable && rows.length < (rowCount || Infinity)) {
-        estimationRows = await extractAllRows(duckTable);
+        const me = await measure(() => extractAllRows(duckTable));
+        estimationRows = me.result;
+        logEstimate({ path: "js", phase: "extract", n: rowCount, msTotal: me.ms });
       }
-      const out = _runEstimation(estimationRows);
+      const mj = await measure(async () => _runEstimation(estimationRows));
+      const out = mj.result;
+      logEstimate({
+        path: "js", phase: "estimate",
+        n: estimationRows.length, k: allX.length,
+        estimator: model, seType, msTotal: mj.ms,
+      });
       if (out.error) { setErr(out.error); }
       else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
     } catch (e) {
@@ -1748,7 +1905,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       setRunning(false);
     }
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
-      model, yVar, xVars, wVars, weightVar, factorVars, seType]);
+      model, yVar, xVars, wVars, weightVar, factorVars, seType,
+      clusterVar, clusterVar2, timeVar, maxLag]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -1908,6 +2066,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             seType={seType}           setSeType={setSeType}
             clusterVar={clusterVar}   setClusterVar={setClusterVar}
             clusterVar2={clusterVar2} setClusterVar2={setClusterVar2}
+            timeVar={timeVar}         setTimeVar={setTimeVar}
+            panelTimeCol={panel?.timeCol ?? null}
             maxLag={maxLag}           setMaxLag={setMaxLag}
           />
 
