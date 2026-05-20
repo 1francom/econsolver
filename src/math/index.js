@@ -18,6 +18,9 @@ export {
   buildLatex, buildCSVExport, downloadText,
 } from "./LinearEngine.js";
 
+// ── IV / 2SLS sufficient-statistics solver ────────────────────────────────────
+export { run2SLSFromSuffStats } from "./IV2SLSEngine.js";
+
 // ── Panel estimators ──────────────────────────────────────────────────────────
 export {
   runFE,
