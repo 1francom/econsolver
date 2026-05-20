@@ -1,7 +1,7 @@
 # DuckDB Sufficient-Statistics Roadmap — Design
 
 **Date:** 2026-05-19
-**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fase 3a (2SLS) DONE (2026-05-20). Fases 3b/3c (GMM/LIML, WLS), 4–7 pending.
+**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fase 3a (2SLS) DONE (2026-05-20). Fase 3c (WLS) DONE (2026-05-21). Fase 3b (GMM/LIML), 4–7 pending.
 **Owner:** Franco Medero
 
 ## Problem
@@ -256,6 +256,15 @@ Detailed design for each fase deferred to its own implementation plan. Only the 
   - Guards in `ModelingTab` 2SLS branch: seType ∈ {classical, HC0, HC1} only, endogenous factor variables forbid HC0/HC1.
   - Validated vs `AER::ivreg` + `sandwich::vcovHC` at 6dp coef / 4dp SE (`fase3aBenchmarks.json`, `window.__validation.fase3a`).
   - Deferred to 3b/3c: HC2/HC3, clustered, twoway, HAC for 2SLS; WLS; GMM/LIML.
+
+**Fase 3c status (2026-05-21):** WLS classical + HC0/HC1 implemented.
+  - `duckdbWLS.js` `buildWLSSuffStats` — single SQL pass produces both weighted (X'WX, X'WY, sumW) and unweighted (X'X, X'Y, Y'Y, sumY) cross-products. Row filter rejects NULL / non-finite y/x/w and w ≤ 0 (matches `runWLS` in `LinearEngine.js:233-238`).
+  - `WLSEngine.js` `runWLSFromSuffStats` — β = (X'WX)⁻¹X'WY; SSR = Y'Y − 2β'X'Y + β'X'Xβ (UNweighted, matches `runWLS`); R² emitted from unweighted SST (documented deviation from `runWLS`'s weighted R²; `_wlsR2Note: "unweighted"` flag on the result).
+  - `duckdbWLSRobustSE.js` `computeWLSHCMeat` — meat = Σ wᵢ² êᵢ² xᵢ xⱼ computed in SQL with β as prepared params. HC1 scaling n/(n−k) is applied by the engine, not the builder.
+  - Cache: `makeCacheKey` / `validateSuffStatsEntry` extended with optional `wCol` (single LRU; weighted keys disjoint from unweighted via `|W|` sentinel).
+  - Dispatcher: `hasWeights = true` allowed iff `estimator === "WLS"` AND `weightCol` is non-empty; SE restricted to `{classical, HC0, HC1}` for WLS in Fase 3c.
+  - Validated vs R `lm(..., weights = w)` + `sandwich::vcovHC` at 6dp coef / 4dp SE (`fase3cBenchmarks.json`, `window.__validation.fase3c`).
+  - Deferred to a later fase: HC2/HC3, clustered, twoway, HAC × WLS.
 
 ### Fase 4 — FE / FD / TWFE
 
