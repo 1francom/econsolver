@@ -21,6 +21,9 @@ export {
 // ── IV / 2SLS sufficient-statistics solver ────────────────────────────────────
 export { run2SLSFromSuffStats, firstStageFFromSuffStats } from "./IV2SLSEngine.js";
 
+// ── WLS sufficient-statistics solver ──────────────────────────────────────────
+export { runWLSFromSuffStats } from "./WLSEngine.js";
+
 // ── Panel estimators ──────────────────────────────────────────────────────────
 export {
   runFE,
