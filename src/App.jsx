@@ -59,6 +59,23 @@ const DEMO_CSV = `wage,educ,exper,union,country,id,year
 22.1,16,11,1,Germany,9,2008
 17.6,13,8,0,Germany,10,2008`;
 
+const PRELOADED_DATASETS = [
+  {
+    id: "fast_food_did",
+    label: "Fast food DiD",
+    filename: "fast_food_DiD.csv",
+    url: "/preloaded/fast_food_DiD.csv",
+    hint: "Card-Krueger fast food panel for DiD",
+  },
+  {
+    id: "rdrobust_senate",
+    label: "Senate RD",
+    filename: "rdrobust_senate.csv",
+    url: "/preloaded/rdrobust_senate.csv",
+    hint: "Regression discontinuity sample",
+  },
+];
+
 // ─── PARSING UTILS ────────────────────────────────────────────────────────────
 const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
 const NUM_PAT = /^-?\d*\.?\d+([eE][+-]?\d+)?$/;
@@ -790,6 +807,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
   const [success,   setSuccess]   = useState("");
   const [wbOpen,    setWbOpen]    = useState(false);
   const [oecdOpen,  setOecdOpen]  = useState(false);
+  const [preloadedOpen, setPreloadedOpen] = useState(false);
   const [dragOver,  setDragOver]  = useState(false);
   const [view,      setView]      = useState("overview"); // "overview" | "grid"
 
@@ -858,6 +876,31 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
       }
     } catch (e) {
       setErr("Parse error: " + (e?.message || "unknown"));
+    }
+    setLoading(false);
+  }
+
+  async function handlePreloaded(ds) {
+    setLoading(true); setErr(""); setSuccess("");
+    try {
+      const res = await fetch(ds.url);
+      if (!res.ok) throw new Error(`Could not load ${ds.filename} (${res.status})`);
+      const blob = await res.blob();
+      const file = new File([blob], ds.filename, { type: "text/csv" });
+      const parsed = await parseFileForPrimary(file);
+      if (!parsed?.headers?.length || !parsed?.rows?.length) throw new Error("Dataset is empty or could not be parsed.");
+
+      if (!rawData && onLoadPrimary) {
+        await onLoadPrimary(parsed, ds.filename);
+        setSuccess(`"${ds.filename}" loaded as primary dataset.`);
+      } else {
+        if (!studioRef.current) await new Promise(r => requestAnimationFrame(r));
+        studioRef.current?.addParsed?.(ds.filename, parsed);
+        setSuccess(`"${ds.filename}" loaded — visible in Dataset Manager.`);
+      }
+      setPreloadedOpen(false);
+    } catch (e) {
+      setErr("Preloaded dataset error: " + (e?.message || "unknown"));
     }
     setLoading(false);
   }
@@ -936,6 +979,27 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
                         border:`1px solid ${C.border2}`,color:C.textDim,fontFamily:mono,fontSize:10}}>
                 OECD ↗
               </button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5}}>
+              <button onClick={()=>setPreloadedOpen(o=>!o)}
+                style={{padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
+                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily:mono,fontSize:10,
+                        textAlign:"left"}}>
+                {preloadedOpen ? "v" : ">"} Preloaded datasets
+              </button>
+              {preloadedOpen && (
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {PRELOADED_DATASETS.map(ds => (
+                    <button key={ds.id} onClick={()=>handlePreloaded(ds)} disabled={loading}
+                      style={{padding:"0.45rem 0.6rem",borderRadius:3,cursor:loading?"not-allowed":"pointer",
+                              background:C.surface,border:`1px solid ${C.border2}`,color:C.textDim,
+                              fontFamily:mono,fontSize:10,textAlign:"left"}}>
+                      <div style={{color:C.text}}>{ds.label}</div>
+                      <div style={{fontSize:8,color:C.textMuted,marginTop:2}}>{ds.hint}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1106,6 +1170,28 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
                   onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
                 >{label}</button>
               ))}
+              <button onClick={()=>setPreloadedOpen(o=>!o)} style={{
+                padding:"0.4rem 0.65rem",background:"transparent",
+                border:`1px solid ${C.border2}`,borderRadius:3,
+                color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,
+                textAlign:"left",transition:"all 0.12s",
+              }}>
+                {preloadedOpen ? "v" : ">"} Preloaded datasets
+              </button>
+              {preloadedOpen && (
+                <div style={{display:"flex",flexDirection:"column",gap:4,paddingLeft:6}}>
+                  {PRELOADED_DATASETS.map(ds => (
+                    <button key={ds.id} onClick={()=>handlePreloaded(ds)} disabled={loading}
+                      style={{padding:"0.38rem 0.55rem",background:C.surface2,
+                              border:`1px solid ${C.border2}`,borderRadius:3,
+                              color:C.textDim,cursor:loading?"not-allowed":"pointer",
+                              fontFamily:mono,fontSize:9,textAlign:"left"}}>
+                      <div style={{color:C.text}}>{ds.label}</div>
+                      <div style={{fontSize:8,color:C.textMuted,marginTop:2,lineHeight:1.4}}>{ds.hint}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Accepted formats */}
