@@ -8,7 +8,9 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
-  runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLSFromSuffStats, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
+  runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLSFromSuffStats,
+  runGMMFromSuffStats, runLIMLFromSuffStats,
+  runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   fCDF,
   breuschPagan, computeVIF, hausmanTest,
@@ -34,6 +36,9 @@ import {
 import { computeHACMeat } from "../services/data/duckdbHACSE.js";
 import { sampleResiduals }      from "../services/data/duckdbResiduals.js";
 import { computeIVHCMeat }      from "../services/data/duckdbIVRobustSE.js";
+import { buildGMMSuffStats }    from "../services/data/duckdbGMM.js";
+import { computeGMMOmega }      from "../services/data/duckdbGMMOmega.js";
+import { buildLIMLSuffStats }   from "../services/data/duckdbLIML.js";
 import { buildWLSSuffStats }    from "../services/data/duckdbWLS.js";
 import { computeWLSHCMeat }     from "../services/data/duckdbWLSRobustSE.js";
 import {
@@ -1768,9 +1773,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         clusterVar:    clusterVar ?? null,
         clusterVar2:   clusterVar2 ?? null,
         timeVar:       seTypeNorm === "HAC" ? (timeVar ?? panel?.timeCol ?? null) : null,
-        xColsEndog:    model === "2SLS" ? xVars : [],
-        zVars:         model === "2SLS" ? zVars : [],
-        endogCount:    model === "2SLS" ? xVars.length : 0,
+        xColsEndog:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars : [],
+        zVars:         ["2SLS", "GMM", "LIML"].includes(model) ? zVars : [],
+        endogCount:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars.length : 0,
       };
 
       if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
@@ -1964,6 +1969,71 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             setResult(wrapped);
             return;
           }
+
+          if (model === "GMM") {
+            // ── GMM SQL branch (Fase 3b — classical SE only; 2-step efficient) ──
+            if (seTypeNorm !== "classical") {
+              throw new Error(`GMM SQL path only supports classical SE in Fase 3b (got ${seTypeNorm}) — fallback to JS`);
+            }
+            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable });
+            const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable });
+            const { xColsExpanded: zExp, dummySQL: zDummy } = await expandFactors({ xCols: zVars, tableName: duckTable });
+            const dummySQL = { ...wDummy, ...xDummy, ...zDummy };
+
+            // Re-check post-expansion (k+q) against threshold.
+            if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: [...xExp, ...wExp] })) {
+              throw new Error("Post-expansion (w+x+z) exceeds threshold — fallback to JS");
+            }
+
+            const ss = await measure(() => buildGMMSuffStats(duckTable, yVar[0], xExp, wExp, zExp, { dummySQL }));
+            logEstimate({ path: "sql", phase: "gmmSuffStats", n: rowCount, k: ss.result.xColsAll.length, msTotal: ss.ms });
+
+            // Step 1: 2SLS β̂₁ using the same suff stats (uses ZtZ, ZtX, XtX, ZtY, XtY).
+            const step1 = run2SLSFromSuffStats({ ...ss.result, meat: null, hcType: null });
+            if (!step1) throw new Error("GMM step-1 (2SLS) returned null (singular)");
+
+            // Step 2: Ω̂ via SQL pass over residuals.
+            const om = await measure(() => computeGMMOmega({
+              tableName: duckTable, yCol: yVar[0],
+              xColsAll: ss.result.xColsAll, zColsAll: ss.result.zColsAll, dummySQL,
+              beta: step1.beta,
+            }));
+            logEstimate({ path: "sql", phase: "gmmOmega", n: rowCount, k: ss.result.xColsAll.length, msTotal: om.ms });
+
+            const overidDf = zVars.length - xVars.length;
+            const step2 = runGMMFromSuffStats({ ...ss.result, Omega: om.result.Omega, overidDf });
+            if (!step2) throw new Error("GMM step-2 returned null (singular Ω̂)");
+
+            const wrapped = wrapResult("GMM", step2, { yVar: yVar[0], xVars, wVars, zVars });
+            setResult(wrapped);
+            return;
+          }
+
+          if (model === "LIML") {
+            // ── LIML SQL branch (Fase 3b — classical SE only) ──
+            if (seTypeNorm !== "classical") {
+              throw new Error(`LIML SQL path only supports classical SE in Fase 3b (got ${seTypeNorm}) — fallback to JS`);
+            }
+            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable });
+            const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable });
+            const { xColsExpanded: zExp, dummySQL: zDummy } = await expandFactors({ xCols: zVars, tableName: duckTable });
+            const dummySQL = { ...wDummy, ...xDummy, ...zDummy };
+
+            if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: [...xExp, ...wExp] })) {
+              throw new Error("Post-expansion (w+x+z) exceeds threshold — fallback to JS");
+            }
+
+            const ss = await measure(() => buildLIMLSuffStats(duckTable, yVar[0], xExp, wExp, zExp, { dummySQL }));
+            logEstimate({ path: "sql", phase: "limlSuffStats", n: rowCount, k: ss.result.xColsAll.length, msTotal: ss.ms });
+
+            const r = runLIMLFromSuffStats({ ...ss.result });
+            if (!r) throw new Error("LIML solve returned null (singular Z'Z, W'W, or eigenvalue failure)");
+
+            const wrapped = wrapResult("LIML", r, { yVar: yVar[0], xVars, wVars, zVars });
+            setResult(wrapped);
+            return;
+          }
+
           // ── OLS SQL branch (existing) ──
           const { xColsExpanded, dummySQL } = await expandFactors({
             xCols: allX, tableName: duckTable,
