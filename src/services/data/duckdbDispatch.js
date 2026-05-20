@@ -13,6 +13,9 @@
 //   clusterVar:    string | null  — one-way cluster column (required when seType="clustered" or "twoway")
 //   clusterVar2:   string | null  — second cluster column (required when seType="twoway")
 //   timeVar:       string | null  — time column for HAC LAG ordering (required when seType="HAC")
+//   zVars:         string[] | null  — instruments (required when estimator="2SLS")
+//   endogCount:    number          — number of endogenous regressors (required when estimator="2SLS")
+//   xColsEndog:    string[]         — endogenous regressor names (required when estimator="2SLS")
 
 import {
   N_THRESHOLD,
@@ -36,6 +39,16 @@ export function shouldUseSQLPath(ctx) {
   if (se === "clustered" && !ctx.clusterVar) return false;
   if (se === "twoway"    && (!ctx.clusterVar || !ctx.clusterVar2)) return false;
   if (se === "HAC"       && !ctx.timeVar) return false;
+
+  if (ctx.estimator === "2SLS") {
+    if (!Array.isArray(ctx.zVars) || ctx.zVars.length === 0) return false;
+    if (!Array.isArray(ctx.xColsEndog) || ctx.xColsEndog.length === 0) return false;
+    // Order condition: at least one instrument per endogenous regressor
+    if (ctx.zVars.length < ctx.xColsEndog.length) return false;
+    // Joint complexity: k + q must respect K_THRESHOLD (both go through suff-stats matrices)
+    const totalK = (ctx.xColsExpanded?.length ?? 0) + ctx.zVars.length;
+    if (totalK > K_THRESHOLD) return false;
+  }
 
   return true;
 }
