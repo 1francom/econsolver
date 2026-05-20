@@ -18,6 +18,18 @@ export {
   buildLatex, buildCSVExport, downloadText,
 } from "./LinearEngine.js";
 
+// ── IV / 2SLS sufficient-statistics solver ────────────────────────────────────
+export { run2SLSFromSuffStats, firstStageFFromSuffStats } from "./IV2SLSEngine.js";
+
+// ── GMM sufficient-statistics solver ──────────────────────────────────────────
+export { runGMMFromSuffStats } from "./GMMSuffStatsEngine.js";
+
+// ── LIML sufficient-statistics solver ─────────────────────────────────────────
+export { runLIMLFromSuffStats } from "./LIMLSuffStatsEngine.js";
+
+// ── WLS sufficient-statistics solver ──────────────────────────────────────────
+export { runWLSFromSuffStats } from "./WLSEngine.js";
+
 // ── Panel estimators ──────────────────────────────────────────────────────────
 export {
   runFE,

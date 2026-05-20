@@ -8,8 +8,11 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
-  runOLS, runOLSFromSuffStats, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
+  runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLSFromSuffStats,
+  runGMMFromSuffStats, runLIMLFromSuffStats,
+  runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
+  fCDF,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
@@ -17,10 +20,12 @@ import {
   runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runSyntheticControl,
   wrapResult,
   diagnoseFit,
+  firstStageFFromSuffStats,
 } from "../math/index.js";
 import { predict }              from "../math/calcEngine.js";
 import { extractAllRows }       from "../services/data/duckdb.js";
 import { buildOLSSuffStats }    from "../services/data/duckdbOLS.js";
+import { buildIVSuffStats }     from "../services/data/duckdbIV.js";
 import { shouldUseSQLPath }     from "../services/data/duckdbDispatch.js";
 import { CACHE_MAX_ENTRIES }    from "../services/data/dispatchConfig.js";
 import { expandFactors }        from "../services/data/duckdbFactors.js";
@@ -30,6 +35,12 @@ import {
 } from "../services/data/duckdbClusterSE.js";
 import { computeHACMeat } from "../services/data/duckdbHACSE.js";
 import { sampleResiduals }      from "../services/data/duckdbResiduals.js";
+import { computeIVHCMeat }      from "../services/data/duckdbIVRobustSE.js";
+import { buildGMMSuffStats }    from "../services/data/duckdbGMM.js";
+import { computeGMMOmega }      from "../services/data/duckdbGMMOmega.js";
+import { buildLIMLSuffStats }   from "../services/data/duckdbLIML.js";
+import { buildWLSSuffStats }    from "../services/data/duckdbWLS.js";
+import { computeWLSHCMeat }     from "../services/data/duckdbWLSRobustSE.js";
 import {
   createSuffStatsCache, makeCacheKey, validateSuffStatsEntry,
 } from "../services/data/suffStatsCache.js";
@@ -1757,14 +1768,273 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         estimator:     model,
         seType:        seTypeNorm,
         hasWeights:    !!weightVar[0],
+        weightCol:     weightVar[0] || null,
         hasFactors:    factorVars.size > 0,
         clusterVar:    clusterVar ?? null,
         clusterVar2:   clusterVar2 ?? null,
         timeVar:       seTypeNorm === "HAC" ? (timeVar ?? panel?.timeCol ?? null) : null,
+        xColsEndog:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars : [],
+        zVars:         ["2SLS", "GMM", "LIML"].includes(model) ? zVars : [],
+        endogCount:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars.length : 0,
       };
 
       if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
         try {
+          if (model === "2SLS") {
+            // ── 2SLS SQL branch (Fase 3a classical only) ──
+            // Fase 3a supports classical / HC0 / HC1 only for 2SLS. Other SE types
+            // throw → outer catch → JS fallback.
+            if (!["classical", "HC0", "HC1"].includes(seTypeNorm)) {
+              throw new Error(`2SLS SQL path supports classical/HC0/HC1 in Fase 3a (got ${seTypeNorm}) — fallback to JS`);
+            }
+
+            // X = endogenous + exogenous controls; Z = exogenous + excluded instruments.
+            const xAll2 = [...xVars, ...wVars];
+            const zAll2 = [...wVars, ...zVars];
+
+            // Expand factors for X and Z separately. If a column appears in both,
+            // its dummySQL definition is identical — last write wins, no conflict.
+            const xExpansion = await expandFactors({ xCols: xAll2, tableName: duckTable });
+            const zExpansion = await expandFactors({ xCols: zAll2, tableName: duckTable });
+            const xExp = xExpansion.xColsExpanded;
+            const zExp = zExpansion.xColsExpanded;
+            const dummySQL2 = { ...xExpansion.dummySQL, ...zExpansion.dummySQL };
+
+            // Endogenous factor variables: not supported in Fase 3a HC0/HC1 — the
+            // first-stage β alignment would need careful index mapping. Fall back.
+            const anyEndogFactor = xVars.some(v => factorVars.has(v));
+            if (anyEndogFactor && (seTypeNorm === "HC0" || seTypeNorm === "HC1")) {
+              throw new Error("Endogenous factor variables not supported in Fase 3a 2SLS HC SE — fallback to JS");
+            }
+
+            // Re-check (k+q) post-expansion against K_THRESHOLD via the dispatcher.
+            if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: xExp })) {
+              throw new Error("Post-expansion k+q exceeds threshold — fallback to JS");
+            }
+
+            // Cache lookup: IV suff-stats keyed by (table, y, xExp, zExp).
+            const ivCache = suffStatsCacheRef.current;
+            const ivKey   = makeCacheKey(duckTable, yVar[0], xExp, zExp);
+            let ivEntry   = ivCache.get(ivKey);
+            const ivHit   = ivEntry != null && validateSuffStatsEntry(ivEntry, xExp, zExp);
+            if (!ivHit) {
+              const mSS = await measure(() => buildIVSuffStats(duckTable, yVar[0], xExp, zExp, { dummySQL: dummySQL2 }));
+              ivEntry = { ...mSS.result, dummySQL: dummySQL2 };
+              ivCache.set(ivKey, ivEntry);
+              logEstimate({
+                path: "sql", phase: "ivSuffStats",
+                n: rowCount, k: xExp.length, q: zExp.length, msTotal: mSS.ms,
+              });
+            }
+
+            const mSolve = await measure(() => run2SLSFromSuffStats({
+              ...ivEntry, meat: null, hcType: null,
+            }));
+            const second = mSolve.result;
+            if (!second) throw new Error("Suff-stats 2SLS solve returned null (singular)");
+            logEstimate({
+              path: "sql", phase: "engine-2SLS",
+              n: rowCount, k: xExp.length, seType: "classical", msTotal: mSolve.ms,
+            });
+
+            // ── First-stage F per endogenous regressor ──
+            const wExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+            const exogExp = wExpansion.xColsExpanded;
+            const dummySQLAll = { ...dummySQL2, ...wExpansion.dummySQL };
+
+            const firstStages = [];
+            const firstStageBetas = new Map();
+            for (let xIdx0 = 0; xIdx0 < xVars.length; xIdx0++) {
+              const endVar = xVars[xIdx0];
+              const uSS = await buildOLSSuffStats(
+                duckTable, endVar,
+                [...exogExp, ...zVars],
+                { dummySQL: dummySQLAll }
+              );
+              const uSolve = runOLSFromSuffStats(uSS);
+              // intercept = index 0, first endogenous = index 1, etc.
+              firstStageBetas.set(xIdx0 + 1, uSolve.beta);
+
+              let rSolve;
+              if (exogExp.length > 0) {
+                const rSS = await buildOLSSuffStats(duckTable, endVar, exogExp, { dummySQL: dummySQLAll });
+                rSolve = runOLSFromSuffStats(rSS);
+              } else {
+                // Intercept-only restricted: SSR_r = Σ(y − ȳ)² = YtY − sumY²/n
+                rSolve = {
+                  SSR: uSS.YtY - (uSS.sumY * uSS.sumY) / uSS.n,
+                  ssr: uSS.YtY - (uSS.sumY * uSS.sumY) / uSS.n,
+                  df:  uSS.n - 1,
+                };
+              }
+
+              const F = firstStageFFromSuffStats(uSolve, rSolve, zVars.length);
+              const Fpval = F ? (1 - fCDF(F.Fstat, F.dfNum, F.dfDen)) : NaN;
+              firstStages.push({
+                endVar,
+                Fstat: F?.Fstat ?? NaN,
+                Fpval,
+                weak: F?.weak ?? false,
+                dfNum: F?.dfNum ?? zVars.length,
+                dfDen: F?.dfDen ?? NaN,
+              });
+            }
+
+            // ── Robust SE meat (HC0/HC1) ──
+            let meat = null;
+            if (seTypeNorm === "HC0" || seTypeNorm === "HC1") {
+              const mMeat = await measure(() => computeIVHCMeat({
+                tableName: duckTable, yCol: yVar[0],
+                xCols: xExp, zCols: zExp, dummySQL: dummySQL2,
+                beta: second.beta, firstStageBeta: firstStageBetas,
+              }));
+              meat = mMeat.result.meat;
+              logEstimate({
+                path: "sql", phase: `meat-2SLS-${seTypeNorm}`,
+                n: rowCount, k: xExp.length, msTotal: mMeat.ms,
+              });
+            }
+
+            // ── Re-solve with robust meat if HC0/HC1 ──
+            let finalSecond = second;
+            if (meat) {
+              const engineHcType = (seTypeNorm === "HC1") ? "HC1" : null;
+              const mSolve2 = await measure(() => run2SLSFromSuffStats({
+                ...ivEntry, meat, hcType: engineHcType,
+              }));
+              if (!mSolve2.result) throw new Error("Suff-stats 2SLS robust solve returned null");
+              finalSecond = mSolve2.result;
+              logEstimate({
+                path: "sql", phase: `solve-2SLS-${seTypeNorm}`,
+                n: rowCount, k: xExp.length, msTotal: mSolve2.ms,
+              });
+            }
+
+            const wrapped = wrapResult("2SLS",
+              { firstStages, second: { ...finalSecond, resid: [], Yhat: [] } },
+              { yVar: yVar[0], xVars, wVars, zVars }
+            );
+            setResult(wrapped);
+            return;
+          }
+
+          if (model === "WLS") {
+            // ── WLS SQL branch (Fase 3c — classical / HC0 / HC1) ──
+            if (!["classical", "HC0", "HC1"].includes(seTypeNorm)) {
+              throw new Error(`WLS SQL path only supports classical/HC0/HC1 in Fase 3c (got ${seTypeNorm}) — fallback to JS`);
+            }
+            const wCol = weightVar[0];
+            if (!wCol) throw new Error("WLS SQL path: weight column not selected — fallback to JS");
+
+            const { xColsExpanded: wlsX, dummySQL: wlsDummy } = await expandFactors({
+              xCols: allX, tableName: duckTable,
+            });
+            if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: wlsX })) {
+              throw new Error("Post-expansion k exceeds threshold — fallback to JS");
+            }
+
+            const wlsCache = suffStatsCacheRef.current;
+            const wlsKey   = makeCacheKey(duckTable, yVar[0], wlsX, null, wCol);
+            let wlsEntry   = wlsCache.get(wlsKey);
+            const wlsHit   = wlsEntry != null && validateSuffStatsEntry(wlsEntry, wlsX, null, wCol);
+            if (!wlsHit) {
+              const m = await measure(() => buildWLSSuffStats(duckTable, yVar[0], wlsX, wCol, { dummySQL: wlsDummy }));
+              wlsEntry = { ...m.result, dummySQL: wlsDummy };
+              wlsCache.set(wlsKey, wlsEntry);
+              logEstimate({ path: "sql", phase: "wlsSuffStats", n: rowCount, k: wlsX.length, msTotal: m.ms });
+            }
+
+            // Classical solve first — gives β even when robust SE requested (meat needs β).
+            const rCls = runWLSFromSuffStats({ ...wlsEntry, meat: null, hcType: null });
+            if (!rCls) throw new Error("Suff-stats WLS solve returned null (singular X'WX)");
+
+            let rFinal;
+            if (seTypeNorm === "classical") {
+              rFinal = rCls;
+            } else {
+              const mm = await measure(() => computeWLSHCMeat({
+                tableName: duckTable, yCol: yVar[0],
+                xCols: wlsX, wCol, dummySQL: wlsDummy,
+                beta: rCls.beta,
+              }));
+              logEstimate({ path: "sql", phase: `meat-WLS-${seTypeNorm}`, n: rowCount, k: wlsX.length, msTotal: mm.ms });
+              const engineHcType = seTypeNorm === "HC1" ? "HC1" : null;
+              rFinal = runWLSFromSuffStats({ ...wlsEntry, meat: mm.result.meat, hcType: engineHcType });
+              if (!rFinal) throw new Error("Suff-stats WLS robust solve returned null");
+            }
+
+            const wrapped = wrapResult("WLS", rFinal, {
+              yVar: yVar[0], xVars, wVars, weightCol: wCol,
+            });
+            setResult(wrapped);
+            return;
+          }
+
+          if (model === "GMM") {
+            // ── GMM SQL branch (Fase 3b — classical SE only; 2-step efficient) ──
+            if (seTypeNorm !== "classical") {
+              throw new Error(`GMM SQL path only supports classical SE in Fase 3b (got ${seTypeNorm}) — fallback to JS`);
+            }
+            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable });
+            const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable });
+            const { xColsExpanded: zExp, dummySQL: zDummy } = await expandFactors({ xCols: zVars, tableName: duckTable });
+            const dummySQL = { ...wDummy, ...xDummy, ...zDummy };
+
+            // Re-check post-expansion (k+q) against threshold.
+            if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: [...xExp, ...wExp] })) {
+              throw new Error("Post-expansion (w+x+z) exceeds threshold — fallback to JS");
+            }
+
+            const ss = await measure(() => buildGMMSuffStats(duckTable, yVar[0], xExp, wExp, zExp, { dummySQL }));
+            logEstimate({ path: "sql", phase: "gmmSuffStats", n: rowCount, k: ss.result.xColsAll.length, msTotal: ss.ms });
+
+            // Step 1: 2SLS β̂₁ using the same suff stats (uses ZtZ, ZtX, XtX, ZtY, XtY).
+            const step1 = run2SLSFromSuffStats({ ...ss.result, meat: null, hcType: null });
+            if (!step1) throw new Error("GMM step-1 (2SLS) returned null (singular)");
+
+            // Step 2: Ω̂ via SQL pass over residuals.
+            const om = await measure(() => computeGMMOmega({
+              tableName: duckTable, yCol: yVar[0],
+              xColsAll: ss.result.xColsAll, zColsAll: ss.result.zColsAll, dummySQL,
+              beta: step1.beta,
+            }));
+            logEstimate({ path: "sql", phase: "gmmOmega", n: rowCount, k: ss.result.xColsAll.length, msTotal: om.ms });
+
+            const overidDf = zVars.length - xVars.length;
+            const step2 = runGMMFromSuffStats({ ...ss.result, Omega: om.result.Omega, overidDf });
+            if (!step2) throw new Error("GMM step-2 returned null (singular Ω̂)");
+
+            const wrapped = wrapResult("GMM", step2, { yVar: yVar[0], xVars, wVars, zVars });
+            setResult(wrapped);
+            return;
+          }
+
+          if (model === "LIML") {
+            // ── LIML SQL branch (Fase 3b — classical SE only) ──
+            if (seTypeNorm !== "classical") {
+              throw new Error(`LIML SQL path only supports classical SE in Fase 3b (got ${seTypeNorm}) — fallback to JS`);
+            }
+            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable });
+            const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable });
+            const { xColsExpanded: zExp, dummySQL: zDummy } = await expandFactors({ xCols: zVars, tableName: duckTable });
+            const dummySQL = { ...wDummy, ...xDummy, ...zDummy };
+
+            if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: [...xExp, ...wExp] })) {
+              throw new Error("Post-expansion (w+x+z) exceeds threshold — fallback to JS");
+            }
+
+            const ss = await measure(() => buildLIMLSuffStats(duckTable, yVar[0], xExp, wExp, zExp, { dummySQL }));
+            logEstimate({ path: "sql", phase: "limlSuffStats", n: rowCount, k: ss.result.xColsAll.length, msTotal: ss.ms });
+
+            const r = runLIMLFromSuffStats({ ...ss.result });
+            if (!r) throw new Error("LIML solve returned null (singular Z'Z, W'W, or eigenvalue failure)");
+
+            const wrapped = wrapResult("LIML", r, { yVar: yVar[0], xVars, wVars, zVars });
+            setResult(wrapped);
+            return;
+          }
+
+          // ── OLS SQL branch (existing) ──
           const { xColsExpanded, dummySQL } = await expandFactors({
             xCols: allX, tableName: duckTable,
           });

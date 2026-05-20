@@ -13,6 +13,10 @@
 //   clusterVar:    string | null  — one-way cluster column (required when seType="clustered" or "twoway")
 //   clusterVar2:   string | null  — second cluster column (required when seType="twoway")
 //   timeVar:       string | null  — time column for HAC LAG ordering (required when seType="HAC")
+//   zVars:         string[] | null  — instruments (required when estimator="2SLS")
+//   endogCount:    number          — number of endogenous regressors (required when estimator="2SLS")
+//   xColsEndog:    string[]         — endogenous regressor names (required when estimator="2SLS")
+//   weightCol:     string | null  — weight column (required when estimator="WLS")
 
 import {
   N_THRESHOLD,
@@ -28,7 +32,7 @@ export function shouldUseSQLPath(ctx) {
   if (!SQL_SUPPORTED_ESTIMATORS.has(ctx.estimator)) return false;
   const se = ctx.seType ?? "classical";
   if (!SQL_SUPPORTED_SE.has(se)) return false;
-  if (ctx.hasWeights) return false;
+  if (ctx.hasWeights && ctx.estimator !== "WLS") return false;
 
   // Cluster/HAC need their operand columns present; otherwise the SQL path
   // cannot run — fall back to JS so the engine returns "classical HC1" per
@@ -36,6 +40,26 @@ export function shouldUseSQLPath(ctx) {
   if (se === "clustered" && !ctx.clusterVar) return false;
   if (se === "twoway"    && (!ctx.clusterVar || !ctx.clusterVar2)) return false;
   if (se === "HAC"       && !ctx.timeVar) return false;
+
+  if (["2SLS", "GMM", "LIML"].includes(ctx.estimator)) {
+    if (!Array.isArray(ctx.zVars) || ctx.zVars.length === 0) return false;
+    if (!Array.isArray(ctx.xColsEndog) || ctx.xColsEndog.length === 0) return false;
+    // Order condition: at least one instrument per endogenous regressor
+    if (ctx.zVars.length < ctx.xColsEndog.length) return false;
+    // Joint complexity: k + q must respect K_THRESHOLD (both go through suff-stats matrices)
+    const totalK = (ctx.xColsExpanded?.length ?? 0) + ctx.zVars.length;
+    if (totalK > K_THRESHOLD) return false;
+  }
+
+  // GMM 2-step efficient SE is heteroskedasticity-robust via Ω̂; HC overrides not
+  // supported. LIML HC variants deferred to a later sub-fase.
+  if (["GMM", "LIML"].includes(ctx.estimator) && se !== "classical") return false;
+
+  if (ctx.estimator === "WLS") {
+    if (!ctx.weightCol || typeof ctx.weightCol !== "string") return false;
+    // Scope of Fase 3c: classical / HC0 / HC1 only
+    if (!["classical", "HC0", "HC1"].includes(se)) return false;
+  }
 
   return true;
 }

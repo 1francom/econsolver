@@ -372,6 +372,27 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "mutate", nn: "", expr: "" }),
   },
 
+  {
+    type: "geocode",
+    label: "Geocode address",
+    category: "features",
+    description: "Add latitude/longitude columns from an address column using cached browser geocoding results.",
+    schema: [
+      { key: "addressCol", type: "col",  label: "Address column" },
+      { key: "latCol",     type: "text", label: "Latitude output column" },
+      { key: "lonCol",     type: "text", label: "Longitude output column" },
+      { key: "provider",   type: "select", label: "Provider", options: [
+        { value: "photon", label: "Photon/Komoot" },
+        { value: "custom", label: "Nominatim-compatible endpoint" },
+      ]},
+      { key: "bbox",       type: "text", label: "Bounding box minLon,minLat,maxLon,maxLat" },
+      { key: "endpoint",   type: "text", label: "Custom endpoint URL" },
+      { key: "apiKey",     type: "text", label: "API key (optional)" },
+    ],
+    toLabel: s => `geocode ${s.addressCol || s.col} -> ${s.latCol || "lat"}/${s.lonCol || "lon"}`,
+    defaultStep: () => ({ type: "geocode", addressCol: "", latCol: "lat", lonCol: "lon", provider: "photon", bbox: "11.35,48.02,11.75,48.25", endpoint: "" }),
+  },
+
   // ── RESHAPE ─────────────────────────────────────────────────────────────────
 
   {

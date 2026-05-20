@@ -15,6 +15,8 @@
 //               Used by the exporter (phase 9.5) to build the topological DAG.
 //               runner.js ignores it — behavior is unchanged.
 
+import { geocodeRowsFromCache } from "../services/data/geocoding.js";
+
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
 
@@ -1190,6 +1192,15 @@ export function applyStep(rows, headers, s, context = {}) {
     //           but NOT pivot_longer / group_summarize which reshape row count)
     // s.col   — column name to overwrite
     // s.value — new value (number | string | null)
+    case "geocode": {
+      const latCol = s.latCol || "lat";
+      const lonCol = s.lonCol || "lon";
+      R = geocodeRowsFromCache(rows, s);
+      if (!H.includes(latCol)) H = [...H, latCol];
+      if (!H.includes(lonCol)) H = [...H, lonCol];
+      break;
+    }
+
     case "patch":
       // Guard: s.ri must be a defined number — prevents a stale step with ri:undefined
       // from matching every row (undefined === undefined is true for all rows).

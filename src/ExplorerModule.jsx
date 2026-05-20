@@ -599,6 +599,10 @@ function SvgACF({ acf, pacf, n }) {
   const iW = W - PAD.l - PAD.r;
   const iH = (H - PAD.t - PAD.b) / 2 - 8; // half height per chart
   const conf = 1.96 / Math.sqrt(n);
+  const axisColor = C.border2;
+  const tickColor = C.textDim;
+  const mutedColor = C.textMuted;
+  const bandColor = C.red;
 
   function renderBars(vals, offsetY, color, label) {
     const barW = Math.max(2, iW / (maxLag + 1) - 2);
@@ -609,10 +613,10 @@ function SvgACF({ acf, pacf, n }) {
         {/* label */}
         <text x={PAD.l + 2} y={offsetY + 10} fill={color} fontSize={8} fontFamily="'IBM Plex Mono',monospace" letterSpacing="0.1em">{label}</text>
         {/* zero line */}
-        <line x1={PAD.l} x2={PAD.l + iW} y1={yMid} y2={yMid} stroke="#252525" strokeWidth={1} />
+        <line x1={PAD.l} x2={PAD.l + iW} y1={yMid} y2={yMid} stroke={axisColor} strokeWidth={1} />
         {/* confidence bands */}
-        <line x1={PAD.l} x2={PAD.l + iW} y1={scaleY(conf)}  y2={scaleY(conf)}  stroke="#c47070" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
-        <line x1={PAD.l} x2={PAD.l + iW} y1={scaleY(-conf)} y2={scaleY(-conf)} stroke="#c47070" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+        <line x1={PAD.l} x2={PAD.l + iW} y1={scaleY(conf)}  y2={scaleY(conf)}  stroke={bandColor} strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+        <line x1={PAD.l} x2={PAD.l + iW} y1={scaleY(-conf)} y2={scaleY(-conf)} stroke={bandColor} strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
         {/* bars (skip lag 0) */}
         {vals.slice(1).map((v, i) => {
           const lag = i + 1;
@@ -626,7 +630,7 @@ function SvgACF({ acf, pacf, n }) {
               <rect x={x - barW / 2} y={Math.min(y0, y1)} width={barW} height={Math.max(1, ht)}
                 fill={sig ? color : `${color}55`} />
               {lag % 5 === 0 && (
-                <text x={x} y={offsetY + iH + 14} textAnchor="middle" fill="#444" fontSize={7} fontFamily="'IBM Plex Mono',monospace">{lag}</text>
+                <text x={x} y={offsetY + iH + 14} textAnchor="middle" fill={tickColor} fontSize={7} fontFamily="'IBM Plex Mono',monospace">{lag}</text>
               )}
             </g>
           );
@@ -634,8 +638,8 @@ function SvgACF({ acf, pacf, n }) {
         {/* y-axis ticks */}
         {[-1, -0.5, 0, 0.5, 1].map(v => (
           <g key={v}>
-            <line x1={PAD.l - 3} x2={PAD.l} y1={scaleY(v)} y2={scaleY(v)} stroke="#252525" strokeWidth={1} />
-            <text x={PAD.l - 5} y={scaleY(v) + 3} textAnchor="end" fill="#444" fontSize={7} fontFamily="'IBM Plex Mono',monospace">{v}</text>
+            <line x1={PAD.l - 3} x2={PAD.l} y1={scaleY(v)} y2={scaleY(v)} stroke={axisColor} strokeWidth={1} />
+            <text x={PAD.l - 5} y={scaleY(v) + 3} textAnchor="end" fill={tickColor} fontSize={7} fontFamily="'IBM Plex Mono',monospace">{v}</text>
           </g>
         ))}
       </g>
@@ -647,14 +651,14 @@ function SvgACF({ acf, pacf, n }) {
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, height: "auto", display: "block", fontFamily: "'IBM Plex Mono',monospace" }}>
-      <rect width={W} height={H} fill="#080808" />
-      {renderBars(acf,  acfOffsetY,  "#6ec8b4", "ACF")}
-      {renderBars(pacf, pacfOffsetY, "#c8a96e", "PACF")}
+      <rect width={W} height={H} fill={C.bg} />
+      {renderBars(acf,  acfOffsetY,  C.teal, "ACF")}
+      {renderBars(pacf, pacfOffsetY, C.gold, "PACF")}
       {/* conf band legend */}
-      <line x1={PAD.l + iW - 80} x2={PAD.l + iW - 60} y1={H - 10} y2={H - 10} stroke="#c47070" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
-      <text x={PAD.l + iW - 56} y={H - 7} fill="#888" fontSize={7} fontFamily="'IBM Plex Mono',monospace">95% CI (±1.96/√n)</text>
+      <line x1={PAD.l + iW - 80} x2={PAD.l + iW - 60} y1={H - 10} y2={H - 10} stroke={bandColor} strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+      <text x={PAD.l + iW - 56} y={H - 7} fill={tickColor} fontSize={7} fontFamily="'IBM Plex Mono',monospace">95% CI (±1.96/√n)</text>
       {/* lag axis label */}
-      <text x={PAD.l + iW / 2} y={H - 1} textAnchor="middle" fill="#444" fontSize={7} fontFamily="'IBM Plex Mono',monospace">Lag</text>
+      <text x={PAD.l + iW / 2} y={H - 1} textAnchor="middle" fill={mutedColor} fontSize={7} fontFamily="'IBM Plex Mono',monospace">Lag</text>
     </svg>
   );
 }
