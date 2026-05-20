@@ -8,7 +8,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
-  runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
+  runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLSFromSuffStats, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   fCDF,
   breuschPagan, computeVIF, hausmanTest,
@@ -34,6 +34,8 @@ import {
 import { computeHACMeat } from "../services/data/duckdbHACSE.js";
 import { sampleResiduals }      from "../services/data/duckdbResiduals.js";
 import { computeIVHCMeat }      from "../services/data/duckdbIVRobustSE.js";
+import { buildWLSSuffStats }    from "../services/data/duckdbWLS.js";
+import { computeWLSHCMeat }     from "../services/data/duckdbWLSRobustSE.js";
 import {
   createSuffStatsCache, makeCacheKey, validateSuffStatsEntry,
 } from "../services/data/suffStatsCache.js";
@@ -1761,6 +1763,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         estimator:     model,
         seType:        seTypeNorm,
         hasWeights:    !!weightVar[0],
+        weightCol:     weightVar[0] || null,
         hasFactors:    factorVars.size > 0,
         clusterVar:    clusterVar ?? null,
         clusterVar2:   clusterVar2 ?? null,
@@ -1906,6 +1909,58 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               { firstStages, second: { ...finalSecond, resid: [], Yhat: [] } },
               { yVar: yVar[0], xVars, wVars, zVars }
             );
+            setResult(wrapped);
+            return;
+          }
+
+          if (model === "WLS") {
+            // ── WLS SQL branch (Fase 3c — classical / HC0 / HC1) ──
+            if (!["classical", "HC0", "HC1"].includes(seTypeNorm)) {
+              throw new Error(`WLS SQL path only supports classical/HC0/HC1 in Fase 3c (got ${seTypeNorm}) — fallback to JS`);
+            }
+            const wCol = weightVar[0];
+            if (!wCol) throw new Error("WLS SQL path: weight column not selected — fallback to JS");
+
+            const { xColsExpanded: wlsX, dummySQL: wlsDummy } = await expandFactors({
+              xCols: allX, tableName: duckTable,
+            });
+            if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: wlsX })) {
+              throw new Error("Post-expansion k exceeds threshold — fallback to JS");
+            }
+
+            const wlsCache = suffStatsCacheRef.current;
+            const wlsKey   = makeCacheKey(duckTable, yVar[0], wlsX, null, wCol);
+            let wlsEntry   = wlsCache.get(wlsKey);
+            const wlsHit   = wlsEntry != null && validateSuffStatsEntry(wlsEntry, wlsX, null, wCol);
+            if (!wlsHit) {
+              const m = await measure(() => buildWLSSuffStats(duckTable, yVar[0], wlsX, wCol, { dummySQL: wlsDummy }));
+              wlsEntry = { ...m.result, dummySQL: wlsDummy };
+              wlsCache.set(wlsKey, wlsEntry);
+              logEstimate({ path: "sql", phase: "wlsSuffStats", n: rowCount, k: wlsX.length, msTotal: m.ms });
+            }
+
+            // Classical solve first — gives β even when robust SE requested (meat needs β).
+            const rCls = runWLSFromSuffStats({ ...wlsEntry, meat: null, hcType: null });
+            if (!rCls) throw new Error("Suff-stats WLS solve returned null (singular X'WX)");
+
+            let rFinal;
+            if (seTypeNorm === "classical") {
+              rFinal = rCls;
+            } else {
+              const mm = await measure(() => computeWLSHCMeat({
+                tableName: duckTable, yCol: yVar[0],
+                xCols: wlsX, wCol, dummySQL: wlsDummy,
+                beta: rCls.beta,
+              }));
+              logEstimate({ path: "sql", phase: `meat-WLS-${seTypeNorm}`, n: rowCount, k: wlsX.length, msTotal: mm.ms });
+              const engineHcType = seTypeNorm === "HC1" ? "HC1" : null;
+              rFinal = runWLSFromSuffStats({ ...wlsEntry, meat: mm.result.meat, hcType: engineHcType });
+              if (!rFinal) throw new Error("Suff-stats WLS robust solve returned null");
+            }
+
+            const wrapped = wrapResult("WLS", rFinal, {
+              yVar: yVar[0], xVars, wVars, weightCol: wCol,
+            });
             setResult(wrapped);
             return;
           }
