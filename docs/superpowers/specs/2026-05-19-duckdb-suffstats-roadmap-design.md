@@ -1,7 +1,7 @@
 # DuckDB Sufficient-Statistics Roadmap — Design
 
 **Date:** 2026-05-19
-**Status:** Fase 0 + Fase 1 DONE (2026-05-19). Fases 2–7 pending.
+**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fases 3–7 pending.
 **Owner:** Franco Medero
 
 ## Problem
