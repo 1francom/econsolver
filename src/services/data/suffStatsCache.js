@@ -38,15 +38,29 @@ export function createSuffStatsCache(maxEntries = 50) {
   };
 }
 
-/** Deterministic key from (tableName, yCol, xCols). Order of xCols irrelevant. */
-export function makeCacheKey(tableName, yCol, xCols) {
-  const sorted = [...xCols].sort();
-  return `${tableName}|${yCol}|${sorted.join(",")}`;
+/**
+ * Deterministic key from (tableName, yCol, xCols [, zCols]).
+ * Order of xCols / zCols irrelevant. When zCols is provided (2SLS suff-stats),
+ * the instrument tuple is appended after a `|Z|` sentinel so OLS keys remain
+ * disjoint from IV keys with the same X.
+ */
+export function makeCacheKey(tableName, yCol, xCols, zCols = null) {
+  const xs = [...xCols].sort().join(",");
+  if (!zCols) return `${tableName}|${yCol}|${xs}`;
+  const zs = [...zCols].sort().join(",");
+  return `${tableName}|${yCol}|${xs}|Z|${zs}`;
 }
 
-/** Defensive check: dim of XtX must match k+1 (k = xCols.length). */
-export function validateSuffStatsEntry(entry, xCols) {
+/**
+ * Defensive check: dim of XtX must match k+1 (k = xCols.length). When zCols is
+ * provided, also verify ZtZ dim matches q+1.
+ */
+export function validateSuffStatsEntry(entry, xCols, zCols = null) {
   if (!entry || !entry.XtX) return false;
   if (entry.XtX.length !== xCols.length + 1) return false;
+  if (zCols) {
+    if (!entry.ZtZ) return false;
+    if (entry.ZtZ.length !== zCols.length + 1) return false;
+  }
   return true;
 }

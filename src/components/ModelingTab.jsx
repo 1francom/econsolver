@@ -1804,15 +1804,23 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               throw new Error("Post-expansion k+q exceeds threshold — fallback to JS");
             }
 
-            const mSS = await measure(() => buildIVSuffStats(duckTable, yVar[0], xExp, zExp, { dummySQL: dummySQL2 }));
-            logEstimate({
-              path: "sql", phase: "ivSuffStats",
-              n: rowCount, k: xExp.length, q: zExp.length, msTotal: mSS.ms,
-            });
+            // Cache lookup: IV suff-stats keyed by (table, y, xExp, zExp).
+            const ivCache = suffStatsCacheRef.current;
+            const ivKey   = makeCacheKey(duckTable, yVar[0], xExp, zExp);
+            let ivEntry   = ivCache.get(ivKey);
+            const ivHit   = ivEntry != null && validateSuffStatsEntry(ivEntry, xExp, zExp);
+            if (!ivHit) {
+              const mSS = await measure(() => buildIVSuffStats(duckTable, yVar[0], xExp, zExp, { dummySQL: dummySQL2 }));
+              ivEntry = { ...mSS.result, dummySQL: dummySQL2 };
+              ivCache.set(ivKey, ivEntry);
+              logEstimate({
+                path: "sql", phase: "ivSuffStats",
+                n: rowCount, k: xExp.length, q: zExp.length, msTotal: mSS.ms,
+              });
+            }
 
-            // Classical only in Task 4 — robust SE wired in Task 7.
             const mSolve = await measure(() => run2SLSFromSuffStats({
-              ...mSS.result, meat: null, hcType: null,
+              ...ivEntry, meat: null, hcType: null,
             }));
             const second = mSolve.result;
             if (!second) throw new Error("Suff-stats 2SLS solve returned null (singular)");
@@ -1884,7 +1892,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (meat) {
               const engineHcType = (seTypeNorm === "HC1") ? "HC1" : null;
               const mSolve2 = await measure(() => run2SLSFromSuffStats({
-                ...mSS.result, meat, hcType: engineHcType,
+                ...ivEntry, meat, hcType: engineHcType,
               }));
               if (!mSolve2.result) throw new Error("Suff-stats 2SLS robust solve returned null");
               finalSecond = mSolve2.result;
