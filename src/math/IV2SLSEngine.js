@@ -93,3 +93,22 @@ export function run2SLSFromSuffStats({
     XtPzXinv: Ainv,
   };
 }
+
+// First-stage F per endogenous regressor — computed entirely from suff-stats.
+// Unrestricted regression: endᵢ ~ [1, exog, instruments]
+// Restricted regression:  endᵢ ~ [1, exog] (or intercept-only if no exog)
+// Caller computes SSR_u and SSR_r via runOLSFromSuffStats and passes them in.
+//
+//   F = ((SSR_r − SSR_u) / q) / (SSR_u / dfu)
+//
+// Stock-Yogo rule of thumb: F < 10 → "weak instruments".
+export function firstStageFFromSuffStats(unrestricted, restricted, qInstruments) {
+  if (!unrestricted || !restricted) return null;
+  const SSR_u = unrestricted.SSR ?? unrestricted.ssr;
+  const SSR_r = restricted.SSR  ?? restricted.ssr;
+  const dfu   = unrestricted.df;
+  if (!isFinite(SSR_u) || !isFinite(SSR_r) || !isFinite(dfu) || dfu <= 0) return null;
+  const Fstat = ((SSR_r - SSR_u) / qInstruments) / (SSR_u / dfu);
+  const weak  = Fstat < 10;  // Stock-Yogo
+  return { Fstat, weak, dfNum: qInstruments, dfDen: dfu };
+}

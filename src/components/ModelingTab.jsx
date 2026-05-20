@@ -10,6 +10,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
+  fCDF,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
@@ -17,6 +18,7 @@ import {
   runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runSyntheticControl,
   wrapResult,
   diagnoseFit,
+  firstStageFFromSuffStats,
 } from "../math/index.js";
 import { predict }              from "../math/calcEngine.js";
 import { extractAllRows }       from "../services/data/duckdb.js";
@@ -1805,8 +1807,47 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               n: rowCount, k: xExp.length, seType: "classical", msTotal: mSolve.ms,
             });
 
+            // ── First-stage F per endogenous regressor ──
+            const wExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+            const exogExp = wExpansion.xColsExpanded;
+            const dummySQLAll = { ...dummySQL2, ...wExpansion.dummySQL };
+
+            const firstStages = [];
+            for (const endVar of xVars) {
+              const uSS = await buildOLSSuffStats(
+                duckTable, endVar,
+                [...exogExp, ...zVars],
+                { dummySQL: dummySQLAll }
+              );
+              const uSolve = runOLSFromSuffStats(uSS);
+
+              let rSolve;
+              if (exogExp.length > 0) {
+                const rSS = await buildOLSSuffStats(duckTable, endVar, exogExp, { dummySQL: dummySQLAll });
+                rSolve = runOLSFromSuffStats(rSS);
+              } else {
+                // Intercept-only restricted: SSR_r = Σ(y − ȳ)² = YtY − sumY²/n
+                rSolve = {
+                  SSR: uSS.YtY - (uSS.sumY * uSS.sumY) / uSS.n,
+                  ssr: uSS.YtY - (uSS.sumY * uSS.sumY) / uSS.n,
+                  df:  uSS.n - 1,
+                };
+              }
+
+              const F = firstStageFFromSuffStats(uSolve, rSolve, zVars.length);
+              const Fpval = F ? (1 - fCDF(F.Fstat, F.dfNum, F.dfDen)) : NaN;
+              firstStages.push({
+                endVar,
+                Fstat: F?.Fstat ?? NaN,
+                Fpval,
+                weak: F?.weak ?? false,
+                dfNum: F?.dfNum ?? zVars.length,
+                dfDen: F?.dfDen ?? NaN,
+              });
+            }
+
             const wrapped = wrapResult("2SLS",
-              { firstStages: [], second: { ...second, resid: [], Yhat: [] } },
+              { firstStages, second: { ...second, resid: [], Yhat: [] } },
               { yVar: yVar[0], xVars, wVars, zVars }
             );
             setResult(wrapped);

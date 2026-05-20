@@ -19,7 +19,7 @@ export {
 } from "./LinearEngine.js";
 
 // ── IV / 2SLS sufficient-statistics solver ────────────────────────────────────
-export { run2SLSFromSuffStats } from "./IV2SLSEngine.js";
+export { run2SLSFromSuffStats, firstStageFFromSuffStats } from "./IV2SLSEngine.js";
 
 // ── Panel estimators ──────────────────────────────────────────────────────────
 export {
