@@ -16,6 +16,7 @@
 //   zVars:         string[] | null  — instruments (required when estimator="2SLS")
 //   endogCount:    number          — number of endogenous regressors (required when estimator="2SLS")
 //   xColsEndog:    string[]         — endogenous regressor names (required when estimator="2SLS")
+//   weightCol:     string | null  — weight column (required when estimator="WLS")
 
 import {
   N_THRESHOLD,
@@ -31,7 +32,7 @@ export function shouldUseSQLPath(ctx) {
   if (!SQL_SUPPORTED_ESTIMATORS.has(ctx.estimator)) return false;
   const se = ctx.seType ?? "classical";
   if (!SQL_SUPPORTED_SE.has(se)) return false;
-  if (ctx.hasWeights) return false;
+  if (ctx.hasWeights && ctx.estimator !== "WLS") return false;
 
   // Cluster/HAC need their operand columns present; otherwise the SQL path
   // cannot run — fall back to JS so the engine returns "classical HC1" per
@@ -48,6 +49,12 @@ export function shouldUseSQLPath(ctx) {
     // Joint complexity: k + q must respect K_THRESHOLD (both go through suff-stats matrices)
     const totalK = (ctx.xColsExpanded?.length ?? 0) + ctx.zVars.length;
     if (totalK > K_THRESHOLD) return false;
+  }
+
+  if (ctx.estimator === "WLS") {
+    if (!ctx.weightCol || typeof ctx.weightCol !== "string") return false;
+    // Scope of Fase 3c: classical / HC0 / HC1 only
+    if (!["classical", "HC0", "HC1"].includes(se)) return false;
   }
 
   return true;
