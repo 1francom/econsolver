@@ -1348,13 +1348,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [seType,      setSeType]      = useState("classical");
   const [clusterVar,  setClusterVar]  = useState(null);
   const [clusterVar2, setClusterVar2] = useState(null);
+  const [timeVar,     setTimeVar]     = useState(null);
   const [maxLag,      setMaxLag]      = useState(null);
 
   const seOpts = useMemo(() => ({
     seType, clusterVar, clusterVar2,
-    timeVar: panel?.timeCol ?? null,
+    timeVar: timeVar ?? panel?.timeCol ?? null,
     maxLag: maxLag ? parseInt(maxLag) : null,
-  }), [seType, clusterVar, clusterVar2, maxLag, panel]);
+  }), [seType, clusterVar, clusterVar2, timeVar, maxLag, panel]);
 
   // ── Results state ─────────────────────────────────────────────────────────
   const [result,       setResult]       = useState(null);
@@ -1759,7 +1760,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         hasFactors:    factorVars.size > 0,
         clusterVar:    clusterVar ?? null,
         clusterVar2:   clusterVar2 ?? null,
-        timeVar:       seTypeNorm === "HAC" ? (panel?.timeCol ?? null) : null,
+        timeVar:       seTypeNorm === "HAC" ? (timeVar ?? panel?.timeCol ?? null) : null,
       };
 
       if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
@@ -1836,7 +1837,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                           G1: mm.result.G1, G2: mm.result.G2, G12: mm.result.G12, msTotal: mm.ms });
           }
           else if (seUp === "HAC") {
-            const orderCol = panel?.timeCol ?? null;
+            const orderCol = timeVar ?? panel?.timeCol ?? null;
             const entityCol = panel?.entityCol ?? null;
             const mm = await measure(() => computeHACMeat({
               tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
@@ -1905,7 +1906,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     }
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
       model, yVar, xVars, wVars, weightVar, factorVars, seType,
-      clusterVar, clusterVar2, maxLag]);
+      clusterVar, clusterVar2, timeVar, maxLag]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -2065,6 +2066,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             seType={seType}           setSeType={setSeType}
             clusterVar={clusterVar}   setClusterVar={setClusterVar}
             clusterVar2={clusterVar2} setClusterVar2={setClusterVar2}
+            timeVar={timeVar}         setTimeVar={setTimeVar}
+            panelTimeCol={panel?.timeCol ?? null}
             maxLag={maxLag}           setMaxLag={setMaxLag}
           />
 
