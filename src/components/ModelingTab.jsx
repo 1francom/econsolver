@@ -33,6 +33,7 @@ import {
 } from "../services/data/duckdbClusterSE.js";
 import { computeHACMeat } from "../services/data/duckdbHACSE.js";
 import { sampleResiduals }      from "../services/data/duckdbResiduals.js";
+import { computeIVHCMeat }      from "../services/data/duckdbIVRobustSE.js";
 import {
   createSuffStatsCache, makeCacheKey, validateSuffStatsEntry,
 } from "../services/data/suffStatsCache.js";
@@ -1773,6 +1774,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         try {
           if (model === "2SLS") {
             // ── 2SLS SQL branch (Fase 3a classical only) ──
+            // Fase 3a supports classical / HC0 / HC1 only for 2SLS. Other SE types
+            // throw → outer catch → JS fallback.
+            if (!["classical", "HC0", "HC1"].includes(seTypeNorm)) {
+              throw new Error(`2SLS SQL path supports classical/HC0/HC1 in Fase 3a (got ${seTypeNorm}) — fallback to JS`);
+            }
+
             // X = endogenous + exogenous controls; Z = exogenous + excluded instruments.
             const xAll2 = [...xVars, ...wVars];
             const zAll2 = [...wVars, ...zVars];
@@ -1784,6 +1791,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             const xExp = xExpansion.xColsExpanded;
             const zExp = zExpansion.xColsExpanded;
             const dummySQL2 = { ...xExpansion.dummySQL, ...zExpansion.dummySQL };
+
+            // Endogenous factor variables: not supported in Fase 3a HC0/HC1 — the
+            // first-stage β alignment would need careful index mapping. Fall back.
+            const anyEndogFactor = xVars.some(v => factorVars.has(v));
+            if (anyEndogFactor && (seTypeNorm === "HC0" || seTypeNorm === "HC1")) {
+              throw new Error("Endogenous factor variables not supported in Fase 3a 2SLS HC SE — fallback to JS");
+            }
 
             // Re-check (k+q) post-expansion against K_THRESHOLD via the dispatcher.
             if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: xExp })) {
@@ -1813,13 +1827,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             const dummySQLAll = { ...dummySQL2, ...wExpansion.dummySQL };
 
             const firstStages = [];
-            for (const endVar of xVars) {
+            const firstStageBetas = new Map();
+            for (let xIdx0 = 0; xIdx0 < xVars.length; xIdx0++) {
+              const endVar = xVars[xIdx0];
               const uSS = await buildOLSSuffStats(
                 duckTable, endVar,
                 [...exogExp, ...zVars],
                 { dummySQL: dummySQLAll }
               );
               const uSolve = runOLSFromSuffStats(uSS);
+              // intercept = index 0, first endogenous = index 1, etc.
+              firstStageBetas.set(xIdx0 + 1, uSolve.beta);
 
               let rSolve;
               if (exogExp.length > 0) {
@@ -1846,8 +1864,38 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               });
             }
 
+            // ── Robust SE meat (HC0/HC1) ──
+            let meat = null;
+            if (seTypeNorm === "HC0" || seTypeNorm === "HC1") {
+              const mMeat = await measure(() => computeIVHCMeat({
+                tableName: duckTable, yCol: yVar[0],
+                xCols: xExp, zCols: zExp, dummySQL: dummySQL2,
+                beta: second.beta, firstStageBeta: firstStageBetas,
+              }));
+              meat = mMeat.result.meat;
+              logEstimate({
+                path: "sql", phase: `meat-2SLS-${seTypeNorm}`,
+                n: rowCount, k: xExp.length, msTotal: mMeat.ms,
+              });
+            }
+
+            // ── Re-solve with robust meat if HC0/HC1 ──
+            let finalSecond = second;
+            if (meat) {
+              const engineHcType = (seTypeNorm === "HC1") ? "HC1" : null;
+              const mSolve2 = await measure(() => run2SLSFromSuffStats({
+                ...mSS.result, meat, hcType: engineHcType,
+              }));
+              if (!mSolve2.result) throw new Error("Suff-stats 2SLS robust solve returned null");
+              finalSecond = mSolve2.result;
+              logEstimate({
+                path: "sql", phase: `solve-2SLS-${seTypeNorm}`,
+                n: rowCount, k: xExp.length, msTotal: mSolve2.ms,
+              });
+            }
+
             const wrapped = wrapResult("2SLS",
-              { firstStages, second: { ...second, resid: [], Yhat: [] } },
+              { firstStages, second: { ...finalSecond, resid: [], Yhat: [] } },
               { yVar: yVar[0], xVars, wVars, zVars }
             );
             setResult(wrapped);
