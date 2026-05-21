@@ -13,7 +13,7 @@ import {
   runFEFromSuffStats, runFDFromSuffStats, runTWFEFromSuffStats,
   runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
-  fCDF,
+  fCDF, matInv,
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
@@ -30,6 +30,11 @@ import { buildIVSuffStats }     from "../services/data/duckdbIV.js";
 import { shouldUseSQLPath }     from "../services/data/duckdbDispatch.js";
 import { CACHE_MAX_ENTRIES }    from "../services/data/dispatchConfig.js";
 import { expandFactors }        from "../services/data/duckdbFactors.js";
+import {
+  buildDiD2x2Synthetic,
+  buildTWFEDiDSynthetic,
+  buildEventStudySynthetic,
+} from "../services/data/duckdbDiDSynthetic.js";
 import { computeHCMeat, computeHCMeatWithLeverage } from "../services/data/duckdbRobustSE.js";
 import {
   countClusters, computeClusterMeat, computeTwowayClusterMeat,
@@ -1782,12 +1787,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         xColsEndog:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars : [],
         zVars:         ["2SLS", "GMM", "LIML"].includes(model) ? zVars : [],
         endogCount:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars.length : 0,
-        unitCol:       ["FE", "FD", "TWFE"].includes(model) ? (panel?.entityCol ?? null) : null,
-        timeCol:       ["FD", "TWFE"].includes(model) ? (panel?.timeCol ?? null)
+        unitCol:       ["FE", "FD", "TWFE", "EventStudy"].includes(model) ? (panel?.entityCol ?? null) : null,
+        timeCol:       ["FD", "TWFE", "EventStudy"].includes(model) ? (panel?.timeCol ?? null)
           : (seTypeNorm === "HAC" ? (panel?.timeCol ?? null) : null),
+        postCol:       postVar[0] || null,
+        treatCol:      treatVar[0] || null,
+        treatTimeCol:  treatTimeCol[0] || null,
+        kPre:          typeof kPre === "number" ? kPre : null,
+        kPost:         typeof kPost === "number" ? kPost : null,
+        controls:      wVars,
       };
 
-      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
+      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy"].includes(model))) {
         try {
           if (model === "2SLS") {
             // ── 2SLS SQL branch (Fase 3a classical only) ──
@@ -2043,20 +2054,47 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return;
           }
 
-          if (model === "FE" || model === "FD" || model === "TWFE") {
+          if (model === "FE" || model === "FD" || model === "TWFE" || model === "EventStudy") {
             // ── Panel FE/FD/TWFE SQL branch (Fase 4b — classical/HC0/HC1/HC2/HC3/clustered/HAC) ──
             const unitCol = panel?.entityCol;
             const timeCol = panel?.timeCol;
             if (!unitCol) throw new Error("Panel SQL path: entityCol missing — fallback to JS");
-            if ((model === "FD" || model === "TWFE") && !timeCol)
+            if ((model === "FD" || model === "TWFE" || model === "EventStudy") && !timeCol)
               throw new Error(`Panel ${model} SQL path: timeCol missing — fallback to JS`);
             // HAC on FE requires a time column for Driscoll-Kraay cross-sectional aggregation
             if (seTypeNorm === "HAC" && !timeCol)
               throw new Error("HAC standard errors require a time column. Set one in the Panel tab.");
 
-            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({
-              xCols: allX, tableName: duckTable,
-            });
+            const panelMode = model === "EventStudy" ? "TWFE" : model;
+            let eventStudySynth = null;
+            let twfeSynth = null;
+            let wExp;
+            let wDummy;
+
+            if (model === "EventStudy") {
+              const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+              eventStudySynth = buildEventStudySynthetic({
+                timeCol,
+                treatTimeCol: treatTimeCol[0],
+                kPre: Math.max(1, kPre || 3),
+                kPost: Math.max(1, kPost || 3),
+                controls: controlsExpansion.xColsExpanded,
+              });
+              wExp = eventStudySynth.xColsExpanded;
+              wDummy = { ...controlsExpansion.dummySQL, ...eventStudySynth.dummySQL };
+            } else if (model === "TWFE") {
+              const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+              twfeSynth = buildTWFEDiDSynthetic({
+                treatCol: treatVar[0],
+                controls: controlsExpansion.xColsExpanded,
+              });
+              wExp = twfeSynth.xColsExpanded;
+              wDummy = controlsExpansion.dummySQL;
+            } else {
+              const expansion = await expandFactors({ xCols: allX, tableName: duckTable });
+              wExp = expansion.xColsExpanded;
+              wDummy = expansion.dummySQL;
+            }
             // Dispatcher already checked HC2/HC3 dim budget; re-check post-expansion
             if (!shouldUseSQLPath({
               ...dispatchCtx, estimator: model,
@@ -2067,8 +2105,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             }
 
             const panelDescriptor = {
-              mode: model, unitCol,
-              timeCol: (model === "FD" || model === "TWFE") ? timeCol : null,
+              mode: panelMode, unitCol,
+              timeCol: (panelMode === "FD" || panelMode === "TWFE") ? timeCol : null,
             };
             const panelCache = suffStatsCacheRef.current;
             const panelKey   = makeCacheKey(duckTable, yVar[0], wExp, null, null, panelDescriptor);
@@ -2077,7 +2115,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (!panelHit) {
               const m = await measure(() => buildWithinSuffStats(
                 duckTable, yVar[0], wExp, unitCol,
-                { mode: model, timeCol: timeCol ?? undefined, dummySQL: wDummy },
+                { mode: panelMode, timeCol: timeCol ?? undefined, dummySQL: wDummy },
               ));
               panelEntry = { ...m.result, dummySQL: wDummy };
               panelCache.set(panelKey, panelEntry);
@@ -2087,8 +2125,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               });
             }
 
-            const solver = model === "FE" ? runFEFromSuffStats
-              : model === "FD" ? runFDFromSuffStats
+            const solver = panelMode === "FE" ? runFEFromSuffStats
+              : panelMode === "FD" ? runFDFromSuffStats
               : runTWFEFromSuffStats;
 
             // Classical solve (always needed for β and XtXinv even when robust SE follows)
@@ -2154,22 +2192,123 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               }
             }
 
+            if (model === "EventStudy") {
+              const idxByName = new Map(wExp.map((name, idx) => [name, idx]));
+              const eventCoeffs = eventStudySynth.eventTerms.map(({ k, name }) => {
+                const idx = idxByName.get(name);
+                return {
+                  k,
+                  beta: rFinal.beta[idx],
+                  se: rFinal.se[idx],
+                  t: rFinal.tStats[idx],
+                  p: rFinal.pVals[idx],
+                };
+              });
+              eventCoeffs.push({ k: eventStudySynth.refK, beta: 0, se: 0, t: null, p: null, isRef: true });
+              eventCoeffs.sort((a, b) => a.k - b.k);
+
+              const preIdxs = eventStudySynth.eventTerms
+                .filter(({ k }) => k < eventStudySynth.refK)
+                .map(({ name }) => (idxByName.get(name) ?? -1) + 1)
+                .filter(idx => idx > 0);
+              let preTestStat = null;
+              let preTestPval = null;
+              if (preIdxs.length > 0 && rCls.XtXinv && Number.isFinite(rCls.s2)) {
+                const subV = preIdxs.map(rowIdx =>
+                  preIdxs.map(colIdx => rCls.XtXinv[rowIdx][colIdx] * rCls.s2)
+                );
+                const subVinv = matInv(subV);
+                if (subVinv) {
+                  const preBeta = preIdxs.map(idx => rCls._betaFull[idx]);
+                  const temp = subVinv.map(row =>
+                    row.reduce((sum, value, idx) => sum + value * preBeta[idx], 0)
+                  );
+                  preTestStat = temp.reduce((sum, value, idx) => sum + value * preBeta[idx], 0) / preIdxs.length;
+                  preTestPval = 1 - fCDF(preTestStat, preIdxs.length, rCls.df);
+                }
+              }
+
+              const eventRaw = {
+                ...rFinal,
+                varNames: eventStudySynth.varNames,
+                R2: rFinal.R2_within ?? null,
+                adjR2: null,
+                eventCoeffs,
+                preTestStat,
+                preTestPval,
+                windowPre: Math.max(1, kPre || 3),
+                windowPost: Math.max(1, kPost || 3),
+              };
+              const wrapped = wrapResult("EventStudy", eventRaw, {
+                yVar: yVar[0],
+                xVars,
+                wVars,
+                entityCol: unitCol,
+                timeCol,
+                treatTimeCol: treatTimeCol[0],
+                kPre: Math.max(1, kPre || 3),
+                kPost: Math.max(1, kPost || 3),
+              });
+              setResult(wrapped);
+              setPanelFE(null);
+              setPanelFD(null);
+              return;
+            }
+
+            if (model === "TWFE") {
+              const twfeNames = [...twfeSynth.varNames];
+              const twfeRaw = {
+                ...rFinal,
+                varNames: twfeNames,
+                R2: rFinal.R2_within ?? null,
+                adjR2: null,
+                att: rFinal.beta[twfeSynth.attIdx] ?? null,
+                attSE: rFinal.se[twfeSynth.attIdx] ?? null,
+                attT: rFinal.tStats[twfeSynth.attIdx] ?? null,
+                attP: rFinal.pVals[twfeSynth.attIdx] ?? null,
+              };
+              const wrapped = wrapResult("TWFE", twfeRaw, {
+                yVar: yVar[0],
+                wVars,
+                entityCol: unitCol,
+                timeCol,
+                treatVar: treatVar[0],
+              });
+              setResult(wrapped);
+              setPanelFE(null);
+              setPanelFD(null);
+              return;
+            }
+
             const panelSpec = { yVar: yVar[0], xVars, wVars, entityCol: unitCol, timeCol };
             const wrapped = wrapResult(model, rFinal, panelSpec);
-            const resultBundle = model === "FE"  ? { type: "FE",   fe: wrapped, fd: null }
-              : model === "FD"   ? { type: "FD",   fe: null, fd: wrapped }
-              :                    { type: "TWFE", twfe: wrapped };
+            const resultBundle = model === "FE"
+              ? { type: "FE", fe: wrapped, fd: null }
+              : { type: "FD", fe: null, fd: wrapped };
             setResult(resultBundle);
-            if (model === "FE")   { setPanelFE(wrapped); setPanelFD(null); }
-            else if (model === "FD") { setPanelFD(wrapped); setPanelFE(null); }
-            else                  { setPanelFE(null);    setPanelFD(null); }
+            if (model === "FE") { setPanelFE(wrapped); setPanelFD(null); }
+            else                { setPanelFD(wrapped); setPanelFE(null); }
             return;
           }
 
           // ── OLS SQL branch (existing) ──
-          const { xColsExpanded, dummySQL } = await expandFactors({
-            xCols: allX, tableName: duckTable,
-          });
+          let xColsExpanded;
+          let dummySQL;
+          let didSynth = null;
+          if (model === "DiD") {
+            const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+            didSynth = buildDiD2x2Synthetic({
+              postCol: postVar[0],
+              treatCol: treatVar[0],
+              controls: controlsExpansion.xColsExpanded,
+            });
+            xColsExpanded = didSynth.xColsExpanded;
+            dummySQL = { ...controlsExpansion.dummySQL, ...didSynth.dummySQL };
+          } else {
+            const expansion = await expandFactors({ xCols: allX, tableName: duckTable });
+            xColsExpanded = expansion.xColsExpanded;
+            dummySQL = expansion.dummySQL;
+          }
           // Re-check post-expansion k against threshold
           if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded })) {
             throw new Error("Post-expansion k exceeds threshold — fallback to JS");
@@ -2272,9 +2411,23 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
               beta: raw.beta, sampleSize: 5000,
             });
-            const wrapped = wrapResult("OLS", raw, {
-              yVar: yVar[0], xVars, wVars, weightCol: null,
-            });
+            const wrapped = model === "DiD"
+              ? wrapResult("DiD", {
+                ...raw,
+                varNames: didSynth.varNames,
+                att: raw.beta[didSynth.attIdx] ?? null,
+                attSE: raw.se[didSynth.attIdx] ?? null,
+                attT: raw.tStats[didSynth.attIdx] ?? null,
+                attP: raw.pVals[didSynth.attIdx] ?? null,
+              }, {
+                yVar: yVar[0],
+                wVars,
+                postVar: postVar[0],
+                treatVar: treatVar[0],
+              })
+              : wrapResult("OLS", raw, {
+                yVar: yVar[0], xVars, wVars, weightCol: null,
+              });
             setResult(wrapped);
             return;
           }
@@ -2307,8 +2460,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       setRunning(false);
     }
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
-      model, yVar, xVars, wVars, weightVar, factorVars, seType,
-      clusterVar, clusterVar2, timeVar, maxLag]);
+      model, yVar, xVars, wVars, zVars, weightVar, factorVars, seType,
+      clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
+      postVar, treatVar, treatTimeCol, kPre, kPost]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];

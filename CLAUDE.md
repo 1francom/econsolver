@@ -183,6 +183,8 @@ Merge: `join, append`
 - `callClaude({ system, user, maxTokens })` strips `SHARED_CONTEXT` from exported prompts before sending (it adds it as the cached block automatically)
 
 ## Pending (ordered by priority)
+
+DuckDB Fase 5 status (2026-05-21): `duckdbDiDSynthetic` emits DiD interaction and Event Study horizon/bin SQL payloads. Large-n `DiD` reuses OLS suff stats; `TWFE` and `EventStudy` reuse TWFE within suff stats and preserve ATT/event-coefficient/pre-trend result contracts. Validation fixtures: base-R `fase5RValidation.R`, generated `fase5Benchmarks.json`, and `window.__validation.fase5`.
 0. ~~**Phase 11.2 — Geocoding pipeline step**~~ — implemented by Codex. `GeocodeSection` in `SpatialTab.jsx` wired; Photon/Komoot default provider (CORS-enabled, München bbox preset); advanced opt-in via Settings for Nominatim-compatible endpoint (custom URL + API key); `geocode` step in `runner.js`/`registry.js` with sessionStorage cache keyed by address.
 1. ~~**Estimator validation vs R**~~ — FE (fixest), RDD (rdrobust), 2SLS (AER), Logit/Probit (glm), GMM/LIML, Synthetic Control (Synth) — all validated with hard benchmarks in `engineValidation.js`.
 2. ~~**DuckDB-WASM**~~ — ✓ complete. `services/data/duckdb.js` singleton (jsDelivr CDN, lazy init). `DataStudio.jsx` routes CSV/TSV >10MB and .parquet to DuckDB loaders. `pipeline/duckdbRunner.js` translates 11 step types (filter, arrange, rename, drop, group_summarize, log, sq, std, lag, lead, diff) to SQL; falls back to JS for the rest. WranglingModule dual-path: async DuckDB when `rawData._duckdb` present, sync JS otherwise. ⚡ DuckDB badge + truncation notice in wrangling header.
