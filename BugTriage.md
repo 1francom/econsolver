@@ -18,3 +18,7 @@
 | 2026-05-13 | Spatial | Multipolygon geometry does not work | high | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | fixed |
 | 2026-05-13 | Spatial | Grids: adjust the size of border grids by cutting them | medium | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | fixed (2026-05-18 — Sutherland-Hodgman polygon clipping in `clipRectToRings`) |
 | 2026-05-13 | Model | Show clearer errors — "Matrix is singular or insufficient data" too vague | medium | ui | `src/components/ModelingTab.jsx`, `src/math/LinearEngine.js` | fixed |
+| 2026-05-21 | Report | `TypeError: Cannot read properties of undefined (reading 'map')` in SigCallout when opening Report tab with an FE/FD model active | high | ui | `src/ReportingModule.jsx` | fixed (2026-05-21 — `normaliseResult` unwraps `{type:"FE/FD", fe, fd}` bundles to the flat inner result) |
+| 2026-05-20 | Spatial | Grids do not work | high | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | open |
+| 2026-05-20 | General | When a dataset is deleted, all variables should disappear from all modules without having to select another dataset | medium | ui | `src/components/workspace/DatasetManager.jsx`, `src/services/session/sessionState.jsx` | open |
+| 2026-05-20 | Explore | ACF/PACF light theme missing | low | ui | `src/ExplorerModule.jsx` | fixed |
