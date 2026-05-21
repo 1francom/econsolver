@@ -281,6 +281,14 @@ Detailed design for each fase deferred to its own implementation plan. Only the 
 - `duckdbWithin.js`: CTE with `x - AVG(x) OVER (PARTITION BY entity)` for FE; `x - LAG(x) OVER (PARTITION BY entity ORDER BY time)` for FD; double within (entity, then time) for TWFE.
 - Suff stats computed over within-transformed table. Classical SE uses σ² adjusted for df (n − N − k for FE).
 - LSDV with many levels → falls back to JS (k passes `K_THRESHOLD` rapidly).
+- **Status (2026-05-21):** FE + FD live for classical / HC0 / HC1.
+  - `duckdbWithin.buildWithinSuffStats({mode})` emits a single CTE chain ending in `wf`: FE recenters with unit+grand means (matching `PanelEngine.runFE`); FD uses LAG over `PARTITION BY unit ORDER BY time`. Returns standard OLS cross-products plus `n_units` and a reusable `withinCTEPrefix`.
+  - `PanelSuffStatsEngine.runFEFromSuffStats` / `runFDFromSuffStats`: FE df = n − G − k_reg; FD df = n_diff − k_reg − 1. HC1 scaling uses `n/(n−k_reg−1)` to match `PanelEngine.runFE`'s passing of `k_reg+1` to `computeRobustSE`. `_betaFull` and `_seFull` exposed for the meat builder + validation harness.
+  - `duckdbWithinRobustSE.computeWithinHCMeat` reuses `withinCTEPrefix` so the within transform is computed once per estimation; HC0 raw meat; HC1 scaling applied inside the engine.
+  - Cache key extended with `panel = {mode, unitCol, timeCol}` via `|P|` sentinel so FE/FD entries don't collide with OLS for the same y/x.
+  - Dispatcher gates FE/FD on `unitCol` (and `timeCol` for FD), classical/HC0/HC1 only, no weights.
+  - Validated vs R manually-demeaned `lm` + `sandwich::vcovHC` (`fase4Benchmarks.json`, `window.__validation.fase4`) at 6dp coef / 4dp SE.
+- **Deferred to Fase 4b:** TWFE double-demean (closed-form requires balanced panel); cluster-by-entity SE; HC2/HC3 (need leverage of the within design); HAC.
 
 ### Fase 5 — DiD (2x2, TWFE) + Event Study
 

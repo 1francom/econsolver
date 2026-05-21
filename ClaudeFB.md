@@ -136,3 +136,23 @@
 
 - ~~[2026-05-13 15:10] · Clean
   Add multiple joins at the same time~~ ✓ DONE 2026-05-18 — MergeTab refactored to stage N joins as cards; "+ Add another join" stacks rows; one onAdd per row; runner chains them sequentially; left-key picker shows headers-after-prior-joins for each row
+
+---
+
+## 2026-05-21 batch
+
+### Bugs
+
+- [2026-05-20 08:16] · Spatial
+  Grids do not work
+
+- [2026-05-20 09:50] · General
+  When a dataset is deleted, all variables should disappear from all modules without having to select another dataset
+
+- [2026-05-20 09:52] · Explore
+  ACF/PACF light theme missing
+
+### Features
+
+- [2026-05-20 09:47] · Spatial
+  Add grids to the plot, not only in the OMS map

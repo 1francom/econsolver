@@ -10,6 +10,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLSFromSuffStats,
   runGMMFromSuffStats, runLIMLFromSuffStats,
+  runFEFromSuffStats, runFDFromSuffStats, runTWFEFromSuffStats,
   runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
   fCDF,
@@ -41,6 +42,11 @@ import { computeGMMOmega }      from "../services/data/duckdbGMMOmega.js";
 import { buildLIMLSuffStats }   from "../services/data/duckdbLIML.js";
 import { buildWLSSuffStats }    from "../services/data/duckdbWLS.js";
 import { computeWLSHCMeat }     from "../services/data/duckdbWLSRobustSE.js";
+import { buildWithinSuffStats }         from "../services/data/duckdbWithin.js";
+import { computeWithinHCMeat }          from "../services/data/duckdbWithinRobustSE.js";
+import { computeWithinClusterMeat }     from "../services/data/duckdbWithinClusterSE.js";
+import { computeWithinHCMeatWithLeverage } from "../services/data/duckdbWithinHC23.js";
+import { computeWithinDriscollKraayMeat }  from "../services/data/duckdbWithinHAC.js";
 import {
   createSuffStatsCache, makeCacheKey, validateSuffStatsEntry,
 } from "../services/data/suffStatsCache.js";
@@ -1776,6 +1782,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         xColsEndog:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars : [],
         zVars:         ["2SLS", "GMM", "LIML"].includes(model) ? zVars : [],
         endogCount:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars.length : 0,
+        unitCol:       ["FE", "FD", "TWFE"].includes(model) ? (panel?.entityCol ?? null) : null,
+        timeCol:       ["FD", "TWFE"].includes(model) ? (panel?.timeCol ?? null)
+          : (seTypeNorm === "HAC" ? (panel?.timeCol ?? null) : null),
       };
 
       if (shouldUseSQLPath(dispatchCtx) && yVar[0] && allX.length > 0) {
@@ -2031,6 +2040,129 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
             const wrapped = wrapResult("LIML", r, { yVar: yVar[0], xVars, wVars, zVars });
             setResult(wrapped);
+            return;
+          }
+
+          if (model === "FE" || model === "FD" || model === "TWFE") {
+            // ── Panel FE/FD/TWFE SQL branch (Fase 4b — classical/HC0/HC1/HC2/HC3/clustered/HAC) ──
+            const unitCol = panel?.entityCol;
+            const timeCol = panel?.timeCol;
+            if (!unitCol) throw new Error("Panel SQL path: entityCol missing — fallback to JS");
+            if ((model === "FD" || model === "TWFE") && !timeCol)
+              throw new Error(`Panel ${model} SQL path: timeCol missing — fallback to JS`);
+            // HAC on FE requires a time column for Driscoll-Kraay cross-sectional aggregation
+            if (seTypeNorm === "HAC" && !timeCol)
+              throw new Error("HAC standard errors require a time column. Set one in the Panel tab.");
+
+            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({
+              xCols: allX, tableName: duckTable,
+            });
+            // Dispatcher already checked HC2/HC3 dim budget; re-check post-expansion
+            if (!shouldUseSQLPath({
+              ...dispatchCtx, estimator: model,
+              xColsExpanded: wExp, timeCol,
+              unitCol, clusterVar: seOpts?.clusterVar ?? null,
+            })) {
+              throw new Error("Post-expansion: dispatcher refused — fallback to JS");
+            }
+
+            const panelDescriptor = {
+              mode: model, unitCol,
+              timeCol: (model === "FD" || model === "TWFE") ? timeCol : null,
+            };
+            const panelCache = suffStatsCacheRef.current;
+            const panelKey   = makeCacheKey(duckTable, yVar[0], wExp, null, null, panelDescriptor);
+            let panelEntry   = panelCache.get(panelKey);
+            const panelHit   = panelEntry != null && validateSuffStatsEntry(panelEntry, wExp, null, null, panelDescriptor);
+            if (!panelHit) {
+              const m = await measure(() => buildWithinSuffStats(
+                duckTable, yVar[0], wExp, unitCol,
+                { mode: model, timeCol: timeCol ?? undefined, dummySQL: wDummy },
+              ));
+              panelEntry = { ...m.result, dummySQL: wDummy };
+              panelCache.set(panelKey, panelEntry);
+              logEstimate({
+                path: "sql", phase: `withinSuffStats-${model}`,
+                n: rowCount, k: wExp.length, msTotal: m.ms,
+              });
+            }
+
+            const solver = model === "FE" ? runFEFromSuffStats
+              : model === "FD" ? runFDFromSuffStats
+              : runTWFEFromSuffStats;
+
+            // Classical solve (always needed for β and XtXinv even when robust SE follows)
+            const rCls = solver({ ...panelEntry, meat: null, hcType: null });
+            if (!rCls) throw new Error(`Suff-stats ${model} solve returned null (singular within X'X)`);
+
+            // ── Robust meat dispatch ──
+            let rFinal = rCls;
+            if (seTypeNorm !== "classical") {
+              let meatResult = null;
+              let engineHcType = null;
+
+              if (seTypeNorm === "HC0" || seTypeNorm === "HC1") {
+                const mm = await measure(() => computeWithinHCMeat({
+                  withinCTEPrefix: panelEntry.withinCTEPrefix,
+                  k: wExp.length,
+                  beta: rCls._betaFull,
+                }));
+                logEstimate({ path: "sql", phase: `meat-${model}-${seTypeNorm}`, n: rowCount, k: wExp.length, msTotal: mm.ms });
+                meatResult = mm.result.meat;
+                engineHcType = seTypeNorm === "HC1" ? "HC1" : null;
+
+              } else if (seTypeNorm === "HC2" || seTypeNorm === "HC3") {
+                // dim² > 1000 guard already fired in dispatcher; safe here
+                const mm = await measure(() => computeWithinHCMeatWithLeverage({
+                  withinCTEPrefix: panelEntry.withinCTEPrefix,
+                  k: wExp.length,
+                  beta: rCls._betaFull,
+                  Ainv: rCls.XtXinv,
+                  hcType: seTypeNorm,
+                }));
+                logEstimate({ path: "sql", phase: `meat-${model}-${seTypeNorm}`, n: rowCount, k: wExp.length, msTotal: mm.ms });
+                meatResult = mm.result.meat;
+                engineHcType = seTypeNorm;
+
+              } else if (seTypeNorm === "clustered") {
+                // Default cluster = entity (natural cluster for FE/FD/TWFE)
+                // _g in wf is always _u_ per Option A in duckdbWithin.js
+                const mm = await measure(() => computeWithinClusterMeat({
+                  withinCTEPrefix: panelEntry.withinCTEPrefix,
+                  k: wExp.length,
+                  beta: rCls._betaFull,
+                }));
+                logEstimate({ path: "sql", phase: `meat-${model}-clustered`, n: rowCount, k: wExp.length, msTotal: mm.ms });
+                meatResult = mm.result.meat;
+                engineHcType = null; // meat already scaled inside computeWithinClusterMeat
+
+              } else if (seTypeNorm === "HAC") {
+                const mm = await measure(() => computeWithinDriscollKraayMeat({
+                  withinCTEPrefix: panelEntry.withinCTEPrefix,
+                  k: wExp.length,
+                  beta: rCls._betaFull,
+                  lag: seOpts?.lag ?? null,
+                }));
+                logEstimate({ path: "sql", phase: `meat-${model}-HAC`, n: rowCount, k: wExp.length, msTotal: mm.ms });
+                meatResult = mm.result.meat;
+                engineHcType = null; // meat pre-scaled by DK
+              }
+
+              if (meatResult !== null) {
+                rFinal = solver({ ...panelEntry, meat: meatResult, hcType: engineHcType });
+                if (!rFinal) throw new Error(`Suff-stats ${model} robust solve returned null`);
+              }
+            }
+
+            const panelSpec = { yVar: yVar[0], xVars, wVars, entityCol: unitCol, timeCol };
+            const wrapped = wrapResult(model, rFinal, panelSpec);
+            const resultBundle = model === "FE"  ? { type: "FE",   fe: wrapped, fd: null }
+              : model === "FD"   ? { type: "FD",   fe: null, fd: wrapped }
+              :                    { type: "TWFE", twfe: wrapped };
+            setResult(resultBundle);
+            if (model === "FE")   { setPanelFE(wrapped); setPanelFD(null); }
+            else if (model === "FD") { setPanelFD(wrapped); setPanelFE(null); }
+            else                  { setPanelFE(null);    setPanelFD(null); }
             return;
           }
 

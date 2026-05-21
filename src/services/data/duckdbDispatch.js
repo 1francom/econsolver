@@ -17,6 +17,10 @@
 //   endogCount:    number          — number of endogenous regressors (required when estimator="2SLS")
 //   xColsEndog:    string[]         — endogenous regressor names (required when estimator="2SLS")
 //   weightCol:     string | null  — weight column (required when estimator="WLS")
+//   unitCol:       string | null  — entity column (required when estimator="FE", "FD", or "TWFE")
+//   timeCol:       string | null  — time column (required when estimator="FD" or "TWFE"; also for HAC)
+//   clusterVar:    string | null  — one-way cluster column (required when seType="clustered"
+//                                   or for panel cluster-by-entity, in which case it equals unitCol)
 
 import {
   N_THRESHOLD,
@@ -59,6 +63,37 @@ export function shouldUseSQLPath(ctx) {
     if (!ctx.weightCol || typeof ctx.weightCol !== "string") return false;
     // Scope of Fase 3c: classical / HC0 / HC1 only
     if (!["classical", "HC0", "HC1"].includes(se)) return false;
+  }
+
+  // ── Panel (preempt before OLS fall-through) ────────────────────────────────
+  if (["FE", "FD", "TWFE"].includes(ctx.estimator)) {
+    if (!ctx.unitCol || typeof ctx.unitCol !== "string") return false;
+    if (["FD", "TWFE"].includes(ctx.estimator)) {
+      if (!ctx.timeCol || typeof ctx.timeCol !== "string") return false;
+    }
+    if (ctx.hasWeights) return false;
+
+    // Fase 4b: classical / HC0 / HC1 / HC2 / HC3 / clustered / HAC
+    const okSE = ["classical", "HC0", "HC1", "HC2", "HC3", "clustered", "HAC"];
+    if (!okSE.includes(se)) return false;
+
+    // Cluster: clusterVar can be null (engine defaults to entity), or a string column.
+    if (se === "clustered" && ctx.clusterVar != null && typeof ctx.clusterVar !== "string") {
+      return false;
+    }
+
+    // HAC for panels = Driscoll-Kraay. Requires timeCol (already validated for
+    // FD/TWFE; for FE, timeCol must be supplied via seOpts.
+    if (se === "HAC" && !ctx.timeCol) return false;
+
+    // Two-way clustering on panels deferred to Fase 4c.
+    if (se === "twoway") return false;
+
+    // HC2/HC3 prepared-statement param budget: dim² params per aggregate.
+    // At dim > 31 (k > 30) we exceed safe limits; fall back to JS.
+    if (["HC2", "HC3"].includes(se) && (ctx.xColsExpanded.length + 1) ** 2 > 1000) {
+      return false;
+    }
   }
 
   return true;
