@@ -4,6 +4,8 @@
 **Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fase 3 (3a 2SLS + 3b GMM/LIML + 3c WLS) DONE (2026-05-21). Fases 4–7 pending.
 **Owner:** Franco Medero
 
+**Status update (2026-05-21):** Fase 4 + 4b and Fase 5 (DiD + Event Study) are complete. Fases 6-7 remain pending.
+
 ## Problem
 
 Estimation on large datasets (n ≥ 100k) is bottlenecked by `extractAllRows` materializing the DuckDB Arrow result into JS objects before any math runs. The matrix algebra itself is fast; row materialization is what hurts. Today only one estimator (OLS, classical SE, no factors, no weights) has a SQL-pushdown path (`buildOLSSuffStats`, commit `7bba121`). Every other estimator falls back to materialization.
@@ -294,6 +296,11 @@ Detailed design for each fase deferred to its own implementation plan. Only the 
 
 - DiD 2x2: OLS with `treat × post` dummy — falls onto Fase 1 once interaction generated in SQL (`CASE WHEN treat=1 AND t>=t0 THEN 1 ELSE 0 END`).
 - TWFE DiD: falls onto Fase 4.
+- **Fase 5 status (2026-05-21):** live for the large-n `DiD`, `TWFE`, and `EventStudy` UI paths.
+  - `duckdbDiDSynthetic.js` emits the OLS DiD interaction payload, the TWFE DiD regressor payload, and Event Study horizon dummies plus endpoint bins without adding a new solver.
+  - `ModelingTab` routes DiD through the Fase 1 OLS suff-stats path and TWFE/Event Study through the Fase 4b TWFE within path. Event Study keeps the JS result contract, including the reference-period coefficient and pre-trend Wald test.
+  - Dispatcher guards operand presence and Event Study horizon width before SQL routing. SQL inference scope is DiD classical + HC0-HC3, TWFE/EventStudy classical + HC0/HC1.
+  - Validation fixtures: base-R `fase5RValidation.R`, generated `fase5_data.csv` / `fase5Benchmarks.json`, and browser harness `window.__validation.fase5`.
 - Event Study: event-time dummies generated in SQL (`CASE WHEN t - t_treat = -3 THEN 1 ELSE 0`, one per lag/lead). k grows with horizon — `K_THRESHOLD` check.
 
 ### Fase 6 — IRLS (Logit / Probit / Poisson FE)

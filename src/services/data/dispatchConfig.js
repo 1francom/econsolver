@@ -18,7 +18,12 @@ export const CACHE_MAX_ENTRIES = 50;
 // Values stored here are canonical (post-normalization). ModelingTab.estimate()
 // canonicalizes UI seType before calling shouldUseSQLPath: hc[0-3] → uppercase,
 // hac → HAC, clustered/twoway pass through lowercase.
-export const SQL_SUPPORTED_ESTIMATORS = new Set(["OLS", "2SLS", "WLS", "GMM", "LIML", "FE", "FD", "TWFE"]);
+export const SQL_SUPPORTED_ESTIMATORS = new Set([
+  "OLS", "2SLS", "WLS", "GMM", "LIML",
+  "FE", "FD", "TWFE",
+  // Fase 5 live UI ids + plan aliases.
+  "DiD", "DiD2x2", "TWFEDiD", "EventStudy",
+]);
 export const SQL_SUPPORTED_SE         = new Set([
   "classical",
   "HC0", "HC1", "HC2", "HC3",

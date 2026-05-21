@@ -22,6 +22,9 @@
 //   clusterVar:    string | null  — one-way cluster column (required when seType="clustered"
 //                                   or for panel cluster-by-entity, in which case it equals unitCol)
 
+// Fase 5 ctx additions:
+//   postCol/treatCol for DiD, treatTimeCol for Event Study,
+//   kPre/kPost for Event Study horizons, controls for synthetic regressors.
 import {
   N_THRESHOLD,
   K_THRESHOLD,
@@ -66,9 +69,30 @@ export function shouldUseSQLPath(ctx) {
   }
 
   // ── Panel (preempt before OLS fall-through) ────────────────────────────────
-  if (["FE", "FD", "TWFE"].includes(ctx.estimator)) {
+  if (ctx.estimator === "DiD" || ctx.estimator === "DiD2x2") {
+    if (!ctx.postCol || !ctx.treatCol) return false;
+    if (!["classical", "HC0", "HC1", "HC2", "HC3"].includes(se)) return false;
+    if (ctx.hasWeights) return false;
+  }
+
+  if (ctx.estimator === "TWFEDiD") {
+    if (!ctx.treatCol || !ctx.unitCol || !ctx.timeCol) return false;
+    if (!["classical", "HC0", "HC1"].includes(se)) return false;
+    if (ctx.hasWeights) return false;
+  }
+
+  if (ctx.estimator === "EventStudy") {
+    if (!ctx.unitCol || !ctx.timeCol || !ctx.treatTimeCol) return false;
+    if (typeof ctx.kPre !== "number" || typeof ctx.kPost !== "number") return false;
+    if (ctx.kPre < 0 || ctx.kPost < 0) return false;
+    if ((ctx.kPre + ctx.kPost) > K_THRESHOLD) return false;
+    if (!["classical", "HC0", "HC1"].includes(se)) return false;
+    if (ctx.hasWeights) return false;
+  }
+
+  if (["FE", "FD", "TWFE", "TWFEDiD", "EventStudy"].includes(ctx.estimator)) {
     if (!ctx.unitCol || typeof ctx.unitCol !== "string") return false;
-    if (["FD", "TWFE"].includes(ctx.estimator)) {
+    if (["FD", "TWFE", "TWFEDiD", "EventStudy"].includes(ctx.estimator)) {
       if (!ctx.timeCol || typeof ctx.timeCol !== "string") return false;
     }
     if (ctx.hasWeights) return false;
