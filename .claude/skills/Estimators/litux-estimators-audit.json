@@ -1,0 +1,176 @@
+{
+  "project": {
+    "name": "Litux",
+    "module": "estimators",
+    "current_engine_files_reviewed": [
+      "calcEngine.js",
+      "NonLinearEngine.js",
+      "GMMEngine.js",
+      "CausalEngine.js"
+    ],
+    "purpose": "Document, validate, and standardize all mathematical, statistical, and econometric logic used by Litux estimator engines.",
+    "principles": [
+      "Correctness before performance",
+      "Reproducibility before UI convenience",
+      "Explicit assumptions before automated interpretation",
+      "No silent defaults",
+      "Every estimator must be validated against R, Stata, or Python before UI release"
+    ]
+  },
+  "current_state": {
+    "calcEngine.js": {
+      "role": "general numerical and probability engine",
+      "implemented": [
+        "Brent root solver",
+        "auto-bracketing root solver",
+        "Newton-Raphson system solver",
+        "central difference derivatives",
+        "numerical integration",
+        "prediction intervals",
+        "expression evaluation",
+        "normal, t, binomial, poisson, chi-squared distributions"
+      ],
+      "risks_or_missing": [
+        "Expression evaluator uses new Function and should be sandbox-reviewed before untrusted production use",
+        "Distribution functions need golden tests against R for a grid of values",
+        "Integration is composite Simpson, not adaptive Simpson despite header wording"
+      ]
+    },
+    "NonLinearEngine.js": {
+      "role": "nonlinear limited dependent variable models",
+      "implemented": [
+        "Logit via IRLS/Newton-Raphson MLE",
+        "Probit via IRLS/Newton-Raphson MLE",
+        "marginal effects at means",
+        "odds ratios for logit",
+        "Poisson fixed effects / PPML with entity FE",
+        "robust SE hook through computeRobustSE"
+      ],
+      "risks_or_missing": [
+        "No standard non-FE Poisson exported as separate estimator",
+        "Poisson FE currently handles one fixed-effect dimension only",
+        "No explicit separation detection/removal comparable to ppmlhdfe",
+        "No offset/exposure support yet",
+        "No two-way FE Poisson yet",
+        "Need validation against glm/fixest/ppmlhdfe"
+      ]
+    },
+    "GMMEngine.js": {
+      "role": "instrumental variables and GMM engine",
+      "implemented": [
+        "two-step efficient linear GMM",
+        "LIML k-class estimator",
+        "first-stage diagnostics",
+        "Hansen J-statistic",
+        "weak instrument F-stat flag",
+        "robust SE hook through computeRobustSE"
+      ],
+      "risks_or_missing": [
+        "This is linear IV-GMM, not general nonlinear GMM",
+        "No one-step/iterated/CUE modes exposed",
+        "J-stat p-value uses Wilson-Hilferty approximation; validate against chi-square CDF",
+        "No HAC weighting matrix yet",
+        "Need validation against R gmm, Stata gmm, statsmodels IVGMM"
+      ]
+    },
+    "CausalEngine.js": {
+      "role": "causal inference estimators",
+      "implemented": [
+        "2SLS/IV",
+        "Sharp RDD with local linear WLS",
+        "Fuzzy RDD as local 2SLS",
+        "IK-style bandwidth helper",
+        "McCrary density test",
+        "triangular, epanechnikov, uniform kernels"
+      ],
+      "risks_or_missing": [
+        "Sharp RDD is local linear only; no p/q polynomial order generalization",
+        "No robust bias correction like rdrobust",
+        "IK bandwidth is approximate and should be labeled as such unless validated",
+        "No rdplot bin-selection equivalent yet",
+        "Fuzzy RDD SE should be validated against rdrobust/Stata",
+        "No Callaway-Santanna, Sun-Abraham, TWFE, or Synthetic Control in this file"
+      ]
+    }
+  },
+  "required_standardization": {
+    "global_result_schema": {
+      "estimator": "string",
+      "formula": "string | null",
+      "varNames": "string[]",
+      "beta": "number[]",
+      "vcov": "number[][] | null",
+      "se": "number[]",
+      "statistic": "number[]",
+      "pVals": "number[]",
+      "ci95": "Array<[number, number]> | null",
+      "n": "number",
+      "k": "number",
+      "df": "number | null",
+      "resid": "number[] | null",
+      "fitted": "number[] | null",
+      "diagnostics": "Record<string, unknown>",
+      "warnings": "string[]",
+      "convergence": {
+        "converged": "boolean | null",
+        "iterations": "number | null",
+        "tolerance": "number | null"
+      },
+      "validation": {
+        "referencePackage": "string | null",
+        "referenceFunction": "string | null",
+        "status": "passed | failed | untested"
+      }
+    },
+    "default_tolerances": {
+      "coefficients": 1e-06,
+      "standard_errors": 1e-05,
+      "vcov": 1e-05,
+      "p_values": 0.0001,
+      "fitted_values": 1e-06,
+      "log_likelihood": 1e-06
+    }
+  },
+  "implementation_backlog": [
+    {
+      "priority": 1,
+      "task": "Create ./estimators/README.md and ./estimators/CLAUDE.md",
+      "reason": "Claude Code needs a stable contract before touching estimator math."
+    },
+    {
+      "priority": 2,
+      "task": "Create global normalizeModelResult adapter",
+      "reason": "Current engines return different result shapes."
+    },
+    {
+      "priority": 3,
+      "task": "Add golden tests for calcEngine distributions against R",
+      "reason": "Probability functions are used by p-values and CI logic."
+    },
+    {
+      "priority": 4,
+      "task": "Split Poisson into poisson_mle, poisson_ppml, poisson_fe",
+      "reason": "Current implementation has FE PPML but not clean standard Poisson API."
+    },
+    {
+      "priority": 5,
+      "task": "Upgrade RDD to support rdrobust-style p/q, bandwidth, kernels, bins, and robust bias correction",
+      "reason": "Current RDD is useful but not equivalent to rdrobust."
+    },
+    {
+      "priority": 6,
+      "task": "Add TWFE/HDFE engine",
+      "reason": "Needed before Sun-Abraham, Callaway-Santanna, and high-dimensional FE models."
+    },
+    {
+      "priority": 7,
+      "task": "Add Staggered DiD modules",
+      "reason": "Not implemented yet."
+    },
+    {
+      "priority": 8,
+      "task": "Add Synthetic Control",
+      "reason": "Not implemented yet."
+    }
+  ]
+}

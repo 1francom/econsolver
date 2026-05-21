@@ -1,10 +1,10 @@
 # DuckDB Sufficient-Statistics Roadmap — Design
 
 **Date:** 2026-05-19
-**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fase 3 (3a 2SLS + 3b GMM/LIML + 3c WLS) DONE (2026-05-21). Fases 4–7 pending.
+**Status:** Fase 0 + Fase 1 + Fase 2 DONE (2026-05-20). Fase 3 (3a 2SLS + 3b GMM/LIML + 3c WLS) DONE (2026-05-21). Fases 4–5 DONE; Fase 6 in progress.
 **Owner:** Franco Medero
 
-**Status update (2026-05-21):** Fase 4 + 4b and Fase 5 (DiD + Event Study) are complete. Fases 6-7 remain pending.
+**Status update (2026-05-21):** Fase 4 + 4b and Fase 5 (DiD + Event Study) are complete. Fase 6 IRLS has started. Fase 7 RDD implementation is complete pending browser validation.
 
 ## Problem
 
@@ -308,12 +308,14 @@ Detailed design for each fase deferred to its own implementation plan. Only the 
 - `duckdbIRLS.js`: loop in JS, per-iter `buildWeightedSuffStats(tableName, yCol, xCols, β)` computes IRLS weights inline (logit: `μ(1−μ)` with `μ=σ(Xβ)`; probit analogous; Poisson: `μ=exp(Xβ)`). One SQL pass per iter, typically 5–10 iters.
 - McFadden R², log-likelihood aggregated on final SQL pass.
 - For n < N_THRESHOLD, dispatcher falls to JS — 10 roundtrips × ~100ms is worse than JS path on small data.
+- **Fase 6 start (2026-05-21):** dispatcher now has the `N_THRESHOLD_IRLS=200_000` gate and scopes Logit/Probit/Poisson FE to classical + HC0/HC1. `duckdbIRLS` and `IRLSSuffStatsEngine` provide the first per-iteration SQL cross-product loop, `duckdbIRLSRobustSE` adds score-residual HC meat, and the ModelingTab SQL branch routes the three estimators while Poisson FE stays capped by factor-expanded entity dummies. A base-R fixture generator plus `window.__validation.fase6` harness are added for numerical checks before this fase is marked complete.
 
 ### Fase 7 — RDD sharp / fuzzy
 
 - `duckdbRDD.js`: triangular kernel as factor `GREATEST(0, 1 - ABS(r - c) / h)` on aggs. Local WLS over window `WHERE r BETWEEN c-h AND c+h`.
 - IK bandwidth: stays in JS, receives local moments from SQL (`SELECT SUM(POWER(r, k)) WHERE ...`).
 - Fuzzy RDD: uses `duckdbIV` with kernel weight applied across the board.
+- **Fase 7 implementation complete (2026-05-21):** live `RDD` and `FuzzyRDD` UI ids dispatch into the SQL path. `duckdbRDD` reuses WLS suff stats with a triangular-kernel `weightSQL` expression and synthetic threshold/slope-interaction regressors; `duckdbRDDBandwidth` computes the current IK-style rule from SQL local quadratic moments; `RDDSuffStatsEngine` returns sharp RDD results and fuzzy Wald results from outcome/take-up discontinuities. WLS HC meat accepts the same kernel weight expression so sharp/fuzzy HC0/HC1 paths stay in SQL. McCrary density bins are aggregated in SQL before the bounded local fit. Base-R fixtures plus `window.__validation.fase7` cover manual-bandwidth sharp/fuzzy cells, automatic bandwidth parity, and the McCrary path; browser validation remains pending.
 
 ## Error handling
 

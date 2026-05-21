@@ -30,6 +30,9 @@ export { runLIMLFromSuffStats } from "./LIMLSuffStatsEngine.js";
 // ── WLS sufficient-statistics solver ──────────────────────────────────────────
 export { runWLSFromSuffStats } from "./WLSEngine.js";
 
+// IRLS sufficient-statistics solver for DuckDB GLM fast paths
+export { runIRLSFromSuffStats, applyRobustSEToIRLSResult } from "./IRLSSuffStatsEngine.js";
+
 // ── Panel estimators ──────────────────────────────────────────────────────────
 export {
   runFE,
@@ -55,6 +58,8 @@ export {
   runFuzzyRDD,
   runMcCrary,
 } from "./CausalEngine.js";
+
+export { runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats } from "./RDDSuffStatsEngine.js";
 
 // ── Binary outcome models + Poisson GLM + Poisson FE ─────────────────────────
 export {

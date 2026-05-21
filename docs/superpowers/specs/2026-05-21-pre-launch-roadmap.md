@@ -41,7 +41,7 @@ Track A is sequential — each fase depends on the previous. Tracks B and C can 
 | 5 | DiD 2×2 + TWFE DiD + Event Study | `2026-05-21-duckdb-fase-5-did-eventstudy.md` | Drafted (needs Fase 4b first) |
 | 6 | IRLS (Logit, Probit, Poisson FE) | `2026-05-21-duckdb-fase-6-irls.md` | Drafted |
 | 7 | Sharp + Fuzzy RDD | `2026-05-21-duckdb-fase-7-rdd.md` | Drafted |
-| 8 | Robust-SE backfill (2SLS, WLS, LIML) | not yet written | Queued |
+| 8 | Robust-SE backfill (2SLS, WLS, LIML) | not yet written | Implementation complete pending browser validation |
 
 ### Fase 8 — Robust-SE backfill (consolidated)
 
@@ -52,6 +52,8 @@ Single plan covering the deferred SE variants that were not yet written:
 - **LIML:** HC0, HC1, cluster, HAC. Currently classical-only. Mirrors 2SLS robust patterns.
 
 Decision: **consolidated** plan (not three sub-fases). The meat-builder pattern is reusable across estimators, and the test matrix benefits from a single R validation script that covers all three at once.
+
+- **Fase 8 implementation complete (2026-05-21):** `duckdbWLSRobustSE` now covers weighted HC2/HC3, one-way cluster, two-way cluster, and HAC score meats. `duckdbIVRobustSE` mirrors those paths on fitted IV design rows. `LIMLSuffStatsEngine` accepts robust meat so LIML can reuse HC0/HC1, clustered, and HAC SQL builders. Self-contained R fixtures and `window.__validation.fase8` cover the backfill; browser validation remains pending.
 
 ---
 

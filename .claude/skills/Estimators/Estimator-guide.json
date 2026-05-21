@@ -1,0 +1,461 @@
+{
+  "project": {
+    "name": "Litux",
+    "module": "estimators",
+    "purpose": "Document and validate all mathematical, statistical, and econometric logic used by Litux estimators.",
+    "philosophy": [
+      "Correctness before performance.",
+      "Reproducibility before UI convenience.",
+      "Explicit assumptions before automated interpretation.",
+      "No silent defaults.",
+      "No estimator enters the UI without validation against R, Stata, or Python."
+    ]
+  },
+  "folder_structure": {
+    "root": "./estimators",
+    "files": [
+      "README.md",
+      "CLAUDE.md",
+      "MATHEMATICAL_ENGINE.md",
+      "VALIDATION_PROTOCOL.md",
+      "OUTPUT_SCHEMA.md",
+      "NUMERICAL_METHODS.md",
+      "REFERENCES.md"
+    ],
+    "subfolders": [
+      "common",
+      "ols",
+      "gmm",
+      "poisson",
+      "rdd",
+      "twfe",
+      "staggered_did",
+      "synthetic_control"
+    ]
+  },
+  "global_rules": {
+    "estimator_lifecycle": [
+      "Mathematical specification",
+      "Numerical algorithm",
+      "Output schema",
+      "Reference implementation comparison",
+      "Edge-case tests",
+      "UI interpretation layer"
+    ],
+    "required_files_per_estimator": [
+      "README.md",
+      "math.md",
+      "algorithm.md",
+      "references.md",
+      "tests.md",
+      "edge_cases.md",
+      "output_schema.md"
+    ],
+    "implementation_rules": [
+      "Never invent econometric formulas.",
+      "Never silently change defaults.",
+      "Never remove observations without recording why.",
+      "Never modify golden tests only to make an estimator pass.",
+      "Always compare against R, Stata, or Python reference output.",
+      "If results differ, report the difference before changing code.",
+      "Prefer readable and auditable code over clever code."
+    ]
+  },
+  "global_output_schema": {
+    "type": "ModelResult",
+    "required_fields": {
+      "estimator": "string",
+      "formula": "string",
+      "coefficients": "Record<string, number>",
+      "variance_covariance_matrix": "number[][]",
+      "standard_errors": "Record<string, number>",
+      "test_statistics": "Record<string, number>",
+      "p_values": "Record<string, number>",
+      "confidence_intervals": "Record<string, [number, number]>",
+      "nobs": "number",
+      "degrees_of_freedom": "number | null",
+      "residuals": "number[] | null",
+      "fitted_values": "number[] | null",
+      "diagnostics": "Record<string, unknown>",
+      "warnings": "string[]",
+      "convergence": {
+        "converged": "boolean",
+        "iterations": "number | null",
+        "tolerance": "number | null",
+        "message": "string | null"
+      },
+      "reference_metadata": {
+        "matched_reference_package": "string | null",
+        "matched_reference_function": "string | null",
+        "validation_status": "passed | failed | untested"
+      }
+    }
+  },
+  "validation_protocol": {
+    "reference_implementations": {
+      "r": [
+        "base R",
+        "fixest",
+        "plm",
+        "gmm",
+        "rdrobust",
+        "did",
+        "Synth"
+      ],
+      "python": [
+        "statsmodels",
+        "linearmodels",
+        "pyfixest",
+        "rdrobust",
+        "pysyncon"
+      ],
+      "stata": [
+        "regress",
+        "reghdfe",
+        "poisson",
+        "ppmlhdfe",
+        "gmm",
+        "rdrobust",
+        "csdid",
+        "eventstudyinteract",
+        "synth"
+      ]
+    },
+    "default_tolerances": {
+      "coefficients": 0.000001,
+      "standard_errors": 0.00001,
+      "variance_covariance_matrix": 0.00001,
+      "p_values": 0.0001,
+      "fitted_values": 0.000001,
+      "log_likelihood": 0.000001,
+      "plots": "structural_comparison_not_pixel_perfect"
+    },
+    "required_test_types": [
+      "Small deterministic dataset",
+      "Simulated dataset",
+      "Known benchmark dataset when available",
+      "Missing values",
+      "Collinearity",
+      "Extreme values",
+      "Clustered standard errors when supported",
+      "Comparison against at least one external implementation"
+    ]
+  },
+  "common_mathematical_engine": {
+    "notation": {
+      "y": "Outcome vector",
+      "X": "Regressor matrix",
+      "Z": "Instrument matrix",
+      "W": "Weighting matrix",
+      "beta": "Coefficient vector",
+      "epsilon": "Residual vector",
+      "V_beta": "Variance-covariance matrix"
+    },
+    "variance_covariance_estimators": [
+      "classical",
+      "heteroskedasticity_robust",
+      "clustered",
+      "multiway_clustered",
+      "HAC_Newey_West_when_applicable"
+    ],
+    "numerical_rules": [
+      "Avoid direct matrix inversion when solve/decomposition is available.",
+      "Prefer QR decomposition for OLS-style systems.",
+      "Prefer Cholesky only when positive definiteness is guaranteed.",
+      "Always expose convergence tolerance.",
+      "Always expose maximum iterations.",
+      "Always report dropped observations.",
+      "Always report absorbed fixed effects.",
+      "Always report collinear variables."
+    ]
+  },
+  "estimators": {
+    "ols": {
+      "models": [
+        "OLS",
+        "OLS with robust standard errors",
+        "OLS with clustered standard errors"
+      ],
+      "formula": "y = X beta + epsilon",
+      "estimator": "beta_hat = (X'X)^(-1) X'y",
+      "implementation_notes": [
+        "Use QR decomposition or numerically stable least squares.",
+        "Do not compute inverse explicitly unless necessary.",
+        "Return residuals, fitted values, R2, adjusted R2, degrees of freedom, and variance-covariance matrix."
+      ],
+      "reference_implementations": {
+        "r": ["lm"],
+        "python": ["statsmodels.OLS"],
+        "stata": ["regress"]
+      },
+      "diagnostics": [
+        "rank deficiency",
+        "collinearity",
+        "missing values",
+        "high leverage",
+        "heteroskedasticity warning if diagnostic available"
+      ]
+    },
+    "gmm": {
+      "models": [
+        "one_step_gmm",
+        "two_step_gmm",
+        "iterated_gmm",
+        "cue_gmm"
+      ],
+      "objective": "Q(theta) = gbar(theta)' W gbar(theta)",
+      "core_steps": [
+        "Define moment function g_i(theta).",
+        "Compute sample average moments gbar(theta).",
+        "Choose initial weighting matrix W0.",
+        "Minimize Q(theta).",
+        "For two-step GMM, estimate S(theta1) and set W1 = S(theta1)^(-1).",
+        "Re-estimate theta using W1.",
+        "Compute Jacobian of moments.",
+        "Compute variance-covariance matrix.",
+        "Report J-test when overidentified."
+      ],
+      "reference_implementations": {
+        "r": ["gmm", "momentfit", "plm::pgmm"],
+        "python": ["statsmodels.sandbox.regression.gmm"],
+        "stata": ["gmm"]
+      },
+      "diagnostics": [
+        "underidentification",
+        "overidentification",
+        "singular weighting matrix",
+        "weak instruments warning when IV-GMM",
+        "non-convergence"
+      ]
+    },
+    "poisson": {
+      "models": [
+        "standard_poisson_mle",
+        "ppml",
+        "poisson_with_fixed_effects",
+        "poisson_with_high_dimensional_fixed_effects"
+      ],
+      "mean_function": "mu_i = exp(x_i' beta + offset_i + fixed_effects_i)",
+      "log_likelihood": "sum_i [y_i log(mu_i) - mu_i - log(y_i!)]",
+      "score": "X'(y - mu)",
+      "hessian": "-X' diag(mu) X",
+      "algorithm": [
+        "Use IRLS or Newton-Raphson.",
+        "Compute eta = X beta.",
+        "Compute mu = exp(eta).",
+        "Compute working response z = eta + (y - mu) / mu.",
+        "Compute working weights W = diag(mu).",
+        "Solve weighted least squares update.",
+        "Repeat until convergence."
+      ],
+      "fixed_effects_algorithm": [
+        "Use outer IRLS loop.",
+        "Inside each IRLS iteration, solve weighted least squares with absorbed fixed effects.",
+        "Use alternating projections or equivalent demeaning algorithm.",
+        "Detect and report separation.",
+        "Detect and report dropped observations."
+      ],
+      "reference_implementations": {
+        "r": ["glm(..., family = poisson)", "fixest::fepois", "fixest::feglm", "pglm"],
+        "python": ["statsmodels.GLM(..., family=Poisson)", "statsmodels.discrete.Poisson", "pyfixest"],
+        "stata": ["poisson", "ppmlhdfe"]
+      },
+      "diagnostics": [
+        "non_convergence",
+        "separation",
+        "collinearity",
+        "zero_heavy_outcome",
+        "extreme_fitted_values",
+        "dropped_observations",
+        "absorbed_fixed_effects"
+      ]
+    },
+    "rdd": {
+      "models": [
+        "sharp_rdd",
+        "fuzzy_rdd",
+        "local_linear_rdd",
+        "local_polynomial_rdd",
+        "kernel_rdd",
+        "rd_bins_for_plots"
+      ],
+      "sharp_estimand": "tau = lim_{x down c} E[Y|X=x] - lim_{x up c} E[Y|X=x]",
+      "fuzzy_estimand": "tau_fuzzy = tau_y / tau_d",
+      "local_polynomial_objective": "min_beta sum_i K((x_i - c) / h) * 1[side] * (y_i - r_p(x_i - c)' beta_side)^2",
+      "kernels": {
+        "triangular": "K(u) = (1 - |u|) * 1[|u| <= 1]",
+        "uniform": "K(u) = 0.5 * 1[|u| <= 1]",
+        "epanechnikov": "K(u) = 0.75 * (1 - u^2) * 1[|u| <= 1]"
+      },
+      "required_options": [
+        "cutoff",
+        "bandwidth",
+        "kernel",
+        "polynomial_order",
+        "bias_correction",
+        "bin_selection_for_plots"
+      ],
+      "reference_implementations": {
+        "r": ["rdrobust", "rdbwselect", "rdplot"],
+        "python": ["rdrobust"],
+        "stata": ["rdrobust", "rdbwselect", "rdplot"]
+      },
+      "diagnostics": [
+        "mass_points",
+        "few_observations_near_cutoff",
+        "bandwidth_sensitivity",
+        "donut_rdd_optional",
+        "covariate_balance_optional",
+        "manipulation_test_optional"
+      ]
+    },
+    "twfe": {
+      "models": [
+        "two_way_fixed_effects",
+        "event_study_twfe"
+      ],
+      "formula": "y_it = alpha_i + gamma_t + beta D_it + X_it' theta + epsilon_it",
+      "estimator": [
+        "Residualize y with respect to unit and time fixed effects.",
+        "Residualize treatment and covariates with respect to unit and time fixed effects.",
+        "Run OLS on residualized variables.",
+        "Compute robust or clustered standard errors."
+      ],
+      "reference_implementations": {
+        "r": ["fixest::feols", "plm"],
+        "python": ["linearmodels.PanelOLS", "pyfixest"],
+        "stata": ["reghdfe", "xtreg, fe", "areg with absorb"]
+      },
+      "required_diagnostics": [
+        "number_of_units",
+        "number_of_periods",
+        "singleton_observations",
+        "absorbed_fixed_effects",
+        "collinear_variables",
+        "staggered_treatment_timing",
+        "already_treated_comparison_warning",
+        "heterogeneous_treatment_effect_warning"
+      ]
+    },
+    "staggered_did": {
+      "models": [
+        "callaway_santanna",
+        "sun_abraham"
+      ],
+      "callaway_santanna": {
+        "primitive_estimand": "ATT(g,t)",
+        "inputs": [
+          "id",
+          "time",
+          "outcome",
+          "first_treatment_period",
+          "covariates",
+          "control_group"
+        ],
+        "control_groups": [
+          "never_treated",
+          "not_yet_treated"
+        ],
+        "estimators": [
+          "outcome_regression",
+          "ipw",
+          "doubly_robust"
+        ],
+        "aggregation": [
+          "simple_ATT",
+          "dynamic_event_time_ATT",
+          "group_ATT",
+          "calendar_time_ATT"
+        ]
+      },
+      "sun_abraham": {
+        "primitive_estimand": "CATT(g,e)",
+        "relative_time": "e = t - g",
+        "regression_structure": "cohort_by_relative_period_interactions_with_unit_and_time_fixed_effects",
+        "aggregation": "CATT(g,e) to ATT(e)"
+      },
+      "reference_implementations": {
+        "r": ["did::att_gt", "did::aggte", "fixest::sunab"],
+        "python": ["pyfixest", "csdid_when_available"],
+        "stata": ["csdid", "eventstudyinteract", "eventstudyweights"]
+      },
+      "diagnostics": [
+        "cohort_sizes",
+        "never_treated_units",
+        "not_yet_treated_units",
+        "unsupported_event_times",
+        "reference_period",
+        "pre_trends",
+        "forbidden_or_bad_comparisons",
+        "already_treated_controls_warning"
+      ]
+    },
+    "synthetic_control": {
+      "models": [
+        "classic_synthetic_control",
+        "augmented_synthetic_control_optional",
+        "robust_synthetic_control_optional",
+        "penalized_synthetic_control_optional"
+      ],
+      "optimization_problem": {
+        "objective": "min_W || X1 - X0 W ||_V",
+        "constraints": [
+          "w_j >= 0",
+          "sum_j w_j = 1"
+        ]
+      },
+      "treatment_effect": "gap_t = Y_treated,t - sum_j w_j Y_j,t",
+      "inputs": [
+        "treated_unit",
+        "donor_pool",
+        "pre_treatment_periods",
+        "post_treatment_periods",
+        "outcome",
+        "predictors",
+        "predictor_weights_V",
+        "unit_weights_W"
+      ],
+      "reference_implementations": {
+        "r": ["Synth", "SCtools"],
+        "python": ["pysyncon", "SyntheticControlMethods", "mlsynth"],
+        "stata": ["synth", "synth2", "synth_runner"]
+      },
+      "diagnostics": [
+        "pre_treatment_fit",
+        "rmspe",
+        "donor_weights",
+        "predictor_balance",
+        "placebo_tests",
+        "leave_one_out_tests",
+        "gap_plot",
+        "path_plot"
+      ]
+    }
+  },
+  "claude_code_instructions": {
+    "recommended_file": "./estimators/CLAUDE.md",
+    "rules": [
+      "Read the estimator folder before coding.",
+      "Implement only what is specified.",
+      "Do not add UI before numerical tests pass.",
+      "Do not change tests unless explicitly instructed.",
+      "When external reference outputs disagree, report the discrepancy.",
+      "When uncertain, create a failing test before changing implementation.",
+      "Every estimator must return the global ModelResult schema."
+    ],
+    "prompt_template": "Read ./estimators/{estimator}/README.md, ./estimators/{estimator}/math.md, ./estimators/{estimator}/algorithm.md, and ./estimators/{estimator}/tests.md. Implement only the numerical core. Match the listed reference implementations within the required tolerances. Do not touch the UI until tests pass."
+  },
+  "integration_with_litux_ui": {
+    "recommended_api": {
+      "function_name": "runEstimator",
+      "input": {
+        "estimator": "string",
+        "data": "DataFrameLike",
+        "formula": "string",
+        "options": "Record<string, unknown>"
+      },
+      "output": "ModelResult"
+    },
+    "rule": "React components such as Engines.jsx should only call estimator APIs. They should not contain estimator mathematics."
+  }
+}

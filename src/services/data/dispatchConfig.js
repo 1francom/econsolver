@@ -7,7 +7,10 @@
 // constant in a one-line PR.
 
 export const N_THRESHOLD = 50_000;
+export const N_THRESHOLD_IRLS = 200_000;
 export const K_THRESHOLD = 100;
+export const IRLS_MAX_ITER = 50;
+export const IRLS_TOL = 1e-8;
 export const RESIDUAL_SAMPLE_SIZE = 5_000;
 export const CACHE_MAX_ENTRIES = 50;
 
@@ -23,6 +26,10 @@ export const SQL_SUPPORTED_ESTIMATORS = new Set([
   "FE", "FD", "TWFE",
   // Fase 5 live UI ids + plan aliases.
   "DiD", "DiD2x2", "TWFEDiD", "EventStudy",
+  // Fase 6 IRLS fast paths.
+  "Logit", "Probit", "PoissonFE",
+  // Fase 7 live ids + roadmap alias.
+  "RDD", "SharpRDD", "FuzzyRDD",
 ]);
 export const SQL_SUPPORTED_SE         = new Set([
   "classical",

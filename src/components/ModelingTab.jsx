@@ -10,6 +10,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   runOLS, runOLSFromSuffStats, run2SLSFromSuffStats, runWLSFromSuffStats,
   runGMMFromSuffStats, runLIMLFromSuffStats,
+  runIRLSFromSuffStats, applyRobustSEToIRLSResult,
   runFEFromSuffStats, runFDFromSuffStats, runTWFEFromSuffStats,
   runWLS, run2SLS, runFE, runFD, runSharpRDD, runMcCrary,
   run2x2DiD, runTWFEDiD, ikBandwidth,
@@ -19,6 +20,7 @@ import {
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
   runGMM, runLIML,
   runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runSyntheticControl,
+  runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats,
   wrapResult,
   diagnoseFit,
   firstStageFFromSuffStats,
@@ -28,7 +30,7 @@ import { extractAllRows }       from "../services/data/duckdb.js";
 import { buildOLSSuffStats }    from "../services/data/duckdbOLS.js";
 import { buildIVSuffStats }     from "../services/data/duckdbIV.js";
 import { shouldUseSQLPath }     from "../services/data/duckdbDispatch.js";
-import { CACHE_MAX_ENTRIES }    from "../services/data/dispatchConfig.js";
+import { CACHE_MAX_ENTRIES, IRLS_MAX_ITER, IRLS_TOL } from "../services/data/dispatchConfig.js";
 import { expandFactors }        from "../services/data/duckdbFactors.js";
 import {
   buildDiD2x2Synthetic,
@@ -41,12 +43,24 @@ import {
 } from "../services/data/duckdbClusterSE.js";
 import { computeHACMeat } from "../services/data/duckdbHACSE.js";
 import { sampleResiduals }      from "../services/data/duckdbResiduals.js";
-import { computeIVHCMeat }      from "../services/data/duckdbIVRobustSE.js";
+import {
+  computeIVHCMeat,
+  computeIVHCMeatWithLeverage,
+  computeIVClusterMeat,
+  computeIVTwowayClusterMeat,
+  computeIVHACMeat,
+} from "../services/data/duckdbIVRobustSE.js";
 import { buildGMMSuffStats }    from "../services/data/duckdbGMM.js";
 import { computeGMMOmega }      from "../services/data/duckdbGMMOmega.js";
 import { buildLIMLSuffStats }   from "../services/data/duckdbLIML.js";
 import { buildWLSSuffStats }    from "../services/data/duckdbWLS.js";
-import { computeWLSHCMeat }     from "../services/data/duckdbWLSRobustSE.js";
+import {
+  computeWLSHCMeat,
+  computeWLSHCMeatWithLeverage,
+  computeWLSClusterMeat,
+  computeWLSTwowayClusterMeat,
+  computeWLSHACMeat,
+} from "../services/data/duckdbWLSRobustSE.js";
 import { buildWithinSuffStats }         from "../services/data/duckdbWithin.js";
 import { computeWithinHCMeat }          from "../services/data/duckdbWithinRobustSE.js";
 import { computeWithinClusterMeat }     from "../services/data/duckdbWithinClusterSE.js";
@@ -1195,7 +1209,7 @@ function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, dict = {}, ro
               node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
             { id: "mccrary", label: "McCrary density",
               node: <McCraryPlot
-                result={r.rddData?.cutoff != null ? runMcCrary(rows, runningVar, r.rddData.cutoff) : null}
+                result={r.mcCrary ?? (r.rddData?.cutoff != null ? runMcCrary(rows, runningVar, r.rddData.cutoff) : null)}
                 xLabel={runningVar}
               /> },
           ]} />
@@ -1760,6 +1774,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       const duckTable = cleanedData?._duckdb?.tableName;
       const rowCount  = cleanedData?._duckdb?.rowCount ?? 0;
       const allX      = [...xVars, ...wVars];
+      const cutoffNum = Number.parseFloat(cutoff);
+      const manualRDDH = bwMode === "manual" ? Number.parseFloat(bwManual) : null;
 
       // ── Single dispatch point (Fase 0) ─────────────────────────────────────
       // shouldUseSQLPath decides between SQL suff-stats fast path and the
@@ -1787,7 +1803,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         xColsEndog:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars : [],
         zVars:         ["2SLS", "GMM", "LIML"].includes(model) ? zVars : [],
         endogCount:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars.length : 0,
-        unitCol:       ["FE", "FD", "TWFE", "EventStudy"].includes(model) ? (panel?.entityCol ?? null) : null,
+        unitCol:       ["FE", "FD", "TWFE", "EventStudy"].includes(model)
+          ? (panel?.entityCol ?? null)
+          : (model === "PoissonFE" ? (panel?.entityCol || poissonEntityCol || null) : null),
         timeCol:       ["FD", "TWFE", "EventStudy"].includes(model) ? (panel?.timeCol ?? null)
           : (seTypeNorm === "HAC" ? (panel?.timeCol ?? null) : null),
         postCol:       postVar[0] || null,
@@ -1796,16 +1814,19 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         kPre:          typeof kPre === "number" ? kPre : null,
         kPost:         typeof kPost === "number" ? kPost : null,
         controls:      wVars,
+        runningCol:    runningVar[0] || null,
+        cutoff:        Number.isFinite(cutoffNum) ? cutoffNum : null,
+        bandwidth:     Number.isFinite(manualRDDH) ? manualRDDH : null,
+        kernelType:    kernel,
+        fuzzyTreatCol: treatVar[0] || null,
       };
 
-      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy"].includes(model))) {
+      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(model))) {
         try {
           if (model === "2SLS") {
-            // ── 2SLS SQL branch (Fase 3a classical only) ──
-            // Fase 3a supports classical / HC0 / HC1 only for 2SLS. Other SE types
-            // throw → outer catch → JS fallback.
-            if (!["classical", "HC0", "HC1"].includes(seTypeNorm)) {
-              throw new Error(`2SLS SQL path supports classical/HC0/HC1 in Fase 3a (got ${seTypeNorm}) — fallback to JS`);
+            // ── 2SLS SQL branch (Fase 3a + Fase 8 robust-SE backfill) ──
+            if (!["classical", "HC0", "HC1", "HC2", "HC3", "clustered", "twoway", "HAC"].includes(seTypeNorm)) {
+              throw new Error(`2SLS SQL path does not support ${seTypeNorm} - fallback to JS`);
             }
 
             // X = endogenous + exogenous controls; Z = exogenous + excluded instruments.
@@ -1820,11 +1841,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             const zExp = zExpansion.xColsExpanded;
             const dummySQL2 = { ...xExpansion.dummySQL, ...zExpansion.dummySQL };
 
-            // Endogenous factor variables: not supported in Fase 3a HC0/HC1 — the
-            // first-stage β alignment would need careful index mapping. Fall back.
+            // Endogenous factor variables: robust fitted-score paths need careful
+            // first-stage beta alignment after dummy expansion. Fall back for now.
             const anyEndogFactor = xVars.some(v => factorVars.has(v));
-            if (anyEndogFactor && (seTypeNorm === "HC0" || seTypeNorm === "HC1")) {
-              throw new Error("Endogenous factor variables not supported in Fase 3a 2SLS HC SE — fallback to JS");
+            if (anyEndogFactor && seTypeNorm !== "classical") {
+              throw new Error("Endogenous factor variables not supported in 2SLS SQL robust SE - fallback to JS");
             }
 
             // Re-check (k+q) post-expansion against K_THRESHOLD via the dispatcher.
@@ -1900,14 +1921,48 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               });
             }
 
-            // ── Robust SE meat (HC0/HC1) ──
+            // ── Robust SE meat (Fase 8) ──
             let meat = null;
-            if (seTypeNorm === "HC0" || seTypeNorm === "HC1") {
-              const mMeat = await measure(() => computeIVHCMeat({
-                tableName: duckTable, yCol: yVar[0],
-                xCols: xExp, zCols: zExp, dummySQL: dummySQL2,
-                beta: second.beta, firstStageBeta: firstStageBetas,
-              }));
+            if (seTypeNorm !== "classical") {
+              const sharedIVMeat = {
+                tableName: duckTable,
+                yCol: yVar[0],
+                xCols: xExp,
+                zCols: zExp,
+                dummySQL: dummySQL2,
+                beta: second.beta,
+                firstStageBeta: firstStageBetas,
+              };
+              const mMeat = await measure(() => {
+                if (seTypeNorm === "HC0" || seTypeNorm === "HC1") {
+                  return computeIVHCMeat(sharedIVMeat);
+                }
+                if (seTypeNorm === "HC2" || seTypeNorm === "HC3") {
+                  return computeIVHCMeatWithLeverage({
+                    ...sharedIVMeat,
+                    Ainv: second.XtPzXinv,
+                    hcType: seTypeNorm,
+                  });
+                }
+                if (seTypeNorm === "clustered") {
+                  return computeIVClusterMeat({
+                    ...sharedIVMeat,
+                    clusterCol: clusterVar,
+                  });
+                }
+                if (seTypeNorm === "twoway") {
+                  return computeIVTwowayClusterMeat({
+                    ...sharedIVMeat,
+                    clusterCol: clusterVar,
+                    clusterCol2: clusterVar2,
+                  });
+                }
+                return computeIVHACMeat({
+                  ...sharedIVMeat,
+                  orderCol: timeVar,
+                  maxLag,
+                });
+              });
               meat = mMeat.result.meat;
               logEstimate({
                 path: "sql", phase: `meat-2SLS-${seTypeNorm}`,
@@ -1915,7 +1970,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               });
             }
 
-            // ── Re-solve with robust meat if HC0/HC1 ──
+            // ── Re-solve with robust meat ──
             let finalSecond = second;
             if (meat) {
               const engineHcType = (seTypeNorm === "HC1") ? "HC1" : null;
@@ -1939,9 +1994,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           }
 
           if (model === "WLS") {
-            // ── WLS SQL branch (Fase 3c — classical / HC0 / HC1) ──
-            if (!["classical", "HC0", "HC1"].includes(seTypeNorm)) {
-              throw new Error(`WLS SQL path only supports classical/HC0/HC1 in Fase 3c (got ${seTypeNorm}) — fallback to JS`);
+            // ── WLS SQL branch (Fase 3c + Fase 8 robust-SE backfill) ──
+            if (!["classical", "HC0", "HC1", "HC2", "HC3", "clustered", "twoway", "HAC"].includes(seTypeNorm)) {
+              throw new Error(`WLS SQL path does not support ${seTypeNorm} - fallback to JS`);
             }
             const wCol = weightVar[0];
             if (!wCol) throw new Error("WLS SQL path: weight column not selected — fallback to JS");
@@ -1972,11 +2027,44 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (seTypeNorm === "classical") {
               rFinal = rCls;
             } else {
-              const mm = await measure(() => computeWLSHCMeat({
-                tableName: duckTable, yCol: yVar[0],
-                xCols: wlsX, wCol, dummySQL: wlsDummy,
+              const sharedWLSMeat = {
+                tableName: duckTable,
+                yCol: yVar[0],
+                xCols: wlsX,
+                wCol,
+                dummySQL: wlsDummy,
                 beta: rCls.beta,
-              }));
+              };
+              const mm = await measure(() => {
+                if (seTypeNorm === "HC0" || seTypeNorm === "HC1") {
+                  return computeWLSHCMeat(sharedWLSMeat);
+                }
+                if (seTypeNorm === "HC2" || seTypeNorm === "HC3") {
+                  return computeWLSHCMeatWithLeverage({
+                    ...sharedWLSMeat,
+                    Ainv: rCls.XtXinv,
+                    hcType: seTypeNorm,
+                  });
+                }
+                if (seTypeNorm === "clustered") {
+                  return computeWLSClusterMeat({
+                    ...sharedWLSMeat,
+                    clusterCol: clusterVar,
+                  });
+                }
+                if (seTypeNorm === "twoway") {
+                  return computeWLSTwowayClusterMeat({
+                    ...sharedWLSMeat,
+                    clusterCol: clusterVar,
+                    clusterCol2: clusterVar2,
+                  });
+                }
+                return computeWLSHACMeat({
+                  ...sharedWLSMeat,
+                  orderCol: timeVar,
+                  maxLag,
+                });
+              });
               logEstimate({ path: "sql", phase: `meat-WLS-${seTypeNorm}`, n: rowCount, k: wlsX.length, msTotal: mm.ms });
               const engineHcType = seTypeNorm === "HC1" ? "HC1" : null;
               rFinal = runWLSFromSuffStats({ ...wlsEntry, meat: mm.result.meat, hcType: engineHcType });
@@ -1986,6 +2074,149 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             const wrapped = wrapResult("WLS", rFinal, {
               yVar: yVar[0], xVars, wVars, weightCol: wCol,
             });
+            setResult(wrapped);
+            return;
+          }
+
+          if (model === "Logit" || model === "Probit" || model === "PoissonFE") {
+            const family = model === "Logit" ? "logit"
+              : model === "Probit" ? "probit"
+              : "poisson";
+            let irlsX = allX;
+            let irlsDummy = {};
+            let entityCol = null;
+
+            if (model === "PoissonFE") {
+              entityCol = panel?.entityCol || poissonEntityCol || null;
+              if (!entityCol) throw new Error("Poisson FE SQL path: entity column missing - fallback to JS");
+              const expansion = await expandFactors({
+                xCols: [...allX, `factor(${entityCol})`],
+                tableName: duckTable,
+              });
+              irlsX = expansion.xColsExpanded;
+              irlsDummy = expansion.dummySQL;
+            } else {
+              const expansion = await expandFactors({ xCols: allX, tableName: duckTable });
+              irlsX = expansion.xColsExpanded;
+              irlsDummy = expansion.dummySQL;
+            }
+
+            if (!shouldUseSQLPath({
+              ...dispatchCtx,
+              xColsExpanded: irlsX,
+              unitCol: entityCol ?? dispatchCtx.unitCol,
+            })) {
+              throw new Error("Post-expansion IRLS design exceeds dispatcher scope - fallback to JS");
+            }
+
+            const mFit = await measure(() => runIRLSFromSuffStats({
+              tableName: duckTable,
+              yCol: yVar[0],
+              xCols: irlsX,
+              family,
+              dummySQL: irlsDummy,
+              maxIter: IRLS_MAX_ITER,
+              tol: IRLS_TOL,
+            }));
+            let irlsResult = mFit.result;
+            if (!irlsResult || irlsResult.error) {
+              throw new Error(irlsResult?.error ?? "IRLS SQL solve failed");
+            }
+            logEstimate({
+              path: "sql",
+              phase: `irls-${model}`,
+              n: rowCount,
+              k: irlsX.length,
+              seType: "classical",
+              msTotal: mFit.ms,
+            });
+
+            if (seTypeNorm === "HC0" || seTypeNorm === "HC1") {
+              const mRobust = await measure(() => applyRobustSEToIRLSResult({
+                result: irlsResult,
+                tableName: duckTable,
+                yCol: yVar[0],
+                xCols: irlsX,
+                family,
+                dummySQL: irlsDummy,
+                hcType: seTypeNorm,
+              }));
+              irlsResult = mRobust.result;
+              logEstimate({
+                path: "sql",
+                phase: `irls-${model}-${seTypeNorm}`,
+                n: rowCount,
+                k: irlsX.length,
+                seType: seTypeNorm,
+                msTotal: mRobust.ms,
+              });
+            }
+
+            if (!irlsResult.converged) {
+              console.warn(`${model} SQL IRLS did not converge after ${irlsResult.iterations} iterations.`);
+            }
+
+            const wrapped = wrapResult(model, irlsResult, {
+              yVar: yVar[0],
+              xVars,
+              wVars,
+              entityCol,
+            });
+            setResult(wrapped);
+            return;
+          }
+
+          if (model === "RDD" || model === "FuzzyRDD") {
+            if (!runningVar[0] || !Number.isFinite(cutoffNum)) {
+              throw new Error("RDD SQL path: running variable or cutoff missing - fallback to JS");
+            }
+            const controlsExpansion = await expandFactors({
+              xCols: wVars.filter(v => v !== runningVar[0] && v !== yVar[0]),
+              tableName: duckTable,
+            });
+            const sharedRDD = {
+              tableName: duckTable,
+              yCol: yVar[0],
+              runningCol: runningVar[0],
+              cutoff: cutoffNum,
+              bandwidth: Number.isFinite(manualRDDH) ? manualRDDH : null,
+              controls: controlsExpansion.xColsExpanded,
+              dummySQL: controlsExpansion.dummySQL,
+              seType: seTypeNorm,
+            };
+            const mRDD = await measure(() => model === "RDD"
+              ? runSharpRDDFromSuffStats(sharedRDD)
+              : runFuzzyRDDFromSuffStats({ ...sharedRDD, treatCol: treatVar[0] }));
+            const rddRaw = mRDD.result;
+            if (!rddRaw || rddRaw.error) {
+              throw new Error(rddRaw?.error ?? `${model} SQL solve failed`);
+            }
+            logEstimate({
+              path: "sql",
+              phase: `rdd-${model}`,
+              n: rowCount,
+              k: controlsExpansion.xColsExpanded.length + 3,
+              seType: seTypeNorm,
+              msTotal: mRDD.ms,
+            });
+            const wrapped = model === "RDD"
+              ? wrapResult("RDD", rddRaw, {
+                yVar: yVar[0],
+                wVars,
+                runningVar: runningVar[0],
+                cutoff: cutoffNum,
+                bandwidth: rddRaw.h,
+                kernel: "triangular",
+              }, { h: rddRaw.h })
+              : wrapResult("FuzzyRDD", rddRaw, {
+                yVar: yVar[0],
+                wVars,
+                treatVar: treatVar[0],
+                runningVar: runningVar[0],
+                cutoff: cutoffNum,
+                bandwidth: rddRaw.h,
+                kernel: "triangular",
+              });
             setResult(wrapped);
             return;
           }
@@ -2030,9 +2261,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           }
 
           if (model === "LIML") {
-            // ── LIML SQL branch (Fase 3b — classical SE only) ──
-            if (seTypeNorm !== "classical") {
-              throw new Error(`LIML SQL path only supports classical SE in Fase 3b (got ${seTypeNorm}) — fallback to JS`);
+            // ── LIML SQL branch (Fase 3b + Fase 8 robust-SE backfill) ──
+            if (!["classical", "HC0", "HC1", "clustered", "HAC"].includes(seTypeNorm)) {
+              throw new Error(`LIML SQL path does not support ${seTypeNorm} - fallback to JS`);
             }
             const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable });
             const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable });
@@ -2046,10 +2277,51 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             const ss = await measure(() => buildLIMLSuffStats(duckTable, yVar[0], xExp, wExp, zExp, { dummySQL }));
             logEstimate({ path: "sql", phase: "limlSuffStats", n: rowCount, k: ss.result.xColsAll.length, msTotal: ss.ms });
 
-            const r = runLIMLFromSuffStats({ ...ss.result });
+            const r = runLIMLFromSuffStats({ ...ss.result, meat: null, hcType: null });
             if (!r) throw new Error("LIML solve returned null (singular Z'Z, W'W, or eigenvalue failure)");
 
-            const wrapped = wrapResult("LIML", r, { yVar: yVar[0], xVars, wVars, zVars });
+            let rFinal = r;
+            if (seTypeNorm !== "classical") {
+              const xAllLiml = [...wExp, ...xExp];
+              const sharedLIMLMeat = {
+                tableName: duckTable,
+                yCol: yVar[0],
+                xColsExpanded: xAllLiml,
+                dummySQL,
+                beta: r.beta,
+              };
+              const mm = await measure(() => {
+                if (seTypeNorm === "HC0" || seTypeNorm === "HC1") {
+                  return computeHCMeat(sharedLIMLMeat);
+                }
+                if (seTypeNorm === "clustered") {
+                  return computeClusterMeat({
+                    ...sharedLIMLMeat,
+                    clusterCol: clusterVar,
+                  });
+                }
+                return computeHACMeat({
+                  ...sharedLIMLMeat,
+                  orderCol: timeVar,
+                  maxLag,
+                });
+              });
+              logEstimate({
+                path: "sql",
+                phase: `meat-LIML-${seTypeNorm}`,
+                n: rowCount,
+                k: xAllLiml.length,
+                msTotal: mm.ms,
+              });
+              rFinal = runLIMLFromSuffStats({
+                ...ss.result,
+                meat: mm.result.meat,
+                hcType: seTypeNorm === "HC1" ? "HC1" : null,
+              });
+              if (!rFinal) throw new Error("LIML robust solve returned null");
+            }
+
+            const wrapped = wrapResult("LIML", rFinal, { yVar: yVar[0], xVars, wVars, zVars });
             setResult(wrapped);
             return;
           }
@@ -2462,7 +2734,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
       model, yVar, xVars, wVars, zVars, weightVar, factorVars, seType,
       clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
-      postVar, treatVar, treatTimeCol, kPre, kPost]);
+      postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol]);
 
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
@@ -3434,7 +3706,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       /> },
                     { id: "mccrary", label: "McCrary density",
                       node: <McCraryPlot
-                        result={runMcCrary(rows, runningVar[0], parseFloat(cutoff))}
+                        result={r.mcCrary ?? runMcCrary(rows, runningVar[0], parseFloat(cutoff))}
                         xLabel={runningVar[0]}
                       /> },
                     ...wVars.map(xc => ({

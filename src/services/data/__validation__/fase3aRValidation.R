@@ -54,6 +54,7 @@ bench <- list(
   se_HC1 = unname(se_HC1),
   firstStageF_x1 = F_first
 )
+bench
 out_json <- file.path("src", "services", "data", "__validation__", "fase3aBenchmarks.json")
 write_json(bench, out_json, auto_unbox = TRUE, digits = 10)
 

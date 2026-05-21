@@ -1,0 +1,442 @@
+# feglm Fixed Effects GLM estimations
+feglm: Fixed-effects GLM estimations
+Description
+Estimates GLM models with any number of fixed-effects.
+
+Usage
+feglm(
+  fml,
+  data,
+  family = "poisson",
+  offset,
+  weights,
+  subset,
+  split,
+  fsplit,
+  cluster,
+  se,
+  dof,
+  panel.id,
+  start = NULL,
+  etastart = NULL,
+  mustart = NULL,
+  fixef,
+  fixef.rm = "perfect",
+  fixef.tol = 1e-06,
+  fixef.iter = 10000,
+  collin.tol = 1e-10,
+  glm.iter = 25,
+  glm.tol = 1e-08,
+  nthreads = getFixest_nthreads(),
+  lean = FALSE,
+  warn = TRUE,
+  notes = getFixest_notes(),
+  verbose = 0,
+  combine.quick,
+  mem.clean = FALSE,
+  only.env = FALSE,
+  env,
+  ...
+)
+feglm.fit(
+  y,
+  X,
+  fixef_mat,
+  family = "poisson",
+  offset,
+  split,
+  fsplit,
+  cluster,
+  se,
+  dof,
+  weights,
+  subset,
+  start = NULL,
+  etastart = NULL,
+  mustart = NULL,
+  fixef.rm = "perfect",
+  fixef.tol = 1e-06,
+  fixef.iter = 10000,
+  collin.tol = 1e-10,
+  glm.iter = 25,
+  glm.tol = 1e-08,
+  nthreads = getFixest_nthreads(),
+  lean = FALSE,
+  warn = TRUE,
+  notes = getFixest_notes(),
+  mem.clean = FALSE,
+  verbose = 0,
+  only.env = FALSE,
+  env,
+  ...
+)
+
+fepois(
+  fml,
+  data,
+  offset,
+  weights,
+  subset,
+  split,
+  fsplit,
+  cluster,
+  se,
+  dof,
+  panel.id,
+  start = NULL,
+  etastart = NULL,
+  mustart = NULL,
+  fixef,
+  fixef.rm = "perfect",
+  fixef.tol = 1e-06,
+  fixef.iter = 10000,
+  collin.tol = 1e-10,
+  glm.iter = 25,
+  glm.tol = 1e-08,
+  nthreads = getFixest_nthreads(),
+  lean = FALSE,
+  warn = TRUE,
+  notes = getFixest_notes(),
+  verbose = 0,
+  combine.quick,
+  mem.clean = FALSE,
+  only.env = FALSE,
+  env,
+  ...
+)
+
+Arguments
+fml
+A formula representing the relation to be estimated. For example: fml = z~x+y. To include fixed-effects, insert them in this formula using a pipe: e.g. fml = z~x+y | fe_1+fe_2. You can combine two fixed-effects with ^: e.g. fml = z~x+y|fe_1^fe_2, see details. You can also use variables with varying slopes using square brackets: e.g. in fml = z~y|fe_1[x] + fe_2, see details. To add IVs, insert the endogenous vars./instruments after a pipe, like in y ~ x | c(x_endo1, x_endo2) ~ x_inst1 + x_inst2. Note that it should always be the last element, see details. Multiple estimations can be performed at once: for multiple dep. vars, wrap them in c(): ex c(y1, y2). For multiple indep. vars, use the stepwise functions: ex x1 + csw(x2, x3). The formula fml = c(y1, y2) ~ x1 + cw0(x2, x3) leads to 6 estimation, see details.
+
+data
+A data.frame containing the necessary variables to run the model. The variables of the non-linear right hand side of the formula are identified with this data.frame names. Can also be a matrix.
+
+family
+Family to be used for the estimation. Defaults to poisson(). See family for details of family functions.
+
+offset
+A formula or a numeric vector. An offset can be added to the estimation. If equal to a formula, it should be of the form (for example) ~0.5*x**2. This offset is linearly added to the elements of the main formula 'fml'.
+
+weights
+A formula or a numeric vector. Each observation can be weighted, the weights must be greater than 0. If equal to a formula, it should be one-sided: for example ~ var_weight.
+
+subset
+A vector (logical or numeric) or a one-sided formula. If provided, then the estimation will be performed only on the observations defined by this argument.
+
+split
+A one sided formula representing a variable (eg split = ~var) or a vector. If provided, the sample is split according to the variable and one estimation is performed for each value of that variable. If you also want to include the estimation for the full sample, use the argument fsplit instead.
+
+fsplit
+A one sided formula representing a variable (eg split = ~var) or a vector. If provided, the sample is split according to the variable and one estimation is performed for each value of that variable. This argument is the same as split but also includes the full sample as the first estimation.
+
+cluster
+Tells how to cluster the standard-errors (if clustering is requested). Can be either a list of vectors, a character vector of variable names, a formula or an integer vector. Assume we want to perform 2-way clustering over var1 and var2 contained in the data.frame base used for the estimation. All the following cluster arguments are valid and do the same thing: cluster = base[, c("var1", "var2")], cluster = c("var1", "var2"), cluster = ~var1+var2. If the two variables were used as clusters in the estimation, you could further use cluster = 1:2 or leave it blank with se = "twoway" (assuming var1 [resp. var2] was the 1st [res. 2nd] cluster). You can interact two variables using ^ with the following syntax: cluster = ~var1^var2 or cluster = "var1^var2".
+
+se
+Character scalar. Which kind of standard error should be computed: “standard”, “hetero”, “cluster”, “twoway”, “threeway” or “fourway”? By default if there are clusters in the estimation: se = "cluster", otherwise se = "standard". Note that this argument can be implicitly deduced from the argument cluster.
+
+dof
+An object of class dof.type obtained with the function dof. Represents how the degree of freedom correction should be done.You must use the function dof for this argument. The arguments and defaults of the function dof are: adj = TRUE, fixef.K="nested", cluster.adj = TRUE, cluster.df = "conventional", t.df = "conventional", fixef.force_exact=FALSE). See the help of the function dof for details.
+
+panel.id
+The panel identifiers. Can either be: i) a one sided formula (e.g. panel.id = ~id+time), ii) a character vector of length 2 (e.g. panel.id=c('id', 'time'), or iii) a character scalar of two variables separated by a comma (e.g. panel.id='id,time'). Note that you can combine variables with ^ only inside formulas (see the dedicated section in feols).
+
+start
+Starting values for the coefficients. Can be: i) a numeric of length 1 (e.g. start = 0), ii) a numeric vector of the exact same length as the number of variables, or iii) a named vector of any length (the names will be used to initialize the appropriate coefficients). Default is missing.
+
+etastart
+Numeric vector of the same length as the data. Starting values for the linear predictor. Default is missing.
+
+mustart
+Numeric vector of the same length as the data. Starting values for the vector of means. Default is missing.
+
+fixef
+Character vector. The names of variables to be used as fixed-effects. These variables should contain the identifier of each observation (e.g., think of it as a panel identifier). Note that the recommended way to include fixed-effects is to insert them directly in the formula.
+
+fixef.rm
+Can be equal to "perfect" (default), "singleton", "both" or "none". Controls which observations are to be removed. If "perfect", then observations having a fixed-effect with perfect fit (e.g. only 0 outcomes in Poisson estimations) will be removed. If "singleton", all observations for which a fixed-effect appears only once will be removed. The meaning of "both" and "none" is direct.
+
+fixef.tol
+Precision used to obtain the fixed-effects. Defaults to 1e-6. It corresponds to the maximum absolute difference allowed between two coefficients of successive iterations.
+
+fixef.iter
+Maximum number of iterations in fixed-effects algorithm (only in use for 2+ fixed-effects). Default is 10000.
+
+collin.tol
+Numeric scalar, default is 1e-10. Threshold deciding when variables should be considered collinear and subsequently removed from the estimation. Higher values means more variables will be removed (if there is presence of collinearity). One signal of presence of collinearity is t-stats that are extremely low (for instance when t-stats < 1e-3).
+
+glm.iter
+Number of iterations of the glm algorithm. Default is 25.
+
+glm.tol
+Tolerance level for the glm algorithm. Default is 1e-8.
+
+nthreads
+The number of threads. Can be: a) an integer lower than, or equal to, the maximum number of threads; b) 0: meaning all available threads will be used; c) a number strictly between 0 and 1 which represents the fraction of all threads to use. The default is to use 50% of all threads. You can set permanently the number of threads used within this package using the function setFixest_nthreads.
+
+lean
+Logical, default is FALSE. If TRUE then all large objects are removed from the returned result: this will save memory but will block the possibility to use many methods. It is recommended to use the arguments se or cluster to obtain the appropriate standard-errors at estimation time, since obtaining different SEs won't be possible afterwards.
+
+warn
+Logical, default is TRUE. Whether warnings should be displayed (concerns warnings relating to convergence state).
+
+notes
+Logical. By default, three notes are displayed: when NAs are removed, when some fixed-effects are removed because of only 0 (or 0/1) outcomes, or when a variable is dropped because of collinearity. To avoid displaying these messages, you can set notes = FALSE. You can remove these messages permanently by using setFixest_notes(FALSE).
+
+verbose
+Integer. Higher values give more information. In particular, it can detail the number of iterations in the demeaning algoritmh (the first number is the left-hand-side, the other numbers are the right-hand-side variables). It can also detail the step-halving algorithm.
+
+combine.quick
+Logical. When you combine different variables to transform them into a single fixed-effects you can do e.g. y ~ x | paste(var1, var2). The algorithm provides a shorthand to do the same operation: y ~ x | var1^var2. Because pasting variables is a costly operation, the internal algorithm may use a numerical trick to hasten the process. The cost of doing so is that you lose the labels. If you are interested in getting the value of the fixed-effects coefficients after the estimation, you should use combine.quick = FALSE. By default it is equal to FALSE if the number of observations is lower than 50,000, and to TRUE otherwise.
+
+mem.clean
+Logical, default is FALSE. Only to be used if the data set is large compared to the available RAM. If TRUE then intermediary objects are removed as much as possible and gc is run before each substantial C++ section in the internal code to avoid memory issues.
+
+only.env
+(Advanced users.) Logical, default is FALSE. If TRUE, then only the environment used to make the estimation is returned.
+
+env
+(Advanced users.) A fixest environment created by a fixest estimation with only.env = TRUE. Default is missing. If provided, the data from this environment will be used to perform the estimation.
+
+...
+Not currently used.
+
+y
+Numeric vector of the dependent variable.
+
+X
+Numeric matrix of the regressors.
+
+fixef_mat
+Matrix/data.frame of the fixed-effects.
+
+Value
+A fixest object. Note that fixest objects contain many elements and most of them are for internal use, they are presented here only for information. To access them, it is safer to use the user-level methods (e.g. vcov.fixest, resid.fixest, etc) or functions (like for instance fitstat to access any fit statistic).
+
+nobs
+The number of observations.
+
+ fml
+The linear formula of the call.
+
+ call
+The call of the function.
+
+ method
+The method used to estimate the model.
+
+ family
+The family used to estimate the model.
+
+ fml_all
+A list containing different parts of the formula. Always contain the linear formula. Then, if relevant: fixef: the fixed-effects.
+
+ nparams
+The number of parameters of the model.
+
+ fixef_vars
+The names of each fixed-effect dimension.
+
+ fixef_id
+The list (of length the number of fixed-effects) of the fixed-effects identifiers for each observation.
+
+ fixef_sizes
+The size of each fixed-effect (i.e. the number of unique identifierfor each fixed-effect dimension).
+
+ y
+(When relevant.) The dependent variable (used to compute the within-R2 when fixed-effects are present).
+
+ convStatus
+Logical, convergence status of the IRWLS algorithm.
+
+ irls_weights
+The weights of the last iteration of the IRWLS algorithm.
+
+ obsRemoved
+(When relevant.) Vector of observations that were removed because of NA values or because of only 0/1 outcome within a fixed-effect (depends on the family though).
+
+ fixef_removed
+(When relevant.) In the case there were fixed-effects and some observations were removed because of only 0/1 outcome within a fixed-effect, it gives the list (for each fixed-effect dimension) of the fixed-effect identifiers that were removed.
+
+ coefficients
+The named vector of estimated coefficients.
+
+ coeftable
+The table of the coefficients with their standard errors, z-values and p-values.
+
+ loglik
+The loglikelihood.
+
+ deviance
+Deviance of the fitted model.
+
+ iterations
+Number of iterations of the algorithm.
+
+ ll_null
+Log-likelihood of the null model (i.e. with the intercept only).
+
+ ssr_null
+Sum of the squared residuals of the null model (containing only with the intercept).
+
+ pseudo_r2
+The adjusted pseudo R2.
+
+ fitted.values
+The fitted values are the expected value of the dependent variable for the fitted model: that is 
+.
+
+ linear.predictors
+The linear predictors.
+
+ residuals
+The residuals (y minus the fitted values).
+
+ sq.cor
+Squared correlation between the dependent variable and the expected predictor (i.e. fitted.values) obtained by the estimation.
+
+ hessian
+The Hessian of the parameters.
+
+ cov.unscaled
+The variance-covariance matrix of the parameters.
+
+ se
+The standard-error of the parameters.
+
+ scores
+The matrix of the scores (first derivative for each observation).
+
+ residuals
+The difference between the dependent variable and the expected predictor.
+
+ sumFE
+The sum of the fixed-effects coefficients for each observation.
+
+ offset
+(When relevant.) The offset formula.
+
+ weights
+(When relevant.) The weights formula.
+
+ collin.var
+(When relevant.) Vector containing the variables removed because of collinearity.
+
+ collin.coef
+(When relevant.) Vector of coefficients, where the values of the variables removed because of collinearity are NA.
+
+Combining the fixed-effects
+You can combine two variables to make it a new fixed-effect using ^. The syntax is as follows: fe_1^fe_2. Here you created a new variable which is the combination of the two variables fe_1 and fe_2. This is identical to doing paste0(fe_1, "_", fe_2) but more convenient.
+
+Note that pasting is a costly operation, especially for large data sets. Thus, the internal algorithm uses a numerical trick which is fast, but the drawback is that the identity of each observation is lost (i.e. they are now equal to a meaningless number instead of being equal to paste0(fe_1, "_", fe_2)). These “identities” are useful only if you're interested in the value of the fixed-effects (that you can extract with fixef.fixest). If you're only interested in coefficients of the variables, it doesn't matter. Anyway, you can use combine.quick = FALSE to tell the internal algorithm to use paste instead of the numerical trick. By default, the numerical trick is performed only for large data sets.
+
+Varying slopes
+You can add variables with varying slopes in the fixed-effect part of the formula. The syntax is as follows: fixef_var[var1, var2]. Here the variables var1 and var2 will be with varying slopes (one slope per value in fixef_var) and the fixed-effect fixef_var will also be added.
+
+To add only the variables with varying slopes and not the fixed-effect, use double square brackets: fixef_var[[var1, var2]].
+
+In other words:
+
+fixef_var[var1, var2] is equivalent to fixef_var + fixef_var[[var1]] + fixef_var[[var2]]
+
+fixef_var[[var1, var2]] is equivalent to fixef_var[[var1]] + fixef_var[[var2]]
+
+In general, for convergence reasons, it is recommended to always add the fixed-effect and avoid using only the variable with varying slope (i.e. use single square brackets).
+
+Lagging variables
+To use leads/lags of variables in the estimation, you can: i) either provide the argument panel.id, ii) either set your data set as a panel with the function panel. Doing either of the two will give you acceess to the lagging functions l, f and d.
+
+You can provide several leads/lags/differences at once: e.g. if your formula is equal to f(y) ~ l(x, -1:1), it means that the dependent variable is equal to the lead of y, and you will have as explanatory variables the lead of x1, x1 and the lag of x1. See the examples in function l for more details.
+
+Interactions
+You can interact a numeric variable with a "factor-like" variable by using interact(var, fe, ref), where fe is the variable to be interacted with and the argument ref is a value of fe taken as a reference (optional). Instead of using the function interact, you can use the alias i(var, fe, ref).
+
+Using this specific way to create interactions leads to a different display of the interacted values in etable and offers a special representation of the interacted coefficients in the function coefplot. See examples.
+
+It is important to note that *if you do not care about the standard-errors of the interactions*, then you can add interactions in the fixed-effects part of the formula (using the syntax fe[[var]], as explained in the section “Varying slopes”).
+
+The function interact has in fact more arguments, please see details in its associated help page.
+
+On standard-errors
+Standard-errors can be computed in different ways, you can use the arguments se and dof in summary.fixest to define how to compute them. By default, in the presence of fixed-effects, standard-errors are automatically clustered.
+
+The following vignette: On standard-errors describes in details how the standard-errors are computed in fixest and how you can replicate standard-errors from other software.
+
+You can use the functions setFixest_se and setFixest_dof to permanently set the way the standard-errors are computed.
+
+Multiple estimations
+Multiple estimations can be performed at once, they just have to be specified in the formula. Multiple estimations yield a fixest_multi object which is ‘kind of’ a list of all the results but includes specific methods to access the results in a handy way.
+
+To include mutliple dependent variables, wrap them in c() (list() also works). For instance fml = c(y1, y2) ~ x1 would estimate the model fml = y1 ~ x1 and then the model fml = y2 ~ x1.
+
+To include multiple independent variables, you need to use the stepwise functions. There are 4 stepwise functions associated to 4 short aliases. These are a) stepwise, stepwise0, cstepwise, cstepwise0, and b) sw, sw0, csw, csw0. Let's explain that. Assume you have the following formula: fml = y ~ x1 + sw(x2, x3). The stepwise function sw will estimate the following two models: y ~ x1 + x2 and y ~ x1 + x3. That is, each element in sw() is sequentially, and separately, added to the formula. Would have you used sw0 in lieu of sw, then the model y ~ x1 would also have been estimated. The 0 in the name means that the model wihtout any stepwise element also needs to be estimated. Finally, the prefix c means cumulative: each stepwise element is added to the next. That is, fml = y ~ x1 + csw(x2, x3) would lead to the following models y ~ x1 + x2 and y ~ x1 + x2 + x3. The 0 has the same meaning and would also lead to the model without the stepwise elements to be estimated: in other words, fml = y ~ x1 + csw0(x2, x3) leads to the following three models: y ~ x1, y ~ x1 + x2 and y ~ x1 + x2 + x3.
+
+Multiple independent variables can be combined with multiple dependent variables, as in fml = c(y1, y2) ~ cw(x1, x2, x3) which would lead to 6 estimations. Multiple estimations can also be combined to split samples (with the arguments split, fsplit).
+
+Fixed-effects cannot be included in a stepwise fashion: they are there or not and stay the same for all estimations.
+
+A note on performance. The feature of multiple estimations has been highly optimized for feols, in particular in the presence of fixed-effects. It is faster to estimate multiple models using the formula rather than with a loop. For non-feols models using the formula is roughly similar to using a loop performance-wise.
+
+Details
+The core of the GLM are the weighted OLS estimations. These estimations are performed with feols. The method used to demean each variable along the fixed-effects is based on Berge (2018), since this is the same problem to solve as for the Gaussian case in a ML setup.
+
+References
+Berge, Laurent, 2018, "Efficient estimation of maximum likelihood models with multiple fixed-effects: the R package FENmlm." CREA Discussion Papers, 13 (https://wwwen.uni.lu/content/download/110162/1299525/file/2018_13).
+
+For models with multiple fixed-effects:
+
+Gaure, Simen, 2013, "OLS with multiple high dimensional category variables", Computational Statistics & Data Analysis 66 pp. 8--18
+
+See Also
+See also summary.fixest to see the results with the appropriate standard-errors, fixef.fixest to extract the fixed-effects coefficients, and the function etable to visualize the results of multiple estimations. And other estimation methods: feols, femlm, fenegbin, feNmlm.
+
+Examples
+Run this code
+# NOT RUN {
+# Default is a poisson model
+res = feglm(Sepal.Length ~ Sepal.Width + Petal.Length | Species, iris)
+
+# You could also use fepois
+res_pois = fepois(Sepal.Length ~ Sepal.Width + Petal.Length | Species, iris)
+
+# With the fit method:
+res_fit = feglm.fit(iris$Sepal.Length, iris[, 2:3], iris$Species)
+
+# All results are identical:
+etable(res, res_pois, res_fit)
+
+# Note that you have more examples in feols
+
+#
+# Multiple estimations:
+#
+
+# 6 estimations
+est_mult = fepois(c(Ozone, Solar.R) ~ Wind + Temp + csw0(Wind:Temp, Day), airquality)
+
+# We can display the results for the first lhs:
+etable(est_mult[lhs = 1])
+
+# And now the second (access can be made by name)
+etable(est_mult[lhs = "Solar.R"])
+
+# Now we focus on the two last right hand sides
+# (note that .N can be used to specify the last item)
+etable(est_mult[rhs = 2:.N])
+
+# Combining with split
+est_split = fepois(c(Ozone, Solar.R) ~ sw(poly(Wind, 2), poly(Temp, 2)),
+                  airquality, split = ~ Month)
+
+# You can display everything at once with the print method
+est_split
+
+# Different way of displaying the results with "compact"
+summary(est_split, "compact")
+
+# You can still select which sample/LHS/RHS to display
+est_split[sample = 1:2, lhs = 1, rhs = 1]
+
+
+# }

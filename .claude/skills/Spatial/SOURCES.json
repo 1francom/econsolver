@@ -1,0 +1,35 @@
+{
+  "purpose": "Offline PDFs and source URLs for Litux spatial implementations.",
+  "generated_for": "./spatial_docs/",
+  "pdfs_included": [
+    "01_r_core/Spatialdata.pdf",
+    "01_r_core/geosphere.pdf",
+    "01_r_core/geosphere_vignette.pdf",
+    "01_r_core/lwgeom.pdf",
+    "01_r_core/s2.pdf",
+    "01_r_core/sf.pdf",
+    "01_r_core/terra.pdf",
+    "01_r_core/units.pdf",
+    "02_engines_standards/PROJ_R_wrapper.pdf",
+    "02_engines_standards/gdal.pdf",
+    "02_engines_standards/postgis-3.1.pdf",
+    "02_engines_standards/proj.pdf",
+    "03_python_stack/rasterio.pdf",
+    "03_python_stack/shapely.pdf",
+    "04_spatial_stats/spdep.pdf"
+  ],
+  "official_html_links_not_included_as_pdf": [
+    {
+      "name": "pyproj Geod",
+      "url": "https://pyproj4.github.io/pyproj/stable/api/geod.html"
+    },
+    {
+      "name": "GeoPandas projections",
+      "url": "https://geopandas.org/en/stable/docs/user_guide/projections.html"
+    },
+    {
+      "name": "GeoPandas docs",
+      "url": "https://geopandas.org/en/stable/docs.html"
+    }
+  ]
+}

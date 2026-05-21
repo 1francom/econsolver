@@ -39,27 +39,31 @@ export function createSuffStatsCache(maxEntries = 50) {
 }
 
 /**
- * Deterministic key from (tableName, yCol, xCols [, zCols [, wCol]]).
+ * Deterministic key from (tableName, yCol, xCols [, zCols [, wCol [, panel]]]).
  * Order of xCols / zCols irrelevant. When zCols is provided (2SLS suff-stats),
  * the instrument tuple is appended after a `|Z|` sentinel so OLS keys remain
  * disjoint from IV keys with the same X. When wCol is provided (WLS suff-stats),
  * the weight column is appended after a `|W|` sentinel so WLS keys remain
- * disjoint from unweighted keys.
+ * disjoint from unweighted keys. When panel is provided ({mode, unitCol, timeCol})
+ * the panel descriptor is appended after a `|P|` sentinel so FE/FD entries are
+ * disjoint from OLS/WLS for the same y/x — they live in a transformed space.
  */
-export function makeCacheKey(tableName, yCol, xCols, zCols = null, wCol = null) {
+export function makeCacheKey(tableName, yCol, xCols, zCols = null, wCol = null, panel = null) {
   const xs = [...xCols].sort().join(",");
   let key = `${tableName}|${yCol}|${xs}`;
   if (zCols) key += `|Z|${[...zCols].sort().join(",")}`;
   if (wCol)  key += `|W|${wCol}`;
+  if (panel) key += `|P|${panel.mode}:${panel.unitCol ?? ""}:${panel.timeCol ?? ""}`;
   return key;
 }
 
 /**
  * Defensive check: dim of XtX must match k+1 (k = xCols.length). When zCols is
  * provided, also verify ZtZ dim matches q+1. When wCol is provided, verify
- * XtWX dim matches k+1 (WLS suff-stats entry).
+ * XtWX dim matches k+1 (WLS suff-stats entry). When panel is provided, verify
+ * the entry's mode matches and that n_units is finite (panel FE/FD entry).
  */
-export function validateSuffStatsEntry(entry, xCols, zCols = null, wCol = null) {
+export function validateSuffStatsEntry(entry, xCols, zCols = null, wCol = null, panel = null) {
   if (!entry || !entry.XtX) return false;
   if (entry.XtX.length !== xCols.length + 1) return false;
   if (zCols) {
@@ -69,6 +73,10 @@ export function validateSuffStatsEntry(entry, xCols, zCols = null, wCol = null) 
   if (wCol) {
     if (!entry.XtWX) return false;
     if (entry.XtWX.length !== xCols.length + 1) return false;
+  }
+  if (panel) {
+    if (entry.mode !== panel.mode) return false;
+    if (!Number.isFinite(entry.n_units)) return false;
   }
   return true;
 }

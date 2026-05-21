@@ -409,6 +409,7 @@ function wrapRDD(eng, spec, h) {
       h:          h              ?? eng.h ?? null,
       kernelType: eng.kernelType ?? null,
     },
+    mcCrary: eng.mcCrary ?? null,
   };
 }
 
@@ -531,6 +532,7 @@ function wrapFuzzyRDD(eng, spec) {
       lateP:      eng.lateP      ?? null,
     },
     Dhat: eng.Dhat ?? [],
+    mcCrary: eng.mcCrary ?? null,
     // First-stage engine output (raw, not normalised through wrapResult)
     firstStage:         eng.firstStage         ?? null,
     firstStageVarNames: eng.firstStageVarNames ?? ["(Intercept)", "Z (instrument)", "running − c", "Z × (running − c)"],

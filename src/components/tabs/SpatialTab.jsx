@@ -183,6 +183,14 @@ function wktToLeaflet(wkt, projectFn) {
     const rings = splitParenGroups(inner).map(ring).filter(r => r.length >= 3);
     return rings.length ? { type: "polygon", rings } : null;
   }
+  if (s.startsWith("MULTILINESTRING")) {
+    const lines = splitParenGroups(inner).map(ring).filter(r => r.length >= 2);
+    return lines.length ? { type: "multiline", rings: lines } : null;
+  }
+  if (s.startsWith("LINESTRING")) {
+    const coords = ring(inner);
+    return coords.length >= 2 ? { type: "line", rings: [coords] } : null;
+  }
   return null;
 }
 
@@ -1391,7 +1399,7 @@ function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders, availa
   const lyWktHeaders = useMemo(() =>
     lyHeaders.filter(h => {
       const s = lyRows.find(r => r[h] != null)?.[h];
-      return typeof s === "string" && /^(POINT|POLYGON|MULTIPOLYGON)/i.test(s.trim());
+      return typeof s === "string" && /^(POINT|POLYGON|MULTIPOLYGON|LINESTRING|MULTILINESTRING)/i.test(s.trim());
     }),
   [lyRows, lyHeaders]);
   const geomCols = lyWktHeaders.length ? lyWktHeaders : lyHeaders;
@@ -1480,6 +1488,18 @@ function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders, availa
           onOpacity={v => onChange({ ...layer, borderWidth: v })} C={C} />
       </>)}
 
+      {/* ── Line ─────────────────────────────────────────────────────────── */}
+      {layer.type === "line" && (<>
+        <ColSelect label="WKT geometry column" value={layer.wktCol}
+          onChange={v => onChange({ ...layer, wktCol: v })} headers={geomCols} C={C} allowNone />
+        <ColorRow label="Line color" color={layer.lineColor ?? "#6e9ec8"} opacity={layer.lineWeight ?? 1.5}
+          opacityLabel="width" opacityMin={0.5} opacityMax={6} opacityStep={0.25}
+          onColor={v => onChange({ ...layer, lineColor: v })}
+          onOpacity={v => onChange({ ...layer, lineWeight: v })} C={C} />
+        <NumInput label="Opacity" value={layer.lineOpacity ?? 0.85}
+          onChange={v => onChange({ ...layer, lineOpacity: Number(v) })} C={C} min={0} max={1} step={0.05} />
+      </>)}
+
       {/* ── Points ────────────────────────────────────────────────────────── */}
       {layer.type === "points" && (<>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1517,6 +1537,7 @@ function mkSLayer(type, idx) {
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fillColor: "#d0d0d0", fillOpacity: 0.12, borderColor: "#222222", borderWidth: 0.5 };
   if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "generate", wktCol: "", boundaryCol: "", cellsize: 500, clipBorder: true, fillColor: col, fillOpacity: 0, borderColor: "#d73027", borderWidth: 0.15, colorByCol: "", colorFillOpacity: 0.55 };
   if (type === "points")   return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", colorCol: "", fillColor: col, radius: 4, opacity: 0.78 };
+  if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", lineColor: col, lineWeight: 1.5, lineOpacity: 0.85 };
   return { id, type, visible: true };
 }
 
@@ -1734,6 +1755,17 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
             .bindTooltip(tipParts.join("<br>")).addTo(group);
         }
       }
+
+      // ── Line ──────────────────────────────────────────────────────────────
+      if (ly.type === "line" && ly.wktCol) {
+        for (const row of lyRows(ly)) {
+          const geo = wktToLeaflet(row[ly.wktCol], proj4fn);
+          if (!geo || (geo.type !== "line" && geo.type !== "multiline")) continue;
+          for (const coords of geo.rings) {
+            L.polyline(coords, { color: ly.lineColor ?? "#6e9ec8", weight: ly.lineWeight ?? 1.5, opacity: ly.lineOpacity ?? 0.85 }).addTo(group);
+          }
+        }
+      }
     }
 
     try {
@@ -1859,13 +1891,14 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
             >
               <div style={{
                 width: 7, height: 7, borderRadius: ly.type === "points" ? "50%" : 1, flexShrink: 0,
-                background: ly.type === "boundary" ? ly.borderColor : ly.type === "grid" ? ly.borderColor : ly.fillColor,
+                background: ly.type === "boundary" ? ly.borderColor : ly.type === "grid" ? ly.borderColor : ly.type === "line" ? (ly.lineColor ?? "#6e9ec8") : ly.fillColor,
               }} />
               <span style={{ flex: 1, fontFamily: mono, fontSize: 9, color: activeId === ly.id ? C.teal : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {ly.type}
                 {ly.type === "boundary" && ly.wktCol && ` · ${ly.wktCol}`}
                 {ly.type === "grid" && ly.mode === "generate" && ` · ${ly.cellsize}m`}
                 {ly.type === "grid" && ly.mode === "wkt" && ly.wktCol && ` · ${ly.wktCol}`}
+                {ly.type === "line" && ly.wktCol && ` · ${ly.wktCol}`}
                 {ly.type === "points" && ly.latCol && ` · ${ly.latCol}/${ly.lonCol}`}
               </span>
               <button onClick={e => { e.stopPropagation(); updateLayer({ ...ly, visible: !ly.visible }); }}
@@ -1878,7 +1911,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           ))}
           {/* Add buttons */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
-            {[["boundary","Boundary"], ["grid","Grid"], ["points","Points"]].map(([t, lbl]) => (
+            {[["boundary","Boundary"], ["grid","Grid"], ["points","Points"], ["line","Line"]].map(([t, lbl]) => (
               <button key={t} onClick={() => addLayer(t)}
                 style={{ padding: "3px 7px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px dashed ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
               >+{lbl}</button>
@@ -1940,7 +1973,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         {layers.length === 0 && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 500 }}>
             <div style={{ background: "rgba(8,8,8,0.75)", border: `1px solid ${C.border2}`, borderRadius: 4, padding: "1.2rem 2rem", fontFamily: mono, fontSize: 10, color: C.textMuted, textAlign: "center" }}>
-              Add a Boundary, Grid, or Points layer<br />
+              Add a Boundary, Grid, Points, or Line layer<br />
               <span style={{ fontSize: 9 }}>to build your spatial plot.</span>
             </div>
           </div>
@@ -2007,6 +2040,7 @@ function mkGeoLayer(type, idx) {
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", fillOpacity: 0, stroke: "#222", strokeWidth: 0.8 };
   if (type === "point")    return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", fill: col, radius: 4, fillOpacity: 0.78 };
   if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", stroke: col, strokeWidth: 1.2 };
+  if (type === "grid")     return { id, type, visible: true, datasetId: "active", wktCol: "", fill: col, fillOpacity: 0.35, stroke: "#888", strokeWidth: 0.3 };
   return { id, type, visible: true, datasetId: "active" };
 }
 
@@ -2060,7 +2094,7 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
           {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
         </select>
       </div>
-      {(ly.type === "polygon" || ly.type === "boundary" || ly.type === "line") && (
+      {(ly.type === "polygon" || ly.type === "boundary" || ly.type === "line" || ly.type === "grid") && (
         <Sel label="Geometry (WKT)" value={ly.wktCol} onChg={v => upd({ wktCol: v })} opts={geomCols} />
       )}
       {ly.type === "point" && (
@@ -2069,7 +2103,7 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
           <Sel label="Longitude" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
         </div>
       )}
-      {(ly.type === "polygon" || ly.type === "point") && (
+      {(ly.type === "polygon" || ly.type === "point" || ly.type === "grid") && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em" }}>Fill</span>
@@ -2274,7 +2308,7 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
                 style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.textMuted, padding: "0 0 0 2px", lineHeight: 1 }}>×</button>
             </div>
           ))}
-          {[["polygon","Polygon"], ["boundary","Boundary"], ["point","Point"], ["line","Line"]].map(([t, lbl]) => (
+          {[["polygon","Polygon"], ["boundary","Boundary"], ["point","Point"], ["line","Line"], ["grid","Grid"]].map(([t, lbl]) => (
             <button key={t} onClick={() => addLayer(t)}
               style={{ padding: "2px 8px", borderRadius: 12, fontFamily: mono, fontSize: 9, background: "none", border: `1px dashed ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
             >+{lbl}</button>
@@ -2337,7 +2371,7 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
         {!Plt && !pltErr && <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }}>Loading Observable Plot…</div>}
         {Plt && dLayers.length === 0 && (
           <div style={{ textAlign: "center", color: C.textMuted, fontFamily: mono, fontSize: 10, marginTop: 60 }}>
-            Add a +Polygon / +Boundary / +Point / +Line layer to build your map.
+            Add a +Polygon / +Boundary / +Point / +Line / +Grid layer to build your map.
           </div>
         )}
         {Plt && dLayers.length > 0 && (
