@@ -39,7 +39,9 @@ const INTSXP   = 13;
 const REALSXP  = 14;
 const STRSXP   = 16;
 const VECSXP   = 19;
+const RAWSXP   = 20;
 const CHARSXP  = 9;
+const ALTREPSXP = 238;
 
 const HAS_ATTR_FLAG = 0x200;   // bit 9
 const HAS_TAG_FLAG  = 0x400;   // bit 10
@@ -211,6 +213,83 @@ function readObject(r) {
       break;
     }
 
+    case RAWSXP: {
+      // Raw byte vector — skip bytes, return empty placeholder
+      const len = r.readInt32();
+      r.readBytes(len);
+      obj = { sxp: RAWSXP, values: [] };
+      if (hasAttr) obj.attrs = readObject(r);
+      break;
+    }
+
+    case ALTREPSXP: {
+      // ALTREP (Alternative Representation) — R 3.5+.
+      // Format: info (LISTSXP class descriptor) + state + attr.
+      // We materialise known compact types; fall back to state for unknowns.
+      const info  = readObject(r);
+      const state = readObject(r);
+      const attr  = readObject(r);
+      const cls   = altrepClassName(info);
+
+      if (cls === "compact_intseq" && state?.sxp === REALSXP && state.values.length >= 3) {
+        const [n, start, by] = state.values;
+        const vals = [];
+        for (let i = 0; i < n; i++) vals.push(Math.round(start + i * by));
+        obj = { sxp: INTSXP, values: vals };
+      } else if (cls === "compact_realseq" && state?.sxp === REALSXP && state.values.length >= 3) {
+        const [n, n1, inc] = state.values;
+        const vals = [];
+        for (let i = 0; i < n; i++) vals.push(n1 + i * inc);
+        obj = { sxp: REALSXP, values: vals };
+      } else if (cls === "deferred_string") {
+        const src = state?.values ?? [];
+        obj = { sxp: STRSXP, values: src.map(v => (v == null ? null : String(v))) };
+      } else if (state && state.sxp != null) {
+        // Unknown ALTREP class — use materialized state as-is
+        obj = state;
+      } else {
+        obj = { sxp: INTSXP, values: [] };
+      }
+      // Merge attributes from the altrep attr slot if present
+      if (attr && attr.type === "pairlist" && obj && typeof obj === "object") {
+        obj = { ...obj, attrs: attr };
+      }
+      break;
+    }
+
+    // ── Skip-only types ────────────────────────────────────────────────────────
+    // These can appear inside sf/spatial objects but carry no tabular data.
+    // Read past them without throwing so the rest of the object parses.
+
+    case 3:   // CLOSXP  — closure (formals + body + env)
+    case 4: { // ENVSXP  — environment (frame + enclos + hashtab)
+      if (hasAttr) readObject(r); // attrs
+      readObject(r); readObject(r); readObject(r); // 3 sub-objects
+      obj = null;
+      break;
+    }
+
+    case 5:   // SPECIALSXP
+    case 6: { // BUILTINSXP — built-in function (name string only)
+      const blen = r.readInt32();
+      r.readBytes(blen);
+      obj = null;
+      break;
+    }
+
+    case 22:  // EXTPTRSXP — external pointer (protected + tag)
+    case 23: { // WEAKREFSXP — weak reference (key + val + finalizer + next)
+      readObject(r); readObject(r);
+      obj = null;
+      break;
+    }
+
+    case 239: { // NAMESPACESXP — namespace ref (version vector)
+      readObject(r); // version vector
+      obj = null;
+      break;
+    }
+
     default:
       throw new Error(`RDS: unsupported SEXP type ${type} at byte ${r.pos - 4}. ` +
         "Only data.frame and named numeric/character vectors are supported.");
@@ -218,6 +297,23 @@ function readObject(r) {
 
   r.refs[refIdx] = obj;
   return obj;
+}
+
+// ── ALTREP class name helper ───────────────────────────────────────────────────
+/** Extract the class name string from an ALTREP info descriptor (LISTSXP). */
+function altrepClassName(info) {
+  if (!info) return null;
+  // info is LISTSXP { car: SYMSXP(className) | STRSXP, cdr: ...(pkg) }
+  if (info.type === "pairlist") {
+    const car = info.car;
+    if (car?.type === "symbol") return typeof car.name === "string" ? car.name : null;
+    if (car?.sxp === STRSXP && car.values.length) return car.values[0];
+    // Two-element list wrapping: { car: LISTSXP { car: SYMSXP }, ... }
+    if (car?.type === "pairlist" && car.car?.type === "symbol")
+      return typeof car.car.name === "string" ? car.car.name : null;
+  }
+  if (info?.type === "symbol") return typeof info.name === "string" ? info.name : null;
+  return null;
 }
 
 // ── Attribute helpers ──────────────────────────────────────────────────────────
@@ -240,7 +336,7 @@ function strsxpStrings(obj) {
   return obj.values.map(v => (v == null ? "" : String(v)));
 }
 
-/** Extract JS array from any vector sxp, handling factors and POSIXct */
+/** Extract JS array from any vector sxp, handling factors, POSIXct, and geometry */
 function vectorValues(obj) {
   if (!obj) return [];
   if (obj.sxp === INTSXP) {
@@ -272,6 +368,33 @@ function vectorValues(obj) {
   }
   if (obj.sxp === LGLSXP) return obj.values;
   if (obj.sxp === STRSXP) return obj.values.map(v => (v == null ? null : String(v)));
+  if (obj.sxp === RAWSXP)  return obj.values; // raw bytes (usually empty placeholder)
+
+  if (obj.sxp === VECSXP) {
+    // List column — common for sf geometry (sfc_POINT, sfc_POLYGON, …).
+    // Check class to decide representation.
+    const cls = obj.attrs ? strsxpStrings(attrsToMap(obj.attrs)["class"]) : [];
+    const isSfc = cls.some(c => c.startsWith("sfc"));
+
+    return obj.elements.map(el => {
+      if (!el) return null;
+      // sfg POINT: REALSXP [lon, lat] — format as "lon lat"
+      if (el.sxp === REALSXP && el.values.length === 2 && !el.attrs) {
+        return `${el.values[0]} ${el.values[1]}`;
+      }
+      if (el.sxp === REALSXP && el.values.length >= 2) {
+        const am = el.attrs ? attrsToMap(el.attrs) : {};
+        const elCls = strsxpStrings(am["class"]);
+        if (elCls.includes("POINT")) return `${el.values[0]} ${el.values[1]}`;
+        // Matrix (ring/polygon) — return centroid-like "x y"
+        return `${el.values[0]} ${el.values[1]}`;
+      }
+      if (el.sxp === STRSXP) return el.values[0] ?? null;
+      if (el.sxp === VECSXP) return isSfc ? "[geometry]" : null;
+      return null;
+    });
+  }
+
   return [];
 }
 
@@ -364,7 +487,15 @@ export async function parseRDS(arrayBuffer) {
     const names    = strsxpStrings(namesSxp);
 
     if (!names.length) {
-      throw new Error("RDS: VECSXP has no 'names' attribute — cannot determine column names. Save as a named list or data.frame.");
+      // No names attr — generate V1, V2, … so data is still usable.
+      // This happens for some sf/tibble objects where names are stored via
+      // a reference or non-standard attribute order.
+      if (!root.elements.length) {
+        throw new Error("RDS: VECSXP has no 'names' attribute and is empty.");
+      }
+      const fallback = root.elements.map((_, i) => `V${i + 1}`);
+      const colArrays = root.elements.map(el => vectorValues(el));
+      return buildTable(fallback, colArrays);
     }
 
     const colArrays = root.elements.map(el => vectorValues(el));
