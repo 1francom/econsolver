@@ -20,6 +20,7 @@ import { saveRawData } from "./services/Persistence/indexedDB.js";
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
 import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
+import { deleteCacheEntry } from "./services/data/parquetCache.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
@@ -391,7 +392,9 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
                   {(ds.rawData._duckdb?.rowCount ?? ds.rawData.rows.length).toLocaleString()} rows ×{" "}
                   {ds.rawData.headers.length} cols
                   {ds.rawData._duckdb && (
-                    <span style={{ marginLeft: 5, color: C.teal, letterSpacing: "0.05em" }}>· duckdb</span>
+                    <span style={{ marginLeft: 5, color: C.teal, letterSpacing: "0.05em" }}>
+                      {ds.rawData._duckdb.cached ? "· cached" : "· duckdb"}
+                    </span>
                   )}
                 </div>
               </div>
@@ -702,8 +705,12 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
 
   const handleRemove = useCallback((id) => {
     if (id === primaryId) return; // primary dataset is protected
-    setDatasets(prev => prev.filter(d => d.id !== id));
-    // If we were viewing the removed dataset, fall back to primary
+    setDatasets(prev => {
+      const ds = prev.find(d => d.id === id);
+      const key = ds?.rawData?._duckdb?.opfsCacheKey;
+      if (key) deleteCacheEntry(key); // fire-and-forget OPFS cleanup
+      return prev.filter(d => d.id !== id);
+    });
     setActiveId(prev => prev === id ? primaryId : prev);
   }, [primaryId]);
 
@@ -745,14 +752,24 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     switchToDataset:  (id) => setActiveId(id),
     removeDataset:    (id) => {
       if (id === primaryId) return; // never remove primary
-      setDatasets(prev => prev.filter(d => d.id !== id));
+      setDatasets(prev => {
+        const ds = prev.find(d => d.id === id);
+        const key = ds?.rawData?._duckdb?.opfsCacheKey;
+        if (key) deleteCacheEntry(key);
+        return prev.filter(d => d.id !== id);
+      });
       setActiveId(prev => prev === id ? primaryId : prev);
       if (dispatch) dispatch({ type: "REMOVE_DATASET", id }); // sync sessionState
     },
     removeDatasetLocal: (id) => {
       // Called by DatasetManager which already dispatched to sessionState
       if (id === primaryId) return;
-      setDatasets(prev => prev.filter(d => d.id !== id));
+      setDatasets(prev => {
+        const ds = prev.find(d => d.id === id);
+        const key = ds?.rawData?._duckdb?.opfsCacheKey;
+        if (key) deleteCacheEntry(key);
+        return prev.filter(d => d.id !== id);
+      });
       setActiveId(prev => prev === id ? primaryId : prev);
     },
     patchDatasetColumns: (id, newRows, newCols) => {
