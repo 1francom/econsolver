@@ -23,6 +23,57 @@ if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('vali
     })
 }
 
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'fase6') {
+  import('./services/data/__validation__/fase6Validation.js')
+    .then(({ runFase6NumericalValidation }) => runFase6NumericalValidation())
+    .then(results => {
+      document.documentElement.dataset.fase6Validation = JSON.stringify(
+        results.map(({ cell, ok, maxCoefDiff, maxSeDiff, logLikDiff, message }) => ({
+          cell, ok, maxCoefDiff, maxSeDiff, logLikDiff, message,
+        })),
+      )
+    })
+    .catch(error => {
+      document.documentElement.dataset.fase6Validation = JSON.stringify({
+        error: error?.message ?? String(error),
+      })
+    })
+}
+
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'fase7') {
+  import('./services/data/__validation__/fase7Validation.js')
+    .then(({ runFase7NumericalValidation }) => runFase7NumericalValidation())
+    .then(results => {
+      document.documentElement.dataset.fase7Validation = JSON.stringify(
+        results.map(({ cell, ok, maxDiff, message }) => ({
+          cell, ok, maxDiff, message,
+        })),
+      )
+    })
+    .catch(error => {
+      document.documentElement.dataset.fase7Validation = JSON.stringify({
+        error: error?.message ?? String(error),
+      })
+    })
+}
+
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'fase8') {
+  import('./services/data/__validation__/fase8Validation.js')
+    .then(({ runFase8NumericalValidation }) => runFase8NumericalValidation())
+    .then(results => {
+      document.documentElement.dataset.fase8Validation = JSON.stringify(
+        results.map(({ cell, ok, maxCoefDiff, maxSeDiff, kappaDiff, L, message }) => ({
+          cell, ok, maxCoefDiff, maxSeDiff, kappaDiff, L, message,
+        })),
+      )
+    })
+    .catch(error => {
+      document.documentElement.dataset.fase8Validation = JSON.stringify({
+        error: error?.message ?? String(error),
+      })
+    })
+}
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ThemeProvider>

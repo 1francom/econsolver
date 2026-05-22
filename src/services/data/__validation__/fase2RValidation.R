@@ -71,3 +71,4 @@ result <- list(
 )
 jsonlite::write_json(result, "fase2Benchmarks.json", auto_unbox = TRUE, digits = 8)
 cat("Wrote fase2_data.csv and fase2Benchmarks.json\n")
+summary(result)

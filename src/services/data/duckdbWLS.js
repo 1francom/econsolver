@@ -30,9 +30,10 @@ function num(v) {
  * @param {string}   tableName
  * @param {string}   yCol
  * @param {string[]} xCols       regressor names (intercept implicit)
- * @param {string}   wCol        weight column
+ * @param {string|null} wCol     weight column; nullable when opts.weightSQL is set
  * @param {object}   [opts]
  * @param {Record<string,string>} [opts.dummySQL]  CASE WHEN expressions for synthetic dummies
+ * @param {string} [opts.weightSQL] raw SQL weight expression, e.g. RDD kernel
  * @returns {Promise<{
  *   n: number, sumW: number, sumY: number, YtY: number,
  *   XtWX: number[][], XtWY: number[],
@@ -44,7 +45,9 @@ export async function buildWLSSuffStats(tableName, yCol, xCols, wCol, opts = {})
   const { conn } = await getDuckDB();
   const k = xCols.length;
   if (k < 1) throw new Error("buildWLSSuffStats: need at least one regressor");
-  if (!wCol) throw new Error("buildWLSSuffStats: weight column required");
+  if (!wCol && !opts.weightSQL) {
+    throw new Error("buildWLSSuffStats: weight column or weightSQL required");
+  }
 
   const dummySQL = opts.dummySQL ?? {};
   const colExpr = (c) => {
@@ -55,7 +58,9 @@ export async function buildWLSSuffStats(tableName, yCol, xCols, wCol, opts = {})
   };
 
   const yExpr  = `TRY_CAST(${esc(yCol)} AS DOUBLE)`;
-  const wExpr  = `TRY_CAST(${esc(wCol)} AS DOUBLE)`;
+  const wExpr  = opts.weightSQL
+    ? `(${opts.weightSQL})`
+    : `TRY_CAST(${esc(wCol)} AS DOUBLE)`;
   const xExprs = xCols.map(colExpr);
 
   const projections = [`${yExpr} AS _y_`, `${wExpr} AS _w_`];
@@ -150,6 +155,6 @@ export async function buildWLSSuffStats(tableName, yCol, xCols, wCol, opts = {})
     n, sumW, sumY, YtY,
     XtX, XtY, XtWX, XtWY,
     varNames: ["(Intercept)", ...xCols],
-    weightCol: wCol,
+    weightCol: wCol ?? null,
   };
 }

@@ -41,7 +41,29 @@
       "Read(//c/Users/meder/**)",
       "Bash(node:*)",
       "Bash(npm.cmd run:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(grep -E \"\\(xx_\\\\$\\\\{i\\\\}_\\\\$\\\\{j\\\\}|x\\\\$\\\\{i\\\\}_x\\\\$\\\\{j\\\\}|x\\\\$\\\\{i\\\\}_sq|whiteTestSQL|export async\\)\")",
+      "mcp__code-review-graph__detect_changes_tool",
+      "Bash(Rscript fase2RValidation.R)",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" fase2RValidation.R)",
+      "mcp__code-review-graph__build_or_update_graph_tool",
+      "Bash(Rscript:*)",
+      "Bash(where Rscript)",
+      "Read(//c/Program Files/R//**)",
+      "Bash(/c/Program Files/R/R-4.4.1/bin/Rscript.exe:*)",
+      "Bash(ls src/main.* src/*.jsx)",
+      "Bash(git log:*)",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" --version)",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" src/services/data/__validation__/fase3cRValidation.R)",
+      "Bash(ls -la src/services/data/__validation__/fase3c*)",
+      "Bash(ls src/services/data/__validation__/fase3a* src/services/data/__validation__/fase3*Validation.js)",
+      "Bash(\"/c/Program Files/R/R-4.4.1/bin/Rscript.exe\" test_gmm2.R)",
+      "Bash(ls -lh src/services/data/__validation__/fase3b*)",
+      "Bash(grep -E \"\\\\.js$\")",
+      "Bash(ls src/services/data/duckdb*.js src/math/PanelSuffStatsEngine.js)",
+      "Bash(ls src/math/calculate* src/math/calc*)",
+      "Bash(grep -l \"evalExpression\\\\|solveRootAuto\\\\|derivative\\\\|integrate\" src/math/*.js)",
+      "Bash(grep -E \"^\\(commit|[a-z].*\\\\.\\(jsx?|json|md\\)$\\)\")"
     ]
   }
 }

@@ -24,7 +24,6 @@ function dot(a, b)  { return a.reduce((s, v, i) => s + v * b[i], 0); }
 // V'Z, V'V exist as sufficient-statistics matrices.
 function mProjForms(VtV, VtZ, ZtZinv) {
   // Returns (m×m) [v_a · M v_b] = VtV[a][b] − (V'Z)[a] · (Z'Z)⁻¹ · (Z'V)[b]
-  const m = VtV.length;
   const VtZi = matMul(VtZ, ZtZinv);            // (m × (l+1))
   const ZtV  = transpose(VtZ);                  // ((l+1) × m)
   const sub  = matMul(VtZi, ZtV);              // (m × m)
@@ -32,15 +31,16 @@ function mProjForms(VtV, VtZ, ZtZinv) {
 }
 
 /**
- * @param {object} args  — output of buildLIMLSuffStats plus optionally `meat`/`hcType` (deferred)
+ * @param {object} args  — output of buildLIMLSuffStats plus optionally `meat`/`hcType`
  * @returns {object|null}
  */
 export function runLIMLFromSuffStats({
   n, sumY, YtY,
   XtX, ZtZ, WtW,
-  ZtX, WtX, ZtW,
+  ZtX, WtX,
   XtY, ZtY, WtY,
   varNames, endoIdx,
+  meat = null, hcType = null,
 }) {
   const k = XtX.length;
   const ZtZinv = matInv(ZtZ);
@@ -125,7 +125,18 @@ export function runLIMLFromSuffStats({
   const df = n - k;
   const s2 = SSR / Math.max(1, df);
 
-  const se = XtPzXi.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  let V;
+  if (meat) {
+    const scaleMeat = hcType === "HC1" ? n / Math.max(1, df) : 1;
+    const scaled = meat.map(row => row.map(v => v * scaleMeat));
+    V = matMul(matMul(XtPzXi, scaled), XtPzXi);
+  } else {
+    V = XtPzXi.map(row => row.map(v => v * s2));
+  }
+  const se = V.map((row, i) => {
+    const d = row[i];
+    return isFinite(d) && d >= 0 ? Math.sqrt(d) : NaN;
+  });
   const tStats = beta.map((b, i) => (se[i] > 0 ? b / se[i] : NaN));
   const pVals  = tStats.map(t => (isFinite(t) ? pValue(t, df) : NaN));
 

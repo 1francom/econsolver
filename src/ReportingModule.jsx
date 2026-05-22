@@ -39,6 +39,13 @@ function safeNum(val, dp = 4) {
 function normaliseResult(raw) {
   if (!raw) return null;
   if (raw.error) return { __error: raw.error };
+  // ── Unwrap FE/FD bundles: ModelingTab packages panel results as
+  //    { type: "FE", fe: <flatResult>, fd: null } (and vice versa). The
+  //    reporting UI expects flat varNames/beta/se/pVals at the root.
+  if ((raw.type === "FE" || raw.type === "FD")) {
+    const inner = raw.fe ?? raw.fd;
+    if (inner) raw = { ...inner, type: raw.type };
+  }
   return {
     ...raw,
     modelLabel: raw.label,

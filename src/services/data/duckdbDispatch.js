@@ -25,8 +25,11 @@
 // Fase 5 ctx additions:
 //   postCol/treatCol for DiD, treatTimeCol for Event Study,
 //   kPre/kPost for Event Study horizons, controls for synthetic regressors.
+// Fase 7 ctx additions:
+//   runningCol, cutoff, bandwidth, kernelType, fuzzyTreatCol for RDD.
 import {
   N_THRESHOLD,
+  N_THRESHOLD_IRLS,
   K_THRESHOLD,
   SQL_SUPPORTED_ESTIMATORS,
   SQL_SUPPORTED_SE,
@@ -34,7 +37,9 @@ import {
 
 export function shouldUseSQLPath(ctx) {
   if (!ctx.tableName) return false;
-  if (!(ctx.n >= N_THRESHOLD)) return false;
+  const isIRLS = ["Logit", "Probit", "PoissonFE"].includes(ctx.estimator);
+  const nGate = isIRLS ? N_THRESHOLD_IRLS : N_THRESHOLD;
+  if (!(ctx.n >= nGate)) return false;
   if (!Array.isArray(ctx.xColsExpanded) || ctx.xColsExpanded.length > K_THRESHOLD) return false;
   if (!SQL_SUPPORTED_ESTIMATORS.has(ctx.estimator)) return false;
   const se = ctx.seType ?? "classical";
@@ -58,14 +63,43 @@ export function shouldUseSQLPath(ctx) {
     if (totalK > K_THRESHOLD) return false;
   }
 
-  // GMM 2-step efficient SE is heteroskedasticity-robust via Ω̂; HC overrides not
-  // supported. LIML HC variants deferred to a later sub-fase.
-  if (["GMM", "LIML"].includes(ctx.estimator) && se !== "classical") return false;
+  // GMM 2-step efficient SE is heteroskedasticity-robust via Ω̂; HC overrides
+  // are still not supported. Fase 8 adds LIML HC0/HC1/clustered/HAC.
+  if (ctx.estimator === "GMM" && se !== "classical") return false;
+  if (ctx.estimator === "LIML"
+      && !["classical", "HC0", "HC1", "clustered", "HAC"].includes(se)) {
+    return false;
+  }
 
   if (ctx.estimator === "WLS") {
     if (!ctx.weightCol || typeof ctx.weightCol !== "string") return false;
-    // Scope of Fase 3c: classical / HC0 / HC1 only
+    if (!["classical", "HC0", "HC1", "HC2", "HC3", "clustered", "twoway", "HAC"].includes(se)) {
+      return false;
+    }
+  }
+
+  if (["WLS", "2SLS"].includes(ctx.estimator)
+      && ["HC2", "HC3"].includes(se)
+      && (ctx.xColsExpanded.length + 1) ** 2 > 1000) {
+    return false;
+  }
+
+  if (isIRLS) {
     if (!["classical", "HC0", "HC1"].includes(se)) return false;
+    if (ctx.hasWeights) return false;
+    if (ctx.estimator === "PoissonFE" && !ctx.unitCol) return false;
+  }
+
+  if (["RDD", "SharpRDD", "FuzzyRDD"].includes(ctx.estimator)) {
+    if (!ctx.runningCol || typeof ctx.runningCol !== "string") return false;
+    if (!Number.isFinite(ctx.cutoff)) return false;
+    if (ctx.bandwidth != null && (!(ctx.bandwidth > 0) || !Number.isFinite(ctx.bandwidth))) {
+      return false;
+    }
+    if (ctx.kernelType && ctx.kernelType !== "triangular") return false;
+    if (ctx.estimator === "FuzzyRDD" && !ctx.fuzzyTreatCol) return false;
+    if (!["classical", "HC0", "HC1"].includes(se)) return false;
+    if (ctx.hasWeights) return false;
   }
 
   // ── Panel (preempt before OLS fall-through) ────────────────────────────────
