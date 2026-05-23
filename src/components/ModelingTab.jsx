@@ -1334,6 +1334,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // Re-initialize when dataset changes
   useEffect(() => {
     setFactorVars(new Set(headers.filter(h => !numericCols.includes(h))));
+    // Clear all variable selectors so stale column names from the previous
+    // dataset don't bleed into the new estimation.
+    setYVar([]);
+    setXVars([]);
+    setWVars([]);
+    setZVars([]);
+    setPostVar([]);
+    setTreatVar([]);
   }, [cleanedData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sufficient-statistics cache (Fase 0) ─────────────────────────────────────
@@ -3379,8 +3387,25 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "BIC",     value: r.BIC?.toFixed(1)         ?? "—", color: C.textDim },
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
+                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: "0.8rem" }}>
+                  AIC/BIC penalty includes entity FEs (k = {r.k} regressors + {r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)
+                </div>
                 <Lbl color={C.textMuted}>Coefficient Table (log-linear, with IRR)</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                {r.alphas && Object.keys(r.alphas).length > 0 && (
+                  <details style={{ marginTop: "1rem" }}>
+                    <summary style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", userSelect: "none" }}>
+                      Entity fixed effects — {Object.keys(r.alphas).length} units (log-scale α̂ᵢ)
+                    </summary>
+                    <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 4 }}>
+                      {Object.entries(r.alphas).sort(([a], [b]) => String(a).localeCompare(String(b), undefined, { numeric: true })).map(([unit, alpha]) => (
+                        <div key={unit} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "3px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                          {unit}:&nbsp;<span style={{ color: C.text }}>{Number(alpha).toFixed(4)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
                 {r.IRR?.length > 0 && (
                   <div style={{ marginTop: "1rem" }}>
                     <Lbl color={C.textMuted}>Incidence Rate Ratios (IRR = exp(β))</Lbl>

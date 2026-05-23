@@ -10,6 +10,11 @@
  */
 
 import * as duckdb from "@duckdb/duckdb-wasm";
+import {
+  loadFromOPFS,
+  saveToOPFS,
+  cacheKey as getParquetCacheKey,
+} from "./parquetCache.js";
 
 const MAX_ROWS    = 2_000_000; // hard cap (legacy, not used for DuckDB tables)
 const PREVIEW_ROWS = 500;      // rows extracted into JS memory; rest served via getTablePage
@@ -155,11 +160,37 @@ const NULL_STRINGS = `['..', '.', 'NA', 'N/A', 'n/a', 'na', 'NULL', 'null', 'Non
 export async function loadLargeCSV(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   const tableName = `csv_${Date.now()}`;
+  const opfsCacheKey = getParquetCacheKey(file);
+  const { db, conn } = await getDuckDB();
+
+  // ── Fase 9: OPFS Parquet cache ─────────────────────────────────────────────
+  const cacheHit = await loadFromOPFS(db, tableName, file);
+  if (cacheHit) {
+    const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
+    const rowCount = Number(countRes.toArray()[0].n);
+    window.__validation?.fase9?.recordHit?.();
+    const { headers, rows } = await queryDuckDB(
+      `SELECT * FROM "${tableName}" LIMIT ${PREVIEW_ROWS}`
+    );
+    return {
+      headers,
+      rows,
+      _duckdb: { tableName, rowCount, truncated: true, cached: true, opfsCacheKey },
+    };
+  }
+  window.__validation?.fase9?.recordMiss?.();
+  // ───────────────────────────────────────────────────────────────────────────
+
   const delim = ext === "tsv" ? `delim='\\t', ` : "";
   const { tableName: tbl, rowCount } = await registerAndCreate(
     file,
     tableName,
     `CREATE OR REPLACE TABLE "${tableName}" AS SELECT * FROM read_csv('${file.name}', ${delim}header=true, auto_detect=true, nullstr=${NULL_STRINGS})`
+  );
+
+  // Fire-and-forget: write Parquet to OPFS for next session — does not block return
+  saveToOPFS(db, tbl, file).catch(() =>
+    window.__validation?.fase9?.recordErr?.()
   );
 
   const { headers, rows } = await queryDuckDB(
@@ -169,6 +200,6 @@ export async function loadLargeCSV(file) {
   return {
     headers,
     rows, // preview only — full data served via getTablePage / extractAllRows
-    _duckdb: { tableName: tbl, rowCount, truncated: true },
+    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, opfsCacheKey },
   };
 }

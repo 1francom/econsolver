@@ -706,8 +706,9 @@ export function runPoissonFE(rows, yCol, xCols, unitCol, seOpts = {}) {
 
   // ── 7. Fit statistics ─────────────────────────────────────────────────────────
   const McFaddenR2 = logLikNull !== 0 ? 1 - logLik / logLikNull : 0;
-  const AIC        = -2 * logLik + 2 * k;
-  const BIC        = -2 * logLik + k * Math.log(n);
+  const kTotal     = k + nUnits;          // regressors + entity fixed effects
+  const AIC        = -2 * logLik + 2 * kTotal;
+  const BIC        = -2 * logLik + kTotal * Math.log(n);
   const df         = n - k - nUnits;
 
   // ── 8. Return ─────────────────────────────────────────────────────────────────
@@ -721,7 +722,7 @@ export function runPoissonFE(rows, yCol, xCols, unitCol, seOpts = {}) {
     alphas: alphasObj,
     fitted: muFinal,
     resid,
-    n, k, df,
+    n, k, nUnits, df,
     converged, iterations,
     droppedZeroUnits,      // entities with all-zero Y dropped pre-flight
     droppedSingletons,     // singleton units dropped (no within variation)
