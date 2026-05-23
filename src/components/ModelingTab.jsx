@@ -3388,7 +3388,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
                 <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: "0.8rem" }}>
-                  AIC/BIC based on within-estimator log-lik (k = {r.k} regressors; entity FEs absorbed — not comparable to R LSDV AIC)
+                  AIC/BIC penalty includes entity FEs (k = {r.k} regressors + {r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Table (log-linear, with IRR)</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
