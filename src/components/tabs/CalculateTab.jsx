@@ -493,7 +493,7 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
 }
 
 // ─── FUNCTION GRAPHER (real-time canvas, parameter sliders) ──────────────────
-function FunctionGrapher({ C, savedEqs }) {
+function FunctionGrapher({ C, savedEqs, canvasRef: externalCanvasRef }) {
   const COLORS = [C.teal, C.gold, "#6e9ec8", "#c86e9e", "#9e6ec8", "#6ec89e"];
   const [funcs, setFuncs]   = useState([
     { id: 1, expr: "a * x**2 + b * x + c" },
@@ -508,21 +508,22 @@ function FunctionGrapher({ C, savedEqs }) {
   const [newExpr,       setNewExpr]       = useState("");
   const [showPForm,     setShowPForm]     = useState(false);
   const [pForm,         setPForm]         = useState({ name: "", val: "1", min: "-5", max: "5", step: "0.1" });
-  const canvasRef = useRef(null);
+  const internalCanvasRef = useRef(null);
+  const canvasRef = externalCanvasRef ?? internalCanvasRef;
   const wrapRef   = useRef(null);
 
   // ── Draw (runs every render for live slider response) ──────────────────────
   useEffect(() => { drawCanvas(); });
 
   function buildEvalFns() {
-    const scope = {}; params.forEach(p => scope[p.name] = p.value);
-    const keys = Object.keys(scope), vals = Object.values(scope);
+    const paramScope = {}; params.forEach(p => paramScope[p.name] = p.value);
     return funcs.map(fn => {
       if (!fn.expr.trim()) return null;
-      try {
-        const f = new Function("x", ...keys, `"use strict"; try { return (${fn.expr}); } catch(e){ return NaN; }`);
-        return x => { try { const y = f(x, ...vals); return Number.isFinite(y) ? y : NaN; } catch(e) { return NaN; } };
-      } catch(e) { return null; }
+      return x => {
+        const r = evalExpression(fn.expr, { x, ...paramScope });
+        const y = r?.value;
+        return Number.isFinite(y) ? y : NaN;
+      };
     });
   }
 
@@ -537,7 +538,7 @@ function FunctionGrapher({ C, savedEqs }) {
     const canvas = canvasRef.current, wrap = wrapRef.current;
     if (!canvas || !wrap) return;
     canvas.width  = wrap.clientWidth;
-    canvas.height = 160;
+    canvas.height = 320;
     const W = canvas.width, H = canvas.height;
     const PAD = { t: 16, r: 16, b: 32, l: 44 };
     const pW = W - PAD.l - PAD.r, pH = H - PAD.t - PAD.b;
@@ -621,117 +622,140 @@ function FunctionGrapher({ C, savedEqs }) {
   const ghost = { background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, cursor: "pointer", fontFamily: mono, transition: "all 0.1s" };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
 
-      {/* Canvas */}
-      <div ref={wrapRef}>
-        <canvas ref={canvasRef} style={{ width: "100%", display: "block", borderRadius: 4 }} />
-      </div>
+      {/* Left: canvas + zoom controls */}
+      <div style={{ flex: "0 0 62%", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div ref={wrapRef}>
+          <canvas ref={canvasRef} style={{ width: "100%", display: "block", borderRadius: 4 }} />
+        </div>
 
-      {/* Zoom + x range */}
-      <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
-        <button onClick={() => zoom(0.7)} style={{ ...ghost, padding: "0.2rem 0.55rem", color: C.textDim, fontSize: 13, lineHeight: 1 }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>+</button>
-        <button onClick={() => zoom(1.4)} style={{ ...ghost, padding: "0.2rem 0.55rem", color: C.textDim, fontSize: 13, lineHeight: 1 }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>−</button>
-        <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>x:</span>
-        <input type="number" step="any" value={xRange[0]}
-          onChange={e => setXRange(r => [parseFloat(e.target.value) || r[0], r[1]])}
-          style={{ ...fieldStyle(C), width: 52 }} />
-        <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>to</span>
-        <input type="number" step="any" value={xRange[1]}
-          onChange={e => setXRange(r => [r[0], parseFloat(e.target.value) || r[1]])}
-          style={{ ...fieldStyle(C), width: 52 }} />
-        <button onClick={() => setXRange([-8, 8])} style={{ ...ghost, padding: "0.15rem 0.5rem", color: C.textMuted, fontSize: 9 }}>reset</button>
-      </div>
+        {/* Zoom + x range */}
+        <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => zoom(0.7)} style={{ ...ghost, padding: "0.2rem 0.55rem", color: C.textDim, fontSize: 13, lineHeight: 1 }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>+</button>
+          <button onClick={() => zoom(1.4)} style={{ ...ghost, padding: "0.2rem 0.55rem", color: C.textDim, fontSize: 13, lineHeight: 1 }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>−</button>
+          <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>x:</span>
+          <input type="number" step="any" value={xRange[0]}
+            onChange={e => setXRange(r => [parseFloat(e.target.value) || r[0], r[1]])}
+            style={{ ...fieldStyle(C), width: 52 }} />
+          <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>to</span>
+          <input type="number" step="any" value={xRange[1]}
+            onChange={e => setXRange(r => [r[0], parseFloat(e.target.value) || r[1]])}
+            style={{ ...fieldStyle(C), width: 52 }} />
+          <button onClick={() => setXRange([-8, 8])} style={{ ...ghost, padding: "0.15rem 0.5rem", color: C.textMuted, fontSize: 9 }}>reset</button>
+        </div>
 
-      {/* Legend */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {funcs.map((fn, i) => (
-          <div key={fn.id} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <div style={{ width: 14, height: 3, background: COLORS[i % COLORS.length], borderRadius: 2 }} />
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>f{i + 1}(x)</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Functions list */}
-      <div>
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Functions</div>
-        {funcs.map((fn, i) => (
-          <div key={fn.id} style={{ display: "flex", gap: 5, alignItems: "center", marginBottom: 4 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS[i % COLORS.length], flexShrink: 0 }} />
-            <input
-              value={fn.expr}
-              onChange={e => setFuncs(fs => fs.map(x => x.id === fn.id ? { ...x, expr: e.target.value } : x))}
-              placeholder="e.g. a*x**2 + b*x"
-              style={{ ...fieldStyle(C), flex: 1, fontSize: 10 }}
-            />
-            <button onClick={() => setFuncs(fs => fs.filter(x => x.id !== fn.id))}
-              disabled={funcs.length <= 1}
-              style={{ background: "transparent", border: "none", color: C.textMuted, cursor: funcs.length > 1 ? "pointer" : "default", fontFamily: mono, fontSize: 14, opacity: funcs.length > 1 ? 1 : 0.35 }}
-              onMouseEnter={e => { if (funcs.length > 1) e.currentTarget.style.color = C.red; }}
-              onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
-          </div>
-        ))}
-        <div style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 4 }}>
-          <input value={newExpr} onChange={e => setNewExpr(e.target.value)}
-            placeholder="add function, e.g. sin(x)"
-            onKeyDown={e => { if (e.key === "Enter" && newExpr.trim()) { setFuncs(fs => [...fs, { id: Date.now(), expr: newExpr.trim() }]); setNewExpr(""); } }}
-            style={{ ...fieldStyle(C), flex: 1, fontSize: 10 }} />
-          <Btn ch="+" v="solid" color={C.teal} sm dis={!newExpr.trim()}
-            onClick={() => { setFuncs(fs => [...fs, { id: Date.now(), expr: newExpr.trim() }]); setNewExpr(""); }} />
-          <EquationPicker savedEqs={savedEqs} onLoad={expr => setNewExpr(expr)} label="Load ▾" />
+        {/* Legend */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {funcs.map((fn, i) => (
+            <div key={fn.id} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <div style={{ width: 14, height: 3, background: COLORS[i % COLORS.length], borderRadius: 2 }} />
+              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>f{i + 1}(x)</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Parameters */}
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase" }}>Parameters</div>
-          <button onClick={() => setShowPForm(s => !s)}
-            style={{ ...ghost, padding: "0.15rem 0.45rem", fontSize: 9, color: C.gold, borderColor: C.gold }}
-            onMouseEnter={e => e.currentTarget.style.background = `${C.gold}15`}
-            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>+ Add</button>
-        </div>
-        {showPForm && (
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 8, padding: "0.55rem", background: C.surface2, borderRadius: 4, border: `1px solid ${C.border}` }}>
-            <input value={pForm.name} onChange={e => setPForm(f => ({...f, name: e.target.value}))} placeholder="name" style={{ ...fieldStyle(C), width: 50 }} />
-            <input type="number" step="any" value={pForm.val}  onChange={e => setPForm(f => ({...f, val: e.target.value}))}  placeholder="val" style={{ ...fieldStyle(C), width: 50 }} />
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>min</span>
-            <input type="number" step="any" value={pForm.min}  onChange={e => setPForm(f => ({...f, min: e.target.value}))}  style={{ ...fieldStyle(C), width: 50 }} />
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>max</span>
-            <input type="number" step="any" value={pForm.max}  onChange={e => setPForm(f => ({...f, max: e.target.value}))}  style={{ ...fieldStyle(C), width: 50 }} />
-            <Btn ch="Add" v="solid" color={C.gold} sm dis={!pForm.name.trim()}
-              onClick={() => {
-                const v = parseFloat(pForm.val)||1, mn = parseFloat(pForm.min)||-5, mx = parseFloat(pForm.max)||5;
-                setParams(ps => [...ps, { id: Date.now(), name: pForm.name.trim(), value: v, min: mn, max: mx, step: (mx-mn)/100 }]);
-                setPForm({ name: "", val: "1", min: "-5", max: "5" }); setShowPForm(false);
-              }} />
-          </div>
-        )}
-        {params.map(p => (
-          <div key={p.id} style={{ display: "grid", gridTemplateColumns: "52px 1fr 48px 16px", gap: 6, alignItems: "center", marginBottom: 5 }}>
-            <span style={{ fontFamily: mono, fontSize: 10, color: C.gold }}>{p.name}</span>
-            <input type="range" min={p.min} max={p.max} step={p.step ?? 0.1} value={p.value}
-              onChange={e => setParams(ps => ps.map(x => x.id === p.id ? { ...x, value: parseFloat(e.target.value) } : x))}
-              style={{ width: "100%", accentColor: C.teal, cursor: "pointer" }} />
-            <span style={{ fontFamily: mono, fontSize: 10, color: C.teal, textAlign: "right" }}>
-              {Number.isInteger(p.value * 10) ? p.value.toFixed(1) : p.value.toFixed(2)}
-            </span>
-            <button onClick={() => setParams(ps => ps.filter(x => x.id !== p.id))}
-              style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 12, padding: 0 }}
-              onMouseEnter={e => e.currentTarget.style.color = C.red}
-              onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
-          </div>
-        ))}
-        <div style={{ fontSize: 9, color: C.textMuted, marginTop: 4 }}>
-          Use parameter names (a, b, c…) directly in function expressions
-        </div>
-      </div>
+      {/* Right: functions + parameters */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
 
+        {/* Functions list */}
+        <div>
+          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Functions</div>
+          {funcs.map((fn, i) => (
+            <div key={fn.id} style={{ display: "flex", gap: 5, alignItems: "center", marginBottom: 4 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS[i % COLORS.length], flexShrink: 0 }} />
+              <input
+                value={fn.expr}
+                onChange={e => setFuncs(fs => fs.map(x => x.id === fn.id ? { ...x, expr: e.target.value } : x))}
+                placeholder="e.g. a*x**2 + b*x"
+                style={{ ...fieldStyle(C), flex: 1, fontSize: 10 }}
+              />
+              <button onClick={() => setFuncs(fs => fs.filter(x => x.id !== fn.id))}
+                disabled={funcs.length <= 1}
+                style={{ background: "transparent", border: "none", color: C.textMuted, cursor: funcs.length > 1 ? "pointer" : "default", fontFamily: mono, fontSize: 14, opacity: funcs.length > 1 ? 1 : 0.35 }}
+                onMouseEnter={e => { if (funcs.length > 1) e.currentTarget.style.color = C.red; }}
+                onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 4 }}>
+            <input value={newExpr} onChange={e => setNewExpr(e.target.value)}
+              placeholder="add function, e.g. sin(x)"
+              onKeyDown={e => { if (e.key === "Enter" && newExpr.trim()) { setFuncs(fs => [...fs, { id: Date.now(), expr: newExpr.trim() }]); setNewExpr(""); } }}
+              style={{ ...fieldStyle(C), flex: 1, fontSize: 10 }} />
+            <Btn ch="+" v="solid" color={C.teal} sm dis={!newExpr.trim()}
+              onClick={() => { setFuncs(fs => [...fs, { id: Date.now(), expr: newExpr.trim() }]); setNewExpr(""); }} />
+            <EquationPicker savedEqs={savedEqs} onLoad={expr => setNewExpr(expr)} label="Load ▾" />
+          </div>
+        </div>
+
+        {/* Parameters */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase" }}>Parameters</div>
+            <button onClick={() => setShowPForm(s => !s)}
+              style={{ ...ghost, padding: "0.15rem 0.45rem", fontSize: 9, color: C.gold, borderColor: C.gold }}
+              onMouseEnter={e => e.currentTarget.style.background = `${C.gold}15`}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>+ Add</button>
+          </div>
+          {showPForm && (
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 8, padding: "0.55rem", background: C.surface2, borderRadius: 4, border: `1px solid ${C.border}` }}>
+              <input value={pForm.name} onChange={e => setPForm(f => ({...f, name: e.target.value}))} placeholder="name" style={{ ...fieldStyle(C), width: 50 }} />
+              <input type="number" step="any" value={pForm.val}  onChange={e => setPForm(f => ({...f, val: e.target.value}))}  placeholder="val" style={{ ...fieldStyle(C), width: 50 }} />
+              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>min</span>
+              <input type="number" step="any" value={pForm.min}  onChange={e => setPForm(f => ({...f, min: e.target.value}))}  style={{ ...fieldStyle(C), width: 50 }} />
+              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>max</span>
+              <input type="number" step="any" value={pForm.max}  onChange={e => setPForm(f => ({...f, max: e.target.value}))}  style={{ ...fieldStyle(C), width: 50 }} />
+              <Btn ch="Add" v="solid" color={C.gold} sm dis={!pForm.name.trim()}
+                onClick={() => {
+                  const v = parseFloat(pForm.val)||1, mn = parseFloat(pForm.min)||-5, mx = parseFloat(pForm.max)||5;
+                  setParams(ps => [...ps, { id: Date.now(), name: pForm.name.trim(), value: v, min: mn, max: mx, step: (mx-mn)/100 }]);
+                  setPForm({ name: "", val: "1", min: "-5", max: "5" }); setShowPForm(false);
+                }} />
+            </div>
+          )}
+          {params.map(p => (
+            <div key={p.id} style={{ display: "grid", gridTemplateColumns: "44px 1fr 44px 16px", gap: 6, alignItems: "center", marginBottom: 5 }}>
+              <span style={{ fontFamily: mono, fontSize: 10, color: C.gold }}>{p.name}</span>
+              <input type="range" min={p.min} max={p.max} step={p.step ?? 0.1} value={p.value}
+                onChange={e => setParams(ps => ps.map(x => x.id === p.id ? { ...x, value: parseFloat(e.target.value) } : x))}
+                style={{ width: "100%", accentColor: C.teal, cursor: "pointer" }} />
+              <span style={{ fontFamily: mono, fontSize: 10, color: C.teal, textAlign: "right" }}>
+                {Number.isInteger(p.value * 10) ? p.value.toFixed(1) : p.value.toFixed(2)}
+              </span>
+              <button onClick={() => setParams(ps => ps.filter(x => x.id !== p.id))}
+                style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 12, padding: 0 }}
+                onMouseEnter={e => e.currentTarget.style.color = C.red}
+                onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
+            </div>
+          ))}
+          <div style={{ fontSize: 9, color: C.textMuted, marginTop: 4 }}>
+            Use parameter names (a, b, c…) directly in function expressions
+          </div>
+        </div>
+
+        {/* Export PNG */}
+        <div style={{ marginTop: 4 }}>
+          <button
+            onClick={() => {
+              const canvas = canvasRef.current;
+              if (!canvas) return;
+              const link = document.createElement("a");
+              link.download = "function-graph.png";
+              link.href = canvas.toDataURL("image/png");
+              link.click();
+            }}
+            style={{ padding: "0.28rem 0.7rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, transition: "all 0.12s" }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+          >↓ Save as PNG</button>
+        </div>
+
+      </div>
     </div>
   );
 }
@@ -996,6 +1020,7 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
   // ── Active tool + grapher ─────────────────────────────────────────────────
   const [activeTool,   setActiveTool]  = useState("solver"); // "solver"|"derivative"|"symbolic"|"algebra"|"integral"
   const [grapherOpen,  setGrapherOpen] = useState(false);
+  const grapherCanvasRef = useRef(null);
   const [probOpen,     setProbOpen]    = useState(false);
 
   // ── Equation solver ────────────────────────────────────────────────────────
@@ -1367,7 +1392,7 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
           <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", marginBottom: 3 }}>Calculate</div>
           <div style={{ fontSize: 18, color: C.text, letterSpacing: "-0.01em" }}>Variable Workspace</div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           {[["↓R","r",C.gold],["↓Stata","stata",C.teal],["↓py","python",C.blue]].map(([label,lang,color]) => (
             <button key={lang}
               onClick={() => download(generateCalcScript(lang, variables, computeds), `calculate.${lang === "r" ? "R" : lang === "stata" ? "do" : "py"}`)}
@@ -1376,8 +1401,23 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
               onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
             >{label}</button>
           ))}
+          <div style={{ width: 1, height: 16, background: C.border2, margin: "0 2px" }} />
+          <button
+            title="Open function grapher"
+            onClick={() => setGrapherOpen(o => !o)}
+            style={{ padding: "0.3rem 0.7rem", background: grapherOpen ? `${C.teal}18` : "transparent", border: `1px solid ${grapherOpen ? C.teal : C.border2}`, borderRadius: 3, color: grapherOpen ? C.teal : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, transition: "all 0.12s" }}
+            onMouseEnter={e => { if (!grapherOpen) { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; } }}
+            onMouseLeave={e => { if (!grapherOpen) { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; } }}
+          >Graph</button>
         </div>
       </div>
+
+      {/* ── Function Grapher panel (below header) ───────────────────────────── */}
+      {grapherOpen && (
+        <div style={{ border: `1px solid ${C.teal}40`, borderRadius: 6, background: C.surface, padding: "1rem 1.1rem", marginBottom: "1.4rem" }}>
+          <FunctionGrapher C={C} savedEqs={savedEqs} canvasRef={grapherCanvasRef} />
+        </div>
+      )}
 
       {/* ── 1. User-defined variables ──────────────────────────────────────── */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
@@ -1654,13 +1694,7 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
         </div>
       )}
 
-      {/* ── 4. Function Grapher ──────────────────────────────────────────────── */}
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
-        <SectionHeader label="Function Grapher" open={grapherOpen} onToggle={() => setGrapherOpen(o => !o)} />
-        {grapherOpen && <div style={{ background: C.surface }}><FunctionGrapher C={C} savedEqs={savedEqs} /></div>}
-      </div>
-
-      {/* ── 5. Probability Calculator ───────────────────────────────────────── */}
+      {/* ── 4. Probability Calculator ───────────────────────────────────────── */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
         <SectionHeader label="Probability Calculator" open={probOpen} onToggle={() => setProbOpen(o => !o)} />
         {probOpen && <div style={{ background: C.surface }}><ProbCalc /></div>}

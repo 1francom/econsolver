@@ -2101,7 +2101,17 @@ export default function App() {
                 hasOutput={!!tabOutput(activeTab)}
                 activeDatasetId={tabDsId(activeTab)}
                 onSelectDataset={id => selectDataset(activeTab, id, activeTab === "clean")}
-                onRemoveDataset={id => studioRef.current?.removeDatasetLocal(id)}
+                onRemoveDataset={id => {
+                  studioRef.current?.removeDatasetLocal(id);
+                  // Purge stale pipeline output so modules see fresh data
+                  setOutputs(prev => { const { [id]: _, ...rest } = prev; return rest; });
+                  // Reset any tab that was scoped to the deleted dataset → fall back to primary
+                  setActiveDatasetIds(prev => {
+                    const next = { ...prev };
+                    Object.keys(next).forEach(tab => { if (next[tab] === id) next[tab] = pid; });
+                    return next;
+                  });
+                }}
                 onStartTour={() => setTourStep(0)}
                 onOpenFeedback={() => setFeedbackOpen(true)}
               />

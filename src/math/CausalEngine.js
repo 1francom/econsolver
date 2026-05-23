@@ -625,7 +625,7 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
 
   // ── 4. First stage: D ~ Xfs with kernel weights ─────────────────────────────
   // β̂_fs = (X_fs' W X_fs)⁻¹ X_fs' W D
-  const firstStage = runWLS(Xfs, D, W);
+  const firstStage = runWLS(Xfs, D, W, seOpts);
   if (!firstStage)
     return { error: "First-stage WLS failed — singular matrix. Check for perfect collinearity." };
 
@@ -710,19 +710,29 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
   const robustSE  = computeRobustSE(seOpts, XtXinvIV, wXss, wResidIV, n, k, null);
   const corrSE    = robustSE ?? classicalSE;
 
-  const lateSE    = corrSE[1]; // index 1 = β̂₁ (LATE), after intercept
-  const lateTCorr = isFinite(lateSE) && lateSE > 0 ? late / lateSE : lateT;
-  const latePCorr = isFinite(lateTCorr) ? pValue(lateTCorr, dfIV) : lateP;
-
-  // ── 8. Local Wald ratio for reference ────────────────────────────────────────
-  // Also compute reduced-form Sharp RDD (jump in Y at cutoff ignoring D),
-  // and report the Wald ratio: τ_fuzzy = jump_Y / jump_D
-  const reducedForm = runSharpRDD(valid, yCol, runCol, cutoff, h, kernel);
+  // ── 8. Local Wald ratio + delta-method SE ────────────────────────────────────
+  // Reduced-form Sharp RDD: jump in Y at cutoff (ignoring D).
+  // SE uses the same seOpts so delta-method propagation matches R's fuzzy_wald.
+  const reducedForm = runSharpRDD(valid, yCol, runCol, cutoff, h, kernel, [], seOpts);
 
   const jumpY = reducedForm ? reducedForm.late : NaN;
   const waldRatio = isFinite(firstStageJumpD) && Math.abs(firstStageJumpD) > 1e-10
     ? jumpY / firstStageJumpD
     : NaN;
+
+  // Delta-method SE for LATE — matches R's fuzzy_wald reference.
+  // Var(LATE) ≈ Var(γ̂) / α̂² + γ̂² · Var(α̂) / α̂⁴
+  // where γ̂ = jump in Y (reduced form), α̂ = jump in D (first stage).
+  // firstStage.se[1] already uses seOpts (HC1 or classical from the WLS call above).
+  const se_rf = reducedForm ? reducedForm.lateSE : NaN;
+  const se_fs = firstStage.se[1];
+  const varDelta = (se_rf ** 2) / (firstStageJumpD ** 2)
+    + (jumpY ** 2) * (se_fs ** 2) / (firstStageJumpD ** 4);
+  const deltaLateSE = Math.sqrt(Math.max(0, varDelta));
+
+  const lateSE    = Number.isFinite(deltaLateSE) ? deltaLateSE : corrSE[1];
+  const lateTCorr = isFinite(lateSE) && lateSE > 0 ? late / lateSE : lateT;
+  const latePCorr = isFinite(lateTCorr) ? pValue(lateTCorr, dfIV) : lateP;
 
   // ── 9. Plot data: smooth fit lines using first-stage + second-stage coefficients
   // Using D̂ from first stage at each grid point gives a clean regression curve,

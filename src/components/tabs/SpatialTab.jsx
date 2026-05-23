@@ -3,7 +3,7 @@
 // Sections: Distance · Buffer · Grid Assignment · Spatial Join · Nearest Neighbour · Geocode
 // All operations call SpatialEngine.js (pure JS, no backend).
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
@@ -47,6 +47,20 @@ const BASEMAPS = {
     attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>",
   },
 };
+
+// ── OSM / CARTO tile helpers for Plot tab ────────────────────────────────────
+const CARTO_TILE = "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png";
+function lonToTx(lon, z) { return Math.floor((lon + 180) / 360 * (1 << z)); }
+function latToTy(lat, z) { const s = Math.sin(lat * Math.PI / 180); return Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * (1 << z)); }
+function txToLon(tx, z) { return tx / (1 << z) * 360 - 180; }
+function tyToLat(ty, z) { return Math.atan(Math.sinh(Math.PI * (1 - 2 * ty / (1 << z)))) * 180 / Math.PI; }
+function pickTileZ(lonRange, latRange) {
+  for (let z = 14; z >= 3; z--) {
+    const tw = 360 / (1 << z);
+    if (lonRange / tw <= 8 && latRange / tw <= 8) return z;
+  }
+  return 8;
+}
 
 function addBasemap(L, map, basemap = "light") {
   const cfg = BASEMAPS[basemap] ?? BASEMAPS.light;
@@ -1442,8 +1456,8 @@ function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders, availa
 
       {/* ── Grid ──────────────────────────────────────────────────────────── */}
       {layer.type === "grid" && (<>
-        <div style={{ display: "flex", gap: 4 }}>
-          {[["generate", "Auto-generate"], ["wkt", "From WKT col"]].map(([m, lbl]) => (
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {[["latlon", "Lat/Lon extent"], ["generate", "Boundary WKT"], ["wkt", "From WKT col"]].map(([m, lbl]) => (
             <button key={m} onClick={() => onChange({ ...layer, mode: m })}
               style={{
                 flex: 1, padding: "3px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
@@ -1454,6 +1468,21 @@ function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders, availa
             >{lbl}</button>
           ))}
         </div>
+
+        {layer.mode === "latlon" && (<>
+          <ColSelect label="Latitude column" value={layer.latCol}
+            onChange={v => onChange({ ...layer, latCol: v })} headers={lyHeaders} C={C} allowNone />
+          <ColSelect label="Longitude column" value={layer.lonCol}
+            onChange={v => onChange({ ...layer, lonCol: v })} headers={lyHeaders} C={C} allowNone />
+          <NumInput label="Cell size (meters)" value={layer.cellsize}
+            onChange={v => onChange({ ...layer, cellsize: Number(v) })} C={C} min={50} max={10000} step={50} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
+            <input type="checkbox" checked={layer.clipBorder !== false}
+              onChange={e => onChange({ ...layer, clipBorder: e.target.checked })}
+              style={{ accentColor: C.teal, cursor: "pointer" }} />
+            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Clip border cells to extent</span>
+          </label>
+        </>)}
 
         {layer.mode === "generate" && (<>
           <ColSelect label="Boundary WKT column" value={layer.boundaryCol}
@@ -1535,7 +1564,7 @@ function mkSLayer(type, idx) {
   const col = LAYER_COLORS[idx % LAYER_COLORS.length];
   const id  = "sl_" + Math.random().toString(36).slice(2, 7);
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fillColor: "#d0d0d0", fillOpacity: 0.12, borderColor: "#222222", borderWidth: 0.5 };
-  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "generate", wktCol: "", boundaryCol: "", cellsize: 500, clipBorder: true, fillColor: col, fillOpacity: 0, borderColor: "#d73027", borderWidth: 0.15, colorByCol: "", colorFillOpacity: 0.55 };
+  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "latlon", latCol: "", lonCol: "", wktCol: "", boundaryCol: "", cellsize: 500, clipBorder: true, fillColor: col, fillOpacity: 0, borderColor: "#d73027", borderWidth: 0.15, colorByCol: "", colorFillOpacity: 0.55 };
   if (type === "points")   return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", colorCol: "", fillColor: col, radius: 4, opacity: 0.78 };
   if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", lineColor: col, lineWeight: 1.5, lineOpacity: 0.85 };
   return { id, type, visible: true };
@@ -1603,6 +1632,71 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
     const a    = document.createElement("a");
     a.href = url; a.download = "spatial_map.html"; a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // ── Download map as PNG (vector overlay cropped to visible area) ────────────
+  function downloadMapPng() {
+    const map = leafMapRef.current;
+    if (!map) return;
+    const overlaySvg = map.getPanes().overlayPane?.querySelector("svg");
+    if (!overlaySvg) { alert("No vector layers to export."); return; }
+
+    // Leaflet's overlay SVG extends beyond the viewport by its padding (default ~200px).
+    // Crop to the visible map container using viewBox.
+    const containerRect = map.getContainer().getBoundingClientRect();
+    const svgRect       = overlaySvg.getBoundingClientRect();
+    const vbX = containerRect.left - svgRect.left;
+    const vbY = containerRect.top  - svgRect.top;
+    const vbW = Math.max(1, containerRect.width);
+    const vbH = Math.max(1, containerRect.height);
+
+    const svgClone = overlaySvg.cloneNode(true);
+    svgClone.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
+    svgClone.setAttribute("width",  vbW);
+    svgClone.setAttribute("height", vbH);
+
+    const svgStr  = new XMLSerializer().serializeToString(svgClone);
+    const svgBlob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width  = Math.round(vbW) * scale;
+      canvas.height = Math.round(vbH) * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#f0ede8"; // light CARTO-style background
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(blobUrl);
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = "spatial_map.png";
+      a.click();
+    };
+    img.onerror = () => { URL.revokeObjectURL(blobUrl); alert("PNG export failed — try a different browser."); };
+    img.src = blobUrl;
+  }
+
+  // ── Download map as PDF (SVG in print iframe) ────────────────────────────────
+  function downloadMapPdf() {
+    const map = leafMapRef.current;
+    if (!map) return;
+    const overlaySvg = map.getPanes().overlayPane?.querySelector("svg");
+    if (!overlaySvg) { alert("No vector layers to export."); return; }
+    const { width, height } = overlaySvg.getBoundingClientRect();
+    const svgStr  = new XMLSerializer().serializeToString(overlaySvg);
+    const blob    = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const iframe  = document.createElement("iframe");
+    iframe.style.cssText = `position:fixed;top:-9999px;left:-9999px;width:${Math.max(1, Math.round(width))}px;height:${Math.max(1, Math.round(height))}px;border:none;`;
+    iframe.src = blobUrl;
+    iframe.onload = () => {
+      try { iframe.contentWindow.print(); } catch (_) { alert("PDF export: use the browser print dialog."); }
+      setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(iframe); }, 2000);
+    };
+    document.body.appendChild(iframe);
   }
 
   useEffect(() => {
@@ -1676,11 +1770,28 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
 
   // Auto-generate grid cells (memoized — also used for save)
   const generatedGrid = useMemo(() => {
-    const gl = layers.find(l => l.type === "grid" && l.mode === "generate" && l.boundaryCol && l.cellsize > 0);
+    const gl = layers.find(l =>
+      l.type === "grid" && l.cellsize > 0 && (
+        (l.mode === "generate" && l.boundaryCol) ||
+        (l.mode === "latlon"   && l.latCol && l.lonCol)
+      )
+    );
     if (!gl) return null;
     const glRows = (!gl.datasetId || gl.datasetId === "active") ? rows : availableDatasets.find(d => d.id === gl.datasetId)?.rows ?? rows;
-    const wkt = glRows.find(r => r[gl.boundaryCol])?.[gl.boundaryCol];
-    if (!wkt) return null;
+    let wkt;
+    if (gl.mode === "generate") {
+      wkt = glRows.find(r => r[gl.boundaryCol])?.[gl.boundaryCol];
+      if (!wkt) return null;
+    } else {
+      // latlon mode: build bounding-box WKT from point extent
+      const lats = glRows.map(r => parseFloat(r[gl.latCol])).filter(v => !isNaN(v));
+      const lons = glRows.map(r => parseFloat(r[gl.lonCol])).filter(v => !isNaN(v));
+      if (!lats.length || !lons.length) return null;
+      const pad = 0.0001;
+      const lat0 = Math.min(...lats) - pad, lat1 = Math.max(...lats) + pad;
+      const lon0 = Math.min(...lons) - pad, lon1 = Math.max(...lons) + pad;
+      wkt = `POLYGON((${lon0} ${lat0}, ${lon1} ${lat0}, ${lon1} ${lat1}, ${lon0} ${lat1}, ${lon0} ${lat0}))`;
+    }
     try { return { cells: makeGrid(wkt, gl.cellsize, gl.clipBorder !== false), error: null }; }
     catch (e) { return { cells: null, error: e.message }; }
   }, [layers, rows, availableDatasets]);
@@ -1896,7 +2007,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
               <span style={{ flex: 1, fontFamily: mono, fontSize: 9, color: activeId === ly.id ? C.teal : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {ly.type}
                 {ly.type === "boundary" && ly.wktCol && ` · ${ly.wktCol}`}
-                {ly.type === "grid" && ly.mode === "generate" && ` · ${ly.cellsize}m`}
+                {ly.type === "grid" && (ly.mode === "latlon" || ly.mode === "generate") && ` · ${ly.cellsize}m`}
                 {ly.type === "grid" && ly.mode === "wkt" && ly.wktCol && ` · ${ly.wktCol}`}
                 {ly.type === "line" && ly.wktCol && ` · ${ly.wktCol}`}
                 {ly.type === "points" && ly.latCol && ` · ${ly.latCol}/${ly.lonCol}`}
@@ -1918,12 +2029,20 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
             ))}
           </div>
 
-          {/* ── Download as HTML ── */}
+          {/* ── Download as HTML / PNG / PDF ── */}
           {layers.length > 0 && (
-            <div style={{ marginTop: 10 }}>
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
               <button onClick={downloadMapHtml}
-                style={{ width: "100%", padding: "3px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.gold}15`, border: `1px solid ${C.gold}55`, color: C.gold, cursor: "pointer" }}
-              >⬇ Download map.html</button>
+                style={{ padding: "3px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.gold}15`, border: `1px solid ${C.gold}55`, color: C.gold, cursor: "pointer" }}
+              >⬇ map.html</button>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={downloadMapPng}
+                  style={{ flex: 1, padding: "3px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}12`, border: `1px solid ${C.teal}40`, color: C.teal, cursor: "pointer" }}
+                >⬇ .png</button>
+                <button onClick={downloadMapPdf}
+                  style={{ flex: 1, padding: "3px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}12`, border: `1px solid ${C.teal}40`, color: C.teal, cursor: "pointer" }}
+                >⬇ .pdf</button>
+              </div>
             </div>
           )}
         </div>
@@ -2022,6 +2141,8 @@ function geoBbox(layers, defaultRows, availableDatasets) {
     const r = (!ly.datasetId || ly.datasetId === "active") ? defaultRows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? defaultRows;
     if (ly.type === "point" && ly.latCol && ly.lonCol) {
       for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
+    } else if (ly.type === "grid" && (ly.mode ?? "latlon") === "latlon" && ly.latCol && ly.lonCol) {
+      for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
     } else if (ly.wktCol) {
       for (const row of r) { const p = parseWktRings(row[ly.wktCol]); if (p) for (const ring of p.rings) for (const [x, y] of ring) exp(x, y); }
     }
@@ -2040,7 +2161,7 @@ function mkGeoLayer(type, idx) {
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", fillOpacity: 0, stroke: "#222", strokeWidth: 0.8 };
   if (type === "point")    return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", fill: col, radius: 4, fillOpacity: 0.78 };
   if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", stroke: col, strokeWidth: 1.2 };
-  if (type === "grid")     return { id, type, visible: true, datasetId: "active", wktCol: "", fill: col, fillOpacity: 0.35, stroke: "#888", strokeWidth: 0.3 };
+  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "latlon", wktCol: "", latCol: "", lonCol: "", cellsize: 500, fill: col, fillOpacity: 0.35, stroke: "#888", strokeWidth: 0.3 };
   return { id, type, visible: true, datasetId: "active" };
 }
 
@@ -2094,7 +2215,28 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
           {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
         </select>
       </div>
-      {(ly.type === "polygon" || ly.type === "boundary" || ly.type === "line" || ly.type === "grid") && (
+      {ly.type === "grid" && (
+        <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+          {[["latlon", "Lat/Lon"], ["wkt", "WKT col"]].map(([m, lbl]) => (
+            <button key={m} onClick={() => upd({ mode: m })}
+              style={{
+                flex: 1, padding: "2px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                background: (ly.mode ?? "latlon") === m ? `${C.teal}18` : "transparent",
+                border: `1px solid ${(ly.mode ?? "latlon") === m ? C.teal + "55" : C.border2}`,
+                color: (ly.mode ?? "latlon") === m ? C.teal : C.textMuted,
+              }}
+            >{lbl}</button>
+          ))}
+        </div>
+      )}
+      {ly.type === "grid" && (ly.mode ?? "latlon") === "latlon" && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Sel label="Lat" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
+          <Sel label="Lon" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
+          <Rng label="Cell (m)" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} fmt={v => v + "m"} />
+        </div>
+      )}
+      {(ly.type === "polygon" || ly.type === "boundary" || ly.type === "line" || (ly.type === "grid" && (ly.mode ?? "latlon") === "wkt")) && (
         <Sel label="Geometry (WKT)" value={ly.wktCol} onChg={v => upd({ wktCol: v })} opts={geomCols} />
       )}
       {ly.type === "point" && (
@@ -2131,8 +2273,79 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
   );
 }
 
-function GeoPlotCanvas({ Plt, layers, rows, availableDatasets, title, subtitle, caption, width = 700, maxH = 0, forceH = 0 }) {
-  const canvasRef = useRef(null);
+// Fixed margins so y-axis labels like "34.52°S" always fit
+const GEO_MARGIN = { top: 20, right: 20, bottom: 34, left: 72 };
+
+const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
+  { Plt, layers, rows, availableDatasets, title, subtitle, caption,
+    maxW = 700, maxH = 0, forceH = 0, showTiles = false },
+  ref
+) {
+  const canvasRef  = useRef(null);
+  const tileCanRef = useRef(null);
+  const wrapperRef = useRef(null);
+  // Track computed plot size for tile canvas positioning
+  const dimsRef    = useRef({ plotW: 0, plotH: 0, innerW: 0, innerH: 0, xMin: 0, xMax: 1, yMin: 0, yMax: 1 });
+
+  useImperativeHandle(ref, () => ({
+    // Composite export: tiles canvas (if present) + SVG on top → PNG download
+    exportToPng: (filename = "geo_plot.png") => new Promise(resolve => {
+      const svg = canvasRef.current?.querySelector("svg");
+      if (!svg) { resolve(); return; }
+      const { plotW, plotH } = dimsRef.current;
+      if (!plotW || !plotH) { resolve(); return; }
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width  = plotW * scale;
+      canvas.height = plotH * scale;
+      const ctx = canvas.getContext("2d");
+
+      const drawSvgLayer = () => {
+        const svgStr  = new XMLSerializer().serializeToString(svg);
+        const svgBlob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+        const svgUrl  = URL.createObjectURL(svgBlob);
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, plotW * scale, plotH * scale);
+          URL.revokeObjectURL(svgUrl);
+          const a = document.createElement("a");
+          a.href = canvas.toDataURL("image/png");
+          a.download = filename;
+          a.click();
+          resolve();
+        };
+        img.onerror = () => { URL.revokeObjectURL(svgUrl); resolve(); };
+        img.src = svgUrl;
+      };
+
+      // Draw tile canvas first if tiles are shown
+      const tileCanvas = tileCanRef.current;
+      if (showTiles && tileCanvas && tileCanvas.width > 0) {
+        ctx.drawImage(tileCanvas, 0, 0, plotW * scale, plotH * scale);
+        drawSvgLayer();
+      } else {
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawSvgLayer();
+      }
+    }),
+    exportToPdf: () => {
+      const svg = canvasRef.current?.querySelector("svg");
+      if (!svg) return;
+      const { plotW, plotH } = dimsRef.current;
+      const svgStr  = new XMLSerializer().serializeToString(svg);
+      const blob    = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+      const blobUrl = URL.createObjectURL(blob);
+      const iframe  = document.createElement("iframe");
+      iframe.style.cssText = `position:fixed;top:-9999px;left:-9999px;width:${plotW}px;height:${plotH}px;border:none;`;
+      iframe.src = blobUrl;
+      iframe.onload = () => {
+        try { iframe.contentWindow.print(); } catch (_) { alert("PDF export: use the browser print dialog."); }
+        setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(iframe); }, 2000);
+      };
+      document.body.appendChild(iframe);
+    },
+  }), [showTiles]);
 
   useEffect(() => {
     if (!Plt || !canvasRef.current || layers.length === 0) return;
@@ -2143,15 +2356,28 @@ function GeoPlotCanvas({ Plt, layers, rows, availableDatasets, title, subtitle, 
     const midLat = (yMin + yMax) / 2;
     const cosLat = Math.max(0.1, Math.cos(midLat * Math.PI / 180));
 
-    // Compute height: user override → auto-computed capped to container
+    // Compute dimensions: preserve geographic aspect ratio within maxW × maxH.
+    // When height is constrained (by maxH or forceH), shrink width accordingly.
     const xRange = xMax - xMin, yRange = yMax - yMin;
-    const innerW = width - 60;
-    const idealH = Math.round(innerW * (yRange / Math.max(xRange, 1e-9)) / cosLat) + 40;
-    const plotH  = forceH > 0 ? forceH
-                 : maxH  > 0 ? Math.min(Math.max(idealH, 180), maxH)
-                 : Math.max(idealH, 180);
+    const ML = GEO_MARGIN.left, MR = GEO_MARGIN.right, MT = GEO_MARGIN.top, MB = GEO_MARGIN.bottom;
+    const innerMaxW = maxW - ML - MR;
+    // idealH = height needed for full width at correct aspect ratio (cosLat correction)
+    const idealH    = Math.round(innerMaxW * (yRange / Math.max(xRange, 1e-9)) / cosLat) + MT + MB;
+    let plotW, plotH;
+    const effectiveMaxH = maxH > 0 ? maxH : Infinity;
+    if (forceH > 0) {
+      plotH = Math.min(forceH, effectiveMaxH === Infinity ? forceH : effectiveMaxH);
+    } else {
+      plotH = Math.min(Math.max(idealH, 180), effectiveMaxH === Infinity ? Math.max(idealH, 180) : effectiveMaxH);
+    }
+    // Back-compute plotW from plotH to maintain correct aspect ratio
+    const innerH    = Math.max(1, plotH - MT - MB);
+    const idealInnerW = Math.round(innerH * (xRange / Math.max(yRange, 1e-9)) * cosLat);
+    const innerW    = Math.min(idealInnerW, innerMaxW);
+    plotW = innerW + ML + MR;
+    dimsRef.current = { plotW, plotH, innerW, innerH, xMin, xMax, yMin, yMax };
 
-    const marks = [Plt.frame({ stroke: "#bbb", strokeWidth: 0.5 })];
+    const marks = [Plt.frame({ stroke: showTiles ? "#ccc" : "#bbb", strokeWidth: 0.5 })];
 
     for (const ly of layers) {
       if (!ly.visible) continue;
@@ -2162,6 +2388,31 @@ function GeoPlotCanvas({ Plt, layers, rows, availableDatasets, title, subtitle, 
           fill: ly.fill ?? "#6ec8b4", r: ly.radius ?? 4,
           fillOpacity: ly.fillOpacity ?? 0.78, stroke: "none",
         }));
+      } else if (ly.type === "grid" && (ly.mode ?? "latlon") === "latlon" && ly.latCol && ly.lonCol) {
+        try {
+          const lats = r.map(row => parseFloat(row[ly.latCol])).filter(v => !isNaN(v));
+          const lons = r.map(row => parseFloat(row[ly.lonCol])).filter(v => !isNaN(v));
+          if (lats.length && lons.length) {
+            const pad = 0.0001;
+            const lat0 = Math.min(...lats) - pad, lat1 = Math.max(...lats) + pad;
+            const lon0 = Math.min(...lons) - pad, lon1 = Math.max(...lons) + pad;
+            const bboxWkt = `POLYGON((${lon0} ${lat0}, ${lon1} ${lat0}, ${lon1} ${lat1}, ${lon0} ${lat1}, ${lon0} ${lat0}))`;
+            const cells = makeGrid(bboxWkt, ly.cellsize ?? 500, false);
+            for (const cell of cells) {
+              const parsed = parseWktRings(cell.geometry);
+              if (!parsed) continue;
+              for (const ring of parsed.rings) {
+                if (ring.length < 2) continue;
+                marks.push(Plt.line([...ring, ring[0]], {
+                  x: d => d[0], y: d => d[1],
+                  fill: ly.fill ?? "none", fillOpacity: ly.fillOpacity ?? 0.35,
+                  stroke: ly.stroke ?? "#888", strokeWidth: ly.strokeWidth ?? 0.3,
+                  strokeLinejoin: "round",
+                }));
+              }
+            }
+          }
+        } catch (_) { /* skip */ }
       } else if (ly.wktCol) {
         for (const row of r) {
           const parsed = parseWktRings(row[ly.wktCol]);
@@ -2183,9 +2434,9 @@ function GeoPlotCanvas({ Plt, layers, rows, availableDatasets, title, subtitle, 
 
     try {
       const svg = Plt.plot({
-        width,
-        height: plotH,
-        style: { background: "white", color: "#444", fontFamily: "serif", fontSize: "11px" },
+        width: plotW, height: plotH,
+        marginTop: MT, marginRight: MR, marginBottom: MB, marginLeft: ML,
+        style: { background: showTiles ? "transparent" : "white", color: "#444", fontFamily: "serif", fontSize: "11px" },
         x: { domain: [xMin, xMax], label: null, nice: false, grid: true,
              tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°W` : `${d.toFixed(2)}°E` },
         y: { domain: [yMin, yMax], label: null, nice: false, grid: true,
@@ -2200,18 +2451,51 @@ function GeoPlotCanvas({ Plt, layers, rows, availableDatasets, title, subtitle, 
       el.appendChild(errDiv);
     }
 
+    // ── Draw CARTO tiles on the tile canvas ──────────────────────────────────
+    if (showTiles && tileCanRef.current) {
+      const tc = tileCanRef.current;
+      tc.width  = plotW;
+      tc.height = plotH;
+      const ctx = tc.getContext("2d");
+      ctx.fillStyle = "#f0ede8"; // CARTO Voyager light background
+      ctx.fillRect(0, 0, plotW, plotH);
+
+      const lonToPx = lon => ML + (lon - xMin) / (xMax - xMin) * innerW;
+      const latToPy = lat => MT + (yMax - lat) / (yMax - yMin) * innerH;
+      const z = pickTileZ(xMax - xMin, yMax - yMin);
+      const tx0 = lonToTx(xMin, z), tx1 = lonToTx(xMax, z);
+      const ty0 = latToTy(yMax, z), ty1 = latToTy(yMin, z);
+
+      for (let tx = tx0; tx <= tx1; tx++) {
+        for (let ty = ty0; ty <= ty1; ty++) {
+          const lon0 = txToLon(tx,   z), lon1 = txToLon(tx + 1, z);
+          const lat1 = tyToLat(ty,   z), lat0 = tyToLat(ty + 1, z); // lat1 > lat0
+          const px0 = lonToPx(lon0), px1 = lonToPx(lon1);
+          const py0 = latToPy(lat1), py1 = latToPy(lat0);
+          const url = CARTO_TILE.replace("{z}", z).replace("{x}", tx).replace("{y}", ty);
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); };
+          img.src = url;
+        }
+      }
+    }
+
     return () => { while (el.firstChild) el.removeChild(el.firstChild); };
-  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, width, maxH, forceH]);
+  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, maxW, maxH, forceH, showTiles]);
 
   return (
-    <div style={{ fontFamily: "serif", color: "#333", background: "white", padding: "12px 8px 8px", borderRadius: 4, border: "1px solid #ddd" }}>
+    <div ref={wrapperRef} style={{ fontFamily: "serif", color: "#333", background: "white", padding: "12px 8px 8px", borderRadius: 4, border: "1px solid #ddd" }}>
       {title    && <div style={{ textAlign: "center", fontSize: 15, fontWeight: "bold", marginBottom: 2 }}>{title}</div>}
       {subtitle && <div style={{ textAlign: "center", fontSize: 11, color: "#666", marginBottom: 6 }}>{subtitle}</div>}
-      <div ref={canvasRef} />
+      <div style={{ position: "relative" }}>
+        {showTiles && <canvas ref={tileCanRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />}
+        <div ref={canvasRef} style={{ position: "relative" }} />
+      </div>
       {caption  && <div style={{ textAlign: "right", fontSize: 9, color: "#999", marginTop: 4 }}>{caption}</div>}
     </div>
   );
-}
+});
 
 function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const [Plt,     setPlt]     = useState(null);
@@ -2226,7 +2510,9 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const [histOpen,    setHistOpen]    = useState(false);
   const [compareIds,  setCompareIds]  = useState(new Set());
   const [userH,       setUserH]       = useState(null); // null = auto
-  const wrapRef = useRef(null);
+  const [showTiles,   setShowTiles]   = useState(false);
+  const wrapRef    = useRef(null);
+  const geoPlotRef = useRef(null);
   const [canvasW, setCanvasW] = useState(700);
   const [canvasH, setCanvasH] = useState(500);
 
@@ -2253,6 +2539,14 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const activeLayer = layers.find(l => l.id === activeId) ?? null;
 
   const currentEntry = () => ({ layers, title, subtitle, caption });
+
+  function exportPng() {
+    geoPlotRef.current?.exportToPng(`${dTitle || "geo_plot"}.png`);
+  }
+
+  function exportPdf() {
+    geoPlotRef.current?.exportToPdf();
+  }
 
   async function savePlot() {
     if (!pid) return;
@@ -2283,7 +2577,7 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const dSubtitle = view ? view.subtitle : subtitle;
   const dCaption  = view ? view.caption  : caption;
   const comparePlots = plotHistory.filter(e => compareIds.has(e.id));
-  const plotW = Math.max(280, canvasW - 48);
+  const maxW = Math.max(280, canvasW - 48);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto" }}>
@@ -2334,8 +2628,8 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
           {/* Height slider */}
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono }}>H</span>
-            <input type="range" min={150} max={1200} step={20}
-              value={userH ?? Math.max(200, canvasH - 60)}
+            <input type="range" min={250} max={Math.max(400, (typeof window !== "undefined" ? window.innerHeight : 800) - 260)} step={20}
+              value={userH ?? Math.min(Math.max(300, canvasH - 100), (typeof window !== "undefined" ? window.innerHeight : 800) - 260)}
               onChange={e => setUserH(parseInt(e.target.value))}
               style={{ width: 70, accentColor: C.teal }} />
             <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted, minWidth: 32 }}>
@@ -2347,7 +2641,22 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
             )}
           </div>
 
+          {/* Tiles toggle */}
+          <button onClick={() => setShowTiles(t => !t)}
+            style={{ padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+              background: showTiles ? `${C.teal}20` : "none",
+              border: `1px solid ${showTiles ? C.teal + "60" : C.border2}`,
+              color: showTiles ? C.teal : C.textMuted }}>
+            OSM
+          </button>
+
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5 }}>
+            {dLayers.length > 0 && (<>
+              <button onClick={exportPng}
+                style={{ padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}12`, border: `1px solid ${C.teal}40`, color: C.teal, cursor: "pointer" }}>⬇ PNG</button>
+              <button onClick={exportPdf}
+                style={{ padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}12`, border: `1px solid ${C.teal}40`, color: C.teal, cursor: "pointer" }}>⬇ PDF</button>
+            </>)}
             {plotHistory.length > 0 && (<>
               <button onClick={() => setHistIdx(i => i === null ? plotHistory.length - 1 : Math.max(0, i - 1))}
                 style={{ padding: "2px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}>←</button>
@@ -2375,10 +2684,10 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
           </div>
         )}
         {Plt && dLayers.length > 0 && (
-          <GeoPlotCanvas Plt={Plt} layers={dLayers} rows={rows} availableDatasets={availableDatasets}
-            title={dTitle} subtitle={dSubtitle} caption={dCaption} width={plotW}
-            maxH={Math.max(200, (typeof window !== "undefined" ? window.innerHeight : 700) - 260)}
-            forceH={userH ?? 0} />
+          <GeoPlotCanvas ref={geoPlotRef} Plt={Plt} layers={dLayers} rows={rows} availableDatasets={availableDatasets}
+            title={dTitle} subtitle={dSubtitle} caption={dCaption} maxW={maxW}
+            maxH={Math.max(300, (typeof window !== "undefined" ? window.innerHeight : 700) - 260)}
+            forceH={userH ?? 0} showTiles={showTiles} />
         )}
 
         {/* History strip */}
@@ -2416,7 +2725,7 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
                     <div style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginBottom: 6 }}>{entry.name}</div>
                     <GeoPlotCanvas Plt={Plt} layers={entry.layers ?? []} rows={rows} availableDatasets={availableDatasets}
                       title={entry.title} subtitle={entry.subtitle} caption={entry.caption}
-                      width={Math.max(240, (plotW - 32) / 2)}
+                      maxW={Math.max(240, (maxW - 32) / 2)}
                       forceH={userH ?? 0} />
                   </div>
                 ))}

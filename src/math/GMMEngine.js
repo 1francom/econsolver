@@ -280,9 +280,9 @@ export function runLIML(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
   let pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
 
   // ── Robust SE override ─────────────────────────────────────────────────────
-  // XtPzXi scaled by s2 is the classical Var(β̂); pass it as the bread matrix.
-  const XtPzXiS2 = XtPzXi.map(row => row.map(v => v * s2));
-  const robSE    = computeRobustSE(seOpts, XtPzXiS2, X, resid, n, k, valid);
+  // Bread for sandwich = (X'P_Z X)^{-1}. Do NOT pre-multiply by s2 — that
+  // would inflate every robust SE by s2 (squaring the s2 factor in bread×meat×bread).
+  const robSE    = computeRobustSE(seOpts, XtPzXi, X, resid, n, k, valid);
   if (robSE) {
     se     = robSE;
     tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
