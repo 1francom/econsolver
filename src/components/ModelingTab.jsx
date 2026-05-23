@@ -1334,6 +1334,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // Re-initialize when dataset changes
   useEffect(() => {
     setFactorVars(new Set(headers.filter(h => !numericCols.includes(h))));
+    // Clear all variable selectors so stale column names from the previous
+    // dataset don't bleed into the new estimation.
+    setYVar([]);
+    setXVars([]);
+    setWVars([]);
+    setZVars([]);
+    setPostVar([]);
+    setTreatVar([]);
   }, [cleanedData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sufficient-statistics cache (Fase 0) ─────────────────────────────────────
