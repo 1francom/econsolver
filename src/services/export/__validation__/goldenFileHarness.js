@@ -383,7 +383,21 @@ export function runGoldenHarness({ verbose = false, only = null } = {}) {
 }
 
 // ─── Attach to window ────────────────────────────────────────────────────────────
+
+const VALIDATION_DEADLINE = new Date("2026-05-29T00:00:00");
+
 if (typeof window !== "undefined") {
-  window.__goldenHarness = runGoldenHarness;
+  window.__goldenHarness = function wrappedGoldenHarness(opts) {
+    sessionStorage.setItem("__goldenHarnessRan", new Date().toISOString());
+    return runGoldenHarness(opts);
+  };
   console.log("[goldenFileHarness] Ready — window.__goldenHarness() or window.__goldenHarness({ verbose:true })");
+
+  // Deadline check — warn once per session if overdue
+  if (new Date() >= VALIDATION_DEADLINE && !sessionStorage.getItem("__goldenHarnessRan")) {
+    console.warn(
+      "%c⚠ Export validation overdue!\nDeadline was 2026-05-29. Run window.__goldenHarness() and window.__validateExports() now to confirm all 19 estimators × 3 languages pass.",
+      "color: #ff9900; font-weight: bold; font-size: 12px"
+    );
+  }
 }

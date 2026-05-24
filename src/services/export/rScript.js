@@ -906,10 +906,39 @@ export function generateRScript(config) {
   return lines.join("\n");
 }
 
+// ─── MULTI-MODEL HELPERS ───────────────────────────────────────────────────────
+
+/**
+ * Returns "map" when all configs share the same estimator spec AND all carry
+ * subsetFilters metadata (i.e. they came from runAllSubsets). Otherwise "separate".
+ */
+function detectMapPattern(configs) {
+  if (configs.length < 2) return "separate";
+  const allHaveMeta = configs.every(c => Array.isArray(c.subsetFilters));
+  if (!allHaveMeta) return "separate";
+  const first = configs[0].model;
+  const xKey  = arr => JSON.stringify([...(arr ?? [])].sort());
+  const sameSpec = configs.every(c =>
+    c.model.type  === first.type &&
+    c.model.yVar  === first.yVar &&
+    xKey(c.model.xVars) === xKey(first.xVars)
+  );
+  return sameSpec ? "map" : "separate";
+}
+
+/** Translate a subset's filter array to an R dplyr::filter() expression, or null for full sample. */
+function subsetFiltersToR(filters) {
+  if (!filters?.length) return null;
+  return filters.map(f => {
+    const val = isNaN(Number(f.val)) ? `"${f.val}"` : f.val;
+    return `${rName(f.col)} ${f.op} ${val}`;
+  }).join(" & ");
+}
+
 // ─── MULTI-MODEL EXPORT ────────────────────────────────────────────────────────
 // Generates an R script that estimates all models and outputs a joint modelsummary table.
 //
-// configs:        Array of { model: ModelConfig, label: string }
+// configs:        Array of { model: ModelConfig, label: string, subsetName?, subsetFilters? }
 // dataDictionary: Record<string,string> | null
 // opts:           { filename?: string, pipeline?: Step[] }
 export function generateMultiModelRScript(configs = [], dataDictionary = null, opts = {}) {
@@ -965,29 +994,64 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
     lines.push(``);
   }
 
-  lines.push(`# ── 3. Estimation (one fit object per model) ─────────────────────────────`);
-  const fitNames = [];
-  configs.forEach((c, i) => {
-    const fitName = `fit_${i + 1}`;
-    fitNames.push(fitName);
-    lines.push(`# Model ${i+1}: ${c.label ?? c.model?.type}`);
-    const modelCode = transpileModel(c.model ?? {});
-    // Replace generic "fit" variable with indexed name
-    lines.push(modelCode.replace(/\bfit\b/g, fitName).replace(/\bfit_fe\b/g, fitName).replace(/\bfit_fd\b/g, fitName));
-    lines.push(``);
-  });
+  const pattern = detectMapPattern(configs);
 
-  lines.push(`# ── 4. Joint output table ────────────────────────────────────────────────`);
-  const listItems = configs.map((c, i) => `${rStr(c.label ?? `Model ${i+1}`)} = ${fitNames[i]}`).join(", ");
-  lines.push(
-    `modelsummary::modelsummary(`,
-    `  list(${listItems}),`,
-    `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
-    `  gof_omit   = "AIC|BIC|Log|F$",`,
-    `  output     = "comparison_results.docx"`,
-    `)`,
-    ``
-  );
+  if (pattern === "map") {
+    // ── Same spec, different subsets → lapply pattern ────────────────────────
+    lines.push(`# ── 3. Subsets + lapply ──────────────────────────────────────────────────`);
+    const subsetEntries = configs.map(c => {
+      const expr = subsetFiltersToR(c.subsetFilters);
+      const rhs  = expr ? `df |> dplyr::filter(${expr})` : `df`;
+      return `  ${rStr(c.subsetName ?? c.label)} = ${rhs}`;
+    });
+    lines.push(`subsets <- list(`);
+    subsetEntries.forEach((e, i) => lines.push(e + (i < subsetEntries.length - 1 ? "," : "")));
+    lines.push(`)`);
+    lines.push(``);
+
+    // Extract the fit call from the first config (strip assignment, swap df → s)
+    const singleCode = transpileModel(configs[0].model ?? {});
+    const fitCall    = singleCode
+      .replace(/\b(fit|fit_fe|fit_fd)\s*<-\s*/, "")
+      .replace(/\bdf\b/g, "s");
+    lines.push(`results <- lapply(subsets, function(s) ${fitCall})`);
+    lines.push(``);
+
+    lines.push(`# ── 4. Joint output table ─────────────────────────────────────────────`);
+    lines.push(
+      `modelsummary::modelsummary(`,
+      `  results,`,
+      `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
+      `  gof_omit   = "AIC|BIC|Log|F$",`,
+      `  output     = "comparison_results.docx"`,
+      `)`,
+      ``
+    );
+  } else {
+    // ── Different specs → one fit object per model ───────────────────────────
+    lines.push(`# ── 3. Estimation (one fit object per model) ─────────────────────────────`);
+    const fitNames = [];
+    configs.forEach((c, i) => {
+      const fitName = `fit_${i + 1}`;
+      fitNames.push(fitName);
+      lines.push(`# Model ${i+1}: ${c.label ?? c.model?.type}`);
+      const modelCode = transpileModel(c.model ?? {});
+      lines.push(modelCode.replace(/\bfit\b/g, fitName).replace(/\bfit_fe\b/g, fitName).replace(/\bfit_fd\b/g, fitName));
+      lines.push(``);
+    });
+
+    lines.push(`# ── 4. Joint output table ────────────────────────────────────────────────`);
+    const listItems = configs.map((c, i) => `${rStr(c.label ?? `Model ${i+1}`)} = ${fitNames[i]}`).join(", ");
+    lines.push(
+      `modelsummary::modelsummary(`,
+      `  list(${listItems}),`,
+      `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
+      `  gof_omit   = "AIC|BIC|Log|F$",`,
+      `  output     = "comparison_results.docx"`,
+      `)`,
+      ``
+    );
+  }
 
   lines.push(`sessionInfo()`);
   return lines.join("\n");

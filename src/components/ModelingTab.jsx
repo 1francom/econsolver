@@ -1792,7 +1792,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         : rows;
       const fullOut = _runEstimation(fullRows);
       if (!fullOut.error && fullOut.result) {
-        const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
+        const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample", subsetFilters: [] };
         modelBuffer.add(r);
         setBufferVersion(v => v + 1);
       }
@@ -1805,7 +1805,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           : filtered;
         const out = _runEstimation(subsetRows);
         if (!out.error && out.result) {
-          const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
+          const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name, subsetFilters: s.filters ?? [] };
           modelBuffer.add(r);
           setBufferVersion(v => v + 1);
         }

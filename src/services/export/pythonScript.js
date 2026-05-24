@@ -663,8 +663,32 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
   return lines;
 }
 
+// ─── MULTI-MODEL HELPERS ─────────────────────────────────────────────��────────
+
+function detectMapPatternPy(configs) {
+  if (configs.length < 2) return "separate";
+  const allHaveMeta = configs.every(c => Array.isArray(c.subsetFilters));
+  if (!allHaveMeta) return "separate";
+  const first = configs[0].model;
+  const xKey  = arr => JSON.stringify([...(arr ?? [])].sort());
+  return configs.every(c =>
+    c.model.type === first.type &&
+    c.model.yVar === first.yVar &&
+    xKey(c.model.xVars) === xKey(first.xVars)
+  ) ? "map" : "separate";
+}
+
+function subsetFiltersToPython(filters, dfName = "df") {
+  if (!filters?.length) return null;
+  const parts = filters.map(f => {
+    const val = isNaN(Number(f.val)) ? `"${f.val}"` : f.val;
+    return `(${dfName}["${f.col}"] ${f.op} ${val})`;
+  });
+  return `${dfName}[${parts.join(" & ")}]`;
+}
+
 // ─── MULTI-MODEL EXPORT ────────────────────────────────────────────────────────
-// configs: Array of { model: ModelConfig, label: string }
+// configs: Array of { model: ModelConfig, label: string, subsetName?, subsetFilters? }
 // opts:    { filename?: string, pipeline?: Step[] }
 export function generateMultiModelPythonScript(configs = [], dataDictionary = null, opts = {}) {
   if (!configs.length) return "# No models provided.";
@@ -720,55 +744,93 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
     lines.push("");
   }
 
-  lines.push(`# ── Estimation ─────────────────────────────────────────────────────────────`);
-  const fitNames = [];
-  configs.forEach((c, i) => {
+  const pattern = detectMapPatternPy(configs);
+
+  if (pattern === "map") {
+    // ── Same spec, different subsets → dict + for loop ───────────────────────
+    lines.push(`# ── Subsets ─────────────────────────────────────────────────────────────────`);
+    lines.push(`subsets = {`);
+    configs.forEach((c, i) => {
+      const expr = subsetFiltersToPython(c.subsetFilters, "df");
+      const rhs  = expr ?? "df";
+      const comma = i < configs.length - 1 ? "," : "";
+      lines.push(`    "${c.subsetName ?? c.label}": ${rhs}${comma}`);
+    });
+    lines.push(`}`);
+    lines.push(``);
+
+    // Build the model call from first config, replacing "df" with "s"
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-            treatedUnit, treatTime } = c.model ?? {};
-    const allX = [...xVars, ...wVars];
-    const fitName = `model_${i + 1}`;
-    fitNames.push(fitName);
-    lines.push(`# Model ${i+1}: ${c.label ?? type}`);
-    const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
-    modelLines.forEach(l => lines.push(l.replace(/\bmodel\b/g, fitName)));
-    lines.push("");
-  });
+            treatedUnit, treatTime } = configs[0].model ?? {};
+    const allX0 = [...xVars, ...wVars];
+    const singleLines = transpileModel({ type, yVar, allX: allX0, xVars, wVars, zVars,
+      entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+    // Strip assignment prefix, swap df → s
+    const fitCall = singleLines
+      .map(l => l.replace(/\bmodel\b\s*=\s*/, "").replace(/\bdf\b/g, "s"))
+      .join("; ");
 
-  // Split fit names by library: statsmodels models support summary_col;
-  // linearmodels (IV2SLS, PanelOLS, etc.) use their own .summary attribute.
-  const ivTypes = new Set(["2SLS", "FE", "FD", "TWFE", "LSDV", "EventStudy"]);
-  const smFits  = [];   // statsmodels fit objects
-  const lmFits  = [];   // linearmodels fit objects
-  configs.forEach((c, i) => {
-    if (ivTypes.has(c.model?.type)) lmFits.push({ name: fitNames[i], label: c.label ?? `Model ${i+1}` });
-    else                             smFits.push({ name: fitNames[i], label: c.label ?? `Model ${i+1}` });
-  });
+    lines.push(`# ── Estimation ─────────────────────────────────────────────────────────────`);
+    lines.push(`results = {}`);
+    lines.push(`for name, s in subsets.items():`);
+    lines.push(`    results[name] = ${fitCall}`);
+    lines.push(``);
 
-  lines.push(`# ── Results ─────────────────────────────────────────────────────────────────`);
-  if (smFits.length && lmFits.length) {
-    // Mixed: print each group separately
-    lines.push(`# statsmodels models`);
+    lines.push(`# ── Results ─────────────────────────────────────────────────────────────────`);
     lines.push(`from statsmodels.iolib.summary2 import summary_col`);
-    const smList   = smFits.map(f => f.name).join(", ");
-    const smLabels = smFits.map(f => `"${f.label}"`).join(", ");
-    lines.push(`print(summary_col([${smList}], model_names=[${smLabels}], stars=True, float_format="%.4f"))`);
-    lines.push(`# linearmodels models`);
-    lines.push(`from linearmodels.iv.model import compare as lm_compare`);
-    const lmDict = lmFits.map(f => `"${f.label}": ${f.name}`).join(", ");
-    lines.push(`print(lm_compare({${lmDict}}))`);
-  } else if (smFits.length) {
-    lines.push(`from statsmodels.iolib.summary2 import summary_col`);
-    const fitList   = smFits.map(f => f.name).join(", ");
-    const labelList = smFits.map(f => `"${f.label}"`).join(", ");
-    lines.push(`table = summary_col([${fitList}], model_names=[${labelList}], stars=True, float_format="%.4f")`);
+    lines.push(`table = summary_col(list(results.values()), model_names=list(results.keys()), stars=True, float_format="%.4f")`);
     lines.push(`print(table)`);
+    lines.push(``);
   } else {
-    lines.push(`from linearmodels.iv.model import compare as lm_compare`);
-    const lmDict = lmFits.map(f => `"${f.label}": ${f.name}`).join(", ");
-    lines.push(`print(lm_compare({${lmDict}}))`);
+    // ── Different specs → one model object per config ────────────────────────
+    lines.push(`# ── Estimation ─────────────────────────────────────────────────────────────`);
+    const fitNames = [];
+    configs.forEach((c, i) => {
+      const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
+              entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
+              treatedUnit, treatTime } = c.model ?? {};
+      const allX = [...xVars, ...wVars];
+      const fitName = `model_${i + 1}`;
+      fitNames.push(fitName);
+      lines.push(`# Model ${i+1}: ${c.label ?? type}`);
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      modelLines.forEach(l => lines.push(l.replace(/\bmodel\b/g, fitName)));
+      lines.push("");
+    });
+
+    const ivTypes = new Set(["2SLS", "FE", "FD", "TWFE", "LSDV", "EventStudy"]);
+    const smFits  = [];
+    const lmFits  = [];
+    configs.forEach((c, i) => {
+      if (ivTypes.has(c.model?.type)) lmFits.push({ name: fitNames[i], label: c.label ?? `Model ${i+1}` });
+      else                             smFits.push({ name: fitNames[i], label: c.label ?? `Model ${i+1}` });
+    });
+
+    lines.push(`# ── Results ─────────────────────────────────────────────────────────────────`);
+    if (smFits.length && lmFits.length) {
+      lines.push(`# statsmodels models`);
+      lines.push(`from statsmodels.iolib.summary2 import summary_col`);
+      const smList   = smFits.map(f => f.name).join(", ");
+      const smLabels = smFits.map(f => `"${f.label}"`).join(", ");
+      lines.push(`print(summary_col([${smList}], model_names=[${smLabels}], stars=True, float_format="%.4f"))`);
+      lines.push(`# linearmodels models`);
+      lines.push(`from linearmodels.iv.model import compare as lm_compare`);
+      const lmDict = lmFits.map(f => `"${f.label}": ${f.name}`).join(", ");
+      lines.push(`print(lm_compare({${lmDict}}))`);
+    } else if (smFits.length) {
+      lines.push(`from statsmodels.iolib.summary2 import summary_col`);
+      const fitList   = smFits.map(f => f.name).join(", ");
+      const labelList = smFits.map(f => `"${f.label}"`).join(", ");
+      lines.push(`table = summary_col([${fitList}], model_names=[${labelList}], stars=True, float_format="%.4f")`);
+      lines.push(`print(table)`);
+    } else {
+      lines.push(`from linearmodels.iv.model import compare as lm_compare`);
+      const lmDict = lmFits.map(f => `"${f.label}": ${f.name}`).join(", ");
+      lines.push(`print(lm_compare({${lmDict}}))`);
+    }
+    lines.push("");
   }
-  lines.push("");
 
   return lines.join("\n");
 }

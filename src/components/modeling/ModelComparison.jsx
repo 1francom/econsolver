@@ -364,7 +364,9 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
         bandwidth:  m.spec?.bandwidth  ?? null,
         kernel:     m.spec?.kernel     ?? "triangular",
       },
-      label: m.label ?? m.type ?? "Model",
+      label:         m.label         ?? m.type ?? "Model",
+      subsetName:    m.subsetName    ?? null,
+      subsetFilters: m.subsetFilters ?? null,
     }));
     const scriptOpts = { filename, pipeline };
     if (lang === "r")      return generateMultiModelRScript(configs, dataDictionary, scriptOpts);

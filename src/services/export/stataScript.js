@@ -556,8 +556,36 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
   return lines;
 }
 
+// ─── MULTI-MODEL HELPERS ─────────────────────��────────────────────────────────
+
+function detectMapPatternStata(configs) {
+  if (configs.length < 2) return "separate";
+  const allHaveMeta = configs.every(c => Array.isArray(c.subsetFilters));
+  if (!allHaveMeta) return "separate";
+  const first = configs[0].model;
+  const xKey  = arr => JSON.stringify([...(arr ?? [])].sort());
+  return configs.every(c =>
+    c.model.type === first.type &&
+    c.model.yVar === first.yVar &&
+    xKey(c.model.xVars) === xKey(first.xVars)
+  ) ? "map" : "separate";
+}
+
+function subsetFiltersToStata(filters) {
+  if (!filters?.length) return null;
+  return filters.map(f => {
+    const val = isNaN(Number(f.val)) ? `"${f.val}"` : f.val;
+    return `${f.col} ${f.op} ${val}`;
+  }).join(" & ");
+}
+
+// Safe Stata local name: lowercase, spaces → underscores, strip special chars
+function stataLocalName(label) {
+  return label.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^[0-9]/, "_").slice(0, 28);
+}
+
 // ─── MULTI-MODEL EXPORT ────────────────────────────────────────────────────────
-// configs: Array of { model: ModelConfig, label: string }
+// configs: Array of { model: ModelConfig, label: string, subsetName?, subsetFilters? }
 export function generateMultiModelStataScript(configs = [], dataDictionary = null, opts = {}) {
   if (!configs.length) return "* No models provided.";
 
@@ -604,37 +632,78 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     lines.push("");
   }
 
-  lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  const estoreNames = [];
-  configs.forEach((c, i) => {
-    const estName = `m_${i + 1}`;
-    estoreNames.push({ name: estName, label: c.label ?? c.model?.type ?? `Model ${i+1}` });
+  const pattern = detectMapPatternStata(configs);
+
+  if (pattern === "map") {
+    // ── Same spec, different subsets → preserve/restore per subset ────────────
+    lines.push(`* ── Subset estimation (preserve/restore) ─────────────────────────────────`);
+    const estoreNames = [];
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-            treatedUnit, treatTime } = c.model ?? {};
+            treatedUnit, treatTime } = configs[0].model ?? {};
     const allX = [...xVars, ...wVars];
-    lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-    const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
-    // Override the estimates store command if present, else append one
-    let hasStore = false;
-    modelLines.forEach(l => {
-      const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
-      if (overridden !== l) hasStore = true;
-      lines.push(overridden);
-    });
-    if (!hasStore) lines.push(`estimates store ${estName}`);
-    lines.push("");
-  });
 
-  lines.push(`* ── Joint table (esttab) ─────────────────────────────────────────────────`);
-  lines.push(`* If esttab not installed: ssc install estout`);
-  const mList = estoreNames.map(e => e.name).join(" ");
-  const mlabels = estoreNames.map(e => `"${e.label}"`).join(" ");
-  lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
-  lines.push(`  mtitles(${mlabels}) ///`);
-  lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
-  lines.push(`  se r2 N replace`);
-  lines.push("");
+    configs.forEach((c) => {
+      const estName = stataLocalName(c.subsetName ?? c.label);
+      estoreNames.push({ name: estName, label: c.subsetName ?? c.label });
+      const filterExpr = subsetFiltersToStata(c.subsetFilters);
+      lines.push(`preserve`);
+      if (filterExpr) lines.push(`  keep if ${filterExpr}`);
+      else            lines.push(`  * Full sample — no filter`);
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      let hasStore = false;
+      modelLines.forEach(l => {
+        const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
+        if (ov !== l) hasStore = true;
+        lines.push(`  ${ov}`);
+      });
+      if (!hasStore) lines.push(`  estimates store ${estName}`);
+      lines.push(`restore`);
+      lines.push(``);
+    });
+
+    lines.push(`* ── Joint table (esttab) ─────────────────────────────────────────────────`);
+    lines.push(`* If esttab not installed: ssc install estout`);
+    const mList    = estoreNames.map(e => e.name).join(" ");
+    const mlabels  = estoreNames.map(e => `"${e.label}"`).join(" ");
+    lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
+    lines.push(`  mtitles(${mlabels}) ///`);
+    lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
+    lines.push(`  se r2 N replace`);
+    lines.push("");
+  } else {
+    // ── Different specs → one block per model ────────────────────────────────
+    lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
+    const estoreNames = [];
+    configs.forEach((c, i) => {
+      const estName = `m_${i + 1}`;
+      estoreNames.push({ name: estName, label: c.label ?? c.model?.type ?? `Model ${i+1}` });
+      const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
+              entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
+              treatedUnit, treatTime } = c.model ?? {};
+      const allX = [...xVars, ...wVars];
+      lines.push(`* Model ${i+1}: ${c.label ?? type}`);
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      let hasStore = false;
+      modelLines.forEach(l => {
+        const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
+        if (overridden !== l) hasStore = true;
+        lines.push(overridden);
+      });
+      if (!hasStore) lines.push(`estimates store ${estName}`);
+      lines.push("");
+    });
+
+    lines.push(`* ── Joint table (esttab) ─────────────────────────────────────────────────`);
+    lines.push(`* If esttab not installed: ssc install estout`);
+    const mList   = estoreNames.map(e => e.name).join(" ");
+    const mlabels = estoreNames.map(e => `"${e.label}"`).join(" ");
+    lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
+    lines.push(`  mtitles(${mlabels}) ///`);
+    lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
+    lines.push(`  se r2 N replace`);
+    lines.push("");
+  }
 
   return lines.join("\n");
 }
