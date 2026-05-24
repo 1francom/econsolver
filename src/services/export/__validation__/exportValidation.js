@@ -80,14 +80,14 @@ const ESTIMATOR_TESTS = [
     model: { type: "RDD", yVar: "outcome", xVars: [], wVars: [], runningVar: "score", cutoff: 50, bandwidth: 10, kernel: "triangular" },
     expectedR:      "rdrobust",
     expectedStata:  "rdrobust",
-    expectedPython: "smf.wls",
+    expectedPython: "rdrobust",
   },
   {
     type: "FuzzyRDD",
     model: { type: "FuzzyRDD", yVar: "outcome", xVars: [], wVars: [], runningVar: "score", cutoff: 50, bandwidth: 10, treatVar: "D", kernel: "triangular" },
     expectedR:      "rdrobust",
     expectedStata:  "rdrobust",
-    expectedPython: "smf.wls",
+    expectedPython: "rdrobust",
   },
   {
     type: "SpatialRDD",

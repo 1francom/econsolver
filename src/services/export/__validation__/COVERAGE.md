@@ -24,24 +24,24 @@
 | TWFE DiD            | complete          | complete          | complete | Interaction term in TWFE |
 | 2x2 DiD             | complete          | complete          | complete | `post × treat` interaction |
 | 2SLS / IV           | complete          | complete          | complete | `feols(... \| Z)` / `ivregress 2sls` / `linearmodels.IV2SLS` |
-| Sharp RDD           | known-divergent   | known-divergent   | partial  | `rdrobust` Stata uses different bias-correction df vs R; Python lacks a vetted rdrobust port |
-| Fuzzy RDD           | complete          | partial           | partial  | R `rdrobust(fuzzy=...)` clean; Stata/Python rely on manual 2SLS first stage |
+| Sharp RDD           | known-divergent   | known-divergent   | complete | `rdrobust` Stata uses different bias-correction df vs R; Python: `rdrobust` pkg (try/except) + `smf.wls` fallback |
+| Fuzzy RDD           | complete          | complete          | complete  | R `rdrobust(fuzzy=...)`; Stata `rdrobust fuzzy(D)`; Python `rdrobust(fuzzy=)` (try/except) + manual 2SLS fallback |
 | McCrary density     | complete          | complete          | complete | R `rddensity`; Stata `rddensity`; Python `rddensity` package |
 | Logit               | complete          | complete          | complete | `glm(..., family=binomial)` |
 | Probit              | complete          | complete          | complete | `glm(..., family=binomial(probit))` |
 | GMM                 | complete          | complete          | complete | R `gmm::gmm`; Stata `ivregress gmm`; Python `linearmodels.IVGMM` |
 | LIML                | complete          | complete          | complete | R `ivreg::ivreg(...,method="liml")`; Stata `ivregress liml`; Python `linearmodels.IVLIML` |
 | Event Study         | complete          | complete          | complete | R `fixest::feols i()`; Stata `reghdfe`; Python `pyfixest` |
-| Panel LSDV          | complete          | partial           | partial  | R full; Stata/Python emit dummy expansion but without HC variants |
+| Panel LSDV          | complete          | complete          | complete  | All three recover alpha_i: R `fixef(fit)`; Stata `areg` + `predict _fe, dresiduals`; Python `model.estimated_effects` |
 | Poisson FE          | complete          | complete          | complete | R `fepois`; Stata `ppmlhdfe`; Python `pyfixest.fepois` |
-| Synthetic Control   | known-divergent   | missing           | missing  | EconSolver Frank-Wolfe vs R `Synth::ipop` converges to slightly different weights (~1e-2); no Stata/Python emit |
+| Synthetic Control   | known-divergent   | complete          | complete  | Stata `synth` + `synth_runner` placebo; Python `pysynth` (try/except) + scipy SLSQP fallback; weights ~1e-2 vs R Synth::ipop (Frank-Wolfe vs nested-opt, tolerated) |
 | **Spatial RD**      | complete          | complete          | complete    | R `rdrobust` on signed dist; Stata `rdrobust` + manual WLS fallback; Python `smf.wls` |
 
 **Coverage stats (estimators)** — updated 2026-05-24
-- R:      19/19 emit something, ~16 numerically equivalent
-- Stata:  19/19 emit something, ~16 numerically equivalent
-- Python: 19/19 emit something, ~16 numerically equivalent
-- GMM/LIML/PoissonFE/McCrary were missing in all three — now added. Spatial RD: estimator + translators all DONE.
+- R:      19/19 complete or known-divergent
+- Stata:  19/19 complete or known-divergent
+- Python: 19/19 complete or known-divergent
+- All partial/missing entries resolved: Sharp RDD Python → rdrobust try/except; Fuzzy RDD Stata/Python → rdrobust; LSDV Stata/Python → FE recovery added; SyntheticControl Stata/Python → already had emitters (table was stale).
 
 ---
 
@@ -63,7 +63,7 @@
 | trim_outliers        | complete | complete | complete | IQR-based |
 | flag_outliers        | complete | complete | complete | |
 | extract_regex        | complete | complete | complete | |
-| ai_tr                | partial  | partial  | partial  | Emitted as comment + literal user expression; needs runtime validation |
+| ai_tr                | partial  | partial  | partial  | Parses `v => body` arrow fn, substitutes param → col ref, runs `jsExprToR/Stata/Python`; falls back to comment. Runtime validation still needed for complex exprs |
 | log                  | complete | complete | complete | |
 | sq                   | complete | complete | complete | |
 | std                  | complete | complete | complete | |
@@ -82,13 +82,16 @@
 | pivot_longer         | partial  | complete | complete | R `tidyr::pivot_longer` exists but emit needs verification |
 | join                 | complete | complete | complete | R `dplyr::left_join`/`inner_join`; Stata `preserve/merge/restore`; Python `pd.merge` |
 | append               | complete | complete | complete | R `bind_rows`; Stata `preserve/append/restore`; Python `pd.concat` |
-| geocode              | partial  | missing  | missing  | Cached coordinates emit as static lookup; live geocoding not portable |
+| geocode              | complete | complete | complete | R `tidygeocoder::geocode(method="osm")`; Stata export+merge workaround; Python `geopy` Nominatim + RateLimiter |
 | patch (cell edits)   | complete  | complete  | complete  | Emits `__row_id`-based lookup when `step.rowId` set; `__ri` fallback with warning comment. Phase E will populate `rowId` on new patches. |
 
-**Coverage stats (pipeline steps, 34 total)**
-- R:      ~31 complete, 3 partial, 0 missing
-- Stata:  ~28 complete, 4 partial, 2 missing (`geocode`, `McCrary`-related steps not applicable here)
-- Python: ~28 complete, 4 partial, 2 missing
+**Coverage stats (pipeline steps, 34 total)** — updated 2026-05-24
+- R:      ~33 complete, 1 partial (ai_tr), 0 missing
+- Stata:  ~33 complete, 1 partial (ai_tr), 0 missing
+- Python: ~33 complete, 1 partial (ai_tr), 0 missing
+- pivot_longer R → complete (tidyr::pivot_longer, simple + multi/.value modes)
+- geocode all three → complete (tidygeocoder / Stata export+merge / geopy RateLimiter)
+- ai_tr: upgraded from stub comment → arrow-fn parser + jsExprToR/Stata/Python; falls back to comment
 
 ---
 
@@ -116,4 +119,5 @@
 6. ~~**`patch` step**~~ — DONE. All three emitters now emit `__row_id`-based lookup when `step.rowId` is set; fall back to `__ri` with a comment for legacy steps. `rowIdentity.js` wiring (Phase E) will populate `rowId` on new patches.
 7. ~~**`mutate` step**~~ — DONE. `jsExprToR/Stata/Python` exported from `stepTranslators.js` and wired into all three export files. Translates `ifelse`, `log`, `sqrt`, `case_when`, `pmin/pmax`, JS operators (`===`, `&&`, `||`, `**`) to language equivalents. Falls back to a manual-translate comment for arrow functions / template literals.
 
-This file is the input to `seTolerances.js` (Phase A.1) and to the golden-file harness (Phase A.2).
+Phase A.1 (`seTolerances.js`) and Phase A.2 (`goldenFileHarness.js`) are both ✓ DONE.
+**Browser validation PENDING — Franco to run `window.__goldenHarness()` and `window.__validateExports()` by 2026-05-29.**

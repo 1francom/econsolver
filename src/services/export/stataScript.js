@@ -247,8 +247,22 @@ function transpileStep(step) {
         `erase "__append_tmp.dta"`,
       ].join("\n");
     }
-    case "ai_tr":
-      return `* AI transform: ${params.description ?? "(manual step)"}`;
+    case "ai_tr": {
+      const col    = step.col ?? "col";
+      const jsCode = step.js  ?? "";
+      const arrowMatch = jsCode.match(/^\s*\(?\s*(\w+)\s*\)?\s*=>\s*([\s\S]+)$/);
+      if (arrowMatch) {
+        const [, param, body] = arrowMatch;
+        const substituted = body.trim().replace(new RegExp(`\\b${param}\\b`, "g"), col);
+        const stExpr = jsExprToStata(substituted);
+        if (stExpr) return `replace ${col} = ${stExpr}`;
+      }
+      return [
+        `* AI transform on "${col}"`,
+        `* JS: ${jsCode}`,
+        `* replace ${col} = <Stata expression>`,
+      ].join("\n");
+    }
     case "factor_interactions": {
       const { cols } = params;
       if (cols?.length >= 2) return `gen ${cols.join("_x_")} = ${cols[0]} * ${cols[1]}`;
@@ -261,6 +275,27 @@ function transpileStep(step) {
         return `replace ${col} = ${val} if __row_id == "${step.rowId}"`;
       }
       return `replace ${col} = ${val} if __ri == ${step.ri}  /* __ri-based: may misalign after sort */`;
+    }
+
+    case "geocode": {
+      const addrCol = step.addressCol ?? "address";
+      const latCol  = step.latCol  ?? "lat";
+      const lonCol  = step.lonCol  ?? "lon";
+      return [
+        `* Geocode: ${addrCol} -> ${latCol} / ${lonCol}`,
+        `* Stata has no native geocoding — export addresses, geocode externally, merge back.`,
+        `* Step 1: export addresses`,
+        `preserve`,
+        `keep ${addrCol}`,
+        `duplicates drop`,
+        `export delimited using "addresses_to_geocode.csv", replace`,
+        `restore`,
+        `* Step 2: geocode the CSV externally (Python/R with geopy/tidygeocoder)`,
+        `* Step 3: merge geocoded coordinates back`,
+        `* merge m:1 ${addrCol} using "geocoded_coords.dta", keep(master match) nogenerate`,
+        `* rename _lat ${latCol}`,
+        `* rename _lon ${lonCol}`,
+      ].join("\n");
     }
 
     default:
@@ -358,11 +393,19 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
 
     case "LSDV": {
-      lines.push(`* Panel LSDV (numerically equivalent to within/FE)`);
+      lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
+      lines.push(`* Within (FE) — numerically equivalent to LSDV`);
       lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
       lines.push(`estimates store m_lsdv`);
-      lines.push(`* Alternatively: areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
+      lines.push(``);
+      lines.push(`* Recover alpha_i (entity fixed effects) via areg`);
+      lines.push(`areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
+      lines.push(`predict _alpha_i, dresiduals`);
+      lines.push(`label var _alpha_i "Entity fixed effect (LSDV alpha_i)"`);
+      lines.push(`* List unique entity FEs`);
+      lines.push(`bysort ${entityCol}: keep if _n == 1`);
+      lines.push(`list ${entityCol} _alpha_i, sep(0)`);
       break;
     }
 

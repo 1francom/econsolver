@@ -244,12 +244,22 @@ function transpileStep(step, dfVar = "df") {
       ].join("\n");
     }
 
-    case "ai_tr":
+    case "ai_tr": {
+      const col    = step.col ?? "col";
+      const jsCode = step.js  ?? "";
+      const arrowMatch = jsCode.match(/^\s*\(?\s*(\w+)\s*\)?\s*=>\s*([\s\S]+)$/);
+      if (arrowMatch) {
+        const [, param, body] = arrowMatch;
+        const substituted = body.trim().replace(new RegExp(`\\b${param}\\b`, "g"), rName(col));
+        const rExpr = jsExprToR(substituted);
+        if (rExpr) return `${dfVar} <- ${dfVar} |> dplyr::mutate(${rName(col)} = ${rExpr})`;
+      }
       return [
-        `# ai_tr on "${step.col}" — AI-generated transformation`,
-        `# JS: ${step.js}`,
-        `# Translate to R manually`,
+        `# ai_tr on "${col}" — AI-generated transformation`,
+        `# JS: ${jsCode}`,
+        `# ${dfVar} <- ${dfVar} |> dplyr::mutate(${rName(col)} = <R expression>)`,
       ].join("\n");
+    }
 
     case "arrange": {
       const dir = step.dir === "desc" ? `desc(${rName(step.col)})` : rName(step.col);
@@ -270,6 +280,43 @@ function transpileStep(step, dfVar = "df") {
         `${dfVar} <- ${dfVar} |>`,
         `  group_by(${by}) |>`,
         `  summarise(\n${aggs},\n    .groups = "drop"\n  )`,
+      ].join("\n");
+    }
+
+    case "pivot_longer": {
+      const mode      = step.mode || "simple";
+      const namesTo   = rName(step.namesTo   ?? "name");
+      const valuesTo  = rName(step.valuesTo  ?? "value");
+
+      if (mode === "multi") {
+        // .value semantics: groups = [{prefix, colName}], keyName = time variable
+        const groups  = step.groups ?? [];
+        const keyName = rName(step.keyName ?? "key");
+        const prefixParts = groups.map(g => rStr(g.prefix)).join(", ");
+        const colNames    = groups.map(g => rStr(g.colName)).join(", ");
+        return [
+          `# pivot_longer (multi-variable / .value semantics)`,
+          `${dfVar} <- ${dfVar} |> tidyr::pivot_longer(`,
+          `  cols = tidyr::matches(paste0("^(", paste(c(${prefixParts}), collapse="|"), ")")),`,
+          `  names_to = c(${colNames}, "${keyName}"),`,
+          `  names_sep = ${rStr(step.keySep ?? "_")},`,
+          `  values_to = ".value"`,
+          `)`,
+        ].join("\n");
+      }
+
+      // Simple mode
+      const pivotCols = (step.cols ?? []).map(rName).join(", ");
+      const opts = [];
+      if (step.namesPrefix) opts.push(`  names_prefix = ${rStr(step.namesPrefix)}`);
+      if (step.namesSep)    opts.push(`  names_sep    = ${rStr(step.namesSep)}`);
+      return [
+        `${dfVar} <- ${dfVar} |> tidyr::pivot_longer(`,
+        `  cols      = c(${pivotCols}),`,
+        `  names_to  = ${rStr(step.namesTo  ?? "name")},`,
+        `  values_to = ${rStr(step.valuesTo ?? "value")}${opts.length ? "," : ""}`,
+        ...opts,
+        `)`,
       ].join("\n");
     }
 
@@ -297,6 +344,22 @@ function transpileStep(step, dfVar = "df") {
         return `${dfVar}[${dfVar}$__row_id == "${step.rowId}", "${col}"] <- ${val}`;
       }
       return `${dfVar}[${dfVar}$__ri == ${step.ri}, "${col}"] <- ${val}  # __ri-based: may misalign after sort`;
+    }
+
+    case "geocode": {
+      const addrCol = rName(step.addressCol ?? "address");
+      const latCol  = rName(step.latCol  ?? "lat");
+      const lonCol  = rName(step.lonCol  ?? "lon");
+      return [
+        `# Geocode: ${addrCol} → ${latCol} / ${lonCol}`,
+        `# Requires tidygeocoder: install.packages("tidygeocoder")`,
+        `# Provider: OpenStreetMap Nominatim (1 req/s — ToS)`,
+        `library(tidygeocoder)`,
+        `${dfVar} <- ${dfVar} |>`,
+        `  geocode(address = ${addrCol}, method = "osm",`,
+        `          lat = ${latCol}, long = ${lonCol},`,
+        `          full_results = FALSE, quiet = TRUE)`,
+      ].join("\n");
     }
 
     default:

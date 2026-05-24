@@ -261,8 +261,23 @@ function transpileStep(step) {
         `df = pd.concat([df, df_right], ignore_index=True)`,
       ].join("\n");
     }
-    case "ai_tr":
-      return `# AI transform: ${params.description ?? "(manual step)"}\n# df = ...`;
+    case "ai_tr": {
+      const col    = step.col ?? "col";
+      const jsCode = step.js  ?? "";
+      const arrowMatch = jsCode.match(/^\s*\(?\s*(\w+)\s*\)?\s*=>\s*([\s\S]+)$/);
+      if (arrowMatch) {
+        const [, param, body] = arrowMatch;
+        const colRef = `df["${col}"]`;
+        const substituted = body.trim().replace(new RegExp(`\\b${param}\\b`, "g"), colRef);
+        const pyExpr = jsExprToPython(substituted, "df");
+        if (pyExpr) return `df["${col}"] = ${pyExpr}`;
+      }
+      return [
+        `# AI transform on "${col}"`,
+        `# JS: ${jsCode}`,
+        `# df["${col}"] = <Python expression>`,
+      ].join("\n");
+    }
     case "factor_interactions": {
       const { cols } = params;
       if (cols?.length >= 2) return `df["${cols.join("_x_")}"] = df["${cols[0]}"] * df["${cols[1]}"]`;
@@ -275,6 +290,26 @@ function transpileStep(step) {
         return `df.loc[df["__row_id"] == "${step.rowId}", "${col}"] = ${val}`;
       }
       return `df.loc[df["__ri"] == ${step.ri}, "${col}"] = ${val}  # __ri-based: may misalign after sort`;
+    }
+
+    case "geocode": {
+      const addrCol = step.addressCol ?? "address";
+      const latCol  = step.latCol  ?? "lat";
+      const lonCol  = step.lonCol  ?? "lon";
+      return [
+        `# Geocode: ${addrCol} → ${latCol} / ${lonCol}`,
+        `# pip install geopy`,
+        `from geopy.geocoders import Nominatim`,
+        `from geopy.extra.rate_limiter import RateLimiter`,
+        `_geolocator = Nominatim(user_agent="econsolver_replication")`,
+        `_geocode    = RateLimiter(_geolocator.geocode, min_delay_seconds=1)`,
+        `def _get_coords(address):`,
+        `    loc = _geocode(str(address))`,
+        `    return (loc.latitude, loc.longitude) if loc else (None, None)`,
+        `df[["${latCol}", "${lonCol}"]] = df["${addrCol}"].apply(`,
+        `    lambda a: pd.Series(_get_coords(a))`,
+        `)`,
+      ].join("\n");
     }
 
     default:
@@ -361,23 +396,33 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "RDD": {
       const kernelStr = kernel === "epanechnikov" ? "epanechnikov" : kernel === "uniform" ? "uniform" : "triangular";
+      const extraCols = wVars.length ? ` + ${wVars.join(" + ")}` : "";
+      const h_py = bandwidth ? Number(bandwidth).toFixed(6) : "None  # replace with numeric bandwidth";
       lines.push(`# Sharp Regression Discontinuity Design`);
       lines.push(`cutoff = ${cutoff ?? 0}`);
-      lines.push(`bw     = ${bandwidth ?? "None  # replace with numeric bandwidth"}`);
-      lines.push(`df_rdd = df[(df["${runningVar}"] >= cutoff - bw) & (df["${runningVar}"] <= cutoff + bw)].copy()`);
-      lines.push(`df_rdd["above"] = (df_rdd["${runningVar}"] >= cutoff).astype(int)`);
-      lines.push(`df_rdd["run_c"] = df_rdd["${runningVar}"] - cutoff`);
+      lines.push(`bw     = ${h_py}`);
+      lines.push(`# ── Preferred: rdrobust package ──────────────────────────────────────`);
+      lines.push(`# pip install rdrobust`);
+      lines.push(`try:`);
+      lines.push(`    from rdrobust import rdrobust`);
+      lines.push(`    rdd = rdrobust(y=df["${yVar}"].values, x=df["${runningVar}"].values, c=cutoff${bandwidth ? `, h=bw` : ""}${kernelStr !== "triangular" ? `, kernel="${kernelStr}"` : ""}${wVars.length ? `, covs=df[${JSON.stringify(wVars)}].values` : ""})`);
+      lines.push(`    print(rdd.summary())`);
+      lines.push(`    print(f"LATE = {rdd.coef[0]:.4f}  SE = {rdd.se[3]:.4f}  p = {rdd.pv[3]:.4f}")`);
+      lines.push(`except ImportError:`);
+      lines.push(`    # ── Fallback: manual local-linear WLS ────────────────────────────`);
+      lines.push(`    df_rdd = df[(df["${runningVar}"] >= cutoff - bw) & (df["${runningVar}"] <= cutoff + bw)].copy()`);
+      lines.push(`    df_rdd["above"] = (df_rdd["${runningVar}"] >= cutoff).astype(int)`);
+      lines.push(`    df_rdd["run_c"] = df_rdd["${runningVar}"] - cutoff`);
       if (kernelStr === "triangular") {
-        lines.push(`df_rdd["_w"] = np.maximum(0, 1 - np.abs(df_rdd["run_c"]) / bw)`);
+        lines.push(`    df_rdd["_w"] = np.maximum(0, 1 - np.abs(df_rdd["run_c"]) / bw)`);
       } else if (kernelStr === "epanechnikov") {
-        lines.push(`df_rdd["_w"] = np.where(np.abs(df_rdd["run_c"] / bw) <= 1, 0.75 * (1 - (df_rdd["run_c"]/bw)**2), 0)`);
+        lines.push(`    df_rdd["_w"] = np.where(np.abs(df_rdd["run_c"] / bw) <= 1, 0.75 * (1 - (df_rdd["run_c"]/bw)**2), 0)`);
       } else {
-        lines.push(`df_rdd["_w"] = 1.0`);
+        lines.push(`    df_rdd["_w"] = 1.0`);
       }
-      const extraCols = wVars.length ? ` + ${wVars.join(" + ")}` : "";
-      lines.push(`model = smf.wls("${yVar} ~ above + run_c + above:run_c${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(cov_type="HC3")`);
-      lines.push(`print(model.summary())`);
-      lines.push(`print(f"LATE = {model.params['above']:.4f}  SE = {model.bse['above']:.4f}  p = {model.pvalues['above']:.4f}")`);
+      lines.push(`    model = smf.wls("${yVar} ~ above + run_c + above:run_c${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(cov_type="HC3")`);
+      lines.push(`    print(model.summary())`);
+      lines.push(`    print(f"LATE = {model.params['above']:.4f}  SE = {model.bse['above']:.4f}  p = {model.pvalues['above']:.4f}")`);
       break;
     }
 
@@ -399,6 +444,11 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
       lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True${timeCol ? ", time_effects=True" : ""}).fit(cov_type="clustered", cluster_entity=True)`);
       lines.push(`print(model.summary)`);
+      lines.push(``);
+      lines.push(`# Recover entity fixed effects (LSDV alpha_i)`);
+      lines.push(`entity_fe = model.estimated_effects`);
+      lines.push(`print("Entity fixed effects (first 20):")`);
+      lines.push(`print(entity_fe.groupby(level="${entityCol}").first().head(20))`);
       break;
     }
 
@@ -408,27 +458,38 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
                       : "triangular";
       const dVar   = treatVar ?? "D";
       const extraCols = wVars.length ? ` + ${wVars.join(" + ")}` : "";
-      lines.push(`# Fuzzy RDD via 2SLS within bandwidth`);
+      const h_fpy = bandwidth ? Number(bandwidth).toFixed(6) : "None  # set bandwidth";
+      lines.push(`# Fuzzy RDD — LATE for compliers`);
       lines.push(`cutoff = ${cutoff ?? 0}`);
-      lines.push(`bw     = ${bandwidth ?? "None  # set bandwidth"}`);
-      lines.push(`df_bw = df[(df["${runningVar}"] >= cutoff - bw) & (df["${runningVar}"] <= cutoff + bw)].copy()`);
-      lines.push(`df_bw["_Z"]     = (df_bw["${runningVar}"] >= cutoff).astype(int)`);
-      lines.push(`df_bw["_run_c"] = df_bw["${runningVar}"] - cutoff`);
+      lines.push(`bw     = ${h_fpy}`);
+      lines.push(`# ── Preferred: rdrobust package ──────────────────────────────────────`);
+      lines.push(`# pip install rdrobust`);
+      lines.push(`try:`);
+      lines.push(`    from rdrobust import rdrobust`);
+      lines.push(`    rdd = rdrobust(y=df["${yVar}"].values, x=df["${runningVar}"].values,`);
+      lines.push(`                   fuzzy=df["${dVar}"].values, c=cutoff${bandwidth ? `, h=bw` : ""}${kernelStr !== "triangular" ? `, kernel="${kernelStr}"` : ""}${wVars.length ? `, covs=df[${JSON.stringify(wVars)}].values` : ""})`);
+      lines.push(`    print(rdd.summary())`);
+      lines.push(`    print(f"LATE (Fuzzy) = {rdd.coef[0]:.4f}  SE = {rdd.se[3]:.4f}  p = {rdd.pv[3]:.4f}")`);
+      lines.push(`except ImportError:`);
+      lines.push(`    # ── Fallback: manual kernel-weighted 2SLS ────────────────────────`);
+      lines.push(`    df_bw = df[(df["${runningVar}"] >= cutoff - bw) & (df["${runningVar}"] <= cutoff + bw)].copy()`);
+      lines.push(`    df_bw["_Z"]     = (df_bw["${runningVar}"] >= cutoff).astype(int)`);
+      lines.push(`    df_bw["_run_c"] = df_bw["${runningVar}"] - cutoff`);
       if (kernelStr === "triangular") {
-        lines.push(`df_bw["_w"] = np.maximum(0, 1 - np.abs(df_bw["_run_c"]) / bw)`);
+        lines.push(`    df_bw["_w"] = np.maximum(0, 1 - np.abs(df_bw["_run_c"]) / bw)`);
       } else if (kernelStr === "epanechnikov") {
-        lines.push(`df_bw["_w"] = np.where(np.abs(df_bw["_run_c"] / bw) <= 1, 0.75 * (1 - (df_bw["_run_c"]/bw)**2), 0)`);
+        lines.push(`    df_bw["_w"] = np.where(np.abs(df_bw["_run_c"] / bw) <= 1, 0.75 * (1 - (df_bw["_run_c"]/bw)**2), 0)`);
       } else {
-        lines.push(`df_bw["_w"] = 1.0`);
+        lines.push(`    df_bw["_w"] = 1.0`);
       }
-      lines.push(`# First stage: Z -> D`);
-      lines.push(`fs = smf.wls("${dVar} ~ _Z + _run_c + _Z:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(cov_type="HC3")`);
-      lines.push(`print(f"First-stage F-stat: {fs.fvalue:.2f}  (p={fs.f_pvalue:.4f})")`);
-      lines.push(`# Second stage: use D_hat as instrument`);
-      lines.push(`df_bw["_D_hat"] = fs.fittedvalues`);
-      lines.push(`ss = smf.wls("${yVar} ~ _D_hat + _run_c + _D_hat:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(cov_type="HC3")`);
-      lines.push(`print(ss.summary())`);
-      lines.push(`print(f"LATE = {ss.params['_D_hat']:.4f}  SE = {ss.bse['_D_hat']:.4f}  p = {ss.pvalues['_D_hat']:.4f}")`);
+      lines.push(`    # First stage: Z -> D`);
+      lines.push(`    fs = smf.wls("${dVar} ~ _Z + _run_c + _Z:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(cov_type="HC3")`);
+      lines.push(`    print(f"First-stage F-stat: {fs.fvalue:.2f}  (p={fs.f_pvalue:.4f})")`);
+      lines.push(`    # Second stage: use D_hat as instrument`);
+      lines.push(`    df_bw["_D_hat"] = fs.fittedvalues`);
+      lines.push(`    ss = smf.wls("${yVar} ~ _D_hat + _run_c + _D_hat:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(cov_type="HC3")`);
+      lines.push(`    print(ss.summary())`);
+      lines.push(`    print(f"LATE = {ss.params['_D_hat']:.4f}  SE = {ss.bse['_D_hat']:.4f}  p = {ss.pvalues['_D_hat']:.4f}")`);
       break;
     }
 
