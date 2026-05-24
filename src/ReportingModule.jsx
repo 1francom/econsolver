@@ -954,8 +954,8 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
 
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
 
-  // Detect Sharp RDD — canonical shape uses type, legacy shape carries rddData or raw fields
-  const isRDD = rawResult?.type === "RDD" || !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
+  // Detect Sharp RDD / Spatial RD — canonical shape uses type, legacy shape carries rddData or raw fields
+  const isRDD = rawResult?.type === "RDD" || rawResult?.type === "SpatialRDD" || !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
 
   // ── ALL hooks must be unconditional — never placed after an early return ──────
   const [narrativeOpen, setNarrativeOpen] = useState(false);

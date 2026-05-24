@@ -9,6 +9,8 @@
 //   { type, yVar, xVars, wVars, zVars, entityCol, timeCol,
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
+import { toPython, jsExprToPython } from "../../pipeline/stepTranslators.js";
+
 export function generatePythonScript(config = {}) {
   const {
     filename     = "dataset.csv",
@@ -27,13 +29,16 @@ export function generatePythonScript(config = {}) {
     timeCol     = null,
     postVar     = null,
     treatVar    = null,
-    runningVar  = null,
-    cutoff      = null,
-    bandwidth   = null,
-    kernel      = "triangular",
+    runningVar    = null,
+    cutoff        = null,
+    bandwidth     = null,
+    kernel        = "triangular",
+    distCol       = null,
+    treatmentCol  = null,
   } = model;
 
-  const stem = filename.replace(/\.[^.]+$/, "");
+  const stem    = filename.replace(/\.[^.]+$/, "");
+  const pyFile  = filename.replace(/\\/g, "/");   // forward slashes — safe in Python strings
   const allX = [...(xVars ?? []), ...(wVars ?? [])];
   const pkgs = buildPackageList(type, pipeline);
 
@@ -76,7 +81,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Load data ───────────────────────────────────────────────────────────────
   lines.push("# ── Load data ─────────────────────────────────────────────────────────────");
-  lines.push(`df = pd.read_csv("${filename}")`);
+  lines.push(`df = pd.read_csv("${pyFile}")`);
   lines.push("");
 
   // ── Data dictionary ─────────────────────────────────────────────────────────
@@ -109,8 +114,8 @@ export function generatePythonScript(config = {}) {
 // ─── PACKAGE LIST ─────────────────────────────────────────────────────────────
 function buildPackageList(modelType, pipeline = []) {
   const pkgs = new Set(["statsmodels"]);
-  if (["FE","FD","2SLS","TWFE"].includes(modelType)) pkgs.add("linearmodels");
-  if (modelType === "RDD") pkgs.add("scipy");
+  if (["FE","FD","2SLS","TWFE","GMM","LIML"].includes(modelType)) pkgs.add("linearmodels");
+  if (modelType === "RDD" || modelType === "SpatialRDD") pkgs.add("scipy");
   return pkgs;
 }
 
@@ -186,8 +191,16 @@ function transpileStep(step) {
       return `df["${params.col1}_x_${params.col2}"] = df["${params.col1}"] * df["${params.col2}"]`;
     case "did":
       return `df["did"] = df["${params.postVar}"] * df["${params.treatVar}"]`;
-    case "mutate":
-      return `df.eval("${params.newCol} = ${params.expr}", inplace=True)`;
+    case "mutate": {
+      const nn     = step.nn ?? params.newCol ?? "newcol";
+      const pyExpr = jsExprToPython(step.expr ?? params.expr, "df");
+      if (pyExpr) return `df["${nn}"] = ${pyExpr}`;
+      return [
+        `# mutate: ${nn} = ${step.expr ?? params.expr}`,
+        `# NOTE: expression uses JS syntax — translate to Python manually`,
+        `# df["${nn}"] = <pandas expression>`,
+      ].join("\n");
+    }
     case "arrange":
       return `df = df.sort_values("${params.col}", ascending=${params.asc !== false ? "True" : "False"})`;
     case "group_summarize": {
@@ -225,10 +238,29 @@ function transpileStep(step) {
       return `# normalize_cats: manual step`;
     case "extract_regex":
       return `df["${params.newCol}"] = df["${params.col}"].str.extract(r"${params.regex}")`;
-    case "join":
-      return `# join: load the second dataset and merge\n# df = df.merge(df_right, on="${params.key}", how="${params.how ?? "left"}")`;
-    case "append":
-      return `# append: load the second dataset and concatenate\n# df = pd.concat([df, df_right], ignore_index=True)`;
+    case "join": {
+      const how     = step.how === "inner" ? "inner" : "left";
+      const lk      = step.leftKey  ?? "id";
+      const rk      = step.rightKey ?? lk;
+      const sfx     = step.suffix   ?? "_r";
+      const rightId = step.rightId  ?? "right_dataset";
+      const byExpr  = lk === rk
+        ? `on="${lk}"`
+        : `left_on="${lk}", right_on="${rk}"`;
+      return [
+        `# Join: load right dataset and merge on ${lk}`,
+        `df_right = pd.read_csv("<path_to_${rightId}.csv>")`,
+        `df = df.merge(df_right, ${byExpr}, how="${how}", suffixes=("", "${sfx}"))`,
+      ].join("\n");
+    }
+    case "append": {
+      const rightId = step.rightId ?? "right_dataset";
+      return [
+        `# Append: stack right dataset below current`,
+        `df_right = pd.read_csv("<path_to_${rightId}.csv>")`,
+        `df = pd.concat([df, df_right], ignore_index=True)`,
+      ].join("\n");
+    }
     case "ai_tr":
       return `# AI transform: ${params.description ?? "(manual step)"}\n# df = ...`;
     case "factor_interactions": {
@@ -236,6 +268,15 @@ function transpileStep(step) {
       if (cols?.length >= 2) return `df["${cols.join("_x_")}"] = df["${cols[0]}"] * df["${cols[1]}"]`;
       return `# factor_interactions`;
     }
+    case "patch": {
+      const col = step.col ?? "column";
+      const val = typeof step.value === "string" ? `"${step.value}"` : (step.value ?? "None");
+      if (step.rowId) {
+        return `df.loc[df["__row_id"] == "${step.rowId}", "${col}"] = ${val}`;
+      }
+      return `df.loc[df["__ri"] == ${step.ri}, "${col}"] = ${val}  # __ri-based: may misalign after sort`;
+    }
+
     default:
       return `# [${type}] — not yet transpiled`;
   }
@@ -279,11 +320,20 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const instr = zVars.map(v => `"${v}"`).join(", ");
       const exogX = wVars.map(v => `"${v}"`).join(", ");
       lines.push(`# Two-Stage Least Squares (IV)`);
-      lines.push(`df_panel = df.set_index(["${entityCol ?? "entity"}", "${timeCol ?? "time"}"])` );
-      lines.push(`dependent  = df_panel["${yVar}"]`);
-      lines.push(`exog_vars  = sm.add_constant(df_panel[[${exogX || '"' + (wVars[0] ?? '') + '"'}]])` );
-      lines.push(`endog_vars = df_panel[[${endog}]]`);
-      lines.push(`instr_vars = df_panel[[${instr}]]`);
+      if (entityCol && timeCol) {
+        // Panel IV
+        lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+        lines.push(`dependent  = df_panel["${yVar}"]`);
+        lines.push(exogX ? `exog_vars  = sm.add_constant(df_panel[[${exogX}]])` : `exog_vars  = None`);
+        lines.push(`endog_vars = df_panel[[${endog}]]`);
+        lines.push(`instr_vars = df_panel[[${instr}]]`);
+      } else {
+        // Cross-sectional IV
+        lines.push(`dependent  = df["${yVar}"]`);
+        lines.push(exogX ? `exog_vars  = sm.add_constant(df[[${exogX}]])` : `exog_vars  = None`);
+        lines.push(`endog_vars = df[[${endog}]]`);
+        lines.push(`instr_vars = df[[${instr}]]`);
+      }
       lines.push(`model = IV2SLS(dependent, exog_vars, endog_vars, instr_vars).fit(cov_type="robust")`);
       lines.push(`print(model.summary)`);
       break;
@@ -382,6 +432,33 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "SpatialRDD": {
+      const kernelStr = kernel === "epanechnikov" ? "epanechnikov"
+                      : kernel === "uniform"      ? "uniform"
+                      : "triangular";
+      const distV  = distCol      ?? runningVar ?? "dist";
+      const trtV   = treatmentCol ?? treatVar   ?? "treatment";
+      const h      = bandwidth ? Number(bandwidth).toFixed(6) : null;
+      const extraCols = wVars.length ? ` + ${wVars.join(" + ")}` : "";
+      lines.push(`# Spatial RD (Keele & Titiunik 2015)`);
+      lines.push(`# Build signed running variable: positive = treated side, cutoff = 0`);
+      lines.push(`df["_signed_dist"] = (2 * df["${trtV}"] - 1) * df["${distV}"].abs()`);
+      lines.push(`bw = ${h ?? "None  # replace with numeric bandwidth"}`);
+      lines.push(`df_rdd = df[(df["_signed_dist"] >= -bw) & (df["_signed_dist"] <= bw)].copy()`);
+      if (kernelStr === "triangular") {
+        lines.push(`df_rdd["_w"] = np.maximum(0, 1 - np.abs(df_rdd["_signed_dist"]) / bw)`);
+      } else if (kernelStr === "epanechnikov") {
+        lines.push(`df_rdd["_w"] = np.where(np.abs(df_rdd["_signed_dist"] / bw) <= 1, 0.75 * (1 - (df_rdd["_signed_dist"] / bw)**2), 0)`);
+      } else {
+        lines.push(`df_rdd["_w"] = 1.0`);
+      }
+      lines.push(`df_rdd["_above"] = (df_rdd["_signed_dist"] >= 0).astype(int)`);
+      lines.push(`model = smf.wls("${yVar} ~ _above + _signed_dist + _above:_signed_dist${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(cov_type="HC3")`);
+      lines.push(`print(model.summary())`);
+      lines.push(`print(f"LATE at boundary = {model.params['_above']:.4f}  SE = {model.bse['_above']:.4f}  p = {model.pvalues['_above']:.4f}")`);
+      break;
+    }
+
     case "EventStudy": {
       const extraCols = wVars.map(v => `"${v}"`).join(", ");
       lines.push(`# Event Study — relative-time dummies`);
@@ -447,6 +524,77 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "GMM": {
+      const xList = xVars.map(v => `"${v}"`).join(", ");
+      const wList = wVars.map(v => `"${v}"`).join(", ");
+      const zList = [...xVars, ...zVars].map(v => `"${v}"`).join(", ");
+      lines.push(`# Two-Step Efficient GMM`);
+      lines.push(`from linearmodels.iv import IVGMM`);
+      lines.push(`dependent  = df["${yVar}"]`);
+      lines.push(`exog_vars  = sm.add_constant(df[[${xList || `"# add exog columns"`}]])` );
+      lines.push(`endog_vars = df[[${wList || `"# add endogenous columns"`}]]`);
+      lines.push(`instr_vars = df[[${zList || `"# add instrument columns"`}]]`);
+      lines.push(`model = IVGMM(dependent, exog_vars, endog_vars, instr_vars).fit(cov_type="robust")`);
+      lines.push(`print(model.summary)`);
+      lines.push(`# J-statistic (over-identification test)`);
+      lines.push(`print(f"J-stat: {model.j_stat.stat:.4f}  p={model.j_stat.pval:.4f}")`);
+      break;
+    }
+
+    case "LIML": {
+      const xList = xVars.map(v => `"${v}"`).join(", ");
+      const wList = wVars.map(v => `"${v}"`).join(", ");
+      const zList = [...xVars, ...zVars].map(v => `"${v}"`).join(", ");
+      lines.push(`# Limited Information Maximum Likelihood (LIML)`);
+      lines.push(`from linearmodels.iv import IVLIML`);
+      lines.push(`dependent  = df["${yVar}"]`);
+      lines.push(`exog_vars  = sm.add_constant(df[[${xList || `"# add exog columns"`}]])`);
+      lines.push(`endog_vars = df[[${wList || `"# add endogenous columns"`}]]`);
+      lines.push(`instr_vars = df[[${zList || `"# add instrument columns"`}]]`);
+      lines.push(`model = IVLIML(dependent, exog_vars, endog_vars, instr_vars).fit(cov_type="robust")`);
+      lines.push(`print(model.summary)`);
+      lines.push(`# kappa: 1 = just-identified (= 2SLS); > 1 = over-identified`);
+      lines.push(`print(f"kappa = {model.kappa:.6f}")`);
+      break;
+    }
+
+    case "PoissonFE": {
+      const ec  = entityCol ?? "entity";
+      const cov = xVars.map(v => `"${v}"`).join(", ");
+      lines.push(`# Poisson FE (PPML with entity fixed effects)`);
+      lines.push(`# Option 1 — pyfixest (mirrors R's fixest)`);
+      lines.push(`# pip install pyfixest`);
+      lines.push(`try:`);
+      lines.push(`    import pyfixest as pf`);
+      lines.push(`    fit = pf.fepois("${yVar} ~ ${xVars.join(" + ") || "1"} | ${ec}", data=df, vcov={"CRV1": "${ec}"})`);
+      lines.push(`    pf.etable([fit])`);
+      lines.push(`    import numpy as np`);
+      lines.push(`    print("IRR:", np.exp(fit.coef().values))`);
+      lines.push(`except ImportError:`);
+      lines.push(`    # Option 2 — statsmodels GLM with entity dummies (slow for large N)`);
+      lines.push(`    import statsmodels.formula.api as smf`);
+      lines.push(`    model = smf.glm("${yVar} ~ ${[...xVars, `C(${ec})`].join(" + ") || "1"}",`);
+      lines.push(`        data=df, family=sm.families.Poisson()).fit(cov_type="HC3")`);
+      lines.push(`    print(model.summary())`);
+      lines.push(`    import numpy as np`);
+      lines.push(`    print("IRR:", np.exp(model.params))`);
+      break;
+    }
+
+    case "McCrary": {
+      const rv = runningVar ?? "running";
+      const c0 = cutoff ?? 0;
+      lines.push(`# McCrary / Cattaneo-Jansson-Ma density test`);
+      lines.push(`# pip install rddensity`);
+      lines.push(`from rddensity import rddensity`);
+      lines.push(`fit = rddensity(X=df["${rv}"], c=${c0})`);
+      lines.push(`print(fit.summary())`);
+      lines.push(`# Density plot`);
+      lines.push(`from rddensity import rdplotdensity`);
+      lines.push(`rdplotdensity(fit, df["${rv}"], xlabel="${rv}")`);
+      break;
+    }
+
     default:
       lines.push(`# Model type "${type}" — add estimation code here`);
   }
@@ -456,9 +604,13 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
 // ─── MULTI-MODEL EXPORT ────────────────────────────────────────────────────────
 // configs: Array of { model: ModelConfig, label: string }
-export function generateMultiModelPythonScript(configs = [], dataDictionary = null) {
+// opts:    { filename?: string, pipeline?: Step[] }
+export function generateMultiModelPythonScript(configs = [], dataDictionary = null, opts = {}) {
   if (!configs.length) return "# No models provided.";
 
+  const filename = opts.filename ?? "dataset.csv";
+  const pipeline = opts.pipeline ?? [];
+  const pyFile   = filename.replace(/\\/g, "/");
   const ts = new Date().toISOString().slice(0, 10);
   const lines = [];
 
@@ -470,6 +622,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   lines.push("");
 
   const needsLinear = configs.some(c => ["FE","FD","2SLS","TWFE"].includes(c.model?.type));
+  const needs2SLS   = configs.some(c => c.model?.type === "2SLS");
   const installPkgs = ["statsmodels", ...(needsLinear ? ["linearmodels"] : [])];
   lines.push(`# Install required packages if needed:`);
   lines.push(`#   pip install ${installPkgs.join(" ")}`);
@@ -480,11 +633,25 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   lines.push("import statsmodels.formula.api as smf");
   lines.push("import statsmodels.api as sm");
   if (needsLinear) lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS");
+  if (needs2SLS)   lines.push("from linearmodels.iv import IV2SLS");
   lines.push("");
 
   lines.push(`# ── Load data ─────────────────────────────────────────────────────────────`);
-  lines.push(`df = pd.read_csv("dataset.csv")`);
+  const ext = filename.split(".").pop()?.toLowerCase();
+  if (ext === "dta") lines.push(`df = pd.read_stata("${pyFile}")`);
+  else if (["xlsx","xls"].includes(ext)) lines.push(`df = pd.read_excel("${pyFile}")`);
+  else lines.push(`df = pd.read_csv("${pyFile}")`);
   lines.push("");
+
+  if (pipeline.length) {
+    lines.push(`# ── Data pipeline ─────────────────────────────────────────────────────────`);
+    pipeline.forEach(step => {
+      const out = toPython(step, "df");
+      if (Array.isArray(out)) out.forEach(l => lines.push(l));
+      else if (out) lines.push(out);
+    });
+    lines.push("");
+  }
 
   if (dataDictionary && Object.keys(dataDictionary).length) {
     lines.push(`# ── Variable definitions ─────────────────────────────────────────────────`);
@@ -507,12 +674,39 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
     lines.push("");
   });
 
-  lines.push(`# ── Joint summary (statsmodels summary_col) ─────────────────────────────`);
-  lines.push(`from statsmodels.iolib.summary2 import summary_col`);
-  const fitList = fitNames.join(", ");
-  const labelList = configs.map((c, i) => `"${c.label ?? `Model ${i+1}`}"`).join(", ");
-  lines.push(`table = summary_col([${fitList}], model_names=[${labelList}], stars=True, float_format="%.4f")`);
-  lines.push(`print(table)`);
+  // Split fit names by library: statsmodels models support summary_col;
+  // linearmodels (IV2SLS, PanelOLS, etc.) use their own .summary attribute.
+  const ivTypes = new Set(["2SLS", "FE", "FD", "TWFE", "LSDV", "EventStudy"]);
+  const smFits  = [];   // statsmodels fit objects
+  const lmFits  = [];   // linearmodels fit objects
+  configs.forEach((c, i) => {
+    if (ivTypes.has(c.model?.type)) lmFits.push({ name: fitNames[i], label: c.label ?? `Model ${i+1}` });
+    else                             smFits.push({ name: fitNames[i], label: c.label ?? `Model ${i+1}` });
+  });
+
+  lines.push(`# ── Results ─────────────────────────────────────────────────────────────────`);
+  if (smFits.length && lmFits.length) {
+    // Mixed: print each group separately
+    lines.push(`# statsmodels models`);
+    lines.push(`from statsmodels.iolib.summary2 import summary_col`);
+    const smList   = smFits.map(f => f.name).join(", ");
+    const smLabels = smFits.map(f => `"${f.label}"`).join(", ");
+    lines.push(`print(summary_col([${smList}], model_names=[${smLabels}], stars=True, float_format="%.4f"))`);
+    lines.push(`# linearmodels models`);
+    lines.push(`from linearmodels.iv.model import compare as lm_compare`);
+    const lmDict = lmFits.map(f => `"${f.label}": ${f.name}`).join(", ");
+    lines.push(`print(lm_compare({${lmDict}}))`);
+  } else if (smFits.length) {
+    lines.push(`from statsmodels.iolib.summary2 import summary_col`);
+    const fitList   = smFits.map(f => f.name).join(", ");
+    const labelList = smFits.map(f => `"${f.label}"`).join(", ");
+    lines.push(`table = summary_col([${fitList}], model_names=[${labelList}], stars=True, float_format="%.4f")`);
+    lines.push(`print(table)`);
+  } else {
+    lines.push(`from linearmodels.iv.model import compare as lm_compare`);
+    const lmDict = lmFits.map(f => `"${f.label}": ${f.name}`).join(", ");
+    lines.push(`print(lm_compare({${lmDict}}))`);
+  }
   lines.push("");
 
   return lines.join("\n");

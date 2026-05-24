@@ -13,6 +13,20 @@ function safeDatasetName(id, allDatasets) {
   return allDatasets?.[id]?.name ?? id;
 }
 
+// Split a comma-separated argument list, respecting nested parentheses/brackets.
+function splitTopLevel(str, sep = ",") {
+  const parts = [];
+  let depth = 0, cur = "";
+  for (const ch of str) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth--;
+    else if (ch === sep && depth === 0) { parts.push(cur); cur = ""; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts;
+}
+
 // ─── R HELPERS ───────────────────────────────────────────────────────────────
 
 /** Wrap an identifier in backticks if it contains spaces / special chars */
@@ -22,6 +36,170 @@ function rName(c) {
 function rStr(s) { return `"${String(s).replace(/"/g, '\\"')}"`;  }
 function rVec(arr) { return `c(${arr.map(rStr).join(", ")})`; }
 function rNames(arr) { return arr.map(rName).join(", "); }
+
+/**
+ * Best-effort JS expression → R expression.
+ * Handles: case_when, strict equality, JS logical ops, single-quoted strings,
+ * Math.* prefixes. Passes everything else through (exp/log/sqrt/abs are same in R).
+ * Returns null when expression contains untranslatable JS (arrow fn, template literal).
+ */
+export function jsExprToR(expr) {
+  if (!expr) return null;
+  const s = String(expr);
+  // Untranslatable JS patterns → fall back to comment
+  if (/=>|`/.test(s)) return null;
+
+  let r = s;
+
+  // case_when(c1, v1, c2, v2, ..., default) → dplyr::case_when(c1 ~ v1, ..., .default = last)
+  r = r.replace(/\bcase_when\((.+)\)/s, (_, inner) => {
+    const args = splitTopLevel(inner).map(a => a.trim());
+    const pairs = [];
+    for (let i = 0; i + 1 < args.length; i += 2) pairs.push(`${args[i]} ~ ${args[i + 1]}`);
+    const hasDefault = args.length % 2 === 1;
+    const def = hasDefault ? args[args.length - 1] : "NA";
+    return `dplyr::case_when(${pairs.join(", ")}, .default = ${def})`;
+  });
+
+  // JS operators → R equivalents
+  r = r.replace(/===/g, "==").replace(/!==/g, "!=")
+       .replace(/&&/g, "&").replace(/\|\|/g, "|");
+
+  // Single-quoted strings → double-quoted
+  r = r.replace(/'([^']*)'/g, '"$1"');
+
+  // Math.* → bare R functions
+  r = r.replace(/\bMath\.(log|exp|sqrt|abs|round|floor|ceil|max|min|pow)\b/g, "$1");
+
+  return r;
+}
+
+// Python keywords / module names that must NOT be wrapped in df["..."]
+const PY_SKIP = new Set([
+  "np", "pd", "True", "False", "None", "and", "or", "not", "in", "is", "nan",
+]);
+
+/**
+ * Translate a single JS sub-expression to Python, wrapping bare identifiers
+ * (not followed by '(') as df["identifier"] column references.
+ */
+function translatePyExpr(expr, dfName) {
+  let r = String(expr).trim();
+
+  // JS operator → Python
+  r = r.replace(/===/g, "==").replace(/!==/g, "!=");
+  r = r.replace(/&&/g, " and ").replace(/\|\|/g, " or ");
+
+  // Single-quoted strings → double-quoted (before identifier scan)
+  r = r.replace(/'([^']*)'/g, '"$1"');
+
+  // Math.* → np.*
+  r = r.replace(/\bMath\.(log|exp|sqrt|abs|round|floor|ceil|max|min)\b/g, "np.$1");
+
+  // Common math functions → numpy (only when followed by '(')
+  const mathFns = ["exp", "log", "log10", "log2", "sqrt", "abs", "round", "floor", "ceil"];
+  for (const fn of mathFns) {
+    r = r.replace(new RegExp(`\\b${fn}\\b(?=\\s*\\()`, "g"), `np.${fn}`);
+  }
+
+  // Wrap bare identifiers in df["..."]:
+  // - must start with letter/underscore
+  // - must NOT be followed by '(' (function call) or '"' (already inside df["..."])
+  // - must NOT be in PY_SKIP or look like a numpy-prefixed token
+  r = r.replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*[("])/g, (match) => {
+    if (PY_SKIP.has(match)) return match;
+    return `${dfName}["${match}"]`;
+  });
+
+  return r;
+}
+
+/**
+ * Translate a scalar JS value (string literal or expression) to a Python literal.
+ */
+function translatePyVal(v) {
+  const t = v.trim();
+  // Single-quoted string literal → double-quoted Python string
+  if (/^'[^']*'$/.test(t)) return `"${t.slice(1, -1)}"`;
+  // Already a number → pass through
+  if (/^-?\d+(\.\d+)?$/.test(t)) return t;
+  // Otherwise translate as expression
+  return t.replace(/'([^']*)'/g, '"$1"');
+}
+
+/**
+ * Best-effort JS expression → Python (pandas mutate context).
+ * Translates case_when → np.select and wraps bare identifiers as df["col"].
+ * Falls back to null only for truly untranslatable JS (arrow fn, template literal).
+ */
+export function jsExprToPython(expr, dfName = "df") {
+  if (!expr) return null;
+  const s = String(expr);
+  if (/=>|`/.test(s)) return null;
+
+  // case_when(c1, v1, c2, v2, ..., default)
+  if (/\bcase_when\s*\(/.test(s)) {
+    const inner = s.replace(/^\s*case_when\s*\(/, "").replace(/\)\s*$/, "");
+    const args = splitTopLevel(inner).map(a => a.trim());
+    const conds = [], vals = [];
+    for (let i = 0; i + 1 < args.length; i += 2) {
+      conds.push(translatePyExpr(args[i], dfName));
+      vals.push(translatePyVal(args[i + 1]));
+    }
+    const def = args.length % 2 === 1 ? translatePyVal(args[args.length - 1]) : "np.nan";
+    return `np.select(\n    [${conds.join(", ")}],\n    [${vals.join(", ")}],\n    default=${def}\n)`;
+  }
+
+  // General expression: translate and wrap identifiers
+  return translatePyExpr(s, dfName);
+}
+
+/**
+ * Best-effort JS expression → Stata.
+ * Translates case_when → nested cond(), JS operators → Stata, Math.* → Stata fns.
+ * Column names in Stata are bare identifiers (no df["..."] wrapping needed).
+ * Falls back to null only for truly untranslatable JS (arrow fn, template literal).
+ */
+export function jsExprToStata(expr) {
+  if (!expr) return null;
+  const s = String(expr);
+  if (/=>|`/.test(s)) return null;
+
+  // case_when(c1, v1, c2, v2, ..., default) → nested cond(c1, v1, cond(c2, v2, ...))
+  if (/\bcase_when\s*\(/.test(s)) {
+    const inner = s.replace(/^\s*case_when\s*\(/, "").replace(/\)\s*$/, "");
+    const args = splitTopLevel(inner).map(a => a.trim().replace(/'([^']*)'/g, '"$1"'));
+    const hasDefault = args.length % 2 === 1;
+    const def = hasDefault ? args[args.length - 1] : `""`;
+    let result = def;
+    for (let i = args.length - (hasDefault ? 3 : 2); i >= 0; i -= 2) {
+      result = `cond(${args[i]}, ${args[i + 1]}, ${result})`;
+    }
+    return result;
+  }
+
+  // General expression: translate common JS patterns to Stata equivalents.
+  // Stata column references are bare identifiers — no wrapping needed.
+  let r = s;
+
+  // JS strict equality / logical ops → Stata
+  r = r.replace(/===/g, "==").replace(/!==/g, "!=");
+  r = r.replace(/&&/g, " & ").replace(/\|\|/g, " | ");
+
+  // Single-quoted strings → double-quoted
+  r = r.replace(/'([^']*)'/g, '"$1"');
+
+  // Math.* → Stata functions
+  r = r.replace(/\bMath\.log\b/g, "ln").replace(/\bMath\.exp\b/g, "exp")
+       .replace(/\bMath\.sqrt\b/g, "sqrt").replace(/\bMath\.abs\b/g, "abs")
+       .replace(/\bMath\.round\b/g, "round").replace(/\bMath\.floor\b/g, "floor")
+       .replace(/\bMath\.ceil\b/g, "ceil");
+
+  // JS log() → Stata ln() (natural log; Stata accepts log() but ln() is canonical)
+  r = r.replace(/\blog\b(?=\s*\()/g, "ln");
+
+  return r;
+}
 
 // ─── STATA HELPERS ────────────────────────────────────────────────────────────
 
@@ -253,8 +431,11 @@ export function toR(step, df = "df", allDatasets = {}) {
     case "did":
       return `${df} <- ${df} |> mutate(${nn} = ${rName(step.tc)} * ${rName(step.pc)})`;
 
-    case "date_parse":
-      return `${df} <- ${df} |> mutate(${col} = lubridate::parse_date_time(${col}, orders = c("ymd", "dmy", "mdy")))`;
+    case "date_parse": {
+      // When step.nn is set and different from step.col, create a new column (e.g. Date_iso)
+      const outCol = (step.nn && step.nn !== step.col) ? rName(step.nn) : col;
+      return `${df} <- ${df} |> mutate(${outCol} = lubridate::parse_date_time(${col}, orders = c("ymd", "dmy", "mdy")))`;
+    }
 
     case "date_extract": {
       const parts = step.parts ?? [];
@@ -271,12 +452,17 @@ export function toR(step, df = "df", allDatasets = {}) {
         : `# date_extract: no parts specified`;
     }
 
-    case "mutate":
+    case "mutate": {
+      const rExpr = jsExprToR(step.expr);
+      if (rExpr) {
+        return `${df} <- ${df} |> mutate(${nn} = ${rExpr})`;
+      }
       return [
         `# mutate: ${step.nn} = ${step.expr}`,
         `# NOTE: expression uses JS syntax — translate to R manually`,
         `# ${df} <- ${df} |> mutate(${nn} = <R expression>)`,
       ].join("\n");
+    }
 
     case "arrange": {
       const dir = step.dir === "desc" ? `desc(${rName(step.col)})` : rName(step.col);
@@ -569,14 +755,17 @@ export function toStata(step, df = "df", allDatasets = {}) {
     case "did":
       return `generate ${o} = ${stVar(step.tc)} * ${stVar(step.pc)}`;
 
-    case "date_parse":
+    case "date_parse": {
+      // When step.nn differs from step.col, produce a new column (e.g. Date_iso)
+      const outV = (step.nn && step.nn !== step.col) ? stVar(step.nn) : v;
       return [
-        `* date_parse: convert string ${v} to Stata date`,
-        `gen _tmp = date(${v}, "YMD")`,
-        `replace ${v} = _tmp`,
-        `drop _tmp`,
-        `format ${v} %td`,
+        `* date_parse: convert string ${v} to Stata date → ${outV}`,
+        `gen _tmp_dp = date(${v}, "YMD")`,
+        `gen ${outV} = _tmp_dp`,
+        `drop _tmp_dp`,
+        `format ${outV} %td`,
       ].join("\n");
+    }
 
     case "date_extract": {
       const parts = step.parts ?? [];
@@ -590,12 +779,15 @@ export function toStata(step, df = "df", allDatasets = {}) {
       }).filter(Boolean).join("\n") || `* date_extract: no parts specified`;
     }
 
-    case "mutate":
+    case "mutate": {
+      const stExpr = jsExprToStata(step.expr);
+      if (stExpr) return `generate ${o} = ${stExpr}`;
       return [
         `* mutate: ${step.nn} = ${step.expr}`,
         `* NOTE: expression uses JS syntax — translate to Stata manually`,
         `* generate ${o} = <Stata expression>`,
       ].join("\n");
+    }
 
     case "arrange":
       return step.dir === "desc" ? `gsort -${v}` : `sort ${v}`;
@@ -848,8 +1040,11 @@ export function toPython(step, df = "df", allDatasets = {}) {
     case "did":
       return `${df}[${o}] = ${df}[${pyCol(step.tc)}] * ${df}[${pyCol(step.pc)}]`;
 
-    case "date_parse":
-      return `${df}[${c}] = pd.to_datetime(${df}[${c}], infer_datetime_format=True, errors="coerce")`;
+    case "date_parse": {
+      // When step.nn differs from step.col, create a new column (e.g. Date_iso)
+      const outC = (step.nn && step.nn !== step.col) ? pyCol(step.nn) : c;
+      return `${df}[${outC}] = pd.to_datetime(${df}[${c}], infer_datetime_format=True, errors="coerce")`;
+    }
 
     case "date_extract": {
       const parts = step.parts ?? [];
@@ -863,12 +1058,15 @@ export function toPython(step, df = "df", allDatasets = {}) {
       }).filter(Boolean).join("\n") || `# date_extract: no parts specified`;
     }
 
-    case "mutate":
+    case "mutate": {
+      const pyExpr = jsExprToPython(step.expr, df);
+      if (pyExpr) return `${df}[${o}] = ${pyExpr}`;
       return [
         `# mutate: ${step.nn} = ${step.expr}`,
         `# NOTE: expression uses JS syntax — translate to Python manually`,
         `# ${df}[${o}] = <pandas expression>`,
       ].join("\n");
+    }
 
     case "arrange": {
       const asc = step.dir !== "desc";

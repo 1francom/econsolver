@@ -45,7 +45,11 @@ export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, allDatasets = [], onSaveSubset, addStepRef }) {
+export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, projectPid, allDatasets = [], onSaveSubset, addStepRef }) {
+  // Per-dataset pipelines are stored under the parent project's pid (Phase 0.2
+  // schema). Fall back to `pid` so single-dataset legacy paths still work —
+  // they treat the project pid and the primary dataset id as the same value.
+  const ownerPid = projectPid || pid;
   const { C } = useTheme();
   // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
   const sessionDispatch = useSessionDispatch();
@@ -66,18 +70,23 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     let cancelled = false;
     (async () => {
       await migrateFromLocalStorage();
-      const rec = await loadPipeline(pid);
+      const rec = await loadPipeline(ownerPid, pid);
       if (cancelled) return;
       if (rec) {
-        if (rec.pipeline)            setPipeline(rec.pipeline);
-        if (rec.panel)               setPanel(rec.panel);
-        if (rec.dataDictionary)      setDataDictionary(rec.dataDictionary);
-        if (rec.branchPointIndex != null) setBranchPointIndex(rec.branchPointIndex);
+        // v4 schema: per-dataset slot uses `steps`. Older readers may still
+        // hand us `pipeline` — accept both so we survive partial migrations.
+        const steps = Array.isArray(rec.steps) ? rec.steps
+                    : Array.isArray(rec.pipeline) ? rec.pipeline
+                    : null;
+        if (steps)                          setPipeline(steps);
+        if (rec.panel)                      setPanel(rec.panel);
+        if (rec.dataDictionary)             setDataDictionary(rec.dataDictionary);
+        if (rec.branchPointIndex != null)   setBranchPointIndex(rec.branchPointIndex);
       }
       setIdbReady(true);
     })();
     return () => { cancelled = true; };
-  }, [pid]);
+  }, [pid, ownerPid]);
 
   const context = useMemo(() => ({
     datasets: Object.fromEntries((allDatasets || []).map(d => [d.id, d.rawData]))
@@ -156,7 +165,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         rowCount: rawData.rows.length, colCount: rawData.headers.length,
         pipelineLength: pipeline.length,
       };
-      savePipeline(pid, pipelineRecord);
+      // Persist the per-dataset slot under the owning project's pid.
+      savePipeline(ownerPid, pid, pipelineRecord);
       // Keep project store in sync — only for primary projects (pid starts with "proj_").
       // Secondary datasets use genId() keys and must not create project entries.
       if (pid?.startsWith("proj_")) {

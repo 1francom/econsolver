@@ -321,7 +321,7 @@ function FitGrid({ models }) {
 }
 
 // ─── MULTI-MODEL EXPORT ───────────────────────────────────────────────────────
-function ExportBlock({ models, dataDictionary }) {
+function ExportBlock({ models, dataDictionary, pipeline = [], filename = "dataset.csv" }) {
   const { C } = useTheme();
   const [lang,           setLang]           = useState("r");
   const [customLabels,   setCustomLabels]   = useState(() => models.map((m, i) => m.label ?? m.type ?? `M${i + 1}`));
@@ -366,11 +366,12 @@ function ExportBlock({ models, dataDictionary }) {
       },
       label: m.label ?? m.type ?? "Model",
     }));
-    if (lang === "r")      return generateMultiModelRScript(configs, dataDictionary);
-    if (lang === "python") return generateMultiModelPythonScript(configs, dataDictionary);
-    if (lang === "stata")  return generateMultiModelStataScript(configs, dataDictionary);
+    const scriptOpts = { filename, pipeline };
+    if (lang === "r")      return generateMultiModelRScript(configs, dataDictionary, scriptOpts);
+    if (lang === "python") return generateMultiModelPythonScript(configs, dataDictionary, scriptOpts);
+    if (lang === "stata")  return generateMultiModelStataScript(configs, dataDictionary, scriptOpts);
     return "";
-  }, [models, dataDictionary, lang, customLabels, showFirstStage, hasIV]);
+  }, [models, dataDictionary, lang, customLabels, showFirstStage, hasIV, pipeline, filename]);
 
   const ext = lang === "r" ? ".R" : lang === "python" ? ".py" : lang === "stata" ? ".do" : ".tex";
   const LANGS = [
@@ -543,7 +544,7 @@ function SectionHdr({ children }) {
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
-export default function ModelComparison({ models, dataDictionary, onClose }) {
+export default function ModelComparison({ models, dataDictionary, pipeline = [], filename = "dataset.csv", onClose }) {
   const { C } = useTheme();
   const [tab, setTab] = useState("table");
 
@@ -660,7 +661,7 @@ export default function ModelComparison({ models, dataDictionary, onClose }) {
           {tab === "export" && (
             <>
               <SectionHdr>Multi-Model Replication Script</SectionHdr>
-              <ExportBlock models={models} dataDictionary={dataDictionary} />
+              <ExportBlock models={models} dataDictionary={dataDictionary} pipeline={pipeline} filename={filename} />
             </>
           )}
 

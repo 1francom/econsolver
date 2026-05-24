@@ -689,10 +689,19 @@ function _serializeModelContext(result, dataDictionary) {
     });
   }
 
-  // RDD specifics
-  if (result.type === "RDD") {
+  // RDD specifics (Sharp / Spatial — both expose rddData + late/lateSE/lateP)
+  if (result.type === "RDD" || result.type === "SpatialRDD") {
     const rdd = result.rddData ?? {};
-    lines.push(`LATE at cutoff=${rdd.cutoff ?? result.spec?.cutoff}: ${result.late?.toFixed(4) ?? "N/A"} (SE=${result.lateSE?.toFixed(4) ?? "N/A"}, p=${result.lateP?.toFixed(4) ?? "N/A"})`);
+    const isSpatial = result.type === "SpatialRDD";
+    if (isSpatial) {
+      lines.push(`LATE at the geographic boundary: ${result.late?.toFixed(4) ?? "N/A"} (SE=${result.lateSE?.toFixed(4) ?? "N/A"}, p=${result.lateP?.toFixed(4) ?? "N/A"})`);
+      if (result.nTreated != null && result.nControl != null)
+        lines.push(`Treated/control split in bandwidth: ${result.nTreated}/${result.nControl}`);
+      if (result.distCol)      lines.push(`Distance-to-boundary column: ${result.distCol}`);
+      if (result.treatmentCol) lines.push(`Treated-side indicator column: ${result.treatmentCol}`);
+    } else {
+      lines.push(`LATE at cutoff=${rdd.cutoff ?? result.spec?.cutoff}: ${result.late?.toFixed(4) ?? "N/A"} (SE=${result.lateSE?.toFixed(4) ?? "N/A"}, p=${result.lateP?.toFixed(4) ?? "N/A"})`);
+    }
     lines.push(`Bandwidth: ${rdd.h?.toFixed(4) ?? "N/A"}, Kernel: ${rdd.kernelType ?? "N/A"}`);
   }
 

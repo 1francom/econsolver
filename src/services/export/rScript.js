@@ -35,6 +35,7 @@
 
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 import { stepLabel } from "../../pipeline/registry.js";
+import { jsExprToR } from "../../pipeline/stepTranslators.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -233,13 +234,15 @@ function transpileStep(step, dfVar = "df") {
         : `# date_extract: no parts specified`;
     }
 
-    case "mutate":
-      // Best-effort: translate common helpers to R equivalents
+    case "mutate": {
+      const rExpr = jsExprToR(step.expr);
+      if (rExpr) return `${dfVar} <- ${dfVar} |> dplyr::mutate(${nn} = ${rExpr})`;
       return [
         `# mutate: ${step.nn} = ${step.expr}`,
-        `# NOTE: expression uses JS syntax — translate to R manually if needed`,
-        `# ${dfVar} <- ${dfVar} |> mutate(${nn} = <R expression>)`,
+        `# NOTE: expression uses JS syntax — translate to R manually`,
+        `# ${dfVar} <- ${dfVar} |> dplyr::mutate(${nn} = <R expression>)`,
       ].join("\n");
+    }
 
     case "ai_tr":
       return [
@@ -285,6 +288,17 @@ function transpileStep(step, dfVar = "df") {
         `${dfVar} <- dplyr::bind_rows(${dfVar}, right_df)`,
       ].join("\n");
 
+    case "patch": {
+      // Cell edit — use __row_id (UUID) when available for sort-stable lookup,
+      // fall back to __ri (sequential int) for legacy steps.
+      const col = step.col ?? "column";
+      const val = typeof step.value === "string" ? `"${step.value}"` : (step.value ?? "NA");
+      if (step.rowId) {
+        return `${dfVar}[${dfVar}$__row_id == "${step.rowId}", "${col}"] <- ${val}`;
+      }
+      return `${dfVar}[${dfVar}$__ri == ${step.ri}, "${col}"] <- ${val}  # __ri-based: may misalign after sort`;
+    }
+
     default:
       return `# [unknown step: ${step.type}] ${stepLabel(step)}`;
   }
@@ -295,9 +309,10 @@ function transpileModel(model) {
   const {
     type, yVar, xVars = [], wVars = [],
     zVars = [], postVar, treatVar,
-    runningVar, cutoff, bandwidth, kernel = "triangular",
+    runningVar, cutoff, bandwidth, kernel = "triangular", polyOrder = 1,
     entityCol, timeCol, factorVars = [],
     treatedUnit, treatTime,
+    distCol, treatmentCol,
   } = model;
 
   const fvSet = new Set(factorVars);
@@ -355,7 +370,7 @@ function transpileModel(model) {
       const iv_rhs = ctrls ? `${instrs} + ${ctrls}` : instrs;
       return [
         `# ── 2SLS / IV ────────────────────────────────────────────────────────`,
-        `fit <- fixest::feols(${y} ~ ${ctrls ? ctrls + " | " : "| "}${endog} ~ ${iv_rhs}, data = df, vcov = "HC1")`,
+        `fit <- fixest::feols(${y} ~ ${ctrls || "1"} | ${endog} ~ ${iv_rhs}, data = df, vcov = "HC1")`,
         ``,
         `# First-stage diagnostics`,
         `fixest::fitstat(fit, ~ ivwald)   # Wald F for instrument strength`,
@@ -403,17 +418,18 @@ function transpileModel(model) {
       const kernR = kernel === "triangular" ? "triangular"
                   : kernel === "epanechnikov" ? "epanechnikov"
                   : "uniform";
+      const pOrd = Math.max(1, Math.round(polyOrder ?? 1));
       return [
         `# ── Sharp RDD ────────────────────────────────────────────────────────`,
         `# Centre running variable at cutoff`,
         `df <- df |> mutate(${rv}_c = ${rv} - ${c0})`,
         ``,
         h
-          ? `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, c = ${c0}, h = ${h}, kernel = ${rStr(kernR)})`
-          : `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, c = ${c0}, kernel = ${rStr(kernR)})`,
+          ? `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, c = ${c0}, h = ${h}, kernel = ${rStr(kernR)}, p = ${pOrd})`
+          : `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, c = ${c0}, kernel = ${rStr(kernR)}, p = ${pOrd})`,
         ``,
         `summary(fit)`,
-        `rdrobust::rdplot(y = df$${y}, x = df$${rv}, c = ${c0})`,
+        `rdrobust::rdplot(y = df$${y}, x = df$${rv}, c = ${c0}, p = ${pOrd})`,
       ].join("\n");
     }
 
@@ -483,12 +499,10 @@ function transpileModel(model) {
         ? `, covs = df[, c(${wVars.map(v => `"${rName(v)}"`).join(", ")})]` : "";
       return [
         `# ── Fuzzy RDD (IV-LATE via rdrobust) ─────────────────────────────────`,
+        `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, fuzzy = df$${dVar},`,
         h
-          ? `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, fuzzy = df$${dVar},`
-          : `fit <- rdrobust::rdrobust(y = df$${y}, x = df$${rv}, fuzzy = df$${dVar},`,
-        h
-          ? `  c = ${c0}, h = ${h}, kernel = ${rStr(kernR)}${covOpt})`
-          : `  c = ${c0}, kernel = ${rStr(kernR)}${covOpt})`,
+          ? `  c = ${c0}, h = ${h}, kernel = ${rStr(kernR)}, p = ${Math.max(1, Math.round(polyOrder ?? 1))}${covOpt})`
+          : `  c = ${c0}, kernel = ${rStr(kernR)}, p = ${Math.max(1, Math.round(polyOrder ?? 1))}${covOpt})`,
         ``,
         `summary(fit)  # LATE = tau_SRD for compliers`,
         `rdrobust::rdplot(y = df$${y}, x = df$${rv}, c = ${c0})`,
@@ -498,6 +512,33 @@ function transpileModel(model) {
         h ? `df_bw <- df[abs(df$${rv} - ${c0}) <= ${h}, ]` : `df_bw <- df  # set bandwidth filter`,
         `fs <- lm(${dVar} ~ _Z, data = df_bw)`,
         `cat("First-stage F:", summary(fs)$fstatistic[1], "\\n")`,
+      ].join("\n");
+    }
+
+    case "SpatialRDD": {
+      // Keele & Titiunik 2015 geographic RD via rdrobust on a signed running variable.
+      // The user supplies an unsigned distance-to-boundary column and a 0/1 treated-side
+      // indicator; we build d̃ = (2D − 1) * |dist| and treat the cutoff as 0.
+      const distR  = rName(distCol ?? runningVar);
+      const trtR   = rName(treatmentCol ?? treatVar);
+      const h      = bandwidth ? Number(bandwidth).toFixed(6) : null;
+      const kernR  = kernel === "epanechnikov" ? "epanechnikov"
+                   : kernel === "uniform"      ? "uniform"
+                   : "triangular";
+      const covOpt = wVars.length
+        ? `, covs = df[, c(${wVars.map(v => `"${rName(v)}"`).join(", ")})]` : "";
+      const pOrdS = Math.max(1, Math.round(polyOrder ?? 1));
+      return [
+        `# ── Spatial RD (Keele & Titiunik 2015) ──────────────────────────────`,
+        `# Build signed running variable: positive on treated side, cutoff = 0.`,
+        `df <- df |> dplyr::mutate(.signed_dist = (2 * ${trtR} - 1) * abs(${distR}))`,
+        ``,
+        h
+          ? `fit <- rdrobust::rdrobust(y = df$${y}, x = df$.signed_dist, c = 0, h = ${h}, kernel = ${rStr(kernR)}, p = ${pOrdS}${covOpt})`
+          : `fit <- rdrobust::rdrobust(y = df$${y}, x = df$.signed_dist, c = 0, kernel = ${rStr(kernR)}, p = ${pOrdS}${covOpt})`,
+        ``,
+        `summary(fit)  # LATE at the boundary`,
+        `rdrobust::rdplot(y = df$${y}, x = df$.signed_dist, c = 0, p = ${pOrdS})`,
       ].join("\n");
     }
 
@@ -585,6 +626,81 @@ function transpileModel(model) {
         `  Ylab         = "Gap in ${y2}",`,
         `  Xlab         = "${tc}"`,
         `)`,
+      ].join("\n");
+    }
+
+    case "GMM": {
+      const endog  = wVars.map(rName).join(", ");
+      const exog   = xVars.map(fmtR).join(" + ") || "1";
+      const instrs = [...xVars, ...zVars].map(rName).join(", ");
+      return [
+        `# ── Two-Step Efficient GMM ───────────────────────────────────────────`,
+        `# Install: install.packages("gmm")`,
+        `library(gmm)`,
+        ``,
+        `# Structural: ${y} ~ exogenous + endogenous`,
+        `# Instruments: exogenous + excluded`,
+        `fit <- gmm::gmm(${y} ~ ${exog}${wVars.length ? ` + ${wVars.map(fmtR).join(" + ")}` : ""},`,
+        `  ~ ${instrs || "1"},`,
+        `  data = df, vcov = "HAC")`,
+        ``,
+        `summary(fit)`,
+        `coef(fit)`,
+      ].join("\n");
+    }
+
+    case "LIML": {
+      const endog  = wVars.map(rName).join(" + ");
+      const exog   = xVars.map(fmtR).join(" + ") || "1";
+      const instrs = [...xVars, ...zVars].map(rName).join(" + ");
+      return [
+        `# ── Limited Information Maximum Likelihood (LIML) ────────────────────`,
+        `# Install: install.packages("ivreg")`,
+        `library(ivreg)`,
+        ``,
+        `fit <- ivreg::ivreg(${y} ~ ${exog}${wVars.length ? ` + ${endog}` : ""} | ${instrs || "1"},`,
+        `  data = df, method = "liml")`,
+        ``,
+        `summary(fit, diagnostics = TRUE)`,
+        `# κ (kappa): 1 = just-identified (= 2SLS); > 1 = over-identified`,
+        `cat("kappa:", fit$kappa, "\\n")`,
+      ].join("\n");
+    }
+
+    case "PoissonFE": {
+      const ec  = rName(entityCol ?? "entity");
+      const cov = xVars.map(fmtR).join(" + ") || "1";
+      return [
+        `# ── Poisson FE (PPML with entity fixed effects) ──────────────────────`,
+        `library(fixest)`,
+        ``,
+        `fit <- fixest::fepois(${y} ~ ${cov} | ${ec}, data = df, vcov = ~${ec})`,
+        ``,
+        `fixest::etable(fit)`,
+        `cat("Incidence Rate Ratios:\\n")`,
+        `print(exp(coef(fit)))`,
+        ``,
+        `# Overdispersion check: Pearson chi-sq / df`,
+        `pearson_resid <- residuals(fit, type = "pearson")`,
+        `cat("Pearson chi-sq / df:", sum(pearson_resid^2) / fit$nobs, "\\n")`,
+      ].join("\n");
+    }
+
+    case "McCrary": {
+      const rv = rName(runningVar ?? "running");
+      const c0 = cutoff ?? 0;
+      return [
+        `# ── McCrary / Cattaneo-Jansson-Ma Density Test ───────────────────────`,
+        `# Tests for manipulation of the running variable at the cutoff.`,
+        `# Install: install.packages("rddensity")`,
+        `library(rddensity)`,
+        ``,
+        `fit <- rddensity::rddensity(X = df$${rv}, c = ${c0})`,
+        `summary(fit)`,
+        ``,
+        `# Density plot`,
+        `rddensity::rdplotdensity(fit, df$${rv},`,
+        `  xlabel = "${rv}", title = "McCrary Density Test (cutoff = ${c0})")`,
       ].join("\n");
     }
 
@@ -730,19 +846,24 @@ export function generateRScript(config) {
 // ─── MULTI-MODEL EXPORT ────────────────────────────────────────────────────────
 // Generates an R script that estimates all models and outputs a joint modelsummary table.
 //
-// configs: Array of { model: ModelConfig, label: string }
+// configs:        Array of { model: ModelConfig, label: string }
 // dataDictionary: Record<string,string> | null
-export function generateMultiModelRScript(configs = [], dataDictionary = null) {
+// opts:           { filename?: string, pipeline?: Step[] }
+export function generateMultiModelRScript(configs = [], dataDictionary = null, opts = {}) {
   if (!configs.length) return "# No models provided.";
 
+  const filename = opts.filename ?? "dataset.csv";
+  const pipeline = opts.pipeline ?? [];
   const ts = new Date().toISOString().slice(0, 10);
   const allTypes = [...new Set(configs.map(c => c.model?.type).filter(Boolean))];
   const pkgsSet = new Set(["dplyr", "tidyr", "readr", "fixest", "modelsummary", "lmtest", "car"]);
   allTypes.forEach(t => {
     if (t === "FE" || t === "FD") pkgsSet.add("plm");
-    if (t === "RDD") pkgsSet.add("rdrobust");
+    if (t === "RDD" || t === "FuzzyRDD" || t === "SpatialRDD") pkgsSet.add("rdrobust");
     if (t === "Logit" || t === "Probit") { pkgsSet.add("marginaleffects"); pkgsSet.add("pROC"); pkgsSet.add("lmtest"); }
   });
+  if (pipeline.some(s => s.type === "dummy")) pkgsSet.add("fastDummies");
+  if (pipeline.some(s => ["date_parse","date_extract"].includes(s.type))) pkgsSet.add("lubridate");
   const pkgs = pkgsSet;
 
   const lines = [];
@@ -761,11 +882,22 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null) {
   lines.push(``);
 
   lines.push(`# ── 1. Load data ─────────────────────────────────────────────────────────`);
-  lines.push(`df <- readr::read_csv("dataset.csv")`);
+  const ext = filename.split(".").pop()?.toLowerCase();
+  if (ext === "dta") lines.push(`df <- haven::read_dta(${rStr(filename)})`);
+  else if (["xlsx","xls"].includes(ext)) lines.push(`df <- readxl::read_excel(${rStr(filename)})`);
+  else lines.push(`df <- readr::read_csv(${rStr(filename)})`);
   lines.push(``);
 
+  if (pipeline.length) {
+    lines.push(`# ── 2. Data pipeline ─────────────────────────────────────────────────────`);
+    pipeline.forEach(step => {
+      lines.push(transpileStep(step));
+    });
+    lines.push(``);
+  }
+
   if (dataDictionary && Object.keys(dataDictionary).length) {
-    lines.push(`# ── 2. Variable definitions ──────────────────────────────────────────────`);
+    lines.push(`# ── Variable definitions ─────────────────────────────────────────────────`);
     Object.entries(dataDictionary).forEach(([k, v]) => lines.push(`# ${rName(k).padEnd(20)} ${v}`));
     lines.push(``);
   }
@@ -936,7 +1068,7 @@ function buildPackageList(modelType, pipeline) {
 
   // Model-specific
   if (modelType === "FE" || modelType === "FD") pkgs.add("plm");
-  if (modelType === "RDD") { pkgs.add("rdrobust"); pkgs.delete("fixest"); pkgs.delete("modelsummary"); }
+  if (modelType === "RDD" || modelType === "FuzzyRDD" || modelType === "SpatialRDD") { pkgs.add("rdrobust"); pkgs.delete("fixest"); pkgs.delete("modelsummary"); }
   if (modelType === "Logit" || modelType === "Probit") {
     pkgs.add("marginaleffects");
     pkgs.add("pROC");
