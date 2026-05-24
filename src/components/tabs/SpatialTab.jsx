@@ -1914,6 +1914,14 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
     setActiveCrs(null); setProj4fn(null); setCrsInput(""); setCrsErr("");
   }
 
+  // J3 — auto-init CRS from dataset metadata when projected coords are detected
+  // and no CRS has been set yet.
+  useEffect(() => {
+    if (activeCrs || !isProjected) return;
+    const dsCrs = availableDatasets.find(d => d.crs?.proj4)?.crs;
+    if (dsCrs?.proj4) applyCrs(dsCrs.proj4);
+  }, [isProjected, availableDatasets]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const addLayer    = type => setLayers(prev => { const ly = mkSLayer(type, prev.length); setActiveId(ly.id); return [...prev, ly]; });
   const updateLayer = upd  => setLayers(prev => prev.map(l => l.id === upd.id ? upd : l));
   const removeLayer = id   => { setLayers(prev => prev.filter(l => l.id !== id)); setActiveId(prev => prev === id ? null : prev); };
@@ -2013,8 +2021,11 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         const ptRows = lyRows(ly);
         const { getColor } = buildColorScale(ptRows, ly.colorCol);
         for (const row of ptRows) {
-          const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]);
-          if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
+          let lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]);
+          if (isNaN(lat) || isNaN(lon)) continue;
+          // J2: reproject from projected CRS (easting=lon col, northing=lat col) → WGS84
+          if (proj4fn) { const [wLon, wLat] = proj4fn([lon, lat]); lon = wLon; lat = wLat; }
+          if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
           const color = (ly.colorCol ? getColor(row) : null) ?? ly.fillColor;
           const op    = ly.opacity ?? 0.78;
           const tipParts = [`lat: ${lat.toFixed(4)}`, `lon: ${lon.toFixed(4)}`];

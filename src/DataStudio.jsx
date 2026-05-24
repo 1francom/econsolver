@@ -608,6 +608,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         rowCount: d.rawData._duckdb?.rowCount ?? d.rawData.rows?.length    ?? 0,
         colCount: d.rawData.headers?.length ?? 0,
         headers:  d.rawData.headers         ?? [],
+        crs:      d.crs ?? null,
       });
     });
   }, [datasets, dispatch]);
@@ -619,6 +620,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       filename: d.filename,
       rows:     d.rawData?.rows    ?? [],
       headers:  d.rawData?.headers ?? [],
+      crs:      d.crs ?? null,
     })));
   }, [datasets]);
 
