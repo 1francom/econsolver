@@ -79,7 +79,7 @@
 | factor_interactions  | complete | complete | complete | |
 | arrange              | complete | complete | complete | |
 | group_summarize      | complete | complete | complete | |
-| pivot_longer         | partial  | complete | complete | R `tidyr::pivot_longer` exists but emit needs verification |
+| pivot_longer         | complete | complete | complete | R `tidyr::pivot_longer` simple + multi/.value modes; Stata `reshape long`; Python `pd.melt` |
 | join                 | complete | complete | complete | R `dplyr::left_join`/`inner_join`; Stata `preserve/merge/restore`; Python `pd.merge` |
 | append               | complete | complete | complete | R `bind_rows`; Stata `preserve/append/restore`; Python `pd.concat` |
 | geocode              | complete | complete | complete | R `tidygeocoder::geocode(method="osm")`; Stata export+merge workaround; Python `geopy` Nominatim + RateLimiter |

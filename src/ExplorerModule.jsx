@@ -11,6 +11,7 @@ import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
+import { generateCleanScript } from "./pipeline/exporter.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
@@ -1605,7 +1606,7 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
 export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset, pid}) {
   const{C}=useTheme();
-  const {headers, cleanRows:rows, panelIndex:panel, filename} = cleanedData;
+  const {headers, cleanRows:rows, panelIndex:panel, filename, pipeline = []} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
   const [filterConds, setFilterConds] = useState([]);
@@ -1618,11 +1619,34 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   function downloadExploreScript(language) {
     const ext    = { r: "R", stata: "do", python: "py" }[language];
     const base   = (filename || "dataset").replace(/\.[^.]+$/, "");
-    const script = generateExploreScript(language, { headers, info, filename });
-    const blob   = new Blob([script], { type: "text/plain" });
-    const a      = document.createElement("a");
-    a.href       = URL.createObjectURL(blob);
-    a.download   = `${base}_explore.${ext}`;
+    const dsName = base.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^[0-9]/, "_");
+    let script   = "";
+    if (pipeline.length > 0) {
+      try {
+        script = generateCleanScript({ language, datasetName: dsName, filename, pipeline }) + "\n\n";
+      } catch (_) { /* skip pipeline section if it fails */ }
+    }
+    script += generateExploreScript(language, { headers, info, filename });
+    const blob = new Blob([script], { type: "text/plain" });
+    const a    = document.createElement("a");
+    a.href     = URL.createObjectURL(blob);
+    a.download = `${base}_explore.${ext}`;
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+
+  function downloadCSV() {
+    const base = (filename || "dataset").replace(/\.[^.]+$/, "");
+    const esc  = v => {
+      if (v === null || v === undefined) return "";
+      const s = String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.join(","), ...filteredRows.map(r => headers.map(h => esc(r[h])).join(","))];
+    const blob  = new Blob([lines.join("\r\n")], { type: "text/csv" });
+    const a     = document.createElement("a");
+    a.href      = URL.createObjectURL(blob);
+    a.download  = `${base}_export.csv`;
     a.click(); URL.revokeObjectURL(a.href);
   }
 
@@ -1642,6 +1666,15 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             </div>
           </div>
           <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+            <button onClick={downloadCSV} style={{
+              padding:"0.28rem 0.55rem", borderRadius:3, cursor:"pointer",
+              fontFamily:mono, fontSize:10, background:"transparent",
+              border:`1px solid ${C.border2}`, color:C.textDim, transition:"all 0.12s",
+            }}
+              title={`Download current view as CSV (${filteredRows.length} rows)`}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.gold;e.currentTarget.style.color=C.gold;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
+            >↓CSV</button>
             {["R","Stata","py"].map((lbl, i) => {
               const lang = ["r","stata","python"][i];
               return (
@@ -1651,7 +1684,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
                   border:`1px solid ${C.border2}`, color:C.textDim,
                   transition:"all 0.12s",
                 }}
-                  title={`Export Explore script (${lbl})`}
+                  title={`Export pipeline + explore script (${lbl})${pipeline.length ? ` · ${pipeline.length} pipeline steps included` : ""}`}
                   onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;e.currentTarget.style.color=C.teal;}}
                   onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
                 >↓{lbl}</button>
