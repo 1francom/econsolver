@@ -20,6 +20,7 @@ import {
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
   runGMM, runLIML,
   runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runSyntheticControl,
+  runSpatialRDD,
   runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats,
   wrapResult,
   diagnoseFit,
@@ -1271,7 +1272,7 @@ function buildModelAvail(panelOk, panelFdOk) {
     OLS: true, WLS: true,
     FE: panelOk, FD: panelFdOk,
     LSDV: panelOk, TWFE: panelOk, EventStudy: panelOk,
-    "2SLS": true, RDD: true, FuzzyRDD: true, DiD: true,
+    "2SLS": true, RDD: true, FuzzyRDD: true, SpatialRDD: true, DiD: true,
     Logit: true, Probit: true, Poisson: true, PoissonFE: true,
     GMM: true, LIML: true,
     SyntheticControl: true,
@@ -1376,6 +1377,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [bwMode,     setBwMode]     = useState("ik");
   const [bwManual,   setBwManual]   = useState("");
   const [kernel,     setKernel]     = useState("triangular");
+  const [polyOrder,  setPolyOrder]  = useState(1);     // local polynomial order (RDD / FuzzyRDD / SpatialRDD)
   const [weightVar, setWeightVar] = useState([]);
 
   // ── New estimator state ───────────────────────────────────────────────────
@@ -1601,9 +1603,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
         const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
         if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
-        const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, expW, seOpts);
+        const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, expW, seOpts, polyOrder);
         if (!res) return { error: "RDD failed. Not enough observations within bandwidth." };
-        return { result: wrapResult("RDD", res, { yVar: y, wVars: expW, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }, { h }), panelFE: null, panelFD: null };
+        return { result: wrapResult("RDD", res, { yVar: y, wVars: expW, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel, polyOrder }, { h }), panelFE: null, panelFD: null };
 
       } else if (model === "Logit" || model === "Probit") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
@@ -1666,9 +1668,47 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
         const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
         if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
-        const res = runFuzzyRDD(dataRows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts });
+        const res = runFuzzyRDD(dataRows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts, polyOrder });
         if (!res || res.error) return { error: res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth." };
-        return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars: expW, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel }), panelFE: null, panelFD: null };
+        return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars: expW, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel, polyOrder }), panelFE: null, panelFD: null };
+
+      } else if (model === "SpatialRDD") {
+        // Keele & Titiunik 2015 geographic RD: signed running variable built from
+        // a distance-to-boundary column + a 0/1 indicator for the treated side.
+        if (!treatVar[0])   return { error: "Select the treated-side indicator column (0/1)." };
+        if (!runningVar[0]) return { error: "Select the distance-to-boundary column." };
+        const bwManualNum = bwMode === "manual" ? parseFloat(bwManual) : null;
+        if (bwMode === "manual" && (!isFinite(bwManualNum) || bwManualNum <= 0))
+          return { error: "Invalid manual bandwidth." };
+        let res;
+        try {
+          res = runSpatialRDD({
+            rows:       dataRows,
+            y,
+            dist:       runningVar[0],
+            treatment:  treatVar[0],
+            covariates: expW,
+            bandwidth:  bwManualNum,           // null ⇒ IK auto-bandwidth
+            kernel,
+            seOpts,
+            polyOrder,
+          });
+        } catch (e) {
+          return { error: e.message || "Spatial RDD failed." };
+        }
+        if (!res || res.error) return { error: res?.error ?? "Spatial RDD failed." };
+        return {
+          result: wrapResult("SpatialRDD", res, {
+            yVar: y, wVars: expW,
+            distCol:      runningVar[0],
+            treatmentCol: treatVar[0],
+            runningVar:   runningVar[0],
+            cutoff:       0,
+            bandwidth:    res.bandwidth,
+            kernel,
+          }, { h: res.bandwidth }),
+          panelFE: null, panelFD: null,
+        };
 
       } else if (model === "Poisson") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
@@ -1700,7 +1740,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } catch (e) {
       return { error: `Estimation error: ${e.message}` };
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol]);
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -1752,7 +1792,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         : rows;
       const fullOut = _runEstimation(fullRows);
       if (!fullOut.error && fullOut.result) {
-        const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample" };
+        const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample", subsetFilters: [] };
         modelBuffer.add(r);
         setBufferVersion(v => v + 1);
       }
@@ -1765,7 +1805,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           : filtered;
         const out = _runEstimation(subsetRows);
         if (!out.error && out.result) {
-          const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name };
+          const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name, subsetFilters: s.filters ?? [] };
           modelBuffer.add(r);
           setBufferVersion(v => v + 1);
         }
@@ -2177,6 +2217,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           if (model === "RDD" || model === "FuzzyRDD") {
             if (!runningVar[0] || !Number.isFinite(cutoffNum)) {
               throw new Error("RDD SQL path: running variable or cutoff missing - fallback to JS");
+            }
+            if (polyOrder > 1) {
+              throw new Error("RDD SQL path: polynomial order > 1 not supported via SQL — fallback to JS");
             }
             const controlsExpansion = await expandFactors({
               xCols: wVars.filter(v => v !== runningVar[0] && v !== yVar[0]),
@@ -2882,6 +2925,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             bwMode={bwMode}       setBwMode={setBwMode}
             bwManual={bwManual}   setBwManual={setBwManual}
             kernel={kernel}       setKernel={setKernel}
+            polyOrder={polyOrder} setPolyOrder={setPolyOrder}
             weightVar={weightVar} setWeightVar={setWeightVar}
             treatTimeCol={treatTimeCol}     setTreatTimeCol={setTreatTimeCol}
             kPre={kPre}                     setKPre={setKPre}
@@ -3684,20 +3728,28 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             );
           })()}
 
-          {/* RDD */}
-          {result?.type === "RDD" && (() => {
+          {/* RDD / SpatialRDD */}
+          {(result?.type === "RDD" || result?.type === "SpatialRDD") && (() => {
             const r   = result;
             const rdd = r.rddData ?? {};
+            const isSpatial = r.type === "SpatialRDD";
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Sharp RDD Results</span>
+                  <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>
+                    {isSpatial ? "Spatial RD Results" : "Sharp RDD Results"}
+                  </span>
                   <Badge label={`bw = ${rdd.h?.toFixed(3) ?? "—"}`} color={C.textDim} />
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {isSpatial && r.nTreated != null && r.nControl != null && (
+                    <Badge label={`treated/control = ${r.nTreated}/${r.nControl}`} color={C.textDim} />
+                  )}
                 </div>
                 <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
                   <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
-                    Local Average Treatment Effect (LATE) at cutoff = {rdd.cutoff}
+                    {isSpatial
+                      ? "Local Average Treatment Effect (LATE) at the boundary"
+                      : `Local Average Treatment Effect (LATE) at cutoff = ${rdd.cutoff}`}
                   </div>
                   <div style={{ fontSize: 24, color: r.lateP != null && r.lateP < 0.05 ? C.orange : C.textDim }}>
                     {r.late != null && isFinite(r.late) ? (r.late >= 0 ? "+" : "") + r.late.toFixed(4) : "N/A"}{r.lateP != null ? stars(r.lateP) : ""}
@@ -3721,19 +3773,28 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   accentColor={C.orange}
                   defaultId="scatter"
                   plots={[
-                    { id: "scatter", label: "Binned scatter",
-                      node: <RDDPlot result={{ ...rdd, late: r.late, lateP: r.lateP }} yLabel={yVar[0]} xLabel={runningVar[0]} /> },
-                    { id: "bw",      label: "Bandwidth sensitivity",
-                      node: <RDDBandwidthPlot
-                        rows={rows} yCol={yVar[0]} runCol={runningVar[0]}
-                        cutoff={parseFloat(cutoff)} optH={rdd.h}
-                        kernel={kernel} controls={wVars} runSharpRDD={runSharpRDD}
+                    { id: "scatter", label: isSpatial ? "Binned scatter (signed distance)" : "Binned scatter",
+                      node: <RDDPlot
+                        result={{ ...rdd, late: r.late, lateP: r.lateP }}
+                        yLabel={yVar[0]}
+                        xLabel={isSpatial ? `signed dist to boundary (${runningVar[0]})` : runningVar[0]}
                       /> },
-                    { id: "mccrary", label: "McCrary density",
-                      node: <McCraryPlot
-                        result={r.mcCrary ?? runMcCrary(rows, runningVar[0], parseFloat(cutoff))}
-                        xLabel={runningVar[0]}
-                      /> },
+                    // Bandwidth-sensitivity + McCrary on the original column are
+                    // ill-defined for SpatialRDD (running var is internal/signed),
+                    // so hide them in that case.
+                    ...(isSpatial ? [] : [
+                      { id: "bw",      label: "Bandwidth sensitivity",
+                        node: <RDDBandwidthPlot
+                          rows={rows} yCol={yVar[0]} runCol={runningVar[0]}
+                          cutoff={parseFloat(cutoff)} optH={rdd.h}
+                          kernel={kernel} controls={wVars} runSharpRDD={runSharpRDD}
+                        /> },
+                      { id: "mccrary", label: "McCrary density",
+                        node: <McCraryPlot
+                          result={r.mcCrary ?? runMcCrary(rows, runningVar[0], parseFloat(cutoff))}
+                          xLabel={runningVar[0]}
+                        /> },
+                    ]),
                     ...wVars.map(xc => ({
                       id: `bal_${xc}`,
                       label: `Balance: ${xc}`,
@@ -3744,10 +3805,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <ExportBar
                   yVar={yVar[0]}
                   results={r}
-                  model="RDD"
-                  onReport={() => openReport({ ...r, modelLabel: "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
-                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "RDD", yVar: yVar[0], wVars,
-                    runningVar: runningVar[0], cutoff: parseFloat(cutoff), bandwidth: rdd.h, kernel } }}
+                  model={isSpatial ? "SpatialRDD" : "RDD"}
+                  onReport={() => openReport({ ...r, modelLabel: isSpatial ? "Spatial RD" : "Sharp RDD", yVar: yVar[0], xVars: [...wVars] })}
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: isSpatial ? "SpatialRDD" : "RDD", yVar: yVar[0], wVars,
+                    runningVar: runningVar[0], cutoff: isSpatial ? 0 : parseFloat(cutoff), bandwidth: rdd.h, kernel, polyOrder,
+                    ...(isSpatial ? { distCol: runningVar[0], treatmentCol: treatVar[0], treatVar: treatVar[0] } : {}) } }}
                 />
               </div>
             );
@@ -3974,6 +4036,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         <ModelComparison
           models={pinnedModels}
           dataDictionary={cleanedData?.dataDictionary ?? null}
+          pipeline={fullPipeline}
+          filename={cleanedData?.filename ?? "dataset.csv"}
           onClose={() => setCompareOpen(false)}
         />
       )}

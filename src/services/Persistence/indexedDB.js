@@ -4,16 +4,26 @@
 //
 // DB layout:
 //   DB name  : "econ_studio_v1"
-//   Version  : 3
+//   Version  : 4
 //
 //   Store "projects"   — named project registry (top-level, user-visible)
 //     Key   : pid (string, same as pipeline key)
 //     Index : updatedAt
 //     Value : { pid, name, filename, rowCount, colCount, createdAt, updatedAt }
 //
-//   Store "pipelines"  — pipeline metadata, steps, panel config, dictionary
-//     Key   : pid (string)
+//   Store "pipelines"  — per-project record holding a map of per-dataset pipelines
+//     Key   : pid (string, project id)
 //     Index : ts (for listing recents)
+//     Value : {
+//       id: pid,
+//       datasetPipelines: { [datasetId]: { steps, panel, dataDictionary,
+//                                          branchPointIndex, ...extra } },
+//       ts,
+//       ...extra top-level meta (filename, rowCount, colCount, pipelineLength)
+//     }
+//     v3 -> v4 migration reshapes legacy { pipeline, panel, ... } records into
+//     datasetPipelines[pid] = { steps: pipeline, panel, ... } so single-dataset
+//     projects keep working unchanged.
 //
 //   Store "raw_data"   — original dataset rows + headers, keyed by pid
 //     Key   : pid (string)
@@ -22,12 +32,14 @@
 //
 // Exports:
 //   openDB()
-//   saveProject(pid, meta)      / listProjects()      / deleteProject(pid) / clearAllProjects()
-//   savePipeline(id, record)    / loadPipeline(id)
-//   listPipelines()             / deletePipeline(id)  / clearAllPipelines()
-//   saveRawData(id, rawData)    / loadRawData(id)     / deleteRawData(id)
+//   saveProject(pid, meta)               / listProjects()      / deleteProject(pid) / clearAllProjects()
+//   savePipeline(pid, datasetId, record) / loadPipeline(pid, datasetId)
+//   listPipelines()                      / deletePipeline(id)  / clearAllPipelines()
+//   saveRawData(id, rawData)             / loadRawData(id)     / deleteRawData(id)
 
-const DB_VERSION           = 3;
+import { retrofitRowId } from "../data/rowIdentity.js";
+
+const DB_VERSION           = 4;
 const STORE_PIPE           = "pipelines";
 const STORE_RAW            = "raw_data";
 const STORE_PROJ           = "projects";
@@ -84,6 +96,43 @@ export function openDB() {
         const proj = db.createObjectStore(STORE_PROJ, { keyPath: "pid" });
         proj.createIndex("updatedAt", "updatedAt", { unique: false });
       }
+
+      // v4: reshape pipelines store — each pid record now holds a per-dataset
+      // map { [datasetId]: { steps, panel, dataDictionary, branchPointIndex } }
+      // instead of those fields at the top level. Legacy single-dataset records
+      // are migrated by treating the project pid as the primary dataset id.
+      if (oldVer < 4 && oldVer >= 1) {
+        // Use the upgrade transaction (provided on the request) to walk
+        // existing records — opening a new transaction here is illegal.
+        const tx2  = e.target.transaction;
+        const pipe = tx2.objectStore(STORE_PIPE);
+        const cur  = pipe.openCursor();
+        cur.onsuccess = ev => {
+          const cursor = ev.target.result;
+          if (!cursor) return;
+          const rec = cursor.value;
+          if (rec && !rec.datasetPipelines) {
+            const {
+              id, pipeline, panel, dataDictionary, branchPointIndex,
+              ts, ...rest
+            } = rec;
+            const inner = {
+              steps:            Array.isArray(pipeline) ? pipeline : [],
+              panel:            panel             ?? null,
+              dataDictionary:   dataDictionary    ?? null,
+              branchPointIndex: branchPointIndex  ?? null,
+            };
+            const reshaped = {
+              ...rest,
+              id,
+              datasetPipelines: { [id]: inner },
+              ts: ts ?? Date.now(),
+            };
+            cursor.update(reshaped);
+          }
+          cursor.continue();
+        };
+      }
     };
 
     req.onsuccess = e => resolve(e.target.result);
@@ -107,17 +156,105 @@ function tx(store, db, mode, fn) {
 }
 
 // ─── PIPELINE API ─────────────────────────────────────────────────────────────
+// Each project pid owns a single store record whose `datasetPipelines` map
+// holds one entry per dataset id. For single-dataset projects, datasetId
+// equals the project pid (legacy compatibility — see v4 migration above).
 
-export async function savePipeline(id, record) {
+/**
+ * Persist the pipeline for a single (projectPid, datasetId) slot.
+ *
+ * `record` should carry the per-dataset payload — typically
+ * `{ pipeline, panel, dataDictionary, branchPointIndex, ... }`.
+ * `pipeline` is normalised to `steps` so the stored shape matches the v4
+ * schema regardless of what callers pass in.
+ *
+ * Any extra fields on `record` that are NOT per-dataset (filename, rowCount,
+ * colCount, pipelineLength) are mirrored at the top of the project record so
+ * the project list previews keep working.
+ */
+export async function savePipeline(projectPid, datasetId, record = {}) {
+  if (!projectPid) throw new Error("savePipeline: projectPid required");
+  if (!datasetId)  throw new Error("savePipeline: datasetId required");
+
   const db = await openDB();
-  await tx(STORE_PIPE, db, "readwrite", s => s.put({ ...record, id, ts: Date.now() }));
+
+  // Read-modify-write the per-project record so concurrent datasets merge.
+  const existing = await new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE_PIPE, "readonly");
+    const req = t.objectStore(STORE_PIPE).get(projectPid);
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = e => reject(e.target.error);
+  });
+
+  const {
+    pipeline, steps, panel, dataDictionary, branchPointIndex,
+    filename, rowCount, colCount, pipelineLength,
+    ...rest
+  } = record;
+
+  const innerSteps = Array.isArray(steps)
+    ? steps
+    : Array.isArray(pipeline) ? pipeline : [];
+
+  const inner = {
+    ...rest,
+    steps:            innerSteps,
+    panel:            panel             ?? null,
+    dataDictionary:   dataDictionary    ?? null,
+    branchPointIndex: branchPointIndex  ?? null,
+  };
+
+  const next = {
+    ...(existing || {}),
+    id:               projectPid,
+    datasetPipelines: {
+      ...(existing?.datasetPipelines || {}),
+      [datasetId]: inner,
+    },
+    ts: Date.now(),
+  };
+
+  // Mirror top-level project meta (used by project-list previews) when caller
+  // provides it. Only the primary dataset typically supplies these.
+  if (filename       != null) next.filename       = filename;
+  if (rowCount       != null) next.rowCount       = rowCount;
+  if (colCount       != null) next.colCount       = colCount;
+  if (pipelineLength != null) next.pipelineLength = pipelineLength;
+
+  await tx(STORE_PIPE, db, "readwrite", s => s.put(next));
 }
 
-export async function loadPipeline(id) {
+/**
+ * Load the per-dataset slot for (projectPid, datasetId).
+ * Returns `{ steps, panel, dataDictionary, branchPointIndex, ... }` or null.
+ *
+ * When called with only `projectPid` (legacy single-dataset assumption), the
+ * primary slot — `datasetPipelines[projectPid]` — is returned. This preserves
+ * call sites that still want the single-dataset view.
+ */
+export async function loadPipeline(projectPid, datasetId = projectPid) {
+  const db = await openDB();
+  const rec = await new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE_PIPE, "readonly");
+    const req = t.objectStore(STORE_PIPE).get(projectPid);
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = e => reject(e.target.error);
+  });
+  if (!rec) return null;
+  const map = rec.datasetPipelines || {};
+  return map[datasetId] ?? null;
+}
+
+/**
+ * Load the whole per-project pipeline record, exposing the full
+ * `datasetPipelines` map plus any top-level meta. Useful for project-list
+ * previews that need to inspect multiple datasets at once.
+ */
+export async function loadProjectPipelines(projectPid) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t   = db.transaction(STORE_PIPE, "readonly");
-    const req = t.objectStore(STORE_PIPE).get(id);
+    const req = t.objectStore(STORE_PIPE).get(projectPid);
     req.onsuccess = e => resolve(e.target.result ?? null);
     req.onerror   = e => reject(e.target.error);
   });
@@ -185,7 +322,12 @@ export async function loadRawData(id) {
       const req = t.objectStore(STORE_RAW).get(id);
       req.onsuccess = e => {
         const rec = e.target.result;
-        resolve(rec ? { headers: rec.headers, rows: rec.rows } : null);
+        if (!rec) { resolve(null); return; }
+        // Legacy projects stored before the __row_id invariant may lack the
+        // column. Retrofit on read so callers always observe both __ri and
+        // __row_id without an explicit migration phase.
+        const retrofitted = retrofitRowId({ headers: rec.headers, rows: rec.rows });
+        resolve(retrofitted);
       };
       req.onerror = e => reject(e.target.error);
     });
@@ -282,7 +424,9 @@ export async function migrateFromLocalStorage() {
     }
 
     for (const rec of records) {
-      if (rec?.id) await savePipeline(rec.id, rec);
+      // Legacy localStorage records are single-dataset — treat the project pid
+      // as the primary dataset id (matches the v3 -> v4 store migration).
+      if (rec?.id) await savePipeline(rec.id, rec.id, rec);
     }
 
     localStorage.setItem(MIGRATED_FLAG, "1");

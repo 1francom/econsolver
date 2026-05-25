@@ -17,6 +17,7 @@ import {
 } from "./services/Persistence/indexedDB.js";
 import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage } from "./services/data/duckdb.js";
+import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
 import SimulateTab      from './components/tabs/SimulateTab.jsx';
 import SpatialTab       from './components/tabs/SpatialTab.jsx';
@@ -1328,12 +1329,18 @@ function Dashboard({onNew, onLoad}) {
           const pipes = await listPipelines();
           for (const p of pipes) {
             if (!p.id || !p.filename) continue; // skip bare/secondary entries
+            // v4: primary dataset's steps live under datasetPipelines[p.id].steps.
+            // Fall back to legacy p.pipeline so a partially-migrated DB still works.
+            const primarySteps =
+              p.datasetPipelines?.[p.id]?.steps
+              || p.pipeline
+              || [];
             await saveProject(p.id, {
               name:         (p.filename || "").replace(/\.[^.]+$/, "") || "Untitled",
               filename:     p.filename || "dataset.csv",
               rowCount:     p.rowCount ?? 0,
               colCount:     p.colCount ?? 0,
-              datasetCount: 1 + (p.pipeline || []).filter(s => s.type === "join" || s.type === "append").length,
+              datasetCount: 1 + primarySteps.filter(s => s.type === "join" || s.type === "append").length,
             });
           }
         } catch (e) {
@@ -1351,6 +1358,9 @@ function Dashboard({onNew, onLoad}) {
   // When selected project changes, load its pipeline for detail display.
   useEffect(() => {
     if (!selected) { setSelPipeline(null); return; }
+    // Project list preview shows the primary dataset's pipeline slot. For
+    // legacy projects the primary dataset id is the project pid itself, so
+    // loadPipeline(pid) === loadPipeline(pid, pid) by default.
     loadPipeline(selected).then(p => setSelPipeline(p ?? null)).catch(() => setSelPipeline(null));
   }, [selected]);
 
@@ -1635,8 +1645,8 @@ function Dashboard({onNew, onLoad}) {
               gap:1, background:C.border,
             }}>
               {[
-                {l:"Datasets", v: selProject.datasetCount ?? (1 + (selPipeline?.pipeline||[]).filter(s=>["join","append"].includes(s.type)).length), c:C.teal},
-                {l:"Pipeline", v:`${selPipeline?.pipelineLength||0} steps`, c:(selPipeline?.pipelineLength)?C.gold:C.textMuted},
+                {l:"Datasets", v: selProject.datasetCount ?? (1 + ((selPipeline?.steps || selPipeline?.pipeline) || []).filter(s=>["join","append"].includes(s.type)).length), c:C.teal},
+                {l:"Pipeline", v:`${(selPipeline?.steps || selPipeline?.pipeline || []).length} steps`, c:((selPipeline?.steps || selPipeline?.pipeline || []).length)?C.gold:C.textMuted},
               ].map(s=>(
                 <div key={s.l} style={{background:C.surface,padding:"0.6rem 0.8rem"}}>
                   <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:3}}>{s.l}</div>
@@ -1695,13 +1705,15 @@ function Dashboard({onNew, onLoad}) {
             </div>
 
             {/* Pipeline steps preview */}
-            {selPipeline?.pipeline?.length > 0 && (
+            {(() => {
+              const _previewSteps = selPipeline?.steps || selPipeline?.pipeline || [];
+              return _previewSteps.length > 0 && (
               <div style={{padding:"0.7rem 1rem", borderTop:`1px solid ${C.border}`, background:C.surface}}>
                 <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>
                   Pipeline steps
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                  {selPipeline.pipeline.slice(0,5).map((s,i)=>(
+                  {_previewSteps.slice(0,5).map((s,i)=>(
                     <div key={i} style={{fontSize:10,color:C.textDim,display:"flex",gap:6}}>
                       <span style={{color:C.border2,flexShrink:0}}>{i+1}.</span>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -1709,14 +1721,15 @@ function Dashboard({onNew, onLoad}) {
                       </span>
                     </div>
                   ))}
-                  {selPipeline.pipeline.length > 5 && (
+                  {_previewSteps.length > 5 && (
                     <div style={{fontSize:10,color:C.textMuted}}>
-                      … {selPipeline.pipeline.length - 5} more steps
+                      … {_previewSteps.length - 5} more steps
                     </div>
                   )}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Open button */}
             <div style={{
@@ -1925,7 +1938,7 @@ export default function App() {
       const coerced = rows.map(r => {
         const o = {}; headers.forEach(h => { o[h] = coerce(r[h], types[h]); }); return o;
       });
-      const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
+      const ensRi = ensureRowIdentity;
       setRawData(ensRi({ headers, rows: coerced }));
       setActiveTab("data");
       setScreen("workspace");
@@ -1934,7 +1947,7 @@ export default function App() {
 
     const stored = await loadRawData(p.id);
     if (stored && stored.rows?.length) {
-      const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
+      const ensRi = ensureRowIdentity;
       setRawData(ensRi(stored));
       setActiveTab("clean");
     } else {
@@ -1968,7 +1981,7 @@ export default function App() {
 
   // ── Called by DataTab when user loads the first (primary) dataset ─────────
   const handlePrimaryLoad = async (data, fname) => {
-    const ensRi = d => (!d?.rows?.length || d.rows[0]?.__ri !== undefined) ? d : { ...d, rows: d.rows.map((r, i) => ({ __ri: i, ...r })) };
+    const ensRi = ensureRowIdentity;
     setRawData(ensRi(data));
     setFilename(fname);
     // Update project metadata with real row/col counts
@@ -2101,7 +2114,17 @@ export default function App() {
                 hasOutput={!!tabOutput(activeTab)}
                 activeDatasetId={tabDsId(activeTab)}
                 onSelectDataset={id => selectDataset(activeTab, id, activeTab === "clean")}
-                onRemoveDataset={id => studioRef.current?.removeDatasetLocal(id)}
+                onRemoveDataset={id => {
+                  studioRef.current?.removeDatasetLocal(id);
+                  // Purge stale pipeline output so modules see fresh data
+                  setOutputs(prev => { const { [id]: _, ...rest } = prev; return rest; });
+                  // Reset any tab that was scoped to the deleted dataset → fall back to primary
+                  setActiveDatasetIds(prev => {
+                    const next = { ...prev };
+                    Object.keys(next).forEach(tab => { if (next[tab] === id) next[tab] = pid; });
+                    return next;
+                  });
+                }}
                 onStartTour={() => setTourStep(0)}
                 onOpenFeedback={() => setFeedbackOpen(true)}
               />

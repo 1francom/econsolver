@@ -13,7 +13,19 @@
 
 // ─── SHARED CONTEXT (prepended to every system prompt) ───────────────────────
 // ~800 tokens. Combined with any individual prompt → always > 1024.
+//
+// promptVersion: 1
+//   Schema-version sentinel embedded in the cached block. Bump this integer
+//   whenever ANY prompt in this file changes its expected output schema
+//   (field names, JSON shape, narrative section count, etc.). Because the
+//   cache key is the full text of SHARED_CONTEXT, bumping this value also
+//   invalidates the Anthropic prompt cache — which is the desired behaviour
+//   when prompts have changed semantically.
+//
+//   Phase E (replication bundles) will persist this value alongside every
+//   cached AI output so replay can detect prompt-version drift.
 export const SHARED_CONTEXT = `\
+[promptVersion: 1]
 You are a senior econometrician embedded in Litux, a browser-based
 research platform used by PhD students and faculty at LMU Munich. The platform
 implements the following estimators in pure JavaScript:
@@ -78,6 +90,39 @@ GENERAL CONDUCT:
 
 // ─── PROMPT: INFER VARIABLE UNITS ────────────────────────────────────────────
 // v1.1 — added rule 11 for interaction/DiD columns
+/**
+ * INFER_UNITS_PROMPT — single-call variable description inference.
+ *
+ * Consumer: AIService.inferVariableUnits(headers, sampleRows).
+ *   The consumer JSON.parses the raw model text (after stripping ```json fences)
+ *   and reads ONE value per header. Falls back to identity map on parse failure.
+ *
+ * @expectedOutput Flat JSON object: { [header: string]: string }
+ *   - Every key in the input `headers` array MUST appear as a key in the output.
+ *   - Each value is a short human-readable description (≤ 10 words):
+ *       • binary/dummy → "dummy 1=<label>"
+ *       • count        → "number of <unit>"
+ *       • monetary     → "<...> in <currency>" when inferable
+ *       • log-var      → "log of <base>"
+ *       • squared      → "<base> squared"
+ *       • identifier   → "entity identifier"
+ *       • interaction  → "interaction of <A> and <B>"
+ *       • unknown      → return the column name as-is
+ *
+ *   Example shape (NOT illustrative content — just structure):
+ *   {
+ *     "wage":   "hourly wage in USD",
+ *     "female": "dummy 1=female",
+ *     "id":     "entity identifier"
+ *   }
+ *
+ *   NOTE on richer fields ({unit, currency, scale, type, description}):
+ *   the current consumer only stores the string value. If the schema is
+ *   extended to a structured object, the consumer in AIService.js MUST be
+ *   updated in lockstep AND `SHARED_CONTEXT.promptVersion` MUST be bumped.
+ *
+ * Bump `SHARED_CONTEXT.promptVersion` when this schema changes.
+ */
 export const INFER_UNITS_PROMPT = `\
 ${SHARED_CONTEXT}
 ────────────────────────────────────────────────────────────────────
@@ -105,6 +150,36 @@ STRICT RULES:
 
 // ─── PROMPT: INTERPRET REGRESSION ────────────────────────────────────────────
 // v1.4 — rules H (standardized) + I (lag/lead); value-based binary detection via rows
+/**
+ * INTERPRET_REGRESSION_PROMPT — narrative results section.
+ *
+ * Consumer: AIService.interpretRegression(result, dataDictionary?, metadataReport?, rows?).
+ *   The consumer returns the raw model text directly — no JSON parsing. The
+ *   downstream renderer (ReportingModule) treats the string as plain text
+ *   and expects EXACTLY TWO paragraphs separated by one blank line.
+ *
+ * @expectedOutput Plain-text string. NOT JSON. NOT markdown.
+ *   Shape:
+ *     <paragraph 1: 4–6 sentences — statistical findings>
+ *     <blank line>
+ *     <paragraph 2: 4–6 sentences — economic plausibility + reliability>
+ *
+ *   Hard constraints enforced by the FORMAT RULES section:
+ *   - No markdown headers, no bullet points, no LaTeX.
+ *   - Must quote β to 4 d.p. and exact p-values.
+ *   - 95% CIs mentioned for significant regressors.
+ *   - English only.
+ *   - Must NOT begin with "This study", "The results", or "In this".
+ *
+ *   Variable-type framing is driven by the upstream VARIABLE METADATA block
+ *   built by _classifyVariables() in AIService.js. The metadata tags
+ *   (binary-dummy, treatment-indicator, time-dummy, did-interaction, log-var,
+ *   squared-term, continuous, standardized, lag-var, lead-var, interaction-term)
+ *   correspond to rules A–I inside this prompt and MUST stay in sync.
+ *
+ * Bump `SHARED_CONTEXT.promptVersion` when this schema changes
+ * (paragraph count, format rules, metadata tag vocabulary, etc.).
+ */
 export const INTERPRET_REGRESSION_PROMPT = `\
 ${SHARED_CONTEXT}
 ────────────────────────────────────────────────────────────────────
@@ -196,6 +271,35 @@ I. LAGGED / LEADING VARIABLES  [metadata tag: lag-var | lead-var]
 // ─── PROMPT: WRANGLING TRANSFORM ─────────────────────────────────────────────
 // v1.0 — used by callAI(mode="transform") in utils.js
 // Generates a JS arrow function body to transform a column value.
+/**
+ * WRANGLING_TRANSFORM_PROMPT — natural-language to JS column transform.
+ *
+ * Consumer: callAI(mode="transform") in components/wrangling/utils.js.
+ *   Consumer JSON.parses the raw text (strips fenced code first) and
+ *   uses `js` as the body wrapped per row via the `ai_tr`
+ *   pipeline step in runner.js.
+ *
+ * NOTE: This prompt currently emits an inline JS function body, NOT a
+ * declarative pipeline-step spec of the form `{ type, ... }`. The
+ * `ai_tr` step itself is the declarative wrapper that stores this JS
+ * and replays it via the runtime constructor used in runner.js
+ * (see STEP_REGISTRY entry for ai_tr).
+ * If a future schema moves to fully declarative step specs, both this
+ * prompt and the `ai_tr` step in runner.js MUST change together.
+ *
+ * @expectedOutput JSON object with exactly three string/array fields:
+ *   {
+ *     "description": string,       // <= 1 sentence, what the transform does
+ *     "preview":     unknown[],    // exactly 5 transformed values, same order as samples
+ *     "js":          string        // arrow-function BODY (no fn keyword, no wrapper)
+ *                                   // receives (value, rowIndex), returns newValue
+ *                                   // vanilla JS only — no imports, no fetch, no eval
+ *                                   // must return null for null/undefined input
+ *   }
+ *
+ * Bump `SHARED_CONTEXT.promptVersion` when this schema changes
+ * (field rename, switch to declarative step spec, JS sandbox rules, etc.).
+ */
 export const WRANGLING_TRANSFORM_PROMPT = `\
 ${SHARED_CONTEXT}
 ────────────────────────────────────────────────────────────────────
@@ -226,6 +330,32 @@ RULES:
 // ─── PROMPT: WRANGLING QUERY ──────────────────────────────────────────────────
 // v1.0 — used by callAI(mode="query") in utils.js
 // Answers a natural-language question about a column's data.
+/**
+ * WRANGLING_QUERY_PROMPT — natural-language Q&A over column samples.
+ *
+ * Consumer: callAI(mode="query") in components/wrangling/utils.js.
+ *   Consumer JSON.parses the raw text and renders the three string fields
+ *   in the Dictionary / data-quality side panel.
+ *
+ * NOTE: Despite the file-level comment that this should emit "a JSON
+ * filter/query spec", the current implementation emits a free-text
+ * analytic answer + a single headline statistic. There is NO filter
+ * spec emitted today. If we later add structured filter generation
+ * (e.g. `{ type:"filter", col, op, value }`) it should be a new prompt
+ * (e.g. WRANGLING_FILTER_SPEC_PROMPT) so versioning stays clean.
+ *
+ * @expectedOutput JSON object with exactly three string fields:
+ *   {
+ *     "answer":    string,   // 2–3 sentences, econometrically precise
+ *     "stat":      string,   // single most important quantitative finding
+ *                              // (e.g. "42% missing", "range 0–1", "mean ~ 23.4")
+ *     "statLabel": string    // short label for stat, <= 4 words
+ *                              // (e.g. "Missing rate", "Value range")
+ *   }
+ *
+ * Bump `SHARED_CONTEXT.promptVersion` when this schema changes
+ * (field rename, addition of filter-spec output, etc.).
+ */
 export const WRANGLING_QUERY_PROMPT = `\
 ${SHARED_CONTEXT}
 ────────────────────────────────────────────────────────────────────
@@ -251,6 +381,47 @@ RULES:
 
 // ─── PROMPT: AI CLEANING SUGGESTIONS ─────────────────────────────────────────
 // v1.0 — production. Called by suggestCleaning() in AIService.js.
+/**
+ * CLEANING_SUGGESTIONS_PROMPT — prioritised cleaning step recommendations.
+ *
+ * Consumer: AIService.suggestCleaning(dataQualityReport).
+ *   Consumer JSON.parses the raw text (strips fenced code first) and
+ *   FILTERS out any element missing the required fields
+ *   `issue` (string), `rationale` (string), and `severity` in
+ *   {"high","medium","low"}. Returns [] on parse failure.
+ *
+ *   Each `suggested_step` string maps to a step type registered in
+ *   pipeline/registry.js, so changes to that registry imply a schema
+ *   change here.
+ *
+ * @expectedOutput JSON array (≤ 12 items), each item shaped:
+ *   [
+ *     {
+ *       "col":            string | null,   // exact column name, or null for dataset-level
+ *       "issue":          string,          // <= 12 words
+ *       "suggested_step": string | null,   // one of:
+ *                                          //   Cleaning: drop, filter, drop_na, fill_na,
+ *                                          //             fill_na_grouped, type_cast, recode,
+ *                                          //             normalize_cats, winz, trim_outliers,
+ *                                          //             flag_outliers, extract_regex, ai_tr
+ *                                          //   Features: log, sq, std, dummy, lag, lead,
+ *                                          //             date_parse
+ *                                          //   (null = informational only, no step)
+ *       "params":         object,          // step parameters, {} if none implied
+ *                                          // e.g. {"mode":"median"} for fill_na
+ *                                          //      {"p_lo":0.01,"p_hi":0.99} for winz
+ *       "rationale":      string,          // one econometric sentence (why it matters)
+ *       "severity":       "high" | "medium" | "low"
+ *     }
+ *   ]
+ *
+ *   Ordering MUST be by severity high -> medium -> low. Items with
+ *   severity "ok" MUST be omitted.
+ *
+ * Bump `SHARED_CONTEXT.promptVersion` when this schema changes
+ * (field rename, new step types in the allowed `suggested_step` set,
+ * severity vocabulary change, etc.).
+ */
 export const CLEANING_SUGGESTIONS_PROMPT = `\
 ${SHARED_CONTEXT}
 ────────────────────────────────────────────────────────────────────

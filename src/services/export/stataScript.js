@@ -8,6 +8,8 @@
 //   { type, yVar, xVars, wVars, zVars, entityCol, timeCol,
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
+import { toStata, jsExprToStata } from "../../pipeline/stepTranslators.js";
+
 export function generateStataScript(config = {}) {
   const {
     filename       = "dataset.csv",
@@ -26,13 +28,16 @@ export function generateStataScript(config = {}) {
     timeCol    = null,
     postVar    = null,
     treatVar   = null,
-    runningVar = null,
-    cutoff     = null,
-    bandwidth  = null,
-    kernel     = "triangular",
+    runningVar    = null,
+    cutoff        = null,
+    bandwidth     = null,
+    kernel        = "triangular",
+    distCol       = null,
+    treatmentCol  = null,
   } = model;
 
-  const stem = filename.replace(/\.[^.]+$/, "");
+  const stem     = filename.replace(/\.[^.]+$/, "");
+  const stataFile = filename.replace(/\\/g, "/");  // forward slashes — safe in Stata
   const allX = [...(xVars ?? []), ...(wVars ?? [])];
 
   const lines = [];
@@ -51,7 +56,7 @@ export function generateStataScript(config = {}) {
 
   // ── Load data ───────────────────────────────────────────────────────────────
   lines.push(`* ── Load data ────────────────────────────────────────────────────────────`);
-  lines.push(`import delimited "${filename}", clear`);
+  lines.push(`import delimited "${stataFile}", clear`);
   lines.push("");
 
   // ── Data dictionary ─────────────────────────────────────────────────────────
@@ -163,8 +168,16 @@ function transpileStep(step) {
       return `gen ${params.col1}_x_${params.col2} = ${params.col1} * ${params.col2}`;
     case "did":
       return `gen did = ${params.postVar} * ${params.treatVar}`;
-    case "mutate":
-      return `gen ${params.newCol} = ${params.expr}`;
+    case "mutate": {
+      const nn     = step.nn ?? params.newCol ?? "newcol";
+      const stExpr = jsExprToStata(step.expr ?? params.expr);
+      if (stExpr) return `gen ${nn} = ${stExpr}`;
+      return [
+        `* mutate: ${nn} = ${step.expr ?? params.expr}`,
+        `* NOTE: expression uses JS syntax — translate to Stata manually`,
+        `* gen ${nn} = <Stata expression>`,
+      ].join("\n");
+    }
     case "arrange":
       return `sort ${params.col}`;
     case "group_summarize": {
@@ -203,17 +216,88 @@ function transpileStep(step) {
       return `* normalize_cats: manual step`;
     case "extract_regex":
       return `* regex extract: gen ${params.newCol} from ${params.col} using pattern "${params.regex}"\n* Use -regexm()- / -regexs()-:\n* gen ${params.newCol} = regexs(1) if regexm(${params.col}, "${params.regex}")`;
-    case "join":
-      return `* merge: load second dataset as df_right.dta first\n* merge ${params.how ?? "1:1"} ${params.key} using "df_right.dta"`;
-    case "append":
-      return `* append: load second dataset\n* append using "df_right.dta"`;
-    case "ai_tr":
-      return `* AI transform: ${params.description ?? "(manual step)"}`;
+    case "join": {
+      const how      = step.how === "inner" ? "1:1" : "1:1";  // Stata: 1:1 for both; user adjusts to m:1/1:m as needed
+      const lk       = step.leftKey  ?? "id";
+      const rk       = step.rightKey ?? lk;
+      const sfx      = step.suffix   ?? "_r";
+      const rightId  = step.rightId  ?? "right_dataset";
+      const sameKey  = lk === rk ? lk : `${lk} = ${rk}`;
+      const keepInner = step.how === "inner" ? "\nkeep if _merge == 3" : "\nkeep if _merge == 1 | _merge == 3";
+      return [
+        `* Join: load right dataset, merge on ${sameKey}`,
+        `preserve`,
+        `  import delimited "<path_to_${rightId}.csv>", clear`,
+        `  rename ${rk} ${lk}  /* align key names */`,
+        `  save "__right_tmp.dta", replace`,
+        `restore`,
+        `merge ${how} ${lk} using "__right_tmp.dta", keep(master match) nogen suffixes("" "${sfx}")`,${keepInner}
+        `erase "__right_tmp.dta"`,
+      ].join("\n");
+    }
+    case "append": {
+      const rightId = step.rightId ?? "right_dataset";
+      return [
+        `* Append: stack right dataset below current`,
+        `preserve`,
+        `  import delimited "<path_to_${rightId}.csv>", clear`,
+        `  save "__append_tmp.dta", replace`,
+        `restore`,
+        `append using "__append_tmp.dta"`,
+        `erase "__append_tmp.dta"`,
+      ].join("\n");
+    }
+    case "ai_tr": {
+      const col    = step.col ?? "col";
+      const jsCode = step.js  ?? "";
+      const arrowMatch = jsCode.match(/^\s*\(?\s*(\w+)\s*\)?\s*=>\s*([\s\S]+)$/);
+      if (arrowMatch) {
+        const [, param, body] = arrowMatch;
+        const substituted = body.trim().replace(new RegExp(`\\b${param}\\b`, "g"), col);
+        const stExpr = jsExprToStata(substituted);
+        if (stExpr) return `replace ${col} = ${stExpr}`;
+      }
+      return [
+        `* AI transform on "${col}"`,
+        `* JS: ${jsCode}`,
+        `* replace ${col} = <Stata expression>`,
+      ].join("\n");
+    }
     case "factor_interactions": {
       const { cols } = params;
       if (cols?.length >= 2) return `gen ${cols.join("_x_")} = ${cols[0]} * ${cols[1]}`;
       return `* factor_interactions`;
     }
+    case "patch": {
+      const col = step.col ?? "column";
+      const val = typeof step.value === "string" ? `"${step.value}"` : (step.value ?? ".");
+      if (step.rowId) {
+        return `replace ${col} = ${val} if __row_id == "${step.rowId}"`;
+      }
+      return `replace ${col} = ${val} if __ri == ${step.ri}  /* __ri-based: may misalign after sort */`;
+    }
+
+    case "geocode": {
+      const addrCol = step.addressCol ?? "address";
+      const latCol  = step.latCol  ?? "lat";
+      const lonCol  = step.lonCol  ?? "lon";
+      return [
+        `* Geocode: ${addrCol} -> ${latCol} / ${lonCol}`,
+        `* Stata has no native geocoding — export addresses, geocode externally, merge back.`,
+        `* Step 1: export addresses`,
+        `preserve`,
+        `keep ${addrCol}`,
+        `duplicates drop`,
+        `export delimited using "addresses_to_geocode.csv", replace`,
+        `restore`,
+        `* Step 2: geocode the CSV externally (Python/R with geopy/tidygeocoder)`,
+        `* Step 3: merge geocoded coordinates back`,
+        `* merge m:1 ${addrCol} using "geocoded_coords.dta", keep(master match) nogenerate`,
+        `* rename _lat ${latCol}`,
+        `* rename _lon ${lonCol}`,
+      ].join("\n");
+    }
+
     default:
       return `* [${type}] — not yet transpiled`;
   }
@@ -309,11 +393,19 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
 
     case "LSDV": {
-      lines.push(`* Panel LSDV (numerically equivalent to within/FE)`);
+      lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
+      lines.push(`* Within (FE) — numerically equivalent to LSDV`);
       lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
       lines.push(`estimates store m_lsdv`);
-      lines.push(`* Alternatively: areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
+      lines.push(``);
+      lines.push(`* Recover alpha_i (entity fixed effects) via areg`);
+      lines.push(`areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
+      lines.push(`predict _alpha_i, dresiduals`);
+      lines.push(`label var _alpha_i "Entity fixed effect (LSDV alpha_i)"`);
+      lines.push(`* List unique entity FEs`);
+      lines.push(`bysort ${entityCol}: keep if _n == 1`);
+      lines.push(`list ${entityCol} _alpha_i, sep(0)`);
       break;
     }
 
@@ -331,6 +423,33 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`gen _run_c = ${runningVar} - ${cutoff ?? 0}`);
       lines.push(`ivregress 2sls ${yVar} _run_c (${dVar} = _Z), robust`);
       lines.push(`drop _Z _run_c`);
+      break;
+    }
+
+    case "SpatialRDD": {
+      const kernelOpt = kernel === "uniform"      ? "nw(1)"
+                      : kernel === "epanechnikov" ? "kernel(epanechnikov)"
+                      : "kernel(triangular)";
+      const distV  = distCol      ?? runningVar ?? "dist";
+      const trtV   = treatmentCol ?? treatVar   ?? "treatment";
+      const h      = bandwidth ? Number(bandwidth).toFixed(6) : null;
+      const extra  = wVars.length ? ` covs(${wVars.join(" ")})` : "";
+      lines.push(`* Spatial RD (Keele & Titiunik 2015)`);
+      lines.push(`* Build signed running variable: positive on treated side, cutoff = 0`);
+      lines.push(`gen _signed_dist = (2 * ${trtV} - 1) * abs(${distV})`);
+      lines.push(`* If rdrobust not installed: ssc install rdrobust`);
+      if (h) {
+        lines.push(`rdrobust ${yVar} _signed_dist, c(0) h(${h}) ${kernelOpt}${extra}`);
+      } else {
+        lines.push(`rdrobust ${yVar} _signed_dist, c(0) ${kernelOpt}${extra}`);
+      }
+      lines.push(`* Manual WLS approach (triangular kernel):`);
+      lines.push(`gen _above = (_signed_dist >= 0)`);
+      lines.push(`gen _above_run = _above * _signed_dist`);
+      const bwStata = h ?? "# replace with bandwidth";
+      lines.push(`gen _w = max(0, 1 - abs(_signed_dist) / ${bwStata}) if abs(_signed_dist) <= ${bwStata}`);
+      lines.push(`reg ${yVar} _above _signed_dist _above_run${wVars.length ? " " + wVars.join(" ") : ""} [aw=_w], robust`);
+      lines.push(`drop _signed_dist _above _above_run _w`);
       break;
     }
 
@@ -378,6 +497,58 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "GMM": {
+      const endog  = wVars.join(" ");
+      const exog   = xVars.join(" ");
+      const instrs = [...xVars, ...zVars].join(" ");
+      lines.push(`* Two-Step Efficient GMM`);
+      lines.push(`* Structural: ${yVar} ~ ${exog || "(no exog)"} + (${endog || "endog"}) endogenous`);
+      lines.push(`* Instruments: ${instrs || "(instruments)"}`);
+      if (wVars.length) {
+        lines.push(`ivregress gmm ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")}), wmatrix(robust)`);
+      } else {
+        lines.push(`* No endogenous variables specified — using 2SLS form`);
+        lines.push(`ivregress gmm ${yVar} ${exog}, robust`);
+      }
+      lines.push(`estat overid  /* Sargan-Hansen J-test — available after gmm */`);
+      break;
+    }
+
+    case "LIML": {
+      const endog  = wVars.join(" ");
+      const exog   = xVars.join(" ");
+      lines.push(`* Limited Information Maximum Likelihood (LIML)`);
+      if (wVars.length) {
+        lines.push(`ivregress liml ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")}), vce(robust)`);
+      } else {
+        lines.push(`* No endogenous variables specified — defaulting to OLS`);
+        lines.push(`reg ${yVar} ${exog}, robust`);
+      }
+      lines.push(`estat firststage  /* first-stage F-statistics */`);
+      break;
+    }
+
+    case "PoissonFE": {
+      const ec   = entityCol ?? "entity";
+      const cov  = xVars.join(" ");
+      lines.push(`* Poisson FE (PPML with entity fixed effects)`);
+      lines.push(`* ppmlhdfe recommended — if not installed: ssc install ppmlhdfe`);
+      lines.push(`ppmlhdfe ${yVar}${cov ? ` ${cov}` : ""}, absorb(${ec}) vce(cluster ${ec})`);
+      lines.push(`* Incidence Rate Ratios (manual — Stata PPML reports log-IRR by default):`);
+      lines.push(`* nlcom (exp(_b[${xVars[0] ?? "x"}]))`);
+      break;
+    }
+
+    case "McCrary": {
+      const rv = runningVar ?? "running";
+      const c0 = cutoff ?? 0;
+      lines.push(`* McCrary / Cattaneo-Jansson-Ma density test`);
+      lines.push(`* If rddensity not installed: ssc install rddensity`);
+      lines.push(`rddensity ${rv}, c(${c0})`);
+      lines.push(`rddensity ${rv}, c(${c0}) plot`);
+      break;
+    }
+
     default:
       lines.push(`* Model type "${type}" — add estimation command here`);
   }
@@ -385,11 +556,42 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
   return lines;
 }
 
+// ─── MULTI-MODEL HELPERS ─────────────────────��────────────────────────────────
+
+function detectMapPatternStata(configs) {
+  if (configs.length < 2) return "separate";
+  const allHaveMeta = configs.every(c => Array.isArray(c.subsetFilters));
+  if (!allHaveMeta) return "separate";
+  const first = configs[0].model;
+  const xKey  = arr => JSON.stringify([...(arr ?? [])].sort());
+  return configs.every(c =>
+    c.model.type === first.type &&
+    c.model.yVar === first.yVar &&
+    xKey(c.model.xVars) === xKey(first.xVars)
+  ) ? "map" : "separate";
+}
+
+function subsetFiltersToStata(filters) {
+  if (!filters?.length) return null;
+  return filters.map(f => {
+    const val = isNaN(Number(f.val)) ? `"${f.val}"` : f.val;
+    return `${f.col} ${f.op} ${val}`;
+  }).join(" & ");
+}
+
+// Safe Stata local name: lowercase, spaces → underscores, strip special chars
+function stataLocalName(label) {
+  return label.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^[0-9]/, "_").slice(0, 28);
+}
+
 // ─── MULTI-MODEL EXPORT ────────────────────────────────────────────────────────
-// configs: Array of { model: ModelConfig, label: string }
-export function generateMultiModelStataScript(configs = [], dataDictionary = null) {
+// configs: Array of { model: ModelConfig, label: string, subsetName?, subsetFilters? }
+export function generateMultiModelStataScript(configs = [], dataDictionary = null, opts = {}) {
   if (!configs.length) return "* No models provided.";
 
+  const filename  = opts.filename ?? "dataset.csv";
+  const pipeline  = opts.pipeline ?? [];
+  const stataFile = filename.replace(/\\/g, "/");
   const ts = new Date().toISOString().slice(0, 10);
   const lines = [];
 
@@ -405,8 +607,21 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
   lines.push("");
 
   lines.push(`* ── Load data ────────────────────────────────────────────────────────────`);
-  lines.push(`import delimited "dataset.csv", clear`);
+  const ext = filename.split(".").pop()?.toLowerCase();
+  if (ext === "dta") lines.push(`use "${stataFile}", clear`);
+  else if (["xlsx","xls"].includes(ext)) lines.push(`import excel "${stataFile}", firstrow clear`);
+  else lines.push(`import delimited "${stataFile}", clear`);
   lines.push("");
+
+  if (pipeline.length) {
+    lines.push(`* ── Data pipeline ────────────────────────────────────────────────────────`);
+    pipeline.forEach(step => {
+      const out = toStata(step, "df");
+      if (Array.isArray(out)) out.forEach(l => lines.push(l));
+      else if (out) lines.push(out);
+    });
+    lines.push("");
+  }
 
   if (dataDictionary && Object.keys(dataDictionary).length) {
     lines.push(`* ── Variable definitions ─────────────────────────────────────────────────`);
@@ -417,37 +632,78 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     lines.push("");
   }
 
-  lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  const estoreNames = [];
-  configs.forEach((c, i) => {
-    const estName = `m_${i + 1}`;
-    estoreNames.push({ name: estName, label: c.label ?? c.model?.type ?? `Model ${i+1}` });
+  const pattern = detectMapPatternStata(configs);
+
+  if (pattern === "map") {
+    // ── Same spec, different subsets → preserve/restore per subset ────────────
+    lines.push(`* ── Subset estimation (preserve/restore) ─────────────────────────────────`);
+    const estoreNames = [];
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-            treatedUnit, treatTime } = c.model ?? {};
+            treatedUnit, treatTime } = configs[0].model ?? {};
     const allX = [...xVars, ...wVars];
-    lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-    const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
-    // Override the estimates store command if present, else append one
-    let hasStore = false;
-    modelLines.forEach(l => {
-      const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
-      if (overridden !== l) hasStore = true;
-      lines.push(overridden);
-    });
-    if (!hasStore) lines.push(`estimates store ${estName}`);
-    lines.push("");
-  });
 
-  lines.push(`* ── Joint table (esttab) ─────────────────────────────────────────────────`);
-  lines.push(`* If esttab not installed: ssc install estout`);
-  const mList = estoreNames.map(e => e.name).join(" ");
-  const mlabels = estoreNames.map(e => `"${e.label}"`).join(" ");
-  lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
-  lines.push(`  mtitles(${mlabels}) ///`);
-  lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
-  lines.push(`  se r2 N replace`);
-  lines.push("");
+    configs.forEach((c) => {
+      const estName = stataLocalName(c.subsetName ?? c.label);
+      estoreNames.push({ name: estName, label: c.subsetName ?? c.label });
+      const filterExpr = subsetFiltersToStata(c.subsetFilters);
+      lines.push(`preserve`);
+      if (filterExpr) lines.push(`  keep if ${filterExpr}`);
+      else            lines.push(`  * Full sample — no filter`);
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      let hasStore = false;
+      modelLines.forEach(l => {
+        const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
+        if (ov !== l) hasStore = true;
+        lines.push(`  ${ov}`);
+      });
+      if (!hasStore) lines.push(`  estimates store ${estName}`);
+      lines.push(`restore`);
+      lines.push(``);
+    });
+
+    lines.push(`* ── Joint table (esttab) ─────────────────────────────────────────────────`);
+    lines.push(`* If esttab not installed: ssc install estout`);
+    const mList    = estoreNames.map(e => e.name).join(" ");
+    const mlabels  = estoreNames.map(e => `"${e.label}"`).join(" ");
+    lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
+    lines.push(`  mtitles(${mlabels}) ///`);
+    lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
+    lines.push(`  se r2 N replace`);
+    lines.push("");
+  } else {
+    // ── Different specs → one block per model ────────────────────────────────
+    lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
+    const estoreNames = [];
+    configs.forEach((c, i) => {
+      const estName = `m_${i + 1}`;
+      estoreNames.push({ name: estName, label: c.label ?? c.model?.type ?? `Model ${i+1}` });
+      const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
+              entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
+              treatedUnit, treatTime } = c.model ?? {};
+      const allX = [...xVars, ...wVars];
+      lines.push(`* Model ${i+1}: ${c.label ?? type}`);
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      let hasStore = false;
+      modelLines.forEach(l => {
+        const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
+        if (overridden !== l) hasStore = true;
+        lines.push(overridden);
+      });
+      if (!hasStore) lines.push(`estimates store ${estName}`);
+      lines.push("");
+    });
+
+    lines.push(`* ── Joint table (esttab) ─────────────────────────────────────────────────`);
+    lines.push(`* If esttab not installed: ssc install estout`);
+    const mList   = estoreNames.map(e => e.name).join(" ");
+    const mlabels = estoreNames.map(e => `"${e.label}"`).join(" ");
+    lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
+    lines.push(`  mtitles(${mlabels}) ///`);
+    lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
+    lines.push(`  se r2 N replace`);
+    lines.push("");
+  }
 
   return lines.join("\n");
 }
@@ -480,7 +736,7 @@ export function generateSubsetStataScript({ filename = "dataset.csv", pipeline =
   lines.push("");
 
   lines.push(`* ── Load data ────────────────────────────────────────────────────────────`);
-  lines.push(`import delimited ${JSON.stringify(filename)}, clear`);
+  lines.push(`import delimited "${filename.replace(/\\/g, "/")}", clear`);
   lines.push("");
 
   if (dataDictionary && Object.keys(dataDictionary).length) {

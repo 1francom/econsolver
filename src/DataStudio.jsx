@@ -21,6 +21,7 @@ import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
 import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
 import { deleteCacheEntry } from "./services/data/parquetCache.js";
+import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
@@ -510,12 +511,11 @@ function ssClear(pid) {
 }
 
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
-// Assign stable __ri row IDs if not already present.
-// __ri is used by the patch pipeline step for cell editing (runner.js).
-function ensureRowIds(data) {
-  if (!data?.rows?.length || data.rows[0]?.__ri !== undefined) return data;
-  return { ...data, rows: data.rows.map((r, i) => ({ __ri: i, ...r })) };
-}
+// Assigns stable row identity columns: `__ri` (sequential integer, used by
+// the in-app patch step) and `__row_id` (UUID v4, used by replication
+// scripts in R / Stata / Python to translate cell edits). See
+// services/data/rowIdentity.js for invariants.
+const ensureRowIds = ensureRowIdentity;
 
 const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplete, onOutputReady, pid, onDatasetsChange, activeDatasetId }, ref) {
   const { C } = useTheme();
@@ -531,8 +531,13 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
   const registeredIds = useRef(new Set());
 
   const [datasets, setDatasets] = useState(() => {
-    // Secondary datasets scoped to this project's pid — no cross-project leakage
-    const secondary = ssRead(primaryId);
+    // Secondary datasets scoped to this project's pid — no cross-project leakage.
+    // Retrofit row-identity columns on rehydration so projects persisted before
+    // the __row_id invariant always observe both __ri and __row_id.
+    const secondary = ssRead(primaryId).map(d => ({
+      ...d,
+      rawData: d.rawData ? ensureRowIds(d.rawData) : d.rawData,
+    }));
     return [
       { id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData) },
       ...secondary,
@@ -603,6 +608,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         rowCount: d.rawData._duckdb?.rowCount ?? d.rawData.rows?.length    ?? 0,
         colCount: d.rawData.headers?.length ?? 0,
         headers:  d.rawData.headers         ?? [],
+        crs:      d.crs ?? null,
       });
     });
   }, [datasets, dispatch]);
@@ -614,6 +620,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       filename: d.filename,
       rows:     d.rawData?.rows    ?? [],
       headers:  d.rawData?.headers ?? [],
+      crs:      d.crs ?? null,
     })));
   }, [datasets]);
 
@@ -832,6 +839,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
             onComplete={onComplete}
             onReady={r => onOutputReady?.(r, activeDs.id)}
             pid={activeDs.id}
+            projectPid={primaryId}
             allDatasets={otherDatasets}
             onSaveSubset={handleSaveSubset}
             addStepRef={wranglingAddStepRef}

@@ -1180,7 +1180,7 @@ Datasets are never stored in Supabase — they remain in the user's IndexedDB, k
 
 ---
 
-### 13.3 — Tier & Access Control — PENDING
+### 13.3 — Tier & Access Control — DONE
 
 Three tiers for the initial launch:
 
@@ -1415,7 +1415,7 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 | 10 | Probability & Simulation Analytics | DONE |
 | 11 | Spatial Analytics | IN PROGRESS — border clipping + Moran's I + Aggregate-to-Grid UI + Spatial RD shortcut remaining (Geocoding DONE) |
 | 12 | Excel-style Cell Editing | DEFERRED |
-| 13 | Project Isolation & User Auth | DONE |
+| 13 | Project Isolation & User Auth | DONE (incl. 13.3 tier & access control) |
 | 14 | Web Launch v0.1 Beta | DONE — Vercel deployed, API key settings, landing page, feedback modal all live |
 | 15 | Local Installable Version (Tauri) | PENDING — blocked on 14 validation |
 
@@ -1560,7 +1560,7 @@ Ongoing improvements to PlotBuilder.jsx, ModelPlots.jsx, and SpatialTab.jsx to m
    - ~~`[2026-05-08] Data` — Big datasets crashes (>900k rows) → DuckDB model-frame builder~~ ✓ DONE
    - `[2026-05-10] Data` — CSV parse error line 1583 (DuckDB CSV reader edge case)
    - ~~`[2026-05-11] Data` — Edit cells button does not work~~ ✓ DONE (minor bugs remain)
-   - `[2026-05-11] Explore` — Graph does not fit screen
+   - ~~`[2026-05-11] Explore` — Graph does not fit screen~~ ✓ DONE
    - `[2026-05-13] Data` — .dta files wrongly loaded/read — **PENDING**
    - ~~`[2026-05-13] Spatial` — Multipolygon geometry does not work~~ ✓ DONE
    - `[2026-05-13] Spatial` — Grids: clip border cells (Sutherland-Hodgman)

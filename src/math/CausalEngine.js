@@ -188,7 +188,9 @@ export function run2SLS(rows, yCol, endog, exog, instr, seOpts = {}) {
 
   const Ym  = Y.reduce((a, b) => a + b, 0) / n;
   const SST = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
-  const R2    = SST > 0 ? 1 - trueSSR / SST : NaN;
+  // R² uses projected (second-stage) residuals — matches fixest::feols / AER::ivreg
+  const projSSR = secondRes.SSR;
+  const R2    = SST > 0 ? 1 - projSSR / SST : NaN;
   const adjR2 = isFinite(R2) ? 1 - (1 - R2) * (n - 1) / df : NaN;
 
   // varNames aligned with X2 column order (intercept first)
@@ -507,7 +509,8 @@ export function runMcCrary(rows, runCol, cutoff, h = null, bins = null) {
     n,
   };
 }
-export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangular", controls = [], seOpts = {}) {
+export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangular", controls = [], seOpts = {}, polyOrder = 1) {
+  const p = Math.max(1, Math.round(polyOrder));   // clamp to integer ≥ 1
   const valid = rows.filter(r =>
     typeof r[yCol]   === "number" && typeof r[runCol] === "number" &&
     isFinite(r[yCol]) && isFinite(r[runCol]) &&
@@ -525,24 +528,47 @@ export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangu
   // Leaving them in causes exact multicollinearity and produces all-NaN results.
   const safeControls = controls.filter(c => {
     if (c === runCol || c === yCol) return false;
-    // If the control is binary and perfectly correlated with D, drop it.
     const vals = valid.map(r => r[c]);
     const isBinaryLikeD = vals.every((v, i) => v === D[i] || v === 1 - D[i]);
     if (isBinaryLikeD) return false;
     return true;
   });
 
-  const X  = valid.map((r, i) => [1, D[i], xc[i], D[i] * xc[i], ...safeControls.map(c => r[c])]);
+  // Local polynomial design: [1, D, xc^1, ..., xc^p, D·xc^1, ..., D·xc^p, ...controls]
+  // LATE = β[1] (coefficient on D) — the jump at xc=0 for any polynomial order.
+  const X = valid.map((r, i) => {
+    const row = [1, D[i]];
+    for (let k = 1; k <= p; k++) row.push(xc[i] ** k);          // xc^1..xc^p
+    for (let k = 1; k <= p; k++) row.push(D[i] * (xc[i] ** k)); // D·xc^1..D·xc^p
+    safeControls.forEach(c => row.push(r[c]));
+    return row;
+  });
 
   const res = runWLS(X, Y, W, seOpts);
   if (!res) return null;
 
-  const varNames  = ["(Intercept)", "D (treatment)", "running − c", "D × (running − c)", ...safeControls];
-  const leftFit   = valid
-    .map((r, i) => ({ x: r[runCol], yhat: res.beta[0] + res.beta[2] * xc[i] }))
+  // Variable names matching column order above
+  const polyNames  = Array.from({ length: p }, (_, k) => k === 0 ? "running − c" : `(running − c)^${k + 1}`);
+  const interNames = Array.from({ length: p }, (_, k) => k === 0 ? "D × (running − c)" : `D × (running − c)^${k + 1}`);
+  const varNames   = ["(Intercept)", "D (treatment)", ...polyNames, ...interNames, ...safeControls];
+
+  // Fitted values per side using polynomial terms:
+  // Left  (D=0): Ŷ = β[0] + Σ_{k=1}^{p} β[1+k] · xc^k
+  // Right (D=1): Ŷ = β[0] + β[1] + Σ_{k=1}^{p} (β[1+k] + β[1+p+k]) · xc^k
+  const leftFit = valid
+    .map((r, i) => {
+      let yhat = res.beta[0];
+      for (let k = 1; k <= p; k++) yhat += res.beta[1 + k] * (xc[i] ** k);
+      return { x: r[runCol], yhat };
+    })
     .filter((_, i) => D[i] === 0);
-  const rightFit  = valid
-    .map((r, i) => ({ x: r[runCol], yhat: res.beta[0] + res.beta[1] + (res.beta[2] + res.beta[3]) * xc[i] }))
+
+  const rightFit = valid
+    .map((r, i) => {
+      let yhat = res.beta[0] + res.beta[1];
+      for (let k = 1; k <= p; k++) yhat += (res.beta[1 + k] + res.beta[1 + p + k]) * (xc[i] ** k);
+      return { x: r[runCol], yhat };
+    })
     .filter((_, i) => D[i] === 1);
 
   return {
@@ -551,9 +577,10 @@ export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangu
     cutoff, h, kernelType,
     valid, xc, D, Y, W,
     leftFit, rightFit,
-    late:   res.beta[1],
-    lateSE: res.se[1],
-    lateP:  res.pVals[1],
+    late:     res.beta[1],
+    lateSE:   res.se[1],
+    lateP:    res.pVals[1],
+    polyOrder: p,
   };
 }
 
@@ -579,7 +606,8 @@ export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangu
 //             bandwidth = null → IK bandwidth selector
 //             kernel    = "triangular" (default)
 export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
-  const { bandwidth = null, kernel = "triangular", seOpts = {} } = opts;
+  const { bandwidth = null, kernel = "triangular", seOpts = {}, polyOrder = 1 } = opts;
+  const p = Math.max(1, Math.round(polyOrder));
 
   // ── 1. Filter valid rows ────────────────────────────────────────────────────
   const valid = rows.filter(r =>
@@ -618,24 +646,32 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
 
   const n = inWindow.length;
 
-  // ── First stage design matrix: [1, Z, (x-c), Z·(x-c)] ─────────────────────
-  // Column order: intercept=0, above(Z)=1, xc=2, Z·xc=3
-  // Z = above is the excluded instrument; all four columns appear in the first stage.
-  const Xfs = inWindow.map((_, i) => [1, above[i], xc[i], above[i] * xc[i]]);
+  // ── First stage design matrix: [1, Z, xc^1..xc^p, Z·xc^1..Z·xc^p] ─────────
+  // Z = above is the excluded instrument.
+  const buildFuzzyRow = (z_i, xci) => {
+    const row = [1, z_i];
+    for (let k = 1; k <= p; k++) row.push(xci ** k);           // xc^1..xc^p
+    for (let k = 1; k <= p; k++) row.push(z_i * (xci ** k));   // Z·xc^1..Z·xc^p
+    return row;
+  };
+  const Xfs = inWindow.map((_, i) => buildFuzzyRow(above[i], xc[i]));
 
   // ── 4. First stage: D ~ Xfs with kernel weights ─────────────────────────────
   // β̂_fs = (X_fs' W X_fs)⁻¹ X_fs' W D
-  const firstStage = runWLS(Xfs, D, W);
+  const firstStage = runWLS(Xfs, D, W, seOpts);
   if (!firstStage)
     return { error: "First-stage WLS failed — singular matrix. Check for perfect collinearity." };
 
   const Dhat = firstStage.yhat; // D̂_i = fitted values of treatment from first stage
 
   // ── 5. First-stage diagnostics ───────────────────────────────────────────────
-  // F-stat: tests H₀: α₁ = 0 (instrument Z has no effect on D).
-  // Restricted model drops the 'above' (Z) indicator: D ~ [1, xc, Z·xc]
-  // This is the key weak-instrument check (Stock-Yogo threshold: F < 10 → weak).
-  const XfsRestricted = inWindow.map((_, i) => [1, xc[i], above[i] * xc[i]]);
+  // Restricted model drops Z (col index 1): D ~ [1, xc^1..xc^p, Z·xc^1..Z·xc^p]
+  const XfsRestricted = inWindow.map((_, i) => {
+    const row = [1];
+    for (let k = 1; k <= p; k++) row.push(xc[i] ** k);
+    for (let k = 1; k <= p; k++) row.push(above[i] * (xc[i] ** k));
+    return row;
+  });
   const firstRestricted = runWLS(XfsRestricted, D, W);
   const qFS  = 1; // one exclusion restriction (Z = above indicator)
   const dfFS = firstStage.df;
@@ -648,12 +684,11 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
   // This is α̂₁ = E[D | x≥c] − E[D | x<c] at the cutoff (first-stage discontinuity)
   const firstStageJumpD = firstStage.beta[1];
 
-  // ── 6. Second stage: Y ~ [1, D̂, (x-c), Z·(x-c)] with kernel weights ────────
-  // Structural equation: Y = β₀ + β₁·D + β₂·(x-c) + β₃·Z·(x-c) + u
-  // Z is the EXCLUDED instrument — it does NOT appear directly in the structural
-  // equation. The intercept shift across the cutoff is absorbed by β₁ (the LATE).
-  // X̂ = [1, D̂, (x-c), Z·(x-c)]  — instrumented design matrix for 2SLS
-  const Xss = inWindow.map((_, i) => [1, Dhat[i], xc[i], above[i] * xc[i]]);
+  // ── 6. Second stage: Y ~ [1, D̂, xc^1..xc^p, Z·xc^1..Z·xc^p] ───────────────
+  // Z is the EXCLUDED instrument. LATE = β₁ (coefficient on D̂) for any p.
+  const Xss = inWindow.map((_, i) => buildFuzzyRow(above[i], xc[i]).map((v, j) =>
+    j === 1 ? Dhat[i] : v   // replace Z with D̂ at index 1
+  ));
 
   const secondStage = runWLS(Xss, Y, W);
   if (!secondStage)
@@ -676,13 +711,15 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
   //
   // Using weighted SSR would deflate σ̂² by mean(W) ≈ 0.5 for triangular kernel,
   // causing ~√2 underestimation of SE (same issue as Sharp RDD).
-  const k    = 4;   // [intercept, D, xc, Z·xc]
+  const k    = 2 * (p + 1);   // [intercept, D/Z, xc^1..xc^p, (D/Z)·xc^1..(D/Z)·xc^p]
   const dfIV = n - k;
   if (dfIV <= 0)
     return { error: "Degrees of freedom ≤ 0 in second stage." };
 
-  // Structural design matrix: X_orig = [1, D, (x-c), Z·(x-c)]  (original D, not D̂)
-  const XorigSS = inWindow.map((_, i) => [1, D[i], xc[i], above[i] * xc[i]]);
+  // Structural design matrix: X_orig uses actual D (not D̂) at index 1
+  const XorigSS = inWindow.map((_, i) => buildFuzzyRow(above[i], xc[i]).map((v, j) =>
+    j === 1 ? D[i] : v
+  ));
   const residIV = Y.map((y, i) =>
     y - XorigSS[i].reduce((s, v, j) => s + v * secondStage.beta[j], 0)
   );
@@ -710,19 +747,29 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
   const robustSE  = computeRobustSE(seOpts, XtXinvIV, wXss, wResidIV, n, k, null);
   const corrSE    = robustSE ?? classicalSE;
 
-  const lateSE    = corrSE[1]; // index 1 = β̂₁ (LATE), after intercept
-  const lateTCorr = isFinite(lateSE) && lateSE > 0 ? late / lateSE : lateT;
-  const latePCorr = isFinite(lateTCorr) ? pValue(lateTCorr, dfIV) : lateP;
-
-  // ── 8. Local Wald ratio for reference ────────────────────────────────────────
-  // Also compute reduced-form Sharp RDD (jump in Y at cutoff ignoring D),
-  // and report the Wald ratio: τ_fuzzy = jump_Y / jump_D
-  const reducedForm = runSharpRDD(valid, yCol, runCol, cutoff, h, kernel);
+  // ── 8. Local Wald ratio + delta-method SE ────────────────────────────────────
+  // Reduced-form Sharp RDD: jump in Y at cutoff (ignoring D).
+  // SE uses the same seOpts so delta-method propagation matches R's fuzzy_wald.
+  const reducedForm = runSharpRDD(valid, yCol, runCol, cutoff, h, kernel, [], seOpts, p);
 
   const jumpY = reducedForm ? reducedForm.late : NaN;
   const waldRatio = isFinite(firstStageJumpD) && Math.abs(firstStageJumpD) > 1e-10
     ? jumpY / firstStageJumpD
     : NaN;
+
+  // Delta-method SE for LATE — matches R's fuzzy_wald reference.
+  // Var(LATE) ≈ Var(γ̂) / α̂² + γ̂² · Var(α̂) / α̂⁴
+  // where γ̂ = jump in Y (reduced form), α̂ = jump in D (first stage).
+  // firstStage.se[1] already uses seOpts (HC1 or classical from the WLS call above).
+  const se_rf = reducedForm ? reducedForm.lateSE : NaN;
+  const se_fs = firstStage.se[1];
+  const varDelta = (se_rf ** 2) / (firstStageJumpD ** 2)
+    + (jumpY ** 2) * (se_fs ** 2) / (firstStageJumpD ** 4);
+  const deltaLateSE = Math.sqrt(Math.max(0, varDelta));
+
+  const lateSE    = Number.isFinite(deltaLateSE) ? deltaLateSE : corrSE[1];
+  const lateTCorr = isFinite(lateSE) && lateSE > 0 ? late / lateSE : lateT;
+  const latePCorr = isFinite(lateTCorr) ? pValue(lateTCorr, dfIV) : lateP;
 
   // ── 9. Plot data: smooth fit lines using first-stage + second-stage coefficients
   // Using D̂ from first stage at each grid point gives a clean regression curve,
@@ -733,31 +780,47 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
     row.reduce((s, v, j) => s + v * secondStage.beta[j], 0)
   );
 
+  // ── 9. Plot lines: evaluate polynomial fit at a grid of xc values ────────────
+  // Column layout: [intercept, Z/D̂, xc^1..xc^p, (Z/D̂)·xc^1..(Z/D̂)·xc^p]
+  // helper: sum polynomial terms for a row at given xc, starting from col index 2
+  const polySum = (betas, xcv) => {
+    let s = 0;
+    for (let k = 1; k <= p; k++) s += betas[1 + k] * (xcv ** k);
+    return s;
+  };
+  const interSum = (betas, xcv) => {
+    let s = 0;
+    for (let k = 1; k <= p; k++) s += betas[1 + p + k] * (xcv ** k);
+    return s;
+  };
+
   const nGrid = 60;
-  const fsB = firstStage.beta;   // [α₀, α₁(Z), α₂(xc), α₃(Z·xc)]
-  const ssB = secondStage.beta;  // [β₀, β₁(D), β₂(xc), β₃(Z·xc)]
+  const fsB = firstStage.beta;
+  const ssB = secondStage.beta;
 
   const leftFit = Array.from({ length: nGrid + 1 }, (_, i) => {
-    const x    = cutoff - h + i * (h / nGrid);
-    const xcv  = x - cutoff;
-    const dhat = fsB[0] + fsB[2] * xcv;                              // above=0
-    const yhat = ssB[0] + ssB[1] * dhat + ssB[2] * xcv;             // above=0
+    const x   = cutoff - h + i * (h / nGrid);
+    const xcv = x - cutoff;
+    const dhat = fsB[0] + polySum(fsB, xcv);                         // Z=0
+    const yhat = ssB[0] + ssB[1] * dhat + polySum(ssB, xcv);        // Z=0
     return { x, yhat };
   });
 
   const rightFit = Array.from({ length: nGrid + 1 }, (_, i) => {
-    const x    = cutoff + i * (h / nGrid);
-    const xcv  = x - cutoff;
-    const dhat = fsB[0] + fsB[1] + (fsB[2] + fsB[3]) * xcv;         // above=1
-    const yhat = ssB[0] + ssB[1] * dhat + (ssB[2] + ssB[3]) * xcv;  // above=1
+    const x   = cutoff + i * (h / nGrid);
+    const xcv = x - cutoff;
+    const dhat = fsB[0] + fsB[1] + polySum(fsB, xcv) + interSum(fsB, xcv);  // Z=1
+    const yhat = ssB[0] + ssB[1] * dhat + polySum(ssB, xcv) + interSum(ssB, xcv); // Z=1
     return { x, yhat };
   });
 
   // ── 10. Return result ────────────────────────────────────────────────────────
-  // varNames match X̂ column order: [intercept, D̂, (x-c), Z·(x-c)]
-  const varNames = ["(Intercept)", "D (LATE)", "running − c", "Z × (running − c)"];
-  // First-stage column order: [intercept, Z, (x-c), Z·(x-c)]
-  const firstStageVarNames = ["(Intercept)", "Z (instrument)", "running − c", "Z × (running − c)"];
+  const polyLbls = Array.from({ length: p }, (_, k) => k === 0 ? "running − c" : `(running − c)^${k + 1}`);
+  const interLbls = Array.from({ length: p }, (_, k) => k === 0 ? "Z × (running − c)" : `Z × (running − c)^${k + 1}`);
+  const varNames = ["(Intercept)", "D (LATE)", ...polyLbls, ...interLbls];
+  const fsPolyLbls  = Array.from({ length: p }, (_, k) => k === 0 ? "running − c" : `(running − c)^${k + 1}`);
+  const fsInterLbls = Array.from({ length: p }, (_, k) => k === 0 ? "Z × (running − c)" : `Z × (running − c)^${k + 1}`);
+  const firstStageVarNames = ["(Intercept)", "Z (instrument)", ...fsPolyLbls, ...fsInterLbls];
 
   return {
     // Core LATE
@@ -776,11 +839,12 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
     waldRatio,
     reducedForm,   // runSharpRDD result (jump in Y at cutoff)
 
-    // Second-stage detail (corrected SE replaces WLS SE from second stage)
+    // Second-stage detail (corrected SE replaces WLS SE from second stage).
+    // Splice lateSE/T/P into index 1; keep corrSE for all other positions.
     beta:    secondStage.beta,
-    se:      [corrSE[0], lateSE, corrSE[2], corrSE[3]],
-    tStats:  [secondStage.tStats[0], lateTCorr, secondStage.tStats[2], secondStage.tStats[3]],
-    pVals:   [secondStage.pVals[0],  latePCorr, secondStage.pVals[2],  secondStage.pVals[3]],
+    se:      corrSE.map((s, j) => j === 1 ? lateSE  : s),
+    tStats:  secondStage.tStats.map((t, j) => j === 1 ? lateTCorr : t),
+    pVals:   secondStage.pVals.map((pv, j)  => j === 1 ? latePCorr : pv),
     R2:      secondStage.R2,
     varNames,
 
@@ -792,6 +856,7 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
     kernel,
     kernelType: kernel,  // alias for RDDPlot
     cutoff,
+    polyOrder: p,
 
     // Plot data
     leftFit,

@@ -96,6 +96,7 @@ const ESTIMATOR_META = {
   GMM:    { label: "Two-Step GMM",     color: "#c8a96e" },
   LIML:   { label: "LIML",            color: "#c8a96e" },
   FuzzyRDD:        { label: "Fuzzy RDD",          color: "#c88e6e" },
+  SpatialRDD:      { label: "Spatial RD",         color: "#c88e6e" },
   EventStudy:      { label: "Event Study",         color: "#6ec8b4" },
   LSDV:            { label: "Panel LSDV",          color: "#6e9ec8" },
   Poisson:         { label: "Poisson GLM",          color: "#9e7ec8" },
@@ -112,6 +113,7 @@ const FAMILY_MAP = {
   Logit: "binary", Probit: "binary",
   GMM: "iv",    LIML: "iv",
   FuzzyRDD: "rdd",
+  SpatialRDD: "rdd",
   EventStudy: "panel",
   LSDV: "panel",
   Poisson: "count",
@@ -181,6 +183,7 @@ function buildFormula(type, spec) {
     case "TWFE":  return `${yVar} ~ ${treatVar ?? "treat"} × ${postVar ?? "post"} | ${entityCol ?? "?"} + ${timeCol ?? "?"}`;
     case "RDD":       return `${yVar} ~ rdd(${runningVar ?? "?"}, c=${cutoff ?? "?"})`;
     case "FuzzyRDD":  return `${yVar} ~ fuzzy_rdd(${runningVar ?? "?"}, Z, c=${cutoff ?? "?"})`;
+    case "SpatialRDD": return `${yVar} ~ spatial_rdd(dist=${spec.distCol ?? runningVar ?? "?"}, treat=${spec.treatmentCol ?? treatVar ?? "?"})`;
     case "Logit":     return `Logit(${yVar}) ~ ${x}`;
     case "Probit":    return `Probit(${yVar}) ~ ${x}`;
     case "Poisson":   return `Poisson(${yVar}) ~ ${x}`;
@@ -703,6 +706,26 @@ export function wrapResult(type, engineOutput, spec, extras = {}) {
     case "DiD":    r = wrapDiD(engineOutput, spec); break;
     case "TWFE":   r = wrapTWFE(engineOutput, spec); break;
     case "RDD":    r = wrapRDD(engineOutput, spec, extras.h); break;
+    case "SpatialRDD": {
+      // Spatial RDD returns the Sharp-RDD shape plus { isSpatialRDD, nTreated,
+      // nControl, distCol, treatmentCol, mcCrary }. Re-use wrapRDD then overlay
+      // the metadata so the result still satisfies the RDD contract.
+      const wrapped = wrapRDD(engineOutput, spec, extras.h ?? engineOutput.h);
+      r = {
+        ...wrapped,
+        type:         "SpatialRDD",
+        family:       FAMILY_MAP.SpatialRDD,
+        label:        ESTIMATOR_META.SpatialRDD.label,
+        color:        ESTIMATOR_META.SpatialRDD.color,
+        isSpatialRDD: true,
+        nTreated:     engineOutput.nTreated ?? null,
+        nControl:     engineOutput.nControl ?? null,
+        distCol:      engineOutput.distCol ?? null,
+        treatmentCol: engineOutput.treatmentCol ?? null,
+        mcCrary:      engineOutput.mcCrary ?? null,
+      };
+      break;
+    }
     case "Logit":  r = wrapBinary("Logit",  engineOutput, spec); break;
     case "Probit": r = wrapBinary("Probit", engineOutput, spec); break;
     case "GMM":    r = wrapGMM(engineOutput, spec); break;

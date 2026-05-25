@@ -117,6 +117,26 @@ function TWFEConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, wVars, 
   );
 }
 
+// ─── Shared polynomial order selector ────────────────────────────────────────
+function PolyOrderSection({ polyOrder, setPolyOrder }) {
+  const { C } = useTheme();
+  return (
+    <Section title="Polynomial Order" color={C.orange}>
+      <div style={{ display: "flex", gap: 4 }}>
+        {[1, 2, 3].map(p => (
+          <Chip
+            key={p}
+            label={p === 1 ? "p=1 (linear)" : p === 2 ? "p=2 (quadratic)" : "p=3 (cubic)"}
+            selected={polyOrder === p}
+            color={C.orange}
+            onClick={() => setPolyOrder(p)}
+          />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 // ─── RDD: Running Variable + Cutoff + Bandwidth + Kernel ─────────────────────
 function RDDConfig({
   numericCols, yVar,
@@ -125,6 +145,7 @@ function RDDConfig({
   bwMode, setBwMode,
   bwManual, setBwManual,
   kernel, setKernel,
+  polyOrder, setPolyOrder,
 }) {
   const { C } = useTheme();
   return (
@@ -191,6 +212,9 @@ function RDDConfig({
           ))}
         </div>
       </Section>
+
+      {/* Polynomial order */}
+      <PolyOrderSection polyOrder={polyOrder} setPolyOrder={setPolyOrder} />
     </>
   );
 }
@@ -293,8 +317,78 @@ function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit
   );
 }
 
+// ─── SpatialRDD: distance-to-boundary + treated-side indicator + bw + kernel ─
+// Keele & Titiunik 2015 geographic RD. The engine builds the signed running
+// variable internally from |dist| and the side indicator (no user-facing cutoff).
+function SpatialRDDConfig({
+  numericCols, yVar,
+  runningVar, setRunningVar,   // → distance-to-boundary column (unsigned ok)
+  treatVar,   setTreatVar,     // → 0/1 indicator for the treated side
+  bwMode,     setBwMode,
+  bwManual,   setBwManual,
+  kernel,     setKernel,
+  polyOrder,  setPolyOrder,
+}) {
+  const { C } = useTheme();
+  return (
+    <>
+      <VarPanel
+        title="Distance-to-Boundary Column"
+        color={C.orange}
+        vars={numericCols.filter(h => !yVar.includes(h) && !treatVar.includes(h))}
+        selected={runningVar}
+        onToggle={setRunningVar}
+        multi={false}
+        info="Distance from each observation to the treatment boundary (km, m, or projected units). Unsigned or signed — sign is recovered from the treated-side indicator."
+      />
+      <VarPanel
+        title="Treated Side Indicator (0/1)"
+        color={C.teal}
+        vars={numericCols.filter(h => !yVar.includes(h) && !runningVar.includes(h))}
+        selected={treatVar}
+        onToggle={setTreatVar}
+        multi={false}
+        info="1 if the observation is on the treated side of the boundary, 0 otherwise. Combined with distance to build the signed running variable, with cutoff = 0 by construction."
+      />
+
+      {/* Bandwidth */}
+      <Section title="Bandwidth" color={C.orange}>
+        <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+          {[
+            { id: "ik",     label: "IK (auto)" },
+            { id: "manual", label: "Manual" },
+          ].map(({ id, label }) => (
+            <Chip key={id} label={label} selected={bwMode === id} color={C.orange} onClick={() => setBwMode(id)} />
+          ))}
+        </div>
+        {bwMode === "manual" && (
+          <input
+            type="number"
+            value={bwManual}
+            onChange={e => setBwManual(e.target.value)}
+            placeholder="bandwidth h (distance units)"
+            style={inputStyle(C)}
+          />
+        )}
+      </Section>
+
+      {/* Kernel */}
+      <Section title="Kernel" color={C.orange}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {["triangular", "epanechnikov", "uniform"].map(k => (
+            <Chip key={k} label={k} selected={kernel === k} color={C.orange} onClick={() => setKernel(k)} />
+          ))}
+        </div>
+      </Section>
+
+      {/* Polynomial order */}
+      <PolyOrderSection polyOrder={polyOrder} setPolyOrder={setPolyOrder} />
+    </>
+  );
+}
+
 // ─── FuzzyRDD: uses RDDConfig + treatVar for D column ────────────────────────
-function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, setRunningVar, cutoff, setCutoff, bwMode, setBwMode, bwManual, setBwManual, kernel, setKernel }) {
+function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, setRunningVar, cutoff, setCutoff, bwMode, setBwMode, bwManual, setBwManual, kernel, setKernel, polyOrder, setPolyOrder }) {
   const { C } = useTheme();
   return (
     <>
@@ -315,6 +409,7 @@ function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, 
         bwMode={bwMode}         setBwMode={setBwMode}
         bwManual={bwManual}     setBwManual={setBwManual}
         kernel={kernel}         setKernel={setKernel}
+        polyOrder={polyOrder}   setPolyOrder={setPolyOrder}
       />
     </>
   );
@@ -335,6 +430,7 @@ export default function ModelConfiguration({
   bwMode,     setBwMode,
   bwManual,   setBwManual,
   kernel,     setKernel,
+  polyOrder,  setPolyOrder,
   weightVar,  setWeightVar,
   // New estimator props
   treatTimeCol,   setTreatTimeCol,
@@ -407,12 +503,18 @@ export default function ModelConfiguration({
         setBwManual={setBwManual}
         kernel={kernel}
         setKernel={setKernel}
+        polyOrder={polyOrder}
+        setPolyOrder={setPolyOrder}
       />
     );
   }
 
   if (model === "FuzzyRDD") {
-    return <FuzzyRDDConfig numericCols={numericCols} yVar={yVar} treatVar={treatVar} setTreatVar={setTreatVar} runningVar={runningVar} setRunningVar={setRunningVar} cutoff={cutoff} setCutoff={setCutoff} bwMode={bwMode} setBwMode={setBwMode} bwManual={bwManual} setBwManual={setBwManual} kernel={kernel} setKernel={setKernel} />;
+    return <FuzzyRDDConfig numericCols={numericCols} yVar={yVar} treatVar={treatVar} setTreatVar={setTreatVar} runningVar={runningVar} setRunningVar={setRunningVar} cutoff={cutoff} setCutoff={setCutoff} bwMode={bwMode} setBwMode={setBwMode} bwManual={bwManual} setBwManual={setBwManual} kernel={kernel} setKernel={setKernel} polyOrder={polyOrder} setPolyOrder={setPolyOrder} />;
+  }
+
+  if (model === "SpatialRDD") {
+    return <SpatialRDDConfig numericCols={numericCols} yVar={yVar} runningVar={runningVar} setRunningVar={setRunningVar} treatVar={treatVar} setTreatVar={setTreatVar} bwMode={bwMode} setBwMode={setBwMode} bwManual={bwManual} setBwManual={setBwManual} kernel={kernel} setKernel={setKernel} polyOrder={polyOrder} setPolyOrder={setPolyOrder} />;
   }
 
   if (model === "EventStudy") {

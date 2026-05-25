@@ -16,9 +16,21 @@
 //               runner.js ignores it — behavior is unchanged.
 
 import { geocodeRowsFromCache } from "../services/data/geocoding.js";
+import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+
+// Row-identity columns (__row_id, __ri) are invariant — pipeline steps
+// must not drop, rename, or overwrite them. See services/data/rowIdentity.js.
+function assertNotProtected(col, stepType) {
+  if (PROTECTED_ROW_ID_COLS.includes(col)) {
+    throw new Error(
+      `Pipeline step "${stepType}" is not allowed to touch protected row-identity column "${col}". ` +
+      `__row_id and __ri must persist unchanged across all steps so cell-edit translations to R / Stata / Python remain valid.`
+    );
+  }
+}
 
 // ─── SMART NUMBER HELPERS ─────────────────────────────────────────────────────
 // Column-level locale detection. Votes over all values to decide whether
@@ -102,11 +114,14 @@ export function applyStep(rows, headers, s, context = {}) {
   let R = rows, H = [...headers];
   switch (s.type) {
     case "rename":
+      assertNotProtected(s.col,     "rename");
+      assertNotProtected(s.newName, "rename");
       R = rows.map(r => { const c = {...r}; c[s.newName] = c[s.col]; delete c[s.col]; return c; });
       H = headers.map(h => h === s.col ? s.newName : h);
       break;
 
     case "drop":
+      assertNotProtected(s.col, "drop");
       R = rows.map(r => { const c = {...r}; delete c[s.col]; return c; });
       H = headers.filter(h => h !== s.col);
       break;

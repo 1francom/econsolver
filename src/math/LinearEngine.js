@@ -280,7 +280,7 @@ export function runWLS(rows, yCol, xCols, weights, seOpts = {}) {
   const wX     = X.map((row, i) => row.map(v => v * sqW[i]));
   const wResid = resid.map((e, i) => e * sqW[i]);
   let se       = XtWXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
-  const robustSe = computeRobustSE(seOpts, XtWXinv, wX, wResid, n, k, valid);
+  const robustSe = computeRobustSE(seOpts, XtWXinv, wX, wResid, n, k, valid.map(v => v.r));
   if (robustSe) se = robustSe;
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals  = tStats.map(t => pValue(t, df));

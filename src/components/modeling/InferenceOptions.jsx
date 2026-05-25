@@ -33,7 +33,7 @@ const SE_TYPES = [
 ];
 
 // Models where HAC makes sense (time series / panel)
-const HAC_COMPATIBLE = new Set(["FE", "FD", "TWFE", "DiD", "OLS"]);
+const HAC_COMPATIBLE = new Set(["FE", "FD", "TWFE", "DiD", "TWFEDiD", "EventStudy", "OLS", "WLS", "2SLS", "GMM", "LIML"]);
 
 // ─── Small styled select ──────────────────────────────────────────────────────
 function ColSelect({ value, onChange, options, placeholder }) {

@@ -55,8 +55,8 @@ export function run2SLSFromSuffStats({
   if (!Ainv) return null;
   const beta = vmul(Ainv, XtPzY);
 
-  // Σêᵢ² in closed form on suff-stats
-  // êᵢ = yᵢ − xᵢ'β  ⇒  Σê² = Y'Y − 2β'X'Y + β'X'Xβ
+  // Structural Σêᵢ² in closed form: êᵢ = yᵢ − xᵢ'β  ⇒  Σê² = Y'Y − 2β'X'Y + β'X'Xβ
+  // Used for σ̂² (degrees-of-freedom correction uses structural residuals per iv_robust spec).
   const SSR = YtY
     - 2 * beta.reduce((s, b, i) => s + b * XtY[i], 0)
     + quadForm(beta, XtX);
@@ -65,7 +65,13 @@ export function run2SLSFromSuffStats({
   const s2 = SSR / Math.max(1, df);
   const Ym = sumY / n;
   const SST = YtY - n * Ym * Ym;
-  const R2  = SST > 0 ? 1 - SSR / SST : NaN;
+
+  // R² uses projected (second-stage) residuals — matches fixest::feols / AER::ivreg.
+  // SSR_proj = Y'Y − 2β'(X'PzY) + β'(X'PzX)β  where X̂ = Pz X
+  const SSR_proj = YtY
+    - 2 * beta.reduce((s, b, i) => s + b * XtPzY[i], 0)
+    + quadForm(beta, XtPzX);
+  const R2  = SST > 0 ? 1 - SSR_proj / SST : NaN;
   const adjR2 = isFinite(R2) ? 1 - (1 - R2) * (n - 1) / df : NaN;
 
   // Classical SE: √(σ̂² · diag(Ainv))

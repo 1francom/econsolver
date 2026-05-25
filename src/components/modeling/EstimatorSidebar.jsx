@@ -30,6 +30,7 @@ export const MODELS = [
   { id: "2SLS",            label: "2SLS / IV",          group: "Causal",            desc: "Two-Stage Least Squares",                       color: "#c8a96e" },
   { id: "RDD",             label: "Sharp RDD",          group: "Causal",            desc: "Regression Discontinuity Design",               color: "#c88e6e" },
   { id: "FuzzyRDD",        label: "Fuzzy RDD",          group: "Causal",            desc: "Fuzzy Regression Discontinuity (planned)",      color: "#c88e6e" },
+  { id: "SpatialRDD",      label: "Spatial RD",         group: "Causal",            desc: "Geographic RD at a boundary (Keele & Titiunik 2015)", color: "#c88e6e" },
   { id: "DiD",             label: "DiD 2×2",            group: "Causal",            desc: "Classic Difference-in-Differences",             color: "#6ec8b4" },
   // Limited Dependent
   { id: "Logit",           label: "Logit",              group: "Limited Dependent", desc: "Binary Logistic Regression (MLE)",              color: "#9e7ec8" },
