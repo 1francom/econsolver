@@ -405,6 +405,13 @@ export async function clearAllProjects() {
   await tx(STORE_PROJ, db, "readwrite", s => s.clear());
 }
 
+export async function clearAllLocalData() {
+  await clearAllPipelines(); // clears STORE_PIPE + STORE_RAW
+  await clearAllProjects();  // clears STORE_PROJ
+  try { localStorage.clear(); } catch (_) {}
+  try { sessionStorage.clear(); } catch (_) {}
+}
+
 // ─── MIGRATION HELPER ─────────────────────────────────────────────────────────
 const MIGRATED_FLAG = "econ_idb_migrated_v1";
 

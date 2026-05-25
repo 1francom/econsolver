@@ -231,7 +231,7 @@ function transpileStep(step) {
         `  rename ${rk} ${lk}  /* align key names */`,
         `  save "__right_tmp.dta", replace`,
         `restore`,
-        `merge ${how} ${lk} using "__right_tmp.dta", keep(master match) nogen suffixes("" "${sfx}")`,${keepInner}
+        `merge ${how} ${lk} using "__right_tmp.dta", keep(master match) nogen suffixes("" "${sfx}")${keepInner}`,
         `erase "__right_tmp.dta"`,
       ].join("\n");
     }

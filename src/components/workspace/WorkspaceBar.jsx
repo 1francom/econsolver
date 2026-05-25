@@ -6,6 +6,7 @@
 import DatasetManager from "./DatasetManager.jsx";
 import { useTheme } from "../../ThemeContext.jsx";
 import { signOut } from "../../services/auth/authService.js";
+import { clearAllLocalData } from "../../services/Persistence/indexedDB.js";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
@@ -161,6 +162,35 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
         onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
       >
         {theme === "dark" ? "☀" : "☾"}
+      </button>
+
+      {/* ── Clear all local data ── */}
+      <button
+        onClick={async () => {
+          if (!window.confirm("Clear ALL local data?\n\nThis deletes every dataset, pipeline, and project stored in this browser. This cannot be undone.")) return;
+          await clearAllLocalData();
+          window.location.reload();
+        }}
+        title="Clear all local data"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 32,
+          flexShrink: 0,
+          background: "transparent",
+          border: "none",
+          borderLeft: `1px solid ${C.border}`,
+          color: C.textMuted,
+          cursor: "pointer",
+          fontSize: 13,
+          fontFamily: mono,
+          transition: "color 0.12s",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = "#e07070"; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+      >
+        ⊘
       </button>
 
       {/* ── Sign out ── */}
