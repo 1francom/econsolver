@@ -1,0 +1,191 @@
+# EconSolver — Threat Model (K1)
+
+**Written:** 2026-05-25  
+**Scope:** Current client-side-only deployment + planned auth/backend extension  
+**Status:** Living document — update before any backend work starts
+
+---
+
+## 1. Adversary Profiles
+
+| Adversary | Motivation | Capability |
+|-----------|-----------|------------|
+| **Curious student** | Peek at classmate's dataset or API key | Low — browser devtools, local network sniffing |
+| **Credential thief** | Steal Anthropic API key to run AI workloads at victim's expense | Medium — XSS payloads, social engineering |
+| **Malicious dataset contributor** | Inject code via a crafted CSV/Stata/RDS file that executes on open | Medium — knowledge of parsers; no remote access |
+| **Insider / shared-device attacker** | Access another user's research data on a shared lab computer | Low — physical access only |
+| **State actor / institutional espionage** | Steal non-published thesis data or policy papers | High — supply-chain, CDN compromise, network MITM |
+
+---
+
+## 2. Assets at Risk
+
+| Asset | Sensitivity | Current storage |
+|-------|------------|-----------------|
+| **Research datasets** (student/thesis data, policy data) | High — often unpublished, embargoed | IndexedDB in browser; never leaves device |
+| **Anthropic API key** | High — financial liability | `localStorage` key `litux_api_key` |
+| **Pipeline definitions** (research methodology) | Medium — intellectual property | IndexedDB |
+| **AI-generated narratives** | Low | Ephemeral in memory; not persisted |
+| **User identity** (future) | High — when auth lands | Not yet collected |
+
+---
+
+## 3. Current Attack Surface (Client-Only, No Auth)
+
+### 3.1 API Key Exposure — ✓ RESOLVED
+
+**Status:** The server-side proxy is fully implemented and deployed.
+
+- `api/anthropic.js` (Vercel Serverless Function): validates Supabase JWT, checks `profiles.tier`, forwards to Anthropic using `process.env.ANTHROPIC_API_KEY` — key never reaches the browser
+- `AIService.js` routes through `/api/anthropic` when `VITE_AI_PROXY_ENABLED=true` (production); the `localStorage`/env-var fallback in `getApiKey()` is explicitly dev-only
+
+**Remaining (low-priority cleanup):**
+- [ ] Remove the `VITE_ANTHROPIC_KEY` env var path from `getApiKey()` — dead code in production, confusing to maintain
+- [ ] Add key masking in the dev-mode Settings UI (show only last 6 chars) for shared dev environments
+
+### 3.2 Dynamic Expression Evaluation — Unsandboxed Code Execution
+
+**Threat:** User-supplied expressions are evaluated dynamically via the `Function` constructor in the main thread:
+- `runner.js:267` — `mutate`/`ai_tr` step arrow-function eval
+- `runner.js:653` — `mutate` expression step
+- `FeatureTab.jsx:94` — live preview of `mutate` expressions
+- `SimulateTab.jsx:91-133` — DGP expression evaluator
+- `FormatTab.jsx:73` — cell format expressions
+
+The `Function` constructor in the browser has full access to the global scope including `localStorage`, `indexedDB`, `fetch`, and DOM APIs. A crafted expression would silently exfiltrate the API key.
+
+**Risk rating:** **HIGH** — requires user to type or paste a malicious expression, or receive one via `ai_tr` (AI-generated). AI-generated expressions are pre-screened by Claude but not guaranteed safe.
+
+**Mitigations:**
+- [ ] Move expression evaluation to a dedicated `Worker` — workers have no access to `localStorage`, `indexedDB`, or `document`
+- [ ] Pass only required column data into the worker; receive only the result array back
+- [ ] For `ai_tr`: always show generated expression to user before executing; never auto-run
+- [ ] Add a CSP header (see §3.5) — does not block dynamic `Function` eval but limits external script injection
+
+### 3.3 File Upload — Binary Parser Bounds Checking
+
+**Threat:** Malicious `.dta`, `.rds`, or `.shp/.dbf` files crafted to exploit length/offset parsing bugs in:
+- `src/services/data/parsers/stata.js` (readstat-wasm — third-party)
+- `src/services/data/parsers/rds.js` (custom XDR parser)
+- `src/services/data/parsers/shapefile.js` (custom dBase III parser)
+
+Typical vectors: integer overflow in record-count fields, crafted string lengths causing out-of-bounds reads, unbounded allocation.
+
+**Risk rating:** **MEDIUM** — requires crafted file; consequence is crash or memory exposure (no RCE in browser JS, but can trigger DoS or adjacent ArrayBuffer disclosure).
+
+**Mitigations:**
+- [x] `rds.js`: max string length guard (> 1M → skip), max vector length (> 10M → throw), max list nesting depth 200
+- [x] `shapefile.js`: numParts/numPoints bounds on Polyline/Polygon records; DBF recordCount/recordSize guards
+- [ ] Both: wrap all reads in try/catch; surface a user-visible error, never swallow silently
+- [ ] `readstat-wasm`: pin to a known-good version; subscribe to its CVE feed
+
+### 3.4 CDN Script Integrity
+
+**Threat:** CDN scripts loaded without Subresource Integrity (SRI):
+- Leaflet (`unpkg.com`)
+- proj4js (`cdnjs.cloudflare.com`)
+- Observable Plot (`cdn.jsdelivr.net`)
+- SheetJS (`cdn.sheetjs.com`)
+
+A CDN compromise or BGP hijack delivers a tampered script that reads `localStorage` or exfiltrates datasets.
+
+**Risk rating:** **MEDIUM** — supply-chain risk; unpkg/jsDelivr are widely trusted but have had incidents.
+
+**Mitigations:**
+- [ ] Add `integrity="sha384-..."` + `crossorigin="anonymous"` to all CDN `<script>` tags in `index.html`
+- [ ] Pin versions (already done for most); generate SRI hashes at pin time:  
+  `openssl dgst -sha384 -binary file.js | openssl base64 -A`
+- [ ] Long-term: vendor scripts into `/public/vendor/` to eliminate CDN dependency entirely
+
+### 3.5 Missing Content Security Policy
+
+**Threat:** No CSP header currently. Any XSS vector (e.g. via a crafted dataset label rendered without escaping) could inject arbitrary scripts.
+
+**Status:** ✓ RESOLVED — CSP, `X-Content-Type-Options`, and `X-Frame-Options` added to `vercel.json`.
+
+**Risk rating:** **MEDIUM** — CSP significantly reduces XSS blast radius.
+
+**Remaining:**
+- [ ] Remove `'unsafe-eval'` once FeatureTab/FormatTab expression evaluation is moved to a Worker (main-thread eval still present)
+
+### 3.6 Shared Device — IndexedDB Data Persistence
+
+**Threat:** On a shared lab computer, a previous user's dataset persists in IndexedDB until explicitly cleared. A subsequent user can open browser devtools and read it.
+
+**Risk rating:** **LOW-MEDIUM** — requires physical access but is realistic in LMU lab environments.
+
+**Mitigations:**
+- [x] "Clear all local data" button (⊘) in WorkspaceBar — confirm dialog, wipes IndexedDB + sessionStorage + localStorage, reloads page
+- [ ] Display a visible notice in the app that data is stored locally (reinforces the privacy promise)
+- [ ] Future: session-lock with PIN for shared devices (post-MVP)
+
+---
+
+## 4. Future Attack Surface (When Auth / Backend Is Added)
+
+These risks do not exist yet but **must be addressed before any backend code is written**. K2–K10 cover the implementation.
+
+### 4.1 Authentication Endpoints
+
+- Login/signup forms: parameterized queries only, bcrypt (cost ≥ 12), rate limiting (5 attempts → 15 min lockout), CAPTCHA on signup
+- Sessions: httpOnly + Secure + SameSite=Strict cookies; never in `localStorage`
+- Password reset: time-limited HMAC-signed tokens; single-use; invalidate on use
+
+### 4.2 Dataset Upload to Backend
+
+- If datasets are ever stored server-side: validate MIME type + magic bytes (not just extension), enforce per-user storage quotas, never execute uploaded content
+- **Prefer keeping datasets client-side** — this is the privacy-first promise; push computation to the browser
+
+### 4.3 Server-Side Expression Evaluation
+
+- Never evaluate `mutate`/pipeline expressions server-side
+- If a computation API is added (DML, MCMC), accept only structured JSON payloads (estimator config), never raw code strings
+
+### 4.4 API Key Proxy
+
+- `/api/ai` endpoint: authenticate session before forwarding to Anthropic; per-user rate limiting; log key usage (not prompt content); rotate on suspected compromise
+
+### 4.5 IDOR / Data Isolation
+
+- Every dataset, pipeline, and result must be scoped to a user ID server-side
+- Row-Level Security on all tables — never trust user-supplied IDs without ownership check
+- Audit log for all data access (K9)
+
+---
+
+## 5. Risk Priority Matrix
+
+| Risk | Likelihood | Impact | Priority |
+|------|-----------|--------|----------|
+| ~~API key exfiltrated via XSS~~ | ~~Medium~~ | ~~Critical~~ | ~~**P0**~~ → **DONE** (server-side proxy) |
+| ~~API key baked into client bundle~~ | ~~Low~~ | ~~Critical~~ | ~~**P0**~~ → **DONE** (Vercel env var only) |
+| ~~Dynamic expression eval → exfiltration~~ | ~~Low~~ | ~~High~~ | ~~**P1**~~ → **DONE** (Worker sandbox) |
+| ~~CDN script compromise~~ | ~~Very Low~~ | ~~Critical~~ | ~~**P1**~~ → **DONE** (SRI hashes + import map) |
+| ~~Malicious file parser exploit~~ | ~~Low~~ | ~~Medium~~ | ~~**P2**~~ → **DONE** (rds.js + shapefile.js bounds) |
+| ~~Missing CSP~~ | ~~Medium~~ | ~~Medium~~ | ~~**P2**~~ → **DONE** (vercel.json CSP + nosniff + DENY) |
+| ~~Shared-device IndexedDB leakage~~ | ~~Medium~~ | ~~Medium~~ | ~~**P2**~~ → **DONE** (⊘ clear-all button in WorkspaceBar) |
+| IDOR after auth (future) | N/A yet | Critical | **P0 when applicable** |
+
+---
+
+## 6. Decision Map for K2–K10
+
+| K-item | Decision driven by this model |
+|--------|-------------------------------|
+| K2 Auth hardening | bcrypt, rate-limit, CAPTCHA |
+| K3 Injection prevention | ✓ mutate/ai_tr/SimulateTab eval moved to Worker; CSP deployed |
+| K4 API key management | ✓ Done — server-side proxy via `api/anthropic.js` + Supabase JWT auth |
+| K5 Transport security | HTTPS via Vercel; add HSTS + secure cookies when auth lands |
+| K6 Frontend hardening | ✓ CSP header + SRI hashes + import map integrity |
+| K7 File upload safety | ✓ rds.js + shapefile.js bounds checks deployed |
+| K8 Session management | httpOnly cookies + refresh rotation |
+| K9 Audit logging | Auth events only; never log raw expressions or dataset content |
+| K10 Pentest checklist | OWASP Top 10 before first institutional contract |
+
+---
+
+## 7. Out of Scope
+
+- Server-side attacks (no server yet)
+- Mobile browser quirks (target: desktop Chrome/Firefox on Vercel)
+- GDPR compliance documentation (separate deliverable)

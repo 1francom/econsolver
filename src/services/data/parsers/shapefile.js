@@ -58,6 +58,14 @@ function parseDBF(buf) {
   const headerSize   = dv.getUint16(8,  true);
   const recordSize   = dv.getUint16(10, true);
 
+  if (recordCount > 10_000_000) throw new Error(`DBF: record count too large (${recordCount}) — file may be corrupt`);
+  if (recordSize  > 65_535)     throw new Error(`DBF: record size too large (${recordSize}) — file may be corrupt`);
+  if (headerSize  > buf.byteLength) throw new Error("DBF: header size exceeds file length — file may be corrupt");
+  if (recordCount > 0 && recordSize > 0 &&
+      headerSize + recordCount * recordSize > buf.byteLength + 1) {
+    throw new Error("DBF: records extend beyond file length — file may be corrupt");
+  }
+
   // ── Field descriptors ──────────────────────────────────────────────────────
   const fields = [];
   let offset = 32;
@@ -259,6 +267,8 @@ async function loadProj4() {
   _proj4Promise = new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = "https://unpkg.com/proj4@2.9.0/dist/proj4.js";
+    s.integrity   = "sha384-U14wzrePlI+UpXk1Jpe45fK/C0yeI7rtwKzi9eM3Lj7LYjXlHNy0YacuWZIk7Hic";
+    s.crossOrigin = "anonymous";
     s.onload  = () => resolve(window.proj4);
     s.onerror = () => reject(new Error("proj4 load failed"));
     document.head.appendChild(s);
@@ -333,6 +343,7 @@ function parseSHP(buf, projectFn = null) {
         const numParts  = dv.getInt32(pos + 4 + 32,     true);
         const numPoints = dv.getInt32(pos + 4 + 32 + 4, true);
         if (numParts < 1 || numPoints < 1) { wkt = null; break; }
+        if (numParts > 100_000 || numPoints > 1_000_000) { wkt = null; break; }
 
         const partsOffset  = pos + 4 + 32 + 8;
         const pointsOffset = partsOffset + numParts * 4;
@@ -366,6 +377,7 @@ function parseSHP(buf, projectFn = null) {
         const numParts  = dv.getInt32(pos + 4 + 32,     true);
         const numPoints = dv.getInt32(pos + 4 + 32 + 4, true);
         if (numParts < 1 || numPoints < 1) { wkt = null; break; }
+        if (numParts > 100_000 || numPoints > 1_000_000) { wkt = null; break; }
 
         const partsOffset  = pos + 4 + 32 + 8;
         const pointsOffset = partsOffset + numParts * 4;
