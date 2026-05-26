@@ -46,7 +46,7 @@ const BASEMAPS = {
   },
   osm: {
     label: "OSM",
-    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>",
   },
 };
@@ -2495,7 +2495,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       // Draw tile canvas first if tiles are shown
       const tileCanvas = tileCanRef.current;
       if (showTiles && tileCanvas && tileCanvas.width > 0) {
-        ctx.drawImage(tileCanvas, 0, 0, plotW * scale, plotH * scale);
+        try { ctx.drawImage(tileCanvas, 0, 0, plotW * scale, plotH * scale); } catch {}
         drawSvgLayer();
       } else {
         ctx.fillStyle = "white";
@@ -2649,7 +2649,8 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           const url = CARTO_TILE.replace("{z}", z).replace("{x}", tx).replace("{y}", ty);
           const img = new Image();
           img.crossOrigin = "anonymous";
-          img.onload = () => { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); };
+          img.onload = () => { try { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); } catch {} };
+          img.onerror = () => {};
           img.src = url;
         }
       }
