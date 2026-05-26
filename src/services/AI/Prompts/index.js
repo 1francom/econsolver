@@ -629,7 +629,7 @@ TRANSFORMATION RULES (apply all):
        semicolon-aware reader (e.g. R: readr::read_delim(file, delim=";"),
        Python: pd.read_csv(file, sep=";"), Stata: import delimited "...",
        delimiter(";") clear). Excel must include the sheet name. Stata .dta
-       must use `use ... , clear` / R `haven::read_dta` / Py `pd.read_stata`.
+       must use 'use ... , clear' / R 'haven::read_dta' / Py 'pd.read_stata'.
     b. If a "REQUIRED LOAD CALL" line is provided, that load call is
        authoritative — emit it verbatim in the Data Loading section.
     c. Walk the PIPELINE step list in order. If the section scripts already
