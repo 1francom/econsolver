@@ -81,7 +81,22 @@ export async function runPolyRDDValidation() {
   return results;
 }
 
+// ─── Attach to window + deadline check ────────────────────────────────────────
+
+const VALIDATION_DEADLINE = new Date("2026-05-29T00:00:00");
+
 if (typeof window !== "undefined") {
   window.__validation = window.__validation ?? {};
-  window.__validation.polyRDD = runPolyRDDValidation;
+  window.__validation.polyRDD = function wrappedPolyRDDValidation() {
+    sessionStorage.setItem("__polyRDDValidationRan", new Date().toISOString());
+    return runPolyRDDValidation();
+  };
+
+  // Deadline check — warn once per session if overdue
+  if (new Date() >= VALIDATION_DEADLINE && !sessionStorage.getItem("__polyRDDValidationRan")) {
+    console.warn(
+      "%c⚠ Polynomial RDD validation overdue!\nDeadline was 2026-05-29. Run `Rscript src/services/data/__validation__/polyRDDRValidation.R` to populate benchmarks, then call window.__validation.polyRDD() to confirm all 6 cells pass.",
+      "color: #ff9900; font-weight: bold; font-size: 12px"
+    );
+  }
 }
