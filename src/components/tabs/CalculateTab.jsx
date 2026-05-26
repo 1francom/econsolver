@@ -509,6 +509,7 @@ function FunctionGrapher({ C, savedEqs, canvasRef: externalCanvasRef }) {
     { id: 3, name: "c", value: 0,  min: -5, max: 5, step: 0.1 },
   ]);
   const [xRange,        setXRange]        = useState([-8, 8]);
+  const [positiveQuad,  setPositiveQuad]  = useState(false);
   const [newExpr,       setNewExpr]       = useState("");
   const [showPForm,     setShowPForm]     = useState(false);
   const [pForm,         setPForm]         = useState({ name: "", val: "1", min: "-5", max: "5", step: "0.1" });
@@ -547,7 +548,8 @@ function FunctionGrapher({ C, savedEqs, canvasRef: externalCanvasRef }) {
     const PAD = { t: 16, r: 16, b: 32, l: 44 };
     const pW = W - PAD.l - PAD.r, pH = H - PAD.t - PAD.b;
     const ctx = canvas.getContext("2d");
-    const [xMin, xMax] = xRange;
+    let [xMin, xMax] = xRange;
+    if (positiveQuad) xMin = Math.max(0, xMin);
     const STEPS = 600;
     const evalFns = buildEvalFns();
 
@@ -557,13 +559,16 @@ function FunctionGrapher({ C, savedEqs, canvasRef: externalCanvasRef }) {
       if (!f) return;
       for (let i = 0; i <= STEPS; i++) {
         const y = f(xMin + (i / STEPS) * (xMax - xMin));
-        if (Number.isFinite(y)) allY.push(y);
+        if (Number.isFinite(y) && (!positiveQuad || y >= 0)) allY.push(y);
       }
     });
-    let yMin = allY.length ? Math.min(...allY) : -5;
+    let yMin = allY.length ? Math.min(...allY) : (positiveQuad ? 0 : -5);
     let yMax = allY.length ? Math.max(...allY) : 5;
-    if (Math.abs(yMax - yMin) < 1e-6) { yMin -= 1; yMax += 1; }
-    const yPad = (yMax - yMin) * 0.12; yMin -= yPad; yMax += yPad;
+    if (positiveQuad) yMin = 0;
+    if (Math.abs(yMax - yMin) < 1e-6) { yMin = positiveQuad ? 0 : yMin - 1; yMax += 1; }
+    const yPad = (yMax - yMin) * 0.12;
+    if (!positiveQuad) yMin -= yPad;
+    yMax += yPad;
 
     const tx = x => PAD.l + ((x - xMin) / (xMax - xMin)) * pW;
     const ty = y => PAD.t + pH - ((y - yMin) / (yMax - yMin)) * pH;
@@ -650,7 +655,17 @@ function FunctionGrapher({ C, savedEqs, canvasRef: externalCanvasRef }) {
           <input type="number" step="any" value={xRange[1]}
             onChange={e => setXRange(r => [r[0], parseFloat(e.target.value) || r[1]])}
             style={{ ...fieldStyle(C), width: 52 }} />
-          <button onClick={() => setXRange([-8, 8])} style={{ ...ghost, padding: "0.15rem 0.5rem", color: C.textMuted, fontSize: 9 }}>reset</button>
+          <button onClick={() => { setXRange([-8, 8]); setPositiveQuad(false); }} style={{ ...ghost, padding: "0.15rem 0.5rem", color: C.textMuted, fontSize: 9 }}>reset</button>
+          <button
+            onClick={() => {
+              const next = !positiveQuad;
+              setPositiveQuad(next);
+              if (next) setXRange(r => [Math.max(0, r[0]), r[1]]);
+            }}
+            style={{ ...ghost, padding: "0.15rem 0.5rem", fontSize: 9,
+              color: positiveQuad ? C.teal : C.textMuted,
+              borderColor: positiveQuad ? C.teal : undefined,
+              background: positiveQuad ? `${C.teal}15` : "transparent" }}>Q⁺</button>
         </div>
 
         {/* Legend */}
