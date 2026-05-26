@@ -3258,7 +3258,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model={r.type} />
                 <ExportBar yVar={yVar[0]} results={r} model={r.type}
                   onReport={() => openReport({ ...r, modelLabel: r.label, yVar: yVar[0], xVars: [...xVars, ...wVars] })}
-                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars } }} />
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars, weightCol: r.spec?.weightCol ?? null } }} />
               </div>
             );
           })()}

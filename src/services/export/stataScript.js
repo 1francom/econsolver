@@ -304,7 +304,7 @@ function transpileStep(step) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime, weightCol = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
@@ -314,6 +314,17 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     case "OLS":
       lines.push(`reg ${yVar} ${xList}, robust`);
       lines.push(`estimates store m_ols`);
+      break;
+
+    case "WLS":
+      if (!weightCol) {
+        lines.push(`* WARNING: no weight column supplied; falling back to OLS`);
+        lines.push(`reg ${yVar} ${xList}, robust`);
+      } else {
+        lines.push(`* Weighted Least Squares (analytic weights: ${weightCol})`);
+        lines.push(`reg ${yVar} ${xList} [aw=${weightCol}], robust`);
+      }
+      lines.push(`estimates store m_wls`);
       break;
 
     case "FE":

@@ -35,10 +35,10 @@ const ESTIMATOR_TESTS = [
   },
   {
     type: "WLS",
-    model: { type: "WLS", yVar: "wage", xVars: ["educ", "exp"], wVars: [], zVars: [], weightVar: "wgt" },
-    expectedR:      "feols",
-    expectedStata:  "reg wage",
-    expectedPython: "WLS",
+    model: { type: "WLS", yVar: "wage", xVars: ["educ", "exp"], wVars: [], zVars: [], weightCol: "wgt" },
+    expectedR:      "weights = ~wgt",
+    expectedStata:  "[aw=wgt]",
+    expectedPython: "smf.wls",
   },
   {
     type: "FE",

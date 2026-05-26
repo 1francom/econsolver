@@ -1,0 +1,20 @@
+{
+  "_note": "Run polyRDDRValidation.R to populate this file before running the browser harness.",
+  "manual_h": 0.5,
+  "p2": {
+    "beta": [],
+    "se": [],
+    "late": 0,
+    "lateSE": 0,
+    "n": 0,
+    "k": 6
+  },
+  "p3": {
+    "beta": [],
+    "se": [],
+    "late": 0,
+    "lateSE": 0,
+    "n": 0,
+    "k": 8
+  }
+}

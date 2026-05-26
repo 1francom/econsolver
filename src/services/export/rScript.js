@@ -376,6 +376,7 @@ function transpileModel(model) {
     entityCol, timeCol, factorVars = [],
     treatedUnit, treatTime,
     distCol, treatmentCol,
+    weightCol = null,
   } = model;
 
   const fvSet = new Set(factorVars);
@@ -397,6 +398,26 @@ function transpileModel(model) {
         `lmtest::bptest(lm(${y} ~ ${xStr}, data = df))  # Breusch-Pagan`,
         `car::vif(lm(${y} ~ ${xStr}, data = df))         # VIF`,
       ].join("\n");
+
+    case "WLS": {
+      const w = weightCol ? rName(weightCol) : null;
+      if (!w) {
+        return [
+          `# ── WLS ──────────────────────────────────────────────────────────────`,
+          `# WARNING: no weight column supplied; falling back to OLS`,
+          `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = "HC1")`,
+          `fixest::etable(fit)`,
+        ].join("\n");
+      }
+      return [
+        `# ── WLS (weighted least squares) ─────────────────────────────────────`,
+        `# Weights: ${w}`,
+        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, vcov = "HC1")`,
+        ``,
+        `# Diagnostics`,
+        `fixest::etable(fit)`,
+      ].join("\n");
+    }
 
     case "FE":
       return [

@@ -318,7 +318,7 @@ function transpileStep(step) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime, weightCol = null }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
   const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
@@ -328,6 +328,19 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     case "OLS": {
       const formula = `"${yVar} ~ ${allX.map(fmtPy).join(" + ")}"`;
       lines.push(`model = smf.ols(${formula}, data=df).fit(cov_type="HC3")`);
+      lines.push(`print(model.summary())`);
+      break;
+    }
+
+    case "WLS": {
+      const formula = `"${yVar} ~ ${allX.map(fmtPy).join(" + ")}"`;
+      if (!weightCol) {
+        lines.push(`# WARNING: no weight column supplied; falling back to OLS`);
+        lines.push(`model = smf.ols(${formula}, data=df).fit(cov_type="HC3")`);
+      } else {
+        lines.push(`# Weighted Least Squares (weights: ${weightCol})`);
+        lines.push(`model = smf.wls(${formula}, data=df, weights=df["${weightCol}"]).fit(cov_type="HC3")`);
+      }
       lines.push(`print(model.summary())`);
       break;
     }
