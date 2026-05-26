@@ -1234,3 +1234,30 @@ export function runPipeline(rows, headers, pipeline, context = {}) {
   for (const step of pipeline) s = applyStep(s.rows, s.headers, step, context);
   return s;
 }
+
+/**
+ * Async variant: mutate and ai_tr steps run in the expression Worker (isolated
+ * from localStorage / indexedDB). All other steps run synchronously via applyStep.
+ * Use when the pipeline contains at least one mutate or ai_tr step.
+ */
+export async function runPipelineAsync(rows, headers, pipeline, context = {}) {
+  const { evalColumn } = await import("../services/exprEvalService.js");
+  let s = { rows, headers };
+  for (const step of pipeline) {
+    if (step.type === "mutate" || step.type === "ai_tr") {
+      try {
+        const { newColValues } = await evalColumn(step, s.rows);
+        const outCol = step.type === "ai_tr" ? step.col : step.nn;
+        const newRows = s.rows.map((r, i) => ({ ...r, [outCol]: newColValues[i] ?? null }));
+        const newHeaders = s.headers.includes(outCol) ? s.headers : [...s.headers, outCol];
+        s = { rows: newRows, headers: newHeaders };
+      } catch (e) {
+        console.warn("[runPipelineAsync] worker eval failed, falling back to sync:", e.message);
+        s = applyStep(s.rows, s.headers, step, context);
+      }
+    } else {
+      s = applyStep(s.rows, s.headers, step, context);
+    }
+  }
+  return s;
+}

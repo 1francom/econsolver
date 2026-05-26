@@ -86,10 +86,14 @@ function loadLeaflet() {
       link.id = "leaflet-css";
       link.rel = "stylesheet";
       link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      link.integrity = "sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H";
+      link.crossOrigin = "anonymous";
       document.head.appendChild(link);
     }
     const script = document.createElement("script");
     script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.integrity = "sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH";
+    script.crossOrigin = "anonymous";
     script.onload = () => { _leafletPromiseST = null; resolve(window.L); };
     script.onerror = () => { _leafletPromiseST = null; reject(new Error("Leaflet load failed")); };
     document.head.appendChild(script);
@@ -105,6 +109,8 @@ function loadProj4() {
   _proj4Promise = new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = "https://unpkg.com/proj4@2.9.0/dist/proj4.js";
+    s.integrity = "sha384-U14wzrePlI+UpXk1Jpe45fK/C0yeI7rtwKzi9eM3Lj7LYjXlHNy0YacuWZIk7Hic";
+    s.crossOrigin = "anonymous";
     s.onload = () => { _proj4Promise = null; resolve(window.proj4); };
     s.onerror = () => { _proj4Promise = null; reject(new Error("proj4 load failed")); };
     document.head.appendChild(s);
@@ -2276,7 +2282,7 @@ let _geoPlt = null, _geoPltPromise = null;
 function loadGeoPlt() {
   if (_geoPlt) return Promise.resolve(_geoPlt);
   if (_geoPltPromise) return _geoPltPromise;
-  _geoPltPromise = import("https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm")
+  _geoPltPromise = import("https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.16/+esm")
     .then(m => { _geoPlt = m; _geoPltPromise = null; return m; })
     .catch(e => { _geoPltPromise = null; throw e; });
   return _geoPltPromise;
