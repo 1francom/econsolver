@@ -14,8 +14,14 @@ const DispatchCtx = createContext(null);
 // ─── INITIAL STATE ────────────────────────────────────────────────────────────
 const initialState = {
   // { [id]: DatasetMeta }
-  // DatasetMeta: { id, name, source, rowCount, colCount, headers[] }
+  // DatasetMeta: { id, name, source, rowCount, colCount, headers[],
+  //                crs?, loadOpts? }
   // source: 'loaded' | 'derived' | 'simulated' | 'calculated'
+  // loadOpts: { format: 'csv' | 'tsv' | 'excel' | 'stata' | 'rds' | 'parquet' |
+  //                     'shapefile-dbf' | 'shapefile-shp' | 'shapefile-zip',
+  //             delimiter?, encoding?, sheetName?, engine? }
+  //   — captured at parse time by DataStudio.parseFile so replication scripts
+  //     and the Report-AI can faithfully recreate the load step.
   datasets: {},
 
   primaryDatasetId: null,

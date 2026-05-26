@@ -26,6 +26,7 @@ import {
   INTERPRET_MARGINAL_EFFECTS_PROMPT,
   buildMetadataContext,
 } from "./Prompts/index.js";
+import { serializeSnapshot, loadOptsToScriptHint } from "./sessionSnapshot.js";
 import { getSession } from "../auth/authService.js";
 
 const API_URL       = "https://api.anthropic.com/v1/messages";
@@ -386,7 +387,7 @@ function buildCoeffLines(result) {
     .join("\n");
 }
 
-export async function interpretRegression(result, dataDictionary = null, metadataReport = null, rows = null) {
+export async function interpretRegression(result, dataDictionary = null, metadataReport = null, rows = null, { snapshot = null } = {}) {
   if (!result) throw new Error("No result object provided.");
 
   const {
@@ -430,7 +431,8 @@ export async function interpretRegression(result, dataDictionary = null, metadat
   const dictSection = buildDictionarySection(dataDictionary);
   const metaBlock   = _classifyVariables(varNames, dataDictionary, rows);
 
-  const metaCtx = metadataReport ? buildMetadataContext(metadataReport) : "";
+  const metaCtx     = metadataReport ? buildMetadataContext(metadataReport) : "";
+  const snapshotBlk = snapshot ? "\nSESSION CONTEXT:\n" + serializeSnapshot(snapshot) + "\n" : "";
   const userPrompt = `\
 REGRESSION OUTPUT
 Model type: ${modelLabel}
@@ -442,7 +444,7 @@ ${dictSection}
 ${metaBlock ? metaBlock + "\n" : ""}
 Coefficient details:
 ${coeffLines}
-${metaCtx ? "\n" + metaCtx : ""}
+${metaCtx ? "\n" + metaCtx : ""}${snapshotBlk}
 Write the two-paragraph interpretation now.`;
 
   try {
@@ -838,7 +840,7 @@ export async function interpretMarginalEffects({ model, dataDictionary = null, p
 // Returns: Promise<string> — the unified script text (no markdown fences).
 // On failure: returns a fallback that concatenates the sections with headers.
 
-export async function generateUnifiedScript(sections, language, dataDictionary = null) {
+export async function generateUnifiedScript(sections, language, dataDictionary = null, { snapshot = null } = {}) {
   const langLabel = language === "r" ? "R" : language === "stata" ? "Stata" : "Python";
   const cmt       = language === "stata" ? "*" : "#";
 
@@ -865,9 +867,17 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
     ? `\n\nDATA DICTIONARY:\n${Object.entries(dataDictionary).slice(0, 30).map(([k, v]) => `  ${k}: "${v}"`).join("\n")}`
     : "";
 
+  // ── Session snapshot block (load opts, pipeline order, panel, etc.) ───────
+  const snapshotBlk = snapshot ? `\n\nSESSION SNAPSHOT:\n${serializeSnapshot(snapshot)}` : "";
+  const loadHint = snapshot?.dataLoadOpts
+    ? `\n\nREQUIRED LOAD CALL (${langLabel}): ${loadOptsToScriptHint(snapshot.dataLoadOpts, language)}`
+    : "";
+
   const userPrompt = [
     `TARGET LANGUAGE: ${langLabel}`,
     dictSection,
+    snapshotBlk,
+    loadHint,
     `\nSECTION SCRIPTS:\n`,
     sectionBlocks.join("\n\n"),
     `\nGenerate the unified ${langLabel} replication script now.`,

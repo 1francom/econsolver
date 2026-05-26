@@ -219,6 +219,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       headers, cleanRows: rows, colInfo: ci,
       filename, issues: [], removed: 0,
       dataDictionary: dataDictionary || {},
+      pipeline,
+      loadOpts: rawData?._loadOpts ?? null,
       panelIndex: panel
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
             balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
@@ -394,6 +396,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       filename,
       issues: [], removed: naCount,
       dataDictionary: dataDictionary || {},
+      pipeline,
+      loadOpts: rawData?._loadOpts ?? null,
       panelIndex: panel
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
             balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
