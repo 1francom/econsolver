@@ -99,7 +99,12 @@ class XDRReader {
 }
 
 // ── Object reader ──────────────────────────────────────────────────────────────
+const MAX_DEPTH = 200;
+let _depth = 0;
+
 function readObject(r) {
+  if (++_depth > MAX_DEPTH) throw new Error("RDS: nesting too deep — file may be corrupt");
+  try {
   const word    = r.readUint32();
   const type    = word & 0xFF;
   const flags   = word;
@@ -143,6 +148,7 @@ function readObject(r) {
       const enc  = (flags >>> 12) & 0x7; // UTF-8=4, Latin-1=2, bytes=1
       const len  = r.readInt32();
       if (len === -1) { obj = null; break; } // NA_string_
+      if (len > 1_000_000) throw new Error(`RDS: string too long (${len} bytes) — file may be corrupt`);
       obj = r.readString(len);
       break;
     }
@@ -160,6 +166,7 @@ function readObject(r) {
 
     case LGLSXP: {
       const len   = r.readInt32();
+      if (len > 10_000_000) throw new Error(`RDS: logical vector too large (${len}) — file may be corrupt`);
       const vals  = [];
       for (let i = 0; i < len; i++) {
         const v = r.readInt32();
@@ -172,6 +179,7 @@ function readObject(r) {
 
     case INTSXP: {
       const len  = r.readInt32();
+      if (len > 10_000_000) throw new Error(`RDS: integer vector too large (${len}) — file may be corrupt`);
       const vals = [];
       for (let i = 0; i < len; i++) {
         const v = r.readInt32();
@@ -184,6 +192,7 @@ function readObject(r) {
 
     case REALSXP: {
       const len  = r.readInt32();
+      if (len > 10_000_000) throw new Error(`RDS: real vector too large (${len}) — file may be corrupt`);
       const vals = [];
       for (let i = 0; i < len; i++) {
         const { hi, lo } = r.peekDoubleWords();
@@ -197,6 +206,7 @@ function readObject(r) {
 
     case STRSXP: {
       const len  = r.readInt32();
+      if (len > 10_000_000) throw new Error(`RDS: character vector too large (${len}) — file may be corrupt`);
       const vals = [];
       for (let i = 0; i < len; i++) vals.push(readObject(r));
       obj = { sxp: STRSXP, values: vals };
@@ -206,6 +216,7 @@ function readObject(r) {
 
     case VECSXP: {
       const len  = r.readInt32();
+      if (len > 10_000) throw new Error(`RDS: list too large (${len} elements) — file may be corrupt`);
       const elts = [];
       for (let i = 0; i < len; i++) elts.push(readObject(r));
       obj = { sxp: VECSXP, elements: elts };
@@ -297,6 +308,7 @@ function readObject(r) {
 
   r.refs[refIdx] = obj;
   return obj;
+  } finally { _depth--; }
 }
 
 // ── ALTREP class name helper ───────────────────────────────────────────────────
@@ -426,6 +438,7 @@ async function decompressGzip(arrayBuffer) {
  * @returns {{ headers: string[], rows: object[] }}
  */
 export async function parseRDS(arrayBuffer) {
+  _depth = 0; // reset nesting depth counter for each new parse call
   const bytes = new Uint8Array(arrayBuffer);
 
   // Validate magic bytes

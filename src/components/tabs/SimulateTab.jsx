@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { useTheme, mono } from "../modeling/shared.jsx";
 import { HintBox } from "../HelpSystem.jsx";
+import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.js";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
@@ -493,11 +494,10 @@ export default function SimulateTab({ onAddDataset }) {
   const DIST_COLOR = distColor(C);
 
   // ── Generate ───────────────────────────────────────────────────────────────
-  function generate() {
+  async function generate() {
     setGenErr(""); setSaved(false);
-    const rng = mulberry32(+seed || 0);
     const nObs = Math.max(1, Math.min(100000, +n || 500));
-    const { scope, error } = buildScope(variables, nObs, rng);
+    const { scope, error } = await evalScopeInWorker(variables, nObs, +seed || 0);
     if (error) { setGenErr(error); return; }
     const headers = variables.map(v => v.name);
     const rows = [];
@@ -556,8 +556,7 @@ export default function SimulateTab({ onAddDataset }) {
     const betas = [];
     const BATCH = 100;
     for (let r = 0; r < reps; r++) {
-      const rng = mulberry32((+seed || 0) + r * 1_000_037);
-      const { scope, error } = buildScope(variables, nObs, rng);
+      const { scope, error } = await evalScopeInWorker(variables, nObs, (+seed || 0) + r * 1_000_037);
       if (error) { setMcRunning(false); return; }
       const ys = scope[mcY], xs = scope[mcX];
       if (!ys || !xs) continue;

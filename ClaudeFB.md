@@ -100,8 +100,8 @@
 - [2026-05-11 14:38] · Model
   Add multiple statistics tests
 
-- [2026-05-11 15:30] · Model
-  Kombinatorik and permutations inference (maybe also in model for tests)
+- ~~[2026-05-11 15:30] · Model
+  Kombinatorik and permutations inference (maybe also in model for tests)~~ ✓ DONE 2026-05-26
 
 - ~~[2026-05-11 20:26] · Explore
   Plots not saved — once finished, a save button should persist the plot; currently the screen clears (truncated in source)~~ ✓ DONE — Phase 16 (Plot Builder History) shipped: Save/New buttons, ← → nav, history strip, IndexedDB persistence per pid
@@ -149,10 +149,55 @@
 - [2026-05-20 09:50] · General
   When a dataset is deleted, all variables should disappear from all modules without having to select another dataset
 
-- [2026-05-20 09:52] · Explore
-  ACF/PACF light theme missing
+- ~~[2026-05-20 09:52] · Explore
+  ACF/PACF light theme missing~~ ✓ DONE 2026-05-26
 
 ### Features
 
 - [2026-05-20 09:47] · Spatial
   Add grids to the plot, not only in the OMS map
+
+---
+
+## 2026-05-26 batch
+> ⚠️ Recovered manually — collector marked rows processed=TRUE in Supabase but never appended them. Same wrong-branch class of failure as 2026-05-10/11.
+
+### Bugs
+
+- [2026-05-21 12:10] · Model
+  **URGENT** There is an error with p-value calculation, t-value = 0.49 but p-value < 0.001, impossible
+
+- [2026-05-21 12:12] · Model
+  When selecting and eliminating variables, the model reestimates automatically — fix that
+
+- [2026-05-21 12:13] · Model
+  Add an option to clean the current model
+
+- [2026-05-22 11:33] · Calculate
+  Fix the function graph from 0
+
+- [2026-05-25 09:25] · Calculate
+  Only 1 equation is plotted
+
+- [2026-05-25 19:26] · Report
+  AI does not recognize the pipeline steps in the Script generation
+
+- [2026-05-19 08:18] · Explore
+  Color references in the plot builder for "color = X"
+
+- [2026-05-19 11:53] · Simulate
+  Montecarlo for single variables
+
+### Features
+
+- [2026-05-18 15:08] · Simulate
+  Add resampling, bootstrapping, sampling to the mean
+
+- [2026-05-19 08:30] · Explore
+  Add filter(regionname %in% c("Spain (Espana)", "Basque Country (Pais Vasco)")) for filter option
+
+- [2026-05-21 12:21] · Model
+  Add for RDD a summary table as in R with summary() — Call: rdrobust Sharp RD estimates using local polynomial regression
+
+- [2026-05-25 20:29] · Model
+  Add an option to estimate without intercept

@@ -36,6 +36,7 @@
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 import { stepLabel } from "../../pipeline/registry.js";
 import { jsExprToR } from "../../pipeline/stepTranslators.js";
+import { buildRLoadLine } from "./loadLine.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -376,6 +377,7 @@ function transpileModel(model) {
     entityCol, timeCol, factorVars = [],
     treatedUnit, treatTime,
     distCol, treatmentCol,
+    weightCol = null,
   } = model;
 
   const fvSet = new Set(factorVars);
@@ -397,6 +399,26 @@ function transpileModel(model) {
         `lmtest::bptest(lm(${y} ~ ${xStr}, data = df))  # Breusch-Pagan`,
         `car::vif(lm(${y} ~ ${xStr}, data = df))         # VIF`,
       ].join("\n");
+
+    case "WLS": {
+      const w = weightCol ? rName(weightCol) : null;
+      if (!w) {
+        return [
+          `# ── WLS ──────────────────────────────────────────────────────────────`,
+          `# WARNING: no weight column supplied; falling back to OLS`,
+          `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = "HC1")`,
+          `fixest::etable(fit)`,
+        ].join("\n");
+      }
+      return [
+        `# ── WLS (weighted least squares) ─────────────────────────────────────`,
+        `# Weights: ${w}`,
+        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, vcov = "HC1")`,
+        ``,
+        `# Diagnostics`,
+        `fixest::etable(fit)`,
+      ].join("\n");
+    }
 
     case "FE":
       return [
@@ -780,6 +802,7 @@ export function generateRScript(config) {
     model        = {},
     auditTrail   = null,
     dataDictionary = null,
+    dataLoadOpts = null,
   } = config;
 
   const baseName = filename.replace(/\.[^.]+$/, "");
@@ -814,17 +837,8 @@ export function generateRScript(config) {
   lines.push(``);
 
   // ── Data loading ─────────────────────────────────────────────────────────────
-  const ext = filename.split(".").pop()?.toLowerCase();
   lines.push(`# ── 1. Load data ─────────────────────────────────────────────────────────`);
-  if (ext === "csv") {
-    lines.push(`df <- readr::read_csv(${rStr(filename)})`);
-  } else if (["xlsx", "xls"].includes(ext)) {
-    lines.push(`df <- readxl::read_excel(${rStr(filename)})`);
-  } else if (ext === "dta") {
-    lines.push(`df <- haven::read_dta(${rStr(filename)})`);
-  } else {
-    lines.push(`df <- readr::read_csv(${rStr(filename)})  # adjust for your format`);
-  }
+  lines.push(buildRLoadLine(filename, dataLoadOpts));
   lines.push(``);
 
   // ── Data dictionary comment ───────────────────────────────────────────────────
@@ -944,8 +958,9 @@ function subsetFiltersToR(filters) {
 export function generateMultiModelRScript(configs = [], dataDictionary = null, opts = {}) {
   if (!configs.length) return "# No models provided.";
 
-  const filename = opts.filename ?? "dataset.csv";
-  const pipeline = opts.pipeline ?? [];
+  const filename     = opts.filename ?? "dataset.csv";
+  const pipeline     = opts.pipeline ?? [];
+  const dataLoadOpts = opts.dataLoadOpts ?? null;
   const ts = new Date().toISOString().slice(0, 10);
   const allTypes = [...new Set(configs.map(c => c.model?.type).filter(Boolean))];
   const pkgsSet = new Set(["dplyr", "tidyr", "readr", "fixest", "modelsummary", "lmtest", "car"]);
@@ -974,10 +989,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
   lines.push(``);
 
   lines.push(`# ── 1. Load data ─────────────────────────────────────────────────────────`);
-  const ext = filename.split(".").pop()?.toLowerCase();
-  if (ext === "dta") lines.push(`df <- haven::read_dta(${rStr(filename)})`);
-  else if (["xlsx","xls"].includes(ext)) lines.push(`df <- readxl::read_excel(${rStr(filename)})`);
-  else lines.push(`df <- readr::read_csv(${rStr(filename)})`);
+  lines.push(buildRLoadLine(filename, dataLoadOpts));
   lines.push(``);
 
   if (pipeline.length) {
@@ -1069,7 +1081,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
 //     model           ModelConfig
 //     dataDictionary  Record|null
 //   }
-export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null } = {}) {
+export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null, dataLoadOpts = null } = {}) {
   const ts      = new Date().toISOString().slice(0, 10);
   const stem    = filename.replace(/\.[^.]+$/, "");
   const pkgs    = buildPackageList(model.type, [...pipeline, ...perSubsetSteps]);
@@ -1107,11 +1119,7 @@ export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [],
   lines.push(``);
 
   lines.push(`# ── 1. Load data ─────────────────────────────────────────────────────────`);
-  const ext = filename.split(".").pop()?.toLowerCase();
-  if (ext === "csv")  lines.push(`df <- readr::read_csv(${rStr(filename)})`);
-  else if (["xlsx","xls"].includes(ext)) lines.push(`df <- readxl::read_excel(${rStr(filename)})`);
-  else if (ext === "dta") lines.push(`df <- haven::read_dta(${rStr(filename)})`);
-  else lines.push(`df <- readr::read_csv(${rStr(filename)})`);
+  lines.push(buildRLoadLine(filename, dataLoadOpts));
   lines.push(``);
 
   if (dataDictionary && Object.keys(dataDictionary).length) {

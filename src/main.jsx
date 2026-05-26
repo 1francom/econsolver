@@ -74,6 +74,23 @@ if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('vali
     })
 }
 
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'polyRDD') {
+  import('./services/data/__validation__/polyRDDValidation.js')
+    .then(({ runPolyRDDValidation }) => runPolyRDDValidation())
+    .then(results => {
+      document.documentElement.dataset.polyRDDValidation = JSON.stringify(
+        results.map(({ cell, ok, maxDiff, message }) => ({
+          cell, ok, maxDiff, message,
+        })),
+      )
+    })
+    .catch(error => {
+      document.documentElement.dataset.polyRDDValidation = JSON.stringify({
+        error: error?.message ?? String(error),
+      })
+    })
+}
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ThemeProvider>

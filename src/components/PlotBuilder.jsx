@@ -42,7 +42,7 @@ let _pltPromise = null;
 function loadPlot() {
   if (_plt) return Promise.resolve(_plt);
   if (_pltPromise) return _pltPromise;
-  _pltPromise = import("https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm")
+  _pltPromise = import("https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.16/+esm")
     .then(m => { _plt = m; _pltPromise = null; return m; })
     .catch(e => { _pltPromise = null; throw e; });
   return _pltPromise;
@@ -60,10 +60,14 @@ function loadLeaflet() {
       link.id = "leaflet-css";
       link.rel = "stylesheet";
       link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      link.integrity = "sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H";
+      link.crossOrigin = "anonymous";
       document.head.appendChild(link);
     }
     const script = document.createElement("script");
     script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.integrity = "sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH";
+    script.crossOrigin = "anonymous";
     script.onload = () => { _leafletPromise = null; resolve(window.L); };
     script.onerror = () => { _leafletPromise = null; reject(new Error("Leaflet load failed")); };
     document.head.appendChild(script);

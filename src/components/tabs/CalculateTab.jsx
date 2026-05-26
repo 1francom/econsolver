@@ -253,9 +253,13 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css";
+    link.integrity = "sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+";
+    link.crossOrigin = "anonymous";
     document.head.appendChild(link);
     const script = document.createElement("script");
     script.src = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js";
+    script.integrity = "sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg";
+    script.crossOrigin = "anonymous";
     script.onload = () => setKatexLoaded(true);
     document.head.appendChild(script);
   }, []);

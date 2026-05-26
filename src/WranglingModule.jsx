@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { HintBox } from "./components/HelpSystem.jsx";
-import { applyStep, runPipeline }  from "./pipeline/runner.js";
+import { applyStep, runPipeline, runPipelineAsync } from "./pipeline/runner.js";
 import { validatePanel, buildInfo } from "./pipeline/validator.js";
 import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQuality.js";
 
@@ -40,7 +40,7 @@ import { useSessionDispatch } from "./services/session/sessionState.jsx";
 
 // ── Re-exports (consumed by ModelingTab and other modules) ─────────────────
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
-export { applyStep, runPipeline }     from "./pipeline/runner.js";
+export { applyStep, runPipeline, runPipelineAsync } from "./pipeline/runner.js";
 export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
@@ -137,11 +137,23 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         )
       );
     } else {
-      // JS path — defer by one frame so the spinner renders before we block
-      const timerId = setTimeout(() => {
-        if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
-      }, 0);
-      return () => { cancelled = true; clearTimeout(timerId); clearInterval(timerRef.current); };
+      // JS path — defer by one frame so the spinner renders before we block.
+      // If the pipeline contains mutate/ai_tr steps, use the Worker async path
+      // (isolated from localStorage/indexedDB) instead of main-thread eval.
+      const hasExprSteps = pipeline.some(s => s.type === "mutate" || s.type === "ai_tr");
+      if (hasExprSteps) {
+        runPipelineAsync(rawData.rows, rawData.headers, pipeline, context)
+          .then(result => { if (!cancelled) done(result); })
+          .catch(e => {
+            console.warn("[WranglingModule] async pipeline failed, falling to sync:", e);
+            if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+          });
+      } else {
+        const timerId = setTimeout(() => {
+          if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+        }, 0);
+        return () => { cancelled = true; clearTimeout(timerId); clearInterval(timerRef.current); };
+      }
     }
 
     return () => { cancelled = true; clearInterval(timerRef.current); };
@@ -207,6 +219,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       headers, cleanRows: rows, colInfo: ci,
       filename, issues: [], removed: 0,
       dataDictionary: dataDictionary || {},
+      pipeline,
+      loadOpts: rawData?._loadOpts ?? null,
       panelIndex: panel
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
             balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
@@ -382,6 +396,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       filename,
       issues: [], removed: naCount,
       dataDictionary: dataDictionary || {},
+      pipeline,
+      loadOpts: rawData?._loadOpts ?? null,
       panelIndex: panel
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
             balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }

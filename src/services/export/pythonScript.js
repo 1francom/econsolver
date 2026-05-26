@@ -10,6 +10,7 @@
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
 import { toPython, jsExprToPython } from "../../pipeline/stepTranslators.js";
+import { buildPyLoadLine } from "./loadLine.js";
 
 export function generatePythonScript(config = {}) {
   const {
@@ -17,6 +18,7 @@ export function generatePythonScript(config = {}) {
     pipeline     = [],
     model        = {},
     dataDictionary = null,
+    dataLoadOpts = null,
   } = config;
 
   const {
@@ -81,7 +83,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Load data ───────────────────────────────────────────────────────────────
   lines.push("# ── Load data ─────────────────────────────────────────────────────────────");
-  lines.push(`df = pd.read_csv("${pyFile}")`);
+  lines.push(buildPyLoadLine(pyFile, dataLoadOpts));
   lines.push("");
 
   // ── Data dictionary ─────────────────────────────────────────────────────────
@@ -318,7 +320,7 @@ function transpileStep(step) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime, weightCol = null }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
   const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
@@ -328,6 +330,19 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     case "OLS": {
       const formula = `"${yVar} ~ ${allX.map(fmtPy).join(" + ")}"`;
       lines.push(`model = smf.ols(${formula}, data=df).fit(cov_type="HC3")`);
+      lines.push(`print(model.summary())`);
+      break;
+    }
+
+    case "WLS": {
+      const formula = `"${yVar} ~ ${allX.map(fmtPy).join(" + ")}"`;
+      if (!weightCol) {
+        lines.push(`# WARNING: no weight column supplied; falling back to OLS`);
+        lines.push(`model = smf.ols(${formula}, data=df).fit(cov_type="HC3")`);
+      } else {
+        lines.push(`# Weighted Least Squares (weights: ${weightCol})`);
+        lines.push(`model = smf.wls(${formula}, data=df, weights=df["${weightCol}"]).fit(cov_type="HC3")`);
+      }
       lines.push(`print(model.summary())`);
       break;
     }
@@ -693,9 +708,10 @@ function subsetFiltersToPython(filters, dfName = "df") {
 export function generateMultiModelPythonScript(configs = [], dataDictionary = null, opts = {}) {
   if (!configs.length) return "# No models provided.";
 
-  const filename = opts.filename ?? "dataset.csv";
-  const pipeline = opts.pipeline ?? [];
-  const pyFile   = filename.replace(/\\/g, "/");
+  const filename     = opts.filename ?? "dataset.csv";
+  const pipeline     = opts.pipeline ?? [];
+  const dataLoadOpts = opts.dataLoadOpts ?? null;
+  const pyFile       = filename.replace(/\\/g, "/");
   const ts = new Date().toISOString().slice(0, 10);
   const lines = [];
 
@@ -722,10 +738,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   lines.push("");
 
   lines.push(`# ── Load data ─────────────────────────────────────────────────────────────`);
-  const ext = filename.split(".").pop()?.toLowerCase();
-  if (ext === "dta") lines.push(`df = pd.read_stata("${pyFile}")`);
-  else if (["xlsx","xls"].includes(ext)) lines.push(`df = pd.read_excel("${pyFile}")`);
-  else lines.push(`df = pd.read_csv("${pyFile}")`);
+  lines.push(buildPyLoadLine(pyFile, dataLoadOpts));
   lines.push("");
 
   if (pipeline.length) {
@@ -837,7 +850,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
 
 // ─── SUBSET REPLICATION SCRIPT (H6/H10) ───────────────────────────────────────
 // config: { filename, pipeline, perSubsetSteps, subsets, model, dataDictionary }
-export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null } = {}) {
+export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null, dataLoadOpts = null } = {}) {
   const ts   = new Date().toISOString().slice(0, 10);
   const stem = filename.replace(/\.[^.]+$/, "");
   const lines = [];
@@ -871,7 +884,7 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
   lines.push("");
 
   lines.push(`# ── Load data ─────────────────────────────────────────────────────────────`);
-  lines.push(`df = pd.read_csv(${JSON.stringify(filename)})`);
+  lines.push(buildPyLoadLine(filename, dataLoadOpts));
   lines.push("");
 
   if (dataDictionary && Object.keys(dataDictionary).length) {

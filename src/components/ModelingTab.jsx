@@ -313,7 +313,50 @@ function ciMultiplier(df) {
 function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [] }) {
   const { C } = useTheme();
   const [open, setOpen] = useState(null);
+  const [copied, setCopied] = useState(null);
   const z    = ciMultiplier(df);
+
+  function toLatex() {
+    const bodyRows = varNames.map((v, i) => {
+      const b = beta[i], s = se[i], p = pVals[i];
+      const st = stars(p);
+      const vEsc = v.replace(/[_^&%$#{}~\\]/g, m => "\\" + m);
+      return `  ${vEsc} & ${b.toFixed(4)} & (${s.toFixed(4)}) & ${st} \\\\`;
+    });
+    return [
+      "\\begin{table}[htbp]",
+      "\\centering",
+      "\\begin{tabular}{lrrl}",
+      "\\toprule",
+      `Variable & $\\hat{\\beta}$ & (SE) & \\\\`,
+      "\\midrule",
+      ...bodyRows,
+      "\\bottomrule",
+      "\\end{tabular}",
+      `\\caption{Dependent variable: ${yVar}}`,
+      "\\label{tab:results}",
+      "\\end{table}",
+    ].join("\n");
+  }
+
+  function toMarkdown() {
+    const header = "| Variable | β̂ | (SE) | p |";
+    const sep    = "| :--- | ---: | ---: | ---: |";
+    const bodyRows = varNames.map((v, i) => {
+      const b = beta[i], s = se[i], p = pVals[i];
+      const pStr = p < 0.001 ? "<0.001" : p?.toFixed(4) ?? "—";
+      return `| ${v} | ${b.toFixed(4)} | (${s.toFixed(4)}) | ${pStr} ${stars(p)} |`;
+    });
+    return [header, sep, ...bodyRows].join("\n");
+  }
+
+  function copyFmt(fmt) {
+    const text = fmt === "latex" ? toLatex() : toMarkdown();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(fmt);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  }
   const COLS = "1.8fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 0.8fr 0.45fr";
 
   return (
@@ -453,10 +496,24 @@ function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "
         padding: "0.4rem 0.75rem", background: C.surface,
         borderTop: `1px solid ${C.border}`,
         fontSize: 9, color: C.textMuted, fontFamily: mono,
-        display: "flex", justifyContent: "space-between",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <span>● significant at 5% · SE in parentheses</span>
-        <span>95% CI = β̂ ± {z.toFixed(3)} × SE{df ? ` (t-dist, df=${df})` : " (z≈1.96)"}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span>95% CI = β̂ ± {z.toFixed(3)} × SE{df ? ` (t-dist, df=${df})` : " (z≈1.96)"}</span>
+          {(["latex", "md"]).map(fmt => (
+            <button key={fmt} onClick={() => copyFmt(fmt)} style={{
+              background: "none", border: `1px solid ${C.border}`, borderRadius: 3,
+              color: copied === fmt ? C.teal : C.textMuted,
+              fontFamily: mono, fontSize: 8, padding: "1px 6px",
+              cursor: "pointer", letterSpacing: "0.08em",
+              transition: "color 0.15s, border-color 0.15s",
+              borderColor: copied === fmt ? C.teal : C.border,
+            }}>
+              {copied === fmt ? "copied!" : fmt === "latex" ? "copy LaTeX" : "copy MD"}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -3258,7 +3315,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model={r.type} />
                 <ExportBar yVar={yVar[0]} results={r} model={r.type}
                   onReport={() => openReport({ ...r, modelLabel: r.label, yVar: yVar[0], xVars: [...xVars, ...wVars] })}
-                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars } }} />
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars, weightCol: r.spec?.weightCol ?? null } }} />
               </div>
             );
           })()}

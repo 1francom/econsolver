@@ -9,6 +9,7 @@
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
 import { toStata, jsExprToStata } from "../../pipeline/stepTranslators.js";
+import { buildStataLoadLine } from "./loadLine.js";
 
 export function generateStataScript(config = {}) {
   const {
@@ -16,6 +17,7 @@ export function generateStataScript(config = {}) {
     pipeline       = [],
     model          = {},
     dataDictionary = null,
+    dataLoadOpts   = null,
   } = config;
 
   const {
@@ -56,7 +58,7 @@ export function generateStataScript(config = {}) {
 
   // ── Load data ───────────────────────────────────────────────────────────────
   lines.push(`* ── Load data ────────────────────────────────────────────────────────────`);
-  lines.push(`import delimited "${stataFile}", clear`);
+  lines.push(buildStataLoadLine(stataFile, dataLoadOpts));
   lines.push("");
 
   // ── Data dictionary ─────────────────────────────────────────────────────────
@@ -304,7 +306,7 @@ function transpileStep(step) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime, weightCol = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
@@ -314,6 +316,17 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     case "OLS":
       lines.push(`reg ${yVar} ${xList}, robust`);
       lines.push(`estimates store m_ols`);
+      break;
+
+    case "WLS":
+      if (!weightCol) {
+        lines.push(`* WARNING: no weight column supplied; falling back to OLS`);
+        lines.push(`reg ${yVar} ${xList}, robust`);
+      } else {
+        lines.push(`* Weighted Least Squares (analytic weights: ${weightCol})`);
+        lines.push(`reg ${yVar} ${xList} [aw=${weightCol}], robust`);
+      }
+      lines.push(`estimates store m_wls`);
       break;
 
     case "FE":
@@ -589,9 +602,10 @@ function stataLocalName(label) {
 export function generateMultiModelStataScript(configs = [], dataDictionary = null, opts = {}) {
   if (!configs.length) return "* No models provided.";
 
-  const filename  = opts.filename ?? "dataset.csv";
-  const pipeline  = opts.pipeline ?? [];
-  const stataFile = filename.replace(/\\/g, "/");
+  const filename     = opts.filename ?? "dataset.csv";
+  const pipeline     = opts.pipeline ?? [];
+  const dataLoadOpts = opts.dataLoadOpts ?? null;
+  const stataFile    = filename.replace(/\\/g, "/");
   const ts = new Date().toISOString().slice(0, 10);
   const lines = [];
 
@@ -607,10 +621,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
   lines.push("");
 
   lines.push(`* ── Load data ────────────────────────────────────────────────────────────`);
-  const ext = filename.split(".").pop()?.toLowerCase();
-  if (ext === "dta") lines.push(`use "${stataFile}", clear`);
-  else if (["xlsx","xls"].includes(ext)) lines.push(`import excel "${stataFile}", firstrow clear`);
-  else lines.push(`import delimited "${stataFile}", clear`);
+  lines.push(buildStataLoadLine(stataFile, dataLoadOpts));
   lines.push("");
 
   if (pipeline.length) {
@@ -710,7 +721,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
 
 // ─── SUBSET REPLICATION SCRIPT (H6/H10) ───────────────────────────────────────
 // config: { filename, pipeline, perSubsetSteps, subsets, model, dataDictionary }
-export function generateSubsetStataScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null } = {}) {
+export function generateSubsetStataScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null, dataLoadOpts = null } = {}) {
   const ts   = new Date().toISOString().slice(0, 10);
   const stem = filename.replace(/\.[^.]+$/, "");
   const lines = [];
@@ -736,7 +747,7 @@ export function generateSubsetStataScript({ filename = "dataset.csv", pipeline =
   lines.push("");
 
   lines.push(`* ── Load data ────────────────────────────────────────────────────────────`);
-  lines.push(`import delimited "${filename.replace(/\\/g, "/")}", clear`);
+  lines.push(buildStataLoadLine(filename.replace(/\\/g, "/"), dataLoadOpts));
   lines.push("");
 
   if (dataDictionary && Object.keys(dataDictionary).length) {

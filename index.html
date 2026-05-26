@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Litux</title>
+    <!-- Import map: pins CDN ESM modules to exact versions with SRI integrity hashes.
+         Browser verifies hash before executing — blocks tampered CDN scripts.
+         Requires Chrome 112+, Firefox 115+, Safari 17.4+. -->
+    <script type="importmap">
+    {
+      "imports": {
+        "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.16/+esm": "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.16/+esm",
+        "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs": "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs"
+      },
+      "integrity": {
+        "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.16/+esm": "sha384-RV9FnaWu1geD2XH5kgJT2tAgluGukFy8CBX48bW0HaTCuSPiqqT5/0yAROURkxw5",
+        "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs": "sha384-OLBgp1GsljhM2TJ+sbHjaiH9txEUvgdDTAzHv2P24donTt6/529l+9Ua0vFImLlb"
+      }
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>

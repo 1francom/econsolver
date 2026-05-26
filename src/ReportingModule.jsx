@@ -14,6 +14,7 @@ import { useTheme } from "./ThemeContext.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import { stars, buildLatex } from "./math/index.js";
 import { interpretRegression, generateUnifiedScript } from "./services/AI/AIService.js";
+import { buildSessionSnapshot } from "./services/AI/sessionSnapshot.js";
 import { generateCleanScript } from "./pipeline/exporter.js";
 import { generateRScript }     from "./services/export/rScript.js";
 import { generatePythonScript } from "./services/export/pythonScript.js";
@@ -506,7 +507,7 @@ function NarrativeSkeleton() {
   );
 }
 
-function AINarrative({ result, modelLabel, yVar, dataDictionary, rows }) {
+function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot }) {
   const { C } = useTheme();
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
@@ -528,7 +529,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows }) {
     setError("");
 
     try {
-      const out = await interpretRegression(result, hasDictionary ? dataDictionary : null, null, rows);
+      const out = await interpretRegression(result, hasDictionary ? dataDictionary : null, null, rows, { snapshot });
       if (abortRef.current === token) {
         setText(out.trim());
       }
@@ -744,7 +745,7 @@ function SigCallout({ result }) {
 // Props:
 //   result       — normalised EstimationResult (for model section)
 //   cleanedData  — { cleanRows, headers, pipeline, dataDictionary, filename }
-function AIUnifiedScript({ result, cleanedData }) {
+function AIUnifiedScript({ result, cleanedData, snapshot }) {
   const { C } = useTheme();
   const [open,     setOpen]     = useState(false);
   const [lang,     setLang]     = useState("r");
@@ -766,6 +767,7 @@ function AIUnifiedScript({ result, cleanedData }) {
       filename:       spec.filename       ?? cleanedData?.filename ?? "dataset.csv",
       pipeline:       spec.pipeline       ?? cleanedData?.pipeline ?? [],
       dataDictionary: spec.dataDictionary ?? cleanedData?.dataDictionary ?? null,
+      dataLoadOpts:   cleanedData?.loadOpts ?? snapshot?.dataLoadOpts ?? null,
       model: {
         type:       result.type     ?? "OLS",
         yVar:       spec.yVar       ?? "",
@@ -805,7 +807,7 @@ function AIUnifiedScript({ result, cleanedData }) {
       });
       const modelSc = _buildModelScript(lang);
       const dict    = cleanedData?.dataDictionary ?? null;
-      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict);
+      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot });
       setScript(out);
     } catch (e) {
       setError(e.message ?? "Generation failed.");
@@ -953,6 +955,13 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
   console.log("DEBUG_RESULTS:", rawResult);
 
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
+
+  // ── Build session snapshot once per render — passed to AI calls so Claude
+  //    sees data load opts (sep, sheet, encoding), pipeline, dictionary, etc.
+  const snapshot = useMemo(
+    () => buildSessionSnapshot({ cleanedData, result: rawResult }),
+    [cleanedData, rawResult]
+  );
 
   // Detect Sharp RDD / Spatial RD — canonical shape uses type, legacy shape carries rddData or raw fields
   const isRDD = rawResult?.type === "RDD" || rawResult?.type === "SpatialRDD" || !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
@@ -1165,13 +1174,14 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
                 yVar={yVar}
                 dataDictionary={cleanedData?.dataDictionary ?? null}
                 rows={cleanedData?.cleanRows ?? null}
+                snapshot={snapshot}
               />
             </div>
           )}
         </div>
 
         {/* ── AI Unified Script Export — Phase 9.10 ── */}
-        <AIUnifiedScript result={result} cleanedData={cleanedData} />
+        <AIUnifiedScript result={result} cleanedData={cleanedData} snapshot={snapshot} />
 
       </div>
     </div>

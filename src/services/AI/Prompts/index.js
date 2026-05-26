@@ -623,6 +623,21 @@ TRANSFORMATION RULES (apply all):
     # See exported plots (excluded from replication script)
 6.  Keep all estimation code intact — do NOT simplify or summarise it.
 7.  At the end, add a brief comment block explaining the main model spec.
+8.  HONOR THE SESSION SNAPSHOT (when provided):
+    a. If a SESSION SNAPSHOT block is present, use its DATA LOAD OPTIONS
+       to emit the load call. CSV with delimiter ";" must use the
+       semicolon-aware reader (e.g. R: readr::read_delim(file, delim=";"),
+       Python: pd.read_csv(file, sep=";"), Stata: import delimited "...",
+       delimiter(";") clear). Excel must include the sheet name. Stata .dta
+       must use `use ... , clear` / R `haven::read_dta` / Py `pd.read_stata`.
+    b. If a "REQUIRED LOAD CALL" line is provided, that load call is
+       authoritative — emit it verbatim in the Data Loading section.
+    c. Walk the PIPELINE step list in order. If the section scripts already
+       cover all steps, keep them. If any step is missing, add it.
+    d. Reflect the SE TYPE from the snapshot in the estimation call when
+       applicable (e.g. fixest cluster=, plm vcov, statsmodels cov_type).
+    e. If PINNED MODELS or SUBSETS are listed, mention them in a final
+       comment block — do not estimate them unless the section script does.
 
 OUTPUT RULES (mandatory):
 - Return ONLY the script — no markdown fences, no preamble, no explanations.

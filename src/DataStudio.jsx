@@ -96,7 +96,8 @@ async function parseExcel(file) {
   const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
   const buf = await file.arrayBuffer();
   const wb  = read(buf, { type: "array", cellDates: true });
-  const ws  = wb.Sheets[wb.SheetNames[0]];
+  const sheetName = wb.SheetNames[0];
+  const ws  = wb.Sheets[sheetName];
   if (!ws) throw new Error("Excel file has no sheets.");
   const data = utils.sheet_to_json(ws, { defval: null, raw: false });
   if (!data.length) throw new Error("Excel sheet is empty — no rows found.");
@@ -116,7 +117,7 @@ async function parseExcel(file) {
     });
     return row;
   });
-  return { headers, rows };
+  return { headers, rows, _sheetName: sheetName };
 }
 
 // ─── DELIMITER DETECTION ─────────────────────────────────────────────────────
@@ -224,45 +225,58 @@ function groupShapefileFiles(files) {
   return out;
 }
 
+// Attach load options to the parsed result so downstream consumers
+// (sessionState, replication-script exports, AI Report) can faithfully
+// recreate the load step. Mirrors the `_crs` / `_duckdb` attachment
+// pattern already used by parseFile.
+function withLoadOpts(parsed, loadOpts) {
+  if (!parsed) return parsed;
+  parsed._loadOpts = loadOpts;
+  return parsed;
+}
+
 async function parseFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   if (["csv", "txt"].includes(ext)) {
     if (file.size > 10 * 1024 * 1024) {
       const { loadLargeCSV } = await import("./services/data/duckdb.js");
-      return loadLargeCSV(file);
+      // DuckDB auto-detects delimiter — record as "auto" so exports can mirror that.
+      return withLoadOpts(await loadLargeCSV(file), { format: "csv", delimiter: "auto", engine: "duckdb" });
     }
     const text = await file.text();
-    return parseCSV(text, detectDelimiter(text));
+    const delimiter = detectDelimiter(text);
+    return withLoadOpts(parseCSV(text, delimiter), { format: "csv", delimiter, encoding: "utf-8" });
   }
   if (ext === "tsv") {
     if (file.size > 10 * 1024 * 1024) {
       const { loadLargeCSV } = await import("./services/data/duckdb.js");
-      return loadLargeCSV(file);
+      return withLoadOpts(await loadLargeCSV(file), { format: "tsv", delimiter: "\t", engine: "duckdb" });
     }
     const text = await file.text();
-    return parseCSV(text, "\t");
+    return withLoadOpts(parseCSV(text, "\t"), { format: "tsv", delimiter: "\t", encoding: "utf-8" });
   }
   if (["xlsx", "xls"].includes(ext)) {
-    return parseExcel(file);
+    const parsed = await parseExcel(file);
+    return withLoadOpts(parsed, { format: "excel", sheetName: parsed?._sheetName ?? null });
   }
   if (ext === "dta") {
     const { parseStata } = await import("./services/data/parsers/stata.js");
     const buf = await file.arrayBuffer();
-    return parseStata(buf);
+    return withLoadOpts(await parseStata(buf), { format: "stata" });
   }
   if (ext === "rds") {
     const { parseRDS } = await import("./services/data/parsers/rds.js");
     const buf = await file.arrayBuffer();
-    return parseRDS(buf);
+    return withLoadOpts(await parseRDS(buf), { format: "rds" });
   }
   if (ext === "parquet") {
     const { loadParquet } = await import("./services/data/duckdb.js");
-    return loadParquet(file);
+    return withLoadOpts(await loadParquet(file), { format: "parquet", engine: "duckdb" });
   }
   if (ext === "dbf") {
     const { parseShapefile } = await import("./services/data/parsers/shapefile.js");
     const buf = await file.arrayBuffer();
-    return parseShapefile(buf, null);
+    return withLoadOpts(await parseShapefile(buf, null), { format: "shapefile-dbf" });
   }
   if (ext === "zip") {
     const { unzipSync } = await import("fflate");
@@ -286,17 +300,18 @@ async function parseFile(file) {
       const prjArr = files[prjKey];
       prjText = new TextDecoder("utf-8").decode(prjArr);
     }
-    return parseShapefile(dbfBuf, shpBuf, prjText);
+    return withLoadOpts(await parseShapefile(dbfBuf, shpBuf, prjText), { format: "shapefile-zip" });
   }
   if (ext === "shp") {
     const { parseSHPOnly } = await import("./services/data/parsers/shapefile.js");
     const buf = await file.arrayBuffer();
-    return parseSHPOnly(buf);
+    return withLoadOpts(await parseSHPOnly(buf), { format: "shapefile-shp" });
   }
   // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
     const text = await file.text();
-    return parseCSV(text, detectDelimiter(text));
+    const delimiter = detectDelimiter(text);
+    return withLoadOpts(parseCSV(text, delimiter), { format: "csv", delimiter, encoding: "utf-8", fallback: true });
   } catch { return null; }
 }
 
@@ -609,6 +624,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         colCount: d.rawData.headers?.length ?? 0,
         headers:  d.rawData.headers         ?? [],
         crs:      d.crs ?? null,
+        loadOpts: d.rawData._loadOpts ?? null,
       });
     });
   }, [datasets, dispatch]);
@@ -658,6 +674,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         colCount: parsed.headers.length,
         headers:  parsed.headers,
         crs:      parsed._crs ?? null,
+        loadOpts: parsed._loadOpts ?? null,
       });
     }
     return id;

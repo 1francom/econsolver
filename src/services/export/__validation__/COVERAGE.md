@@ -1,6 +1,7 @@
 # Phase 0.4 — Export Translation Coverage
 
 **Generated:** 2026-05-23
+**Last refreshed:** 2026-05-26
 **Scope:** Estimator and pipeline-step coverage across R, Stata, and Python transpilers
 **Source files:** `src/services/export/rScript.js`, `stataScript.js`, `pythonScript.js`
 
@@ -17,7 +18,7 @@
 | Estimator           | R                 | Stata             | Python  | Notes |
 |---------------------|-------------------|-------------------|---------|-------|
 | OLS                 | complete          | complete          | complete | `feols` / `reg, robust` / `statsmodels.OLS` |
-| WLS                 | complete          | complete          | complete | Weighted least squares |
+| WLS                 | complete          | complete          | complete | `fixest::feols(... weights = ~w, vcov = "HC1")` / `reg y x [aw=w], robust` / `smf.wls(..., weights=df["w"]).fit(cov_type="HC3")`. Falls back to OLS with a `WARNING:` comment when `weightCol` is null. ModelingTab now forwards `result.spec.weightCol` into `replicateConfig` (was previously dropped, so weights never reached the export even if a `case "WLS":` had existed) |
 | FE (within)         | complete          | complete          | complete | `fixest::feols` / `xtreg, fe` / `linearmodels.PanelOLS` |
 | FD                  | complete          | complete          | complete | `plm(model="fd")` / `xtreg, fd` / `linearmodels.FirstDifferenceOLS` |
 | TWFE                | complete          | complete          | complete | Dual FE syntax in all three |
@@ -37,11 +38,12 @@
 | Synthetic Control   | known-divergent   | complete          | complete  | Stata `synth` + `synth_runner` placebo; Python `pysynth` (try/except) + scipy SLSQP fallback; weights ~1e-2 vs R Synth::ipop (Frank-Wolfe vs nested-opt, tolerated) |
 | **Spatial RD**      | complete          | complete          | complete    | R `rdrobust` on signed dist; Stata `rdrobust` + manual WLS fallback; Python `smf.wls` |
 
-**Coverage stats (estimators)** — updated 2026-05-24
-- R:      19/19 complete or known-divergent
-- Stata:  19/19 complete or known-divergent
-- Python: 19/19 complete or known-divergent
-- All partial/missing entries resolved: Sharp RDD Python → rdrobust try/except; Fuzzy RDD Stata/Python → rdrobust; LSDV Stata/Python → FE recovery added; SyntheticControl Stata/Python → already had emitters (table was stale).
+**Coverage stats (estimators, 20 total)** — refreshed 2026-05-26
+- R:      20/20 complete or known-divergent; 1 row counted under "DiD" covers both 2x2 and TWFE-DiD via the same `case "DiD":`
+- Stata:  20/20 complete or known-divergent
+- Python: 20/20 complete or known-divergent
+- WLS round-trip 2026-05-26: surfaced as `missing` during refresh (no `case "WLS":` in any transpiler), then implemented (`feols(...,weights=~w)` / `reg [aw=w]` / `smf.wls`). Also fixed a latent bug — ModelingTab's OLS/WLS `replicateConfig` was not forwarding `result.spec.weightCol`, so weights would not have reached the export even with a case branch. Smoke test in `exportValidation.js` row 37–42 tightened: `weightVar` → `weightCol`, patterns upgraded from generic `"feols"`/`"reg wage"`/`"WLS"` to `"weights = ~wgt"` / `"[aw=wgt]"` / `"smf.wls"`.
+- All other partial/missing entries resolved earlier: Sharp RDD Python → rdrobust try/except; Fuzzy RDD Stata/Python → rdrobust; LSDV Stata/Python → FE recovery added; SyntheticControl Stata/Python → already had emitters (table was stale).
 
 ---
 
@@ -63,7 +65,7 @@
 | trim_outliers        | complete | complete | complete | IQR-based |
 | flag_outliers        | complete | complete | complete | |
 | extract_regex        | complete | complete | complete | |
-| ai_tr                | partial  | partial  | partial  | Parses `v => body` arrow fn, substitutes param → col ref, runs `jsExprToR/Stata/Python`; falls back to comment. Runtime validation still needed for complex exprs |
+| ai_tr                | complete | complete | complete | Parses `v => body` arrow fn, substitutes param → col ref, runs `jsExprToR/Stata/Python` (same translator as `mutate`); comment fallback for unparseable arrow / unsupported syntax. Promoted from `partial` 2026-05-26 — same machinery as `mutate`, which is already `complete` |
 | log                  | complete | complete | complete | |
 | sq                   | complete | complete | complete | |
 | std                  | complete | complete | complete | |
@@ -85,13 +87,13 @@
 | geocode              | complete | complete | complete | R `tidygeocoder::geocode(method="osm")`; Stata export+merge workaround; Python `geopy` Nominatim + RateLimiter |
 | patch (cell edits)   | complete  | complete  | complete  | Emits `__row_id`-based lookup when `step.rowId` set; `__ri` fallback with warning comment. Phase E will populate `rowId` on new patches. |
 
-**Coverage stats (pipeline steps, 34 total)** — updated 2026-05-24
-- R:      ~33 complete, 1 partial (ai_tr), 0 missing
-- Stata:  ~33 complete, 1 partial (ai_tr), 0 missing
-- Python: ~33 complete, 1 partial (ai_tr), 0 missing
-- pivot_longer R → complete (tidyr::pivot_longer, simple + multi/.value modes)
-- geocode all three → complete (tidygeocoder / Stata export+merge / geopy RateLimiter)
-- ai_tr: upgraded from stub comment → arrow-fn parser + jsExprToR/Stata/Python; falls back to comment
+**Coverage stats (pipeline steps, 34 total)** — refreshed 2026-05-26
+- R:      34/34 complete, 0 partial, 0 missing
+- Stata:  34/34 complete, 0 partial, 0 missing
+- Python: 34/34 complete, 0 partial, 0 missing
+- pivot_longer R → complete (tidyr::pivot_longer, simple + multi/.value modes) [2026-05-24]
+- geocode all three → complete (tidygeocoder / Stata export+merge / geopy RateLimiter) [2026-05-24]
+- ai_tr all three → complete (arrow-fn parser + jsExprToR/Stata/Python, same path as `mutate`) [2026-05-26]
 
 ---
 
@@ -118,6 +120,12 @@
 5. ~~**Join / Append in Stata/Python**~~ — DONE. Stata: `preserve/import/merge/restore` pattern with `__right_tmp.dta`; Python: `pd.read_csv` + `df.merge`/`pd.concat`.
 6. ~~**`patch` step**~~ — DONE. All three emitters now emit `__row_id`-based lookup when `step.rowId` is set; fall back to `__ri` with a comment for legacy steps. `rowIdentity.js` wiring (Phase E) will populate `rowId` on new patches.
 7. ~~**`mutate` step**~~ — DONE. `jsExprToR/Stata/Python` exported from `stepTranslators.js` and wired into all three export files. Translates `ifelse`, `log`, `sqrt`, `case_when`, `pmin/pmax`, JS operators (`===`, `&&`, `||`, `**`) to language equivalents. Falls back to a manual-translate comment for arrow functions / template literals.
+8. ~~**`ai_tr` step**~~ — DONE 2026-05-26. All three emitters parse `v => body` arrow fns, substitute the param with the target column reference, and reuse the `mutate` translator (`jsExprToR/Stata/Python`). Comment fallback preserved for unparseable input. Same correctness envelope as `mutate`.
+9. ~~**WLS estimator**~~ — DONE 2026-05-26. Added `case "WLS":` to all three transpilers — `fixest::feols(... weights = ~w, vcov = "HC1")` / `reg y x [aw=w], robust` / `smf.wls(..., weights=df["w"]).fit(cov_type="HC3")`. Each branch falls back to OLS with an explicit `WARNING:` comment when `weightCol` is null. Also patched ModelingTab.jsx ~3318 to forward `result.spec.weightCol` into `replicateConfig.model` (was being dropped, so weights would not have reached the export even with a case branch). Smoke test row 37–42 in `exportValidation.js` tightened to canonical field `weightCol` and assertion patterns `weights = ~wgt` / `[aw=wgt]` / `smf.wls`.
+
+### Open
+
+(none — all enumerated items resolved as of 2026-05-26)
 
 Phase A.1 (`seTolerances.js`) and Phase A.2 (`goldenFileHarness.js`) are both ✓ DONE.
 **Browser validation PENDING — Franco to run `window.__goldenHarness()` and `window.__validateExports()` by 2026-05-29.**
