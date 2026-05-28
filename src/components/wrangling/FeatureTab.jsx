@@ -50,6 +50,9 @@ function MutateSubTab({rows, headers, info, onAdd}){
     coalesce:(...a)=>a.find(v=>v!==null&&v!==undefined)??null,
     pmin:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.min(a,b):null,
     pmax:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.max(a,b):null,
+    min:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.min(a,b):null,
+    max:(a,b)=>(typeof a==="number"&&typeof b==="number")?Math.max(a,b):null,
+    pow:(x,n)=>(typeof x==="number"&&typeof n==="number")?Math.pow(x,n):null,
     clamp:(x,lo,hi)=>typeof x==="number"?Math.max(lo,Math.min(hi,x)):null,
     rescale:(x,o0,o1,n0=0,n1=1)=>(typeof x==="number"&&o1!==o0)?(n0+(x-o0)*(n1-n0)/(o1-o0)):null,
     case_when:(...p)=>{for(let i=0;i<p.length-1;i+=2){if(p[i])return p[i+1];}return p.length%2===1?p[p.length-1]:null;},
@@ -199,7 +202,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
         fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
         {isGrouped
           ?<>Grouped mutate — <span style={{color:C.purple}}>group_by() %&gt;% mutate()</span>. Columns become <b>arrays</b> within each group. Use <span style={{color:C.purple}}>any/all/sum/mean/min/max/count/first/last</span>. All rows kept.</>
-          :<>dplyr <span style={{color:C.green}}>mutate()</span> — columns are per-row scalars. All math operators (+, −, *, /, **) supported.</>}
+          :<>dplyr <span style={{color:C.green}}>mutate()</span> — columns are per-row scalars. Math operators (+, −, *, /, **) and helpers: <span style={{color:C.blue}}>log sqrt exp abs pow round min max floor ceil clamp ifelse case_when</span>. Ctrl+Enter to apply.</>}
       </div>
 
       {/* Group by + filter */}
@@ -278,12 +281,12 @@ function MutateSubTab({rows, headers, info, onAdd}){
               onChange={e=>{setStepField(i,"name",e.target.value);setActive(i);}}
               onFocus={()=>setActive(i)}
               style={{...inpS,borderColor:i===activeIdx?`${C.green}70`:inpS.borderColor}}/>
-            <input value={s.expr}
-              placeholder={isGrouped?"e.g. any(trarrprop)":"e.g. gdp / population"}
+            <textarea value={s.expr} rows={2}
+              placeholder={isGrouped?"e.g. any(trarrprop)":"e.g. log(wage) * 2 + educ\ne.g. income > 0 ? income : 0"}
               onChange={e=>{setStepField(i,"expr",e.target.value);setActive(i);}}
               onFocus={()=>setActive(i)}
-              onKeyDown={e=>{if(e.key==="Enter"&&canAdd)doAddAll();}}
-              style={{...inpS,borderColor:i===activeIdx?`${C.green}70`:inpS.borderColor}}/>
+              onKeyDown={e=>{if(e.key==="Enter"&&e.ctrlKey&&canAdd)doAddAll();}}
+              style={{...inpS,resize:"vertical",lineHeight:1.5,borderColor:i===activeIdx?`${C.green}70`:inpS.borderColor}}/>
             {steps.length>1&&(
               <button onClick={e=>{e.stopPropagation();removeStep(i);}}
                 style={{background:"none",border:"none",cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,padding:0}}>✕</button>
@@ -433,6 +436,143 @@ function MutateSubTab({rows, headers, info, onAdd}){
 
 
 
+// ─── CONDITIONAL SUB-TAB ─────────────────────────────────────────────────────
+// Provides if_else and case_when step builders.
+function ConditionalSubTab({ headers, onAdd }) {
+  const { C } = useTheme();
+  const [mode, setMode] = useState("if_else"); // "if_else" | "case_when"
+
+  // if_else state
+  const [ifeNN,       setIfeNN]       = useState("");
+  const [ifeCond,     setIfeCond]     = useState("");
+  const [ifeTrueVal,  setIfeTrueVal]  = useState("");
+  const [ifeFalseVal, setIfeFalseVal] = useState("");
+
+  // case_when state
+  const [cwNN,      setCwNN]      = useState("");
+  const [cwCases,   setCwCases]   = useState([{ cond: "", val: "" }]);
+  const [cwDefault, setCwDefault] = useState("");
+
+  const inpS = {
+    width: "100%", boxSizing: "border-box", padding: "0.42rem 0.65rem",
+    background: C.surface2, border: `1px solid ${C.border2}`,
+    borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, outline: "none",
+  };
+  const taS = { ...inpS, resize: "vertical", lineHeight: 1.5, rows: 2 };
+
+  function addIfeStep() {
+    if (!ifeNN.trim() || !ifeCond.trim()) return;
+    onAdd({
+      type: "if_else", nn: ifeNN.trim(), cond: ifeCond.trim(),
+      trueVal: ifeTrueVal, falseVal: ifeFalseVal,
+      desc: `if_else(${ifeCond.trim()}) → ${ifeNN.trim()}`,
+    });
+    setIfeNN(""); setIfeCond(""); setIfeTrueVal(""); setIfeFalseVal("");
+  }
+
+  function addCwStep() {
+    if (!cwNN.trim() || !cwCases.some(c => c.cond.trim())) return;
+    onAdd({
+      type: "case_when", nn: cwNN.trim(),
+      cases: cwCases.filter(c => c.cond.trim()),
+      defaultVal: cwDefault || null,
+      desc: `case_when(${cwCases.filter(c=>c.cond.trim()).length} cases) → ${cwNN.trim()}`,
+    });
+    setCwNN(""); setCwCases([{ cond: "", val: "" }]); setCwDefault("");
+  }
+
+  const modeBtnS = (active) => ({
+    padding: "0.3rem 0.85rem", border: `1px solid ${active ? C.gold : C.border2}`,
+    background: active ? `${C.gold}18` : "transparent",
+    color: active ? C.gold : C.textMuted,
+    borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: mono,
+  });
+
+  return (
+    <div>
+      {/* Mode toggle */}
+      <div style={{ display: "flex", gap: 6, marginBottom: "1rem" }}>
+        <button style={modeBtnS(mode === "if_else")}    onClick={() => setMode("if_else")}>if_else</button>
+        <button style={modeBtnS(mode === "case_when")}  onClick={() => setMode("case_when")}>case_when</button>
+      </div>
+
+      {mode === "if_else" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ padding: "0.5rem 0.9rem", background: C.surface, border: `1px solid ${C.border}`,
+            borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.6 }}>
+            <span style={{ color: C.gold }}>if_else(cond, trueVal, falseVal)</span> — creates a new column.
+            Condition is a JS expression (column names available). True/false values can be literals or column names.
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Output column name</div>
+            <input value={ifeNN} onChange={e => setIfeNN(e.target.value)} placeholder="e.g. adult" style={inpS} />
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Condition</div>
+            <textarea value={ifeCond} rows={2} onChange={e => setIfeCond(e.target.value)}
+              placeholder={"e.g. age >= 18\ne.g. gdp > 1000 && year >= 2000"} style={taS} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Value when true</div>
+              <input value={ifeTrueVal} onChange={e => setIfeTrueVal(e.target.value)}
+                placeholder="literal or column name" style={inpS} />
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Value when false</div>
+              <input value={ifeFalseVal} onChange={e => setIfeFalseVal(e.target.value)}
+                placeholder="literal or column name" style={inpS} />
+            </div>
+          </div>
+          <Btn onClick={addIfeStep} color={C.gold} v="solid" dis={!ifeNN.trim() || !ifeCond.trim()} ch="Add to pipeline →" />
+        </div>
+      )}
+
+      {mode === "case_when" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ padding: "0.5rem 0.9rem", background: C.surface, border: `1px solid ${C.border}`,
+            borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.6 }}>
+            <span style={{ color: C.gold }}>case_when(c1 → v1, c2 → v2, …, default)</span> — first matching condition wins.
+            Conditions are JS expressions; values are literals.
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Output column name</div>
+            <input value={cwNN} onChange={e => setCwNN(e.target.value)} placeholder="e.g. size_cat" style={inpS} />
+          </div>
+          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Cases — first match wins</div>
+          {cwCases.map((c, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 22px", gap: 6, alignItems: "center" }}>
+              <textarea value={c.cond} rows={2} onChange={e => setCwCases(cs => cs.map((x,j) => j===i ? {...x, cond: e.target.value} : x))}
+                placeholder={`condition ${i+1}  e.g. area < 10`} style={taS} />
+              <input value={c.val} onChange={e => setCwCases(cs => cs.map((x,j) => j===i ? {...x, val: e.target.value} : x))}
+                placeholder={`value  e.g. "small"`} style={inpS} />
+              {cwCases.length > 1
+                ? <button onClick={() => setCwCases(cs => cs.filter((_,j) => j !== i))}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, fontSize: 13 }}>✕</button>
+                : <span />
+              }
+            </div>
+          ))}
+          <button onClick={() => setCwCases(cs => [...cs, { cond: "", val: "" }])} style={{
+            padding: "0.28rem 0.7rem", background: "transparent", border: `1px dashed ${C.border2}`,
+            borderRadius: 3, color: C.textMuted, cursor: "pointer", fontSize: 10, fontFamily: mono, alignSelf: "flex-start",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.color = C.gold; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+          >+ case</button>
+          <div>
+            <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Default value (no match)</div>
+            <input value={cwDefault} onChange={e => setCwDefault(e.target.value)}
+              placeholder='e.g. "other" or 0' style={inpS} />
+          </div>
+          <Btn onClick={addCwStep} color={C.gold} v="solid"
+            dis={!cwNN.trim() || !cwCases.some(c => c.cond.trim())} ch="Add to pipeline →" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   const { C } = useTheme();
@@ -570,7 +710,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
 
   return(
     <div>
-      <Tabs tabs={[["quick","⚡ Transforms"],["mutate","ƒ Mutate"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["numbers","⬡ Numbers"],["strings","◈ Strings"]]} active={vt} set={setVt} accent={C.teal} sm/>
+      <Tabs tabs={[["quick","⚡ Transforms"],["mutate","ƒ Mutate"],["conditional","⊕ Conditional"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["numbers","⬡ Numbers"],["strings","◈ Strings"]]} active={vt} set={setVt} accent={C.teal} sm/>
 
       {/* ── Variable name input (shared by quick/panel/did) ── */}
       {(vt==="quick"||vt==="panel"||vt==="did")&&(
@@ -841,6 +981,9 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
 
       {/* ── Mutate ── */}
       {vt==="mutate"&&<MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>}
+
+      {/* ── Conditional ── */}
+      {vt==="conditional"&&<ConditionalSubTab headers={headers} onAdd={onAdd}/>}
 
       {/* ── Group mutate (removed — integrated into ƒ Mutate tab) ── */}
       {vt==="group_REMOVED"&&(()=>{

@@ -1002,8 +1002,418 @@ function ProbCalc() {
   );
 }
 
+// ─── SEEDED PRNG (mulberry32) ─────────────────────────────────────────────────
+function mulberry32(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s += 0x6D2B79F5;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeRNG(seed) {
+  if (seed == null || seed === "") return () => Math.random();
+  const s = parseInt(seed, 10);
+  return isFinite(s) ? mulberry32(s) : () => Math.random();
+}
+
+// ─── PURE-JS RANDOM VARIATE GENERATORS ───────────────────────────────────────
+function genNormal(mean, sd, n, rng) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const u1 = Math.max(rng(), 1e-15), u2 = rng();
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    out.push(mean + sd * z);
+  }
+  return out;
+}
+function genUniform(min, max, n, rng) {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(min + (max - min) * rng());
+  return out;
+}
+function genBinomial(trials, p, n, rng) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let k = 0;
+    for (let j = 0; j < trials; j++) if (rng() < p) k++;
+    out.push(k);
+  }
+  return out;
+}
+function genPoisson(lambda, n, rng) {
+  const L = Math.exp(-lambda);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let k = 0, pp = 1;
+    do { k++; pp *= rng(); } while (pp > L);
+    out.push(k - 1);
+  }
+  return out;
+}
+function genExponential(rate, n, rng) {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(-Math.log(Math.max(rng(), 1e-15)) / rate);
+  return out;
+}
+function _genGammaMT(shape, scale, rng) {
+  let sh = shape, boost = 1;
+  if (sh < 1) { boost = rng() ** (1 / sh); sh += 1; }
+  const d = sh - 1 / 3, c2 = 1 / Math.sqrt(9 * d);
+  for (;;) {
+    let x, v;
+    do { x = (rng() * 2 - 1) * 3.4641; v = 1 + c2 * x; } while (v <= 0);
+    v = v * v * v;
+    const u = rng(), x2 = x * x;
+    if (u < 1 - 0.0331 * x2 * x2) return d * v * scale * boost;
+    if (Math.log(u) < 0.5 * x2 + d * (1 - v + Math.log(v))) return d * v * scale * boost;
+  }
+}
+function genGamma(shape, scale, n, rng) {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(_genGammaMT(shape, scale, rng));
+  return out;
+}
+
+function generateSamples(dist, params, n, seed) {
+  const rng = makeRNG(seed);
+  const N = Math.max(1, Math.min(100000, parseInt(n) || 100));
+  switch (dist) {
+    case "normal":      return genNormal(+params.mean, +params.sd, N, rng);
+    case "uniform":     return genUniform(+params.min, +params.max, N, rng);
+    case "binomial":    return genBinomial(+params.n, +params.p, N, rng);
+    case "poisson":     return genPoisson(+params.lambda, N, rng);
+    case "exponential": return genExponential(+params.rate, N, rng);
+    case "gamma":       return genGamma(+params.shape, +params.scale, N, rng);
+    default:            return [];
+  }
+}
+
+const DIST_CONFIGS = {
+  normal:     { label:"Normal",      params:[{k:"mean",def:"0"},{k:"sd",def:"1"}] },
+  uniform:    { label:"Uniform",     params:[{k:"min",def:"0"},{k:"max",def:"1"}] },
+  binomial:   { label:"Binomial",    params:[{k:"n",def:"10"},{k:"p",def:"0.5"}] },
+  poisson:    { label:"Poisson",     params:[{k:"lambda",def:"1"}] },
+  exponential:{ label:"Exponential", params:[{k:"rate",def:"1"}] },
+  gamma:      { label:"Gamma",       params:[{k:"shape",def:"2"},{k:"scale",def:"1"}] },
+};
+
+// ─── MINI INLINE HISTOGRAM ────────────────────────────────────────────────────
+function MiniHist({ values, color }) {
+  const { C } = useTheme();
+  const col = color ?? C.teal;
+  if (!values?.length) return null;
+  const W = 340, H = 72, PL = 6, PR = 6, PT = 6, PB = 14;
+  let lo = Infinity, hi = -Infinity;
+  for (const v of values) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  const span = hi - lo || 1;
+  const NBINS = 28;
+  const bw = span / NBINS;
+  const counts = new Array(NBINS).fill(0);
+  for (const v of values) counts[Math.min(NBINS - 1, Math.max(0, Math.floor((v - lo) / bw)))]++;
+  const maxC = Math.max(...counts);
+  const xp = v => PL + (W - PL - PR) * (v - lo) / span;
+  const yp = c => H - PB - (H - PT - PB) * (c / maxC);
+  const bwPx = (W - PL - PR) / NBINS;
+  return (
+    <svg width={W} height={H} style={{ display:"block", marginTop:4 }}>
+      {counts.map((c, i) => (
+        <rect key={i} x={PL + i*bwPx + 0.5} y={yp(c)} width={Math.max(0, bwPx - 1)}
+          height={H - PB - yp(c)} fill={col} opacity={0.55}/>
+      ))}
+      <line x1={PL} x2={W - PR} y1={H - PB} y2={H - PB} stroke={C.border}/>
+      <text x={PL} y={H - 2} fontSize={8} fontFamily={mono} fill={C.textMuted}>{lo.toFixed(2)}</text>
+      <text x={W - PR} y={H - 2} textAnchor="end" fontSize={8} fontFamily={mono} fill={C.textMuted}>{hi.toFixed(2)}</text>
+    </svg>
+  );
+}
+
+// ─── D2 + D4: DISTRIBUTIONS SECTION ──────────────────────────────────────────
+function DistributionsSection({ onAddColumn, onCreateDataset }) {
+  const { C } = useTheme();
+  const [open, setOpen]     = useState(false);
+  const [dist, setDist]     = useState("normal");
+  const [params, setParams] = useState({ mean:"0", sd:"1" });
+  const [nSamples, setNSamples] = useState("100");
+  const [seed, setSeed]     = useState("");
+  const [colName, setColName] = useState("sample_1");
+  const [generated, setGenerated] = useState(null);
+  const [addedMsg, setAddedMsg]   = useState("");
+
+  function switchDist(d) {
+    setDist(d);
+    const def = {};
+    DIST_CONFIGS[d].params.forEach(({ k, def: v }) => { def[k] = v; });
+    setParams(def);
+    setGenerated(null);
+  }
+
+  function generate() {
+    try {
+      const values = generateSamples(dist, params, nSamples, seed || null);
+      setGenerated({ values });
+    } catch (e) {
+      setGenerated({ error: e.message });
+    }
+  }
+
+  function addToDataset() {
+    if (!generated?.values || !colName.trim()) return;
+    onAddColumn?.(colName.trim(), generated.values);
+    setAddedMsg("Added!"); setTimeout(() => setAddedMsg(""), 1800);
+  }
+
+  function newDataset() {
+    if (!generated?.values || !colName.trim()) return;
+    const name = colName.trim();
+    onCreateDataset?.(name + "_dataset", generated.values.map(v => ({ [name]: v })), [name]);
+    setAddedMsg("Dataset created!"); setTimeout(() => setAddedMsg(""), 1800);
+  }
+
+  const cfg = DIST_CONFIGS[dist];
+
+  return (
+    <div style={{ border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden", marginBottom:"1.4rem" }}>
+      <SectionHeader label="∿ Distributions" open={open} onToggle={() => setOpen(o => !o)} />
+      {open && (
+        <div style={{ padding:"0.85rem", background:C.surface, display:"flex", flexDirection:"column", gap:10 }}>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+            <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
+              <select value={dist} onChange={e => switchDist(e.target.value)} style={{ ...fieldStyle(C), width:130 }}>
+                {Object.entries(DIST_CONFIGS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </label>
+            {cfg.params.map(({ k }) => (
+              <label key={k} style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
+                <input type="number" step="any" value={params[k] ?? ""}
+                  onChange={e => setParams(p => ({ ...p, [k]: e.target.value }))}
+                  style={{ ...fieldStyle(C), width:72 }}/>
+              </label>
+            ))}
+          </div>
+
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+            <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>N samples</span>
+              <input type="number" min={1} max={100000} step={1} value={nSamples}
+                onChange={e => setNSamples(e.target.value)} style={{ ...fieldStyle(C), width:90 }}/>
+            </label>
+            <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Seed (optional)</span>
+              <input type="number" step={1} value={seed} placeholder="random"
+                onChange={e => setSeed(e.target.value)} style={{ ...fieldStyle(C), width:100 }}/>
+            </label>
+            <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Column name</span>
+              <input value={colName} onChange={e => setColName(e.target.value)}
+                style={{ ...fieldStyle(C), width:130 }}/>
+            </label>
+            <div style={{ alignSelf:"flex-end" }}>
+              <Btn ch="Generate ▸" v="solid" color={C.teal} sm onClick={generate} dis={!colName.trim()}/>
+            </div>
+          </div>
+
+          {generated?.error && <ErrBox msg={generated.error}/>}
+
+          {generated?.values && (
+            <ResultBox color={C.teal}>
+              <div style={{ fontSize:9, color:C.textMuted, marginBottom:4 }}>
+                Preview (first 5 of {generated.values.length}):&nbsp;
+                <span style={{ color:C.teal }}>{generated.values.slice(0,5).map(v => Number(v).toFixed(4)).join(", ")}</span>
+              </div>
+              <div style={{ fontSize:9, color:C.textMuted, marginBottom:2 }}>
+                mean = {(generated.values.reduce((a,b)=>a+b,0)/generated.values.length).toFixed(4)}
+                {" · "}sd = {(() => { const m=generated.values.reduce((a,b)=>a+b,0)/generated.values.length; return Math.sqrt(generated.values.reduce((a,b)=>a+(b-m)**2,0)/generated.values.length).toFixed(4); })()}
+              </div>
+              <MiniHist values={generated.values}/>
+            </ResultBox>
+          )}
+
+          {generated?.values && (
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+              <Btn ch="Add to dataset" v="solid" color={C.gold} sm onClick={addToDataset}
+                dis={!colName.trim() || !onAddColumn}/>
+              <Btn ch="New dataset from this column" v="out" sm onClick={newDataset}
+                dis={!colName.trim()}/>
+              {addedMsg && <span style={{ fontFamily:mono, fontSize:10, color:C.teal }}>{addedMsg}</span>}
+              {!onAddColumn && (
+                <span style={{ fontFamily:mono, fontSize:9, color:C.textMuted }}>
+                  (onAddColumn not wired — TODO in parent)
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── D5: MONTE CARLO SECTION ──────────────────────────────────────────────────
+function _buildMCScope(rng) {
+  return {
+    rnorm:  (n, mean, sd)     => { const _m=mean??0, _s=sd??1; return (n??1)===1 ? genNormal(_m,_s,1,rng)[0] : genNormal(_m,_s,n??1,rng); },
+    runif:  (n, min, max)     => { const _mn=min??0, _mx=max??1; return (n??1)===1 ? genUniform(_mn,_mx,1,rng)[0] : genUniform(_mn,_mx,n??1,rng); },
+    rbinom: (n, p, trials)    => { const _t=trials??1; return (n??1)===1 ? genBinomial(_t,p??0.5,1,rng)[0] : genBinomial(_t,p??0.5,n??1,rng); },
+    rpois:  (lambda, n)       => (n??1)===1 ? genPoisson(lambda??1,1,rng)[0] : genPoisson(lambda??1,n??1,rng),
+    rexp:   (rate, n)         => (n??1)===1 ? genExponential(rate??1,1,rng)[0] : genExponential(rate??1,n??1,rng),
+    rgamma: (shape, scale, n) => (n??1)===1 ? _genGammaMT(shape??2,scale??1,rng) : genGamma(shape??2,scale??1,n??1,rng),
+  };
+}
+
+function MonteCarloSection({ onAddColumn, onCreateDataset }) {
+  const { C } = useTheme();
+  const [open, setOpen]         = useState(false);
+  const [expr, setExpr]         = useState("rnorm(1) * 2 + runif(1)");
+  const [nRep, setNRep]         = useState("1000");
+  const [seed, setSeed]         = useState("");
+  const [result, setResult]     = useState(null);
+  const [busy, setBusy]         = useState(false);
+  const [addedMsg, setAddedMsg] = useState("");
+  const [resColName, setResColName] = useState("mc_result");
+
+  function run() {
+    const N = Math.max(1, Math.min(10000, parseInt(nRep) || 1000));
+    setBusy(true); setResult(null);
+    setTimeout(() => {
+      try {
+        const rng = makeRNG(seed || null);
+        const sc = _buildMCScope(rng);
+        const values = [];
+        for (let i = 0; i < N; i++) {
+          const { value, error } = evalExpression(expr, sc);
+          if (error) throw new Error(`Expression error: ${error}`);
+          if (typeof value !== "number" || !isFinite(value))
+            throw new Error(`Expression returned ${value} on iteration ${i+1}. Must evaluate to a finite number.`);
+          values.push(value);
+        }
+        const sorted = [...values].sort((a, b) => a - b);
+        const mean = values.reduce((a, b) => a + b, 0) / N;
+        const sd = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / N);
+        setResult({ values: sorted, mean, sd, p025: sorted[Math.floor(0.025*N)], p975: sorted[Math.min(N-1, Math.floor(0.975*N))], N });
+      } catch (e) {
+        setResult({ error: e.message });
+      } finally {
+        setBusy(false);
+      }
+    }, 0);
+  }
+
+  function addResults() {
+    if (!result?.values || !resColName.trim()) return;
+    onAddColumn?.(resColName.trim(), result.values);
+    setAddedMsg("Added!"); setTimeout(() => setAddedMsg(""), 1800);
+  }
+
+  function newDataset() {
+    if (!result?.values || !resColName.trim()) return;
+    const name = resColName.trim();
+    onCreateDataset?.(name + "_mc", result.values.map(v => ({ [name]: v })), [name]);
+    setAddedMsg("Dataset created!"); setTimeout(() => setAddedMsg(""), 1800);
+  }
+
+  return (
+    <div style={{ border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden", marginBottom:"1.4rem" }}>
+      <SectionHeader label="⊡ Monte Carlo" open={open} onToggle={() => setOpen(o => !o)} />
+      {open && (
+        <div style={{ padding:"0.85rem", background:C.surface, display:"flex", flexDirection:"column", gap:10 }}>
+          <div style={{ fontSize:9, color:C.textMuted, lineHeight:1.65 }}>
+            Expression evaluated N times. Scope:&nbsp;
+            <span style={{ color:C.teal }}>rnorm(n,mean,sd)</span>&nbsp;
+            <span style={{ color:C.teal }}>runif(n,min,max)</span>&nbsp;
+            <span style={{ color:C.teal }}>rbinom(n,p,trials)</span>&nbsp;
+            <span style={{ color:C.teal }}>rpois(lambda,n)</span>&nbsp;
+            <span style={{ color:C.teal }}>rexp(rate,n)</span>&nbsp;
+            <span style={{ color:C.teal }}>rgamma(shape,scale,n)</span>.
+            Each returns a single draw when n=1 (default).
+          </div>
+
+          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+            <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Expression (returns a number each iteration)</span>
+            <textarea rows={2} value={expr} onChange={e => { setExpr(e.target.value); setResult(null); }}
+              placeholder="rnorm(1) * 2 + runif(1)"
+              style={{ ...fieldStyle(C), resize:"vertical", lineHeight:1.65, width:"100%", boxSizing:"border-box" }}
+              spellCheck={false}/>
+          </div>
+
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+            <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Repetitions (max 10000)</span>
+              <input type="number" min={1} max={10000} step={100} value={nRep}
+                onChange={e => setNRep(e.target.value)} style={{ ...fieldStyle(C), width:120 }}/>
+            </label>
+            <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Seed (optional)</span>
+              <input type="number" step={1} value={seed} placeholder="random"
+                onChange={e => setSeed(e.target.value)} style={{ ...fieldStyle(C), width:100 }}/>
+            </label>
+            <div style={{ alignSelf:"flex-end" }}>
+              <Btn ch={busy ? "Running…" : "Run ▸"} v="solid" color={C.teal} sm
+                onClick={run} dis={busy || !expr.trim()}/>
+            </div>
+          </div>
+
+          <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+            {[
+              ["rnorm(1) * 2 + runif(1)", "Normal + Uniform"],
+              ["rnorm(1) > 0 ? 1 : 0", "Bernoulli indicator"],
+              ["rpois(3)", "Poisson(3) draw"],
+              ["Math.max(rnorm(1), 0)", "Truncated normal"],
+            ].map(([ex, label]) => (
+              <button key={ex} onClick={() => { setExpr(ex); setResult(null); }}
+                style={{ padding:"0.18rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:9 }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor=C.teal; e.currentTarget.style.color=C.teal; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor=C.border2; e.currentTarget.style.color=C.textDim; }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {result?.error && <ErrBox msg={result.error}/>}
+
+          {result && !result.error && (
+            <>
+              <ResultBox color={C.teal}>
+                <div>N = {result.N}</div>
+                <div>mean  = <span style={{ color:C.teal }}>{result.mean.toFixed(6)}</span></div>
+                <div>SD    = {result.sd.toFixed(6)}</div>
+                <div>2.5%  = {result.p025.toFixed(6)}</div>
+                <div>97.5% = {result.p975.toFixed(6)}</div>
+              </ResultBox>
+              <MiniHist values={result.values} color={C.blue}/>
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end", marginTop:2 }}>
+                <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                  <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Column name</span>
+                  <input value={resColName} onChange={e => setResColName(e.target.value)}
+                    style={{ ...fieldStyle(C), width:130 }}/>
+                </label>
+                <div style={{ alignSelf:"flex-end", display:"flex", gap:6 }}>
+                  <Btn ch="Add to dataset" v="solid" color={C.gold} sm onClick={addResults}
+                    dis={!resColName.trim() || !onAddColumn}/>
+                  <Btn ch="New dataset" v="out" sm onClick={newDataset}
+                    dis={!resColName.trim()}/>
+                  {addedMsg && <span style={{ fontFamily:mono, fontSize:10, color:C.teal }}>{addedMsg}</span>}
+                </div>
+              </div>
+              {!onAddColumn && (
+                <span style={{ fontFamily:mono, fontSize:9, color:C.textMuted }}>
+                  (onAddColumn not wired — TODO in parent)
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function CalculateTab({ rows = [], headers = [], onAddDataset }) {
+export default function CalculateTab({ rows = [], headers = [], onAddDataset, onAddColumn, onCreateDataset }) {
   const { C } = useTheme();
   // ── Variable workspace ─────────────────────────────────────────────────────
   const [variables,    setVariables]   = useState([]);
@@ -1715,9 +2125,15 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset }) 
 
       {/* ── 4. Probability Calculator ───────────────────────────────────────── */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
-        <SectionHeader label="Probability Calculator" open={probOpen} onToggle={() => setProbOpen(o => !o)} />
+        <SectionHeader label="∫ Probability" open={probOpen} onToggle={() => setProbOpen(o => !o)} />
         {probOpen && <div style={{ background: C.surface }}><ProbCalc /></div>}
       </div>
+
+      {/* ── 5. Distributions (D2 + D4) ─────────────────────────────────────── */}
+      <DistributionsSection onAddColumn={onAddColumn} onCreateDataset={onCreateDataset ?? onAddDataset} />
+
+      {/* ── 5b. Monte Carlo (D5) ────────────────────────────────────────────── */}
+      <MonteCarloSection onAddColumn={onAddColumn} onCreateDataset={onCreateDataset ?? onAddDataset} />
 
       {/* ── 6. Math Tools ─────────────────────────────────────────────────────── */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>

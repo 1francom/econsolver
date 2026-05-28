@@ -8,7 +8,7 @@
 //   { type, yVar, xVars, wVars, zVars, entityCol, timeCol,
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
-import { toStata, jsExprToStata } from "../../pipeline/stepTranslators.js";
+import { toStata, jsExprToStata, stataRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildStataLoadLine } from "./loadLine.js";
 
 export function generateStataScript(config = {}) {
@@ -18,6 +18,7 @@ export function generateStataScript(config = {}) {
     model          = {},
     dataDictionary = null,
     dataLoadOpts   = null,
+    allDatasets    = {},
   } = config;
 
   const {
@@ -75,7 +76,7 @@ export function generateStataScript(config = {}) {
   if (pipeline.length) {
     lines.push(`* ── Data pipeline ────────────────────────────────────────────────────────`);
     pipeline.forEach(step => {
-      const code = transpileStep(step);
+      const code = transpileStep(step, allDatasets);
       if (code) lines.push(code);
     });
     lines.push("");
@@ -90,7 +91,7 @@ export function generateStataScript(config = {}) {
 }
 
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────
-function transpileStep(step) {
+function transpileStep(step, allDatasets = {}) {
   const { type, params = {} } = step;
   switch (type) {
     case "rename":
@@ -223,13 +224,12 @@ function transpileStep(step) {
       const lk       = step.leftKey  ?? "id";
       const rk       = step.rightKey ?? lk;
       const sfx      = step.suffix   ?? "_r";
-      const rightId  = step.rightId  ?? "right_dataset";
       const sameKey  = lk === rk ? lk : `${lk} = ${rk}`;
       const keepInner = step.how === "inner" ? "\nkeep if _merge == 3" : "\nkeep if _merge == 1 | _merge == 3";
       return [
         `* Join: load right dataset, merge on ${sameKey}`,
         `preserve`,
-        `  import delimited "<path_to_${rightId}.csv>", clear`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
         `  rename ${rk} ${lk}  /* align key names */`,
         `  save "__right_tmp.dta", replace`,
         `restore`,
@@ -238,11 +238,10 @@ function transpileStep(step) {
       ].join("\n");
     }
     case "append": {
-      const rightId = step.rightId ?? "right_dataset";
       return [
         `* Append: stack right dataset below current`,
         `preserve`,
-        `  import delimited "<path_to_${rightId}.csv>", clear`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
         `  save "__append_tmp.dta", replace`,
         `restore`,
         `append using "__append_tmp.dta"`,

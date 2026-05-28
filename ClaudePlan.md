@@ -1583,3 +1583,153 @@ Ongoing improvements to PlotBuilder.jsx, ModelPlots.jsx, and SpatialTab.jsx to m
 - ✓ Geocoding (Phase 11.2) — Nominatim integration
 - ✓ Web Launch (Phase 14) — Vercel deployed
 - ✓ README replaced (Vite-template → user/dev docs)
+
+---
+
+## Phase 16: Artifact Replication for Report-AI (Premium)
+
+### Context
+
+Pipeline + models are already replicated well by Report-AI via `sessionSnapshot.js` + `UNIFIED_SCRIPT_PROMPT`. What's missing: **plots, maps, summary tables, histograms, function plots, and Monte Carlo simulations** are not emitted in the generated R/Python/Stata scripts. This phase adds a curated, premium-only artifact replication system: users pin the specific artifacts they want replicated, and the AI emits per-language code for each one.
+
+### Design decisions (locked 2026-05-26)
+
+| Decision | Choice |
+|---|---|
+| Pinning UX | 📌 button like model-pin; one click; no forced label (auto-generated from spec) |
+| Tier | Premium-only. Free tier gets pipeline+models only, as today. |
+| Granularity | One pin = one artifact. No collapsing across subsets/variables. |
+| Per-subset replication | Always separate pins (no loops) — users tweak bins/colors per subset |
+| Script ordering | Grouped by type in output (histograms → scatters → maps → tables → simulations) |
+| User preferences | Free-form text box in ReportingModule, optional, injected verbatim into AI prompt |
+
+### Architecture
+
+#### New file: `src/services/AI/artifactRegistry.js`
+
+```js
+// Artifact shape
+{
+  id, module, type, label, spec, createdAt, pid
+}
+```
+
+Exports:
+- `pinArtifact(pid, artifact) → Promise<id>`
+- `unpinArtifact(pid, id) → Promise<void>`
+- `listArtifacts(pid, module?) → Promise<Artifact[]>`
+- `updateArtifact(pid, id, patch) → Promise<void>`
+- `reorderArtifacts(pid, newOrder) → Promise<void>` (manual reorder within type group)
+
+Storage: IndexedDB store `artifacts` (pid-scoped), mirrors `services/Persistence/plotHistory.js` pattern.
+
+#### New file: `src/services/auth/tier.js`
+
+```js
+export function isPremium() { return true; }  // stub until auth ships
+```
+
+When K-track auth lands, this reads from user session.
+
+#### New file: `src/components/shared/PinButton.jsx`
+
+Shared component: `<PinButton artifact={{ module, type, spec }} label?={string} />`
+
+Behavior:
+- Free tier → disabled, tooltip "Pin for replication (Premium)"
+- Premium → one click pins to registry, button flips to "📌 Pinned" with unpin-on-click
+- Auto-generates label from spec if not provided
+
+#### Per-type artifact specs
+
+| Type | Module | Spec |
+|---|---|---|
+| `histogram` | Explore | `{ column, bins, weight? }` |
+| `density` | Explore | `{ column, adjust? }` |
+| `scatter` | Explore | `{ x, y, color?, smooth? }` |
+| `acf_pacf` | Explore | `{ column, lags, type: "acf"|"pacf" }` |
+| `summary_table` | Data/Explore | `{ columns, stats: ["mean","sd","min","max","n"] }` |
+| `plot_builder` | Explore/Modeling | full PlotBuilder JSON (already serialized in plotHistory) |
+| `map` | Spatial | `{ wktCol?, latCol?, lonCol?, basemap, polygonColor? }` |
+| `function_plot` | Calculate | `{ funcs, params, xRange, quadrant }` |
+| `monte_carlo` | Simulate | `{ expr, N, seed, dists }` |
+
+#### ReportingModule extensions
+
+New section **"Pinned for replication"**:
+- List of pinned artifacts, grouped by type (collapsed groups)
+- Per item: label (editable), delete, manual reorder within group
+- Empty state explains how to pin
+
+New textbox **"Script preferences (optional)"**:
+- 4-line free-form text
+- Examples shown as placeholder: "use base R not tidyverse · comment in Spanish · round to 4 decimals"
+- Injected as Rule 10 in AI prompt
+
+#### `sessionSnapshot.js` extension
+
+```js
+{
+  ...existingSnapshot,
+  artifacts: await listArtifacts(pid),  // already grouped by type before serializing
+  preferences: reportingPreferencesText || ""
+}
+```
+
+#### `UNIFIED_SCRIPT_PROMPT` additions
+
+- **Rule 9** — for each pinned artifact, emit replication code in target language. Use spec-to-code helpers per language.
+- **Rule 10** — if `preferences` is non-empty, apply user preferences across the entire script.
+
+#### Per-language emitters
+
+New helpers in existing files (one function per artifact type):
+
+**`services/export/rScript.js`**:
+- `rHistogram(spec, dfVar)` → `ggplot(... geom_histogram(bins=...))`
+- `rDensity(spec, dfVar)` → `ggplot(... geom_density())`
+- `rScatter(spec, dfVar)` → `ggplot(... geom_point() + smooth)`
+- `rACF(spec, dfVar)` → `acf(...)` / `pacf(...)`
+- `rSummaryTable(spec, dfVar)` → `modelsummary::datasummary(...)`
+- `rMap(spec, dfVar)` → `leaflet::leaflet() %>% addTiles() %>% addPolygons()`
+- `rFunctionPlot(spec)` → `ggplot(data.frame(x=...)) + stat_function(...)`
+- `rMonteCarlo(spec)` → `replicate(N, ...)` + histogram
+
+**`services/export/pythonScript.js`**: equivalents using `matplotlib`/`seaborn`/`folium`/`statsmodels`
+
+**`services/export/stataScript.js`**: equivalents using `histogram`, `summarize`, `corr`, etc. Maps use the export+merge workaround already established for geocoding.
+
+### Phasing
+
+1. **Foundation** — `artifactRegistry.js` + IndexedDB schema + `isPremium()` stub + `<PinButton>` shared component
+2. **ReportingModule UI** — "Pinned for replication" list section + "Script preferences" textbox
+3. **PlotBuilder + Explore** — wire PinButton to PlotBuilder header, histogram/density/scatter/ACF panels, summary table panel
+4. **Spatial** — wire to GeoPlotCanvas + Leaflet map header
+5. **Calculate + Simulate** — function plots + Monte Carlo result panel
+6. **AI prompt + emitters** — `UNIFIED_SCRIPT_PROMPT` rules 9/10 + per-language spec-to-code helpers for all artifact types
+7. **Premium gate live** — replace `isPremium()` stub with real check (gated on K-track auth)
+
+### Validation
+
+After each phase: load a dataset, pin one artifact of the new type, generate R/Python/Stata script, verify the artifact code appears in the script and runs to produce the expected output.
+
+### Files added/modified
+
+**New files**:
+- `src/services/AI/artifactRegistry.js`
+- `src/services/auth/tier.js`
+- `src/components/shared/PinButton.jsx`
+
+**Modified files**:
+- `src/services/AI/sessionSnapshot.js` — include `artifacts` + `preferences`
+- `src/services/AI/Prompts/index.js` — `UNIFIED_SCRIPT_PROMPT` rules 9/10
+- `src/services/export/rScript.js` / `pythonScript.js` / `stataScript.js` — per-type emitters
+- `src/ReportingModule.jsx` — pinned list section + preferences textbox
+- `src/components/PlotBuilder.jsx` — PinButton in header
+- `src/ExplorerModule.jsx` — PinButton on histograms/density/scatter/ACF/summary panels
+- `src/components/tabs/SpatialTab.jsx` — PinButton on map + GeoPlotCanvas
+- `src/components/tabs/CalculateTab.jsx` — PinButton on function plot
+- `src/components/tabs/SimulateTab.jsx` — PinButton on Monte Carlo result
+- `src/services/Persistence/indexedDB.js` — new `artifacts` object store
+
+### Status: PENDING — start with Phase 16.1 (Foundation) when ready

@@ -1368,6 +1368,94 @@ function applyFactors(rows, vars, factorVars) {
   return { rows: expandedRows, vars: expandedVars };
 }
 
+// ─── B5: SESSION MODEL HISTORY ────────────────────────────────────────────────
+function ModelHistory({ history, onRestore, onClear }) {
+  const { C } = useTheme();
+  const [open, setOpen] = useState(false);
+  const fmt = ts => {
+    const d = new Date(ts);
+    return d.toTimeString().slice(0, 8);
+  };
+  const fmtSpec = entry => {
+    const y = entry.yVar ?? entry.spec?.yVar ?? "?";
+    const xs = entry.xVars ?? entry.spec?.xVars ?? [];
+    const parts = xs.slice(0, 4);
+    const tail  = xs.length > 4 ? ` +${xs.length - 4}` : "";
+    return `${y} ~ ${parts.join(" + ")}${tail}`;
+  };
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0.4rem 0.65rem",
+        background: open ? `${C.teal}0a` : C.surface,
+        border: `1px solid ${open ? C.teal + "40" : C.border}`,
+        borderRadius: open ? "4px 4px 0 0" : 4,
+        cursor: "pointer",
+      }}
+        onClick={() => setOpen(v => !v)}
+      >
+        <span style={{ fontFamily: mono, fontSize: 9, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+          {open ? "▾" : "▸"} Session history ({history.length} models)
+        </span>
+        {history.length > 0 && (
+          <button
+            onClick={e => { e.stopPropagation(); onClear?.(); }}
+            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: mono, fontSize: 9, color: C.textMuted, padding: "0 2px" }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {open && (
+        <div style={{
+          border: `1px solid ${C.teal}40`, borderTop: "none",
+          borderRadius: "0 0 4px 4px",
+          background: C.surface2,
+        }}>
+          {history.length === 0 ? (
+            <div style={{ padding: "0.6rem 0.75rem", fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+              No models estimated yet.
+            </div>
+          ) : (
+            <>
+              <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                {[...history].reverse().map(entry => (
+                  <div
+                    key={entry._histId}
+                    onClick={() => onRestore(entry)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "0.35rem 0.65rem",
+                      borderBottom: `1px solid ${C.border}`,
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = C.teal + "12"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = ""; }}
+                  >
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.teal, flexShrink: 0, letterSpacing: "0.05em" }}>
+                      {entry.type ?? entry.label ?? "Model"}
+                    </span>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textDim, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {fmtSpec(entry)}
+                    </span>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>
+                      n={entry.n ?? "—"}
+                    </span>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>
+                      {fmt(entry._histTs)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion, pid }) {
   const { C } = useTheme();
@@ -1379,6 +1467,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const fullPipeline    = cleanedData?.pipeline          ?? [];
   const branchPointIdx  = cleanedData?.branchPointIndex  ?? null;
   const pipelineCtx     = cleanedData?.context           ?? {};
+
+  // Build allDatasets map for CodeEditor join/append script resolution
+  const allDatasetsMap  = useMemo(
+    () => Object.fromEntries((availableDatasets || []).map(d => [d.id, { name: d.name ?? d.filename, filename: d.filename }])),
+    [availableDatasets]
+  );
 
   const numericCols = useMemo(
     () => headers.filter(h => rows.some(r => typeof r[h] === "number" && isFinite(r[h]))),
@@ -1489,6 +1583,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [specRows,    setSpecRows]    = useState([]);
   const [specRunning, setSpecRunning] = useState(false);
 
+  // ── B5: Session model history ─────────────────────────────────────────────
+  const [modelHistory,    setModelHistory]    = useState([]);
+
+  // ── B2: Quick variation panel ─────────────────────────────────────────────
+  const [varOpen,         setVarOpen]         = useState(false);
+  const [swapOut,         setSwapOut]         = useState("");
+  const [swapIn,          setSwapIn]          = useState("");
+  const [pendingEstimate, setPendingEstimate] = useState(false);
+
+  // ── B3: Data peek panel ───────────────────────────────────────────────────
+  const [peekOpen,        setPeekOpen]        = useState(false);
+
   // ── G12: Plot Builder panel ───────────────────────────────────────────────
   const [plotOpen,        setPlotOpen]        = useState(false);
   const [plotTemplateKey, setPlotTemplateKey]  = useState(0);
@@ -1542,6 +1648,16 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
+
+  // B5: push non-null results to session history
+  useEffect(() => {
+    if (!result) return;
+    setModelHistory(prev => [...prev, {
+      ...result,
+      _histTs: Date.now(),
+      _histId: Math.random().toString(36).slice(2),
+    }]);
+  }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const panelOk    = !!panel;
   const panelFdOk  = !!panel && !panel.blockFD;
@@ -2844,6 +2960,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
       postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol]);
 
+  // B2: fire estimate() after xVars state update has settled
+  useEffect(() => {
+    if (!pendingEstimate) return;
+    setPendingEstimate(false);
+    estimate();
+  }, [pendingEstimate, estimate]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const openReport = useCallback((raw) => setReportResult(raw), []);
   const diagX = [...xVars, ...wVars];
 
@@ -3008,7 +3131,86 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             maxLag={maxLag}           setMaxLag={setMaxLag}
           />
 
-          <CodeEditor result={result} />
+          {/* ── B2: Quick Variation ── */}
+          {result && (
+            <div style={{ marginTop: 6 }}>
+              <button
+                onClick={() => setVarOpen(v => !v)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "0.4rem 0.65rem",
+                  background: varOpen ? `${C.gold}0a` : C.surface,
+                  border: `1px solid ${varOpen ? C.gold + "40" : C.border}`,
+                  borderRadius: varOpen ? "4px 4px 0 0" : 4,
+                  cursor: "pointer", fontFamily: mono,
+                }}
+              >
+                <span style={{ fontSize: 9, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+                  {varOpen ? "▾" : "▸"} Quick variation
+                </span>
+              </button>
+              {varOpen && (
+                <div style={{
+                  border: `1px solid ${C.gold}40`, borderTop: "none",
+                  borderRadius: "0 0 4px 4px", padding: "0.6rem 0.65rem",
+                  background: C.surface,
+                }}>
+                  <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 8, color: C.textMuted, fontFamily: mono, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP OUT</div>
+                      <select
+                        value={swapOut}
+                        onChange={e => setSwapOut(e.target.value)}
+                        style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                      >
+                        <option value="">— current X —</option>
+                        {xVars.map(v => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 8, color: C.textMuted, fontFamily: mono, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP IN</div>
+                      <select
+                        value={swapIn}
+                        onChange={e => setSwapIn(e.target.value)}
+                        style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                      >
+                        <option value="">— available —</option>
+                        {headers.filter(h => !xVars.includes(h) && h !== yVar[0]).map(v => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <button
+                    disabled={!swapOut || !swapIn}
+                    onClick={() => {
+                      if (!swapOut || !swapIn) return;
+                      setXVars(prev => prev.map(v => v === swapOut ? swapIn : v));
+                      setSwapOut(""); setSwapIn("");
+                      setPendingEstimate(true);
+                    }}
+                    style={{
+                      width: "100%", padding: "4px 0",
+                      background: swapOut && swapIn ? `${C.gold}18` : "none",
+                      border: `1px solid ${swapOut && swapIn ? C.gold : C.border}`,
+                      borderRadius: 3, cursor: swapOut && swapIn ? "pointer" : "not-allowed",
+                      fontFamily: mono, fontSize: 9, color: swapOut && swapIn ? C.gold : C.textMuted,
+                      letterSpacing: "0.1em",
+                    }}
+                  >
+                    Re-estimate ↺
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <CodeEditor result={result} allDatasets={allDatasetsMap} />
+
+          {/* ── B5: Session History ── */}
+          <ModelHistory
+            history={modelHistory}
+            onRestore={entry => setResult(entry)}
+            onClear={() => setModelHistory([])}
+          />
 
           <SubsetManager
             headers={headers}
@@ -3193,6 +3395,80 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         {/* ── RIGHT: Results Panel (column flex so buffer bar sticks to bottom) ── */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div style={{ flex: 1, overflowY: "auto", padding: "1.4rem 1.6rem", paddingBottom: "3rem" }}>
+
+          {/* ── B3: Data Peek ── */}
+          {rows.length > 0 && (() => {
+            const peekCols = (() => {
+              const sel = [...(yVar.length ? yVar : []), ...xVars.slice(0, 5)];
+              if (sel.length === 0) return headers.slice(0, 6);
+              return [...new Set(sel)].slice(0, 6);
+            })();
+            const peekRows = rows.slice(0, 8);
+            return (
+              <div style={{ marginBottom: "0.9rem" }}>
+                <button
+                  onClick={() => setPeekOpen(v => !v)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "0.35rem 0.7rem",
+                    background: peekOpen ? `${C.blue}0a` : C.surface,
+                    border: `1px solid ${peekOpen ? C.blue + "40" : C.border}`,
+                    borderRadius: peekOpen ? "4px 4px 0 0" : 4,
+                    cursor: "pointer", fontFamily: mono,
+                  }}
+                >
+                  <span style={{ fontSize: 9, color: C.blue, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+                    {peekOpen ? "▾" : "▸"} Data ({rows.length} obs, {headers.length} cols)
+                  </span>
+                </button>
+                {peekOpen && (
+                  <div style={{
+                    border: `1px solid ${C.blue}40`, borderTop: "none",
+                    borderRadius: "0 0 4px 4px",
+                    background: C.surface2,
+                    maxHeight: 180, overflowY: "auto", overflowX: "auto",
+                  }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: 9 }}>
+                      <thead>
+                        <tr>
+                          {peekCols.map(col => (
+                            <th key={col} style={{
+                              padding: "3px 8px", borderBottom: `1px solid ${C.border}`,
+                              color: C.teal, fontWeight: 600, textAlign: "left",
+                              whiteSpace: "nowrap", letterSpacing: "0.06em",
+                              background: C.surface,
+                            }}>{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {peekRows.map((row, i) => (
+                          <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                            {peekCols.map(col => (
+                              <td key={col} style={{
+                                padding: "2px 8px", color: C.textDim,
+                                whiteSpace: "nowrap", maxWidth: 120,
+                                overflow: "hidden", textOverflow: "ellipsis",
+                              }}>
+                                {row[col] == null ? <span style={{ color: C.textMuted }}>NA</span>
+                                  : typeof row[col] === "number" ? (Number.isInteger(row[col]) ? row[col] : row[col].toFixed(4))
+                                  : String(row[col]).slice(0, 20)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {peekCols.length < headers.length && (
+                      <div style={{ padding: "3px 8px", fontSize: 8, color: C.textMuted, fontFamily: mono, borderTop: `1px solid ${C.border}` }}>
+                        Showing {peekCols.length} of {headers.length} cols · first 8 rows
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {!result && !err && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60%", gap: "1rem" }}>

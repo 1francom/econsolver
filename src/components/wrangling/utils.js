@@ -3,8 +3,9 @@
 //
 // Exports:
 //   lsGet, lsSet, lsSave           — localStorage persistence
+//   jaroWinkler                    — Jaro-Winkler string similarity (0..1)
 //   levenshtein, normStr           — string distance
-//   fuzzyGroups, buildInitialMap   — categorical normalization
+//   fuzzyGroups, buildInitialMap   — categorical normalization (method: "levenshtein"|"jaroWinkler")
 //   audit, aiAuditScan             — smart auditor engine
 //   callAI                         — Anthropic API helper
 
@@ -19,6 +20,48 @@ export function lsSave(id,upd){
 }
 
 // ─── FUZZY MATCHING ───────────────────────────────────────────────────────────
+// Jaro-Winkler similarity (0 = no match, 1 = identical).
+// Returns a distance in [0,1] when used as 1 - jaroWinkler(a,b).
+export function jaroWinkler(s1, s2) {
+  if (s1 === s2) return 1;
+  const len1 = s1.length, len2 = s2.length;
+  if (len1 === 0 || len2 === 0) return 0;
+
+  const matchDist = Math.max(Math.floor(Math.max(len1, len2) / 2) - 1, 0);
+  const s1Matches = new Uint8Array(len1);
+  const s2Matches = new Uint8Array(len2);
+
+  let matches = 0, transpositions = 0;
+
+  for (let i = 0; i < len1; i++) {
+    const lo = Math.max(0, i - matchDist);
+    const hi = Math.min(i + matchDist + 1, len2);
+    for (let j = lo; j < hi; j++) {
+      if (s2Matches[j] || s1[i] !== s2[j]) continue;
+      s1Matches[i] = 1; s2Matches[j] = 1; matches++; break;
+    }
+  }
+  if (matches === 0) return 0;
+
+  let k = 0;
+  for (let i = 0; i < len1; i++) {
+    if (!s1Matches[i]) continue;
+    while (!s2Matches[k]) k++;
+    if (s1[i] !== s2[k]) transpositions++;
+    k++;
+  }
+
+  const jaro = (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3;
+
+  // Winkler prefix bonus (up to 4 chars)
+  let prefix = 0;
+  for (let i = 0; i < Math.min(4, len1, len2); i++) {
+    if (s1[i] === s2[i]) prefix++; else break;
+  }
+
+  return jaro + prefix * 0.1 * (1 - jaro);
+}
+
 export function levenshtein(a,b,maxD=6){
   if(Math.abs(a.length-b.length)>maxD) return maxD+1;
   const m=a.length,n=b.length;
@@ -35,7 +78,8 @@ export function levenshtein(a,b,maxD=6){
 
 export function normStr(s){return String(s||"").trim().toLowerCase().replace(/\s+/g," ");}
 
-export function fuzzyGroups(vals, rowsForFreq){
+// method: "levenshtein" (default) | "jaroWinkler"
+export function fuzzyGroups(vals, rowsForFreq, method = "levenshtein"){
   const freq={};
   if(rowsForFreq){rowsForFreq.forEach(v=>{if(v!=null){const s=String(v);freq[s]=(freq[s]||0)+1;}});}
   const norm=vals.map(normStr);
@@ -61,11 +105,17 @@ export function fuzzyGroups(vals, rowsForFreq){
       if(visited[j]) continue;
       // Skip numeric variants — "comuna 1" and "comuna 2" are NOT the same
       if(areNumericVariants(norm[i], norm[j])) continue;
-      const isSub=norm[i].includes(norm[j])||norm[j].includes(norm[i]);
-      const d=isSub?0:levenshtein(norm[i],norm[j]);
-      if(d===0||d<=Math.max(2,Math.floor(norm[i].length*.25))){
-        group.push(j);visited[j]=true;
+      let isSimilar = false;
+      if (method === "jaroWinkler") {
+        // Jaro-Winkler: distance = 1 - similarity; threshold ≥ 0.88
+        const sim = jaroWinkler(norm[i], norm[j]);
+        isSimilar = sim >= 0.88;
+      } else {
+        const isSub=norm[i].includes(norm[j])||norm[j].includes(norm[i]);
+        const d=isSub?0:levenshtein(norm[i],norm[j]);
+        isSimilar = d===0||d<=Math.max(2,Math.floor(norm[i].length*.25));
       }
+      if(isSimilar){group.push(j);visited[j]=true;}
     }
     if(group.length>1){
       const members=group.map(k=>vals[k]);
@@ -127,6 +177,14 @@ export async function aiAuditScan(sug,rows,info){
   }
   return results;
 }
+
+// ─── E5 TODO ──────────────────────────────────────────────────────────────────
+// E5 — LLM-assisted contextual correction is intentionally NOT implemented here.
+// It requires an active AI call via callAI / callClaude. To implement:
+//   1. Call callAI(instruction, col, sampleValues, "transform") with a prompt like
+//      "Suggest canonical corrections for these likely OCR or transcription errors."
+//   2. Surface suggestions in DataQualityReport.jsx SmartQualitySignals alongside E3 hits.
+//   3. Add an "Apply AI suggestion" button that pushes an ai_tr step to the pipeline.
 
 // ─── AI HELPER ────────────────────────────────────────────────────────────────
 // Delegates to callClaude (AIService.js) — benefits from prompt caching on

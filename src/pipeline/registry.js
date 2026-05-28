@@ -373,6 +373,31 @@ export const STEP_REGISTRY = [
   },
 
   {
+    type: "if_else",
+    label: "If/Else (conditional column)",
+    category: "features",
+    description: "Create a column whose value depends on a boolean condition. Condition is a JS expression; true/false values can be literals or column names.",
+    schema: [
+      { key: "nn",       type: "text", label: "Output column name" },
+      { key: "cond",     type: "text", label: "Condition (e.g. age >= 18)" },
+      { key: "trueVal",  type: "text", label: "Value when true" },
+      { key: "falseVal", type: "text", label: "Value when false" },
+    ],
+    toLabel: s => `if_else(${s.cond}) → ${s.nn}`,
+    defaultStep: () => ({ type: "if_else", nn: "", cond: "", trueVal: "", falseVal: "" }),
+  },
+
+  {
+    type: "case_when",
+    label: "Case When (multi-branch column)",
+    category: "features",
+    description: "Create a column by testing multiple conditions in order. First matching condition wins; falls back to defaultVal if none match.",
+    schema: [],
+    toLabel: s => `case_when(${(s.cases||[]).length} cases) → ${s.nn}`,
+    defaultStep: () => ({ type: "case_when", nn: "", cases: [{ cond: "", val: "" }], defaultVal: "" }),
+  },
+
+  {
     type: "geocode",
     label: "Geocode address",
     category: "features",

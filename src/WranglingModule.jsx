@@ -661,6 +661,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "quality" && (
           <DataQualityReport
             report={qualityReport}
+            rows={rows}
             onApplyStep={s => addStep(s)}
             onExportMd={() => {
               const md   = exportMarkdown(qualityReport);

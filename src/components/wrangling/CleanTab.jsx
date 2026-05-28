@@ -365,7 +365,8 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
               <span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>— edit the canonical name for each cluster</span>
             </div>
             <div style={{fontSize:11,color:C.textDim,fontFamily:mono,marginBottom:"1rem",lineHeight:1.6}}>
-              Each row is a cluster of similar values detected by Levenshtein fuzzy matching. The <span style={{color:C.gold}}>Canonical Name</span> is editable — all cluster members will be replaced by that value.
+              Each row is a cluster of similar values detected by{" "}
+              <span style={{color:C.teal}}>fuzzy matching</span>. The <span style={{color:C.gold}}>Canonical Name</span> is editable — all cluster members will be replaced by that value.
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 28px 1fr",gap:"0.5rem",marginBottom:6}}>
               <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,letterSpacing:"0.12em",textTransform:"uppercase",padding:"0 0.5rem"}}>Detected variants</div>
@@ -799,6 +800,9 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
   const { C } = useTheme();
   const emptyCondition = () => ({ col:"", op:"notna", value:"", values:[], lo:"", hi:"", _id: Date.now()+Math.random() });
 
+  const [filterMode, setFilterMode] = useState("simple"); // "simple" | "formula"
+  const [formulaExpr, setFormulaExpr] = useState("");
+
   const [groups, setGroups] = useState([
     { _id: 1, logic:"and", conditions: [emptyCondition()] }
   ]);
@@ -861,13 +865,19 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
   }
 
   function apply() {
+    if (filterMode === "formula") {
+      if (!formulaExpr.trim()) return;
+      onAdd({ type:"filter", expr: formulaExpr.trim(), desc: `Filter: ${formulaExpr.trim()}` });
+      onCancel();
+      return;
+    }
     if (!predicate) return;
     const desc = `Filter: ${buildDesc(predicate)}`;
     onAdd({ type:"filter", predicate, desc });
     onCancel();
   }
 
-  const canApply = predicate !== null;
+  const canApply = filterMode === "formula" ? !!formulaExpr.trim() : predicate !== null;
   const groupColors = [C.yellow, C.teal, C.blue, C.orange, C.purple, C.green];
 
   return (
@@ -875,10 +885,44 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
       <div style={{ fontSize:10, color:C.yellow, letterSpacing:"0.18em", textTransform:"uppercase", fontFamily:mono, marginBottom:"0.9rem", display:"flex", alignItems:"center", gap:8 }}>
         ⊧ Filter Builder
         <span style={{ fontSize:9, color:C.textMuted, textTransform:"none", letterSpacing:0 }}>— keep rows where conditions are true</span>
+        <div style={{ marginLeft:"auto", display:"flex", gap:5 }}>
+          {["simple","formula"].map(m => (
+            <button key={m} onClick={() => setFilterMode(m)} style={{
+              padding:"2px 9px", border:`1px solid ${filterMode===m ? C.yellow : C.border2}`,
+              background: filterMode===m ? `${C.yellow}18` : "transparent",
+              color: filterMode===m ? C.yellow : C.textDim,
+              borderRadius:2, cursor:"pointer", fontSize:9, fontFamily:mono,
+            }}>{m === "simple" ? "Simple" : "Formula"}</button>
+          ))}
+        </div>
       </div>
 
-      {/* Groups */}
-      {groups.map((group, gIdx) => (
+      {/* Formula mode */}
+      {filterMode === "formula" && (
+        <div style={{ marginBottom:"1rem" }}>
+          <div style={{ fontSize:10, color:C.textMuted, fontFamily:mono, marginBottom:6, lineHeight:1.6,
+            padding:"0.4rem 0.75rem", background:C.surface2, border:`1px solid ${C.border}`,
+            borderLeft:`3px solid ${C.yellow}`, borderRadius:4 }}>
+            Enter a JS boolean expression. Column names are available as variables.{" "}
+            <span style={{ color:C.yellow }}>&&</span> for AND, <span style={{ color:C.yellow }}>||</span> for OR,{" "}
+            <span style={{ color:C.yellow }}>!</span> for NOT.{" "}
+            Example: <span style={{ color:C.teal }}>gdp &gt; 1000 &amp;&amp; year &gt;= 2000 &amp;&amp; country !== "USA"</span>
+          </div>
+          <textarea
+            value={formulaExpr}
+            rows={3}
+            onChange={e => setFormulaExpr(e.target.value)}
+            placeholder={'gdp > 1000 && year >= 2000\ncountry !== "USA" || region === "EU"'}
+            style={{ width:"100%", boxSizing:"border-box", padding:"0.5rem 0.75rem",
+              background:C.surface2, border:`1px solid ${formulaExpr.trim() ? C.yellow+"60" : C.border2}`,
+              borderRadius:3, color:C.text, fontFamily:mono, fontSize:11, outline:"none",
+              resize:"vertical", lineHeight:1.6 }}
+          />
+        </div>
+      )}
+
+      {/* Groups (simple mode only) */}
+      {filterMode === "simple" && groups.map((group, gIdx) => (
         <div key={group._id} style={{
           marginBottom:"0.7rem",
           border:`1px solid ${groupColors[gIdx % groupColors.length]}30`,
@@ -949,34 +993,36 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
         </div>
       ))}
 
-      {/* Add group + top-level logic */}
-      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:"0.9rem", flexWrap:"wrap" }}>
-        <button onClick={addGroup} style={{
-          padding:"0.3rem 0.75rem", background:"transparent",
-          border:`1px dashed ${C.border2}`, borderRadius:3,
-          color:C.textMuted, cursor:"pointer", fontSize:10, fontFamily:mono,
-          transition:"all 0.1s",
-        }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-        >+ OR group</button>
-        {groups.length > 1 && (
-          <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.textMuted, fontFamily:mono }}>
-            combine groups with:
-            {["and","or"].map(l => (
-              <button key={l} onClick={() => setTopLogic(l)} style={{
-                padding:"2px 8px", border:`1px solid ${topLogic===l ? C.gold : C.border2}`,
-                background: topLogic===l ? `${C.gold}18` : "transparent",
-                color: topLogic===l ? C.gold : C.textDim,
-                borderRadius:2, cursor:"pointer", fontSize:9, fontFamily:mono,
-              }}>{l.toUpperCase()}</button>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Add group + top-level logic (simple mode only) */}
+      {filterMode === "simple" && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:"0.9rem", flexWrap:"wrap" }}>
+          <button onClick={addGroup} style={{
+            padding:"0.3rem 0.75rem", background:"transparent",
+            border:`1px dashed ${C.border2}`, borderRadius:3,
+            color:C.textMuted, cursor:"pointer", fontSize:10, fontFamily:mono,
+            transition:"all 0.1s",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+          >+ OR group</button>
+          {groups.length > 1 && (
+            <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.textMuted, fontFamily:mono }}>
+              combine groups with:
+              {["and","or"].map(l => (
+                <button key={l} onClick={() => setTopLogic(l)} style={{
+                  padding:"2px 8px", border:`1px solid ${topLogic===l ? C.gold : C.border2}`,
+                  background: topLogic===l ? `${C.gold}18` : "transparent",
+                  color: topLogic===l ? C.gold : C.textDim,
+                  borderRadius:2, cursor:"pointer", fontSize:9, fontFamily:mono,
+                }}>{l.toUpperCase()}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Live preview */}
-      <FilterPreview rows={rows} predicate={predicate} total={rows.length} />
+      {/* Live preview (simple mode only) */}
+      {filterMode === "simple" && <FilterPreview rows={rows} predicate={predicate} total={rows.length} />}
 
       {/* Actions */}
       <div style={{ display:"flex", gap:8 }}>
@@ -1562,6 +1608,8 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
   const [aSt,setASt]=useState("idle"),[aRes,setARes]=useState(null);
   const [sug,setSug]=useState([]),[aiP,setAiP]=useState([]),[audL,setAudL]=useState(false);
   const [normTarget,setNormTarget]=useState(null);
+  // E4 — Jaro-Winkler toggle for the normalizer ("levenshtein" | "jaroWinkler")
+  const [normMethod,setNormMethod]=useState("levenshtein");
   const ran=useRef(false);
 
   useEffect(()=>{
@@ -1574,13 +1622,14 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
     }
   },[]);
 
-  function openNormDialog(col){
+  function openNormDialog(col,method){
     const colInfo=info[col];
     if(!colInfo||colInfo.isNum) return;
     const rawVals=colInfo.uVals.map(v=>String(v));
     const allRawForFreq=rows.map(r=>r[col]).filter(v=>v!=null).map(v=>String(v));
-    const clusters=fuzzyGroups(rawVals,allRawForFreq);
-    setNormTarget({col,clusters,rawVals});
+    const m=method??normMethod;
+    const clusters=fuzzyGroups(rawVals,allRawForFreq,m);
+    setNormTarget({col,clusters,rawVals,method:m});
   }
   function handleNormConfirm(step){
     onAdd({...step,id:Date.now()+Math.random()});
@@ -1707,7 +1756,18 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
               </div>
               {/* Normalize button for cat columns — still available inline for quick access */}
               {selIsCat&&<div style={{marginBottom:"0.8rem"}}>
-                <Btn onClick={()=>openNormDialog(sel)} color={C.teal} sm ch="⬡ Open full normalizer for this column…"/>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <Btn onClick={()=>openNormDialog(sel)} color={C.teal} sm ch="⬡ Open full normalizer for this column…"/>
+                  {/* E4 — Jaro-Winkler / Levenshtein toggle */}
+                  <div style={{display:"flex",gap:2,marginLeft:"auto"}}>
+                    {[["levenshtein","Levenshtein"],["jaroWinkler","Jaro-Winkler"]].map(([m,label])=>(
+                      <button key={m} onClick={()=>setNormMethod(m)}
+                        style={{padding:"0.22rem 0.55rem",border:`1px solid ${normMethod===m?C.gold:C.border2}`,background:normMethod===m?`${C.gold}14`:"transparent",color:normMethod===m?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.12s"}}>
+                        {normMethod===m?"✓ ":""}{label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>}
             </div>
           )}
