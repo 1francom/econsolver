@@ -35,7 +35,7 @@
 
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 import { stepLabel } from "../../pipeline/registry.js";
-import { jsExprToR } from "../../pipeline/stepTranslators.js";
+import { jsExprToR, rRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildRLoadLine } from "./loadLine.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ function rCols(arr) {
 
 // ─── PIPELINE TRANSPILER ──────────────────────────────────────────────────────
 // Each step type maps to one or more dplyr/tidyr/stringr/lubridate calls.
-function transpileStep(step, dfVar = "df") {
+function transpileStep(step, dfVar = "df", allDatasets = {}) {
   const col  = step.col  ? rName(step.col)  : null;
   const nn   = step.nn   ? rName(step.nn)   : null;
   const quot = step.col  ? rStr(step.col)   : null;
@@ -322,19 +322,23 @@ function transpileStep(step, dfVar = "df") {
     }
 
     case "join": {
-      const how = step.how === "inner" ? "inner_join" : "left_join";
+      const how       = step.how === "inner" ? "inner_join" : "left_join";
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
       return [
-        `# Load right dataset before joining`,
-        `right_df <- readr::read_csv(<path_to_${rName(step.rightId)}>)`,
+        `# Load right dataset: "${rightName}"`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
         `${dfVar} <- ${how}(${dfVar}, right_df, by = c(${rStr(step.leftKey)} = ${rStr(step.rightKey)}), suffix = c("", ${rStr(step.suffix ?? "_r")}))`,
       ].join("\n");
     }
 
-    case "append":
+    case "append": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
       return [
-        `right_df <- readr::read_csv(<path_to_${rName(step.rightId)}>)`,
+        `# Append dataset: "${rightName}"`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
         `${dfVar} <- dplyr::bind_rows(${dfVar}, right_df)`,
       ].join("\n");
+    }
 
     case "patch": {
       // Cell edit — use __row_id (UUID) when available for sort-stable lookup,
@@ -797,12 +801,13 @@ function transpileModel(model) {
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export function generateRScript(config) {
   const {
-    filename     = "dataset.csv",
-    pipeline     = [],
-    model        = {},
-    auditTrail   = null,
+    filename       = "dataset.csv",
+    pipeline       = [],
+    model          = {},
+    auditTrail     = null,
     dataDictionary = null,
-    dataLoadOpts = null,
+    dataLoadOpts   = null,
+    allDatasets    = {},
   } = config;
 
   const baseName = filename.replace(/\.[^.]+$/, "");
@@ -861,7 +866,7 @@ export function generateRScript(config) {
       const comment = auditTrail?.entries?.[i]?.decision;
       lines.push(`# Step ${i + 1}: ${label}`);
       if (comment) lines.push(`# ${comment}`);
-      lines.push(transpileStep(step));
+      lines.push(transpileStep(step, "df", allDatasets));
       lines.push(``);
     });
   }
@@ -995,7 +1000,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
   if (pipeline.length) {
     lines.push(`# ── 2. Data pipeline ─────────────────────────────────────────────────────`);
     pipeline.forEach(step => {
-      lines.push(transpileStep(step));
+      lines.push(transpileStep(step, "df", allDatasets));
     });
     lines.push(``);
   }
@@ -1132,7 +1137,7 @@ export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [],
     lines.push(`# ── 3. Shared pipeline (${pipeline.length} step${pipeline.length !== 1 ? "s" : ""}) ────────────────────────────────`);
     pipeline.forEach((step, i) => {
       lines.push(`# Step ${i + 1}: ${step.type}`);
-      lines.push(transpileStep(step));
+      lines.push(transpileStep(step, "df", allDatasets));
       lines.push(``);
     });
   }

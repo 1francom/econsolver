@@ -429,6 +429,174 @@ export function buildDataQualityReport(headers, rows, info, panelReport = null) 
   return { meta, columns, correlations, panelSummary, flags };
 }
 
+// ─── E1: COORDINATE FORMAT VALIDATOR ────────────────────────────────────────
+// Flags values in a column that look like malformed lat/lon coordinates.
+// Valid lat: -90..90, valid lon: -180..180.
+// Malformed: multiple decimal points, letters/symbols other than - and .,
+// or numeric but out of the expected range.
+//
+// Returns { badRows: number[], sample: string[] }
+//   badRows — row indices with bad values (0-indexed)
+//   sample  — up to 3 bad raw values as strings
+export function detectCoordIssues(rows, col) {
+  const isLatCol = /^(lat(itude)?|y)$/i.test(col.trim());
+  const isLonCol = /^(lon(gitude)?|x)$/i.test(col.trim());
+  const checkRange = isLatCol || isLonCol;
+  const latMax = 90, lonMax = 180;
+
+  const badRows = [];
+  const sample = [];
+
+  rows.forEach((row, i) => {
+    const raw = row[col];
+    if (raw === null || raw === undefined || raw === "") return;
+    const s = String(raw).trim();
+
+    let isBad = false;
+
+    // Multiple decimal points (e.g. "5.43.345")
+    const dotCount = (s.match(/\./g) || []).length;
+    if (dotCount > 1) {
+      isBad = true;
+    }
+
+    // Contains characters other than digits, single minus at start, and at most one dot
+    if (!isBad && !/^-?\d*\.?\d+$/.test(s)) {
+      isBad = true;
+    }
+
+    // Numeric but out of coordinate range
+    if (!isBad && checkRange) {
+      const num = parseFloat(s);
+      if (!isNaN(num)) {
+        if (isLatCol  && (num < -latMax || num > latMax)) isBad = true;
+        if (isLonCol  && (num < -lonMax || num > lonMax)) isBad = true;
+      }
+    }
+
+    if (isBad) {
+      badRows.push(i);
+      if (sample.length < 3) sample.push(s);
+    }
+  });
+
+  return { badRows, sample };
+}
+
+// ─── E2: CASE ANOMALY DETECTOR ───────────────────────────────────────────────
+// Detects strings with mixed-case entropy: uppercase in unexpected positions.
+// A string is anomalous if it is not all-caps, not all-lowercase, not Title Case,
+// and has uppercase letters beyond position 0.
+//
+// Returns { anomalies: string[], rate: number }
+//   anomalies — up to 20 anomalous raw values
+//   rate      — fraction of non-null string values that are anomalous
+export function detectCaseAnomalies(rows, col) {
+  const anomalies = [];
+  let total = 0;
+
+  rows.forEach(row => {
+    const v = row[col];
+    if (v === null || v === undefined || typeof v !== "string" || v === "") return;
+    total++;
+
+    const s = v.trim();
+    if (s.length < 2) return;
+
+    // All lowercase → fine
+    if (s === s.toLowerCase()) return;
+    // All uppercase → fine (acronyms, country codes)
+    if (s === s.toUpperCase()) return;
+    // Title Case → fine (first char of each word is uppercase, rest lower)
+    const titleCase = s.replace(/\b\w/g, c => c.toUpperCase()).replace(/\B\w/g, c => c.toLowerCase());
+    if (s === titleCase) return;
+
+    // Check if there are uppercase letters in non-initial word positions
+    // Split into words and check each word
+    const words = s.split(/\s+/);
+    let hasInternalUpper = false;
+    for (const word of words) {
+      if (word.length < 2) continue;
+      // Check characters after position 0 in the word for uppercase
+      for (let i = 1; i < word.length; i++) {
+        const ch = word[i];
+        if (ch >= "A" && ch <= "Z") {
+          hasInternalUpper = true;
+          break;
+        }
+      }
+      if (hasInternalUpper) break;
+    }
+
+    if (hasInternalUpper) {
+      if (anomalies.length < 20) anomalies.push(v);
+    }
+  });
+
+  const rate = total > 0 ? anomalies.length / total : 0;
+  return { anomalies, rate };
+}
+
+// ─── E3: OCR CHARACTER CONTAMINATION DETECTION ───────────────────────────────
+// Detects common OCR substitution errors in string columns.
+// For each value, checks if applying a substitution produces a more word-like
+// result (matches /^[A-Za-z\s-]+$/ while the original didn't).
+//
+// OCR substitution table:
+//   0 ↔ O,  1 → I/l,  ! → I,  | → I/l,  5 ↔ S,
+//   6 → G,  8 → B,  @ → a,  rn → m,  cl → d,  VV → W
+//
+// Returns { hits: Array<{original, suggested}>, rate: number }
+export function detectOCRContamination(rows, col) {
+  // Substitution rules: [pattern (string or regex), replacement]
+  const SUBS = [
+    [/0/g, "O"],
+    [/O/g, "0"],   // reverse — O misread as 0 in numeric strings
+    [/1/g, "I"],
+    [/1/g, "l"],
+    [/!/g, "I"],
+    [/\|/g, "I"],
+    [/\|/g, "l"],
+    [/5/g, "S"],
+    [/S/g, "5"],   // reverse
+    [/6/g, "G"],
+    [/8/g, "B"],
+    [/@/g, "a"],
+    [/rn/g, "m"],
+    [/cl/g, "d"],
+    [/VV/g, "W"],
+  ];
+
+  const WORD_LIKE = /^[A-Za-z\s\-]+$/;
+
+  const hits = [];
+  let total = 0;
+
+  rows.forEach(row => {
+    const v = row[col];
+    if (v === null || v === undefined || typeof v !== "string" || v === "") return;
+    total++;
+
+    const s = v.trim();
+    // Skip if already word-like
+    if (WORD_LIKE.test(s)) return;
+
+    for (const [pattern, replacement] of SUBS) {
+      const candidate = s.replace(pattern, replacement);
+      if (candidate !== s && WORD_LIKE.test(candidate)) {
+        // Only add if not already captured for this original value
+        if (!hits.some(h => h.original === s)) {
+          hits.push({ original: s, suggested: candidate });
+        }
+        break;
+      }
+    }
+  });
+
+  const rate = total > 0 ? hits.length / total : 0;
+  return { hits, rate };
+}
+
 // ─── MARKDOWN EXPORT ─────────────────────────────────────────────────────────
 // Produces a replication-package-ready .md file.
 export function exportMarkdown(report) {

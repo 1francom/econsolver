@@ -3,7 +3,8 @@
 // Each exported function takes (step, dfName, allDatasets) and returns a string.
 //
 // allDatasets — optional map { id: { name, filename } } used to resolve join/
-// append dataset names into human-readable filenames in comments.
+// append dataset names. When filename is present, a real load call is emitted
+// (read_csv / read_dta / read_excel etc.); otherwise a placeholder is used.
 //
 // Design: pure functions, no React, no imports from UI.
 
@@ -11,6 +12,40 @@
 
 function safeDatasetName(id, allDatasets) {
   return allDatasets?.[id]?.name ?? id;
+}
+
+// Returns the right-hand load line for join/append steps.
+// Uses the actual filename when known; falls back to a placeholder.
+export function rRightLoad(id, allDatasets) {
+  const ds   = allDatasets?.[id];
+  const name = (ds?.name ?? id).replace(/\s+/g, "_");
+  const file = ds?.filename;
+  if (!file) return `readr::read_csv("<path_to_${name}.csv>")`;
+  const fl = file.toLowerCase();
+  if (fl.endsWith(".dta"))               return `haven::read_dta("${file}")`;
+  if (fl.endsWith(".xlsx") || fl.endsWith(".xls")) return `readxl::read_excel("${file}")`;
+  return `readr::read_csv("${file}")`;
+}
+
+export function pyRightLoad(id, allDatasets) {
+  const ds   = allDatasets?.[id];
+  const name = (ds?.name ?? id).replace(/\s+/g, "_");
+  const file = ds?.filename;
+  if (!file) return `pd.read_csv("<path_to_${name}.csv>")`;
+  const fl = file.toLowerCase();
+  if (fl.endsWith(".dta"))               return `pd.read_stata("${file}")`;
+  if (fl.endsWith(".xlsx") || fl.endsWith(".xls")) return `pd.read_excel("${file}")`;
+  return `pd.read_csv("${file}")`;
+}
+
+export function stataRightLoad(id, allDatasets) {
+  const ds   = allDatasets?.[id];
+  const name = (ds?.name ?? id).replace(/\s+/g, "_");
+  const file = ds?.filename;
+  if (!file) return `import delimited "<path_to_${name}.csv>", clear`;
+  const fl = file.toLowerCase();
+  if (fl.endsWith(".dta")) return `use "${file}", clear`;
+  return `import delimited "${file}", clear`;
 }
 
 // Split a comma-separated argument list, respecting nested parentheses/brackets.
@@ -506,11 +541,11 @@ export function toR(step, df = "df", allDatasets = {}) {
     }
 
     case "join": {
-      const how      = step.how === "inner" ? "inner_join" : "left_join";
+      const how       = step.how === "inner" ? "inner_join" : "left_join";
       const rightName = safeDatasetName(step.rightId, allDatasets);
       return [
         `# Load right dataset: "${rightName}"`,
-        `right_df <- readr::read_csv("<path_to_${rightName.replace(/\s+/g, "_")}.csv>")`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
         `${df} <- ${how}(${df}, right_df, by = c(${rStr(step.leftKey)} = ${rStr(step.rightKey)}), suffix = c("", ${rStr(step.suffix ?? "_r")}))`,
       ].join("\n");
     }
@@ -519,7 +554,7 @@ export function toR(step, df = "df", allDatasets = {}) {
       const rightName = safeDatasetName(step.rightId, allDatasets);
       return [
         `# Append dataset: "${rightName}"`,
-        `right_df <- readr::read_csv("<path_to_${rightName.replace(/\s+/g, "_")}.csv>")`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
         `${df} <- dplyr::bind_rows(${df}, right_df)`,
       ].join("\n");
     }
@@ -830,7 +865,7 @@ export function toStata(step, df = "df", allDatasets = {}) {
         `* Join dataset: "${rightName}"`,
         `* Save current data first`,
         `preserve`,
-        `use "<path_to_${rightName.replace(/\s+/g, "_")}.dta>", clear`,
+        `${stataRightLoad(step.rightId, allDatasets)}`,
         `rename ${stVar(step.rightKey)} ${stVar(step.leftKey)}`,
         `save _right_tmp.dta, replace`,
         `restore`,
@@ -844,7 +879,12 @@ export function toStata(step, df = "df", allDatasets = {}) {
       const rightName = safeDatasetName(step.rightId, allDatasets);
       return [
         `* Append dataset: "${rightName}"`,
-        `append using "<path_to_${rightName.replace(/\s+/g, "_")}.dta>"`,
+        `preserve`,
+        `${stataRightLoad(step.rightId, allDatasets)}`,
+        `save _append_tmp.dta, replace`,
+        `restore`,
+        `append using "_append_tmp.dta"`,
+        `erase "_append_tmp.dta"`,
       ].join("\n");
     }
 
@@ -1117,7 +1157,7 @@ export function toPython(step, df = "df", allDatasets = {}) {
       const how = step.how === "inner" ? "inner" : "left";
       return [
         `# Join dataset: "${rightName}"`,
-        `right_df = pd.read_csv("<path_to_${rightName.replace(/\s+/g, "_")}.csv>")`,
+        `right_df = ${pyRightLoad(step.rightId, allDatasets)}`,
         `${df} = pd.merge(${df}, right_df, left_on=${pyCol(step.leftKey)}, right_on=${pyCol(step.rightKey)}, how=${pyStr(how)}, suffixes=("", ${pyStr(step.suffix ?? "_r")}))`,
       ].join("\n");
     }
@@ -1126,7 +1166,7 @@ export function toPython(step, df = "df", allDatasets = {}) {
       const rightName = safeDatasetName(step.rightId, allDatasets);
       return [
         `# Append dataset: "${rightName}"`,
-        `right_df = pd.read_csv("<path_to_${rightName.replace(/\s+/g, "_")}.csv>")`,
+        `right_df = ${pyRightLoad(step.rightId, allDatasets)}`,
         `${df} = pd.concat([${df}, right_df], ignore_index=True)`,
       ].join("\n");
     }

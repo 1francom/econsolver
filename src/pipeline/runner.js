@@ -195,8 +195,17 @@ export function applyStep(rows, headers, s, context = {}) {
         return true;
       }
 
-      // Detect shape: compound predicate vs legacy flat
-      if (s.predicate) {
+      // Detect shape: formula expr > compound predicate > legacy flat
+      if (s.expr) {
+        // Formula mode: evaluate a boolean expression per row.
+        // Pattern is consistent with the mutate sandbox already in this file.
+        const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+        // eslint-disable-next-line no-new-func
+        let filterFn; try { filterFn = new Function(...safeH, `"use strict"; return !!(${s.expr});`); } catch { break; }
+        R = rows.filter(r => {
+          try { return filterFn(...safeH.map(h => r[h] ?? null)); } catch { return true; }
+        });
+      } else if (s.predicate) {
         R = rows.filter(r => evalPredicate(s.predicate, r));
       } else {
         // Legacy flat shape — still fully supported
@@ -640,6 +649,9 @@ export function applyStep(rows, headers, s, context = {}) {
         coalesce: (...args) => args.find(v => v !== null && v !== undefined) ?? null,
         pmin:     (a, b) => (typeof a === "number" && typeof b === "number") ? Math.min(a, b) : null,
         pmax:     (a, b) => (typeof a === "number" && typeof b === "number") ? Math.max(a, b) : null,
+        min:      (a, b) => (typeof a === "number" && typeof b === "number") ? Math.min(a, b) : null,
+        max:      (a, b) => (typeof a === "number" && typeof b === "number") ? Math.max(a, b) : null,
+        pow:      (x, n) => (typeof x === "number" && typeof n === "number") ? Math.pow(x, n) : null,
         clamp:    (x, lo, hi) => typeof x === "number" ? Math.max(lo, Math.min(hi, x)) : null,
         rescale:  (x, oMin, oMax, nMin = 0, nMax = 1) => (typeof x === "number" && oMax !== oMin) ? (nMin + (x - oMin) * (nMax - nMin) / (oMax - oMin)) : null,
         case_when: (...pairs) => {
@@ -663,6 +675,49 @@ export function applyStep(rows, headers, s, context = {}) {
       if (!H.includes(s.nn)) H = [...H, s.nn];
       break;
     }
+
+    case "if_else": {
+      // s.cond:     JS boolean expression string (column names available as variables)
+      // s.trueVal:  literal value or column name for true branch
+      // s.falseVal: literal value or column name for false branch
+      // s.nn:       output column name
+      const safeH_ife = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+      // eslint-disable-next-line no-new-func
+      let ifeFn; try { ifeFn = new Function(...safeH_ife, `"use strict"; return !!(${s.cond});`); } catch { break; }
+      R = rows.map(r => {
+        let result = false;
+        try { result = ifeFn(...safeH_ife.map(h => r[h] ?? null)); } catch {}
+        // trueVal/falseVal: if it matches a header, use that column's value; else use as literal
+        const tv = H.includes(s.trueVal)  ? r[s.trueVal]  : s.trueVal;
+        const fv = H.includes(s.falseVal) ? r[s.falseVal] : s.falseVal;
+        return { ...r, [s.nn]: result ? tv : fv };
+      });
+      if (!H.includes(s.nn)) H = [...H, s.nn];
+      break;
+    }
+
+    case "case_when": {
+      // s.cases:      [{ cond: string, val: string|number }, ...]
+      // s.defaultVal: fallback value when no condition matches
+      // s.nn:         output column name
+      const safeH_cw = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+      const caseFns = (s.cases ?? []).map(c => {
+        // eslint-disable-next-line no-new-func
+        try { return new Function(...safeH_cw, `"use strict"; return !!(${c.cond});`); }
+        catch { return null; }
+      });
+      R = rows.map(r => {
+        const args = safeH_cw.map(h => r[h] ?? null);
+        for (let i = 0; i < (s.cases ?? []).length; i++) {
+          if (!caseFns[i]) continue;
+          try { if (caseFns[i](...args)) return { ...r, [s.nn]: s.cases[i].val }; } catch {}
+        }
+        return { ...r, [s.nn]: s.defaultVal ?? null };
+      });
+      if (!H.includes(s.nn)) H = [...H, s.nn];
+      break;
+    }
+
     case "type_cast": {
       // Convert a column to a target type in-place.
       // s.col:    column name

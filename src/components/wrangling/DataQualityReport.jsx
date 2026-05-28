@@ -4,11 +4,17 @@
 //
 // Props:
 //   report        DataQualityReport   — from buildDataQualityReport()
+//   rows          object[]            — raw data rows (needed for Smart signals E1/E2/E3)
 //   onApplyStep   fn(step)            — adds a step to the pipeline
 //   onExportMd    fn()                — triggers markdown export
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
+import {
+  detectCoordIssues,
+  detectCaseAnomalies,
+  detectOCRContamination,
+} from "../../core/validation/dataQuality.js";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
@@ -329,8 +335,197 @@ function SectionHeader({ title, count, color }) {
   );
 }
 
+// ─── E-TRACK: SMART QUALITY SIGNALS ──────────────────────────────────────────
+// Runs E1/E2/E3 checks lazily (only when this component mounts or rows change).
+// Surfaces signals as colored badges per column.
+const COORD_COLS = /^(lat(itude)?|lon(gitude)?|x|y)$/i;
+const CAT_COL_THRESHOLD = 0.05; // 5% case anomaly rate triggers warning
+
+function SmartQualitySignals({ columns, rows }) {
+  const { C } = useTheme();
+
+  const signals = useMemo(() => {
+    const out = [];
+
+    columns.forEach(colReport => {
+      const col = colReport.col;
+
+      // E1 — coord issues: only for coord-named numeric columns
+      if (COORD_COLS.test(col.trim())) {
+        const result = detectCoordIssues(rows, col);
+        if (result.badRows.length > 0) {
+          out.push({
+            type: "coord",
+            col,
+            count: result.badRows.length,
+            sample: result.sample,
+          });
+        }
+      }
+
+      // E2 — case anomalies: only for categorical (string) columns
+      if (colReport.type === "categorical" || colReport.type === "mixed") {
+        const result = detectCaseAnomalies(rows, col);
+        if (result.rate > CAT_COL_THRESHOLD && result.anomalies.length > 0) {
+          out.push({
+            type: "case",
+            col,
+            rate: result.rate,
+            anomalies: result.anomalies,
+          });
+        }
+      }
+
+      // E3 — OCR contamination: only for categorical/mixed columns
+      if (colReport.type === "categorical" || colReport.type === "mixed") {
+        const result = detectOCRContamination(rows, col);
+        if (result.hits.length > 0) {
+          out.push({
+            type: "ocr",
+            col,
+            hits: result.hits,
+            rate: result.rate,
+          });
+        }
+      }
+    });
+
+    return out;
+  }, [columns, rows]);
+
+  if (!signals.length) {
+    return (
+      <div style={{ fontSize: 11, color: C.green, fontFamily: mono, padding: "0.75rem 0" }}>
+        ✓ No smart quality signals detected.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {signals.map((sig, i) => {
+        if (sig.type === "coord") {
+          return (
+            <div key={i} style={{
+              padding: "0.55rem 0.85rem",
+              background: `${C.orange}0d`,
+              border: `1px solid ${C.orange}40`,
+              borderLeft: `3px solid ${C.orange}`,
+              borderRadius: 3,
+              display: "flex", alignItems: "flex-start", gap: 10,
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.orange, fontFamily: mono, marginBottom: 3 }}>
+                  ⚠ {sig.count} malformed coordinate{sig.count > 1 ? "s" : ""} in{" "}
+                  <span style={{ color: C.text }}>{sig.col}</span>
+                </div>
+                {sig.sample.length > 0 && (
+                  <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+                    Samples: {sig.sample.map(s => (
+                      <span key={s} style={{
+                        marginRight: 6, padding: "1px 5px",
+                        background: C.surface2, border: `1px solid ${C.border}`,
+                        borderRadius: 2, color: C.red,
+                      }}>{s}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span style={{
+                fontSize: 8, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
+                background: `${C.orange}20`, border: `1px solid ${C.orange}50`,
+                color: C.orange, fontFamily: mono, letterSpacing: "0.08em",
+              }}>E1 COORD</span>
+            </div>
+          );
+        }
+
+        if (sig.type === "case") {
+          return (
+            <div key={i} style={{
+              padding: "0.55rem 0.85rem",
+              background: `${C.yellow}0a`,
+              border: `1px solid ${C.yellow}35`,
+              borderLeft: `3px solid ${C.yellow}`,
+              borderRadius: 3,
+              display: "flex", alignItems: "flex-start", gap: 10,
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.yellow, fontFamily: mono, marginBottom: 3 }}>
+                  ⚠ {(sig.rate * 100).toFixed(1)}% case anomalies in{" "}
+                  <span style={{ color: C.text }}>{sig.col}</span>
+                </div>
+                {sig.anomalies.length > 0 && (
+                  <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+                    Examples: {sig.anomalies.slice(0, 5).map(s => (
+                      <span key={s} style={{
+                        marginRight: 6, padding: "1px 5px",
+                        background: C.surface2, border: `1px solid ${C.border}`,
+                        borderRadius: 2, color: C.yellow,
+                      }}>{s}</span>
+                    ))}
+                    {sig.anomalies.length > 5 && (
+                      <span style={{ color: C.textMuted }}> +{sig.anomalies.length - 5} more</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <span style={{
+                fontSize: 8, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
+                background: `${C.yellow}18`, border: `1px solid ${C.yellow}40`,
+                color: C.yellow, fontFamily: mono, letterSpacing: "0.08em",
+              }}>E2 CASE</span>
+            </div>
+          );
+        }
+
+        if (sig.type === "ocr") {
+          return (
+            <div key={i} style={{
+              padding: "0.55rem 0.85rem",
+              background: `${C.red}0a`,
+              border: `1px solid ${C.red}35`,
+              borderLeft: `3px solid ${C.red}`,
+              borderRadius: 3,
+              display: "flex", alignItems: "flex-start", gap: 10,
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.red, fontFamily: mono, marginBottom: 3 }}>
+                  ⚠ {sig.hits.length} OCR substitution{sig.hits.length > 1 ? "s" : ""} detected in{" "}
+                  <span style={{ color: C.text }}>{sig.col}</span>
+                </div>
+                {sig.hits.length > 0 && (
+                  <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.7 }}>
+                    {sig.hits.slice(0, 4).map((h, hi) => (
+                      <span key={hi} style={{ marginRight: 10 }}>
+                        <span style={{ color: C.red }}>{h.original}</span>
+                        <span style={{ color: C.border2, margin: "0 3px" }}>→</span>
+                        <span style={{ color: C.green }}>{h.suggested}</span>
+                      </span>
+                    ))}
+                    {sig.hits.length > 4 && (
+                      <span style={{ color: C.textMuted }}>+{sig.hits.length - 4} more</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <span style={{
+                fontSize: 8, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
+                background: `${C.red}18`, border: `1px solid ${C.red}40`,
+                color: C.red, fontFamily: mono, letterSpacing: "0.08em",
+              }}>E3 OCR</span>
+            </div>
+          );
+        }
+
+        return null;
+      })}
+    </div>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function DataQualityReport({ report, onApplyStep, onExportMd }) {
+export default function DataQualityReport({ report, rows = [], onApplyStep, onExportMd }) {
   const { C } = useTheme();
   const SEV = makeSEV(C);
   const [section, setSection] = useState("flags");
@@ -352,6 +547,7 @@ export default function DataQualityReport({ report, onApplyStep, onExportMd }) {
     ["outliers", `◆ Outliers`,       null],
     ["corr",     `× Correlations`,   correlations.length > 0 ? `${correlations.length}` : null],
     ["columns",  `▤ All columns`,    `${columns.length}`],
+    ["smart",    `◉ Smart`,          null],
   ];
 
   return (
@@ -604,6 +800,23 @@ export default function DataQualityReport({ report, onApplyStep, onExportMd }) {
           {columns.filter(c => c.severity !== "ok").map(c => (
             <ColDetail key={c.col} col={c} onApplyStep={onApplyStep} />
           ))}
+        </div>
+      )}
+
+      {/* ── SMART QUALITY SIGNALS ── */}
+      {section === "smart" && (
+        <div>
+          <SectionHeader title="Smart quality signals — E1 Coord · E2 Case · E3 OCR" color={C.teal} />
+          <div style={{
+            fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.6,
+            marginBottom: "1rem", padding: "0.5rem 0.75rem",
+            background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3,
+          }}>
+            E1: malformed lat/lon/x/y coordinates (multi-dot, out-of-range).{" "}
+            E2: mixed-case anomalies (e.g. "mARTIN", "ArgEntina") in string columns.{" "}
+            E3: OCR substitution errors (0↔O, 1→I, rn→m, cl→d, etc.).
+          </div>
+          <SmartQualitySignals columns={columns} rows={rows} />
         </div>
       )}
     </div>

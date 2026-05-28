@@ -21,7 +21,7 @@ const TABS = [
 
 // ─── SCRIPT GENERATOR ────────────────────────────────────────────────────────
 // Builds a config object from the result and calls the appropriate generator.
-function buildScript(tab, result) {
+function buildScript(tab, result, allDatasets = {}) {
   if (!result) return "# No model estimated yet.";
 
   // Resolve spec — result may have it directly or nested (e.g. FE returns {type, fe, fd})
@@ -32,6 +32,7 @@ function buildScript(tab, result) {
     pipeline:      spec.pipeline      ?? [],
     dataDictionary: spec.dataDictionary ?? null,
     auditTrail:    spec.auditTrail    ?? null,
+    allDatasets,
     model: {
       type:       result.type ?? spec.type ?? "OLS",
       yVar:       spec.yVar       ?? "",
@@ -60,17 +61,17 @@ function buildScript(tab, result) {
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
-export default function CodeEditor({ result }) {
+export default function CodeEditor({ result, allDatasets = {} }) {
   const { C } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [tab,     setTab]     = useState("r");
   const [code,    setCode]    = useState("");
   const [copied,  setCopied]  = useState(false);
 
-  // Regenerate script whenever result or tab changes
+  // Regenerate script whenever result, tab, or allDatasets changes
   const regenerate = useCallback(() => {
-    setCode(buildScript(tab, result));
-  }, [tab, result]);
+    setCode(buildScript(tab, result, allDatasets));
+  }, [tab, result, allDatasets]);
 
   useEffect(() => {
     regenerate();

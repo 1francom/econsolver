@@ -9,16 +9,17 @@
 //   { type, yVar, xVars, wVars, zVars, entityCol, timeCol,
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
-import { toPython, jsExprToPython } from "../../pipeline/stepTranslators.js";
+import { toPython, jsExprToPython, pyRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildPyLoadLine } from "./loadLine.js";
 
 export function generatePythonScript(config = {}) {
   const {
-    filename     = "dataset.csv",
-    pipeline     = [],
-    model        = {},
+    filename       = "dataset.csv",
+    pipeline       = [],
+    model          = {},
     dataDictionary = null,
-    dataLoadOpts = null,
+    dataLoadOpts   = null,
+    allDatasets    = {},
   } = config;
 
   const {
@@ -99,7 +100,7 @@ export function generatePythonScript(config = {}) {
   if (pipeline.length) {
     lines.push("# ── Data pipeline ─────────────────────────────────────────────────────────");
     pipeline.forEach(step => {
-      const code = transpileStep(step);
+      const code = transpileStep(step, allDatasets);
       if (code) lines.push(code);
     });
     lines.push("");
@@ -122,7 +123,7 @@ function buildPackageList(modelType, pipeline = []) {
 }
 
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────
-function transpileStep(step) {
+function transpileStep(step, allDatasets = {}) {
   const { type, params = {} } = step;
   switch (type) {
     case "rename":
@@ -241,25 +242,25 @@ function transpileStep(step) {
     case "extract_regex":
       return `df["${params.newCol}"] = df["${params.col}"].str.extract(r"${params.regex}")`;
     case "join": {
-      const how     = step.how === "inner" ? "inner" : "left";
-      const lk      = step.leftKey  ?? "id";
-      const rk      = step.rightKey ?? lk;
-      const sfx     = step.suffix   ?? "_r";
-      const rightId = step.rightId  ?? "right_dataset";
-      const byExpr  = lk === rk
+      const how      = step.how === "inner" ? "inner" : "left";
+      const lk       = step.leftKey  ?? "id";
+      const rk       = step.rightKey ?? lk;
+      const sfx      = step.suffix   ?? "_r";
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      const byExpr   = lk === rk
         ? `on="${lk}"`
         : `left_on="${lk}", right_on="${rk}"`;
       return [
-        `# Join: load right dataset and merge on ${lk}`,
-        `df_right = pd.read_csv("<path_to_${rightId}.csv>")`,
+        `# Join: load right dataset "${rightName}" and merge on ${lk}`,
+        `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
         `df = df.merge(df_right, ${byExpr}, how="${how}", suffixes=("", "${sfx}"))`,
       ].join("\n");
     }
     case "append": {
-      const rightId = step.rightId ?? "right_dataset";
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
       return [
-        `# Append: stack right dataset below current`,
-        `df_right = pd.read_csv("<path_to_${rightId}.csv>")`,
+        `# Append: stack right dataset "${rightName}" below current`,
+        `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
         `df = pd.concat([df, df_right], ignore_index=True)`,
       ].join("\n");
     }

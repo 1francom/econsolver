@@ -1,7 +1,7 @@
 // ─── ECON STUDIO · ExplorerModule.jsx ────────────────────────────────────────
 // Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
 // Consumes cleanedData emitted by WranglingModule.
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect, Fragment } from "react";
 import { useTheme } from "./ThemeContext.jsx";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
@@ -12,6 +12,7 @@ import PlotBuilder from "./components/PlotBuilder.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 import { generateCleanScript } from "./pipeline/exporter.js";
+import { callClaude } from "./services/AI/AIService.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
@@ -294,7 +295,7 @@ function SummaryTable({rows,headers,info,panel}){
               </tr>
               <tr>
                 <th style={{...thS,textAlign:"left"}}/>
-                {groups.map(g=>allCols.map(([k,l])=><th key={g+k} style={thS}>{l}</th>))}
+                {groups.map(g=><Fragment key={g}>{allCols.map(([k,l])=><th key={k} style={thS}>{l}</th>)}</Fragment>)}
               </tr>
             </thead>
             <tbody>
@@ -304,7 +305,7 @@ function SummaryTable({rows,headers,info,panel}){
                   {groups.map(g=>{
                     const subset=groupBy?rows.filter(r=>r[groupBy]===g):rows;
                     const s=statsFor(subset,h);
-                    return allCols.map(([k])=><td key={g+k} style={tdS}>{fmt(s[k])}</td>);
+                    return <Fragment key={g}>{allCols.map(([k])=><td key={k} style={tdS}>{fmt(s[k])}</td>)}</Fragment>;
                   })}
                 </tr>
               ))}
@@ -1042,12 +1043,12 @@ function AIInsights({rows,headers,info,panel}){
     }).join("; ");
     const panelNote=panel?`Dataset is a ${panel.balance||"panel"} panel with i=${panel.entityCol} and t=${panel.timeCol}.`:"Dataset is cross-sectional.";
     const prompt=`You are a senior econometrician. Write a concise 3-4 sentence descriptive paragraph (Table 1 prose style, academic tone) about this dataset. Include: total observations, key variables and their distributions (mention skewness or outliers if relevant), any notable patterns. ${panelNote}\n\nStats: ${summary}\n\nObs: ${rows.length}, Cols: ${headers.length}.\n\nRespond ONLY with the prose paragraph, no markdown, no headers.`;
-    fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:prompt}]})})
-      .then(r=>r.json()).then(d=>{const t=d.content?.find(b=>b.type==="text")?.text||"";setText(t);setDone(true);}).catch(()=>setText("AI analysis unavailable.")).finally(()=>setLoading(false));
+    callClaude({ user: prompt, maxTokens: 400 })
+      .then(t=>{setText(t||"");setDone(true);}).catch(()=>setText("AI analysis unavailable.")).finally(()=>setLoading(false));
   }
 
   // Run once on mount
-  useState(()=>{runInsights();},[]);
+  useEffect(()=>{runInsights();},[]);
 
   return(
     <div style={{padding:"1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.purple}`,borderRadius:4,marginBottom:"1.4rem"}}>

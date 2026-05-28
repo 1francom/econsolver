@@ -2272,6 +2272,18 @@ export default function App() {
                       const newId = studioRef.current?.addApiData(name, rows, headers);
                       if (newId) selectDataset("calculate", newId);
                     }}
+                    onAddColumn={(colName, values) => {
+                      const baseRows = tabOutput("calculate")?.cleanRows ?? rawData?.rows ?? [];
+                      const merged = baseRows.map((r, i) => ({ ...r, [colName]: values[i] ?? null }));
+                      const baseHdrs = tabOutput("calculate")?.headers ?? rawData?.headers ?? [];
+                      const newHdrs = baseHdrs.includes(colName) ? baseHdrs : [...baseHdrs, colName];
+                      const newId = studioRef.current?.addApiData(colName + "_augmented", merged, newHdrs);
+                      if (newId) selectDataset("calculate", newId);
+                    }}
+                    onCreateDataset={(name, rows, headers) => {
+                      const newId = studioRef.current?.addApiData(name, rows, headers);
+                      if (newId) selectDataset("calculate", newId);
+                    }}
                   />
                 </div>
 
