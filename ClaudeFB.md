@@ -201,3 +201,12 @@
 
 - [2026-05-25 20:29] · Model
   Add an option to estimate without intercept
+
+---
+
+## 2026-05-28 batch
+
+### Bugs
+
+- [14:22] · Model
+  Redefine the event study model separating in Sun-Abraham and Callaway-Santana heterogeneity-robust DiD estimators
