@@ -1923,10 +1923,10 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
   // J3 — auto-init CRS from dataset metadata when projected coords are detected
   // and no CRS has been set yet.
   useEffect(() => {
-    if (activeCrs || !isProjected) return;
+    if (activeCrs || !hasProjected) return;
     const dsCrs = availableDatasets.find(d => d.crs?.proj4)?.crs;
     if (dsCrs?.proj4) applyCrs(dsCrs.proj4);
-  }, [isProjected, availableDatasets]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hasProjected, availableDatasets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addLayer    = type => setLayers(prev => { const ly = mkSLayer(type, prev.length); setActiveId(ly.id); return [...prev, ly]; });
   const updateLayer = upd  => setLayers(prev => prev.map(l => l.id === upd.id ? upd : l));
@@ -2452,7 +2452,7 @@ const GEO_MARGIN = { top: 20, right: 20, bottom: 34, left: 72 };
 
 const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
   { Plt, layers, rows, availableDatasets, title, subtitle, caption,
-    maxW = 700, maxH = 0, forceH = 0, showTiles = false },
+    maxW = 700, maxH = 0, forceH = 0, showTiles = false, C },
   ref
 ) {
   const canvasRef  = useRef(null);
@@ -2498,7 +2498,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
         try { ctx.drawImage(tileCanvas, 0, 0, plotW * scale, plotH * scale); } catch {}
         drawSvgLayer();
       } else {
-        ctx.fillStyle = "white";
+        ctx.fillStyle = C?.bg ?? "#0e1117";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         drawSvgLayer();
       }
@@ -2551,7 +2551,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     plotW = innerW + ML + MR;
     dimsRef.current = { plotW, plotH, innerW, innerH, xMin, xMax, yMin, yMax };
 
-    const marks = [Plt.frame({ stroke: showTiles ? "#ccc" : "#bbb", strokeWidth: 0.5 })];
+    const marks = [Plt.frame({ stroke: C?.border ?? "#2e3340", strokeWidth: 0.5 })];
 
     for (const ly of layers) {
       if (!ly.visible) continue;
@@ -2610,7 +2610,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       const svg = Plt.plot({
         width: plotW, height: plotH,
         marginTop: MT, marginRight: MR, marginBottom: MB, marginLeft: ML,
-        style: { background: showTiles ? "transparent" : "white", color: "#444", fontFamily: "serif", fontSize: "11px" },
+        style: { background: showTiles ? "transparent" : (C?.bg ?? "#0e1117"), color: C?.text ?? "#c8c8c8", fontFamily: "serif", fontSize: "11px" },
         x: { domain: [xMin, xMax], label: null, nice: false, grid: true,
              tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°W` : `${d.toFixed(2)}°E` },
         y: { domain: [yMin, yMax], label: null, nice: false, grid: true,
@@ -2631,7 +2631,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       tc.width  = plotW;
       tc.height = plotH;
       const ctx = tc.getContext("2d");
-      ctx.fillStyle = "#f0ede8"; // CARTO Voyager light background
+      ctx.fillStyle = C?.bg ?? "#0e1117"; // theme background
       ctx.fillRect(0, 0, plotW, plotH);
 
       const lonToPx = lon => ML + (lon - xMin) / (xMax - xMin) * innerW;
@@ -2657,17 +2657,17 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     }
 
     return () => { while (el.firstChild) el.removeChild(el.firstChild); };
-  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, maxW, maxH, forceH, showTiles]);
+  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, maxW, maxH, forceH, showTiles, C]);
 
   return (
-    <div ref={wrapperRef} style={{ fontFamily: "serif", color: "#333", background: "white", padding: "12px 8px 8px", borderRadius: 4, border: "1px solid #ddd" }}>
+    <div ref={wrapperRef} style={{ fontFamily: "serif", color: C?.text ?? "#c8c8c8", background: C?.bg ?? "#0e1117", padding: "12px 8px 8px", borderRadius: 4, border: `1px solid ${C?.border ?? "#2e3340"}` }}>
       {title    && <div style={{ textAlign: "center", fontSize: 15, fontWeight: "bold", marginBottom: 2 }}>{title}</div>}
-      {subtitle && <div style={{ textAlign: "center", fontSize: 11, color: "#666", marginBottom: 6 }}>{subtitle}</div>}
+      {subtitle && <div style={{ textAlign: "center", fontSize: 11, color: C?.textMuted ?? "#8a9ab0", marginBottom: 6 }}>{subtitle}</div>}
       <div style={{ position: "relative" }}>
         {showTiles && <canvas ref={tileCanRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />}
         <div ref={canvasRef} style={{ position: "relative" }} />
       </div>
-      {caption  && <div style={{ textAlign: "right", fontSize: 9, color: "#999", marginTop: 4 }}>{caption}</div>}
+      {caption  && <div style={{ textAlign: "right", fontSize: 9, color: C?.textMuted ?? "#5a6880", marginTop: 4 }}>{caption}</div>}
     </div>
   );
 });
@@ -2850,7 +2850,7 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
       </div>
 
       {/* Canvas + history */}
-      <div ref={wrapRef} style={{ padding: "16px 20px", background: "#f5f5f5" }}>
+      <div ref={wrapRef} style={{ padding: "16px 20px", background: C.bg }}>
         {pltErr && <div style={{ color: "#c47070", fontFamily: mono, fontSize: 10, marginBottom: 8 }}>Observable Plot load error: {pltErr}</div>}
         {!Plt && !pltErr && <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }}>Loading Observable Plot…</div>}
         {Plt && dLayers.length === 0 && (
@@ -2862,7 +2862,7 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
           <GeoPlotCanvas ref={geoPlotRef} Plt={Plt} layers={dLayers} rows={rows} availableDatasets={availableDatasets}
             title={dTitle} subtitle={dSubtitle} caption={dCaption} maxW={maxW}
             maxH={Math.max(300, (typeof window !== "undefined" ? window.innerHeight : 700) - 260)}
-            forceH={userH ?? 0} showTiles={showTiles} />
+            forceH={userH ?? 0} showTiles={showTiles} C={C} />
         )}
 
         {/* History strip */}
@@ -2901,7 +2901,7 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
                     <GeoPlotCanvas Plt={Plt} layers={entry.layers ?? []} rows={rows} availableDatasets={availableDatasets}
                       title={entry.title} subtitle={entry.subtitle} caption={entry.caption}
                       maxW={Math.max(240, (maxW - 32) / 2)}
-                      forceH={userH ?? 0} />
+                      forceH={userH ?? 0} C={C} />
                   </div>
                 ))}
               </div>
