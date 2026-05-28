@@ -50,7 +50,7 @@ const HELPERS = {
 };
 
 // ── eval_col ──────────────────────────────────────────────────────────────────
-function evalCol({ mode, expr, colValues, rows, col, newCol }) {
+function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, cases, defaultVal }) {
   if (mode === "ai_tr") {
     // ai_tr: full arrow-fn or body expression operating on a single column value
     const js = (expr || "").trim();
@@ -59,6 +59,48 @@ function evalCol({ mode, expr, colValues, rows, col, newCol }) {
       ? Function(`return (${js})`)()           // extract the arrow/function
       : Function("value", "rowIndex", js);      // body format
     const newColValues = colValues.map((v, i) => { try { return fn(v, i); } catch { return v; } });
+    return { newColValues };
+  }
+
+  // filter: boolean expr per row → mask[]
+  if (mode === "filter") {
+    if (!rows || rows.length === 0) return { mask: [] };
+    const fH = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+    const fFn = Function(...fH, `"use strict"; return !!(${expr});`);
+    return { mask: rows.map(r => { try { return fFn(...fH.map(h => r[h] ?? null)); } catch { return true; } }) };
+  }
+
+  // if_else: cond expr → trueVal/falseVal per row
+  // payload: { mode, expr: cond, trueVal, falseVal, rows }
+  if (mode === "if_else") {
+    if (!rows || rows.length === 0) return { newColValues: [] };
+    const iH  = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+    const iFn = Function(...iH, `"use strict"; return !!(${expr});`);
+    const allH = Object.keys(rows[0]);
+    const newColValues = rows.map(r => {
+      let ok = false;
+      try { ok = iFn(...iH.map(h => r[h] ?? null)); } catch {}
+      const tv = allH.includes(trueVal)  ? r[trueVal]  : trueVal;
+      const fv = allH.includes(falseVal) ? r[falseVal] : falseVal;
+      return ok ? tv : fv;
+    });
+    return { newColValues };
+  }
+
+  // case_when: array of {cond,val} → first match wins
+  // payload: { mode, cases, defaultVal, rows }
+  if (mode === "case_when") {
+    if (!rows || rows.length === 0) return { newColValues: [] };
+    const cwH  = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+    const fns  = (cases ?? []).map(c => { try { return Function(...cwH, `"use strict"; return !!(${c.cond});`); } catch { return null; } });
+    const newColValues = rows.map(r => {
+      const args = cwH.map(h => r[h] ?? null);
+      for (let i = 0; i < (cases ?? []).length; i++) {
+        if (!fns[i]) continue;
+        try { if (fns[i](...args)) return cases[i].val; } catch {}
+      }
+      return defaultVal ?? null;
+    });
     return { newColValues };
   }
 
