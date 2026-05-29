@@ -135,8 +135,25 @@ function InfoBox({ children, color }) {
 }
 
 // ─── REGRESSION EQUATION ──────────────────────────────────────────────────────
+function buildEquationLatex(varNames, beta, yVar) {
+  const fmt  = b => parseFloat(Math.abs(b).toFixed(4)).toString();
+  const toTx = v => v.replace(/×/g, "\\times").replace(/−/g, "-").replace(/\^(\d+)/g, "^{$1}");
+  const interceptIdx = varNames.indexOf("(Intercept)");
+  const b0 = interceptIdx >= 0 ? beta[interceptIdx] : null;
+  const regs = varNames.map((v, i) => ({ v, b: beta[i] })).filter(({ v }) => v !== "(Intercept)");
+  const yTex = yVar ? `\\hat{${yVar.replace(/_/g, "\\_")}}` : "\\hat{y}";
+  let eq = `${yTex} = `;
+  if (b0 != null && isFinite(b0)) eq += (b0 < 0 ? "-" : "") + fmt(b0);
+  regs.forEach(({ v, b }) => {
+    if (!isFinite(b)) return;
+    eq += (b < 0 ? " - " : " + ") + fmt(b) + " \\cdot \\text{" + toTx(v) + "}";
+  });
+  return eq;
+}
+
 function RegressionEquation({ varNames, beta, yVar }) {
   const { C } = useTheme();
+  const [latexCopied, setLatexCopied] = useState(false);
   if (!varNames.length || !beta.length) return null;
   const interceptIdx = varNames.indexOf("(Intercept)");
   const b0 = interceptIdx >= 0 ? beta[interceptIdx] : null;
@@ -146,32 +163,57 @@ function RegressionEquation({ varNames, beta, yVar }) {
     const s = Math.abs(b).toFixed(4);
     return s === "0.0000" ? "0.0000" : s;
   };
+  const copyLatex = () => {
+    navigator.clipboard.writeText(buildEquationLatex(varNames, beta, yVar)).then(() => {
+      setLatexCopied(true);
+      setTimeout(() => setLatexCopied(false), 1800);
+    });
+  };
   return (
     <div style={{
       background: C.surface2, border: `1px solid ${C.border2}`,
       borderLeft: `3px solid ${C.teal}`, borderRadius: 4,
       padding: "0.9rem 1.1rem", marginBottom: "1.2rem",
-      overflowX: "auto", whiteSpace: "nowrap",
     }}>
-      <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono, marginBottom: 6 }}>
-        Estimated Regression Equation
+      {/* header row: title + copy LaTeX button */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono }}>
+          Estimated Regression Equation
+        </div>
+        <button
+          onClick={copyLatex}
+          title="Copy as LaTeX equation"
+          style={{
+            fontSize: 8, fontFamily: mono, letterSpacing: "0.1em",
+            padding: "2px 8px", borderRadius: 3, cursor: "pointer",
+            border: `1px solid ${latexCopied ? C.teal : C.border2}`,
+            background: latexCopied ? `${C.teal}18` : "transparent",
+            color: latexCopied ? C.teal : C.textMuted,
+            transition: "all 0.15s",
+          }}
+        >
+          {latexCopied ? "✓ copied" : "copy LaTeX"}
+        </button>
       </div>
-      <div style={{ fontSize: 13, fontFamily: mono, color: C.text, lineHeight: 1.8 }}>
-        <span style={{ color: C.teal }}>{yVar ? `${yVar}̂` : "ŷ"}</span>
-        <span style={{ color: C.textDim }}> = </span>
-        {b0 != null && <span style={{ color: b0 >= 0 ? C.text : C.red }}>{b0 < 0 ? "–" : ""}{fmt(b0)}</span>}
-        {regressors.map(({ v, b }) => {
-          const bOk = b != null && isFinite(b);
-          const op = bOk && b < 0 ? " – " : " + ";
-          return (
-            <span key={v}>
-              <span style={{ color: C.textMuted }}>{op}</span>
-              <span style={{ color: bOk ? (b >= 0 ? C.teal : C.red) : C.textMuted }}>{fmt(b)}</span>
-              <span style={{ color: C.textMuted }}>·</span>
-              <span style={{ color: C.text }}>{v.replace(/_/g, "​_")}</span>
-            </span>
-          );
-        })}
+      {/* equation line — only this row scrolls horizontally */}
+      <div style={{ overflowX: "auto", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 13, fontFamily: mono, color: C.text, lineHeight: 1.8, display: "inline" }}>
+          <span style={{ color: C.teal }}>{yVar ? `${yVar}̂` : "ŷ"}</span>
+          <span style={{ color: C.textDim }}> = </span>
+          {b0 != null && <span style={{ color: b0 >= 0 ? C.text : C.red }}>{b0 < 0 ? "–" : ""}{fmt(b0)}</span>}
+          {regressors.map(({ v, b }) => {
+            const bOk = b != null && isFinite(b);
+            const op = bOk && b < 0 ? " – " : " + ";
+            return (
+              <span key={v}>
+                <span style={{ color: C.textMuted }}>{op}</span>
+                <span style={{ color: bOk ? (b >= 0 ? C.teal : C.red) : C.textMuted }}>{fmt(b)}</span>
+                <span style={{ color: C.textMuted }}>·</span>
+                <span style={{ color: C.text }}>{v.replace(/_/g, "​_")}</span>
+              </span>
+            );
+          })}
+        </div>
       </div>
       <div style={{ marginTop: 6, fontSize: 9, color: C.textMuted, fontFamily: mono, letterSpacing: "0.06em" }}>
         <span style={{ color: C.teal }}>teal</span> = significant (p&lt;0.05) ·{" "}
@@ -1774,7 +1816,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (isNaN(c0)) return { error: "Enter a valid cutoff value." };
         const runVals = dataRows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
         const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
-        const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
+        const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0, polyOrder) : parseFloat(bwManual);
         if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
         const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, expW, seOpts, polyOrder);
         if (!res) return { error: "RDD failed. Not enough observations within bandwidth." };
@@ -1839,7 +1881,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (isNaN(c0)) return { error: "Enter a valid cutoff value." };
         const runVals = dataRows.map(r => r[runningVar[0]]).filter(v => typeof v === "number" && isFinite(v));
         const yVals   = dataRows.map(r => r[y]).filter(v => typeof v === "number" && isFinite(v));
-        const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0) : parseFloat(bwManual);
+        const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0, polyOrder) : parseFloat(bwManual);
         if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
         const res = runFuzzyRDD(dataRows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts, polyOrder });
         if (!res || res.error) return { error: res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth." };
@@ -3393,8 +3435,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         </div>
 
         {/* ── RIGHT: Results Panel (column flex so buffer bar sticks to bottom) ── */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <div style={{ flex: 1, overflowY: "auto", padding: "1.4rem 1.6rem", paddingBottom: "3rem" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "1.4rem 1.6rem", paddingBottom: "3rem" }}>
 
           {/* ── B3: Data Peek ── */}
           {rows.length > 0 && (() => {
