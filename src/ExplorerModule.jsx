@@ -1047,9 +1047,6 @@ function AIInsights({rows,headers,info,panel}){
       .then(t=>{setText(t||"");setDone(true);}).catch(()=>setText("AI analysis unavailable.")).finally(()=>setLoading(false));
   }
 
-  // Run once on mount
-  useEffect(()=>{runInsights();},[]);
-
   return(
     <div style={{padding:"1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.purple}`,borderRadius:4,marginBottom:"1.4rem"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>

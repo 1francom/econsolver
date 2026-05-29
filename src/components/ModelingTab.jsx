@@ -3398,11 +3398,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           {/* ── B3: Data Peek ── */}
           {rows.length > 0 && (() => {
-            const peekCols = (() => {
-              const sel = [...(yVar.length ? yVar : []), ...xVars.slice(0, 5)];
-              if (sel.length === 0) return headers.slice(0, 6);
-              return [...new Set(sel)].slice(0, 6);
-            })();
+            const peekCols = headers;
             const peekRows = rows.slice(0, 8);
             return (
               <div style={{ marginBottom: "0.9rem" }}>

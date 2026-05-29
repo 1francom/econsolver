@@ -140,7 +140,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       // JS path — defer by one frame so the spinner renders before we block.
       // If the pipeline contains mutate/ai_tr steps, use the Worker async path
       // (isolated from localStorage/indexedDB) instead of main-thread eval.
-      const hasExprSteps = pipeline.some(s => s.type === "mutate" || s.type === "ai_tr");
+      const hasExprSteps = pipeline.some(s =>
+        s.type === "mutate" || s.type === "ai_tr" ||
+        s.type === "if_else" || s.type === "case_when" ||
+        (s.type === "filter" && s.expr)
+      );
       if (hasExprSteps) {
         runPipelineAsync(rawData.rows, rawData.headers, pipeline, context)
           .then(result => { if (!cancelled) done(result); })

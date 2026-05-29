@@ -563,12 +563,15 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
         marks,
       });
       patchDarkTheme(el);
-      container.innerHTML = "";
-      container.appendChild(el);
+      container.replaceChildren(el);
     } catch (e) {
-      container.innerHTML = `<div style="color:${C.red};font-family:${mono};font-size:11px;padding:1rem">Plot error: ${e.message}</div>`;
+      container.replaceChildren();
+      const errDiv = document.createElement("div");
+      errDiv.style.cssText = `color:${C.red};font-family:${mono};font-size:11px;padding:1rem`;
+      errDiv.textContent = "Plot error: " + e.message;
+      container.appendChild(errDiv);
     }
-    return () => { if (ref.current) ref.current.innerHTML = ""; }; // safe: clearing own container
+    return () => { if (ref.current) ref.current.replaceChildren(); };
   }, [Plt, layers, rows, xLabel, yLabel, width, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt]);
 
   if (err) return <div style={{ color: C.red, fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;

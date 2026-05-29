@@ -671,6 +671,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
       }
       onAdd({type:"std",col:qc,nn:n,mu,sd,desc:`z(${qc}) → ${n}`});
     } else if(qt==="ix"&&xc2) onAdd({type:"ix",c1:qc,c2:xc2,nn:n,desc:`${qc}×${xc2} → ${n}`});
+    else if(qt==="exp") onAdd({type:"mutate",nn:n,expr:`Math.exp(row["${qc}"])`,desc:`exp(${qc}) → ${n}`});
     resetQuick();
   };
   // canAddQuick: winz only needs qc; others need qc + non-empty name; ix also needs xc2
@@ -710,7 +711,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
 
   return(
     <div>
-      <Tabs tabs={[["quick","⚡ Transforms"],["mutate","ƒ Mutate"],["conditional","⊕ Conditional"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["numbers","⬡ Numbers"],["strings","◈ Strings"]]} active={vt} set={setVt} accent={C.teal} sm/>
+      <Tabs tabs={[["quick","⚡ Shortcuts"],["mutate","ƒ Mutate"],["conditional","⊕ Conditional"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["numbers","⬡ Numbers"],["strings","◈ Strings"]]} active={vt} set={setVt} accent={C.teal} sm/>
 
       {/* ── Variable name input (shared by quick/panel/did) ── */}
       {(vt==="quick"||vt==="panel"||vt==="did")&&(
@@ -734,7 +735,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
         <div>
           <Lbl color={C.teal}>Transform</Lbl>
           <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
-            {[["log","ln(x)"],["sq","x²"],["std","z-score"],["ix","x₁×x₂"]].map(([k,l])=>(
+            {[["log","ln(x)"],["sq","x²"],["std","z-score"],["ix","x₁×x₂"],["exp","exp(x)"]].map(([k,l])=>(
               <button key={k} onClick={()=>setQt(k)} style={{padding:"0.32rem 0.75rem",border:`1px solid ${qt===k?C.teal:C.border2}`,background:qt===k?`${C.teal}18`:"transparent",color:qt===k?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>
                 {qt===k?"✓ ":""}{l}
               </button>

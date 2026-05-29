@@ -235,7 +235,53 @@ function withLoadOpts(parsed, loadOpts) {
   return parsed;
 }
 
+// K7 — magic-bytes + size guard. Called before any parser so users get a
+// clear error instead of a cryptic parse failure or silent null result.
+async function validateFileMagic(file) {
+  const MAX_SIZE = 500 * 1024 * 1024; // 500 MB hard cap
+  if (file.size > MAX_SIZE)
+    throw new Error(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(0)} MB — maximum upload size is 500 MB. Use Parquet or DuckDB for large datasets.`);
+
+  const ext = file.name.split(".").pop().toLowerCase();
+  if (["csv", "tsv", "txt", "prj", "shx", "cpg"].includes(ext)) return; // text formats — no magic bytes
+
+  if (file.size < 4) return; // too small to check — parser will handle it
+  const buf = await file.slice(0, 8).arrayBuffer();
+  const b = new Uint8Array(buf);
+
+  if (ext === "xlsx") {
+    if (b[0] !== 0x50 || b[1] !== 0x4B || b[2] !== 0x03 || b[3] !== 0x04)
+      throw new Error(`"${file.name}" is not a valid Excel file — missing ZIP header. Is the file corrupted or saved as a different format?`);
+  } else if (ext === "xls") {
+    if (b[0] !== 0xD0 || b[1] !== 0xCF || b[2] !== 0x11 || b[3] !== 0xE0)
+      throw new Error(`"${file.name}" is not a valid Excel 97-2003 file — missing OLE2 header.`);
+  } else if (ext === "zip") {
+    if (b[0] !== 0x50 || b[1] !== 0x4B)
+      throw new Error(`"${file.name}" is not a valid ZIP file.`);
+  } else if (ext === "parquet") {
+    if (b[0] !== 0x50 || b[1] !== 0x41 || b[2] !== 0x52 || b[3] !== 0x31)
+      throw new Error(`"${file.name}" is not a valid Parquet file — missing PAR1 magic bytes.`);
+  } else if (ext === "shp") {
+    const code = (b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
+    if (code !== 9994)
+      throw new Error(`"${file.name}" is not a valid shapefile — expected file code 9994, got ${code}.`);
+  } else if (ext === "dbf") {
+    const VALID = new Set([0x02, 0x03, 0x04, 0x05, 0x30, 0x31, 0x32, 0x83, 0x8B, 0x8C, 0xF5]);
+    if (!VALID.has(b[0]))
+      throw new Error(`"${file.name}" is not a valid DBF file — unexpected version byte 0x${b[0].toString(16).padStart(2, "0")}.`);
+  } else if (ext === "dta") {
+    // Stata 13+ XML: starts with '<' (0x3C); legacy binary: version byte 108–121
+    if (b[0] !== 0x3C && !(b[0] >= 108 && b[0] <= 121))
+      throw new Error(`"${file.name}" is not a valid Stata .dta file — unrecognised file header.`);
+  } else if (ext === "rds") {
+    // R serialisation: 'X\n' (XDR), 'A\n' (ASCII), or 'B\n' (binary)
+    if (!((b[0] === 0x58 || b[0] === 0x41 || b[0] === 0x42) && b[1] === 0x0A))
+      throw new Error(`"${file.name}" is not a valid R data file (.rds) — unrecognised serialisation header.`);
+  }
+}
+
 async function parseFile(file) {
+  await validateFileMagic(file);
   const ext = file.name.split(".").pop().toLowerCase();
   if (["csv", "txt"].includes(ext)) {
     if (file.size > 10 * 1024 * 1024) {

@@ -51,6 +51,25 @@ export function evalColumn(step, rows) {
       newCol:    step.col,
     });
   }
+  // if_else
+  if (step.type === "if_else") {
+    return request("eval_col", {
+      mode:     "if_else",
+      expr:     step.cond,
+      trueVal:  step.trueVal,
+      falseVal: step.falseVal,
+      rows,
+    });
+  }
+  // case_when
+  if (step.type === "case_when") {
+    return request("eval_col", {
+      mode:       "case_when",
+      cases:      step.cases,
+      defaultVal: step.defaultVal,
+      rows,
+    });
+  }
   // mutate
   return request("eval_col", {
     mode:   "mutate",
@@ -59,6 +78,18 @@ export function evalColumn(step, rows) {
     col:    step.col,
     newCol: step.nn,
   });
+}
+
+/**
+ * Evaluate a filter formula expression in the Worker.
+ * Returns a boolean mask aligned with the rows array.
+ *
+ * @param {string} expr - Boolean JS expression (column names as variables)
+ * @param {object[]} rows - Row objects
+ * @returns {Promise<{ mask: boolean[] }>}
+ */
+export function evalFilter(expr, rows) {
+  return request("eval_col", { mode: "filter", expr, rows });
 }
 
 /**

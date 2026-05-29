@@ -1296,21 +1296,32 @@ export function runPipeline(rows, headers, pipeline, context = {}) {
  * Use when the pipeline contains at least one mutate or ai_tr step.
  */
 export async function runPipelineAsync(rows, headers, pipeline, context = {}) {
-  const { evalColumn } = await import("../services/exprEvalService.js");
+  const { evalColumn, evalFilter } = await import("../services/exprEvalService.js");
   let s = { rows, headers };
   for (const step of pipeline) {
-    if (step.type === "mutate" || step.type === "ai_tr") {
-      try {
+    const isWorkerStep =
+      step.type === "mutate" || step.type === "ai_tr" ||
+      step.type === "if_else" || step.type === "case_when" ||
+      (step.type === "filter" && step.expr);
+
+    if (!isWorkerStep) {
+      s = applyStep(s.rows, s.headers, step, context);
+      continue;
+    }
+
+    try {
+      if (step.type === "filter" && step.expr) {
+        const { mask } = await evalFilter(step.expr, s.rows);
+        s = { rows: s.rows.filter((_, i) => mask[i]), headers: s.headers };
+      } else {
         const { newColValues } = await evalColumn(step, s.rows);
-        const outCol = step.type === "ai_tr" ? step.col : step.nn;
+        const outCol = step.type === "ai_tr" ? step.col : (step.nn ?? step.col);
         const newRows = s.rows.map((r, i) => ({ ...r, [outCol]: newColValues[i] ?? null }));
         const newHeaders = s.headers.includes(outCol) ? s.headers : [...s.headers, outCol];
         s = { rows: newRows, headers: newHeaders };
-      } catch (e) {
-        console.warn("[runPipelineAsync] worker eval failed, falling back to sync:", e.message);
-        s = applyStep(s.rows, s.headers, step, context);
       }
-    } else {
+    } catch (e) {
+      console.warn("[runPipelineAsync] worker eval failed, falling back to sync:", e.message);
       s = applyStep(s.rows, s.headers, step, context);
     }
   }
