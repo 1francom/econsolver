@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 
 const mono = "'IBM Plex Mono', monospace";
@@ -8,10 +8,17 @@ export default function SessionTabs({ sessions, activeId, onSelect, onAdd, onRen
   const { C } = useTheme();
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState("");
+  const committedRef = useRef(false);
 
-  function startRename(s) { setEditingId(s.id); setDraft(s.name); }
+  function startRename(s) { committedRef.current = false; setEditingId(s.id); setDraft(s.name); }
   function commitRename() {
+    if (committedRef.current) return;
+    committedRef.current = true;
     if (editingId && draft.trim()) onRename(editingId, draft.trim().slice(0, 40));
+    setEditingId(null);
+  }
+  function cancelRename() {
+    committedRef.current = true; // block the trailing blur from committing
     setEditingId(null);
   }
 
@@ -34,7 +41,7 @@ export default function SessionTabs({ sessions, activeId, onSelect, onAdd, onRen
               <input autoFocus value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={commitRename}
-                onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setEditingId(null); }}
+                onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }}
                 style={{ background: C.bg, color: C.text, border: `1px solid ${C.teal}`, fontFamily: mono, fontSize: 12, width: 90, padding: "2px 4px" }} />
             ) : (
               <span>{s.name}</span>

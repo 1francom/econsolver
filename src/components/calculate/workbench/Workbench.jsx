@@ -11,6 +11,8 @@ export default function Workbench({ pid }) {
   const [sessions, setSessions] = useState([newSession()]);
   const [activeId, setActiveId] = useState(null);
   const loadedRef = useRef(false);
+  const sessionsRef = useRef(sessions);
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
 
   // Load on mount / pid change.
   useEffect(() => {
@@ -33,7 +35,7 @@ export default function Workbench({ pid }) {
 
   // Flush on unmount.
   useEffect(() => () => {
-    if (loadedRef.current) flushWorkbench(storeKey, sessions).catch(() => {});
+    if (loadedRef.current) flushWorkbench(storeKey, sessionsRef.current).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
