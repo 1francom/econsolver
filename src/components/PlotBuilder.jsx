@@ -438,6 +438,24 @@ function patchDarkTheme(el) {
   el.querySelectorAll("line[stroke='black'], line[stroke='#000']").forEach(l => {
     l.setAttribute("stroke", "#252525");
   });
+  // Patch color legend figures for dark theme
+  el.querySelectorAll("figure").forEach(f => {
+    f.style.background = "transparent";
+    f.style.color = "#9a9a9a";
+    f.style.margin = "0";
+  });
+  el.querySelectorAll("figure h2").forEach(h => {
+    h.style.fontFamily = "IBM Plex Mono, monospace";
+    h.style.fontSize = "9px";
+    h.style.letterSpacing = "0.15em";
+    h.style.textTransform = "uppercase";
+    h.style.color = "#6a6a6a";
+    h.style.fontWeight = "400";
+    h.style.margin = "6px 0 3px";
+  });
+  el.querySelectorAll("figure span[style]").forEach(s => {
+    s.style.color = "#9a9a9a";
+  });
 }
 
 // ─── PLOT CANVAS — renders one or more layers on a single Observable Plot ─────
@@ -500,7 +518,10 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       // Only draw zero rule when 0 is within ±20% of the data range (ggplot expand default)
       const xRange = xMax - xMin;
       const yRange = yMax - yMin;
-      const showRuleX = !xIsDate && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
+      // Boxplot builds string category keys for x — adding a numeric ruleX([0]) creates a
+      // duplicate "0" entry (number vs string) in Observable Plot's categorical domain.
+      const hasBoxplot = layers.some(ly => ly.visible && ly.geom === "boxplot");
+      const showRuleX = !xIsDate && !hasBoxplot && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
       const showRuleY = 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
 
       const zeroStyle = { stroke: "#888", strokeWidth: 1.4, strokeOpacity: 0.55 };
@@ -523,7 +544,10 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
         Plt.frame({ stroke: "#333" }),
       ];
 
-      const colorOpts = scheme ? { scheme } : {};
+      const hasColorChannel = layers.some(ly => ly.visible && ly.aes?.color);
+      const colorOpts = hasColorChannel
+        ? { scheme: scheme || "observable10", legend: true }
+        : scheme ? { scheme } : {};
       const el = Plt.plot({
         width:        width || 580,
         height:       height || 310,

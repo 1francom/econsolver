@@ -25,8 +25,8 @@
 | 2026-05-21 | Model | p-value calculation reported broken — t-value = 0.49 with p < 0.001 | critical→needs-repro | math | `src/math/LinearEngine.js`, `src/math/EstimationResult.js`, `src/core/inference/` | needs reproducer (2026-05-26 — audit of 11 engines + wrappers + CoeffTable found no t/p desync; `pValue(0.49,100)=0.625` matches R; most likely the "0.49" was the β̂ column, not the t column — layout is `Variable \| β̂ \| (SE) \| CI 2.5% \| CI 97.5% \| t \| p \| sig`. Franco to confirm with screenshot + estimator name) |
 | 2026-05-21 | Model | Variables auto-reestimate on selection/elimination toggle — should require explicit re-run | medium | ui | `src/components/ModelingTab.jsx` | open |
 | 2026-05-21 | Model | Add option to clean / reset the current model | low | ui | `src/components/ModelingTab.jsx`, `src/components/modeling/EstimatorSidebar.jsx` | open |
-| 2026-05-22 | Calculate | Function graph does not start from 0 | medium | ui | `src/components/tabs/CalculateTab.jsx` | open |
+| 2026-05-22 | Calculate | Function graph does not start from 0 | medium | ui | `src/components/tabs/CalculateTab.jsx` | fixed |
 | 2026-05-25 | Calculate | Only 1 equation is plotted when multiple are defined | medium | ui | `src/components/tabs/CalculateTab.jsx` | fixed |
 | 2026-05-25 | Report | AI does not recognize pipeline steps in Script generation (matches CLAUDE.md pending item 5b) | high | ai | `src/ReportingModule.jsx`, `src/services/AI/AIService.js`, `src/services/AI/Prompts/index.js` | open |
-| 2026-05-19 | Explore | Color references in PlotBuilder for `color = X` mapping | medium | ui | `src/components/PlotBuilder.jsx` | open |
-| 2026-05-19 | Simulate | Montecarlo simulation for single variables | medium | ui | `src/components/tabs/SimulateTab.jsx` | open |
+| 2026-05-19 | Explore | Color references in PlotBuilder for `color = X` mapping | medium | ui | `src/components/PlotBuilder.jsx` | fixed (2026-05-30 — auto-default to observable10 scheme + dark-mode legend patch when aes.color is set) |
+| 2026-05-19 | Simulate | Montecarlo simulation for single variables | medium | ui | `src/components/tabs/SimulateTab.jsx` | fixed (2026-05-30 — OLS/Single mode toggle; single mode: pick variable + statistic mean/sd/var/median/min/max; MCHistogram reused) |

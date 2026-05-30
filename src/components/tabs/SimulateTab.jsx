@@ -490,6 +490,9 @@ export default function SimulateTab({ onAddDataset }) {
   const [mcReps,     setMcReps]     = useState(1000);
   const [mcResult,   setMcResult]   = useState(null);
   const [mcRunning,  setMcRunning]  = useState(false);
+  const [mcMode,     setMcMode]     = useState("ols");   // "ols" | "single"
+  const [mcVar,      setMcVar]      = useState("");
+  const [mcStat,     setMcStat]     = useState("mean");
 
   const DIST_COLOR = distColor(C);
 
@@ -547,6 +550,35 @@ export default function SimulateTab({ onAddDataset }) {
 
   // ── Monte Carlo ─────────────────────────────────────────────────────────────
   async function runMonteCarlo() {
+    if (mcMode === "single") {
+      if (!mcVar) return;
+      setMcRunning(true); setMcResult(null);
+      const nObs = Math.max(1, Math.min(100000, +n || 500));
+      const reps = Math.max(10, Math.min(10000, +mcReps || 1000));
+      const vals = [];
+      const BATCH = 100;
+      for (let r = 0; r < reps; r++) {
+        const { scope, error } = await evalScopeInWorker(variables, nObs, (+seed || 0) + r * 1_000_037);
+        if (error) { setMcRunning(false); return; }
+        const arr = scope[mcVar];
+        if (!arr?.length) continue;
+        let stat;
+        if (mcStat === "mean")     stat = arr.reduce((s,v)=>s+v,0)/arr.length;
+        else if (mcStat === "sd") { const m=arr.reduce((s,v)=>s+v,0)/arr.length; stat=Math.sqrt(arr.reduce((s,v)=>s+(v-m)**2,0)/arr.length); }
+        else if (mcStat === "var") { const m=arr.reduce((s,v)=>s+v,0)/arr.length; stat=arr.reduce((s,v)=>s+(v-m)**2,0)/arr.length; }
+        else if (mcStat === "median") { const s=[...arr].sort((a,b)=>a-b),mid=Math.floor(s.length/2); stat=s.length%2?s[mid]:(s[mid-1]+s[mid])/2; }
+        else if (mcStat === "min") stat = Math.min(...arr);
+        else                       stat = Math.max(...arr);
+        vals.push(stat);
+        if ((r + 1) % BATCH === 0) await new Promise(res => setTimeout(res, 0));
+      }
+      if (!vals.length) { setMcRunning(false); return; }
+      const mean = vals.reduce((a,v)=>a+v,0)/vals.length;
+      const sd   = Math.sqrt(vals.reduce((a,v)=>a+(v-mean)**2,0)/vals.length);
+      setMcResult({ mode:"single", betas:vals, mean, sd, reps:vals.length, stat:mcStat, varName:mcVar });
+      setMcRunning(false);
+      return;
+    }
     if (!mcY || !mcX) return;
     setMcRunning(true); setMcResult(null);
     const nObs  = Math.max(1, Math.min(100000, +n || 500));
@@ -571,7 +603,7 @@ export default function SimulateTab({ onAddDataset }) {
     const bias  = isFinite(trueBeta) ? mean - trueBeta : null;
     const rmse  = isFinite(trueBeta) ? Math.sqrt(bs.reduce((a,v)=>a+(v-trueBeta)**2,0)/bs.length) : null;
     const rejectRate = betas.filter(b=>Math.abs(b.t)>crit).length/betas.length;
-    setMcResult({ betas:bs, mean, sd, bias, rmse, rejectRate, reps:betas.length, trueBeta:isFinite(trueBeta)?trueBeta:null });
+    setMcResult({ mode:"ols", betas:bs, mean, sd, bias, rmse, rejectRate, reps:betas.length, trueBeta:isFinite(trueBeta)?trueBeta:null });
     setMcRunning(false);
   }
 
@@ -779,8 +811,21 @@ export default function SimulateTab({ onAddDataset }) {
         </button>
         {mcOpen && (
           <div style={{ marginTop:12 }}>
-            {variables.length < 2
-              ? <div style={{ fontSize:10, color:C.textMuted }}>Need at least 2 variables (Y and X) to run Monte Carlo.</div>
+            {/* ── Mode toggle ── */}
+            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+              {[["ols","OLS (β̂)"],["single","Single variable"]].map(([k,label])=>(
+                <button key={k} onClick={()=>{ setMcMode(k); setMcResult(null); }}
+                  style={{ padding:"2px 10px", borderRadius:3, cursor:"pointer", fontFamily:mono, fontSize:9,
+                    background: mcMode===k ? `${C.blue}20` : "transparent",
+                    border: `1px solid ${mcMode===k ? C.blue+"60" : C.border}`,
+                    color: mcMode===k ? C.blue : C.textMuted }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {mcMode === "ols" && (variables.length < 2
+              ? <div style={{ fontSize:10, color:C.textMuted }}>Need at least 2 variables (Y and X) to run OLS Monte Carlo.</div>
               : <>
                 <div style={{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-end", marginBottom:12 }}>
                   <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
@@ -807,40 +852,95 @@ export default function SimulateTab({ onAddDataset }) {
                   </label>
                   <Btn onClick={runMonteCarlo} dis={!mcY||!mcX||mcRunning} v="solid" color={C.blue} ch={mcRunning?"Running…":"Run MC"}/>
                 </div>
-                {mcRunning && <div style={{ fontSize:10, color:C.textMuted, fontFamily:mono, marginBottom:8 }}>Running {mcReps} replications…</div>}
-                {mcResult && (
-                  <div>
-                    <div style={{ overflowX:"auto", marginBottom:14 }}>
-                      <table style={{ borderCollapse:"collapse", fontSize:11 }}>
-                        <thead>
-                          <tr>
-                            {["Reps","Mean β̂","Bias","SD","RMSE","Reject H₀ (5%)"].map(h=>(
-                              <th key={h} style={thStyle(C)}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            <td style={tdStyle(C)}>{mcResult.reps}</td>
-                            <td style={{...tdStyle(C),color:C.teal}}>{mcResult.mean.toFixed(4)}</td>
-                            <td style={{...tdStyle(C),color:mcResult.bias!=null&&Math.abs(mcResult.bias)>0.05?C.gold:C.text}}>
-                              {mcResult.bias!=null ? (mcResult.bias>=0?"+":"")+mcResult.bias.toFixed(4) : "—"}
-                            </td>
-                            <td style={tdStyle(C)}>{mcResult.sd.toFixed(4)}</td>
-                            <td style={tdStyle(C)}>{mcResult.rmse!=null?mcResult.rmse.toFixed(4):"—"}</td>
-                            <td style={{...tdStyle(C),color:Math.abs(mcResult.rejectRate-0.05)>0.015?(C.gold??C.text):(C.green??C.text)}}>
-                              {(mcResult.rejectRate*100).toFixed(1)}%
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    <Lbl mb={6}>Sampling distribution of β̂ ({mcResult.reps} reps, n={+n||500})</Lbl>
-                    <MCHistogram betas={mcResult.betas} trueVal={mcResult.trueBeta} meanVal={mcResult.mean}/>
-                  </div>
-                )}
               </>
-            }
+            )}
+
+            {mcMode === "single" && (variables.length < 1
+              ? <div style={{ fontSize:10, color:C.textMuted }}>Add at least 1 variable to run Monte Carlo.</div>
+              : <>
+                <div style={{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-end", marginBottom:12 }}>
+                  <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                    <Lbl mb={1}>Variable</Lbl>
+                    <select value={mcVar} onChange={e=>setMcVar(e.target.value)} style={{...fieldStyle(C),width:110}}>
+                      <option value="">— select —</option>
+                      {variables.map(v=><option key={v.id} value={v.name}>{v.name}</option>)}
+                    </select>
+                  </label>
+                  <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                    <Lbl mb={1}>Statistic</Lbl>
+                    <select value={mcStat} onChange={e=>setMcStat(e.target.value)} style={{...fieldStyle(C),width:100}}>
+                      {[["mean","Mean"],["sd","Std Dev"],["var","Variance"],["median","Median"],["min","Min"],["max","Max"]].map(([k,l])=>(
+                        <option key={k} value={k}>{l}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                    <Lbl mb={1}>Replications</Lbl>
+                    <input type="number" min={10} max={10000} value={mcReps} onChange={e=>setMcReps(e.target.value)} style={{...fieldStyle(C),width:80}}/>
+                  </label>
+                  <Btn onClick={runMonteCarlo} dis={!mcVar||mcRunning} v="solid" color={C.blue} ch={mcRunning?"Running…":"Run MC"}/>
+                </div>
+              </>
+            )}
+
+            {mcRunning && <div style={{ fontSize:10, color:C.textMuted, fontFamily:mono, marginBottom:8 }}>Running {mcReps} replications…</div>}
+
+            {mcResult?.mode === "ols" && (
+              <div>
+                <div style={{ overflowX:"auto", marginBottom:14 }}>
+                  <table style={{ borderCollapse:"collapse", fontSize:11 }}>
+                    <thead>
+                      <tr>
+                        {["Reps","Mean β̂","Bias","SD","RMSE","Reject H₀ (5%)"].map(h=>(
+                          <th key={h} style={thStyle(C)}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style={tdStyle(C)}>{mcResult.reps}</td>
+                        <td style={{...tdStyle(C),color:C.teal}}>{mcResult.mean.toFixed(4)}</td>
+                        <td style={{...tdStyle(C),color:mcResult.bias!=null&&Math.abs(mcResult.bias)>0.05?C.gold:C.text}}>
+                          {mcResult.bias!=null ? (mcResult.bias>=0?"+":"")+mcResult.bias.toFixed(4) : "—"}
+                        </td>
+                        <td style={tdStyle(C)}>{mcResult.sd.toFixed(4)}</td>
+                        <td style={tdStyle(C)}>{mcResult.rmse!=null?mcResult.rmse.toFixed(4):"—"}</td>
+                        <td style={{...tdStyle(C),color:Math.abs(mcResult.rejectRate-0.05)>0.015?(C.gold??C.text):(C.green??C.text)}}>
+                          {(mcResult.rejectRate*100).toFixed(1)}%
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <Lbl mb={6}>Sampling distribution of β̂ ({mcResult.reps} reps, n={+n||500})</Lbl>
+                <MCHistogram betas={mcResult.betas} trueVal={mcResult.trueBeta} meanVal={mcResult.mean}/>
+              </div>
+            )}
+
+            {mcResult?.mode === "single" && (
+              <div>
+                <div style={{ overflowX:"auto", marginBottom:14 }}>
+                  <table style={{ borderCollapse:"collapse", fontSize:11 }}>
+                    <thead>
+                      <tr>
+                        {["Reps","Mean","SD"].map(h=>(
+                          <th key={h} style={thStyle(C)}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style={tdStyle(C)}>{mcResult.reps}</td>
+                        <td style={{...tdStyle(C),color:C.teal}}>{mcResult.mean.toFixed(4)}</td>
+                        <td style={tdStyle(C)}>{mcResult.sd.toFixed(4)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <Lbl mb={6}>Sampling distribution of {mcResult.stat} ({mcResult.varName}) — {mcResult.reps} reps, n={+n||500}</Lbl>
+                <MCHistogram betas={mcResult.betas} trueVal={null} meanVal={mcResult.mean}/>
+              </div>
+            )}
           </div>
         )}
       </div>

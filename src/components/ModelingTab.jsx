@@ -3520,9 +3520,23 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             </div>
           )}
 
-          {/* ── Pin result button ── */}
+          {/* ── Pin / Clear result buttons ── */}
           {result && (
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 8 }}>
+              <button
+                onClick={() => {
+                  setResult(null); setErr(null); setPanelFE(null); setPanelFD(null);
+                }}
+                style={{
+                  padding: "3px 12px", borderRadius: 3, cursor: "pointer",
+                  fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
+                  border: `1px solid ${C.border2}`, background: "transparent",
+                  color: C.textMuted, transition: "all 0.12s",
+                }}
+                title="Clear estimated result"
+              >
+                ✕ Clear
+              </button>
               <button
                 onClick={() => {
                   const id = modelBuffer.add(result);
