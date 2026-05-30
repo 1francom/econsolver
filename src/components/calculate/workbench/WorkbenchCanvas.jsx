@@ -42,6 +42,7 @@ export default function WorkbenchCanvas({ equations, results, view }) {
       if (r?.plot?.numeric?.points) allPts.push(...r.plot.numeric.points);
     }
     const [x0, x1] = view.xRange;
+    if (!Number.isFinite(x0) || !Number.isFinite(x1) || x0 === x1) return; // degenerate x-range → blank
     let y0 = Infinity, y1 = -Infinity;
     for (const p of allPts) { if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
     if (!Number.isFinite(y0) || !Number.isFinite(y1) || y0 === y1) { y0 = -1; y1 = 1; }
