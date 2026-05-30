@@ -9,6 +9,8 @@ import AuthGate from './components/auth/AuthGate.jsx'
 if (import.meta.env.DEV) {
   // Self-registers window.__validation.workbench() for in-browser symbolic-engine checks.
   import('./math/__validation__/workbenchEngineValidation.js')
+  // Self-registers window.__validation.workbenchStore() for session-store shape checks.
+  import('./math/__validation__/workbenchStoreValidation.js')
 }
 
 if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'fase5') {
