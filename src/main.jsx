@@ -11,6 +11,8 @@ if (import.meta.env.DEV) {
   import('./math/__validation__/workbenchEngineValidation.js')
   // Self-registers window.__validation.workbenchStore() for session-store shape checks.
   import('./math/__validation__/workbenchStoreValidation.js')
+  // Self-registers window.__validation.workbenchOps() for card→engine→result checks.
+  import('./math/__validation__/workbenchOpsValidation.js')
 }
 
 if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'fase5') {
