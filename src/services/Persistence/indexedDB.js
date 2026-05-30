@@ -4,7 +4,7 @@
 //
 // DB layout:
 //   DB name  : "econ_studio_v1"
-//   Version  : 4
+//   Version  : 5
 //
 //   Store "projects"   — named project registry (top-level, user-visible)
 //     Key   : pid (string, same as pipeline key)
@@ -30,12 +30,17 @@
 //     Value : { id, headers, rows, byteSize, ts }
 //     Limit : rows stored only if estimated JSON size < RAW_DATA_LIMIT_BYTES
 //
+//   Store "workbench"  — Equation Workbench sessions, keyed by project pid
+//     Key   : pid (string)
+//     Value : { pid, sessions, ts }
+//
 // Exports:
 //   openDB()
 //   saveProject(pid, meta)               / listProjects()      / deleteProject(pid) / clearAllProjects()
 //   savePipeline(pid, datasetId, record) / loadPipeline(pid, datasetId)
 //   listPipelines()                      / deletePipeline(id)  / clearAllPipelines()
 //   saveRawData(id, rawData)             / loadRawData(id)     / deleteRawData(id)
+//   saveWorkbenchRecord(pid, sessions)   / loadWorkbenchRecord(pid)  / deleteWorkbenchRecord(pid)
 
 import { retrofitRowId } from "../data/rowIdentity.js";
 
