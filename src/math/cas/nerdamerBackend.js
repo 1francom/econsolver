@@ -40,4 +40,7 @@ export const nerdamerBackend = {
     for (const [k, v] of Object.entries(scope)) subs[k] = String(v);
     return Number(N(expr, subs).evaluate().text());
   },
+
+  diff(expr, varName) { return N.diff(expr, varName).toString(); },
+  simplify(expr) { return N(expr).expand().toString(); },
 };

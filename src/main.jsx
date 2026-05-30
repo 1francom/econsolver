@@ -6,6 +6,11 @@ import { ThemeProvider } from './ThemeContext.jsx'
 import { AuthProvider } from './services/auth/AuthContext.jsx'
 import AuthGate from './components/auth/AuthGate.jsx'
 
+if (import.meta.env.DEV) {
+  // Self-registers window.__validation.workbench() for in-browser symbolic-engine checks.
+  import('./math/__validation__/workbenchEngineValidation.js')
+}
+
 if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'fase5') {
   import('./services/data/__validation__/fase5Validation.js')
     .then(({ runFase5NumericalValidation }) => runFase5NumericalValidation())
