@@ -155,9 +155,121 @@ load.
 - `extractSymbols(expr)` → free-symbol detection to auto-populate params /
   choice vars.
 
-Symbolic counterparts (differentiate, solve, lagrangian, simplify, toLatex) wrap
-nerdamer in a thin adapter module so the CAS dependency is isolated and the
-SymPy escalation can swap in behind the same interface.
+### 5.1 CAS adapter contract (the resumability boundary)
+
+All symbolic work goes through **one interface**, `casAdapter`. No Workbench,
+engine, or UI code ever imports nerdamer or SymPy directly — they import only the
+adapter. This is what lets a second agent (Sonnet, Codex) swap the backend
+without touching the rest of the app. Both backends MUST implement this exact
+surface:
+
+```js
+// src/math/cas/casAdapter.js — backend-agnostic facade
+export const cas = {
+  // lifecycle
+  ready():                  Promise<void>,        // resolves when backend loaded
+  backend():                "nerdamer" | "sympy", // which engine is active
+
+  // parsing / introspection
+  parse(src: string):       CasExpr,              // "A*K^alpha*L^(1-alpha)" -> CasExpr
+  freeSymbols(e: CasExpr):  string[],             // ["A","K","alpha","L"]
+  toLatex(e: CasExpr):      string,
+
+  // calculus / algebra (all return symbolic results)
+  diff(e, varName):                 CasExpr,                 // ∂e/∂var
+  simplify(e):                      CasExpr,
+  solve(e, varName):                CasSolution,             // roots of e = 0
+  solveSystem(eqs: CasExpr[], vars: string[]): CasSolution,  // ∇=0 etc.
+
+  // optimization helpers (built on diff + solveSystem)
+  lagrangianFOC(obj, constraints: CasExpr[], choiceVars: string[]):
+      { L: CasExpr, equations: CasExpr[], multipliers: string[] },
+
+  // symbolic→numeric bridge
+  substitute(e, scope: Record<string,number>): CasExpr,
+  compile(e, freeVars: string[]):  (scope) => number,  // fast numeric evaluator
+};
+
+// CasSolution: { closed: boolean, solutions: { [v: string]: CasExpr }[] }
+//   closed === false  ⇒ symbolic solve failed; caller falls back to calcEngine numeric.
+// CasExpr is opaque (backend-owned); only the adapter inspects its internals.
+```
+
+**Hard rule for both backends:** when a symbolic solve cannot close, return
+`{ closed: false, solutions: [] }` rather than throwing. The caller (engine layer)
+then routes to the numeric fallback in `calcEngine.js`. Never let CAS failure
+crash an operation.
+
+### 5.2 Backend A — nerdamer (default, pass one)
+
+- **Load:** CDN `<script>` (jsDelivr), lazily, same pattern as KaTeX / Observable
+  Plot. Pin a version. nerdamer core + `Algebra`, `Calculus`, and `Solve`
+  add-ons are all required (diff, solveEquations, toTeX live in those).
+- **Mapping:** `parse`→`nerdamer(src)`; `diff`→`nerdamer.diff`; `solve`→
+  `nerdamer.solve` / `.solveFor`; `solveSystem`→`nerdamer.solveEquations`;
+  `simplify`→`nerdamer(...).expand()/.evaluate()`; `toLatex`→`.toTeX()`;
+  `compile`→`nerdamer(e).buildFunction(freeVars)`; `substitute`→
+  `nerdamer(e, scope)`.
+- **freeSymbols:** `nerdamer(e).variables()`.
+- **Known weak spots → return `closed:false`:** non-polynomial systems, transcendental
+  roots without closed form, hard symbolic integrals. These fall to numeric.
+
+### 5.3 Backend B — SymPy via Pyodide (escalation, near-term)
+
+Slots in behind the *same* `casAdapter` surface; selected by a build/runtime flag
+(`CAS_BACKEND = "sympy"`) or auto-promoted when nerdamer returns `closed:false`
+on a problem the user explicitly retries with "solve exactly."
+
+- **Load:** Pyodide (WASM) from CDN, then `pyodide.loadPackage("sympy")`. First
+  load is multi-second — show a one-time "loading exact solver…" indicator;
+  cache the interpreter for the session. Reuse the existing WASM-tolerant infra
+  posture (DuckDB already ships WASM here).
+- **Mapping:** `diff`→`sympy.diff`; `solve`→`sympy.solve(eq, var)`; `solveSystem`→
+  `sympy.solve(eqs, vars)` / `linsolve`/`nonlinsolve`; `simplify`→`sympy.simplify`;
+  `toLatex`→`sympy.latex`; `compile`→`sympy.lambdify(freeVars, e, "math")` (or
+  evaluate `subs().evalf()`); `freeSymbols`→`e.free_symbols`; `lagrangianFOC` can
+  use `sympy` directly or the shared default implementation below.
+- **Why escalate:** arbitrary symbolic systems, positivity/realness assumptions
+  (`symbols('K', positive=True)`), and cleaner LaTeX — the things real planner
+  problems need when nerdamer stalls.
+
+### 5.4 Shared (backend-independent) logic
+
+`lagrangianFOC` has a default implementation in terms of `diff` + the symbolic
+primitives, so it works for *any* backend that implements the core surface:
+`L = obj − Σ λᵢ(gᵢ − cᵢ)`; `equations = [∂L/∂choiceVars…, ∂L/∂λᵢ…]`; hand to
+`solveSystem(equations, [...choiceVars, ...multipliers])`. A backend may override
+it if it has a more direct path. Multiplier names are generated as
+`lambda_1, lambda_2, …` and rendered as λ₁, λ₂ in the UI.
+
+### 5.5 `src/math/calcEngine.js` additions (numeric fallback, pure JS, no React)
+
+- `optimizeUnconstrained(fn, [a,b], sense)` → scan + Newton-polish at `f′=0`,
+  classify by `f″`. Returns `{x, value, fp, fpp, kind}`.
+- `optimizeConstrained(objExpr, constraintExprs, choiceVars, scope)` → numeric
+  Lagrangian FOC via existing `gradient` + `solveSystem`. Returns
+  `{choices, multipliers, objectiveValue}`.
+- `extractSymbols(expr)` → free-symbol detection to auto-populate params /
+  choice vars (may delegate to `cas.freeSymbols`).
+
+### 5.6 Operation result contract (what each op stores in `session.results`)
+
+Every operation returns this dual shape so symbolic display, numeric markers, and
+AI interpretation all read from one place:
+
+```js
+{
+  op: "deriv" | "integral" | "solveZero" | "optimize",
+  symbolic: { expr: CasExpr|null, latex: string|null, closed: boolean },
+  numeric:  { /* op-specific: value, points[], roots[], x*, multipliers{} */ },
+  source:   "symbolic" | "numeric-fallback",   // provenance for the UI badge
+  error:    string | null
+}
+```
+
+The UI shows the symbolic LaTeX as the headline; numeric values populate markers
+and the live readout; a small badge marks `numeric-fallback` so the user knows
+when no closed form was available.
 
 ## 6. AI "Interpret" (premium)
 
@@ -193,7 +305,14 @@ New folder `src/components/calculate/workbench/` (small focused files):
 | `ResultsPanel.jsx` | Live symbolic + numeric readout, copy buttons, AI "Interpret" |
 | `templates.js` | Migrated equation library (Cobb-Douglas, Solow, Euler, NKPC…) as card seeds |
 | `workbenchStore.js` | `loadWorkbench(pid)` / `saveWorkbench(pid, sessions)` over indexedDB.js |
-| `casAdapter.js` | nerdamer wrapper (differentiate / solve / lagrangian / simplify / toLatex); isolates CAS dependency for SymPy escalation |
+
+**Symbolic engine folder** `src/math/cas/` (pure JS, no React):
+
+| File | Responsibility |
+|------|----------------|
+| `casAdapter.js` | Backend-agnostic facade (§5.1); selects active backend; shared `lagrangianFOC` |
+| `nerdamerBackend.js` | Backend A — maps the §5.1 surface onto nerdamer (CDN loader + mappings, §5.2) |
+| `sympyBackend.js` | Backend B — maps the §5.1 surface onto SymPy/Pyodide (escalation, §5.3) |
 
 **Edits to existing files:**
 
@@ -211,10 +330,52 @@ Inline styles only, `C` palette (`C.bg` #080808, `C.teal` #6ec8b4, `C.gold`
 #c8a96e, `C.blue` #6e9ec8, `C.red` #c86e6e), IBM Plex Mono (`mono`). No external
 UI component libraries. nerdamer/KaTeX are math/render libraries, not UI.
 
-## 9. Out of scope (this spec)
+## 9. Agent handoff & build order
+
+Implementable in independent slices so Sonnet/Codex can continue at any boundary.
+Each slice is verifiable on its own; later slices depend only on the interfaces
+(not internals) of earlier ones.
+
+1. **CAS adapter + nerdamer backend** (`src/math/cas/`). Implement §5.1 surface
+   with `nerdamerBackend.js`. Done when: `cas.diff`, `cas.solve`,
+   `cas.solveSystem`, `cas.toLatex`, `cas.compile` work on Cobb-Douglas and a
+   2-var budget problem, and unclosable solves return `{closed:false}`.
+   *No UI yet — testable in isolation.*
+2. **calcEngine numeric fallback** (§5.5). `optimizeUnconstrained`,
+   `optimizeConstrained`, `extractSymbols`. Validate vs known closed forms.
+3. **Session model + store** (`workbenchStore.js`, session JSON §3). Load/save
+   per `pid` over IndexedDB; round-trip a session.
+4. **Workbench shell + sessions** (`Workbench.jsx`, `SessionTabs.jsx`). Tabs,
+   add/rename/close, persistence wired. Empty canvas placeholder.
+5. **Equation cards + parameter pool** (`EquationsPanel.jsx`, `EquationCard.jsx`,
+   `ParametersPanel.jsx`, `templates.js`). Symbol auto-detection → params;
+   axis selector; op toggles; template library.
+6. **Operations + result contract** (§5.6) wired card → `cas`/`calcEngine` →
+   `session.results`. plot/deriv/integral/solveZero/optimize(A)/optimize(C-eq).
+7. **Canvas** (`WorkbenchCanvas.jsx`). Curves, f′ overlay, integral shading,
+   root/optimum markers; live re-render on slider change.
+8. **Results panel** (`ResultsPanel.jsx`). Symbolic LaTeX headline + numeric
+   readout + `numeric-fallback` badge + copy buttons.
+9. **AI Interpret** (§6). `INTERPRET_OPTIMIZATION_PROMPT` + `interpretOptimization`.
+10. **Reorg** — move Monte Carlo/Sampling/Permutation to Stat Simulation; rename
+    tab; fold Probability/Distributions into collapsibles under the Workbench.
+
+**Escalation slice (when needed):** `sympyBackend.js` implementing the same §5.1
+surface; flip `CAS_BACKEND` or auto-promote on `closed:false`. No other file
+changes — that is the whole point of the adapter boundary.
+
+**Resumability contract for any agent:** touch the CAS only through `cas.*`;
+preserve the §5.6 result shape; keep `src/math/` and `src/core/` React-free;
+inline styles + `C` palette + IBM Plex Mono; surgical edits over rewrites.
+
+## 10. Out of scope (this spec)
 
 - Contour / indifference-curve rendering (fast-follow).
 - Optimize-mode-B (enumerate all critical points).
 - Inequality-constraint KKT slackness.
-- SymPy/Pyodide CAS (documented escalation, behind `casAdapter.js`).
 - Applying interactive graphs/sliders to Stat Simulation (separate later effort).
+
+Note: SymPy/Pyodide is **in scope** as backend B (§5.3) — fully specified behind
+the adapter, built as the escalation slice (§9). It is not deferred work; it is a
+defined alternative implementation any agent can complete against the §5.1
+contract.
