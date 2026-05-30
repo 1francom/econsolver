@@ -5,6 +5,8 @@ import EquationsPanel from "./EquationsPanel.jsx";
 import ParametersPanel from "./ParametersPanel.jsx";
 import { cas } from "../../../math/cas/casAdapter.js";
 import { newSession, loadWorkbench, saveWorkbench, flushWorkbench } from "./workbenchStore.js";
+import WorkbenchCanvas from "./WorkbenchCanvas.jsx";
+import { runCard } from "./operations.js";
 
 const mono = "'IBM Plex Mono', monospace";
 
@@ -60,6 +62,22 @@ export default function Workbench({ pid }) {
     for (const a of axes) set.delete(a);
     return Array.from(set).sort();
   }, [active]);
+
+  // Track nerdamer CDN readiness so results recompute once the backend loads.
+  const [casReady, setCasReady] = useState(false);
+  useEffect(() => { cas.ready().then(() => setCasReady(true)).catch(() => {}); }, []);
+
+  // Live results: recompute every active op on every card when the session changes
+  // or once nerdamer finishes loading.
+  const results = useMemo(() => {
+    const out = {};
+    if (!active) return out;
+    for (const eq of active.equations) {
+      try { out[eq.id] = runCard(eq, active); } catch { out[eq.id] = {}; }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.equations, active.params, active.choiceVars, active.view, casReady]);
 
   // Mutate the active session immutably.
   const updateActive = useCallback((mutator) => {
@@ -135,7 +153,7 @@ export default function Workbench({ pid }) {
             onParamChange={onParamChange} onToggleRole={onToggleRole} />
         </div>
         <div data-wb-right>
-          <div style={{ fontSize: 11, color: C.textDim || "#888" }}>Canvas + results land here (Tasks 7–8).</div>
+          <WorkbenchCanvas equations={active.equations} results={results} view={active.view} />
         </div>
       </div>
     </div>
