@@ -120,6 +120,11 @@ function runOptimizeC(eq, session, constraints, scope) {
     ? session.choiceVars
     : Array.from(new Set(constraints.flatMap((c) => safeFree(`(${c.relation.lhs}) - (${c.relation.rhs})`)))).slice(0, 2);
   const gExprs = constraints.map((c) => `(${c.relation.lhs}) - (${c.relation.rhs})`);
+  // No detectable decision variables → Lagrangian is degenerate; surface an error
+  // instead of returning a silently-empty (wrong) result.
+  if (!choiceVars.length) {
+    return buildOpResult("optimize", { symbolicExpr: null, numeric: { mode: "constrained" }, closed: false, error: "no choice variables" });
+  }
   const foc = cas.lagrangianFOC(eq.expr, gExprs, choiceVars); // { L, equations, multipliers }
 
   // Symbolic system solve (best effort).
@@ -129,10 +134,15 @@ function runOptimizeC(eq, session, constraints, scope) {
     symbolicClosed = sys.closed; symbolicSol = sys.solutions;
   } catch { /* numeric fallback below */ }
 
-  // Numeric fallback through calcEngine.optimizeConstrained.
+  // Numeric fallback through calcEngine.optimizeConstrained, which requires a
+  // callable objective and callable constraints — compile the symbolic forms
+  // (strings) into numeric fns via cas.compile first. compile() reads only the
+  // declared free vars from scope, so extra lambda_i keys are ignored.
   let numeric = {};
   try {
-    const r = optimizeConstrained(eq.expr, gExprs, choiceVars, scope);
+    const objFn = cas.compile(eq.expr, safeFree(eq.expr));
+    const consFns = gExprs.map((g) => ({ g: cas.compile(g, safeFree(g)) }));
+    const r = optimizeConstrained(objFn, consFns, choiceVars, scope);
     numeric = r.error
       ? { mode: "constrained", error: r.error }
       : { mode: "constrained", choices: r.choices, multipliers: r.multipliers, objectiveValue: r.objectiveValue };
