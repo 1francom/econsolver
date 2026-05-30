@@ -368,7 +368,46 @@ changes — that is the whole point of the adapter boundary.
 preserve the §5.6 result shape; keep `src/math/` and `src/core/` React-free;
 inline styles + `C` palette + IBM Plex Mono; surgical edits over rewrites.
 
-## 10. Out of scope (this spec)
+## 10. Security posture
+
+The Workbench is a **free-form expression-evaluation surface** — the highest-risk
+class of feature in the app. It must inherit and extend the existing hardening
+posture (K-track: K3 Worker-sandboxed expressions, K6 magic-bytes, K7
+DOM-injection; and Fase X3 AI egress hardening). Requirements:
+
+1. **Numeric eval (`calcEngine`).** `evalExpression` compiles via the dynamic
+   `Function` constructor over a **restricted scope object only** — no access to
+   `window`, `globalThis`, `fetch`, `import`, or constructor escapes. Follow the
+   K3 precedent: heavy/repeated evaluation runs in a **Web Worker**, not the main
+   thread, so a hostile expression cannot reach app state or the DOM. Whitelist
+   the allowed identifiers (math functions + declared symbols); reject anything
+   else at parse time.
+2. **Symbolic eval (nerdamer).** Pass user input only as a **string to nerdamer's
+   parser** — never dynamically compile the raw input ourselves. nerdamer's output
+   is data (CasExpr/LaTeX strings), not executed code. `cas.compile` must produce
+   its numeric function through the same restricted-scope path as (1).
+3. **Pyodide / SymPy (backend B).** Run Python **only** through `sympify`/`parse_expr`
+   on the user string with a **fixed symbol table** — never `exec`/`eval` arbitrary
+   Python, never string-interpolate user input into executed code. Pyodide is
+   WASM-sandboxed (no host FS/network by default); do not grant it any. Treat a
+   parse failure as `{closed:false}`, not an exception that surfaces a stack trace.
+4. **LaTeX rendering.** Render symbolic output via **KaTeX with `trust:false`**
+   (no `\href`/`\url`/`\includegraphics`); never `innerHTML` a raw LaTeX or
+   expression string. This is the K7 DOM-injection rule applied to the new surface.
+5. **Persistence.** Session JSON in IndexedDB is the user's own data, but treat it
+   as **untrusted on read** — validate shape and re-parse expressions through the
+   CAS/whitelist on load; never replay a stored string straight into a dynamic
+   evaluator.
+6. **AI egress (Fase X3).** `interpretOptimization` must pass through the **privacy
+   filter** before any network call — expressions and parameter labels can carry
+   dataset-derived variable names. Same single `callClaude` choke point, cached
+   `SHARED_CONTEXT`, no new fetch path.
+
+These are spec-level requirements; the implementation plan turns each into a
+verifiable task. No separate cybersecurity spec is needed — this section is the
+workbench's security contract.
+
+## 11. Out of scope (this spec)
 
 - Contour / indifference-curve rendering (fast-follow).
 - Optimize-mode-B (enumerate all critical points).
