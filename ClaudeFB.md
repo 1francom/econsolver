@@ -210,3 +210,20 @@
 
 - [14:22] · Model
   Redefine the event study model separating in Sun-Abraham and Callaway-Santana heterogeneity-robust DiD estimators
+
+---
+
+## 2026-05-30 batch
+
+### Bugs
+
+- [14:47] · Spatial
+  Adjust size respectively to the spatial unit(s)
+
+### Features
+
+- [11:35] · Spatial
+  Geometry transformations and show EPSG
+
+- [14:46] · Spatial
+  Allow spatial filters for plots
