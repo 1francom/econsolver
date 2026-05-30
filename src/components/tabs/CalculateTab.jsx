@@ -22,6 +22,7 @@ import { bootstrapMean, subsampleMean, permutationTwoSampleMean } from "../../ma
 import { symbolicDiff, latexName } from "../../math/symbolicDiff.js";
 import { solveAlgebraicEquation } from "../../math/symbolicSolve.js";
 import { useTheme } from "../../ThemeContext.jsx";
+import Workbench from "../calculate/workbench/Workbench.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
@@ -1413,7 +1414,7 @@ function MonteCarloSection({ onAddColumn, onCreateDataset }) {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function CalculateTab({ rows = [], headers = [], onAddDataset, onAddColumn, onCreateDataset }) {
+export default function CalculateTab({ pid, rows = [], headers = [], onAddDataset, onAddColumn, onCreateDataset }) {
   const { C } = useTheme();
   // ── Variable workspace ─────────────────────────────────────────────────────
   const [variables,    setVariables]   = useState([]);
@@ -1785,6 +1786,8 @@ export default function CalculateTab({ rows = [], headers = [], onAddDataset, on
 
       {/* ── Left: variable workspace + tools ── */}
       <div style={{ overflowY: "auto", padding: "1.8rem 1.5rem 1.8rem 2.4rem" }}>
+
+      <Workbench pid={pid} />
 
       <HintBox title="How to calculate" sections={[
         { heading: "Variable Workspace", items: [

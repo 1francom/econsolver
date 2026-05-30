@@ -2266,6 +2266,7 @@ export default function App() {
                 {/* CALCULATE — Phase 9.7 */}
                 <div style={{...tabPanel, display: activeTab==="calculate" ? "flex" : "none", flexDirection:"column"}}>
                   <CalculateTab
+                    pid={pid}
                     rows={tabOutput("calculate")?.cleanRows ?? rawData?.rows ?? []}
                     headers={tabOutput("calculate")?.headers ?? rawData?.headers ?? []}
                     onAddDataset={(name, rows, headers) => {
