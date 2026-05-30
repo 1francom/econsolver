@@ -114,10 +114,13 @@ export async function loadWorkbench(pid) {
   return sessions.length ? sessions : [newSession()];
 }
 
+// NOTE: single module-level timer (one Workbench is mounted at a time).
+// Callers MUST flushWorkbench before switching pid to avoid dropping a pending save.
 let _saveTimer = null;
 export function saveWorkbench(pid, sessions, { debounceMs = 500 } = {}) {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
+    _saveTimer = null;
     saveWorkbenchRecord(pid, sessions).catch((e) =>
       console.error("[workbenchStore] save failed:", e),
     );
