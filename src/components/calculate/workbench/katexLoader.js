@@ -16,8 +16,11 @@ export function loadKatex() {
     }
     const s = document.createElement("script");
     s.src = KATEX_JS; s.async = true;
-    s.onload = () => (window.katex ? resolve(window.katex) : reject(new Error("katex global missing")));
-    s.onerror = () => reject(new Error("failed to load KaTeX from CDN"));
+    s.onload = () => {
+      if (window.katex) { resolve(window.katex); }
+      else { loadPromise = null; reject(new Error("katex global missing")); }
+    };
+    s.onerror = () => { loadPromise = null; reject(new Error("failed to load KaTeX from CDN")); };
     document.head.appendChild(s);
   });
   return loadPromise;
