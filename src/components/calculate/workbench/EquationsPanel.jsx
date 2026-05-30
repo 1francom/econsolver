@@ -6,8 +6,8 @@ import { newEquation } from "./workbenchStore.js";
 
 const mono = "'IBM Plex Mono', monospace";
 
-// Props: equations[], onAdd(eq), onPatch(id, patch), onRemove(id)
-export default function EquationsPanel({ equations, onAdd, onPatch, onRemove }) {
+// Props: equations[], view, onAdd(eq), onPatch(id, patch), onRemove(id)
+export default function EquationsPanel({ equations, view, onAdd, onPatch, onRemove }) {
   const { C } = useTheme();
   const [showTemplates, setShowTemplates] = useState(false);
 
@@ -49,7 +49,7 @@ export default function EquationsPanel({ equations, onAdd, onPatch, onRemove }) 
       )}
 
       {equations.map((eq, i) => (
-        <EquationCard key={eq.id} eq={eq} index={i}
+        <EquationCard key={eq.id} eq={eq} index={i} view={view}
           onPatch={(patch) => onPatch(eq.id, patch)}
           onRemove={() => onRemove(eq.id)} />
       ))}

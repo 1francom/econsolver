@@ -19,6 +19,7 @@ export function newEquation(overrides = {}) {
     kind: "objective",          // "objective" | "constraint"
     axis: "",                   // x-axis symbol (objectives only)
     ops: { plot: true, deriv: false, integral: false, solveZero: false, optimize: false },
+    integralRange: null,        // [a, b] integration bounds; null → use view.xRange
     sense: "max",               // "max" | "min"
     relation: { lhs: "", op: "=", rhs: "" }, // constraint only
     ...overrides,
@@ -32,7 +33,7 @@ export function newSession(overrides = {}) {
     equations: [],
     params: [],                 // [{ name, value, min, max, step }]
     choiceVars: [],
-    view: { xRange: [0.01, 10], positiveQuad: true },
+    view: { xRange: [0.01, 10], yRange: null, positiveQuad: true, height: 460 },
     results: {},                // { [equationId]: { [op]: ResultContract } }
     ...overrides,
   };
@@ -51,6 +52,9 @@ function validateEquation(raw) {
   const ops = {};
   for (const k of OPS) ops[k] = !!(raw.ops && raw.ops[k]);
   const rel = raw.relation && typeof raw.relation === "object" ? raw.relation : {};
+  const ir = Array.isArray(raw.integralRange) && raw.integralRange.length === 2
+    && isFiniteNum(raw.integralRange[0]) && isFiniteNum(raw.integralRange[1])
+    ? [raw.integralRange[0], raw.integralRange[1]] : null;
   return {
     id: str(raw.id, base.id),
     label: str(raw.label, "f").slice(0, 24),
@@ -58,6 +62,7 @@ function validateEquation(raw) {
     kind: raw.kind === "constraint" ? "constraint" : "objective",
     axis: str(raw.axis, ""),
     ops,
+    integralRange: ir,
     sense: raw.sense === "min" ? "min" : "max",
     relation: { lhs: str(rel.lhs, "").slice(0, 256), op: "=", rhs: str(rel.rhs, "").slice(0, 256) },
   };
@@ -90,13 +95,18 @@ export function validateSession(raw) {
   const xr = Array.isArray(view.xRange) && view.xRange.length === 2
     && isFiniteNum(view.xRange[0]) && isFiniteNum(view.xRange[1])
     ? [view.xRange[0], view.xRange[1]] : base.view.xRange;
+  const yr = Array.isArray(view.yRange) && view.yRange.length === 2
+    && isFiniteNum(view.yRange[0]) && isFiniteNum(view.yRange[1])
+    ? [view.yRange[0], view.yRange[1]] : null;
+  const height = isFiniteNum(view.height)
+    ? Math.min(900, Math.max(240, view.height)) : base.view.height;
   return {
     id: str(raw.id, base.id),
     name: str(raw.name, "Session").slice(0, 40),
     equations,
     params,
     choiceVars,
-    view: { xRange: xr, positiveQuad: view.positiveQuad !== false },
+    view: { xRange: xr, yRange: yr, positiveQuad: view.positiveQuad !== false, height },
     results: {}, // never trust cached results; recompute live
   };
 }

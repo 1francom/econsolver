@@ -12,8 +12,8 @@ const OPS = [
 ];
 
 // One equation/constraint card. Props:
-//   eq, index, symbolsOf(eq)->string[], onPatch(patch), onRemove()
-export default function EquationCard({ eq, index, onPatch, onRemove }) {
+//   eq, index, view, onPatch(patch), onRemove()
+export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
   const { C } = useTheme();
   const [copied, setCopied] = useState(false);
   const accent = [C.teal, C.gold, C.blue][index % 3];
@@ -87,7 +87,14 @@ export default function EquationCard({ eq, index, onPatch, onRemove }) {
             const on = !!eq.ops[op.key];
             return (
               <button key={op.key} title={op.title}
-                onClick={() => onPatch({ ops: { ...eq.ops, [op.key]: !on } })}
+                onClick={() => {
+                  const next = !on;
+                  const patch = { ops: { ...eq.ops, [op.key]: next } };
+                  // Pre-fill integration bounds from the current view on first enable.
+                  if (op.key === "integral" && next && !eq.integralRange && view?.xRange)
+                    patch.integralRange = [view.xRange[0], view.xRange[1]];
+                  onPatch(patch);
+                }}
                 style={{ fontSize: 11, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
                   background: on ? accent + "22" : "transparent", color: on ? accent : C.textDim || "#888",
                   border: `1px solid ${on ? accent : C.line || "#222"}` }}>
@@ -95,6 +102,21 @@ export default function EquationCard({ eq, index, onPatch, onRemove }) {
               </button>
             );
           })}
+
+          {eq.ops.integral && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }} title="Integration interval">
+              <span style={{ fontSize: 11, color: C.gold }}>∫</span>
+              <input type="number" value={eq.integralRange?.[0] ?? ""}
+                placeholder={String(view?.xRange?.[0] ?? "a")}
+                onChange={(e) => setIntegralBound(eq, onPatch, 0, e.target.value)}
+                style={{ ...inp(C), width: 56, minWidth: 0 }} />
+              <span style={{ fontSize: 10, color: C.textDim || "#888" }}>→</span>
+              <input type="number" value={eq.integralRange?.[1] ?? ""}
+                placeholder={String(view?.xRange?.[1] ?? "b")}
+                onChange={(e) => setIntegralBound(eq, onPatch, 1, e.target.value)}
+                style={{ ...inp(C), width: 56, minWidth: 0 }} />
+            </div>
+          )}
 
           {eq.ops.optimize && (
             <button onClick={() => onPatch({ sense: eq.sense === "max" ? "min" : "max" })}
@@ -118,4 +140,13 @@ export default function EquationCard({ eq, index, onPatch, onRemove }) {
 function inp(C) {
   return { background: C.bg, color: C.text, border: `1px solid ${C.line || "#222"}`,
     fontFamily: mono, fontSize: 12, padding: "3px 5px", minWidth: 60 };
+}
+
+// Patch one endpoint of the integration interval. Empty input clears that
+// endpoint; clearing both resets to null so runIntegral falls back to the view.
+function setIntegralBound(eq, onPatch, i, raw) {
+  const cur = Array.isArray(eq.integralRange) ? [...eq.integralRange] : [null, null];
+  const n = Number(raw);
+  cur[i] = raw === "" || Number.isNaN(n) ? null : n;
+  onPatch({ integralRange: cur[0] == null && cur[1] == null ? null : cur });
 }

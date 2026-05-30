@@ -4,8 +4,8 @@ import { useTheme } from "../../../ThemeContext.jsx";
 const mono = "'IBM Plex Mono', monospace";
 
 // Draws plot curves + f′ overlays + integral shading + markers for a session.
-// Props: equations[], results { [eqId]: { [op]: contract } }, view
-export default function WorkbenchCanvas({ equations, results, view }) {
+// Props: equations[], results { [eqId]: { [op]: contract } }, view, height
+export default function WorkbenchCanvas({ equations, results, view, height = 460 }) {
   const { C } = useTheme();
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
@@ -18,13 +18,13 @@ export default function WorkbenchCanvas({ equations, results, view }) {
     draw();
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [equations, results, view, C]);
+  }, [equations, results, view, height, C]);
 
   function draw() {
     const canvas = canvasRef.current, wrap = wrapRef.current;
     if (!canvas || !wrap) return;
     const dpr = window.devicePixelRatio || 1;
-    const W = wrap.clientWidth, H = 320;
+    const W = wrap.clientWidth, H = Number.isFinite(height) ? height : 460;
     canvas.width = W * dpr; canvas.height = H * dpr;
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
     const ctx = canvas.getContext("2d");
@@ -47,6 +47,12 @@ export default function WorkbenchCanvas({ equations, results, view }) {
     for (const p of allPts) { if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
     if (!Number.isFinite(y0) || !Number.isFinite(y1) || y0 === y1) { y0 = -1; y1 = 1; }
     const padY = (y1 - y0) * 0.08; y0 -= padY; y1 += padY;
+
+    // Manual y-range override (ViewControls) takes precedence over auto-scale.
+    const yr = view.yRange;
+    if (Array.isArray(yr) && Number.isFinite(yr[0]) && Number.isFinite(yr[1]) && yr[0] < yr[1]) {
+      y0 = yr[0]; y1 = yr[1];
+    }
 
     const sx = (x) => pad.l + ((x - x0) / (x1 - x0)) * plotW;
     const sy = (y) => pad.t + (1 - (y - y0) / (y1 - y0)) * plotH;

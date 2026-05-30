@@ -8,6 +8,8 @@ import { newSession, loadWorkbench, saveWorkbench, flushWorkbench } from "./work
 import WorkbenchCanvas from "./WorkbenchCanvas.jsx";
 import { runCard } from "./operations.js";
 import ResultsPanel from "./ResultsPanel.jsx";
+import ViewControls from "./ViewControls.jsx";
+import { buildWorkbenchScript } from "./exportScript.js";
 
 const mono = "'IBM Plex Mono', monospace";
 
@@ -108,6 +110,10 @@ export default function Workbench({ pid }) {
       return { ...s, choiceVars: isChoice ? s.choiceVars.filter((v) => v !== name) : [...s.choiceVars, name] };
     }), [updateActive]);
 
+  // Plot view (x limits / graph height).
+  const onViewChange = useCallback((patch) =>
+    updateActive((s) => ({ ...s, view: { ...s.view, ...patch } })), [updateActive]);
+
   function addSession() {
     const s = newSession({ name: `Session ${sessions.length + 1}` });
     setSessions((prev) => [...prev, s]);
@@ -125,6 +131,17 @@ export default function Workbench({ pid }) {
     });
   }
 
+  // Export the active session's equations as a reproducible script.
+  function exportScript(lang) {
+    const ext = lang === "r" ? "R" : lang === "stata" ? "do" : "py";
+    const text = buildWorkbenchScript(lang, active);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    a.download = `workbench.${ext}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   if (!active) return null;
 
   return (
@@ -135,6 +152,16 @@ export default function Workbench({ pid }) {
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
         <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase" }}>Equation Workbench</div>
         <div style={{ fontSize: 11, color: C.textDim || "#888" }}>symbolic-first · solve · plot · differentiate · optimize</div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          {[["↓R", "r", C.gold], ["↓Stata", "stata", C.teal], ["↓py", "python", C.blue]].map(([label, lang, color]) => (
+            <button key={lang} onClick={() => exportScript(lang)}
+              title={`Export equations as ${label.replace("↓", "")} script`}
+              style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, cursor: "pointer",
+                background: "transparent", color, border: `1px solid ${color}`, fontFamily: mono }}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <SessionTabs
@@ -142,20 +169,26 @@ export default function Workbench({ pid }) {
         onSelect={setActiveId} onAdd={addSession}
         onRename={renameSession} onClose={closeSession} />
 
-      {/* Three-panel layout placeholder — filled by Tasks 4–8. */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.2fr)", gap: 14 }}>
-        <div data-wb-left>
-          <EquationsPanel
-            equations={active.equations}
-            onAdd={addEquation} onPatch={patchEquation} onRemove={removeEquation} />
-          <ParametersPanel
-            detectedSymbols={detectedSymbols}
-            params={active.params} choiceVars={active.choiceVars}
-            onParamChange={onParamChange} onToggleRole={onToggleRole} />
+      {/* Top: inputs (left) + outputs (right). Bottom: full-width plot. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14, alignItems: "start" }}>
+          <div data-wb-inputs>
+            <EquationsPanel
+              equations={active.equations} view={active.view}
+              onAdd={addEquation} onPatch={patchEquation} onRemove={removeEquation} />
+            <ParametersPanel
+              detectedSymbols={detectedSymbols}
+              params={active.params} choiceVars={active.choiceVars}
+              onParamChange={onParamChange} onToggleRole={onToggleRole} />
+          </div>
+          <div data-wb-outputs>
+            <ResultsPanel equations={active.equations} results={results} />
+          </div>
         </div>
-        <div data-wb-right>
-          <WorkbenchCanvas equations={active.equations} results={results} view={active.view} />
-          <ResultsPanel equations={active.equations} results={results} />
+        <div data-wb-canvas>
+          <ViewControls view={active.view} onChange={onViewChange} />
+          <WorkbenchCanvas equations={active.equations} results={results}
+            view={active.view} height={active.view.height} />
         </div>
       </div>
     </div>

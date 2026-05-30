@@ -48,9 +48,13 @@ export function runDeriv(eq, scope, view) {
 }
 
 export function runIntegral(eq, scope, view) {
-  // Numeric definite integral (trapezoid) over the visible range; symbolic
-  // antiderivative is best-effort (nerdamer integration is a known weak spot).
-  const [a, b] = view.xRange;
+  // Numeric definite integral (trapezoid). Uses the equation's explicit
+  // integration bounds when set & valid, else falls back to the visible range.
+  // Symbolic antiderivative is best-effort (nerdamer integration is weak).
+  const ir = eq.integralRange;
+  const useIr = Array.isArray(ir) && ir.length === 2
+    && Number.isFinite(ir[0]) && Number.isFinite(ir[1]) && ir[0] < ir[1];
+  const [a, b] = useIr ? ir : view.xRange;
   const pts = eq.axis ? sampleCurve(eq.expr, eq.axis, safeFree(eq.expr), scope, [a, b]) : [];
   let area = 0;
   for (let i = 1; i < pts.length; i++) area += (pts[i].x - pts[i - 1].x) * (pts[i].y + pts[i - 1].y) / 2;

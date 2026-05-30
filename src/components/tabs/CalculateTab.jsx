@@ -1787,9 +1787,14 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
       {/* ── Left: variable workspace + tools ── */}
       <div style={{ overflowY: "auto", padding: "1.8rem 1.5rem 1.8rem 2.4rem" }}>
 
-      <Workbench pid={pid} />
-
       <HintBox title="How to calculate" sections={[
+        { heading: "Writing expressions (syntax)", items: [
+          "Multiply with * — write 2*x, not 2x; A*K*L, not AKL",
+          "Exponent with ** or ^ — x**2 or x^2 for x², K**alpha for Kᵅ",
+          "Divide with / and group with parentheses: (1-alpha)/2, A*K^(1-alpha)",
+          "Functions: sqrt(x), exp(x), log(x), sin(x); constants pi and e",
+          "Use names for parameters (alpha, beta) — they appear as sliders below",
+        ]},
         { heading: "Variable Workspace", items: [
           "Define scalars or vectors using dataset column names or numeric literals",
           "Variables persist across expressions in the same session",
@@ -1817,6 +1822,8 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
           "Set covariate values manually; prediction uses the full coefficient vector",
         ]},
       ]} />
+
+      <Workbench pid={pid} />
 
       {/* Header + export buttons */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: "1.6rem", flexWrap: "wrap" }}>
