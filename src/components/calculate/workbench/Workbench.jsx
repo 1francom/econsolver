@@ -13,7 +13,7 @@ const mono = "'IBM Plex Mono', monospace";
 
 export default function Workbench({ pid }) {
   const { C } = useTheme();
-  const storeKey = pid ?? "scratch";
+  const storeKey = pid || "scratch";
   const [sessions, setSessions] = useState([newSession()]);
   const [activeId, setActiveId] = useState(null);
   const loadedRef = useRef(false);
