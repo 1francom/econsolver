@@ -7,6 +7,7 @@ import { cas } from "../../../math/cas/casAdapter.js";
 import { newSession, loadWorkbench, saveWorkbench, flushWorkbench } from "./workbenchStore.js";
 import WorkbenchCanvas from "./WorkbenchCanvas.jsx";
 import { runCard } from "./operations.js";
+import ResultsPanel from "./ResultsPanel.jsx";
 
 const mono = "'IBM Plex Mono', monospace";
 
@@ -154,6 +155,7 @@ export default function Workbench({ pid }) {
         </div>
         <div data-wb-right>
           <WorkbenchCanvas equations={active.equations} results={results} view={active.view} />
+          <ResultsPanel equations={active.equations} results={results} />
         </div>
       </div>
     </div>

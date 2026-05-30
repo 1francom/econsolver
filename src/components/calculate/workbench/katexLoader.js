@@ -35,3 +35,16 @@ export function renderLatex(katex, latex) {
     return null;
   }
 }
+
+// Render LaTeX into an existing DOM node. SECURITY (§10.4): trust:false; KaTeX
+// constructs the DOM itself, so no expression string is ever set as innerHTML
+// by app code. throwOnError:false → renders the source string in error color
+// rather than throwing.
+export function renderInto(katex, el, latex) {
+  if (!el) return;
+  try {
+    katex.render(latex, el, { displayMode: true, throwOnError: false, trust: false });
+  } catch {
+    el.textContent = latex; // last-resort plain text
+  }
+}
