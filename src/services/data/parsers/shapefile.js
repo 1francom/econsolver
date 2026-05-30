@@ -208,16 +208,44 @@ const CRS_FOR_EPSG = {
 export function detectCRSFromPRJ(prjText) {
   if (!prjText || typeof prjText !== "string") return null;
   const t = prjText.replace(/\s+/g, " ");
+  const projName = t.match(/PROJCS\s*\[\s*"([^"]+)"/i)?.[1] ?? null;
+  const geogName = t.match(/GEOGCS\s*\[\s*"([^"]+)"/i)?.[1] ?? null;
+  const unitName = t.match(/UNIT\s*\[\s*"([^"]+)"/i)?.[1] ?? null;
+  const isProjected = /PROJCS/i.test(t);
+  const enrich = (info, extra = {}) => {
+    if (!info) return null;
+    const epsgFromLabel = info.label?.match(/EPSG:(\d+)/i)?.[1] ?? null;
+    return {
+      ...info,
+      epsg: extra.epsg ?? info.epsg ?? epsgFromLabel,
+      name: extra.name ?? info.name ?? projName ?? geogName ?? info.label,
+      kind: extra.kind ?? info.kind ?? (isProjected ? "projected" : "geographic"),
+      unit: extra.unit ?? info.unit ?? (isProjected ? (unitName || "metre") : "degree"),
+      source: extra.source ?? info.source ?? "prj",
+      confidence: extra.confidence ?? info.confidence ?? "high",
+      warning: extra.warning ?? info.warning ?? null,
+    };
+  };
 
   // EPSG authority code, if present
-  const epsg = t.match(/AUTHORITY\s*\[\s*"EPSG"\s*,\s*"?(\d+)"?\s*\]\s*\]?\s*$/i);
-  if (epsg && CRS_FOR_EPSG[epsg[1]]) return CRS_FOR_EPSG[epsg[1]];
+  const authorityCodes = [...t.matchAll(/AUTHORITY\s*\[\s*"EPSG"\s*,\s*"?(\d+)"?\s*\]/gi)]
+    .map(m => m[1])
+    .filter(code => !["9001", "9002", "9003", "9102", "9122"].includes(code));
+  const knownEpsg = [...authorityCodes].reverse().find(code => CRS_FOR_EPSG[code]);
+  if (knownEpsg) return enrich(CRS_FOR_EPSG[knownEpsg], { epsg: knownEpsg, source: "prj-authority" });
+  const declaredEpsg = authorityCodes.at(-1) ?? null;
 
   // No PROJCS → geographic (lon/lat); no reprojection needed
   if (!/PROJCS/i.test(t)) {
-    // Try to extract the GEOGCS name for the label
-    const gcs = t.match(/GEOGCS\s*\[\s*"([^"]+)"/i);
-    return { proj4: null, label: gcs ? `${gcs[1]} / geographic` : "Geographic / WGS84" };
+    const label = declaredEpsg
+      ? `${geogName || "Geographic CRS"} (EPSG:${declaredEpsg})`
+      : (geogName ? `${geogName} / geographic` : "Geographic / WGS84");
+    return enrich({ proj4: null, label }, {
+      epsg: declaredEpsg,
+      kind: "geographic",
+      unit: "degree",
+      source: declaredEpsg ? "prj-authority" : "prj",
+    });
   }
 
   // UTM zone parsing from the PROJCS / PROJECTION block
@@ -231,32 +259,65 @@ export function detectCRSFromPRJ(prjText) {
     return {
       proj4: `+proj=utm +zone=${zone}${south ? " +south" : ""} ${datum ? `+datum=${datum}` : `+ellps=${ellps}`}${towgs} +units=m +no_defs`,
       label: `${datumName} / UTM ${zone}${south ? "S" : "N"}`,
+      epsg: declaredEpsg,
+      name: projName,
+      kind: "projected",
+      unit: "metre",
+      source: declaredEpsg ? "prj-authority" : "prj-heuristic",
+      confidence: declaredEpsg ? "high" : "medium",
     };
   }
 
   // Monte Mario / Gauss-Boaga (Italy)
   if (/Monte[_\s]*Mario|Gauss[_\s]*Boaga|Roma[_\s]*40/i.test(t)) {
     const east = /zone[_\s-]*2|fuso[_\s-]*2|East|EST/i.test(t);
-    return CRS_FOR_EPSG[east ? "3004" : "3003"];
+    const code = east ? "3004" : "3003";
+    return enrich(CRS_FOR_EPSG[code], { epsg: code, source: "prj-heuristic" });
   }
 
   // Austria MGI Lambert
   if (/MGI[_\s]*\/?[_\s]*Austria[_\s]*Lambert|Austria[_\s]*GK[_\s]*Central/i.test(t)) {
-    return CRS_FOR_EPSG["31287"];
+    return enrich(CRS_FOR_EPSG["31287"], { epsg: "31287", source: "prj-heuristic" });
   }
 
   // LAEA Europe
-  if (/LAEA|Lambert_Azimuthal/i.test(t)) return CRS_FOR_EPSG["3035"];
+  if (/LAEA|Lambert_Azimuthal/i.test(t)) return enrich(CRS_FOR_EPSG["3035"], { epsg: "3035", source: "prj-heuristic" });
 
   // OSGB36 (UK)
-  if (/OSGB[_\s]*36|British_National_Grid/i.test(t)) return CRS_FOR_EPSG["27700"];
+  if (/OSGB[_\s]*36|British_National_Grid/i.test(t)) return enrich(CRS_FOR_EPSG["27700"], { epsg: "27700", source: "prj-heuristic" });
 
   // RD New (NL)
-  if (/Amersfoort|RD[_\s]*New|Rijksdriehoek/i.test(t)) return CRS_FOR_EPSG["28992"];
+  if (/Amersfoort|RD[_\s]*New|Rijksdriehoek/i.test(t)) return enrich(CRS_FOR_EPSG["28992"], { epsg: "28992", source: "prj-heuristic" });
 
   // Unknown projected CRS — surface the PROJCS name so the user knows we saw it.
-  const projName = t.match(/PROJCS\s*\[\s*"([^"]+)"/i);
-  return { proj4: null, label: projName ? `Unknown / ${projName[1]}` : "Unknown projected CRS" };
+  const generated = buildProj4FromProjectedWKT(t);
+  if (generated) {
+    return enrich({
+      proj4: generated.proj4,
+      label: declaredEpsg
+        ? `${projName || "Projected CRS"} (EPSG:${declaredEpsg})`
+        : `${projName || "Projected CRS"} / ${generated.projection}`,
+    }, {
+      epsg: declaredEpsg,
+      kind: "projected",
+      unit: generated.unit,
+      source: declaredEpsg ? "prj-authority" : "prj-parameters",
+      confidence: declaredEpsg ? "high" : "medium",
+    });
+  }
+
+  return enrich({
+    proj4: null,
+    label: declaredEpsg
+      ? `${projName || "Unknown projected CRS"} (EPSG:${declaredEpsg})`
+      : (projName ? `Unknown / ${projName}` : "Unknown projected CRS"),
+  }, {
+    epsg: declaredEpsg,
+    kind: "projected",
+    unit: unitName || "metre",
+    confidence: declaredEpsg ? "high" : "low",
+    warning: "CRS detected but no proj4 transform is available yet.",
+  });
 }
 
 // Lazy-load proj4 from CDN (same loader pattern as SpatialTab.jsx).
@@ -274,6 +335,40 @@ async function loadProj4() {
     document.head.appendChild(s);
   });
   return _proj4Promise;
+}
+
+function wktParam(t, name, fallback = null) {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`PARAMETER\\s*\\[\\s*"${esc}"\\s*,\\s*([-+0-9.eE]+)`, "i");
+  const m = t.match(re);
+  return m ? Number(m[1]) : fallback;
+}
+
+function buildProj4FromProjectedWKT(t) {
+  if (!/Transverse[_\s]*Mercator/i.test(t)) return null;
+  const lat0 = wktParam(t, "Latitude_Of_Origin", wktParam(t, "latitude_of_origin", 0));
+  const lon0 = wktParam(t, "Central_Meridian", wktParam(t, "central_meridian", null));
+  const k = wktParam(t, "Scale_Factor", wktParam(t, "scale_factor", 1));
+  const x0 = wktParam(t, "False_Easting", wktParam(t, "false_easting", 0));
+  const y0 = wktParam(t, "False_Northing", wktParam(t, "false_northing", 0));
+  if (!Number.isFinite(lon0)) return null;
+
+  let datum = "+datum=WGS84";
+  let towgs = "";
+  if (/GRS[_\s]*1980|GRS[_\s]*80|POSGAR|SIRGAS|ETRS/i.test(t)) {
+    datum = "+ellps=GRS80";
+  } else if (/International[_\s]*1924|Hayford|European[_\s]*1950|ED[_\s]*50/i.test(t)) {
+    datum = "+ellps=intl";
+    towgs = " +towgs84=-87,-98,-121,0,0,0,0";
+  } else if (/Bessel/i.test(t)) {
+    datum = "+ellps=bessel";
+  }
+
+  return {
+    projection: "Transverse Mercator",
+    unit: /foot|feet/i.test(t) ? "foot" : "metre",
+    proj4: `+proj=tmerc +lat_0=${lat0} +lon_0=${lon0} +k=${k} +x_0=${x0} +y_0=${y0} ${datum}${towgs} +units=m +no_defs`,
+  };
 }
 
 // ── SHP geometry reader ────────────────────────────────────────────────────────
@@ -602,7 +697,7 @@ export async function parseSHPOnly(shpBuffer, prjText = null) {
     throw new Error("SHP: no shape records found.");
   }
   const rows = geometries.map((wkt, i) => ({ id: i + 1, __geometry: wkt }));
-  return { headers: ["id", "__geometry"], rows, _crs: crsMeta(info, projectFn) };
+  return { headers: ["id", "__geometry"], rows, _crs: crsMeta(info || inferCRSFromGeometries(geometries), projectFn) };
 }
 
 /**
@@ -638,7 +733,7 @@ export async function parseShapefile(dbfBuffer, shpBuffer = null, prjText = null
         __geometry: geometries[i] ?? null,
         ...row,
       }));
-      return { headers: geomHeaders, rows: geomRows, _crs: crsMeta(info, projectFn) };
+      return { headers: geomHeaders, rows: geomRows, _crs: crsMeta(info || inferCRSFromGeometries(geometries), projectFn) };
     }
   }
 
@@ -650,8 +745,54 @@ function crsMeta(info, projectFn) {
   if (!info) return null;
   return {
     label:       info.label,
+    epsg:        info.epsg ?? null,
+    name:        info.name ?? null,
+    kind:        info.kind ?? null,
+    unit:        info.unit ?? null,
+    source:      info.source ?? null,
+    confidence:  info.confidence ?? null,
+    warning:     info.warning ?? null,
     proj4:       info.proj4,
     reprojected: !!projectFn,            // true when we actually transformed coords to WGS-84
     target:      projectFn ? "WGS84 (EPSG:4326)" : null,
+  };
+}
+
+function inferCRSFromGeometries(geometries) {
+  const coords = [];
+  for (const wkt of geometries || []) {
+    if (!wkt || typeof wkt !== "string") continue;
+    for (const m of wkt.matchAll(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g)) {
+      coords.push([Number(m[1]), Number(m[2])]);
+      if (coords.length >= 80) break;
+    }
+    if (coords.length >= 80) break;
+  }
+  if (!coords.length) return null;
+  const maxAbsX = Math.max(...coords.map(([x]) => Math.abs(x)));
+  const maxAbsY = Math.max(...coords.map(([, y]) => Math.abs(y)));
+  if (maxAbsX <= 180 && maxAbsY <= 90) {
+    return {
+      proj4: null,
+      label: "WGS84 / geographic (EPSG:4326 assumed)",
+      epsg: "4326",
+      name: "WGS84",
+      kind: "geographic",
+      unit: "degree",
+      source: "geometry-range",
+      confidence: "medium",
+      warning: "No .prj file found; EPSG:4326 inferred from lon/lat coordinate ranges.",
+    };
+  }
+  return {
+    proj4: null,
+    label: "Unknown projected CRS",
+    epsg: null,
+    name: null,
+    kind: "projected",
+    unit: "metre",
+    source: "geometry-range",
+    confidence: "low",
+    warning: "No .prj file found; coordinates look projected, but EPSG cannot be inferred safely.",
   };
 }

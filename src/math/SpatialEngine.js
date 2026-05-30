@@ -432,35 +432,23 @@ export function makeGrid(boundaryWkt, cellsizeMeters = 500, clipBorder = true) {
   if (cellsizeMeters <= 0) throw new Error("cellsizeMeters must be > 0");
 
   const MAX_CELLS = 25_000;
-  const wktU = boundaryWkt.trim().toUpperCase();
 
   // ── Parse outer ring(s) ──────────────────────────────────────────────────
   // Returns [{lon, lat}] rings; captures outer ring of each polygon part.
   function parseRings(wkt) {
-    const rings = [];
-    // MULTIPOLYGON: extract each (( )) block
-    if (wktU.startsWith("MULTIPOLYGON")) {
-      const re = /\(\(([^()]+)\)\)/g;
-      let m;
-      while ((m = re.exec(wkt)) !== null) {
-        const r = m[1].split(",").map(p => {
-          const [lon, lat] = p.trim().split(/\s+/).map(Number);
-          return { lon, lat };
-        }).filter(p => !isNaN(p.lon) && !isNaN(p.lat));
-        if (r.length >= 3) rings.push(r);
+    const parsed = parseWKTRings(wkt)
+      .map(r => r.map(([lon, lat]) => ({ lon, lat })))
+      .filter(r => r.length >= 3);
+    const signedArea = (ring) => {
+      let a = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const p1 = ring[i], p2 = ring[(i + 1) % ring.length];
+        a += p1.lon * p2.lat - p2.lon * p1.lat;
       }
-    } else {
-      // POLYGON — outer ring only (first ((...)))
-      const m = wkt.match(/POLYGON\s*\(\(([^()]+)\)/i);
-      if (m) {
-        const r = m[1].split(",").map(p => {
-          const [lon, lat] = p.trim().split(/\s+/).map(Number);
-          return { lon, lat };
-        }).filter(p => !isNaN(p.lon) && !isNaN(p.lat));
-        if (r.length >= 3) rings.push(r);
-      }
-    }
-    return rings;
+      return a / 2;
+    };
+    const outers = parsed.filter(r => signedArea(r) > 0);
+    return outers.length ? outers : parsed;
   }
 
   const rings = parseRings(boundaryWkt);

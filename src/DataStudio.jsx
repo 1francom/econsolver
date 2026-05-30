@@ -235,6 +235,31 @@ function withLoadOpts(parsed, loadOpts) {
   return parsed;
 }
 
+function datasetCrs(ds) {
+  return ds?.crs ?? ds?.rawData?._crs ?? null;
+}
+
+function crsLine(crs) {
+  if (!crs) return null;
+  const epsg = crs.epsg ? `EPSG:${crs.epsg}` : "EPSG unknown";
+  const kind = crs.kind ? `${crs.kind}` : "CRS";
+  return `${epsg} | ${kind}${crs.reprojected ? " | reprojected" : ""}`;
+}
+
+function crsTitle(crs) {
+  if (!crs) return "";
+  const parts = [
+    crs.label,
+    crs.name && crs.name !== crs.label ? `Name: ${crs.name}` : null,
+    crs.unit ? `Unit: ${crs.unit}` : null,
+    crs.source ? `Source: ${crs.source}` : null,
+    crs.confidence ? `Confidence: ${crs.confidence}` : null,
+    crs.reprojected ? `Reprojected to ${crs.target}` : null,
+    crs.warning,
+  ].filter(Boolean);
+  return parts.join("\n");
+}
+
 // K7 — magic-bytes + size guard. Called before any parser so users get a
 // clear error instead of a cryptic parse failure or silent null result.
 async function validateFileMagic(file) {
@@ -406,6 +431,8 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
       <div style={{ flex: 1, overflowY: "auto", padding: "0.3rem 0" }}>
         {datasets.map((ds, idx) => {
           const isActive = ds.id === activeId;
+          const crs = datasetCrs(ds);
+          const crsSummary = crsLine(crs);
           return (
             <div
               key={ds.id}
@@ -459,6 +486,22 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
                     </span>
                   )}
                 </div>
+                {crsSummary && (
+                  <div
+                    style={{
+                      marginTop: 3,
+                      fontSize: 8,
+                      color: crs.reprojected ? C.gold : (crs.warning ? C.textMuted : C.teal),
+                      fontFamily: mono,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={crsTitle(crs)}
+                  >
+                    {crsSummary}
+                  </div>
+                )}
               </div>
 
               {/* Remove — only for non-primary datasets */}
@@ -600,7 +643,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       rawData: d.rawData ? ensureRowIds(d.rawData) : d.rawData,
     }));
     return [
-      { id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData) },
+      { id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData), crs: rawData?._crs ?? null },
       ...secondary,
     ];
   });
@@ -635,7 +678,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     prevRawDataRef.current = rawData;
     if (newFile) {
       // New primary file loaded — drop secondary datasets and clear sessionStorage
-      setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData) }]);
+      setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData), crs: rawData?._crs ?? null }]);
       setActiveId(primaryId);
       ssClear(primaryId);
     } else {
@@ -669,7 +712,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         rowCount: d.rawData._duckdb?.rowCount ?? d.rawData.rows?.length    ?? 0,
         colCount: d.rawData.headers?.length ?? 0,
         headers:  d.rawData.headers         ?? [],
-        crs:      d.crs ?? null,
+        crs:      datasetCrs(d),
         loadOpts: d.rawData._loadOpts ?? null,
       });
     });
@@ -682,7 +725,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       filename: d.filename,
       rows:     d.rawData?.rows    ?? [],
       headers:  d.rawData?.headers ?? [],
-      crs:      d.crs ?? null,
+      crs:      datasetCrs(d),
     })));
   }, [datasets]);
 

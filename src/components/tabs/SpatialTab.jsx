@@ -2290,20 +2290,43 @@ function loadGeoPlt() {
 
 function parseWktRings(wkt) {
   if (!wkt || typeof wkt !== "string") return null;
-  const s = wkt.trim().toUpperCase();
+  const raw = wkt.trim();
+  const s = raw.toUpperCase();
   const coords = str => str.trim().split(",").map(p => {
     const [x, y] = p.trim().split(/\s+/);
     return [parseFloat(x), parseFloat(y)];
   }).filter(([x, y]) => !isNaN(x) && !isNaN(y));
-  const allGroups = [...s.matchAll(/\(([^()]+)\)/g)].map(m => coords(m[1])).filter(r => r.length >= 2);
   if (s.startsWith("POINT")) {
-    const m = s.match(/POINT\s*\(([^)]+)\)/);
+    const m = raw.match(/POINT\s*\(([^)]+)\)/i);
     if (!m) return null;
     const [x, y] = m[1].trim().split(/\s+/).map(Number);
     return { type: "point", rings: [[[x, y]]] };
   }
-  if (s.startsWith("MULTIPOLYGON") || s.startsWith("POLYGON")) return allGroups.length ? { type: "polygon", rings: allGroups } : null;
-  if (s.startsWith("LINESTRING") || s.startsWith("MULTILINESTRING")) return allGroups.length ? { type: "line", rings: allGroups } : null;
+  const body = raw.slice(raw.indexOf("("));
+  const inner = splitParenGroups(body)[0];
+  if (!inner) return null;
+  if (s.startsWith("MULTIPOLYGON")) {
+    const rings = [];
+    for (const poly of splitParenGroups(inner)) {
+      for (const ring of splitParenGroups(poly)) {
+        const r = coords(ring);
+        if (r.length >= 2) rings.push(r);
+      }
+    }
+    return rings.length ? { type: "polygon", rings } : null;
+  }
+  if (s.startsWith("POLYGON")) {
+    const rings = splitParenGroups(inner).map(coords).filter(r => r.length >= 2);
+    return rings.length ? { type: "polygon", rings } : null;
+  }
+  if (s.startsWith("MULTILINESTRING")) {
+    const rings = splitParenGroups(inner).map(coords).filter(r => r.length >= 2);
+    return rings.length ? { type: "line", rings } : null;
+  }
+  if (s.startsWith("LINESTRING")) {
+    const r = coords(inner);
+    return r.length >= 2 ? { type: "line", rings: [r] } : null;
+  }
   return null;
 }
 
@@ -2315,8 +2338,11 @@ function geoBbox(layers, defaultRows, availableDatasets) {
     const r = (!ly.datasetId || ly.datasetId === "active") ? defaultRows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? defaultRows;
     if (ly.type === "point" && ly.latCol && ly.lonCol) {
       for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
-    } else if (ly.type === "grid" && (ly.mode ?? "latlon") === "latlon" && ly.latCol && ly.lonCol) {
+    } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && ly.latCol && ly.lonCol) {
       for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
+    } else if (ly.type === "grid" && ((ly.mode ?? "boundary") === "boundary" || ly.mode === "wkt") && (ly.boundaryCol || ly.wktCol)) {
+      const col = ly.boundaryCol || ly.wktCol;
+      for (const row of r) { const p = parseWktRings(row[col]); if (p) for (const ring of p.rings) for (const [x, y] of ring) exp(x, y); }
     } else if (ly.wktCol) {
       for (const row of r) { const p = parseWktRings(row[ly.wktCol]); if (p) for (const ring of p.rings) for (const [x, y] of ring) exp(x, y); }
     }
@@ -2335,7 +2361,7 @@ function mkGeoLayer(type, idx) {
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", fillOpacity: 0, stroke: "#222", strokeWidth: 0.8 };
   if (type === "point")    return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", fill: col, radius: 4, fillOpacity: 0.78 };
   if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", stroke: col, strokeWidth: 1.2 };
-  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "latlon", wktCol: "", latCol: "", lonCol: "", cellsize: 500, fill: col, fillOpacity: 0.35, stroke: "#888", strokeWidth: 0.3 };
+  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "boundary", wktCol: "", boundaryCol: "", latCol: "", lonCol: "", cellsize: 500, clipBorder: true, fill: col, fillOpacity: 0.08, stroke: "#888", strokeWidth: 0.3 };
   return { id, type, visible: true, datasetId: "active" };
 }
 
@@ -2383,7 +2409,7 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
       {/* Dataset selector */}
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <div style={{ fontSize: 7, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.11em", fontFamily: mono }}>Dataset</div>
-        <select value={ly.datasetId ?? "active"} onChange={e => upd({ datasetId: e.target.value, wktCol: "", latCol: "", lonCol: "" })}
+        <select value={ly.datasetId ?? "active"} onChange={e => upd({ datasetId: e.target.value, wktCol: "", boundaryCol: "", latCol: "", lonCol: "" })}
           style={{ padding: "2px 4px", background: C.surface, border: `1px solid ${C.teal}55`, borderRadius: 3, fontFamily: mono, fontSize: 9, color: C.text, outline: "none" }}>
           <option value="active">— active dataset —</option>
           {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
@@ -2391,26 +2417,36 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
       </div>
       {ly.type === "grid" && (
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-          {[["latlon", "Lat/Lon"], ["wkt", "WKT col"]].map(([m, lbl]) => (
+          {[["boundary", "Boundary"], ["latlon", "Lat/Lon"]].map(([m, lbl]) => (
             <button key={m} onClick={() => upd({ mode: m })}
               style={{
                 flex: 1, padding: "2px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
-                background: (ly.mode ?? "latlon") === m ? `${C.teal}18` : "transparent",
-                border: `1px solid ${(ly.mode ?? "latlon") === m ? C.teal + "55" : C.border2}`,
-                color: (ly.mode ?? "latlon") === m ? C.teal : C.textMuted,
+                background: (ly.mode ?? "boundary") === m ? `${C.teal}18` : "transparent",
+                border: `1px solid ${(ly.mode ?? "boundary") === m ? C.teal + "55" : C.border2}`,
+                color: (ly.mode ?? "boundary") === m ? C.teal : C.textMuted,
               }}
             >{lbl}</button>
           ))}
         </div>
       )}
-      {ly.type === "grid" && (ly.mode ?? "latlon") === "latlon" && (
+      {ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <Sel label="Lat" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
           <Sel label="Lon" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
           <Rng label="Cell (m)" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} fmt={v => v + "m"} />
         </div>
       )}
-      {(ly.type === "polygon" || ly.type === "boundary" || ly.type === "line" || (ly.type === "grid" && (ly.mode ?? "latlon") === "wkt")) && (
+      {ly.type === "grid" && ((ly.mode ?? "boundary") === "boundary" || ly.mode === "wkt") && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "end" }}>
+          <Sel label="Boundary WKT" value={ly.boundaryCol ?? ly.wktCol ?? ""} onChg={v => upd({ boundaryCol: v, wktCol: v })} opts={geomCols} />
+          <Rng label="Cell (m)" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} fmt={v => v + "m"} />
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: mono, fontSize: 8, color: C.textMuted, marginBottom: 3 }}>
+            <input type="checkbox" checked={ly.clipBorder !== false} onChange={e => upd({ clipBorder: e.target.checked })} style={{ accentColor: C.teal }} />
+            clip
+          </label>
+        </div>
+      )}
+      {(ly.type === "polygon" || ly.type === "boundary" || ly.type === "line") && (
         <Sel label="Geometry (WKT)" value={ly.wktCol} onChg={v => upd({ wktCol: v })} opts={geomCols} />
       )}
       {ly.type === "point" && (
@@ -2562,7 +2598,28 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           fill: ly.fill ?? "#6ec8b4", r: ly.radius ?? 4,
           fillOpacity: ly.fillOpacity ?? 0.78, stroke: "none",
         }));
-      } else if (ly.type === "grid" && (ly.mode ?? "latlon") === "latlon" && ly.latCol && ly.lonCol) {
+      } else if (ly.type === "grid" && ((ly.mode ?? "boundary") === "boundary" || ly.mode === "wkt") && (ly.boundaryCol || ly.wktCol)) {
+        try {
+          const col = ly.boundaryCol || ly.wktCol;
+          const boundaries = r.map(row => row[col]).filter(Boolean);
+          for (const boundaryWkt of boundaries) {
+            const cells = makeGrid(boundaryWkt, ly.cellsize ?? 500, ly.clipBorder !== false);
+            for (const cell of cells) {
+              const parsed = parseWktRings(cell.geometry);
+              if (!parsed) continue;
+              for (const ring of parsed.rings) {
+                if (ring.length < 2) continue;
+                marks.push(Plt.line([...ring, ring[0]], {
+                  x: d => d[0], y: d => d[1],
+                  fill: "none",
+                  stroke: ly.stroke ?? "#888", strokeWidth: ly.strokeWidth ?? 0.3,
+                  strokeLinejoin: "round", strokeLinecap: "round",
+                }));
+              }
+            }
+          }
+        } catch (_) { /* skip */ }
+      } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && ly.latCol && ly.lonCol) {
         try {
           const lats = r.map(row => parseFloat(row[ly.latCol])).filter(v => !isNaN(v));
           const lons = r.map(row => parseFloat(row[ly.lonCol])).filter(v => !isNaN(v));
