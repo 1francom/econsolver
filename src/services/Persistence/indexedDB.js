@@ -39,10 +39,11 @@
 
 import { retrofitRowId } from "../data/rowIdentity.js";
 
-const DB_VERSION           = 4;
+const DB_VERSION           = 5;
 const STORE_PIPE           = "pipelines";
 const STORE_RAW            = "raw_data";
 const STORE_PROJ           = "projects";
+const STORE_WORKBENCH      = "workbench";
 const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
 
 // ── Per-user DB isolation ──────────────────────────────────────────────────────
@@ -132,6 +133,11 @@ export function openDB() {
           }
           cursor.continue();
         };
+      }
+
+      // v5: workbench store — Equation Workbench sessions, keyed by project pid.
+      if (oldVer < 5) {
+        db.createObjectStore(STORE_WORKBENCH, { keyPath: "pid" });
       }
     };
 
@@ -405,11 +411,56 @@ export async function clearAllProjects() {
   await tx(STORE_PROJ, db, "readwrite", s => s.clear());
 }
 
+// ─── WORKBENCH API ────────────────────────────────────────────────────────────
+// Equation Workbench sessions, one record per project pid.
+//   Value : { pid, sessions: Session[], ts }
+
+/**
+ * Persist the full session array for a project. Overwrites the record.
+ * Returns { stored: bool }.
+ */
+export async function saveWorkbenchRecord(pid, sessions) {
+  if (!pid) throw new Error("saveWorkbenchRecord: pid required");
+  const db = await openDB();
+  await tx(STORE_WORKBENCH, db, "readwrite", s =>
+    s.put({ pid, sessions: Array.isArray(sessions) ? sessions : [], ts: Date.now() })
+  );
+  return { stored: true };
+}
+
+/**
+ * Load the workbench record for a project. Returns { pid, sessions, ts } or null.
+ */
+export async function loadWorkbenchRecord(pid) {
+  if (!pid) return null;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE_WORKBENCH, "readonly");
+    const req = t.objectStore(STORE_WORKBENCH).get(pid);
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+/**
+ * Delete the workbench record for a project.
+ */
+export async function deleteWorkbenchRecord(pid) {
+  try {
+    const db = await openDB();
+    await tx(STORE_WORKBENCH, db, "readwrite", s => s.delete(pid));
+  } catch { /* non-fatal */ }
+}
+
 export async function clearAllLocalData() {
   await clearAllPipelines(); // clears STORE_PIPE + STORE_RAW
   await clearAllProjects();  // clears STORE_PROJ
-  try { localStorage.clear(); } catch (_) {}
-  try { sessionStorage.clear(); } catch (_) {}
+  try {
+    const db = await openDB();
+    await tx(STORE_WORKBENCH, db, "readwrite", s => s.clear());
+  } catch { /* non-fatal */ }
+  try { localStorage.clear(); } catch { /* non-fatal */ }
+  try { sessionStorage.clear(); } catch { /* non-fatal */ }
 }
 
 // ─── MIGRATION HELPER ─────────────────────────────────────────────────────────
