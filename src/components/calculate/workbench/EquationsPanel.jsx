@@ -29,7 +29,7 @@ export default function EquationsPanel({ equations, onAdd, onPatch, onRemove }) 
               <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 4 }}>{group}</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {items.map((t) => (
-                  <button key={t.label}
+                  <button key={t.group + "/" + t.label}
                     onClick={() => { onAdd(newEquation(t.seed)); setShowTemplates(false); }}
                     style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, cursor: "pointer",
                       background: "transparent", color: C.text, border: `1px solid ${C.line || "#333"}` }}>

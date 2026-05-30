@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 import { cas } from "../../../math/cas/casAdapter.js";
 
@@ -20,11 +20,20 @@ export default function EquationCard({ eq, index, onPatch, onRemove }) {
   const isConstraint = eq.kind === "constraint";
 
   // Free symbols of the expr/relation, for the axis dropdown (objectives only).
-  let symbols = [];
-  try {
-    const src = isConstraint ? `(${eq.relation.lhs}) - (${eq.relation.rhs})` : eq.expr;
-    if (src && src.trim()) symbols = cas.freeSymbols(src);
-  } catch { symbols = []; }
+  const symbols = useMemo(() => {
+    try {
+      const src = isConstraint ? `(${eq.relation.lhs}) - (${eq.relation.rhs})` : eq.expr;
+      if (src && src.trim()) return cas.freeSymbols(src);
+    } catch { /* ignore */ }
+    return [];
+  }, [isConstraint, eq.relation.lhs, eq.relation.rhs, eq.expr]);
+
+  // Self-heal: if the chosen axis is no longer a free symbol of the expr, clear it.
+  useEffect(() => {
+    if (!isConstraint && eq.axis && symbols.length && !symbols.includes(eq.axis)) {
+      onPatch({ axis: "" });
+    }
+  }, [eq.axis, isConstraint, symbols, onPatch]);
 
   function copyLatex() {
     try {

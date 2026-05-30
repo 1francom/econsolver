@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 import SessionTabs from "./SessionTabs.jsx";
 import EquationsPanel from "./EquationsPanel.jsx";
@@ -44,6 +44,23 @@ export default function Workbench({ pid }) {
 
   const active = sessions.find((s) => s.id === activeId) || sessions[0];
 
+  // Detected free symbols across all cards, minus each objective's axis. Memoized
+  // so a card's local re-render (e.g. the copied-flash) doesn't re-parse every expr.
+  const detectedSymbols = useMemo(() => {
+    if (!active) return [];
+    const axes = new Set(active.equations.filter((e) => e.kind !== "constraint").map((e) => e.axis).filter(Boolean));
+    const set = new Set();
+    for (const e of active.equations) {
+      const src = e.kind === "constraint"
+        ? `(${e.relation.lhs}) - (${e.relation.rhs})`
+        : e.expr;
+      if (!src || !src.trim()) continue;
+      try { for (const sym of cas.freeSymbols(src)) set.add(sym); } catch { /* skip */ }
+    }
+    for (const a of axes) set.delete(a);
+    return Array.from(set).sort();
+  }, [active]);
+
   // Mutate the active session immutably.
   const updateActive = useCallback((mutator) => {
     setSessions((prev) => prev.map((s) => (s.id === (activeId ?? prev[0]?.id) ? mutator(s) : s)));
@@ -56,21 +73,6 @@ export default function Workbench({ pid }) {
     updateActive((s) => ({ ...s, equations: s.equations.map((e) => (e.id === id ? { ...e, ...patch } : e)) })), [updateActive]);
   const removeEquation = useCallback((id) =>
     updateActive((s) => ({ ...s, equations: s.equations.filter((e) => e.id !== id) })), [updateActive]);
-
-  // Detected free symbols across all cards, minus each objective's axis.
-  function detectSymbols(session) {
-    const axes = new Set(session.equations.filter((e) => e.kind !== "constraint").map((e) => e.axis).filter(Boolean));
-    const set = new Set();
-    for (const e of session.equations) {
-      const src = e.kind === "constraint"
-        ? `(${e.relation.lhs}) - (${e.relation.rhs})`
-        : e.expr;
-      if (!src || !src.trim()) continue;
-      try { for (const sym of cas.freeSymbols(src)) set.add(sym); } catch { /* skip */ }
-    }
-    for (const a of axes) set.delete(a);
-    return Array.from(set).sort();
-  }
 
   // Parameter slider + role toggle.
   const onParamChange = useCallback((name, patch) =>
@@ -128,7 +130,7 @@ export default function Workbench({ pid }) {
             equations={active.equations}
             onAdd={addEquation} onPatch={patchEquation} onRemove={removeEquation} />
           <ParametersPanel
-            detectedSymbols={detectSymbols(active)}
+            detectedSymbols={detectedSymbols}
             params={active.params} choiceVars={active.choiceVars}
             onParamChange={onParamChange} onToggleRole={onToggleRole} />
         </div>
