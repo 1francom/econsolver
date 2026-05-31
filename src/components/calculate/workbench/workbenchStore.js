@@ -4,7 +4,7 @@
 import {
   loadWorkbenchRecord,
   saveWorkbenchRecord,
-} from "../../../services/persistence/indexedDB.js";
+} from "../../../services/Persistence/indexedDB.js";
 
 let _seq = 0;
 const uid = (p) => `${p}_${Date.now().toString(36)}_${(_seq++).toString(36)}`;
