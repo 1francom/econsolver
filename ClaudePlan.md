@@ -1733,3 +1733,153 @@ After each phase: load a dataset, pin one artifact of the new type, generate R/P
 - `src/services/Persistence/indexedDB.js` — new `artifacts` object store
 
 ### Status: PENDING — start with Phase 16.1 (Foundation) when ready
+
+---
+
+# Phase 17: SpatialTab.jsx file split — PENDING
+
+## Goal & rationale
+
+`src/components/tabs/SpatialTab.jsx` is **3908 lines** doing too many jobs: analyze tools, Leaflet map builder, Observable/SVG static plot, WKT parsing, CRS/proj4, color scales, UI atoms, and the root tab shell. Split it into a `spatial/` directory so Franco, Codex, and Claude can work in parallel without collisions.
+
+**This is a PURE MOVE refactor — verbatim code relocation, zero logic changes.** Do not "improve," rename, or rewrite any function while moving it. Surgical discipline (per `feedback_code_style`): move the exact bytes, add imports/exports only.
+
+**Timing:** Execute only AFTER the current spatial workflow is browser-validated by Franco. Confirm with him before starting — he was leaning toward deferring.
+
+## Why the split is low-risk (verified 2026-05-31)
+
+Coupling is loose. The root (now line 3691) passes plain props down: `rows, headers, availableDatasets, onAddDataset, pid, C`. The three tabs are nearly independent:
+- **Analyze sections** communicate back ONLY via one callback contract: `onResult(rows, newCols, headers?)` → `pendingRows`/`pendingCols`/`pendingHeaders` state in root → sticky `OutputPanel` save bar → `handleSave` → `onAddDataset`.
+- **Map tab** (`SpatialPlotTab`) and **Plot tab** (`SpatialGeoPlot`) are fully self-contained (own layers, history, export codegen).
+
+## INVARIANTS (do not break)
+1. **Default export path stays:** `src/components/tabs/SpatialTab.jsx` remains the root file with `export default function SpatialTab(...)`. No other importer in the codebase changes. (Verify: `grep -rn "tabs/SpatialTab" src/` before and after — should be identical.)
+2. **Verbatim move only** — no logic edits, no renames, no reformatting.
+3. **Skill applies:** `spatial-module` auto-triggers on this file. Re-read it each session.
+4. **Validate after each tab group** in the browser (Analyze, Map, Plot independently) — Franco's convention.
+
+## Orphaned / parked components — DECISION REQUIRED before moving
+- `SpatialMapSection` (1548–1807) and `SpatialRDDSection` (1902–2051) are **defined but NEVER rendered** by the root. `SpatialRDDSection` is likely intentional WIP (uses `runSpatialRDD` from `SpatialRDDEngine.js`). **Do NOT delete** — investigate/ask Franco. Park them in `spatial/analyze/_parked/` and leave them unimported, OR wire them if Franco confirms they should be live.
+- `MapLegend` (1507–1547) is used by the dead `SpatialMapSection` (1801) AND the live Map tab `SpatialPlotTab` (2846). Move to `spatial/map/MapLegend.jsx`; parked section imports from there.
+
+## Target structure
+
+```
+src/components/tabs/
+├── SpatialTab.jsx                    ← STAYS: root tabs + shared pending-result state only (~current 3691–3908)
+└── spatial/
+    ├── shared/
+    │   ├── constants.js   ← mono, arrMin, arrMax, BUFFER_RADIUS_PRESETS, formatRadiusLabel
+    │   ├── leaflet.js     ← BASEMAPS, CARTO_TILE, lonToTx/latToTy/txToLon/tyToLat, pickTileZ, addBasemap, loadLeaflet
+    │   ├── crs.js         ← loadProj4, PRESET_CRS, isProjectedWKT, makeCabaMetricGrid
+    │   ├── wkt.js         ← splitParenGroups, leafletPolygonLatLngs, wktToLeaflet, parseWktRings
+    │   ├── color.js       ← CAT_PALETTE, buildColorScale
+    │   ├── guess.js       ← guessLatCol/LonCol/WktCol/PointCountCol/AddressCol, looksLikeWktValue, isGeometryHeader
+    │   └── atoms.jsx      ← ColSelect, NumInput, TextInput, ApplyBtn, SaveBtn, ResultPreview, ErrBanner, Section
+    ├── analyze/
+    │   ├── CRSTransformSection.jsx
+    │   ├── DistanceSection.jsx
+    │   ├── BufferSection.jsx
+    │   ├── MetricBufferSection.jsx
+    │   ├── GridSection.jsx
+    │   ├── SpatialJoinSection.jsx
+    │   ├── AggregateToGridSection.jsx
+    │   ├── NearestNeighborSection.jsx
+    │   ├── GeocodeSection.jsx
+    │   ├── BoundaryDistanceSection.jsx
+    │   ├── OutputPanel.jsx
+    │   └── _parked/  ← SpatialMapSection.jsx, SpatialRDDSection.jsx (unrendered; see decision above)
+    ├── map/
+    │   ├── SpatialPlotTab.jsx
+    │   ├── SpatialLayerEditor.jsx
+    │   ├── ColorRow.jsx
+    │   ├── MapLegend.jsx
+    │   └── layers.js      ← LAYER_COLORS, mkSLayer
+    └── plot/
+        ├── SpatialGeoPlot.jsx
+        ├── GeoPlotCanvas.jsx
+        ├── GeoLayerConfig.jsx
+        ├── legend.js       ← GEO_MARGIN, appendSvgLegend
+        └── geo.js          ← loadGeoPlt, geoBbox, GEO_COLORS, mkGeoLayer
+```
+
+## Symbol → file map with ORIGINAL line ranges (snapshot @ 3908-line version)
+
+> Line numbers drift as you extract. Move by **symbol boundary** (`function X`/`const X` to just before next top-level def). Use these only to locate the symbol.
+
+| Symbol | Orig lines | Destination |
+|---|---|---|
+| `arrMin`, `arrMax` | 8–9 | shared/constants.js |
+| `mono` | 43 | shared/constants.js |
+| `BUFFER_RADIUS_PRESETS`, `formatRadiusLabel` | 44–58 | shared/constants.js |
+| `BASEMAPS`, `CARTO_TILE`, `lonToTx`,`latToTy`,`txToLon`,`tyToLat`,`pickTileZ`,`addBasemap`,`loadLeaflet` | 60–127 | shared/leaflet.js |
+| `loadProj4`, `PRESET_CRS`, `isProjectedWKT`, `makeCabaMetricGrid` | 130–172 | shared/crs.js |
+| `splitParenGroups`, `leafletPolygonLatLngs`, `wktToLeaflet` | 174–252 | shared/wkt.js |
+| `CAT_PALETTE`, `buildColorScale` | 253–298 | shared/color.js |
+| `ColSelect`,`NumInput`,`TextInput`,`ApplyBtn`,`SaveBtn`,`ResultPreview`,`ErrBanner`,`Section` | 299–484 | shared/atoms.jsx |
+| `guessLatCol`,`guessLonCol`,`guessWktCol`,`guessPointCountCol`,`looksLikeWktValue`,`isGeometryHeader`,`guessAddressCol` | 485–520 | shared/guess.js |
+| `CRSTransformSection` | 521–606 | analyze/CRSTransformSection.jsx |
+| `DistanceSection` | 607–668 | analyze/DistanceSection.jsx |
+| `BufferSection` | 669–720 | analyze/BufferSection.jsx |
+| `MetricBufferSection` | 721–852 | analyze/MetricBufferSection.jsx |
+| `GridSection` | 853–1004 | analyze/GridSection.jsx |
+| `SpatialJoinSection` | 1005–1136 | analyze/SpatialJoinSection.jsx |
+| `AggregateToGridSection` | 1137–1246 | analyze/AggregateToGridSection.jsx |
+| `NearestNeighborSection` | 1247–1356 | analyze/NearestNeighborSection.jsx |
+| `GeocodeSection` | 1357–1506 | analyze/GeocodeSection.jsx |
+| `MapLegend` | 1507–1547 | map/MapLegend.jsx |
+| `SpatialMapSection` (PARKED) | 1548–1807 | analyze/_parked/SpatialMapSection.jsx |
+| `BoundaryDistanceSection` | 1808–1901 | analyze/BoundaryDistanceSection.jsx |
+| `SpatialRDDSection` (PARKED) | 1902–2051 | analyze/_parked/SpatialRDDSection.jsx |
+| `OutputPanel` | 2052–2084 | analyze/OutputPanel.jsx |
+| `ColorRow` | 2085–2103 | map/ColorRow.jsx |
+| `SpatialLayerEditor` | 2104–2257 | map/SpatialLayerEditor.jsx |
+| `LAYER_COLORS`, `mkSLayer` | 2258–2268 | map/layers.js |
+| `SpatialPlotTab` | 2269–2862 | map/SpatialPlotTab.jsx |
+| `loadGeoPlt`, `parseWktRings` | 2864–2913 | geo.js / **wkt.js** (parseWktRings → shared/wkt.js) |
+| `geoBbox`, `GEO_COLORS`, `mkGeoLayer` | 2915–2951 | plot/geo.js |
+| `GeoLayerConfig` | 2952–3079 | plot/GeoLayerConfig.jsx |
+| `GEO_MARGIN`, `appendSvgLegend` | 3080–3174 | plot/legend.js |
+| `GeoPlotCanvas` | 3175–3447 | plot/GeoPlotCanvas.jsx |
+| `SpatialGeoPlot` | 3448–3690 | plot/SpatialGeoPlot.jsx |
+| `SpatialTab` (default export) | 3691–3908 | STAYS in SpatialTab.jsx |
+
+## Cross-tab shared-symbol usage (verified — drives the import lists)
+
+| Shared symbol | Used by |
+|---|---|
+| `wktToLeaflet` | analyze(parked SpatialMapSection), **map** |
+| `buildColorScale` | analyze(parked), **map**, **plot** |
+| `loadLeaflet` | analyze(parked), **map**, **root** |
+| `BASEMAPS`, `addBasemap` | analyze(parked), **map** |
+| `makeCabaMetricGrid` | **map**, **plot** |
+| `isProjectedWKT`, `loadProj4`, `PRESET_CRS` | **map** |
+| `parseWktRings` | **plot** only (but place in shared/wkt.js for cohesion) |
+| `geoBbox` | **plot** only |
+| `BUFFER_RADIUS_PRESETS` | analyze(BufferSection) |
+| `formatRadiusLabel` | analyze(MetricBufferSection) |
+| `mono`, `arrMin`, `arrMax`, atoms, guess helpers | all tabs |
+
+External imports currently at top of file (lines 6–41) — redistribute per consumer: `useTheme`, `HintBox`, `getPlotHistory/savePlotHistory` (plot only), `geocoding.js` (GeocodeSection only), `SpatialEngine.js` exports (per analyze section), `runSpatialRDD` (parked SpatialRDDSection), `wrapResult` + `modelBuffer` (SpatialRDDSection — confirm).
+
+## Execution order (each step = build-clean checkpoint; commit after each)
+
+> **BROWSER-VALIDATED by Franco 2026-05-31** — all 3 tabs (Analyze / Map / Plot) confirmed working after the full split. Refactor complete.
+
+
+- [x] **Step 0** — Franco approved executing now (2026-05-31). `spatial/` dirs created. `_parked` decision: park unrendered components unimported (no deletion).
+- [x] **Step 1 — shared/** — DONE (2026-05-31). Extracted `constants.js`, `leaflet.js`, `crs.js`, `wkt.js` (incl. `parseWktRings`), `color.js`, `guess.js`, `atoms.jsx`. Root imports them; duplicate local `parseWktRings` removed from plot region. `vite build` green (367 modules).
+- [x] **Step 2 — analyze/** — DONE (2026-05-31). 10 live `*Section` + `OutputPanel` moved into `analyze/`, per-file imports auto-detected. Root imports them. `vite build` green; `eslint` 0 `no-undef`. (Pre-existing React-Compiler memoization warnings carried over verbatim — do NOT "fix" as part of this move.) **Browser validation of Analyze tab still pending.**
+- [x] **Step 3 — map/** — DONE 2026-05-31. Moved `ColorRow`, `SpatialLayerEditor`, `MapLegend`, `layers.js`, `SpatialPlotTab` (extracted together with Step 5 parked block, root lines 77-1305). Build green, 0 no-undef. **Validate Map tab in browser** (live Leaflet builder + HTML export).
+- [x] **Step 4 — plot/** — DONE 2026-05-31. Moved `geo.js` (loadGeoPlt/geoBbox/GEO_COLORS/mkGeoLayer), `legend.js` (GEO_MARGIN/appendSvgLegend), `GeoLayerConfig.jsx`, `GeoPlotCanvas.jsx`, `SpatialGeoPlot.jsx`. Note: `GeoPlotCanvas` needed crs/leaflet basemap imports (makeCabaMetricGrid, CARTO_TILE, lonToTx/latToTy/txToLon/tyToLat, pickTileZ) — caught by eslint no-undef. Build green, 0 no-undef. **Validate Plot tab in browser** (SVG render, legend, PNG/SVG export, history persist/restore).
+- [x] **Step 5 — _parked/** — DONE 2026-05-31. Moved `SpatialMapSection` + `SpatialRDDSection` into `analyze/_parked/` (5-up import depth). Kept unimported per Step 0 decision. eslint 0 no-undef.
+- [x] **Step 6 — Final** — DONE 2026-05-31. `grep -rn "tabs/SpatialTab" src/` unchanged (only `App.jsx` imports it). `SpatialTab.jsx` now **245 lines** (was 3908). Unused root imports pruned (eslint 0 no-undef + 0 unused-vars). Full app `vite build` green. Final tree: `spatial/shared/` (7), `spatial/analyze/` (11 + `_parked/` 2), `spatial/map/` (5), `spatial/plot/` (5) = 30 files. update-structure: refresh CLAUDE.md file-structure section. **Browser validation of all 3 tabs pending (Franco).** Commit pending (Franco PRs to main himself).
+
+## Resume protocol (for a fresh low-context session)
+1. Re-read this Phase 17 section + invoke `spatial-module` skill.
+2. Check progress: `ls src/components/tabs/spatial/**` — directories/files already present tell you which steps are done.
+3. `grep -n "^function\|^const\|^export default" src/components/tabs/SpatialTab.jsx` — whatever symbols REMAIN in the root file (beyond `SpatialTab` itself) are not yet extracted.
+4. Continue from the first unchecked step above. Build green + browser-validate before checking a box.
+5. Remember: verbatim moves only; default export path immutable.
+
+### Status: PENDING — awaiting Franco's go-ahead (validate spatial workflow first)
