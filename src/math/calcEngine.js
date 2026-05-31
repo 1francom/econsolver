@@ -514,11 +514,15 @@ export function optimizeUnconstrained(fn, a, b, sense = "max") {
   const STEPS = 400;
   const step = (b - a) / STEPS;
   let bestX = a, bestY = fn(a);
-  for (let i = 1; i <= STEPS; i++) {
+  let yMin = Infinity, yMax = -Infinity;
+  for (let i = 0; i <= STEPS; i++) {
     const x = a + i * step;
     const y = fn(x);
+    if (!Number.isFinite(y)) continue;
+    if (y < yMin) yMin = y;
+    if (y > yMax) yMax = y;
     const better = sense === "max" ? y > bestY : y < bestY;
-    if (Number.isFinite(y) && better) { bestY = y; bestX = x; }
+    if (better || !Number.isFinite(bestY)) { bestY = y; bestX = x; }
   }
   // Newton-polish on f' = 0 around bestX.
   const fp = (x) => derivative(fn, x);
@@ -532,9 +536,33 @@ export function optimizeUnconstrained(fn, a, b, sense = "max") {
     if (Math.abs(nx - x) < 1e-10) { x = nx; break; }
     x = nx;
   }
-  const fpp = derivative(fp, x);
-  const kind = fpp < 0 ? "max" : fpp > 0 ? "min" : "saddle";
-  return { x, value: fn(x), fp: fp(x), fpp, kind };
+  // Typical slope over the window: lets us tell a genuine f'(x)≈0 stationary
+  // point apart from a boundary extremum of a monotone curve (whose "optimum"
+  // would otherwise just track the user's x-window edge — the boundary bug).
+  const span = b - a;
+  const yrange = Number.isFinite(yMax - yMin) ? Math.abs(yMax - yMin) : 0;
+  const slopeScale = span > 0 ? yrange / span : 0;
+  const flatTol = 1e-6 + 1e-3 * slopeScale;
+  const margin = span * 1e-4; // "strictly inside (a,b)"
+  const slope = fp(x);
+  const interior =
+    x > a + margin && x < b - margin &&
+    Number.isFinite(slope) && Math.abs(slope) <= flatTol;
+  if (interior) {
+    const fpp = derivative(fp, x);
+    const kind = fpp < 0 ? "max" : fpp > 0 ? "min" : "saddle";
+    return { x, value: fn(x), fp: slope, fpp, kind, interior: true, unbounded: false };
+  }
+  // Boundary extremum: the dominant value sits on an endpoint. Report whether
+  // the curve is still improving outward there — if so the limit is unbounded
+  // and no finite interior optimum exists.
+  const atUpper = bestX >= (a + b) / 2;
+  const sB = fp(bestX);
+  const improvingOutward = sense === "max"
+    ? (atUpper ? sB > 0 : sB < 0)
+    : (atUpper ? sB < 0 : sB > 0);
+  const unbounded = Number.isFinite(sB) && improvingOutward && Math.abs(sB) > flatTol;
+  return { x: bestX, value: bestY, fp: sB, fpp: derivative(fp, bestX), kind: "boundary", interior: false, unbounded, atUpper };
 }
 
 // Numeric constrained optimization via Lagrangian FOC (§5.5, optimize mode C fallback).

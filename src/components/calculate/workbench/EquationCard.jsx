@@ -3,6 +3,7 @@ import { useTheme } from "../../../ThemeContext.jsx";
 import { cas } from "../../../math/cas/casAdapter.js";
 
 const mono = "'IBM Plex Mono', monospace";
+const swatch = { width: 22, height: 20, padding: 0, border: "1px solid #444", background: "transparent", cursor: "pointer", flexShrink: 0 };
 const OPS = [
   { key: "plot", glyph: "▦", title: "Plot curve" },
   { key: "deriv", glyph: "f′", title: "Symbolic derivative" },
@@ -16,7 +17,8 @@ const OPS = [
 export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
   const { C } = useTheme();
   const [copied, setCopied] = useState(false);
-  const accent = [C.teal, C.gold, C.blue][index % 3];
+  const paletteColor = [C.teal, C.gold, C.blue][index % 3];
+  const accent = eq.color || paletteColor;
   const isConstraint = eq.kind === "constraint";
 
   // Free symbols of the expr/relation, for the axis dropdown (objectives only).
@@ -50,9 +52,13 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <input value={eq.label} onChange={(e) => onPatch({ label: e.target.value.slice(0, 24) })}
-          style={{ width: 54, background: C.bg, color: accent, border: `1px solid ${C.line || "#222"}`,
+          style={{ width: 54, background: C.bg, color: accent, border: `1px solid ${C.border2}`,
             fontFamily: mono, fontSize: 12, padding: "3px 5px" }} />
-        <span style={{ fontSize: 11, color: C.textDim || "#888" }}>{isConstraint ? "s.t." : "="}</span>
+        {!isConstraint && (
+          <input type="color" value={accent} title="Curve color"
+            onChange={(e) => onPatch({ color: e.target.value })} style={swatch} />
+        )}
+        <span style={{ fontSize: 11, color: C.textDim }}>{isConstraint ? "s.t." : "="}</span>
 
         {isConstraint ? (
           <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
@@ -75,10 +81,11 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
       </div>
 
       {!isConstraint && (
+        <>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <label style={{ fontSize: 10, color: C.textDim || "#888" }}>axis</label>
+          <label style={{ fontSize: 10, color: C.textDim }}>axis</label>
           <select value={eq.axis} onChange={(e) => onPatch({ axis: e.target.value })}
-            style={{ background: C.bg, color: C.text, border: `1px solid ${C.line || "#222"}`, fontFamily: mono, fontSize: 11, padding: "2px 4px" }}>
+            style={{ background: C.bg, color: C.text, border: `1px solid ${C.border2}`, fontFamily: mono, fontSize: 11, padding: "2px 4px" }}>
             <option value="">—</option>
             {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -96,49 +103,62 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
                   onPatch(patch);
                 }}
                 style={{ fontSize: 11, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
-                  background: on ? accent + "22" : "transparent", color: on ? accent : C.textDim || "#888",
-                  border: `1px solid ${on ? accent : C.line || "#222"}` }}>
+                  background: on ? accent + "22" : "transparent", color: on ? accent : C.textDim,
+                  border: `1px solid ${on ? accent : C.border2}` }}>
                 {op.glyph}
               </button>
             );
           })}
 
-          {eq.ops.integral && (
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }} title="Integration interval">
-              <span style={{ fontSize: 11, color: C.gold }}>∫</span>
-              <input type="number" value={eq.integralRange?.[0] ?? ""}
-                placeholder={String(view?.xRange?.[0] ?? "a")}
-                onChange={(e) => setIntegralBound(eq, onPatch, 0, e.target.value)}
-                style={{ ...inp(C), width: 56, minWidth: 0 }} />
-              <span style={{ fontSize: 10, color: C.textDim || "#888" }}>→</span>
-              <input type="number" value={eq.integralRange?.[1] ?? ""}
-                placeholder={String(view?.xRange?.[1] ?? "b")}
-                onChange={(e) => setIntegralBound(eq, onPatch, 1, e.target.value)}
-                style={{ ...inp(C), width: 56, minWidth: 0 }} />
-            </div>
-          )}
-
           {eq.ops.optimize && (
-            <button onClick={() => onPatch({ sense: eq.sense === "max" ? "min" : "max" })}
-              style={{ fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
-                background: "transparent", color: C.gold, border: `1px solid ${C.gold}` }}>
-              {eq.sense}
-            </button>
+            <>
+              <button onClick={() => onPatch({ sense: eq.sense === "max" ? "min" : "max" })}
+                style={{ fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
+                  background: "transparent", color: C.gold, border: `1px solid ${C.gold}` }}>
+                {eq.sense}
+              </button>
+              <input type="color" value={eq.optColor || C.red || "#c86e6e"} title="Optimum marker color"
+                onChange={(e) => onPatch({ optColor: e.target.value })} style={swatch} />
+            </>
           )}
 
           <button onClick={copyLatex} title="Copy LaTeX"
-            style={{ fontSize: 10, padding: "3px 7px", borderRadius: 4, marginLeft: "auto", cursor: "pointer",
-              background: "transparent", color: copied ? C.teal : C.textDim || "#888", border: `1px solid ${C.line || "#222"}` }}>
+            style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, marginLeft: "auto", cursor: "pointer",
+              background: copied ? "transparent" : C.surface2, color: copied ? C.teal : C.text,
+              border: `1px solid ${copied ? C.teal : C.border2}`, fontWeight: 600 }}>
             {copied ? "copied" : "LaTeX"}
           </button>
         </div>
+
+        {eq.ops.integral && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 8 }}
+            title="Integration interval and optional welfare reference">
+            <span style={{ fontSize: 11, color: C.gold }}>∫</span>
+            <input type="number" value={eq.integralRange?.[0] ?? ""}
+              placeholder={String(view?.xRange?.[0] ?? "a")}
+              onChange={(e) => setIntegralBound(eq, onPatch, 0, e.target.value)}
+              style={{ ...inp(C), width: 64, minWidth: 0 }} />
+            <span style={{ fontSize: 10, color: C.textDim }}>→</span>
+            <input type="number" value={eq.integralRange?.[1] ?? ""}
+              placeholder={String(view?.xRange?.[1] ?? "b")}
+              onChange={(e) => setIntegralBound(eq, onPatch, 1, e.target.value)}
+              style={{ ...inp(C), width: 64, minWidth: 0 }} />
+            <span style={{ fontSize: 10, color: C.textDim, marginLeft: 8 }}
+              title="Welfare reference y: splits the area into gain (above) and loss (below). Empty → plain area under the curve.">ref y</span>
+            <input type="number" value={eq.integralRef ?? ""}
+              placeholder="—"
+              onChange={(e) => { const n = Number(e.target.value); onPatch({ integralRef: e.target.value === "" || Number.isNaN(n) ? null : n }); }}
+              style={{ ...inp(C), width: 64, minWidth: 0 }} />
+          </div>
+        )}
+        </>
       )}
     </div>
   );
 }
 
 function inp(C) {
-  return { background: C.bg, color: C.text, border: `1px solid ${C.line || "#222"}`,
+  return { background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
     fontFamily: mono, fontSize: 12, padding: "3px 5px", minWidth: 60 };
 }
 

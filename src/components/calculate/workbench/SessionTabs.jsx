@@ -34,8 +34,8 @@ export default function SessionTabs({ sessions, activeId, onSelect, onAdd, onRen
               display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
               padding: "5px 10px", borderRadius: 6, fontFamily: mono, fontSize: 12,
               background: active ? C.teal + "22" : "transparent",
-              border: `1px solid ${active ? C.teal : C.line || "#222"}`,
-              color: active ? C.teal : C.textDim || "#888",
+              border: `1px solid ${active ? C.teal : C.border2}`,
+              color: active ? C.teal : C.textDim,
             }}>
             {editingId === s.id ? (
               <input autoFocus value={draft}

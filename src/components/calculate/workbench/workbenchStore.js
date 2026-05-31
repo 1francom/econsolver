@@ -18,12 +18,22 @@ export function newEquation(overrides = {}) {
     expr: "",
     kind: "objective",          // "objective" | "constraint"
     axis: "",                   // x-axis symbol (objectives only)
+    color: null,                // curve color override (#rrggbb); null → palette
+    optColor: null,             // optimum-marker color override; null → red
     ops: { plot: true, deriv: false, integral: false, solveZero: false, optimize: false },
     integralRange: null,        // [a, b] integration bounds; null → use view.xRange
+    integralRef: null,          // welfare reference y; null → plain area under curve
     sense: "max",               // "max" | "min"
     relation: { lhs: "", op: "=", rhs: "" }, // constraint only
     ...overrides,
   };
+}
+
+// Intersection condition: solve (lhs) = (rhs) for the w.r.t variable(s).
+// lhs/rhs are short refs ("1", "1'", a literal like "0"/"100"). wrt is
+// comma-separated variable names.
+export function newCondition(overrides = {}) {
+  return { id: uid("cond"), lhs: "", rhs: "", wrt: "", enabled: true, ...overrides };
 }
 
 export function newSession(overrides = {}) {
@@ -33,7 +43,11 @@ export function newSession(overrides = {}) {
     equations: [],
     params: [],                 // [{ name, value, min, max, step }]
     choiceVars: [],
-    view: { xRange: [0.01, 10], yRange: null, positiveQuad: true, height: 460 },
+    view: { xRange: [0.01, 10], yRange: null, positiveQuad: true, height: 460,
+            xLabel: "", yLabel: "", refLines: [], annotations: [] },
+    // Comparative statics: sweep one parameter; null param → feature dormant.
+    sweep: { param: null, from: null, to: null, steps: 5, showFamily: true, locus: "off" },
+    conditions: [],             // [{ id, lhs, rhs, wrt, enabled }] — intersection/FOC conditions
     results: {},                // { [equationId]: { [op]: ResultContract } }
     ...overrides,
   };
@@ -45,6 +59,7 @@ const OPS = ["plot", "deriv", "integral", "solveZero", "optimize"];
 
 function isFiniteNum(x) { return typeof x === "number" && Number.isFinite(x); }
 function str(x, fallback = "") { return typeof x === "string" ? x : fallback; }
+function hexColor(x) { return typeof x === "string" && /^#[0-9a-fA-F]{6}$/.test(x) ? x.toLowerCase() : null; }
 
 function validateEquation(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -61,8 +76,11 @@ function validateEquation(raw) {
     expr: str(raw.expr, "").slice(0, 512),   // bounded; re-parsed through cas downstream
     kind: raw.kind === "constraint" ? "constraint" : "objective",
     axis: str(raw.axis, ""),
+    color: hexColor(raw.color),
+    optColor: hexColor(raw.optColor),
     ops,
     integralRange: ir,
+    integralRef: isFiniteNum(raw.integralRef) ? raw.integralRef : null,
     sense: raw.sense === "min" ? "min" : "max",
     relation: { lhs: str(rel.lhs, "").slice(0, 256), op: "=", rhs: str(rel.rhs, "").slice(0, 256) },
   };
@@ -100,13 +118,49 @@ export function validateSession(raw) {
     ? [view.yRange[0], view.yRange[1]] : null;
   const height = isFiniteNum(view.height)
     ? Math.min(900, Math.max(240, view.height)) : base.view.height;
+  const refLines = Array.isArray(view.refLines)
+    ? view.refLines
+        .filter((l) => l && typeof l === "object" && (l.kind === "v" || l.kind === "h") && isFiniteNum(l.value))
+        .slice(0, 12)
+        .map((l) => ({ kind: l.kind, value: l.value, label: str(l.label, "").slice(0, 24) }))
+    : [];
+  const annotations = Array.isArray(view.annotations)
+    ? view.annotations
+        .filter((a) => a && typeof a === "object" && isFiniteNum(a.x) && isFiniteNum(a.y))
+        .slice(0, 24)
+        .map((a) => ({ id: str(a.id, uid("ann")), x: a.x, y: a.y, text: str(a.text, "").slice(0, 64), color: hexColor(a.color) }))
+    : [];
+  const sw = raw.sweep && typeof raw.sweep === "object" ? raw.sweep : {};
+  const sweep = {
+    param: typeof sw.param === "string" && sw.param ? sw.param.slice(0, 24) : null,
+    from: isFiniteNum(sw.from) ? sw.from : null,
+    to: isFiniteNum(sw.to) ? sw.to : null,
+    steps: isFiniteNum(sw.steps) ? Math.min(12, Math.max(2, Math.round(sw.steps))) : 5,
+    showFamily: sw.showFamily !== false,
+    locus: sw.locus === "argmax" || sw.locus === "value" ? sw.locus : "off",
+  };
+  const conditions = Array.isArray(raw.conditions)
+    ? raw.conditions
+        .filter((c) => c && typeof c === "object")
+        .slice(0, 12)
+        .map((c) => ({
+          id: str(c.id, uid("cond")),
+          lhs: str(c.lhs, "").slice(0, 64),
+          rhs: str(c.rhs, "").slice(0, 64),
+          wrt: str(c.wrt, "").slice(0, 64),
+          enabled: c.enabled !== false,
+        }))
+    : [];
   return {
     id: str(raw.id, base.id),
     name: str(raw.name, "Session").slice(0, 40),
     equations,
     params,
     choiceVars,
-    view: { xRange: xr, yRange: yr, positiveQuad: view.positiveQuad !== false, height },
+    view: { xRange: xr, yRange: yr, positiveQuad: view.positiveQuad !== false, height,
+            xLabel: str(view.xLabel, "").slice(0, 48), yLabel: str(view.yLabel, "").slice(0, 48), refLines, annotations },
+    sweep,
+    conditions,
     results: {}, // never trust cached results; recompute live
   };
 }

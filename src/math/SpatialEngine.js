@@ -435,6 +435,10 @@ export function parseWKTPolygon(wkt) {
  */
 export function pointInPolygon(lat, lon, polygonWKT) {
   const rings = parseWKTRings(polygonWKT);
+  return pointInParsedRings(lat, lon, rings);
+}
+
+function pointInParsedRings(lat, lon, rings) {
   if (!rings.length) return false;
   for (const ring of rings) {
     if (ring.length < 3) continue;
@@ -450,6 +454,17 @@ export function pointInPolygon(lat, lon, polygonWKT) {
     if (inside) return true;
   }
   return false;
+}
+
+function ringsBBox(rings) {
+  const xs = rings.flatMap(r => r.map(p => p[0]));
+  const ys = rings.flatMap(r => r.map(p => p[1]));
+  if (!xs.length || !ys.length) return null;
+  return { minX: arrMin(xs), maxX: arrMax(xs), minY: arrMin(ys), maxY: arrMax(ys) };
+}
+
+function bboxContains(bbox, x, y) {
+  return bbox && x >= bbox.minX && x <= bbox.maxX && y >= bbox.minY && y <= bbox.maxY;
 }
 
 // ─── SPATIAL JOIN ─────────────────────────────────────────────────────────────
@@ -488,6 +503,59 @@ export function spatialJoin(pointRows, latCol, lonCol, polyRows, wktCol, joinCol
       ? Object.fromEntries(joinCols.map(c => [c, match[c] ?? null]))
       : nullAttrs;
     return { ...row, ...attrs };
+  });
+}
+
+export function assignPointsToGrid(
+  pointRows,
+  latCol,
+  lonCol,
+  gridRows,
+  gridWktCol,
+  gridIdCol = "grid_id",
+  outGridCol = "grid_id",
+  options = {}
+) {
+  const attributeCols = Array.isArray(options.attributeCols) ? options.attributeCols : [];
+  const metricCrs = normalizeCrs(options.metricCrs ?? "EPSG:32721");
+  const sourceCrs = normalizeCrs(options.sourceCrs ?? "EPSG:4326");
+  const fallbackWktCol = options.fallbackWktCol ?? "geometry";
+
+  const prepared = gridRows.map((cell, idx) => {
+    const wkt = cell[gridWktCol] ?? cell[fallbackWktCol];
+    if (!wkt) return null;
+    const projected = gridWktCol === "metric_geometry" || isProjectedWktCoords(wkt);
+    const rings = parseWKTRings(wkt);
+    if (!rings.length) return null;
+    return { cell, idx, rings, bbox: ringsBBox(rings), projected };
+  }).filter(Boolean);
+
+  const nullAttrs = Object.fromEntries(attributeCols.map(c => [c, null]));
+  return pointRows.map(row => {
+    const lat = Number(row[latCol]);
+    const lon = Number(row[lonCol]);
+    if (!isFinite(lat) || !isFinite(lon)) {
+      return { ...row, [outGridCol]: null, grid_row_index: null, ...nullAttrs };
+    }
+
+    let metricPoint = null;
+    const match = prepared.find(({ rings, bbox, projected }) => {
+      if (projected) {
+        if (!metricPoint) metricPoint = transformCoord(lon, lat, sourceCrs, metricCrs);
+        return bboxContains(bbox, metricPoint[0], metricPoint[1]) &&
+          pointInParsedRings(metricPoint[1], metricPoint[0], rings);
+      }
+      return bboxContains(bbox, lon, lat) && pointInParsedRings(lat, lon, rings);
+    });
+
+    if (!match) return { ...row, [outGridCol]: null, grid_row_index: null, ...nullAttrs };
+    const attrs = Object.fromEntries(attributeCols.map(c => [c, match.cell[c] ?? null]));
+    return {
+      ...row,
+      [outGridCol]: match.cell[gridIdCol] ?? match.idx + 1,
+      grid_row_index: match.idx,
+      ...attrs,
+    };
   });
 }
 
@@ -1107,14 +1175,29 @@ export function makeProjectedGrid(
  * O(n_points × n_cells) — suitable for ≤ 5 000 × 10 000.
  */
 export function aggregateToGrid(gridRows, gridWktCol, pointRows, latCol, lonCol, aggSpecs) {
-  return gridRows.map(cell => {
+  const cells = gridRows.map(cell => {
     const wkt = cell[gridWktCol];
-    if (!wkt) return cell;
-    const matched = pointRows.filter(p => {
-      const lat = parseFloat(p[latCol]);
-      const lon = parseFloat(p[lonCol]);
-      return !isNaN(lat) && !isNaN(lon) && pointInPolygon(lat, lon, wkt);
-    });
+    if (!wkt) return { cell, rings: [], bbox: null, projected: false };
+    const projected = gridWktCol === "metric_geometry" || isProjectedWktCoords(wkt);
+    const rings = parseWKTRings(wkt);
+    return { cell, rings, bbox: ringsBBox(rings), projected };
+  });
+  const points = pointRows.map(p => {
+    const lat = parseFloat(p[latCol]);
+    const lon = parseFloat(p[lonCol]);
+    if (isNaN(lat) || isNaN(lon)) return null;
+    const [mx, my] = transformCoord(lon, lat, "EPSG:4326", "EPSG:32721");
+    return { row: p, lat, lon, mx, my };
+  }).filter(Boolean);
+
+  return cells.map(({ cell, rings, bbox, projected }) => {
+    if (!rings.length) return cell;
+    const matched = points.filter(p => {
+      if (projected) {
+        return bboxContains(bbox, p.mx, p.my) && pointInParsedRings(p.my, p.mx, rings);
+      }
+      return bboxContains(bbox, p.lon, p.lat) && pointInParsedRings(p.lat, p.lon, rings);
+    }).map(p => p.row);
     const extra = {};
     for (const { col, fn, outCol } of aggSpecs) {
       if (fn === "count") {
@@ -1138,5 +1221,47 @@ export function aggregateToGrid(gridRows, gridWktCol, pointRows, latCol, lonCol,
       }
     }
     return { ...cell, ...extra };
+  });
+}
+
+function summarizeMatchedPoints(matched, aggSpecs) {
+  const extra = {};
+  for (const { col, fn, outCol } of aggSpecs) {
+    if (fn === "count") {
+      extra[outCol] = matched.length;
+    } else if (fn === "sum") {
+      extra[outCol] = matched.reduce((s, p) => s + (parseFloat(p[col]) || 0), 0);
+    } else if (fn === "mean") {
+      const vals = matched.map(p => parseFloat(p[col])).filter(v => !isNaN(v));
+      extra[outCol] = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+    } else if (fn === "share") {
+      if (!matched.length) {
+        extra[outCol] = 0;
+      } else {
+        const positives = matched.filter(p => {
+          const v = p[col];
+          if (typeof v === "number") return v > 0;
+          return /^(1|true|yes|y|si|sí)$/i.test(String(v ?? "").trim());
+        }).length;
+        extra[outCol] = positives / matched.length;
+      }
+    }
+  }
+  return extra;
+}
+
+export function aggregateGridById(gridRows, gridIdCol, pointRows, pointGridCol, aggSpecs) {
+  const groups = new Map();
+  for (const row of pointRows) {
+    const id = row[pointGridCol];
+    if (id == null || id === "") continue;
+    const key = String(id);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return gridRows.map(cell => {
+    const id = cell[gridIdCol];
+    const matched = id == null ? [] : (groups.get(String(id)) ?? []);
+    return { ...cell, ...summarizeMatchedPoints(matched, aggSpecs) };
   });
 }

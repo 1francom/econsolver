@@ -11,28 +11,36 @@ export default function EquationsPanel({ equations, view, onAdd, onPatch, onRemo
   const { C } = useTheme();
   const [showTemplates, setShowTemplates] = useState(false);
 
+  // Conditions reference equations by name, so every card needs a unique label.
+  // Assign the first free single-letter name (falling back to a numbered one),
+  // honoring a preferred seed when it is still available.
+  const addNamed = (seed = {}) => {
+    const taken = new Set(equations.map((e) => (e.label || "").trim()).filter(Boolean));
+    onAdd(newEquation({ ...seed, label: uniqueLabel(taken, seed.label) }));
+  };
+
   return (
     <div style={{ fontFamily: mono }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        <button onClick={() => onAdd(newEquation())}
+        <button onClick={() => addNamed()}
           style={btn(C, C.teal)}>+ Equation</button>
-        <button onClick={() => onAdd(newEquation({ kind: "constraint", label: "g" }))}
+        <button onClick={() => addNamed({ kind: "constraint", label: "g" })}
           style={btn(C, C.blue)}>+ Constraint</button>
         <button onClick={() => setShowTemplates((v) => !v)}
           style={btn(C, C.gold)}>{showTemplates ? "Hide" : "Templates"}</button>
       </div>
 
       {showTemplates && (
-        <div style={{ border: `1px solid ${C.line || "#222"}`, borderRadius: 8, padding: 10, marginBottom: 12 }}>
+        <div style={{ border: `1px solid ${C.border2}`, borderRadius: 8, padding: 10, marginBottom: 12 }}>
           {Object.entries(groupBy(TEMPLATES)).map(([group, items]) => (
             <div key={group} style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 4 }}>{group}</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {items.map((t) => (
                   <button key={t.group + "/" + t.label}
-                    onClick={() => { onAdd(newEquation(t.seed)); setShowTemplates(false); }}
+                    onClick={() => { addNamed(t.seed); setShowTemplates(false); }}
                     style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, cursor: "pointer",
-                      background: "transparent", color: C.text, border: `1px solid ${C.line || "#333"}` }}>
+                      background: C.surface2, color: C.text, border: `1px solid ${C.border2}` }}>
                     {t.label}
                   </button>
                 ))}
@@ -57,6 +65,15 @@ export default function EquationsPanel({ equations, view, onAdd, onPatch, onRemo
   );
 }
 
+function uniqueLabel(taken, preferred) {
+  const seq = ["f", "g", "h", "k", "m", "n", "p", "q", "r", "s", "u", "v", "w"];
+  const pref = (preferred || "").trim();
+  if (pref && !taken.has(pref)) return pref;
+  for (const s of seq) if (!taken.has(s)) return s;
+  let i = 1;
+  while (taken.has(`f${i}`)) i++;
+  return `f${i}`;
+}
 function groupBy(arr) {
   const out = {};
   for (const t of arr) (out[t.group] = out[t.group] || []).push(t);

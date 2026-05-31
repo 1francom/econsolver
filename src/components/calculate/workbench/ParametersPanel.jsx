@@ -48,13 +48,38 @@ export default function ParametersPanel({ detectedSymbols, params, choiceVars, o
               )}
             </div>
             {!isChoice && (
-              <input type="range" min={p.min} max={p.max} step={p.step} value={p.value}
-                onChange={(e) => onParamChange(sym, { value: Number(e.target.value) })}
-                style={{ width: "100%", accentColor: C.teal }} />
+              <>
+                <input type="range" min={p.min} max={p.max} step={p.step} value={p.value}
+                  onChange={(e) => onParamChange(sym, { value: Number(e.target.value) })}
+                  style={{ width: "100%", accentColor: C.teal }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
+                  <Bound C={C} label="min" value={p.min}
+                    onCommit={(v) => onParamChange(sym, { min: v, value: Math.max(v, p.value) })} />
+                  <Bound C={C} label="step" value={p.step}
+                    onCommit={(v) => v > 0 && onParamChange(sym, { step: v })} />
+                  <Bound C={C} label="max" value={p.max}
+                    onCommit={(v) => onParamChange(sym, { max: v, value: Math.min(v, p.value) })} />
+                </div>
+              </>
             )}
           </div>
         );
       })}
     </div>
+  );
+}
+
+// Compact numeric input for a slider bound. Commits on blur/Enter; ignores
+// blank or non-finite input so a half-typed value never corrupts the slider.
+function Bound({ C, label, value, onCommit }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, color: C.textDim }}>
+      {label}
+      <input type="number" defaultValue={value} key={value}
+        onBlur={(e) => { const v = Number(e.target.value); if (e.target.value !== "" && Number.isFinite(v)) onCommit(v); }}
+        onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+        style={{ width: 52, background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
+          fontFamily: mono, fontSize: 10, padding: "2px 4px" }} />
+    </label>
   );
 }
