@@ -678,7 +678,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           />
         )}
         {tab === "structure" && (
-          <PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel}/>
+          <PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel} onAdd={addStep}/>
         )}
         {tab === "transform" && (
           <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep} duckdbTableName={rawData?._duckdb?.tableName}/>

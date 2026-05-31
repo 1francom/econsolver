@@ -2244,6 +2244,8 @@ export default function App() {
                 {/* SIMULATE — Phase 9.8 */}
                 <div style={{...tabPanel, display: activeTab==="simulate" ? "flex" : "none", flexDirection:"column"}}>
                   <SimulateTab
+                    rows={tabOutput("simulate")?.cleanRows ?? rawData?.rows ?? []}
+                    headers={tabOutput("simulate")?.headers ?? rawData?.headers ?? []}
                     onAddDataset={(name, rows, headers) => {
                       if (!rawData) {
                         handlePrimaryLoad({ headers, rows }, name).then(() => setActiveTab("clean"));
@@ -2251,6 +2253,18 @@ export default function App() {
                         const newId = studioRef.current?.addApiData(name, rows, headers);
                         if (newId) selectDataset("simulate", newId); // auto-select only in Simulate
                       }
+                    }}
+                    onAddColumn={(colName, values) => {
+                      const baseRows = tabOutput("simulate")?.cleanRows ?? rawData?.rows ?? [];
+                      const merged = baseRows.map((r, i) => ({ ...r, [colName]: values[i] ?? null }));
+                      const baseHdrs = tabOutput("simulate")?.headers ?? rawData?.headers ?? [];
+                      const newHdrs = baseHdrs.includes(colName) ? baseHdrs : [...baseHdrs, colName];
+                      const newId = studioRef.current?.addApiData(colName + "_augmented", merged, newHdrs);
+                      if (newId) selectDataset("simulate", newId);
+                    }}
+                    onCreateDataset={(name, rows, headers) => {
+                      const newId = studioRef.current?.addApiData(name, rows, headers);
+                      if (newId) selectDataset("simulate", newId);
                     }}
                   />
                 </div>
@@ -2266,6 +2280,7 @@ export default function App() {
                 {/* CALCULATE — Phase 9.7 */}
                 <div style={{...tabPanel, display: activeTab==="calculate" ? "flex" : "none", flexDirection:"column"}}>
                   <CalculateTab
+                    pid={pid}
                     rows={tabOutput("calculate")?.cleanRows ?? rawData?.rows ?? []}
                     headers={tabOutput("calculate")?.headers ?? rawData?.headers ?? []}
                     onAddDataset={(name, rows, headers) => {

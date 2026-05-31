@@ -492,3 +492,86 @@ export function buildScope(variables) {
   });
   return scope;
 }
+
+// ─── EQUATION WORKBENCH NUMERIC PRIMITIVES (§5.5) ────────────────────────────
+
+// Free-symbol detection for auto-populating params / choice vars (§5.5).
+// Regex tokenizer; reserved math identifiers are excluded.
+const RESERVED = new Set([
+  "abs","sqrt","exp","log","ln","sin","cos","tan","asin","acos","atan",
+  "pow","min","max","pi","e","floor","ceil","round","sign","E","PI",
+]);
+export function extractSymbols(expr) {
+  const ids = expr.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+  const set = new Set();
+  for (const id of ids) if (!RESERVED.has(id)) set.add(id);
+  return Array.from(set).sort();
+}
+
+// Unconstrained extremum on [a,b] (§5.5, optimize mode A).
+// Scan for the dominant max/min, Newton-polish f'(x)=0, classify via f''.
+export function optimizeUnconstrained(fn, a, b, sense = "max") {
+  const STEPS = 400;
+  const step = (b - a) / STEPS;
+  let bestX = a, bestY = fn(a);
+  for (let i = 1; i <= STEPS; i++) {
+    const x = a + i * step;
+    const y = fn(x);
+    const better = sense === "max" ? y > bestY : y < bestY;
+    if (Number.isFinite(y) && better) { bestY = y; bestX = x; }
+  }
+  // Newton-polish on f' = 0 around bestX.
+  const fp = (x) => derivative(fn, x);
+  let x = bestX;
+  for (let it = 0; it < 50; it++) {
+    const g = fp(x);
+    const gp = derivative(fp, x);
+    if (!Number.isFinite(g) || !Number.isFinite(gp) || Math.abs(gp) < 1e-12) break;
+    const nx = x - g / gp;
+    if (!Number.isFinite(nx) || nx < a || nx > b) break;
+    if (Math.abs(nx - x) < 1e-10) { x = nx; break; }
+    x = nx;
+  }
+  const fpp = derivative(fp, x);
+  const kind = fpp < 0 ? "max" : fpp > 0 ? "min" : "saddle";
+  return { x, value: fn(x), fp: fp(x), fpp, kind };
+}
+
+// Numeric constrained optimization via Lagrangian FOC (§5.5, optimize mode C fallback).
+// obj: (scope)=>number ; constraints: [{ g:(scope)=>number }] where g=0 is feasibility.
+// choiceVars: names of decision variables. base: fixed param values (scope).
+export function optimizeConstrained(obj, constraints, choiceVars, base = {}) {
+  const mults = constraints.map((_, i) => `lambda_${i + 1}`);
+  const unknowns = [...choiceVars, ...mults];
+
+  // L(scope) = obj - sum lambda_i * g_i
+  const L = (scope) => {
+    let v = obj(scope);
+    constraints.forEach((c, i) => { v -= scope[mults[i]] * c.g(scope); });
+    return v;
+  };
+
+  // ∂L/∂u for unknown u, evaluated at the unknown-vector `vec`.
+  const partialAt = (vec, uIndex) => {
+    const scope = { ...base };
+    unknowns.forEach((u, i) => { scope[u] = vec[i]; });
+    const u = unknowns[uIndex];
+    const f = (val) => L({ ...scope, [u]: val });
+    return derivative(f, scope[u]);
+  };
+
+  // calcEngine.solveSystem takes an ARRAY of scalar functions fns[k](vec)->number.
+  const fns = unknowns.map((_, k) => (vec) => partialAt(vec, k));
+
+  // Initial guess: choiceVars=10 (positive interior), multipliers=1.
+  const x0 = unknowns.map((u) => (mults.includes(u) ? 1 : 10));
+  const res = solveSystem(fns, x0); // Newton-Raphson on the FOC system
+  if (res.error) return { error: res.error, choices: {}, multipliers: {}, objectiveValue: NaN };
+
+  const sol = res.solution;
+  const scope = { ...base };
+  unknowns.forEach((u, i) => { scope[u] = sol[i]; });
+  const choices = {}; choiceVars.forEach((c) => { choices[c] = scope[c]; });
+  const multipliers = {}; mults.forEach((m) => { multipliers[m] = scope[m]; });
+  return { choices, multipliers, objectiveValue: obj(scope), converged: res.converged };
+}

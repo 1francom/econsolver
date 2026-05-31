@@ -16,6 +16,108 @@
 const EARTH_RADIUS_KM = 6371;
 const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
+const WGS84_A = 6378137;
+const WGS84_F = 1 / 298.257223563;
+const WGS84_E2 = WGS84_F * (2 - WGS84_F);
+const UTM_K0 = 0.9996;
+
+export function normalizeCrs(crs) {
+  if (!crs) return "EPSG:4326";
+  if (typeof crs === "number") return `EPSG:${crs}`;
+  if (typeof crs === "object") {
+    if (crs.epsg) return `EPSG:${crs.epsg}`;
+    if (crs.code) return normalizeCrs(crs.code);
+    if (crs.name && /4326|wgs\s*84/i.test(crs.name)) return "EPSG:4326";
+    if (crs.name && /32721|utm.*21.*south/i.test(crs.name)) return "EPSG:32721";
+  }
+  const s = String(crs).trim().toUpperCase().replace(/\s+/g, "");
+  if (s === "4326" || s === "WGS84" || s === "WGS_84" || s === "EPSG:4326") return "EPSG:4326";
+  if (s === "32721" || s === "EPSG:32721" || s.includes("UTMZONE21S")) return "EPSG:32721";
+  return s.startsWith("EPSG:") ? s : `EPSG:${s.replace(/^EPSG/, "")}`;
+}
+
+function lonLatToUtm32721(lon, lat) {
+  const zone = 21;
+  const lon0 = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
+  const phi = lat * Math.PI / 180;
+  const lam = lon * Math.PI / 180;
+  const ep2 = WGS84_E2 / (1 - WGS84_E2);
+  const n = WGS84_A / Math.sqrt(1 - WGS84_E2 * Math.sin(phi) ** 2);
+  const t = Math.tan(phi) ** 2;
+  const c = ep2 * Math.cos(phi) ** 2;
+  const a = Math.cos(phi) * (lam - lon0);
+  const m = WGS84_A * (
+    (1 - WGS84_E2 / 4 - 3 * WGS84_E2 ** 2 / 64 - 5 * WGS84_E2 ** 3 / 256) * phi -
+    (3 * WGS84_E2 / 8 + 3 * WGS84_E2 ** 2 / 32 + 45 * WGS84_E2 ** 3 / 1024) * Math.sin(2 * phi) +
+    (15 * WGS84_E2 ** 2 / 256 + 45 * WGS84_E2 ** 3 / 1024) * Math.sin(4 * phi) -
+    (35 * WGS84_E2 ** 3 / 3072) * Math.sin(6 * phi)
+  );
+  const x = UTM_K0 * n * (
+    a + (1 - t + c) * a ** 3 / 6 +
+    (5 - 18 * t + t ** 2 + 72 * c - 58 * ep2) * a ** 5 / 120
+  ) + 500000;
+  const yNorth = UTM_K0 * (
+    m + n * Math.tan(phi) * (
+      a ** 2 / 2 +
+      (5 - t + 9 * c + 4 * c ** 2) * a ** 4 / 24 +
+      (61 - 58 * t + t ** 2 + 600 * c - 330 * ep2) * a ** 6 / 720
+    )
+  );
+  return [x, yNorth + 10000000];
+}
+
+function utm32721ToLonLat(x, y) {
+  const zone = 21;
+  const lon0 = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
+  const ep2 = WGS84_E2 / (1 - WGS84_E2);
+  const e1 = (1 - Math.sqrt(1 - WGS84_E2)) / (1 + Math.sqrt(1 - WGS84_E2));
+  const m = (y - 10000000) / UTM_K0;
+  const mu = m / (WGS84_A * (1 - WGS84_E2 / 4 - 3 * WGS84_E2 ** 2 / 64 - 5 * WGS84_E2 ** 3 / 256));
+  const phi1 = mu +
+    (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu) +
+    (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu) +
+    (151 * e1 ** 3 / 96) * Math.sin(6 * mu) +
+    (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+  const n1 = WGS84_A / Math.sqrt(1 - WGS84_E2 * Math.sin(phi1) ** 2);
+  const t1 = Math.tan(phi1) ** 2;
+  const c1 = ep2 * Math.cos(phi1) ** 2;
+  const r1 = WGS84_A * (1 - WGS84_E2) / Math.pow(1 - WGS84_E2 * Math.sin(phi1) ** 2, 1.5);
+  const d = (x - 500000) / (n1 * UTM_K0);
+  const lat = phi1 - (n1 * Math.tan(phi1) / r1) * (
+    d ** 2 / 2 -
+    (5 + 3 * t1 + 10 * c1 - 4 * c1 ** 2 - 9 * ep2) * d ** 4 / 24 +
+    (61 + 90 * t1 + 298 * c1 + 45 * t1 ** 2 - 252 * ep2 - 3 * c1 ** 2) * d ** 6 / 720
+  );
+  const lon = lon0 + (
+    d -
+    (1 + 2 * t1 + c1) * d ** 3 / 6 +
+    (5 - 2 * c1 + 28 * t1 - 3 * c1 ** 2 + 8 * ep2 + 24 * t1 ** 2) * d ** 5 / 120
+  ) / Math.cos(phi1);
+  return [lon * 180 / Math.PI, lat * 180 / Math.PI];
+}
+
+export function transformCoord(x, y, fromCrs = "EPSG:4326", toCrs = "EPSG:32721") {
+  const from = normalizeCrs(fromCrs);
+  const to = normalizeCrs(toCrs);
+  if (from === to) return [Number(x), Number(y)];
+  if (from === "EPSG:4326" && to === "EPSG:32721") return lonLatToUtm32721(Number(x), Number(y));
+  if (from === "EPSG:32721" && to === "EPSG:4326") return utm32721ToLonLat(Number(x), Number(y));
+  throw new Error(`Unsupported CRS transform: ${from} -> ${to}`);
+}
+
+export function transformWKT(wkt, fromCrs = "EPSG:4326", toCrs = "EPSG:32721", precision = 8) {
+  if (!wkt || typeof wkt !== "string") return wkt;
+  const rx = /(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s+(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)/gi;
+  const fmt = n => {
+    const v = Number(n);
+    if (!isFinite(v)) return "NaN";
+    return v.toFixed(precision).replace(/\.?0+$/, "");
+  };
+  return wkt.replace(rx, (_, xs, ys) => {
+    const [x, y] = transformCoord(Number(xs), Number(ys), fromCrs, toCrs);
+    return `${fmt(x)} ${fmt(y)}`;
+  });
+}
 
 // ─── DISTANCE ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +187,22 @@ export function assignDistance(rows, latCol, lonCol, refLat, refLon, outCol) {
       ...r,
       [outCol]: haversine(Number(lat), Number(lon), refLat, refLon),
     };
+  });
+}
+
+export function assignDistanceMetric(
+  rows, latCol, lonCol, refLat, refLon, outCol,
+  targetCrs = "EPSG:32721"
+) {
+  const [rx, ry] = transformCoord(Number(refLon), Number(refLat), "EPSG:4326", targetCrs);
+  return rows.map(r => {
+    const lat = r[latCol];
+    const lon = r[lonCol];
+    if (lat == null || lon == null || isNaN(lat) || isNaN(lon)) {
+      return { ...r, [outCol]: null };
+    }
+    const [x, y] = transformCoord(Number(lon), Number(lat), "EPSG:4326", targetCrs);
+    return { ...r, [outCol]: euclidean(x, y, rx, ry) };
   });
 }
 
@@ -350,7 +468,7 @@ export function pointInPolygon(lat, lon, polygonWKT) {
  * @param {string[]} joinCols    - columns from polyRows to attach
  * @returns {object[]}
  */
-export function spatialJoin(pointRows, latCol, lonCol, polyRows, wktCol, joinCols) {
+export function spatialJoin(pointRows, latCol, lonCol, polyRows, wktCol, joinCols, predicate = "within") {
   const nullAttrs = Object.fromEntries(joinCols.map(c => [c, null]));
   return pointRows.map(row => {
     const lat = row[latCol];
@@ -358,9 +476,14 @@ export function spatialJoin(pointRows, latCol, lonCol, polyRows, wktCol, joinCol
     if (lat == null || lon == null || isNaN(lat) || isNaN(lon)) {
       return { ...row, ...nullAttrs };
     }
-    const match = polyRows.find(
-      p => p[wktCol] && pointInPolygon(Number(lat), Number(lon), p[wktCol])
-    );
+    const match = polyRows.find(p => {
+      if (!p[wktCol]) return false;
+      // For point-in-polygon data, intersects and within are equivalent except
+      // for boundary points; keep both predicates exposed for sf-style workflow parity.
+      return predicate === "intersects"
+        ? pointInPolygon(Number(lat), Number(lon), p[wktCol])
+        : pointInPolygon(Number(lat), Number(lon), p[wktCol]);
+    });
     const attrs = match
       ? Object.fromEntries(joinCols.map(c => [c, match[c] ?? null]))
       : nullAttrs;
@@ -409,6 +532,194 @@ export function nearestNeighbor(
   });
 }
 
+function radiusLabel(radiusMeters) {
+  const r = Number(radiusMeters);
+  if (!isFinite(r)) return "buffer";
+  return r >= 1000 && r % 1000 === 0 ? `${r / 1000}km` : `${Math.round(r)}m`;
+}
+
+function metricCirclePolys(cx, cy, radiusMeters, segments = 48) {
+  const n = Math.max(12, Math.min(180, Math.round(Number(segments) || 48)));
+  const r = Number(radiusMeters);
+  const poly = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    poly.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+  }
+  return [poly];
+}
+
+function isProjectedWktCoords(wkt) {
+  if (!wkt || typeof wkt !== "string") return false;
+  const m = wkt.match(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);
+  if (!m) return false;
+  return Math.abs(Number(m[1])) > 180 || Math.abs(Number(m[2])) > 90;
+}
+
+function centroidFromWktMetric(wkt, sourceCrs = "EPSG:4326", metricCrs = "EPSG:32721") {
+  if (!wkt || typeof wkt !== "string") return null;
+  const from = sourceCrs === "auto"
+    ? (isProjectedWktCoords(wkt) ? metricCrs : "EPSG:4326")
+    : sourceCrs;
+  const metricWkt = normalizeCrs(from) === normalizeCrs(metricCrs)
+    ? wkt
+    : transformWKT(wkt, from, metricCrs, 3);
+  const rings = parseWKTRings(metricWkt)
+    .map(r => r.map(([x, y]) => ({ x, y })).filter(p => isFinite(p.x) && isFinite(p.y)))
+    .filter(r => r.length >= 3);
+  if (!rings.length) return null;
+  const largest = rings.reduce((best, ring) => xyArea(ring) > xyArea(best) ? ring : best, rings[0]);
+  return xyCentroid(largest);
+}
+
+export function createMetricPointBuffers(
+  rows,
+  latCol,
+  lonCol,
+  radiusMeters = 100,
+  options = {}
+) {
+  const metricCrs = normalizeCrs(options.metricCrs ?? "EPSG:32721");
+  const segments = Number(options.segments ?? 48);
+  const radius = Number(radiusMeters);
+  if (!isFinite(radius) || radius <= 0) throw new Error("radiusMeters must be > 0");
+
+  let nextId = 1;
+  return rows.map(row => {
+    const lat = Number(row[latCol]);
+    const lon = Number(row[lonCol]);
+    if (!isFinite(lat) || !isFinite(lon)) {
+      return {
+        ...row,
+        buffer_id: null,
+        buffer_radius_m: radius,
+        center_lon: null,
+        center_lat: null,
+        center_x: null,
+        center_y: null,
+        geometry: null,
+        metric_geometry: null,
+      };
+    }
+    const [cx, cy] = transformCoord(lon, lat, "EPSG:4326", metricCrs);
+    const polys = metricCirclePolys(cx, cy, radius, segments);
+    return {
+      ...row,
+      buffer_id: nextId++,
+      buffer_radius_m: radius,
+      center_lon: lon,
+      center_lat: lat,
+      center_x: cx,
+      center_y: cy,
+      geometry: projectedPolysToWkt(polys, metricCrs, "EPSG:4326"),
+      metric_geometry: projectedPolysToWkt(polys, metricCrs, metricCrs),
+    };
+  });
+}
+
+export function countPointsWithinGridCentroidBuffer(
+  gridRows,
+  gridWktCol,
+  pointRows,
+  latCol,
+  lonCol,
+  radiusMeters = 100,
+  outPrefix = "points",
+  options = {}
+) {
+  const metricCrs = normalizeCrs(options.metricCrs ?? "EPSG:32721");
+  const radius = Number(radiusMeters);
+  if (!isFinite(radius) || radius <= 0) throw new Error("radiusMeters must be > 0");
+  const prefix = String(outPrefix || "points").trim() || "points";
+  const countCol = options.outCol || `${prefix}_within_${radiusLabel(radius)}`;
+
+  const pts = pointRows.map((p, idx) => {
+    const lat = Number(p[latCol]);
+    const lon = Number(p[lonCol]);
+    if (!isFinite(lat) || !isFinite(lon)) return null;
+    const [x, y] = transformCoord(lon, lat, "EPSG:4326", metricCrs);
+    return { idx, x, y };
+  }).filter(Boolean);
+
+  return gridRows.map(cell => {
+    let cx = Number(cell.centroid_x);
+    let cy = Number(cell.centroid_y);
+    if (!isFinite(cx) || !isFinite(cy)) {
+      const clon = Number(cell.centroid_lon);
+      const clat = Number(cell.centroid_lat);
+      if (isFinite(clon) && isFinite(clat)) {
+        [cx, cy] = transformCoord(clon, clat, "EPSG:4326", metricCrs);
+      }
+    }
+    if (!isFinite(cx) || !isFinite(cy)) {
+      const wkt = cell.metric_geometry || cell[gridWktCol];
+      const cent = centroidFromWktMetric(wkt, cell.metric_geometry ? metricCrs : "auto", metricCrs);
+      if (cent) {
+        cx = cent.x;
+        cy = cent.y;
+      }
+    }
+    if (!isFinite(cx) || !isFinite(cy)) {
+      return { ...cell, [countCol]: null, [`${prefix}_buffer_radius_m`]: radius };
+    }
+    let count = 0;
+    for (const p of pts) {
+      if (euclidean(cx, cy, p.x, p.y) <= radius) count++;
+    }
+    return { ...cell, [countCol]: count, [`${prefix}_buffer_radius_m`]: radius };
+  });
+}
+
+export function nearestNeighborMetric(
+  rows, latCol, lonCol,
+  referenceRows, refLatCol, refLonCol,
+  outDistCol, outIdCol,
+  targetCrs = "EPSG:32721"
+) {
+  const validRefs = referenceRows
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r[refLatCol] != null && r[refLonCol] != null &&
+                        !isNaN(r[refLatCol]) && !isNaN(r[refLonCol]))
+    .map(({ r, i }) => {
+      const [x, y] = transformCoord(Number(r[refLonCol]), Number(r[refLatCol]), "EPSG:4326", targetCrs);
+      return { r, i, x, y };
+    });
+
+  return rows.map(row => {
+    const lat = row[latCol];
+    const lon = row[lonCol];
+    if (lat == null || lon == null || isNaN(lat) || isNaN(lon) || validRefs.length === 0) {
+      return { ...row, [outDistCol]: null, [outIdCol]: null };
+    }
+    const [x, y] = transformCoord(Number(lon), Number(lat), "EPSG:4326", targetCrs);
+    let minDist = Infinity;
+    let minIdx = null;
+    for (const ref of validRefs) {
+      const d = euclidean(x, y, ref.x, ref.y);
+      if (d < minDist) { minDist = d; minIdx = ref.i; }
+    }
+    return {
+      ...row,
+      [outDistCol]: minDist === Infinity ? null : minDist,
+      [outIdCol]: minIdx,
+    };
+  });
+}
+
+export function addDistanceBins(rows, distCol, outCol, cuts = [100, 200, 300]) {
+  const sorted = [...cuts].map(Number).filter(v => isFinite(v) && v > 0).sort((a, b) => a - b);
+  return rows.map(row => {
+    const d = Number(row[distCol]);
+    if (!isFinite(d)) return { ...row, [outCol]: null };
+    let lo = 0;
+    for (const hi of sorted) {
+      if (d < hi) return { ...row, [outCol]: `${lo}-${hi}m` };
+      lo = hi;
+    }
+    return { ...row, [outCol]: `${sorted[sorted.length - 1] ?? 0}m+` };
+  });
+}
+
 // ─── GRID GENERATION ──────────────────────────────────────────────────────────
 
 /**
@@ -432,35 +743,23 @@ export function makeGrid(boundaryWkt, cellsizeMeters = 500, clipBorder = true) {
   if (cellsizeMeters <= 0) throw new Error("cellsizeMeters must be > 0");
 
   const MAX_CELLS = 25_000;
-  const wktU = boundaryWkt.trim().toUpperCase();
 
   // ── Parse outer ring(s) ──────────────────────────────────────────────────
   // Returns [{lon, lat}] rings; captures outer ring of each polygon part.
   function parseRings(wkt) {
-    const rings = [];
-    // MULTIPOLYGON: extract each (( )) block
-    if (wktU.startsWith("MULTIPOLYGON")) {
-      const re = /\(\(([^()]+)\)\)/g;
-      let m;
-      while ((m = re.exec(wkt)) !== null) {
-        const r = m[1].split(",").map(p => {
-          const [lon, lat] = p.trim().split(/\s+/).map(Number);
-          return { lon, lat };
-        }).filter(p => !isNaN(p.lon) && !isNaN(p.lat));
-        if (r.length >= 3) rings.push(r);
+    const parsed = parseWKTRings(wkt)
+      .map(r => r.map(([lon, lat]) => ({ lon, lat })))
+      .filter(r => r.length >= 3);
+    const signedArea = (ring) => {
+      let a = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const p1 = ring[i], p2 = ring[(i + 1) % ring.length];
+        a += p1.lon * p2.lat - p2.lon * p1.lat;
       }
-    } else {
-      // POLYGON — outer ring only (first ((...)))
-      const m = wkt.match(/POLYGON\s*\(\(([^()]+)\)/i);
-      if (m) {
-        const r = m[1].split(",").map(p => {
-          const [lon, lat] = p.trim().split(/\s+/).map(Number);
-          return { lon, lat };
-        }).filter(p => !isNaN(p.lon) && !isNaN(p.lat));
-        if (r.length >= 3) rings.push(r);
-      }
-    }
-    return rings;
+      return a / 2;
+    };
+    const outers = parsed.filter(r => signedArea(r) > 0);
+    return outers.length ? outers : parsed;
   }
 
   const rings = parseRings(boundaryWkt);
@@ -618,12 +917,191 @@ export function makeGrid(boundaryWkt, cellsizeMeters = 500, clipBorder = true) {
   return cells;
 }
 
+function xyArea(poly) {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(a / 2);
+}
+
+function xyCentroid(poly) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    const cross = p.x * q.y - q.x * p.y;
+    a += cross;
+    cx += (p.x + q.x) * cross;
+    cy += (p.y + q.y) * cross;
+  }
+  a /= 2;
+  if (Math.abs(a) < 1e-9) {
+    return {
+      x: poly.reduce((s, p) => s + p.x, 0) / poly.length,
+      y: poly.reduce((s, p) => s + p.y, 0) / poly.length,
+    };
+  }
+  return { x: cx / (6 * a), y: cy / (6 * a) };
+}
+
+function xyPointInRings(x, y, rings) {
+  for (const ring of rings) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const pi = ring[i], pj = ring[j];
+      if ((pi.y > y) !== (pj.y > y) &&
+          x < ((pj.x - pi.x) * (y - pi.y)) / (pj.y - pi.y) + pi.x) {
+        inside = !inside;
+      }
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+
+function clipRingsToRectXY(rings, x0, y0, x1, y1) {
+  const planes = [
+    { axis: "y", side: 1, val: y0 },
+    { axis: "x", side: -1, val: x1 },
+    { axis: "y", side: -1, val: y1 },
+    { axis: "x", side: 1, val: x0 },
+  ];
+  const inside = (p, pl) => {
+    const v = pl.axis === "x" ? p.x : p.y;
+    return pl.side > 0 ? v >= pl.val : v <= pl.val;
+  };
+  const interp = (s, e, pl) => {
+    if (pl.axis === "y") {
+      const t = (pl.val - s.y) / (e.y - s.y);
+      return { x: s.x + t * (e.x - s.x), y: pl.val };
+    }
+    const t = (pl.val - s.x) / (e.x - s.x);
+    return { x: pl.val, y: s.y + t * (e.y - s.y) };
+  };
+  const clipOne = (subj, pl) => {
+    if (!subj.length) return subj;
+    const out = [];
+    let s = subj[subj.length - 1];
+    for (const e of subj) {
+      const eIn = inside(e, pl), sIn = inside(s, pl);
+      if (eIn) {
+        if (!sIn) out.push(interp(s, e, pl));
+        out.push(e);
+      } else if (sIn) {
+        out.push(interp(s, e, pl));
+      }
+      s = e;
+    }
+    return out;
+  };
+
+  const out = [];
+  for (const ring of rings) {
+    let poly = ring.slice();
+    if (poly.length > 1) {
+      const a = poly[0], b = poly[poly.length - 1];
+      if (a.x === b.x && a.y === b.y) poly.pop();
+    }
+    for (const pl of planes) {
+      poly = clipOne(poly, pl);
+      if (!poly.length) break;
+    }
+    if (poly.length >= 3 && xyArea(poly) > 1e-6) out.push(poly);
+  }
+  return out.length ? out : null;
+}
+
+function projectedPolysToWkt(polys, fromCrs, toCrs) {
+  const fmt = n => Number(n).toFixed(toCrs === "EPSG:4326" ? 8 : 3).replace(/\.?0+$/, "");
+  const ring = poly => [...poly, poly[0]].map(p => {
+    const [x, y] = transformCoord(p.x, p.y, fromCrs, toCrs);
+    return `${fmt(x)} ${fmt(y)}`;
+  }).join(", ");
+  return polys.length === 1
+    ? `POLYGON((${ring(polys[0])}))`
+    : `MULTIPOLYGON(${polys.map(p => `((${ring(p)}))`).join(", ")})`;
+}
+
+export function makeProjectedGrid(
+  boundaryWkt,
+  cellsizeMeters = 500,
+  clipBorder = true,
+  options = {}
+) {
+  if (!boundaryWkt || typeof boundaryWkt !== "string") throw new Error("boundaryWkt must be a WKT string");
+  if (cellsizeMeters <= 0) throw new Error("cellsizeMeters must be > 0");
+  const sourceCrs = normalizeCrs(options.sourceCrs ?? "EPSG:4326");
+  const metricCrs = normalizeCrs(options.metricCrs ?? "EPSG:32721");
+  const outputCrs = normalizeCrs(options.outputCrs ?? "EPSG:4326");
+  const MAX_CELLS = Number(options.maxCells ?? 60000);
+
+  const metricWkt = sourceCrs === metricCrs
+    ? boundaryWkt
+    : transformWKT(boundaryWkt, sourceCrs, metricCrs, 3);
+  const rings = parseWKTRings(metricWkt)
+    .map(r => r.map(([x, y]) => ({ x, y })).filter(p => isFinite(p.x) && isFinite(p.y)))
+    .filter(r => r.length >= 3);
+  if (!rings.length) throw new Error("Could not parse boundary WKT. Expected POLYGON or MULTIPOLYGON.");
+
+  const xs = rings.flatMap(r => r.map(p => p.x));
+  const ys = rings.flatMap(r => r.map(p => p.y));
+  const minX = arrMin(xs), maxX = arrMax(xs), minY = arrMin(ys), maxY = arrMax(ys);
+  const nCols = Math.ceil((maxX - minX) / cellsizeMeters);
+  const nRows = Math.ceil((maxY - minY) / cellsizeMeters);
+  if (nCols * nRows > MAX_CELLS * 4) {
+    throw new Error(`Cell size ${cellsizeMeters} m would produce ~${(nCols * nRows).toLocaleString()} candidate cells. Increase cell size.`);
+  }
+
+  const cells = [];
+  for (let row = 0; minY + row * cellsizeMeters < maxY + cellsizeMeters * 0.01; row++) {
+    for (let col = 0; minX + col * cellsizeMeters < maxX + cellsizeMeters * 0.01; col++) {
+      const x0 = minX + col * cellsizeMeters;
+      const y0 = minY + row * cellsizeMeters;
+      const x1 = x0 + cellsizeMeters;
+      const y1 = y0 + cellsizeMeters;
+      const cx = x0 + cellsizeMeters / 2;
+      const cy = y0 + cellsizeMeters / 2;
+      const inside =
+        xyPointInRings(cx, cy, rings) ||
+        xyPointInRings(x0, y0, rings) || xyPointInRings(x0, y1, rings) ||
+        xyPointInRings(x1, y0, rings) || xyPointInRings(x1, y1, rings);
+      const clipped = clipBorder ? clipRingsToRectXY(rings, x0, y0, x1, y1) : null;
+      if (!inside && !clipped) continue;
+      if (cells.length >= MAX_CELLS) throw new Error(`Grid exceeds ${MAX_CELLS.toLocaleString()} cells. Increase cell size.`);
+
+      const polys = clipBorder && clipped ? clipped : [[
+        { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
+      ]];
+      const area = polys.reduce((s, p) => s + xyArea(p), 0);
+      const largest = polys.reduce((best, p) => xyArea(p) > xyArea(best) ? p : best, polys[0]);
+      const cent = xyCentroid(largest);
+      const [centLon, centLat] = transformCoord(cent.x, cent.y, metricCrs, "EPSG:4326");
+      const displayGeometry = projectedPolysToWkt(polys, metricCrs, outputCrs);
+      const metricGeometry = projectedPolysToWkt(polys, metricCrs, metricCrs);
+      cells.push({
+        grid_id: cells.length + 1,
+        geometry: displayGeometry,
+        metric_geometry: metricGeometry,
+        centroid_lon: centLon,
+        centroid_lat: centLat,
+        centroid_x: cent.x,
+        centroid_y: cent.y,
+        area_m2: area,
+        cellsize_m: Number(cellsizeMeters),
+        metric_crs: metricCrs,
+      });
+    }
+  }
+  return cells;
+}
+
 /**
  * Aggregates point rows into grid cells.
  * For each cell (identified by its WKT geometry), counts/sums/averages matching
  * points. Returns the grid rows enriched with aggregate columns.
  *
- * aggSpecs: [{ col: "schools", fn: "count"|"sum"|"mean", outCol: "n_schools" }]
+ * aggSpecs: [{ col: "schools", fn: "count"|"sum"|"mean"|"share", outCol: "n_schools" }]
  * Use fn="count" with col="" to simply count rows.
  *
  * O(n_points × n_cells) — suitable for ≤ 5 000 × 10 000.
@@ -646,6 +1124,17 @@ export function aggregateToGrid(gridRows, gridWktCol, pointRows, latCol, lonCol,
       } else if (fn === "mean") {
         const vals = matched.map(p => parseFloat(p[col])).filter(v => !isNaN(v));
         extra[outCol] = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+      } else if (fn === "share") {
+        if (!matched.length) {
+          extra[outCol] = 0;
+        } else {
+          const positives = matched.filter(p => {
+            const v = p[col];
+            if (typeof v === "number") return v > 0;
+            return /^(1|true|yes|y|si|sí)$/i.test(String(v ?? "").trim());
+          }).length;
+          extra[outCol] = positives / matched.length;
+        }
       }
     }
     return { ...cell, ...extra };

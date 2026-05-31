@@ -262,7 +262,21 @@ function runWLS(xData, yData, weights, seOpts = {}) {
 }
 
 // ─── IK BANDWIDTH SELECTOR ───────────────────────────────────────────────────
-export function ikBandwidth(runningVals, yVals, cutoff) {
+// Imbens-Kalyanaraman (2012) bandwidth for local polynomial of order p.
+//
+// For polynomial order p the MSE-optimal rate is h ∝ n^{-1/(2p+3)}.
+// The bias is driven by the (p+1)-th derivative of E[Y|X] at the cutoff,
+// which corresponds to Taylor coefficient β_{p+1} in a degree-(p+2) pilot fit.
+//
+// p=1 (local linear):  rate = 1/5 = 0.20, pilot uses β₂ (2nd derivative / 2!)
+// p=2 (quadratic):     rate = 1/7 ≈ 0.143, pilot uses β₃ (3rd derivative / 3!)
+// p=3 (cubic):         rate = 1/9 ≈ 0.111, pilot uses β₄ (4th derivative / 4!)
+//
+// Constant 3.4375 is the validated IK constant for p=1, triangular kernel.
+// For p>1 it is used as an approximation — the formula is correct in rate and
+// derivative order; only the leading constant is mildly mis-calibrated.
+export function ikBandwidth(runningVals, yVals, cutoff, polyOrder = 1) {
+  const p     = Math.max(1, Math.round(polyOrder));
   const n     = runningVals.length;
   const left  = runningVals.map((x, i) => ({ x, y: yVals[i] })).filter(d => d.x <  cutoff);
   const right = runningVals.map((x, i) => ({ x, y: yVals[i] })).filter(d => d.x >= cutoff);
@@ -270,26 +284,38 @@ export function ikBandwidth(runningVals, yVals, cutoff) {
   if (left.length < 5 || right.length < 5)
     return (arrMax(runningVals) - arrMin(runningVals)) / 4;
 
-  const pilot = (arrMax(runningVals) - arrMin(runningVals)) / 4;
+  const pilot      = (arrMax(runningVals) - arrMin(runningVals)) / 4;
+  const pilotDeg   = p + 1;   // minimum degree to estimate (p+1)-th derivative; p+2 is more theoretically
+                                // motivated but causes Vandermonde ill-conditioning for p≥3
+  const minPts     = pilotDeg + 2;
 
-  const localVariance = (pts, c) => {
+  const localEstimate = (pts, c) => {
     const near = pts.filter(d => Math.abs(d.x - c) < pilot);
-    if (near.length < 3) return { s2: 1, curv: 0.001 };
-    const X = near.map(d => [1, d.x - c, (d.x - c) ** 2]);
-    const Xt = transpose(X);
+    if (near.length < minPts) return { s2: 1, deriv: 0.001 };
+    const X = near.map(d => {
+      const u = d.x - c;
+      return Array.from({ length: pilotDeg + 1 }, (_, k) => u ** k);
+    });
+    const Xt     = transpose(X);
     const XtXinv = matInv(matMul(Xt, X));
-    if (!XtXinv) return { s2: 1, curv: 0.001 };
+    if (!XtXinv) return { s2: 1, deriv: 0.001 };
     const beta  = matMul(XtXinv, matMul(Xt, near.map(d => [d.y]))).map(r => r[0]);
-    const resid = near.map(d => d.y - (beta[0] + beta[1] * (d.x - c) + beta[2] * (d.x - c) ** 2));
-    const s2    = resid.reduce((s, e) => s + e * e, 0) / Math.max(1, near.length - 3);
-    return { s2, curv: Math.abs(beta[2]) || 0.001 };
+    const resid = near.map((d, i) => {
+      const u = d.x - c;
+      return d.y - beta.reduce((sum, b, k) => sum + b * (u ** k), 0);
+    });
+    const s2    = resid.reduce((s, e) => s + e * e, 0) / Math.max(1, near.length - (pilotDeg + 1));
+    // Taylor coefficient at index p+1: β[p+1] = m^{(p+1)}(c) / (p+1)!
+    const deriv = Math.abs(beta[p + 1]) || 0.001;
+    return { s2, deriv };
   };
 
-  const vL = localVariance(left,  cutoff);
-  const vR = localVariance(right, cutoff);
-  const s2   = (vL.s2   + vR.s2)   / 2;
-  const curv = (vL.curv + vR.curv) / 2;
-  const h    = 3.4375 * Math.pow(s2 / (curv ** 2 * n), 0.2);
+  const vL    = localEstimate(left,  cutoff);
+  const vR    = localEstimate(right, cutoff);
+  const s2    = (vL.s2    + vR.s2)    / 2;
+  const deriv = (vL.deriv + vR.deriv) / 2;
+  const rate  = 1 / (2 * p + 3);
+  const h     = 3.4375 * Math.pow(s2 / (deriv ** 2 * n), rate);
   const range = arrMax(runningVals) - arrMin(runningVals);
   return Math.min(Math.max(h, range * 0.05), range * 0.8);
 }
@@ -627,7 +653,7 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
   // Otherwise apply IK bandwidth to Y ~ running (same logic as Sharp RDD UI).
   const h = bandwidth != null
     ? Number(bandwidth)
-    : ikBandwidth(runVals, yVals, cutoff);
+    : ikBandwidth(runVals, yVals, cutoff, p);
 
   if (!isFinite(h) || h <= 0)
     return { error: "Bandwidth selection failed — check that the running variable has sufficient spread." };

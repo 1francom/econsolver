@@ -350,7 +350,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
                           style={{ fontSize: 9, color: ds.crs.reprojected ? C.gold : C.teal, marginTop: 2, opacity: 0.85 }}
                           title={ds.crs.reprojected
                             ? `Reprojected from ${ds.crs.label} → ${ds.crs.target}`
-                            : `CRS: ${ds.crs.label}`}
+                            : `CRS: ${ds.crs.label}${ds.crs.unit ? ` | unit: ${ds.crs.unit}` : ""}${ds.crs.source ? ` | source: ${ds.crs.source}` : ""}${ds.crs.warning ? ` | ${ds.crs.warning}` : ""}`}
                         >
                           {ds.crs.reprojected ? "↻ " : "◇ "}{ds.crs.label}
                         </div>

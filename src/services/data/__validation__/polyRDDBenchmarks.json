@@ -1,20 +1,17 @@
 {
   "_note": "Run polyRDDRValidation.R to populate this file before running the browser harness.",
   "manual_h": 0.5,
+  "ik_h": { "p1": 0, "p2": 0, "p3": 0 },
+  "p1": {
+    "manual": { "h": 0.5, "beta": [], "se": [], "late": 0, "lateSE": 0, "n": 0, "k": 2 },
+    "ik":     { "h": 0,   "beta": [], "se": [], "late": 0, "lateSE": 0, "n": 0, "k": 2 }
+  },
   "p2": {
-    "beta": [],
-    "se": [],
-    "late": 0,
-    "lateSE": 0,
-    "n": 0,
-    "k": 6
+    "manual": { "h": 0.5, "beta": [], "se": [], "late": 0, "lateSE": 0, "n": 0, "k": 6 },
+    "ik":     { "h": 0,   "beta": [], "se": [], "late": 0, "lateSE": 0, "n": 0, "k": 6 }
   },
   "p3": {
-    "beta": [],
-    "se": [],
-    "late": 0,
-    "lateSE": 0,
-    "n": 0,
-    "k": 8
+    "manual": { "h": 0.5, "beta": [], "se": [], "late": 0, "lateSE": 0, "n": 0, "k": 8 }  ,
+    "ik":     { "h": 0,   "beta": [], "se": [], "late": 0, "lateSE": 0, "n": 0, "k": 8 }
   }
 }

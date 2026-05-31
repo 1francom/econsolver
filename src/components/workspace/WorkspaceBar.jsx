@@ -16,7 +16,7 @@ const TABS = [
   { id: "explore",   label: "Explore",   icon: "◈", requiresOutput: true  },
   { id: "model",     label: "Model",     icon: "⊞", requiresOutput: true  },
   { id: "spatial",   label: "Spatial",   icon: "⊙", requiresOutput: false },
-  { id: "simulate",  label: "Simulate",  icon: "∿", requiresOutput: false },
+  { id: "simulate",  label: "Stat & Simulation", icon: "∿", requiresOutput: false },
   { id: "calculate", label: "Calculate", icon: "∑", requiresOutput: false },
   { id: "report",    label: "Report",    icon: "⊟", requiresOutput: true  },
 ];
