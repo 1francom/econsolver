@@ -25,11 +25,25 @@ function Heatmap({v}){
 }
 
 // ─── PANEL TAB ────────────────────────────────────────────────────────────────
-function PanelTab({rows,headers,panel,setPanel}){
+function PanelTab({rows,headers,panel,setPanel,onAdd}){
   const { C } = useTheme();
   const [ec,setEc]=useState(panel?.entityCol||""),[tc,setTc]=useState(panel?.timeCol||"");
+  const [slotCol,setSlotCol]=useState("");
+  const [outcomeCols,setOutcomeCols]=useState([]);
+  const [staticCols,setStaticCols]=useState([]);
+  const [fillValue,setFillValue]=useState(0);
   const v=useMemo(()=>ec&&tc?validatePanel(rows,ec,tc):null,[rows,ec,tc]);
+  const panelPreview=useMemo(()=>{
+    if(!ec||!tc)return null;
+    const ents=new Set(rows.map(r=>r[ec]).filter(x=>x!==null&&x!==undefined&&x!==""));
+    const times=new Set(rows.map(r=>r[tc]).filter(x=>x!==null&&x!==undefined&&x!==""));
+    const slots=slotCol?new Set(rows.map(r=>r[slotCol]).filter(x=>x!==null&&x!==undefined&&x!=="")):new Set([null]);
+    return {entities:ents.size,times:times.size,slots:slots.size,rows:ents.size*times.size*slots.size};
+  },[rows,ec,tc,slotCol]);
   const bc={strongly_balanced:C.green,unbalanced:C.yellow,gaps:C.orange};
+  const toggle=(col,setter,vals)=>setter(vals.includes(col)?vals.filter(c=>c!==col):[...vals,col]);
+  const colBtn=(col,active,color,onClick)=><button key={col} onClick={onClick} style={{padding:"0.22rem 0.5rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{active?"* ":""}{col}</button>;
+  const addBalancedPanel=()=>onAdd?.({type:"balance_panel",entityCol:ec,timeCol:tc,slotCol,outcomeCols,staticCols,fillValue:Number(fillValue)});
   const bl={strongly_balanced:"Strongly Balanced ✓",unbalanced:"Unbalanced",gaps:"Gaps"};
   return(
     <div>
@@ -72,6 +86,40 @@ function PanelTab({rows,headers,panel,setPanel}){
           </div>
         </div>
       )}
+      <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
+        <div style={{padding:"0.45rem 1rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>Balanced Panel Builder</div>
+        <div style={{padding:"0.75rem 1rem",display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+            <div>
+              <Lbl color={C.violet}>Slot / franja column</Lbl>
+              <select value={slotCol} onChange={e=>setSlotCol(e.target.value)} style={{width:"100%",padding:"0.35rem 0.5rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11}}>
+                <option value="">none</option>
+                {headers.map(h=><option key={h} value={h}>{h}</option>)}
+              </select>
+            </div>
+            <div>
+              <Lbl color={C.green}>Fill missing outcomes</Lbl>
+              <input type="number" value={fillValue} onChange={e=>setFillValue(e.target.value)} style={{width:"100%",padding:"0.35rem 0.5rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11}}/>
+            </div>
+            <div style={{fontSize:11,color:C.textDim,fontFamily:mono,alignSelf:"end",lineHeight:1.6}}>
+              {panelPreview?`${panelPreview.entities} grids x ${panelPreview.times} dates x ${panelPreview.slots} slots = ${panelPreview.rows.toLocaleString()} rows`:"select i and t first"}
+            </div>
+          </div>
+          <div>
+            <Lbl color={C.gold}>Outcome columns filled with zero</Lbl>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+              {headers.filter(h=>h!==ec&&h!==tc&&h!==slotCol).map(h=>colBtn(h,outcomeCols.includes(h),C.gold,()=>toggle(h,setOutcomeCols,outcomeCols)))}
+            </div>
+          </div>
+          <div>
+            <Lbl color={C.blue}>Static controls copied by entity</Lbl>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+              {headers.filter(h=>h!==ec&&h!==tc&&h!==slotCol&&!outcomeCols.includes(h)).map(h=>colBtn(h,staticCols.includes(h),C.blue,()=>toggle(h,setStaticCols,staticCols)))}
+            </div>
+          </div>
+          <Btn onClick={addBalancedPanel} color={C.green} v="solid" dis={!onAdd||!ec||!tc||outcomeCols.length===0} ch="Add balanced panel step"/>
+        </div>
+      </div>
       <div style={{display:"flex",gap:8}}>
         <Btn onClick={()=>setPanel({entityCol:ec,timeCol:tc,validation:v})} color={C.gold} v="solid" dis={!ec||!tc} ch={panel?"Update panel index":"Set panel index"}/>
         {panel&&<Btn onClick={()=>setPanel(null)} color={C.red} ch="Clear"/>}

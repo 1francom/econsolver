@@ -1271,6 +1271,60 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    case "balance_panel": {
+      const entityCol = s.entityCol;
+      const timeCol = s.timeCol;
+      const slotCol = s.slotCol || "";
+      const outcomeCols = s.outcomeCols || [];
+      const staticCols = s.staticCols || [];
+      const fillValue = s.fillValue ?? 0;
+      if (!entityCol || !timeCol) break;
+
+      const uniq = col => [...new Set(rows.map(r => r[col]).filter(v => v !== null && v !== undefined && v !== ""))];
+      const entities = s.entities?.length ? s.entities : uniq(entityCol);
+      const times = s.times?.length ? s.times : uniq(timeCol).sort();
+      const slots = slotCol ? (s.slots?.length ? s.slots : uniq(slotCol).sort()) : [null];
+
+      const keyOf = (e, t, sl) => `${String(e)}\u0001${String(t)}\u0001${slotCol ? String(sl) : ""}`;
+      const rowByKey = new Map();
+      rows.forEach(r => {
+        const k = keyOf(r[entityCol], r[timeCol], slotCol ? r[slotCol] : null);
+        if (!rowByKey.has(k)) rowByKey.set(k, r);
+      });
+
+      const staticByEntity = new Map();
+      rows.forEach(r => {
+        const e = r[entityCol];
+        if (e === null || e === undefined || staticByEntity.has(e)) return;
+        const vals = {};
+        staticCols.forEach(c => { vals[c] = r[c] ?? null; });
+        staticByEntity.set(e, vals);
+      });
+
+      const out = [];
+      entities.forEach(e => {
+        times.forEach(t => {
+          slots.forEach(sl => {
+            const match = rowByKey.get(keyOf(e, t, sl));
+            const row = {
+              [entityCol]: e,
+              [timeCol]: t,
+              ...(slotCol ? { [slotCol]: sl } : {}),
+              ...(staticByEntity.get(e) || {}),
+            };
+            outcomeCols.forEach(c => {
+              const v = match?.[c];
+              row[c] = v === null || v === undefined || v === "" ? fillValue : v;
+            });
+            out.push(row);
+          });
+        });
+      });
+      R = out;
+      H = [...new Set([entityCol, timeCol, ...(slotCol ? [slotCol] : []), ...staticCols, ...outcomeCols])];
+      break;
+    }
+
     case "patch":
       // Guard: s.ri must be a defined number — prevents a stale step with ri:undefined
       // from matching every row (undefined === undefined is true for all rows).
