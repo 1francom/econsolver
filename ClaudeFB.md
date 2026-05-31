@@ -227,3 +227,15 @@
 
 - [14:46] · Spatial
   Allow spatial filters for plots
+
+---
+
+## 2026-05-31 batch
+
+### Bugs
+
+- [12:06] · Data
+  Parse error: schools_with_coordinates.xlsx — Failed to fetch dynamically imported module: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs (SheetJS CDN dynamic import failing at runtime)
+
+- [12:06] · Data
+  OECD proxy error 406 for OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I/A..B1GQ_POP.USD_PPP_PS.NAAG_I — server responded with 406 Not Acceptable; Accept header sent does not match any SDMX format the endpoint supports
