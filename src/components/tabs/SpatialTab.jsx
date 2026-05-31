@@ -19,19 +19,41 @@ import {
   haversine,
   assignDistance,
   assignBuffer,
+  createMetricPointBuffers,
+  countPointsWithinGridCentroidBuffer,
   assignRectGrid,
   assignH3Grid,
   spatialJoin,
   nearestNeighbor,
+  nearestNeighborMetric,
   assignBoundaryDistance,
-  makeGrid,
+  assignDistanceMetric,
+  addDistanceBins,
+  makeProjectedGrid,
   aggregateToGrid,
+  transformCoord,
+  transformWKT,
 } from "../../math/SpatialEngine.js";
 import { runSpatialRDD } from "../../math/SpatialRDDEngine.js";
 import { wrapResult } from "../../math/EstimationResult.js";
 import * as modelBuffer from "../../services/modelBuffer.js";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
+const BUFFER_RADIUS_PRESETS = [
+  ["50m", 50],
+  ["100m", 100],
+  ["200m", 200],
+  ["300m", 300],
+  ["500m", 500],
+  ["1km", 1000],
+  ["2km", 2000],
+  ["5km", 5000],
+];
+const formatRadiusLabel = radiusMeters => {
+  const r = Number(radiusMeters);
+  if (!isFinite(r)) return "buffer";
+  return r >= 1000 && r % 1000 === 0 ? `${r / 1000}km` : `${Math.round(r)}m`;
+};
 
 const BASEMAPS = {
   light: {
@@ -137,6 +159,14 @@ function isProjectedWKT(wkt) {
   if (!m) return false;
   const x = parseFloat(m[1]), y = parseFloat(m[2]);
   return Math.abs(x) > 180 || Math.abs(y) > 90;
+}
+
+function makeCabaMetricGrid(wkt, cellsize, clipBorder = true) {
+  return makeProjectedGrid(wkt, cellsize, clipBorder, {
+    sourceCrs: isProjectedWKT(wkt) ? "EPSG:32721" : "EPSG:4326",
+    metricCrs: "EPSG:32721",
+    outputCrs: "EPSG:4326",
+  });
 }
 
 function splitParenGroups(s) {
@@ -445,6 +475,13 @@ function guessLonCol(headers) {
 function guessWktCol(headers) {
   return headers.find(h => /wkt|geom|geometry|polygon|shape/i.test(h)) ?? headers[0] ?? "";
 }
+function looksLikeWktValue(v) {
+  return typeof v === "string" && /^(POINT|POLYGON|MULTIPOLYGON|LINESTRING|MULTILINESTRING)/i.test(v.trim());
+}
+function isGeometryHeader(headers, rows, h) {
+  if (/wkt|geom|geometry|polygon|shape/i.test(h)) return true;
+  return looksLikeWktValue(rows.find(r => r[h] != null)?.[h]);
+}
 function guessAddressCol(headers) {
   return headers.find(h => /address|addr|street|direccion|dirección|adresse/i.test(h)) ??
          headers.find(h => /place|location|ubicacion|ubicación|name/i.test(h)) ??
@@ -453,6 +490,91 @@ function guessAddressCol(headers) {
 
 // ─── SECTIONS ─────────────────────────────────────────────────────────────────
 
+function CRSTransformSection({ rows, headers, onResult, C }) {
+  const [mode, setMode] = useState("point");
+  const [source, setSource] = useState("EPSG:4326");
+  const [target, setTarget] = useState("EPSG:32721");
+  const [xCol, setXCol] = useState(() => guessLonCol(headers));
+  const [yCol, setYCol] = useState(() => guessLatCol(headers));
+  const [wktCol, setWktCol] = useState(() => guessWktCol(headers));
+  const [outX, setOutX] = useState("x_32721");
+  const [outY, setOutY] = useState("y_32721");
+  const [outWkt, setOutWkt] = useState("geometry_32721");
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+
+  const canApply = mode === "point"
+    ? xCol && yCol && outX && outY && source && target
+    : wktCol && outWkt && source && target;
+
+  function apply() {
+    setErr("");
+    try {
+      if (mode === "point") {
+        const out = rows.map(r => {
+          const x = Number(r[xCol]);
+          const y = Number(r[yCol]);
+          if (!isFinite(x) || !isFinite(y)) return { ...r, [outX]: null, [outY]: null };
+          const [nx, ny] = transformCoord(x, y, source, target);
+          return { ...r, [outX]: nx, [outY]: ny };
+        });
+        setResult({ rows: out, cols: [outX, outY] });
+        onResult(out, [outX, outY]);
+      } else {
+        const out = rows.map(r => ({
+          ...r,
+          [outWkt]: r[wktCol] ? transformWKT(String(r[wktCol]), source, target, target === "EPSG:4326" ? 8 : 3) : null,
+        }));
+        setResult({ rows: out, cols: [outWkt] });
+        onResult(out, [outWkt]);
+      }
+    } catch (e) {
+      setErr(e.message || "CRS transform failed");
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+        Transforms point columns or WKT geometries between WGS84 and CABA metric coordinates.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {[["point", "Point columns"], ["wkt", "WKT geometry"]].map(([v, label]) => (
+          <button key={v} onClick={() => setMode(v)}
+            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+              background: mode === v ? `${C.teal}18` : "transparent",
+              border: `1px solid ${mode === v ? C.teal : C.border2}`,
+              borderRadius: 3, color: mode === v ? C.teal : C.textDim }}
+          >{label}</button>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <ColSelect label="Source CRS" value={source} onChange={setSource} headers={["EPSG:4326", "EPSG:32721"]} C={C} />
+        <ColSelect label="Target CRS" value={target} onChange={setTarget} headers={["EPSG:32721", "EPSG:4326"]} C={C} />
+      </div>
+      {mode === "point" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <ColSelect label="X / longitude column" value={xCol} onChange={setXCol} headers={headers} C={C} />
+          <ColSelect label="Y / latitude column" value={yCol} onChange={setYCol} headers={headers} C={C} />
+          <TextInput label="Output X column" value={outX} onChange={setOutX} C={C} />
+          <TextInput label="Output Y column" value={outY} onChange={setOutY} C={C} />
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <ColSelect label="WKT geometry column" value={wktCol} onChange={setWktCol} headers={headers} C={C} />
+          <TextInput label="Output WKT column" value={outWkt} onChange={setOutWkt} C={C} />
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Transform CRS" />
+        {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {rows.length} rows transformed</span>}
+      </div>
+      <ErrBanner msg={err} C={C} />
+      {result && <ResultPreview rows={result.rows} newCols={result.cols} C={C} />}
+    </div>
+  );
+}
+
 // 1. Distance to Point
 function DistanceSection({ rows, headers, onResult, C }) {
   const [latCol,   setLatCol]   = useState(() => guessLatCol(headers));
@@ -460,6 +582,8 @@ function DistanceSection({ rows, headers, onResult, C }) {
   const [refLat,   setRefLat]   = useState("");
   const [refLon,   setRefLon]   = useState("");
   const [outCol,   setOutCol]   = useState("dist_km");
+  const [metric,   setMetric]   = useState(false);
+  const [binCol,   setBinCol]   = useState("");
   const [result,   setResult]   = useState(null);
   const [err,      setErr]      = useState("");
 
@@ -468,9 +592,16 @@ function DistanceSection({ rows, headers, onResult, C }) {
   function apply() {
     setErr("");
     try {
-      const out = assignDistance(rows, latCol, lonCol, Number(refLat), Number(refLon), outCol);
-      setResult(out);
-      onResult(out, [outCol]);
+      let out = metric
+        ? assignDistanceMetric(rows, latCol, lonCol, Number(refLat), Number(refLon), outCol, "EPSG:32721")
+        : assignDistance(rows, latCol, lonCol, Number(refLat), Number(refLon), outCol);
+      const cols = [outCol];
+      if (metric && binCol.trim()) {
+        out = addDistanceBins(out, outCol, binCol.trim());
+        cols.push(binCol.trim());
+      }
+      setResult({ rows: out, cols });
+      onResult(out, cols);
     } catch (e) {
       setErr(e.message);
     }
@@ -479,21 +610,29 @@ function DistanceSection({ rows, headers, onResult, C }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
-        Computes the haversine great-circle distance (km) from each observation to a fixed reference point.
+        Computes distance from each observation to a fixed reference point. Metric mode uses EPSG:32721 and returns meters.
       </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+        <input type="checkbox" checked={metric} onChange={e => {
+          setMetric(e.target.checked);
+          setOutCol(e.target.checked ? "dist_m" : "dist_km");
+        }} style={{ accentColor: C.teal }} />
+        Use EPSG:32721 metric distance
+      </label>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <ColSelect label="Latitude column" value={latCol} onChange={setLatCol} headers={headers} C={C} />
         <ColSelect label="Longitude column" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
         <NumInput label="Reference latitude" value={refLat} onChange={setRefLat} C={C} step="any" placeholder="e.g. 48.1374" />
         <NumInput label="Reference longitude" value={refLon} onChange={setRefLon} C={C} step="any" placeholder="e.g. 11.5755" />
         <TextInput label="Output column name" value={outCol} onChange={setOutCol} C={C} placeholder="dist_km" />
+        {metric && <TextInput label="Distance bin column" value={binCol} onChange={setBinCol} C={C} placeholder="dist_bin (optional)" />}
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>✓ {result.length} rows processed</span>}
+        {result && <span style={{ fontSize: 9, color: C.teal }}>✓ {result.rows.length} rows processed</span>}
       </div>
       <ErrBanner msg={err} C={C} />
-      {result && <ResultPreview rows={result} newCols={[outCol, latCol, lonCol]} C={C} />}
+      {result && <ResultPreview rows={result.rows} newCols={[...result.cols, latCol, lonCol]} C={C} />}
     </div>
   );
 }
@@ -547,6 +686,137 @@ function BufferSection({ rows, headers, onResult, C }) {
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={[outCol, latCol, lonCol]} C={C} />}
+    </div>
+  );
+}
+
+function MetricBufferSection({ rows, headers, availableDatasets, onResult, C }) {
+  const [mode, setMode] = useState("point_buffers");
+  const [latCol, setLatCol] = useState(() => guessLatCol(headers));
+  const [lonCol, setLonCol] = useState(() => guessLonCol(headers));
+  const [radiusPreset, setRadiusPreset] = useState("100");
+  const [customRadius, setCustomRadius] = useState("");
+  const [gridDsId, setGridDsId] = useState("");
+  const [wktCol, setWktCol] = useState("");
+  const [outPrefix, setOutPrefix] = useState("points");
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+
+  const radius = radiusPreset === "custom" ? Number(customRadius) : Number(radiusPreset);
+  const radiusText = formatRadiusLabel(radius);
+  const gridDs = availableDatasets.find(ds => ds.id === gridDsId);
+  const gridHeaders = gridDs?.headers ?? [];
+  const guessedWkt = useMemo(() => guessWktCol(gridHeaders), [gridHeaders]);
+  const effectiveWkt = wktCol || guessedWkt;
+  const prefix = (outPrefix || "points").trim() || "points";
+  const countCol = `${prefix}_within_${radiusText}`;
+  const radiusCol = `${prefix}_buffer_radius_m`;
+
+  const canApply = latCol && lonCol && isFinite(radius) && radius > 0 &&
+    (mode === "point_buffers" || (gridDs?.rows?.length && effectiveWkt));
+
+  function apply() {
+    setErr("");
+    try {
+      if (mode === "point_buffers") {
+        const out = createMetricPointBuffers(rows, latCol, lonCol, radius, {
+          metricCrs: "EPSG:32721",
+          segments: 48,
+        });
+        const cols = [
+          "buffer_id",
+          "buffer_radius_m",
+          "center_lon",
+          "center_lat",
+          "center_x",
+          "center_y",
+          "geometry",
+          "metric_geometry",
+        ];
+        const valid = out.filter(r => r.geometry).length;
+        setResult({ rows: out, cols, message: `${valid} buffers created` });
+        onResult(out, cols, headers);
+        return;
+      }
+
+      const out = countPointsWithinGridCentroidBuffer(
+        gridDs.rows,
+        effectiveWkt,
+        rows,
+        latCol,
+        lonCol,
+        radius,
+        prefix,
+        { metricCrs: "EPSG:32721", outCol: countCol }
+      );
+      const cols = [countCol, radiusCol];
+      setResult({ rows: out, cols, message: `${out.length} grid cells processed` });
+      onResult(out, cols, gridHeaders);
+    } catch (e) {
+      setErr(e.message);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+        Metric buffers use EPSG:32721, so preset radii are real meters. Create buffer polygons from point rows or count active points around grid centroids.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {[["point_buffers", "Create buffers"], ["grid_centroids", "Count near grid centroids"]].map(([v, label]) => (
+          <button key={v} onClick={() => setMode(v)}
+            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+              background: mode === v ? `${C.teal}18` : "transparent",
+              border: `1px solid ${mode === v ? C.teal : C.border2}`,
+              borderRadius: 3, color: mode === v ? C.teal : C.textDim }}
+          >{label}</button>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <ColSelect label="Point latitude" value={latCol} onChange={setLatCol} headers={headers} C={C} />
+        <ColSelect label="Point longitude" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            Buffer radius
+          </label>
+          <select value={radiusPreset} onChange={e => setRadiusPreset(e.target.value)}
+            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+            {BUFFER_RADIUS_PRESETS.map(([label, value]) => <option key={value} value={String(value)}>{label}</option>)}
+            <option value="custom">custom</option>
+          </select>
+        </div>
+        {radiusPreset === "custom" ? (
+          <NumInput label="Custom radius (m)" value={customRadius} onChange={setCustomRadius} C={C} min={1} step={1} />
+        ) : (
+          <TextInput label="Output radius" value={`${radiusText} (EPSG:32721)`} onChange={() => {}} C={C} />
+        )}
+      </div>
+
+      {mode === "grid_centroids" && (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
+            <select value={gridDsId} onChange={e => { setGridDsId(e.target.value); setWktCol(""); }}
+              style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+              <option value="">select grid dataset</option>
+              {availableDatasets.map(ds => <option key={ds.id} value={ds.id}>{ds.filename ?? ds.name ?? ds.id}</option>)}
+            </select>
+          </div>
+          {gridDs && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <ColSelect label="Grid WKT column" value={effectiveWkt} onChange={setWktCol} headers={gridHeaders} C={C} />
+              <TextInput label="Output prefix" value={outPrefix} onChange={setOutPrefix} C={C} placeholder="schools" />
+            </div>
+          )}
+        </>
+      )}
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <ApplyBtn onClick={apply} disabled={!canApply} C={C} label={mode === "point_buffers" ? "Create buffers" : "Count points"} />
+        {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {result.message}</span>}
+      </div>
+      <ErrBanner msg={err} C={C} />
+      {result && <ResultPreview rows={result.rows} newCols={result.cols} C={C} />}
     </div>
   );
 }
@@ -627,6 +897,8 @@ function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
   const [polyDsId,  setPolyDsId]  = useState("");
   const [wktCol,    setWktCol]    = useState("");
   const [joinCols,  setJoinCols]  = useState([]);
+  const [predicate, setPredicate] = useState("within");
+  const [includeGeomAttrs, setIncludeGeomAttrs] = useState(false);
   const [result,    setResult]    = useState(null);
   const [err,       setErr]       = useState("");
 
@@ -636,6 +908,9 @@ function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
 
   // Auto-set wkt col when polygon dataset changes
   const effectiveWkt = wktCol || guessedWkt;
+  const joinableHeaders = polyHeaders.filter(h =>
+    h !== effectiveWkt && (includeGeomAttrs || !isGeometryHeader(polyHeaders, polyDs?.rows ?? [], h))
+  );
 
   const canApply = latCol && lonCol && polyDs?.rows?.length && effectiveWkt && joinCols.length > 0;
 
@@ -646,7 +921,7 @@ function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
   function apply() {
     setErr("");
     try {
-      const out = spatialJoin(rows, latCol, lonCol, polyDs.rows, effectiveWkt, joinCols);
+      const out = spatialJoin(rows, latCol, lonCol, polyDs.rows, effectiveWkt, joinCols, predicate);
       const matched = out.filter(r => r[joinCols[0]] != null).length;
       setResult({ rows: out, matched });
       onResult(out, joinCols);
@@ -660,10 +935,12 @@ function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
       <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
         Assigns polygon attributes to each point by testing containment (ray-casting).
         Requires a loaded polygon dataset with a WKT geometry column (e.g. from a .dbf/.shp upload).
+        Geometry columns are excluded from joined attributes by default, matching an automatic st_drop_geometry() workflow.
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <ColSelect label="Latitude column" value={latCol} onChange={setLatCol} headers={headers} C={C} />
         <ColSelect label="Longitude column" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
+        <ColSelect label="Predicate" value={predicate} onChange={setPredicate} headers={["within", "intersects"]} C={C} />
       </div>
 
       {/* Polygon dataset picker */}
@@ -705,8 +982,17 @@ function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
             <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
               Columns to join
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: mono, fontSize: 9, color: C.textMuted, marginBottom: 4 }}>
+              <input type="checkbox" checked={includeGeomAttrs} onChange={e => {
+                setIncludeGeomAttrs(e.target.checked);
+                if (!e.target.checked) {
+                  setJoinCols(prev => prev.filter(c => !isGeometryHeader(polyHeaders, polyDs?.rows ?? [], c)));
+                }
+              }} style={{ accentColor: C.teal }} />
+              Include geometry columns
+            </label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              {polyHeaders.filter(h => h !== effectiveWkt).map(h => (
+              {joinableHeaders.map(h => (
                 <button
                   key={h}
                   onClick={() => toggleJoinCol(h)}
@@ -737,6 +1023,70 @@ function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
   );
 }
 
+function AggregateToGridSection({ rows, headers, availableDatasets, C, onResult }) {
+  const [latCol, setLatCol] = useState(() => guessLatCol(headers));
+  const [lonCol, setLonCol] = useState(() => guessLonCol(headers));
+  const [gridDsId, setGridDsId] = useState("");
+  const [wktCol, setWktCol] = useState("");
+  const [fn, setFn] = useState("count");
+  const [valueCol, setValueCol] = useState("");
+  const [outCol, setOutCol] = useState("n_points");
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+
+  const gridDs = availableDatasets.find(ds => ds.id === gridDsId);
+  const gridHeaders = gridDs?.headers ?? [];
+  const guessedWkt = useMemo(() => guessWktCol(gridHeaders), [gridHeaders]);
+  const effectiveWkt = wktCol || guessedWkt;
+  const canApply = latCol && lonCol && gridDs?.rows?.length && effectiveWkt && outCol && (fn === "count" || valueCol);
+
+  function apply() {
+    setErr("");
+    try {
+      const spec = { col: fn === "count" ? "" : valueCol, fn, outCol };
+      const out = aggregateToGrid(gridDs.rows, effectiveWkt, rows, latCol, lonCol, [spec]);
+      setResult({ rows: out, cols: [outCol] });
+      onResult(out, [outCol], gridHeaders);
+    } catch (e) {
+      setErr(e.message);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+        Aggregates active point rows into a grid dataset. Use this for schools, crimes, bus stops, police, and land-use point controls.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <ColSelect label="Point latitude" value={latCol} onChange={setLatCol} headers={headers} C={C} />
+        <ColSelect label="Point longitude" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
+        <select value={gridDsId} onChange={e => { setGridDsId(e.target.value); setWktCol(""); }}
+          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+          <option value="">select grid dataset</option>
+          {availableDatasets.map(ds => <option key={ds.id} value={ds.id}>{ds.filename ?? ds.name ?? ds.id}</option>)}
+        </select>
+      </div>
+      {gridDs && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <ColSelect label="Grid WKT column" value={effectiveWkt} onChange={setWktCol} headers={gridHeaders} C={C} />
+          <ColSelect label="Aggregation" value={fn} onChange={setFn} headers={["count", "sum", "mean", "share"]} C={C} />
+          {fn !== "count" && <ColSelect label="Value column" value={valueCol} onChange={setValueCol} headers={headers} C={C} />}
+          <TextInput label="Output column" value={outCol} onChange={setOutCol} C={C} placeholder="n_points" />
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Aggregate to grid" />
+        {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {result.rows.length} grid cells</span>}
+      </div>
+      <ErrBanner msg={err} C={C} />
+      {result && <ResultPreview rows={result.rows} newCols={[effectiveWkt, outCol]} C={C} />}
+    </div>
+  );
+}
+
 // 5. Nearest Neighbour
 function NearestNeighborSection({ rows, headers, availableDatasets, C, onResult }) {
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
@@ -746,6 +1096,8 @@ function NearestNeighborSection({ rows, headers, availableDatasets, C, onResult 
   const [refLonCol, setRefLonCol] = useState("");
   const [outDist,   setOutDist]   = useState("nn_dist_km");
   const [outIdx,    setOutIdx]    = useState("nn_idx");
+  const [metric,    setMetric]    = useState(false);
+  const [binCol,    setBinCol]    = useState("");
   const [result,    setResult]    = useState(null);
   const [err,       setErr]       = useState("");
   const [running,   setRunning]   = useState(false);
@@ -764,13 +1116,19 @@ function NearestNeighborSection({ rows, headers, availableDatasets, C, onResult 
     // Run async to avoid blocking UI on large datasets
     setTimeout(() => {
       try {
-        const out = nearestNeighbor(
+        let out = (metric ? nearestNeighborMetric : nearestNeighbor)(
           rows, latCol, lonCol,
           refDs.rows, effectiveRefLat, effectiveRefLon,
-          outDist, outIdx
+          outDist, outIdx,
+          "EPSG:32721"
         );
-        setResult(out);
-        onResult(out, [outDist, outIdx]);
+        const cols = [outDist, outIdx];
+        if (metric && binCol.trim()) {
+          out = addDistanceBins(out, outDist, binCol.trim());
+          cols.push(binCol.trim());
+        }
+        setResult({ rows: out, cols });
+        onResult(out, cols);
       } catch (e) {
         setErr(e.message);
       }
@@ -781,9 +1139,17 @@ function NearestNeighborSection({ rows, headers, availableDatasets, C, onResult 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
-        For each observation, finds the nearest point in a reference dataset and returns the haversine distance (km) and reference row index.
+        For each observation, finds the nearest point in a reference dataset and returns distance plus the reference row index.
+
         Brute-force O(n×m) — suitable up to ~10 k × 1 k rows.
       </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+        <input type="checkbox" checked={metric} onChange={e => {
+          setMetric(e.target.checked);
+          setOutDist(e.target.checked ? "nn_dist_m" : "nn_dist_km");
+        }} style={{ accentColor: C.teal }} />
+        Use EPSG:32721 metric distance
+      </label>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <ColSelect label="Latitude column" value={latCol} onChange={setLatCol} headers={headers} C={C} />
         <ColSelect label="Longitude column" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
@@ -818,14 +1184,15 @@ function NearestNeighborSection({ rows, headers, availableDatasets, C, onResult 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <TextInput label="Distance output col" value={outDist} onChange={setOutDist} C={C} placeholder="nn_dist_km" />
         <TextInput label="Index output col" value={outIdx} onChange={setOutIdx} C={C} placeholder="nn_idx" />
+        {metric && <TextInput label="Distance bin column" value={binCol} onChange={setBinCol} C={C} placeholder="dist_bin (optional)" />}
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply || running} label={running ? "Computing…" : "Find neighbours"} C={C} />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>✓ {result.length} rows processed</span>}
+        {result && <span style={{ fontSize: 9, color: C.teal }}>✓ {result.rows.length} rows processed</span>}
       </div>
       <ErrBanner msg={err} C={C} />
-      {result && <ResultPreview rows={result} newCols={[latCol, lonCol, outDist, outIdx]} C={C} />}
+      {result && <ResultPreview rows={result.rows} newCols={[latCol, lonCol, ...result.cols]} C={C} />}
     </div>
   );
 }
@@ -1747,13 +2114,55 @@ function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid
 
   // ── Download as HTML ─────────────────────────────────────────────────────────
   function downloadMapHtml() {
-    const visibleLayers = layers.filter(ly => ly.visible);
-    const layerData = visibleLayers.map(ly => {
+    const toDisplayWkt = wkt => {
+      if (!wkt) return "";
+      try {
+        return isProjectedWKT(wkt) ? transformWKT(wkt, "EPSG:32721", "EPSG:4326", 8) : wkt;
+      } catch {
+        return wkt;
+      }
+    };
+    const gridFromLayer = ly => {
       const lyRows = (!ly.datasetId || ly.datasetId === "active")
         ? rows
         : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+      if (ly.mode === "wkt" && ly.wktCol) {
+        return lyRows
+          .filter(r => r[ly.wktCol])
+          .map(r => ({ ...r, geometry: toDisplayWkt(r[ly.wktCol]) }));
+      }
+      if ((ly.mode === "generate" || ly.mode === "boundary") && (ly.boundaryCol || ly.wktCol)) {
+        const col = ly.boundaryCol || ly.wktCol;
+        return lyRows.flatMap(r => {
+          const wkt = r[col];
+          if (!wkt) return [];
+          try { return makeCabaMetricGrid(wkt, ly.cellsize ?? 500, ly.clipBorder !== false); }
+          catch { return []; }
+        });
+      }
+      if (ly.mode === "latlon" && ly.latCol && ly.lonCol) {
+        const lats = lyRows.map(r => parseFloat(r[ly.latCol])).filter(v => !isNaN(v));
+        const lons = lyRows.map(r => parseFloat(r[ly.lonCol])).filter(v => !isNaN(v));
+        if (!lats.length || !lons.length) return [];
+        const pad = 0.0001;
+        const lat0 = Math.min(...lats) - pad, lat1 = Math.max(...lats) + pad;
+        const lon0 = Math.min(...lons) - pad, lon1 = Math.max(...lons) + pad;
+        const bboxWkt = `POLYGON((${lon0} ${lat0}, ${lon1} ${lat0}, ${lon1} ${lat1}, ${lon0} ${lat1}, ${lon0} ${lat0}))`;
+        try { return makeCabaMetricGrid(bboxWkt, ly.cellsize ?? 500, false); }
+        catch { return []; }
+      }
+      return [];
+    };
+    const layerData = layers.filter(ly => ly.visible).map(ly => {
+      const lyRows = (!ly.datasetId || ly.datasetId === "active")
+        ? rows
+        : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+      if (ly.type === "grid") return { ...ly, _data: gridFromLayer(ly), wktCol: "geometry", mode: "wkt" };
+      if ((ly.type === "boundary" || ly.type === "line") && ly.wktCol) {
+        return { ...ly, _data: lyRows.map(r => ({ ...r, [ly.wktCol]: toDisplayWkt(r[ly.wktCol]) })) };
+      }
       return { ...ly, _data: lyRows };
-    });
+    }).filter(ly => ly.type !== "grid" || ly._data.length);
 
     const html = `<!DOCTYPE html>
 <html><head>
@@ -1767,12 +2176,14 @@ const BASEMAP=${JSON.stringify(BASEMAPS[basemap] ?? BASEMAPS.light)};
 function parseWkt(wkt){
   if(!wkt||typeof wkt!=="string")return null;
   const s=wkt.trim().toUpperCase();
-  function parseRing(s){return s.replace(/[()]/g,"").trim().split(",").map(p=>{const[x,y]=p.trim().split(/\s+/);return[parseFloat(y),parseFloat(x)];});}
+  function parseRing(s){return s.replace(/[()]/g,"").trim().split(",").map(p=>{const[x,y]=p.trim().split(/\s+/);return[parseFloat(y),parseFloat(x)];}).filter(p=>Number.isFinite(p[0])&&Number.isFinite(p[1]));}
   if(s.startsWith("POINT")){const c=s.match(/POINT\s*\(([^)]+)\)/);if(!c)return null;const[x,y]=c[1].trim().split(/\s+/);return{type:"point",latlng:[parseFloat(y),parseFloat(x)]};}
   function groups(s){const out=[];let d=0,st=-1;for(let i=0;i<s.length;i++){const ch=s[i];if(ch==="("){if(d===0)st=i;d++;}else if(ch===")"){d--;if(d===0&&st>=0){out.push(s.slice(st+1,i));st=-1;}}}return out;}
   const body=wkt.slice(wkt.indexOf("("));const inner=groups(body)[0];if(!inner)return null;
   if(s.startsWith("POLYGON")){const rings=groups(inner).map(parseRing).filter(r=>r.length>=3);return rings.length?{type:"polygon",rings}:null;}
   if(s.startsWith("MULTIPOLYGON")){const rings=groups(inner).map(p=>groups(p).map(parseRing).filter(r=>r.length>=3)).filter(p=>p.length);return rings.length?{type:"multipolygon",rings}:null;}
+  if(s.startsWith("LINESTRING")){const coords=parseRing(inner);return coords.length>=2?{type:"line",rings:[coords]}:null;}
+  if(s.startsWith("MULTILINESTRING")){const lines=groups(inner).map(parseRing).filter(r=>r.length>=2);return lines.length?{type:"multiline",rings:lines}:null;}
   return null;
 }
 const map=L.map("map");
@@ -1785,6 +2196,8 @@ for(const ly of LAYERS){
     for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type==="point"){L.circleMarker(geo.latlng,{radius:6,fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}else{L.polygon(geo.rings,{fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
   }else if(ly.type==="grid"&&ly.wktCol){
     for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type!=="point"){L.polygon(geo.rings,{fillColor:ly.fillColor??"#6ec8b4",color:ly.borderColor??"#d73027",weight:ly.borderWidth??0.15,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
+  }else if(ly.type==="line"&&ly.wktCol){
+    for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type==="line"||geo.type==="multiline"){for(const coords of geo.rings){L.polyline(coords,{color:ly.lineColor??"#6e9ec8",weight:ly.lineWeight??1.5,opacity:ly.lineOpacity??0.85}).addTo(group);}}}
   }
 }
 try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map.setView([20,0],2);}catch(_){map.setView([20,0],2);}
@@ -1963,7 +2376,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
       const lon0 = Math.min(...lons) - pad, lon1 = Math.max(...lons) + pad;
       wkt = `POLYGON((${lon0} ${lat0}, ${lon1} ${lat0}, ${lon1} ${lat1}, ${lon0} ${lat1}, ${lon0} ${lat0}))`;
     }
-    try { return { cells: makeGrid(wkt, gl.cellsize, gl.clipBorder !== false), error: null }; }
+    try { return { cells: makeCabaMetricGrid(wkt, gl.cellsize, gl.clipBorder !== false), error: null }; }
     catch (e) { return { cells: null, error: e.message }; }
   }, [layers, rows, availableDatasets]);
 
@@ -2013,7 +2426,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         } else if (ly.mode === "generate" && generatedGrid?.cells) {
           cells = generatedGrid.cells;
           for (const cell of cells) {
-            const geo = wktToLeaflet(cell.geometry, proj4fn);
+            const geo = wktToLeaflet(cell.geometry);
             if (!geo || geo.type === "point") continue;
             L.polygon(leafletPolygonLatLngs(geo), { fillColor: ly.fillColor, fillOpacity: ly.fillOpacity, color: ly.borderColor, weight: ly.borderWidth })
               .bindTooltip(`grid #${cell.grid_id}`)
@@ -2244,7 +2657,10 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                     style={{ flex: 1, padding: "3px 6px", background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: mono, fontSize: 9, color: C.text, outline: "none" }}
                   />
                   <button
-                    onClick={() => saveName && onAddDataset?.(saveName, generatedGrid.cells, ["grid_id", "geometry"])}
+                    onClick={() => saveName && onAddDataset?.(saveName, generatedGrid.cells, [
+                      "grid_id", "geometry", "metric_geometry", "centroid_lon", "centroid_lat",
+                      "centroid_x", "centroid_y", "area_m2", "cellsize_m", "metric_crs"
+                    ])}
                     disabled={!saveName}
                     style={{ padding: "3px 9px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.gold}18`, border: `1px solid ${C.gold}`, color: C.gold, cursor: "pointer" }}
                   >Save</button>
@@ -2603,7 +3019,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           const col = ly.boundaryCol || ly.wktCol;
           const boundaries = r.map(row => row[col]).filter(Boolean);
           for (const boundaryWkt of boundaries) {
-            const cells = makeGrid(boundaryWkt, ly.cellsize ?? 500, ly.clipBorder !== false);
+            const cells = makeCabaMetricGrid(boundaryWkt, ly.cellsize ?? 500, ly.clipBorder !== false);
             for (const cell of cells) {
               const parsed = parseWktRings(cell.geometry);
               if (!parsed) continue;
@@ -2628,7 +3044,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
             const lat0 = Math.min(...lats) - pad, lat1 = Math.max(...lats) + pad;
             const lon0 = Math.min(...lons) - pad, lon1 = Math.max(...lons) + pad;
             const bboxWkt = `POLYGON((${lon0} ${lat0}, ${lon1} ${lat0}, ${lon1} ${lat1}, ${lon0} ${lat1}, ${lon0} ${lat0}))`;
-            const cells = makeGrid(bboxWkt, ly.cellsize ?? 500, false);
+            const cells = makeCabaMetricGrid(bboxWkt, ly.cellsize ?? 500, false);
             for (const cell of cells) {
               const parsed = parseWktRings(cell.geometry);
               if (!parsed) continue;
@@ -2977,6 +3393,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
   const [mainTab,     setMainTab]     = useState("analyze");
   const [pendingRows, setPendingRows] = useState(null);
   const [pendingCols, setPendingCols] = useState([]);
+  const [pendingHeaders, setPendingHeaders] = useState(null);
 
   const numericHeaders = useMemo(
     () => headers.filter(h => rows.slice(0, 20).some(r => typeof r[h] === "number")),
@@ -2990,16 +3407,18 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
     if (hasRows) loadLeaflet().catch(() => {});
   }, [hasRows]);
 
-  const handleResult = useCallback((resultRows, newCols) => {
+  const handleResult = useCallback((resultRows, newCols, baseHeaders = null) => {
     setPendingRows(resultRows);
     setPendingCols(newCols);
+    setPendingHeaders(baseHeaders);
   }, []);
 
   function handleSave(name, resultRows) {
-    const allHeaders = [...new Set([...headers, ...pendingCols])];
+    const allHeaders = [...new Set([...(pendingHeaders ?? headers), ...pendingCols])];
     onAddDataset?.(name, resultRows, allHeaders);
     setPendingRows(null);
     setPendingCols([]);
+    setPendingHeaders(null);
   }
 
   const hasData = rows.length > 0 && headers.length > 0;
@@ -3013,6 +3432,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
   useEffect(() => {
     setPendingRows(null);
     setPendingCols([]);
+    setPendingHeaders(null);
   }, [sectionsKey]);
 
   return (
@@ -3024,6 +3444,8 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
         <HintBox tips={[
           "Load a shapefile (.shp + .dbf) to map geographic boundaries",
           "Join your dataset to the shapefile by a common identifier column",
+          "Spatial joins drop polygon geometry attributes by default; enable geometry only when you need to carry WKT forward",
+          "Metric Buffers creates EPSG:32721 radius buffers from lat/lon points or counts points around grid centroids",
           "Choropleth maps color regions by any numeric variable",
           "Spatial statistics: Moran's I for spatial autocorrelation",
         ]} />
@@ -3104,8 +3526,21 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
               <DistanceSection rows={rows} headers={numericHeaders.length ? numericHeaders : headers} onResult={handleResult} C={C} />
             </Section>
 
+            <Section title="CRS / EPSG Transformer" badge="4326 / 32721" C={C}>
+              <CRSTransformSection rows={rows} headers={headers} onResult={handleResult} C={C} />
+            </Section>
+
             <Section title="Buffer Indicator" badge="0 / 1 treatment" C={C}>
               <BufferSection rows={rows} headers={numericHeaders.length ? numericHeaders : headers} onResult={handleResult} C={C} />
+            </Section>
+
+            <Section title="Metric Buffers" badge="50m / 1km" C={C}>
+              <MetricBufferSection
+                rows={rows} headers={headers}
+                availableDatasets={availableDatasets}
+                onResult={handleResult}
+                C={C}
+              />
             </Section>
 
             <Section title="Grid Assignment" badge="rectangular · hex" C={C}>
@@ -3120,6 +3555,13 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
               />
             </Section>
 
+            <Section title="Aggregate Points to Grid" badge="count / sum / mean / share" C={C}>
+              <AggregateToGridSection
+                rows={rows} headers={headers}
+                availableDatasets={availableDatasets}
+                C={C} onResult={handleResult}
+              />
+            </Section>
             <Section title="Nearest Neighbour" badge="O(n × m) brute-force" C={C}>
               <NearestNeighborSection
                 rows={rows} headers={numericHeaders.length ? numericHeaders : headers}
