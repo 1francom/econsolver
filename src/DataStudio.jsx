@@ -91,15 +91,15 @@ function parseCSV(text, delimiter = ",") {
 }
 
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
-// Excel parser — loads SheetJS from CDN (same pattern as App.jsx, avoids Vite bare-module error)
+// Excel parser — uses the bundled SheetJS dependency so parsing works offline.
 async function parseExcel(file) {
-  const { utils, read } = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+  const XLSX = await import("xlsx");
   const buf = await file.arrayBuffer();
-  const wb  = read(buf, { type: "array", cellDates: true });
+  const wb  = XLSX.read(buf, { type: "array", cellDates: true });
   const sheetName = wb.SheetNames[0];
   const ws  = wb.Sheets[sheetName];
   if (!ws) throw new Error("Excel file has no sheets.");
-  const data = utils.sheet_to_json(ws, { defval: null, raw: false });
+  const data = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
   if (!data.length) throw new Error("Excel sheet is empty — no rows found.");
 
   const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;

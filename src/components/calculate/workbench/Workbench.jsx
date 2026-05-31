@@ -4,10 +4,13 @@ import SessionTabs from "./SessionTabs.jsx";
 import EquationsPanel from "./EquationsPanel.jsx";
 import ParametersPanel from "./ParametersPanel.jsx";
 import { cas } from "../../../math/cas/casAdapter.js";
-import { newSession, loadWorkbench, saveWorkbench, flushWorkbench } from "./workbenchStore.js";
+import { newSession, newCondition, loadWorkbench, saveWorkbench, flushWorkbench } from "./workbenchStore.js";
 import WorkbenchCanvas from "./WorkbenchCanvas.jsx";
-import { runCard } from "./operations.js";
+import { runCard, runSweepFamily, runSweepLocus, runConditions } from "./operations.js";
 import ResultsPanel from "./ResultsPanel.jsx";
+import SweepPanel from "./SweepPanel.jsx";
+import ConditionsPanel from "./ConditionsPanel.jsx";
+import LocusCanvas from "./LocusCanvas.jsx";
 import ViewControls from "./ViewControls.jsx";
 import { buildWorkbenchScript } from "./exportScript.js";
 
@@ -70,6 +73,25 @@ export default function Workbench({ pid }) {
   const [casReady, setCasReady] = useState(false);
   useEffect(() => { cas.ready().then(() => setCasReady(true)).catch(() => {}); }, []);
 
+  // Escalation to the SymPy/Pyodide backend (§5.3). Bumping casBackend forces a
+  // results recompute once the heavier exact solver is active.
+  const [casBackend, setCasBackend] = useState(cas.backend());
+  const [escalating, setEscalating] = useState(false);
+  const [escalateError, setEscalateError] = useState(null);
+  const escalate = useCallback(async () => {
+    if (cas.backend() === "sympy") return;
+    setEscalating(true);
+    setEscalateError(null);
+    try {
+      await cas.escalate();
+      setCasBackend("sympy");
+    } catch (e) {
+      setEscalateError(e?.message || "failed to load exact solver");
+    } finally {
+      setEscalating(false);
+    }
+  }, []);
+
   // Live results: recompute every active op on every card when the session changes
   // or once nerdamer finishes loading.
   const results = useMemo(() => {
@@ -80,7 +102,36 @@ export default function Workbench({ pid }) {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active.equations, active.params, active.choiceVars, active.view, casReady]);
+  }, [active.equations, active.params, active.choiceVars, active.view, casReady, casBackend]);
+
+  // Comparative-statics family of curves (Step 1), computed separately so it
+  // never bloats the per-op results object.
+  const family = useMemo(() => {
+    if (!active) return null;
+    try { return runSweepFamily(active); } catch { return null; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.equations, active.params, active.view, active.sweep, casReady, casBackend]);
+
+  // Comparative-statics optimum locus (Step 2): x* / f(x*) vs the swept param.
+  const locus = useMemo(() => {
+    if (!active) return null;
+    try { return runSweepLocus(active); } catch { return null; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.equations, active.params, active.view, active.sweep, casReady, casBackend]);
+
+  // Named-equation intersection / FOC conditions (item C). Recomputed on any
+  // equation/param/condition change; markers flow into the canvas.
+  const conditionResults = useMemo(() => {
+    if (!active) return [];
+    try { return runConditions(active); } catch { return []; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.equations, active.params, active.conditions, active.view, casReady, casBackend]);
+
+  // Equation names available to reference inside conditions.
+  const equationNames = useMemo(
+    () => Array.from(new Set(active.equations.map((e) => (e.label || "").trim()).filter(Boolean))),
+    [active.equations],
+  );
 
   // Mutate the active session immutably.
   const updateActive = useCallback((mutator) => {
@@ -114,6 +165,22 @@ export default function Workbench({ pid }) {
   const onViewChange = useCallback((patch) =>
     updateActive((s) => ({ ...s, view: { ...s.view, ...patch } })), [updateActive]);
 
+  // Comparative-statics sweep config.
+  const onSweepChange = useCallback((patch) =>
+    updateActive((s) => ({ ...s, sweep: { ...s.sweep, ...patch } })), [updateActive]);
+
+  // Condition CRUD on the active session. New condition seeds w.r.t with the
+  // first objective's axis as a sensible default.
+  const addCondition = useCallback(() =>
+    updateActive((s) => {
+      const obj = s.equations.find((e) => e.kind !== "constraint");
+      return { ...s, conditions: [...(s.conditions || []), newCondition({ wrt: obj?.axis || "" })] };
+    }), [updateActive]);
+  const patchCondition = useCallback((id, patch) =>
+    updateActive((s) => ({ ...s, conditions: (s.conditions || []).map((c) => (c.id === id ? { ...c, ...patch } : c)) })), [updateActive]);
+  const removeCondition = useCallback((id) =>
+    updateActive((s) => ({ ...s, conditions: (s.conditions || []).filter((c) => c.id !== id) })), [updateActive]);
+
   function addSession() {
     const s = newSession({ name: `Session ${sessions.length + 1}` });
     setSessions((prev) => [...prev, s]);
@@ -145,9 +212,9 @@ export default function Workbench({ pid }) {
   if (!active) return null;
 
   return (
-    <div style={{ fontFamily: mono, color: C.text, border: `1px solid ${C.line || "#222"}`,
+    <div style={{ fontFamily: mono, color: C.text, border: `1px solid ${C.border2}`,
       borderRadius: 10, padding: "1.2rem 1.4rem", marginBottom: "2rem",
-      background: "linear-gradient(180deg, " + (C.panel || "#0d0d0d") + ", " + C.bg + ")" }}>
+      background: "linear-gradient(180deg, " + C.surface + ", " + C.bg + ")" }}>
 
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
         <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase" }}>Equation Workbench</div>
@@ -180,15 +247,23 @@ export default function Workbench({ pid }) {
               detectedSymbols={detectedSymbols}
               params={active.params} choiceVars={active.choiceVars}
               onParamChange={onParamChange} onToggleRole={onToggleRole} />
+            <SweepPanel
+              detectedSymbols={detectedSymbols.filter((s) => !active.choiceVars.includes(s))}
+              params={active.params} sweep={active.sweep} onChange={onSweepChange} />
+            <ConditionsPanel
+              conditions={active.conditions} results={conditionResults} names={equationNames}
+              onAdd={addCondition} onPatch={patchCondition} onRemove={removeCondition} />
           </div>
           <div data-wb-outputs>
-            <ResultsPanel equations={active.equations} results={results} />
+            <ResultsPanel session={active} equations={active.equations} results={results}
+              backend={casBackend} escalating={escalating} escalateError={escalateError} onEscalate={escalate} />
           </div>
         </div>
         <div data-wb-canvas>
           <ViewControls view={active.view} onChange={onViewChange} />
-          <WorkbenchCanvas equations={active.equations} results={results}
-            view={active.view} height={active.view.height} />
+          <WorkbenchCanvas equations={active.equations} results={results} family={family}
+            conditions={conditionResults} view={active.view} height={active.view.height} />
+          {locus && <LocusCanvas locus={locus} />}
         </div>
       </div>
     </div>

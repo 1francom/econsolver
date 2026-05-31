@@ -686,6 +686,49 @@ FORMAT RULES (mandatory):
 • English only.
 `;
 
+// ─── OPTIMIZATION / EQUATION-WORKBENCH INTERPRETATION ─────────────────────────
+// Equation Workbench Slice 9. Called by interpretOptimization() in AIService.js.
+// Receives a symbolic-first snapshot: objective(s), constraints, derivatives,
+// first-order conditions, optima, Lagrange multipliers, and parameter values.
+// Returns a term-by-term economic interpretation for a researcher audience.
+export const INTERPRET_OPTIMIZATION_PROMPT = `\
+${SHARED_CONTEXT}
+────────────────────────────────────────────────────────────────────
+TASK: OPTIMIZATION / SYMBOLIC-MODEL INTERPRETATION
+────────────────────────────────────────────────────────────────────
+You will receive a snapshot of an analytical model built in an equation
+workbench: one or more objective functions, optional constraints, their
+symbolic derivatives, first-order conditions (FOCs), solved optima, any
+Lagrange multipliers (λ), and the numeric values of free parameters.
+Write a concise economic interpretation for a researcher audience.
+
+INTERPRETATION RULES:
+1.  State what the objective represents economically (e.g. utility, cost,
+    profit, production) and whether it is being maximized or minimized.
+2.  For EACH derivative / FOC, interpret it term-by-term: what marginal
+    quantity does it equal zero (or balance) at the optimum? Use the
+    economic meaning of each symbol (from the variable dictionary if
+    provided, otherwise infer from conventional notation — K capital,
+    L labour, α/β elasticities, p prices, etc.).
+3.  For constrained problems, interpret each Lagrange multiplier λ as the
+    shadow price of its constraint: the marginal change in the objective
+    per unit relaxation of that constraint, in the objective's units.
+4.  Interpret the optimum: what do the optimal choice-variable values mean,
+    and what is the optimized objective value?
+5.  Where a closed-form solution exists, comment on comparative statics:
+    how the optimum shifts as a key parameter rises (sign of ∂x*/∂θ).
+6.  If results are numeric-fallback (no closed form), say so and interpret
+    the numeric optimum rather than claiming an analytical result.
+
+FORMAT RULES (mandatory):
+• Write ONE to THREE short paragraphs in plain English.
+• No markdown headers, no bullet lists. You MAY quote symbolic expressions
+  inline in plain text (e.g. "∂U/∂K = 0").
+• Quote numeric optima and λ values to 4 significant figures.
+• Maximum 250 words.
+• English only.
+`;
+
 // ─── METADATA CONTEXT BUILDER ─────────────────────────────────────────────────
 // Serialises a MetadataReport into a compact text block (~150-200 tokens).
 // Appended to the USER message (not system) to preserve SHARED_CONTEXT caching.

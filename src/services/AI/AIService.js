@@ -24,9 +24,11 @@ import {
   RESEARCH_COACH_PROMPT,
   UNIFIED_SCRIPT_PROMPT,
   INTERPRET_MARGINAL_EFFECTS_PROMPT,
+  INTERPRET_OPTIMIZATION_PROMPT,
   buildMetadataContext,
 } from "./Prompts/index.js";
 import { serializeSnapshot, loadOptsToScriptHint } from "./sessionSnapshot.js";
+import { filterVariableNames } from "../Privacy/privacyFilter.js";
 import { getSession } from "../auth/authService.js";
 
 const API_URL       = "https://api.anthropic.com/v1/messages";
@@ -822,6 +824,95 @@ export async function interpretMarginalEffects({ model, dataDictionary = null, p
   } catch (err) {
     console.warn("[AIService] interpretMarginalEffects failed:", err.message);
     throw err; // let caller show error — no mock needed here
+  }
+}
+
+// ─── 6b. INTERPRET OPTIMIZATION (EQUATION WORKBENCH · Slice 9) ────────────────
+// Term-by-term economic interpretation of a symbolic-first workbench session:
+// objective(s), constraints, derivatives, FOCs, optima, λ shadow prices, params.
+// Routes through callClaude (single egress choke point). §10.6: variable/symbol
+// names pass through the privacy filter before egress. Premium-gated server-side.
+export async function interpretOptimization({ session, results = {}, dataDictionary = null, piiConfig = {} }) {
+  if (!session) throw new Error("No session provided.");
+
+  const equations = Array.isArray(session.equations) ? session.equations : [];
+  const params = Array.isArray(session.params) ? session.params : [];
+  const objectives = equations.filter((e) => e.kind !== "constraint");
+  const constraints = equations.filter((e) => e.kind === "constraint");
+  if (!objectives.length) throw new Error("No objective to interpret.");
+
+  // §10.6 — redact any PII-flagged symbol names before egress.
+  const symbolNames = [
+    ...params.map((p) => p.name),
+    ...(Array.isArray(session.choiceVars) ? session.choiceVars : []),
+  ].filter(Boolean);
+  const { aliasMap, hasRedactions } = filterVariableNames(symbolNames, piiConfig);
+  const alias = (s) => (typeof s === "string" && aliasMap[s]) || s;
+  const redact = (txt) => {
+    if (!txt || !hasRedactions) return txt;
+    let out = txt;
+    for (const [real, a] of Object.entries(aliasMap)) {
+      out = out.split(real).join(a);
+    }
+    return out;
+  };
+
+  const fmt = (x) => (Number.isFinite(x) ? Number(x).toPrecision(4) : "N/A");
+
+  const lines = [];
+
+  objectives.forEach((eq) => {
+    lines.push(`OBJECTIVE ${eq.label} (${eq.sense === "min" ? "minimize" : "maximize"}): ${redact(eq.expr)}`);
+    const r = results[eq.id] || {};
+    if (r.deriv?.symbolic?.expr) lines.push(`  derivative: ${redact(r.deriv.symbolic.expr)}`);
+    if (r.solveZero?.symbolic?.expr) lines.push(`  FOC roots (symbolic): ${redact(r.solveZero.symbolic.expr)}`);
+    if (r.solveZero?.numeric?.roots?.length) lines.push(`  FOC roots (numeric): ${r.solveZero.numeric.roots.map(fmt).join(", ")}`);
+    const opt = r.optimize;
+    if (opt) {
+      const src = opt.source === "numeric-fallback" ? " [numeric-fallback]" : "";
+      if (opt.symbolic?.expr) lines.push(`  optimum (symbolic)${src}: ${redact(opt.symbolic.expr)}`);
+      const num = opt.numeric;
+      if (num) {
+        if (num.mode === "unconstrained") {
+          lines.push(`  optimum (numeric): x* = ${fmt(num.x)}, f(x*) = ${fmt(num.value)} (${num.kind})`);
+        } else {
+          const choices = num.choices || {};
+          const mults = num.multipliers || {};
+          const cStr = Object.entries(choices).map(([k, v]) => `${alias(k)}* = ${fmt(v)}`).join(", ");
+          const lStr = Object.entries(mults).map(([k, v]) => `λ(${redact(k.replace("lambda_", ""))}) = ${fmt(v)}`).join(", ");
+          if (cStr) lines.push(`  optimum (numeric): ${cStr}`);
+          if (lStr) lines.push(`  shadow prices: ${lStr}`);
+          if (Number.isFinite(num.objectiveValue)) lines.push(`  objective value: ${fmt(num.objectiveValue)}`);
+        }
+      }
+    }
+  });
+
+  if (constraints.length) {
+    lines.push("CONSTRAINTS:");
+    constraints.forEach((c) => {
+      const rel = c.relation || {};
+      lines.push(`  ${redact(rel.lhs || "")} ${rel.op || "="} ${redact(rel.rhs || "")}`);
+    });
+  }
+
+  if (params.length) {
+    lines.push("PARAMETERS:");
+    params.forEach((p) => lines.push(`  ${alias(p.name)} = ${fmt(p.value)}`));
+  }
+
+  const dictLines = (dataDictionary && Object.keys(dataDictionary).length)
+    ? "\nVARIABLE DICTIONARY:\n" + Object.entries(dataDictionary).map(([k, v]) => `  ${alias(k)}: "${v}"`).join("\n")
+    : "";
+
+  const userPrompt = `${lines.join("\n")}${dictLines}\n\nWrite the interpretation now.`;
+
+  const taskPrompt = INTERPRET_OPTIMIZATION_PROMPT.replace(SHARED_CONTEXT, "").trim();
+  try {
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 650 });
+  } catch (err) {
+    console.warn("[AIService] interpretOptimization failed:", err.message);
+    throw err;
   }
 }
 

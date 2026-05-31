@@ -24,6 +24,7 @@ import {
   assignRectGrid,
   assignH3Grid,
   spatialJoin,
+  assignPointsToGrid,
   nearestNeighbor,
   nearestNeighborMetric,
   assignBoundaryDistance,
@@ -31,6 +32,7 @@ import {
   addDistanceBins,
   makeProjectedGrid,
   aggregateToGrid,
+  aggregateGridById,
   transformCoord,
   transformWKT,
 } from "../../math/SpatialEngine.js";
@@ -258,6 +260,24 @@ function buildColorScale(rows, col) {
   if (isNum) {
     const nums = vals.map(Number);
     const mn = arrMin(nums), mx = arrMax(nums), rng = mx - mn || 1;
+    const colorAt = value => {
+      const t = (Number(value) - mn) / rng;
+      const r = Math.round(110 + t * 90);
+      const g = Math.round(200 - t * 31);
+      const b = Math.round(180 - t * 70);
+      return `rgb(${r},${g},${b})`;
+    };
+    const uniq = [...new Set(nums)].sort((a, b) => a - b);
+    const isDiscreteCount = uniq.length <= 24 && uniq.every(v => Number.isInteger(v)) && mn >= 0;
+    if (isDiscreteCount) {
+      const cmap = Object.fromEntries(uniq.map(v => [String(v), colorAt(v)]));
+      const getColor = row => {
+        const v = row[col];
+        if (v === null || v === undefined || v === "") return null;
+        return cmap[String(Number(v))] ?? colorAt(v);
+      };
+      return { getColor, legend: { type: "numeric-discrete", values: uniq, cmap, col } };
+    }
     const getColor = row => {
       const v = row[col];
       if (v === null || v === undefined || v === "") return null;
@@ -474,6 +494,14 @@ function guessLonCol(headers) {
 }
 function guessWktCol(headers) {
   return headers.find(h => /wkt|geom|geometry|polygon|shape/i.test(h)) ?? headers[0] ?? "";
+}
+function guessPointCountCol(headers) {
+  const joined = headers.join(" ");
+  if (/school|escuela|establec|cue|nivel|sector/i.test(joined)) return "n_schools";
+  if (/crime|delito|hecho|robo|hurto|homic/i.test(joined)) return "n_crimes";
+  if (/bus|parada|stop|colectivo|transport/i.test(joined)) return "n_bus_stops";
+  if (/police|policia|policía|comisaria|comisaría/i.test(joined)) return "n_police";
+  return "n_points";
 }
 function looksLikeWktValue(v) {
   return typeof v === "string" && /^(POINT|POLYGON|MULTIPOLYGON|LINESTRING|MULTILINESTRING)/i.test(v.trim());
@@ -822,26 +850,73 @@ function MetricBufferSection({ rows, headers, availableDatasets, onResult, C }) 
 }
 
 // 3. Grid Assignment
-function GridSection({ rows, headers, onResult, C }) {
+function GridSection({ rows, headers, availableDatasets, onResult, C }) {
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
-  const [gridType,  setGridType]  = useState("rectangular"); // "rectangular" | "hex"
+  const [gridType,  setGridType]  = useState("existing"); // "existing" | "rectangular" | "hex"
   const [cellSize,  setCellSize]  = useState(50);
   const [resolution, setResolution] = useState(2);
-  const [outCol,    setOutCol]    = useState("grid_cell");
+  const [outCol,    setOutCol]    = useState("grid_id");
+  const [gridDsId, setGridDsId] = useState("");
+  const [wktCol, setWktCol] = useState("");
+  const [gridIdCol, setGridIdCol] = useState("");
+  const [extraCols, setExtraCols] = useState([]);
   const [result,    setResult]    = useState(null);
   const [err,       setErr]       = useState("");
 
-  const canApply = latCol && lonCol && outCol && (gridType === "rectangular" ? cellSize > 0 : true);
+  const gridDs = availableDatasets.find(ds => ds.id === gridDsId);
+  const gridHeaders = gridDs?.headers ?? [];
+  const guessedWkt = useMemo(() => {
+    if (gridHeaders.includes("metric_geometry")) return "metric_geometry";
+    return guessWktCol(gridHeaders);
+  }, [gridHeaders]);
+  const guessedId = useMemo(
+    () => gridHeaders.find(h => /^grid_?id$/i.test(h)) ?? gridHeaders.find(h => /(^|_)id$/i.test(h)) ?? gridHeaders[0] ?? "",
+    [gridHeaders]
+  );
+  const effectiveWkt = wktCol || guessedWkt;
+  const effectiveGridId = gridIdCol || guessedId;
+  const gridExtraHeaders = gridHeaders.filter(h =>
+    h !== effectiveWkt && h !== effectiveGridId && !isGeometryHeader(gridHeaders, gridDs?.rows ?? [], h)
+  );
+
+  const canApply = latCol && lonCol && outCol && (
+    gridType === "existing"
+      ? gridDs?.rows?.length && effectiveWkt && effectiveGridId
+      : (gridType === "rectangular" ? cellSize > 0 : true)
+  );
+
+  function toggleExtraCol(col) {
+    setExtraCols(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
+  }
 
   function apply() {
     setErr("");
     try {
+      if (gridType === "existing") {
+        const out = assignPointsToGrid(
+          rows,
+          latCol,
+          lonCol,
+          gridDs.rows,
+          effectiveWkt,
+          effectiveGridId,
+          outCol,
+          { attributeCols: extraCols, metricCrs: "EPSG:32721" }
+        );
+        const matched = out.filter(r => r[outCol] != null).length;
+        const cols = [outCol, "grid_row_index", ...extraCols];
+        const distinct = new Set(out.map(r => r[outCol]).filter(v => v != null)).size;
+        setResult({ rows: out, distinct, matched, cols });
+        onResult(out, cols);
+        return;
+      }
+
       const out = gridType === "rectangular"
         ? assignRectGrid(rows, latCol, lonCol, Number(cellSize), outCol)
         : assignH3Grid(rows, latCol, lonCol, Number(resolution), outCol);
       const distinct = new Set(out.map(r => r[outCol]).filter(v => v != null)).size;
-      setResult({ rows: out, distinct });
+      setResult({ rows: out, distinct, matched: null, cols: [outCol] });
       onResult(out, [outCol]);
     } catch (e) {
       setErr(e.message);
@@ -851,13 +926,16 @@ function GridSection({ rows, headers, onResult, C }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
-        Assigns each observation to a spatial grid cell — rectangular or approximate hexagonal.
-        The resulting ID can be used as a fixed effect or aggregation key.
+        Assigns each point to a stable grid ID from an existing grid, or to quick exploratory rectangular/hex bins.
+        Use existing generated grids for schools, crimes, bus stops, and police station point workflows.
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
-        {[["rectangular", "Rectangular"], ["hex", "Hex (approx.)"]].map(([v, l]) => (
+        {[["existing", "Existing grid"], ["rectangular", "Rectangular"], ["hex", "Hex (approx.)"]].map(([v, l]) => (
           <button
-            key={v} onClick={() => setGridType(v)}
+            key={v} onClick={() => {
+              setGridType(v);
+              setOutCol(v === "existing" ? "grid_id" : "grid_cell");
+            }}
             style={{
               padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
               background: gridType === v ? `${C.teal}18` : "transparent",
@@ -870,22 +948,55 @@ function GridSection({ rows, headers, onResult, C }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <ColSelect label="Latitude column" value={latCol} onChange={setLatCol} headers={headers} C={C} />
         <ColSelect label="Longitude column" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
-        {gridType === "rectangular"
+        {gridType === "existing" ? null : gridType === "rectangular"
           ? <NumInput label="Cell size (km)" value={cellSize} onChange={setCellSize} C={C} min={0.1} step={1} />
           : <NumInput label="Resolution (0–5)" value={resolution} onChange={setResolution} C={C} min={0} max={5} step={1} />
         }
         <TextInput label="Output column name" value={outCol} onChange={setOutCol} C={C} placeholder="grid_cell" />
       </div>
+      {gridType === "existing" && (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
+            <select value={gridDsId} onChange={e => { setGridDsId(e.target.value); setWktCol(""); setGridIdCol(""); setExtraCols([]); }}
+              style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+              <option value="">select grid dataset</option>
+              {availableDatasets.map(ds => <option key={ds.id} value={ds.id}>{ds.filename ?? ds.name ?? ds.id}</option>)}
+            </select>
+          </div>
+          {gridDs && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <ColSelect label="Grid WKT column" value={effectiveWkt} onChange={setWktCol} headers={gridHeaders} C={C} />
+                <ColSelect label="Grid ID column" value={effectiveGridId} onChange={setGridIdCol} headers={gridHeaders} C={C} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Optional grid attributes</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {gridExtraHeaders.map(h => (
+                    <button key={h} onClick={() => toggleExtraCol(h)}
+                      style={{ padding: "2px 8px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+                        background: extraCols.includes(h) ? `${C.teal}18` : "transparent",
+                        border: `1px solid ${extraCols.includes(h) ? C.teal : C.border2}`,
+                        borderRadius: 3, color: extraCols.includes(h) ? C.teal : C.textDim }}
+                    >{h}</button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <ApplyBtn onClick={apply} disabled={!canApply} C={C} />
+        <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Assign grid" />
         {result && (
           <span style={{ fontSize: 9, color: C.teal }}>
-            ✓ {result.distinct} distinct cells across {rows.length} rows
+            {gridType === "existing" ? `OK: ${result.matched} / ${rows.length} matched, ${result.distinct} grid cells` : `OK: ${result.distinct} distinct cells across ${rows.length} rows`}
           </span>
         )}
       </div>
       <ErrBanner msg={err} C={C} />
-      {result && <ResultPreview rows={result.rows} newCols={[outCol, latCol, lonCol]} C={C} />}
+      {result && <ResultPreview rows={result.rows} newCols={[...result.cols, latCol, lonCol]} C={C} />}
     </div>
   );
 }
@@ -1024,27 +1135,41 @@ function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
 }
 
 function AggregateToGridSection({ rows, headers, availableDatasets, C, onResult }) {
+  const [mode, setMode] = useState("grid_id");
   const [latCol, setLatCol] = useState(() => guessLatCol(headers));
   const [lonCol, setLonCol] = useState(() => guessLonCol(headers));
+  const [pointGridCol, setPointGridCol] = useState(() => headers.find(h => /^grid_?id$/i.test(h)) ?? "");
   const [gridDsId, setGridDsId] = useState("");
   const [wktCol, setWktCol] = useState("");
+  const [gridIdCol, setGridIdCol] = useState("");
   const [fn, setFn] = useState("count");
   const [valueCol, setValueCol] = useState("");
-  const [outCol, setOutCol] = useState("n_points");
+  const [outCol, setOutCol] = useState(() => guessPointCountCol(headers));
   const [result, setResult] = useState(null);
   const [err, setErr] = useState("");
 
   const gridDs = availableDatasets.find(ds => ds.id === gridDsId);
   const gridHeaders = gridDs?.headers ?? [];
   const guessedWkt = useMemo(() => guessWktCol(gridHeaders), [gridHeaders]);
+  const guessedGridId = useMemo(
+    () => gridHeaders.find(h => /^grid_?id$/i.test(h)) ?? gridHeaders.find(h => /(^|_)id$/i.test(h)) ?? gridHeaders[0] ?? "",
+    [gridHeaders]
+  );
   const effectiveWkt = wktCol || guessedWkt;
-  const canApply = latCol && lonCol && gridDs?.rows?.length && effectiveWkt && outCol && (fn === "count" || valueCol);
+  const effectiveGridId = gridIdCol || guessedGridId;
+  const canApply = gridDs?.rows?.length && outCol && (fn === "count" || valueCol) && (
+    mode === "grid_id"
+      ? pointGridCol && effectiveGridId
+      : latCol && lonCol && effectiveWkt
+  );
 
   function apply() {
     setErr("");
     try {
       const spec = { col: fn === "count" ? "" : valueCol, fn, outCol };
-      const out = aggregateToGrid(gridDs.rows, effectiveWkt, rows, latCol, lonCol, [spec]);
+      const out = mode === "grid_id"
+        ? aggregateGridById(gridDs.rows, effectiveGridId, rows, pointGridCol, [spec])
+        : aggregateToGrid(gridDs.rows, effectiveWkt, rows, latCol, lonCol, [spec]);
       setResult({ rows: out, cols: [outCol] });
       onResult(out, [outCol], gridHeaders);
     } catch (e) {
@@ -1055,15 +1180,42 @@ function AggregateToGridSection({ rows, headers, availableDatasets, C, onResult 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
-        Aggregates active point rows into a grid dataset. Use this for schools, crimes, bus stops, police, and land-use point controls.
+        Aggregates active point rows into a grid dataset. If points already have grid_id, use the fast ID path; geometry mode remains available for raw lat/lon points.
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <ColSelect label="Point latitude" value={latCol} onChange={setLatCol} headers={headers} C={C} />
-        <ColSelect label="Point longitude" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {[
+          ["Schools per grid", "n_schools"],
+          ["Points per grid", "n_points"],
+        ].map(([label, col]) => (
+          <button key={col} onClick={() => { setMode("grid_id"); setFn("count"); setOutCol(col); }}
+            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+              background: outCol === col && fn === "count" ? `${C.gold}18` : "transparent",
+              border: `1px solid ${outCol === col && fn === "count" ? C.gold : C.border2}`,
+              borderRadius: 3, color: outCol === col && fn === "count" ? C.gold : C.textDim }}
+          >{label}</button>
+        ))}
       </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {[["grid_id", "Use assigned grid_id"], ["geometry", "Point-in-polygon"]].map(([v, label]) => (
+          <button key={v} onClick={() => setMode(v)}
+            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+              background: mode === v ? `${C.teal}18` : "transparent",
+              border: `1px solid ${mode === v ? C.teal : C.border2}`,
+              borderRadius: 3, color: mode === v ? C.teal : C.textDim }}
+          >{label}</button>
+        ))}
+      </div>
+      {mode === "geometry" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <ColSelect label="Point latitude" value={latCol} onChange={setLatCol} headers={headers} C={C} />
+          <ColSelect label="Point longitude" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
+        </div>
+      ) : (
+        <ColSelect label="Point grid ID column" value={pointGridCol} onChange={setPointGridCol} headers={headers} C={C} />
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
         <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
-        <select value={gridDsId} onChange={e => { setGridDsId(e.target.value); setWktCol(""); }}
+        <select value={gridDsId} onChange={e => { setGridDsId(e.target.value); setWktCol(""); setGridIdCol(""); }}
           style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
           <option value="">select grid dataset</option>
           {availableDatasets.map(ds => <option key={ds.id} value={ds.id}>{ds.filename ?? ds.name ?? ds.id}</option>)}
@@ -1071,18 +1223,22 @@ function AggregateToGridSection({ rows, headers, availableDatasets, C, onResult 
       </div>
       {gridDs && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <ColSelect label="Grid WKT column" value={effectiveWkt} onChange={setWktCol} headers={gridHeaders} C={C} />
+          {mode === "geometry" ? (
+            <ColSelect label="Grid WKT column" value={effectiveWkt} onChange={setWktCol} headers={gridHeaders} C={C} />
+          ) : (
+            <ColSelect label="Grid ID column" value={effectiveGridId} onChange={setGridIdCol} headers={gridHeaders} C={C} />
+          )}
           <ColSelect label="Aggregation" value={fn} onChange={setFn} headers={["count", "sum", "mean", "share"]} C={C} />
           {fn !== "count" && <ColSelect label="Value column" value={valueCol} onChange={setValueCol} headers={headers} C={C} />}
           <TextInput label="Output column" value={outCol} onChange={setOutCol} C={C} placeholder="n_points" />
         </div>
       )}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Aggregate to grid" />
+        <ApplyBtn onClick={apply} disabled={!canApply} C={C} label={outCol === "n_schools" ? "Sum schools per grid" : "Aggregate to grid"} />
         {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {result.rows.length} grid cells</span>}
       </div>
       <ErrBanner msg={err} C={C} />
-      {result && <ResultPreview rows={result.rows} newCols={[effectiveWkt, outCol]} C={C} />}
+      {result && <ResultPreview rows={result.rows} newCols={mode === "geometry" ? [effectiveWkt, outCol] : [effectiveGridId, outCol]} C={C} />}
     </div>
   );
 }
@@ -1375,6 +1531,16 @@ function MapLegend({ legend, C }) {
           <span style={{ color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{String(cat)}</span>
         </div>
       ))}
+      {legend.type === "numeric-discrete" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, max-content)", gap: "3px 8px", color: C.text }}>
+          {legend.values.map(v => (
+            <div key={v} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <div style={{ width: 9, height: 9, borderRadius: 2, background: legend.cmap[String(v)], flexShrink: 0 }} />
+              <span>{v}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2756,7 +2922,9 @@ function geoBbox(layers, defaultRows, availableDatasets) {
       for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
     } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && ly.latCol && ly.lonCol) {
       for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
-    } else if (ly.type === "grid" && ((ly.mode ?? "boundary") === "boundary" || ly.mode === "wkt") && (ly.boundaryCol || ly.wktCol)) {
+    } else if (ly.type === "grid" && ly.mode === "wkt" && ly.wktCol) {
+      for (const row of r) { const p = parseWktRings(row[ly.wktCol]); if (p) for (const ring of p.rings) for (const [x, y] of ring) exp(x, y); }
+    } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "boundary" && ly.boundaryCol) {
       const col = ly.boundaryCol || ly.wktCol;
       for (const row of r) { const p = parseWktRings(row[col]); if (p) for (const ring of p.rings) for (const [x, y] of ring) exp(x, y); }
     } else if (ly.wktCol) {
@@ -2777,7 +2945,7 @@ function mkGeoLayer(type, idx) {
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", fillOpacity: 0, stroke: "#222", strokeWidth: 0.8 };
   if (type === "point")    return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", fill: col, radius: 4, fillOpacity: 0.78 };
   if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", stroke: col, strokeWidth: 1.2 };
-  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "boundary", wktCol: "", boundaryCol: "", latCol: "", lonCol: "", cellsize: 500, clipBorder: true, fill: col, fillOpacity: 0.08, stroke: "#888", strokeWidth: 0.3 };
+  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "wkt", wktCol: "", boundaryCol: "", latCol: "", lonCol: "", cellsize: 500, clipBorder: true, colorByCol: "", fill: col, fillOpacity: 0.08, colorFillOpacity: 0.65, stroke: "#888", strokeWidth: 0.3 };
   return { id, type, visible: true, datasetId: "active" };
 }
 
@@ -2833,7 +3001,7 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
       </div>
       {ly.type === "grid" && (
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-          {[["boundary", "Boundary"], ["latlon", "Lat/Lon"]].map(([m, lbl]) => (
+          {[["wkt", "Existing WKT"], ["boundary", "Boundary"], ["latlon", "Lat/Lon"]].map(([m, lbl]) => (
             <button key={m} onClick={() => upd({ mode: m })}
               style={{
                 flex: 1, padding: "2px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
@@ -2845,6 +3013,15 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
           ))}
         </div>
       )}
+      {ly.type === "grid" && ly.mode === "wkt" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <Sel label="Grid WKT" value={ly.wktCol} onChg={v => upd({ wktCol: v })} opts={geomCols} />
+          <Sel label="Color by" value={ly.colorByCol ?? ""} onChg={v => upd({ colorByCol: v })} opts={dsHeaders} />
+          {ly.colorByCol && (
+            <Rng label="Color opacity" value={ly.colorFillOpacity ?? 0.65} onChg={v => upd({ colorFillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} />
+          )}
+        </div>
+      )}
       {ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <Sel label="Lat" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
@@ -2852,7 +3029,7 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
           <Rng label="Cell (m)" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} fmt={v => v + "m"} />
         </div>
       )}
-      {ly.type === "grid" && ((ly.mode ?? "boundary") === "boundary" || ly.mode === "wkt") && (
+      {ly.type === "grid" && (ly.mode ?? "boundary") === "boundary" && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "end" }}>
           <Sel label="Boundary WKT" value={ly.boundaryCol ?? ly.wktCol ?? ""} onChg={v => upd({ boundaryCol: v, wktCol: v })} opts={geomCols} />
           <Rng label="Cell (m)" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} fmt={v => v + "m"} />
@@ -2902,6 +3079,99 @@ function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, 
 // Fixed margins so y-axis labels like "34.52°S" always fit
 const GEO_MARGIN = { top: 20, right: 20, bottom: 34, left: 72 };
 
+function appendSvgLegend(svg, legend, C, plotW, plotH, gutterW = 160) {
+  if (!svg || !legend) return;
+  const ns = "http://www.w3.org/2000/svg";
+  const svgW = plotW + gutterW;
+  svg.setAttribute("width", svgW);
+  svg.setAttribute("height", plotH);
+  svg.setAttribute("viewBox", `0 0 ${svgW} ${plotH}`);
+  const items = legend.type === "numeric-discrete"
+    ? legend.values.map(v => ({ label: String(v), color: legend.cmap[String(v)] }))
+    : legend.type === "categorical"
+      ? legend.cats.map(v => ({ label: String(v), color: legend.cmap[v] }))
+      : null;
+  const g = document.createElementNS(ns, "g");
+  g.setAttribute("font-family", mono);
+  g.setAttribute("font-size", "9");
+  const x = plotW + 12;
+  const y = 18;
+  const width = 136;
+  const rowH = 14;
+  const height = legend.type === "gradient" ? 48 : 24 + (items?.length ?? 0) * rowH;
+
+  const bg = document.createElementNS(ns, "rect");
+  bg.setAttribute("x", x);
+  bg.setAttribute("y", y);
+  bg.setAttribute("width", width);
+  bg.setAttribute("height", height);
+  bg.setAttribute("rx", "4");
+  bg.setAttribute("fill", C?.surface ?? "#fff");
+  bg.setAttribute("stroke", C?.border2 ?? "#ddd");
+  bg.setAttribute("opacity", "0.92");
+  g.appendChild(bg);
+
+  const title = document.createElementNS(ns, "text");
+  title.setAttribute("x", x + 8);
+  title.setAttribute("y", y + 14);
+  title.setAttribute("fill", C?.textMuted ?? "#666");
+  title.setAttribute("font-size", "8");
+  title.textContent = String(legend.col ?? "").toUpperCase();
+  g.appendChild(title);
+
+  if (legend.type === "gradient") {
+    const gradId = `grad_${Math.random().toString(36).slice(2)}`;
+    const defs = document.createElementNS(ns, "defs");
+    const grad = document.createElementNS(ns, "linearGradient");
+    grad.setAttribute("id", gradId);
+    grad.setAttribute("x1", "0%");
+    grad.setAttribute("x2", "100%");
+    [["0%", "#6ec8b4"], ["100%", "#c8a96e"]].forEach(([offset, color]) => {
+      const stop = document.createElementNS(ns, "stop");
+      stop.setAttribute("offset", offset);
+      stop.setAttribute("stop-color", color);
+      grad.appendChild(stop);
+    });
+    defs.appendChild(grad);
+    svg.insertBefore(defs, svg.firstChild);
+    const bar = document.createElementNS(ns, "rect");
+    bar.setAttribute("x", x + 8);
+    bar.setAttribute("y", y + 23);
+    bar.setAttribute("width", width - 16);
+    bar.setAttribute("height", 8);
+    bar.setAttribute("fill", `url(#${gradId})`);
+    g.appendChild(bar);
+    [[legend.min, x + 8, "start"], [legend.max, x + width - 8, "end"]].forEach(([v, tx, anchor]) => {
+      const t = document.createElementNS(ns, "text");
+      t.setAttribute("x", tx);
+      t.setAttribute("y", y + 43);
+      t.setAttribute("text-anchor", anchor);
+      t.setAttribute("fill", C?.textDim ?? "#777");
+      t.textContent = Number(v).toFixed(2);
+      g.appendChild(t);
+    });
+  } else if (items) {
+    items.forEach((item, i) => {
+      const yy = y + 27 + i * rowH;
+      const sw = document.createElementNS(ns, "rect");
+      sw.setAttribute("x", x + 8);
+      sw.setAttribute("y", yy - 8);
+      sw.setAttribute("width", 9);
+      sw.setAttribute("height", 9);
+      sw.setAttribute("rx", "2");
+      sw.setAttribute("fill", item.color);
+      const label = document.createElementNS(ns, "text");
+      label.setAttribute("x", x + 23);
+      label.setAttribute("y", yy);
+      label.setAttribute("fill", C?.text ?? "#333");
+      label.textContent = item.label;
+      g.appendChild(sw);
+      g.appendChild(label);
+    });
+  }
+  svg.appendChild(g);
+}
+
 const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
   { Plt, layers, rows, availableDatasets, title, subtitle, caption,
     maxW = 700, maxH = 0, forceH = 0, showTiles = false, C },
@@ -2911,18 +3181,18 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
   const tileCanRef = useRef(null);
   const wrapperRef = useRef(null);
   // Track computed plot size for tile canvas positioning
-  const dimsRef    = useRef({ plotW: 0, plotH: 0, innerW: 0, innerH: 0, xMin: 0, xMax: 1, yMin: 0, yMax: 1 });
+  const dimsRef    = useRef({ plotW: 0, plotH: 0, svgW: 0, innerW: 0, innerH: 0, xMin: 0, xMax: 1, yMin: 0, yMax: 1 });
 
   useImperativeHandle(ref, () => ({
     // Composite export: tiles canvas (if present) + SVG on top → PNG download
     exportToPng: (filename = "geo_plot.png") => new Promise(resolve => {
       const svg = canvasRef.current?.querySelector("svg");
       if (!svg) { resolve(); return; }
-      const { plotW, plotH } = dimsRef.current;
+      const { plotW, plotH, svgW = plotW } = dimsRef.current;
       if (!plotW || !plotH) { resolve(); return; }
       const scale = 2;
       const canvas = document.createElement("canvas");
-      canvas.width  = plotW * scale;
+      canvas.width  = svgW * scale;
       canvas.height = plotH * scale;
       const ctx = canvas.getContext("2d");
 
@@ -2932,7 +3202,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
         const svgUrl  = URL.createObjectURL(svgBlob);
         const img = new Image();
         img.onload = () => {
-          ctx.drawImage(img, 0, 0, plotW * scale, plotH * scale);
+          ctx.drawImage(img, 0, 0, svgW * scale, plotH * scale);
           URL.revokeObjectURL(svgUrl);
           const a = document.createElement("a");
           a.href = canvas.toDataURL("image/png");
@@ -2958,12 +3228,12 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     exportToPdf: () => {
       const svg = canvasRef.current?.querySelector("svg");
       if (!svg) return;
-      const { plotW, plotH } = dimsRef.current;
+      const { plotW, plotH, svgW = plotW } = dimsRef.current;
       const svgStr  = new XMLSerializer().serializeToString(svg);
       const blob    = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
       const blobUrl = URL.createObjectURL(blob);
       const iframe  = document.createElement("iframe");
-      iframe.style.cssText = `position:fixed;top:-9999px;left:-9999px;width:${plotW}px;height:${plotH}px;border:none;`;
+      iframe.style.cssText = `position:fixed;top:-9999px;left:-9999px;width:${svgW}px;height:${plotH}px;border:none;`;
       iframe.src = blobUrl;
       iframe.onload = () => {
         try { iframe.contentWindow.print(); } catch (_) { alert("PDF export: use the browser print dialog."); }
@@ -2981,12 +3251,22 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     const [xMin, xMax, yMin, yMax] = geoBbox(layers, rows, availableDatasets);
     const midLat = (yMin + yMax) / 2;
     const cosLat = Math.max(0.1, Math.cos(midLat * Math.PI / 180));
+    const plotLegend = (() => {
+      for (const ly of [...layers].reverse()) {
+        if (!ly.visible) continue;
+        const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+        if (ly.type === "grid" && ly.mode === "wkt" && ly.colorByCol) return buildColorScale(r, ly.colorByCol).legend;
+        if (ly.type === "point" && ly.colorCol) return buildColorScale(r, ly.colorCol).legend;
+      }
+      return null;
+    })();
+    const legendW = plotLegend ? 160 : 0;
 
     // Compute dimensions: preserve geographic aspect ratio within maxW × maxH.
     // When height is constrained (by maxH or forceH), shrink width accordingly.
     const xRange = xMax - xMin, yRange = yMax - yMin;
     const ML = GEO_MARGIN.left, MR = GEO_MARGIN.right, MT = GEO_MARGIN.top, MB = GEO_MARGIN.bottom;
-    const innerMaxW = maxW - ML - MR;
+    const innerMaxW = Math.max(160, maxW - legendW - ML - MR);
     // idealH = height needed for full width at correct aspect ratio (cosLat correction)
     const idealH    = Math.round(innerMaxW * (yRange / Math.max(xRange, 1e-9)) / cosLat) + MT + MB;
     let plotW, plotH;
@@ -3001,7 +3281,8 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     const idealInnerW = Math.round(innerH * (xRange / Math.max(yRange, 1e-9)) * cosLat);
     const innerW    = Math.min(idealInnerW, innerMaxW);
     plotW = innerW + ML + MR;
-    dimsRef.current = { plotW, plotH, innerW, innerH, xMin, xMax, yMin, yMax };
+    const svgW = plotW + legendW;
+    dimsRef.current = { plotW, plotH, svgW, innerW, innerH, xMin, xMax, yMin, yMax };
 
     const marks = [Plt.frame({ stroke: C?.border ?? "#2e3340", strokeWidth: 0.5 })];
 
@@ -3014,9 +3295,27 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           fill: ly.fill ?? "#6ec8b4", r: ly.radius ?? 4,
           fillOpacity: ly.fillOpacity ?? 0.78, stroke: "none",
         }));
-      } else if (ly.type === "grid" && ((ly.mode ?? "boundary") === "boundary" || ly.mode === "wkt") && (ly.boundaryCol || ly.wktCol)) {
+      } else if (ly.type === "grid" && ly.mode === "wkt" && ly.wktCol) {
+        const { getColor } = buildColorScale(r, ly.colorByCol);
+        for (const row of r) {
+          const parsed = parseWktRings(row[ly.wktCol]);
+          if (!parsed) continue;
+          const fill = ly.colorByCol ? (getColor(row) ?? ly.fill ?? "none") : (ly.fill ?? "none");
+          const fillOpacity = ly.colorByCol ? (ly.colorFillOpacity ?? 0.65) : (ly.fillOpacity ?? 0.08);
+          for (const ring of parsed.rings) {
+            if (ring.length < 2) continue;
+            marks.push(Plt.line([...ring, ring[0]], {
+              x: d => d[0], y: d => d[1],
+              fill,
+              fillOpacity,
+              stroke: ly.stroke ?? "#888", strokeWidth: ly.strokeWidth ?? 0.3,
+              strokeLinejoin: "round", strokeLinecap: "round",
+            }));
+          }
+        }
+      } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "boundary" && ly.boundaryCol) {
         try {
-          const col = ly.boundaryCol || ly.wktCol;
+          const col = ly.boundaryCol;
           const boundaries = r.map(row => row[col]).filter(Boolean);
           for (const boundaryWkt of boundaries) {
             const cells = makeCabaMetricGrid(boundaryWkt, ly.cellsize ?? 500, ly.clipBorder !== false);
@@ -3090,6 +3389,7 @@ const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
              tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°S` : `${d.toFixed(2)}°N` },
         marks,
       });
+      appendSvgLegend(svg, plotLegend, C, plotW, plotH, legendW);
       el.appendChild(svg);
     } catch (e) {
       const errDiv = document.createElement("div");
@@ -3276,8 +3576,8 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
           {/* Height slider */}
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono }}>H</span>
-            <input type="range" min={250} max={Math.max(400, (typeof window !== "undefined" ? window.innerHeight : 800) - 260)} step={20}
-              value={userH ?? Math.min(Math.max(300, canvasH - 100), (typeof window !== "undefined" ? window.innerHeight : 800) - 260)}
+            <input type="range" min={300} max={Math.max(500, (typeof window !== "undefined" ? window.innerHeight : 850) - 170)} step={20}
+              value={userH ?? Math.min(Math.max(420, canvasH - 60), (typeof window !== "undefined" ? window.innerHeight : 850) - 170)}
               onChange={e => setUserH(parseInt(e.target.value))}
               style={{ width: 70, accentColor: C.teal }} />
             <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted, minWidth: 32 }}>
@@ -3334,7 +3634,7 @@ function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
         {Plt && dLayers.length > 0 && (
           <GeoPlotCanvas ref={geoPlotRef} Plt={Plt} layers={dLayers} rows={rows} availableDatasets={availableDatasets}
             title={dTitle} subtitle={dSubtitle} caption={dCaption} maxW={maxW}
-            maxH={Math.max(300, (typeof window !== "undefined" ? window.innerHeight : 700) - 260)}
+            maxH={Math.max(420, (typeof window !== "undefined" ? window.innerHeight : 850) - 170)}
             forceH={userH ?? 0} showTiles={showTiles} C={C} />
         )}
 
@@ -3543,8 +3843,14 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
               />
             </Section>
 
-            <Section title="Grid Assignment" badge="rectangular · hex" C={C}>
-              <GridSection rows={rows} headers={numericHeaders.length ? numericHeaders : headers} onResult={handleResult} C={C} />
+            <Section title="Grid Assignment" badge="existing grid / id" C={C}>
+              <GridSection
+                rows={rows}
+                headers={headers}
+                availableDatasets={availableDatasets}
+                onResult={handleResult}
+                C={C}
+              />
             </Section>
 
             <Section title="Spatial Join (point-in-polygon)" badge="requires polygon dataset" C={C}>

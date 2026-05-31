@@ -217,9 +217,9 @@ function Uploader({onReady}){
       let text="";
       if(name.endsWith(".xlsx")||name.endsWith(".xls")){
         const ab=await file.arrayBuffer();
-        const{utils,read}=await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
-        const wb=read(ab,{type:"array"});
-        text=utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
+        const XLSX=await import("xlsx");
+        const wb=XLSX.read(ab,{type:"array"});
+        text=XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
       } else {
         text=await file.text();
       }

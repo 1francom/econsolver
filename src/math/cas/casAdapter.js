@@ -33,7 +33,28 @@ export const cas = {
 
   substitute(e, scope) { return active.substitute(e, scope); },
   compile(e, freeVars) { return active.compile(e, freeVars); },
+
+  // Escalation (§5.3): lazily load the SymPy/Pyodide backend (backend B) and make
+  // it active behind this same surface. Idempotent — subsequent calls no-op once
+  // SymPy is active. Returns the active backend name. The heavy WASM download
+  // happens here; callers should show a one-time "loading exact solver…" state.
+  escalate() {
+    if (active.name === "sympy") return Promise.resolve("sympy");
+    if (!escalatePromise) {
+      escalatePromise = import("./sympyBackend.js")
+        .then(async ({ sympyBackend }) => {
+          await sympyBackend.ready();
+          active = sympyBackend;
+          readyPromise = Promise.resolve();
+          return "sympy";
+        })
+        .catch((e) => { escalatePromise = null; throw e; });
+    }
+    return escalatePromise;
+  },
 };
+
+let escalatePromise = null;
 
 // For the SymPy escalation (backend B), expose a setter behind the same surface.
 export function _setCasBackend(backend) { active = backend; readyPromise = null; }
