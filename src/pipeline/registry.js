@@ -657,6 +657,25 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "factor_interactions", contCol: "", dummyCols: [], prefix: "" }),
   },
 
+  {
+    type: "balance_panel",
+    label: "Balance panel (fill grid)",
+    category: "reshape",
+    description: "Expand the dataset to a complete entity × time (× optional slot) grid. " +
+                 "Missing outcome cells are filled with a constant; static controls are copied " +
+                 "by entity. Produces a strongly balanced panel.",
+    schema: [
+      { key: "entityCol",   type: "col",    label: "Entity column (i)" },
+      { key: "timeCol",     type: "col",    label: "Time column (t)" },
+      { key: "slotCol",     type: "col",    label: "Slot / franja column (optional)" },
+      { key: "outcomeCols", type: "cols",   label: "Outcome columns (filled with fill value)" },
+      { key: "staticCols",  type: "cols",   label: "Static controls (copied by entity)" },
+      { key: "fillValue",   type: "number", label: "Fill value for missing outcomes" },
+    ],
+    toLabel: s => `balance_panel ${s.entityCol} × ${s.timeCol}${s.slotCol ? ` × ${s.slotCol}` : ""} (fill ${s.fillValue ?? 0})`,
+    defaultStep: () => ({ type: "balance_panel", entityCol: "", timeCol: "", slotCol: "", outcomeCols: [], staticCols: [], fillValue: 0 }),
+  },
+
 ];
 
 // ─── LOOKUP HELPERS ───────────────────────────────────────────────────────────
