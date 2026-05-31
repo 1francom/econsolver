@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useTheme, mono } from "../modeling/shared.jsx";
 import { HintBox } from "../HelpSystem.jsx";
 import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.js";
+import StatWorkspace from "./statsim/StatWorkspace.jsx";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
@@ -466,7 +467,7 @@ export function generateSimScript(language, n, seed, variables) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 let _nextId = 4;
 
-export default function SimulateTab({ onAddDataset }) {
+export default function SimulateTab({ onAddDataset, rows = [], headers = [], onAddColumn, onCreateDataset }) {
   const { C } = useTheme();
   const [n,          setN]          = useState(500);
   const [seed,       setSeed]       = useState(42);
@@ -943,6 +944,17 @@ export default function SimulateTab({ onAddDataset }) {
             )}
           </div>
         )}
+      </div>
+
+      {/* ── Variable Workspace & Statistics (moved from Calculate) ── */}
+      <div style={{ borderTop: `1px solid ${C.border}`, marginTop: "2rem", paddingTop: "1.8rem" }}>
+        <StatWorkspace
+          rows={rows}
+          headers={headers}
+          onAddDataset={onAddDataset}
+          onAddColumn={onAddColumn}
+          onCreateDataset={onCreateDataset}
+        />
       </div>
 
       {/* ── Script export ── */}
