@@ -1,0 +1,101 @@
+// ─── ECON STUDIO · src/math/__validation__/inferenceValidation.js ─────────────
+// Node-runnable validation for the Stat & Simulation data-level inference layer.
+// Run:  node src/math/__validation__/inferenceValidation.js
+// Also exposes window.__validation.inference when imported in the browser.
+//
+// Pure-JS only — these modules import nothing browser-specific, so they run
+// under Node. Each suite returns { pass, fail }. Any failure sets a non-zero
+// process exit code so CI / a human notices.
+
+import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
+
+const TOL = 1e-9;
+const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
+const TOL_P = 1e-3;     // p-values: 3 dp
+
+function near(a, b, tol) {
+  if (!isFinite(a) && !isFinite(b)) return true;
+  return Math.abs(a - b) <= tol;
+}
+
+let _fails = [];
+function check(label, got, want, tol = TOL_STAT) {
+  const ok = near(got, want, tol);
+  if (!ok) _fails.push(`✗ ${label}: got ${got}, want ${want}, diff=${Math.abs(got - want).toExponential(3)}`);
+  return ok;
+}
+
+function runSuite(name, fn) {
+  _fails = [];
+  let pass = 0, fail = 0;
+  try {
+    const r = fn(check);
+    pass = r.pass; fail = r.fail;
+  } catch (e) {
+    _fails.push("EXCEPTION: " + e.stack);
+    fail = 1;
+  }
+  const localFails = _fails.slice();
+  return { name, pass, fail, ok: fail === 0, errors: localFails };
+}
+
+// ─── SUITES ───────────────────────────────────────────────────────────────────
+function suiteRNG(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  // Determinism: same seed → identical stream.
+  const r1 = mulberry32(123), r2 = mulberry32(123);
+  T(check("rng.deterministic", r1(), r2(), TOL));
+  // Range [0,1).
+  const r3 = mulberry32(7);
+  let inRange = true;
+  for (let i = 0; i < 1000; i++) { const v = r3(); if (v < 0 || v >= 1) inRange = false; }
+  T(inRange ? check("rng.range", 1, 1, TOL) : check("rng.range", 0, 1, TOL));
+  // makeRNG resolves a numeric seed and echoes it back.
+  const m = makeRNG(42);
+  T(check("makeRNG.seed", m.seed, 42, TOL));
+  // makeRNG(null) yields a finite resolved seed (auto-seed).
+  const m2 = makeRNG(null);
+  T(check("makeRNG.autoseed.finite", isFinite(m2.seed) ? 1 : 0, 1, TOL));
+  // randInt in [0,n).
+  const r4 = mulberry32(9);
+  let intsOk = true;
+  for (let i = 0; i < 500; i++) { const k = randInt(r4, 5); if (k < 0 || k >= 5 || k !== Math.floor(k)) intsOk = false; }
+  T(check("randInt.range", intsOk ? 1 : 0, 1, TOL));
+  // shuffle returns a permutation (same multiset) and a NEW array.
+  const src = [1, 2, 3, 4, 5];
+  const sh = shuffle(mulberry32(3), src);
+  T(check("shuffle.length", sh.length, 5, TOL));
+  T(check("shuffle.sum", sh.reduce((a, b) => a + b, 0), 15, TOL));
+  T(check("shuffle.nonmutating", src[0], 1, TOL));
+  // sampleWithReplacement returns m draws from the array's values.
+  const swr = sampleWithReplacement(mulberry32(1), [10, 20], 4);
+  T(check("swr.length", swr.length, 4, TOL));
+  T(check("swr.values", swr.every(v => v === 10 || v === 20) ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG]];
+
+export function runInferenceValidation() {
+  const results = SUITES.map(([n, fn]) => runSuite(n, fn));
+  return results;
+}
+
+// Node entrypoint
+if (typeof process !== "undefined" && process.argv && process.argv[1] && new URL(import.meta.url).pathname.replace(/^\//, "") === process.argv[1].replace(/\\/g, "/")) {
+  const results = runInferenceValidation();
+  let totalFail = 0;
+  for (const r of results) {
+    console.log(`${r.ok ? "✓" : "✗"} ${r.name}: ${r.pass} pass, ${r.fail} fail`);
+    r.errors.forEach(e => console.log("    " + e));
+    totalFail += r.fail;
+  }
+  if (totalFail > 0) process.exitCode = 1;
+}
+
+// Browser exposure
+if (typeof window !== "undefined") {
+  window.__validation = window.__validation || {};
+  window.__validation.inference = runInferenceValidation;
+}
