@@ -4,7 +4,7 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessAddressCol } from "../shared/guess.js";
 import { GEOCODE_BBOX_PRESETS, geocodeAddress, parseBBox, readGeocodeCache } from "../../../../services/data/geocoding.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function GeocodeSection({ rows, headers, C, onResult }) {
   const { appendLog } = useSessionLog();

@@ -4,7 +4,7 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, guessPointCountCol } from "../shared/guess.js";
 import { aggregateToGrid, aggregateGridById } from "../../../../math/SpatialEngine.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function AggregateToGridSection({ rows, headers, availableDatasets, C, onResult }) {
   const { appendLog } = useSessionLog();
