@@ -4,7 +4,7 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignBoundaryDistance } from "../../../../math/SpatialEngine.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function BoundaryDistanceSection({ rows, headers, availableDatasets, onResult, C }) {
   const { appendLog } = useSessionLog();

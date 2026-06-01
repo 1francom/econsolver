@@ -4,7 +4,7 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, isGeometryHeader } from "../shared/guess.js";
 import { assignRectGrid, assignH3Grid, assignPointsToGrid } from "../../../../math/SpatialEngine.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
   const { appendLog } = useSessionLog();

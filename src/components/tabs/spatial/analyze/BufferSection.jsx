@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignBuffer } from "../../../../math/SpatialEngine.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function BufferSection({ rows, headers, onResult, C }) {
   const { appendLog } = useSessionLog();

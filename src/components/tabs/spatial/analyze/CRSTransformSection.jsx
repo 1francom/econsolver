@@ -4,7 +4,7 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol } from "../shared/guess.js";
 import { transformCoord, transformWKT } from "../../../../math/SpatialEngine.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function CRSTransformSection({ rows, headers, onResult, C }) {
   const { appendLog } = useSessionLog();

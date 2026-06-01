@@ -4,7 +4,7 @@ import { mono, BUFFER_RADIUS_PRESETS, formatRadiusLabel } from "../shared/consta
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol } from "../shared/guess.js";
 import { createMetricPointBuffers, countPointsWithinGridCentroidBuffer } from "../../../../math/SpatialEngine.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function MetricBufferSection({ rows, headers, availableDatasets, onResult, C }) {
   const { appendLog } = useSessionLog();

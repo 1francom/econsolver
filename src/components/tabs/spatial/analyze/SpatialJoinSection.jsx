@@ -4,7 +4,7 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, isGeometryHeader } from "../shared/guess.js";
 import { spatialJoin } from "../../../../math/SpatialEngine.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
   const { appendLog } = useSessionLog();

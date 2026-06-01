@@ -4,7 +4,7 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignDistance, assignDistanceMetric, addDistanceBins } from "../../../../math/SpatialEngine.js";
-import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
+import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function DistanceSection({ rows, headers, onResult, C }) {
   const { appendLog } = useSessionLog();
