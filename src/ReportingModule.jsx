@@ -15,6 +15,7 @@ import { HintBox } from "./components/HelpSystem.jsx";
 import { stars, buildLatex } from "./math/index.js";
 import { interpretRegression, generateUnifiedScript } from "./services/AI/AIService.js";
 import { buildSessionSnapshot } from "./services/AI/sessionSnapshot.js";
+import { useSessionLog } from "./services/session/sessionLog.jsx";
 import { generateCleanScript } from "./pipeline/exporter.js";
 import { generateRScript }     from "./services/export/rScript.js";
 import { generatePythonScript } from "./services/export/pythonScript.js";
@@ -745,7 +746,7 @@ function SigCallout({ result }) {
 // Props:
 //   result       — normalised EstimationResult (for model section)
 //   cleanedData  — { cleanRows, headers, pipeline, dataDictionary, filename }
-function AIUnifiedScript({ result, cleanedData, snapshot }) {
+function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = [] }) {
   const { C } = useTheme();
   const [open,     setOpen]     = useState(false);
   const [lang,     setLang]     = useState("r");
@@ -798,12 +799,16 @@ function AIUnifiedScript({ result, cleanedData, snapshot }) {
     setScript("");
     try {
       const dsName  = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
+      const dsMap = Object.fromEntries(
+        availableDatasets.map(ds => [ds.id, { name: ds.name ?? ds.filename, filename: ds.filename }])
+      );
       const cleanSc = generateCleanScript({
         language:    lang,
         datasetName: dsName,
         filename:    cleanedData?.filename ?? "dataset.csv",
         pipeline:    cleanedData?.pipeline ?? [],
-        allDatasets: {},
+        loadOpts:    cleanedData?.loadOpts ?? null,
+        allDatasets: dsMap,
       });
       const modelSc = _buildModelScript(lang);
       const dict    = cleanedData?.dataDictionary ?? null;
@@ -947,7 +952,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot }) {
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function ReportingModule({ result: rawResult, cleanedData, onClose }) {
+export default function ReportingModule({ result: rawResult, cleanedData, availableDatasets = [], onClose }) {
   const { C } = useTheme();
   const [tab, setTab] = useState("forest");
 
@@ -958,9 +963,10 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
 
   // ── Build session snapshot once per render — passed to AI calls so Claude
   //    sees data load opts (sep, sheet, encoding), pipeline, dictionary, etc.
+  const { log: sessionLog } = useSessionLog();
   const snapshot = useMemo(
-    () => buildSessionSnapshot({ cleanedData, result: rawResult }),
-    [cleanedData, rawResult]
+    () => buildSessionSnapshot({ cleanedData, result: rawResult, sessionLog }),
+    [cleanedData, rawResult, sessionLog]
   );
 
   // Detect Sharp RDD / Spatial RD — canonical shape uses type, legacy shape carries rddData or raw fields
@@ -1181,7 +1187,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, onClos
         </div>
 
         {/* ── AI Unified Script Export — Phase 9.10 ── */}
-        <AIUnifiedScript result={result} cleanedData={cleanedData} snapshot={snapshot} />
+        <AIUnifiedScript result={result} cleanedData={cleanedData} snapshot={snapshot} availableDatasets={availableDatasets} />
 
       </div>
     </div>

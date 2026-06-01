@@ -653,8 +653,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
           ["structure", "⊞ Panel Structure"],
           ["transform", "⊕ Transform"],
-          ["reshape",   "⟲ Reshape"],
-          ["merge",     "⊞ Merge"],
+          ["reshape",   "⟲ Reshape & Merge"],
           ["dictionary","◈ Dictionary"],
         ]} active={tab} set={setTab}/>
 
@@ -684,11 +683,13 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep} duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "reshape" && (
-          <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
-        )}
-        {tab === "merge" && (
-          <MergeTab rows={rows} headers={headers} filename={filename}
-            allDatasets={allDatasets} onAdd={addStep}/>
+          <div>
+            <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
+            <div style={{margin:"1.2rem 0 0.6rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.2rem"}}>
+              <MergeTab rows={rows} headers={headers} filename={filename}
+                allDatasets={allDatasets} onAdd={addStep}/>
+            </div>
+          </div>
         )}
         {tab === "dictionary" && (
           <DictionaryTab headers={headers} rows={rows}

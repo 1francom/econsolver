@@ -59,7 +59,8 @@ src/
 │   │                                WRANGLING_TRANSFORM_PROMPT, WRANGLING_QUERY_PROMPT,
 │   │                                CLEANING_SUGGESTIONS_PROMPT
 │   ├── session/
-│   │   └── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
+│   │   ├── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
+│   │   └── sessionLog.jsx        ← React Context cross-module operation log (SessionLogProvider, useSessionLog)
 │   ├── Privacy/
 │   │   ├── index.js              ← privacy module barrel export
 │   │   ├── anonymizer.js         ← data anonymization utilities
@@ -91,7 +92,7 @@ src/
 │   │   ├── ExportMenu.jsx        ← CSV + pipeline.json export
 │   │   ├── CleanTab.jsx          ← NormalizePanel, FilterBuilder, FillNaSection
 │   │   ├── PanelTab.jsx          ← heatmap + panel declaration
-│   │   ├── FeatureTab.jsx        ← transforms: log, sq, z-score, winsorize, lag/lead, dummies, dates
+│   │   ├── FeatureTab.jsx        ← transforms: log, sq, z-score, winsorize, lag/lead, dates; Formatting tab (Numbers+Strings merged)
 │   │   ├── ReshapeTab.jsx        ← pivot_longer, group_summarize
 │   │   ├── DictionaryTab.jsx     ← AI inference + manual edit
 │   │   ├── MergeTab.jsx          ← LEFT/INNER JOIN + APPEND
@@ -117,7 +118,43 @@ src/
 │   ├── tabs/
 │   │   ├── CalculateTab.jsx      ← calculator tab; HintBox with calculator tips
 │   │   ├── SimulateTab.jsx       ← simulate tab; HintBox with simulate tips
-│   │   └── SpatialTab.jsx        ← spatial analytics tab (Phase 11); HintBox with spatial tips
+│   │   ├── SpatialTab.jsx        ← spatial analytics tab root shell only (245 lines): Analyze/Map/Plot tab router + pendingRows/OutputPanel save state
+│   │   └── spatial/
+│   │       ├── shared/
+│   │       │   ├── constants.js  ← mono, arrMin, arrMax, BUFFER_RADIUS_PRESETS, formatRadiusLabel
+│   │       │   ├── leaflet.js    ← BASEMAPS, CARTO_TILE, tile math (lonToTx/latToTy/txToLon/tyToLat/pickTileZ), addBasemap, loadLeaflet (CDN singleton)
+│   │       │   ├── crs.js        ← loadProj4, PRESET_CRS, isProjectedWKT, makeCabaMetricGrid
+│   │       │   ├── wkt.js        ← splitParenGroups, leafletPolygonLatLngs, wktToLeaflet ([lat,lon]), parseWktRings ([x,y] for SVG)
+│   │       │   ├── color.js      ← CAT_PALETTE, buildColorScale
+│   │       │   ├── atoms.jsx     ← ColSelect, NumInput, TextInput, ApplyBtn, SaveBtn, ResultPreview, ErrBanner, Section
+│   │       │   └── guess.js      ← guessLatCol/guessLonCol/guessWktCol/guessPointCountCol/looksLikeWktValue/isGeometryHeader/guessAddressCol
+│   │       ├── analyze/          ← one *Section per spatial op, each communicates via onResult(rows, newCols)
+│   │       │   ├── CRSTransformSection.jsx
+│   │       │   ├── DistanceSection.jsx
+│   │       │   ├── BufferSection.jsx
+│   │       │   ├── MetricBufferSection.jsx
+│   │       │   ├── GridSection.jsx
+│   │       │   ├── SpatialJoinSection.jsx
+│   │       │   ├── AggregateToGridSection.jsx
+│   │       │   ├── NearestNeighborSection.jsx
+│   │       │   ├── GeocodeSection.jsx
+│   │       │   ├── BoundaryDistanceSection.jsx
+│   │       │   ├── OutputPanel.jsx ← save-bar for pendingRows
+│   │       │   └── _parked/      ← defined-but-never-rendered orphans (kept, unimported)
+│   │       │       ├── SpatialMapSection.jsx
+│   │       │       └── SpatialRDDSection.jsx
+│   │       ├── map/              ← Leaflet live map builder tab (self-contained)
+│   │       │   ├── SpatialPlotTab.jsx ← the Map tab root
+│   │       │   ├── SpatialLayerEditor.jsx
+│   │       │   ├── ColorRow.jsx
+│   │       │   ├── MapLegend.jsx
+│   │       │   └── layers.js     ← LAYER_COLORS + mkSLayer
+│   │       └── plot/            ← Observable Plot / SVG geo-plot tab (self-contained)
+│   │           ├── SpatialGeoPlot.jsx ← the Plot tab root
+│   │           ├── GeoPlotCanvas.jsx ← forwardRef SVG canvas; draws basemap tile underlay
+│   │           ├── GeoLayerConfig.jsx
+│   │           ├── geo.js        ← loadGeoPlt (CDN singleton), geoBbox, GEO_COLORS, mkGeoLayer
+│   │           └── legend.js     ← GEO_MARGIN, appendSvgLegend
 │   ├── workspace/
 │   │   ├── WorkspaceBar.jsx      ← 7-tab nav bar (Data/Clean/Explore/Model/Simulate/Calculate/Report) + DatasetManager toggle + ? tour button
 │   │   └── DatasetManager.jsx    ← collapsible D·N dataset button + dropdown panel showing all session datasets

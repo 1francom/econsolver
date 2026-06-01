@@ -577,11 +577,10 @@ function ConditionalSubTab({ headers, onAdd }) {
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   const { C } = useTheme();
   const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
+  const [fmtMode,setFmtMode]=useState("numbers");
   const [qt,setQt]=useState("log"),[qc,setQc]=useState(""),[xc2,setXc2]=useState("");
   const [pop,setPop]=useState("lag"),[pc,setPc]=useState(""),[lagN,setLagN]=useState(1);
-  const [dc,setDc]=useState(""),[dp,setDp]=useState("");
   const [dtc,setDtc]=useState(""),[dpc,setDpc]=useState("");
-  const [dummyRef,setDummyRef]=useState("");
   // Date extraction state
   const [dateSrc,setDateSrc]=useState("");
   const [dateParts,setDateParts]=useState({year:false,month:true,day:false,week:false,quarter:false,dow:false,isweekend:false});
@@ -685,8 +684,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
     else if(pop==="diff") onAdd({type:"diff",col:pc,nn:n,ec,tc,desc:`Δ${pc} (i=${ec}) → ${n}`});
     setNm("");setPc("");
   };
-  const doDummy=()=>{const pfx=(dp.trim()||dc).replace(/\s+/g,"_");if(!dc)return;onAdd({type:"dummy",col:dc,pfx,desc:`Dummies from '${dc}' → ${pfx}_*`});setDp("");setDc("");};
-  const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd({type:"did",tc:dtc,pc:dpc,nn:n,desc:`DiD: ${dtc}×${dpc} → ${n}`});setNm("");setDtc("");setDpc("");};
+const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd({type:"did",tc:dtc,pc:dpc,nn:n,desc:`DiD: ${dtc}×${dpc} → ${n}`});setNm("");setDtc("");setDpc("");};
 
   const doDateExtract=()=>{
     if(!dateSrc) return;
@@ -711,7 +709,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
 
   return(
     <div>
-      <Tabs tabs={[["quick","⚡ Shortcuts"],["mutate","ƒ Mutate"],["conditional","⊕ Conditional"],["date","📅 Date"],["panel",`⊞ Panel${!isP?" (no idx)":""}`],["dummy","⊕ Dummies"],["numbers","⬡ Numbers"],["strings","◈ Strings"]]} active={vt} set={setVt} accent={C.teal} sm/>
+      <Tabs tabs={[["quick","⚡ Shortcuts"],["mutate","ƒ Mutate"],["conditional","⊕ Conditional"],["date","📅 Date"],...(isP?[["panel","⊞ Panel"]]:[]),["formatting","⬡ Formatting"]]} active={vt} set={setVt} accent={C.teal} sm/>
 
       {/* ── Variable name input (shared by quick/panel/did) ── */}
       {(vt==="quick"||vt==="panel"||vt==="did")&&(
@@ -907,78 +905,6 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
           </div>
       )}
 
-      {/* ── Dummies ── */}
-      {vt==="dummy"&&(()=>{
-        const dummyCols=headers.filter(h=>info[h]?.isCat||(!info[h]?.isNum&&info[h]?.uCount>0&&info[h]?.uCount<=30));
-        const uVals=dc?(info[dc]?.uVals||[]).map(v=>String(v)):[];
-        // per-category counts for preview
-        const catCounts={};
-        if(dc) rows.forEach(r=>{const v=r[dc];if(v!=null){const s=String(v);catCounts[s]=(catCounts[s]||0)+1;}});
-        return(
-        <div>
-          <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.green}`,borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
-            One-hot encode a categorical column. Choose a <span style={{color:C.red}}>reference category</span> to omit (prevents perfect multicollinearity in OLS).
-          </div>
-
-          <Lbl color={C.green}>Source column</Lbl>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
-            {dummyCols.map(h=>(
-              <button key={h} onClick={()=>{setDc(h);setDp(h);setDummyRef("");}}
-                style={{padding:"0.28rem 0.6rem",border:`1px solid ${dc===h?C.green:C.border2}`,background:dc===h?`${C.green}18`:"transparent",color:dc===h?C.green:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>
-                {dc===h?"✓ ":""}{h}
-                <span style={{fontSize:9,color:C.textMuted,marginLeft:4}}>({info[h]?.uCount})</span>
-              </button>
-            ))}
-          </div>
-
-          {dc&&(
-            <>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.8rem",marginBottom:"1rem"}}>
-                <div>
-                  <Lbl color={C.green}>Column prefix</Lbl>
-                  <input value={dp} onChange={e=>setDp(e.target.value)} placeholder={dc}
-                    style={{width:"100%",boxSizing:"border-box",padding:"0.38rem 0.6rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
-                </div>
-                <div>
-                  <Lbl color={C.red}>Reference category <span style={{color:C.textMuted}}>(omit)</span></Lbl>
-                  <select value={dummyRef} onChange={e=>setDummyRef(e.target.value)}
-                    style={{width:"100%",padding:"0.38rem 0.6rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none",cursor:"pointer"}}>
-                    <option value="">— none (keep all) —</option>
-                    {uVals.map(v=><option key={v} value={v}>{v} ({catCounts[v]||0})</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Category preview with counts */}
-              <Lbl color={C.textMuted}>Categories that will be created</Lbl>
-              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>
-                {uVals.map(v=>{
-                  const isRef=v===dummyRef;
-                  const colName=`${dp||dc}_${v}`;
-                  return(
-                    <div key={v} style={{padding:"0.28rem 0.6rem",border:`1px solid ${isRef?C.red+"40":C.border2}`,background:isRef?`${C.red}08`:"transparent",borderRadius:3,fontSize:10,fontFamily:mono}}>
-                      <span style={{color:isRef?C.red:C.green}}>{isRef?"✕ ":""}{colName}</span>
-                      <span style={{color:C.textMuted,marginLeft:4}}>n={catCounts[v]||0}</span>
-                      {isRef&&<span style={{color:C.red,fontSize:9,marginLeft:3}}>(ref)</span>}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:"0.8rem"}}>
-                <Btn onClick={()=>{
-                  const pfx=(dp.trim()||dc).replace(/\s+/g,"_");
-                  const cats=uVals.filter(v=>v!==dummyRef);
-                  onAdd({type:"dummy",col:dc,pfx,refCat:dummyRef||null,
-                    desc:`Dummies '${dc}' → ${pfx}_* (${cats.length} cols${dummyRef?`, ref=${dummyRef}`:""})`});
-                  setDp("");setDc("");setDummyRef("");
-                }} color={C.green} v="solid" ch={`Create ${uVals.filter(v=>v!==dummyRef).length} dummies`}/>
-              </div>
-            </>
-          )}
-        </div>
-        );
-      })()}
 
       {/* ── Mutate ── */}
       {vt==="mutate"&&<MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>}
@@ -1112,9 +1038,20 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
         );
       })()}
 
-      {/* ── Numbers / Strings (FormatTab sub-tabs) ── */}
-      {vt==="numbers"&&<FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="numbers"/>}
-      {vt==="strings"&&<FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="strings"/>}
+      {/* ── Formatting (Numbers + Strings combined) ── */}
+      {vt==="formatting"&&(
+        <div>
+          <div style={{display:"flex",gap:6,marginBottom:"1rem"}}>
+            {[["numbers","⬡ Numbers"],["strings","◈ Strings"]].map(([m,l])=>(
+              <button key={m} onClick={()=>setFmtMode(m)}
+                style={{padding:"0.28rem 0.75rem",border:`1px solid ${fmtMode===m?C.teal:C.border2}`,background:fmtMode===m?`${C.teal}18`:"transparent",color:fmtMode===m?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode={fmtMode}/>
+        </div>
+      )}
 
     </div>
   );

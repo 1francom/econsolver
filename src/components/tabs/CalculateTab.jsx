@@ -23,6 +23,7 @@ import { symbolicDiff, latexName } from "../../math/symbolicDiff.js";
 import { solveAlgebraicEquation } from "../../math/symbolicSolve.js";
 import { useTheme } from "../../ThemeContext.jsx";
 import Workbench from "../calculate/workbench/Workbench.jsx";
+import { useSessionLog } from "../../services/session/sessionLog.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
@@ -1416,6 +1417,7 @@ function MonteCarloSection({ onAddColumn, onCreateDataset }) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function CalculateTab({ pid, rows = [], headers = [], onAddDataset, onAddColumn, onCreateDataset }) {
   const { C } = useTheme();
+  const { appendLog } = useSessionLog();
   // ── Variable workspace ─────────────────────────────────────────────────────
   const [variables,    setVariables]   = useState([]);
   const [computeds,    setComputeds]   = useState([]);
@@ -1572,6 +1574,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
       Object.assign(base, { rawValue: String(val), sliderMin: String(min), sliderMax: String(max), sliderStep: String(step) });
     }
     setVariables(vs => [...vs, base]);
+    appendLog({ module: "calculate", opType: "add_variable", params: { name: n, type: newType, value: newValue || defaultVal(newType) }, label: `Variable ${n} = ${newValue || defaultVal(newType)} (${newType})` });
     setNewName(""); setNewValue("");
   }
   function addComputed() {

@@ -2,6 +2,7 @@
 // Root orchestrator. Manages global state and screen routing.
 // All heavy logic lives in the module files — this file should stay thin.
 import { useState, useRef, useEffect, useMemo, Fragment } from "react";
+import * as XLSX from "xlsx";
 import DataStudio, { parseFileForPrimary } from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './components/ModelingTab.jsx';
@@ -11,6 +12,7 @@ import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import { SessionStateProvider } from './services/session/sessionState.jsx';
+import { SessionLogProvider } from './services/session/sessionLog.jsx';
 import {
   listPipelines, deletePipeline, clearAllPipelines, loadPipeline, loadRawData,
   saveProject, listProjects, deleteProject, clearAllProjects,
@@ -217,7 +219,6 @@ function Uploader({onReady}){
       let text="";
       if(name.endsWith(".xlsx")||name.endsWith(".xls")){
         const ab=await file.arrayBuffer();
-        const XLSX=await import("xlsx");
         const wb=XLSX.read(ab,{type:"array"});
         text=XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
       } else {
@@ -2106,6 +2107,7 @@ export default function App() {
 
         {screen==="workspace" && (
           <SessionStateProvider key={pid}>
+          <SessionLogProvider>
 
             <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
               <WorkspaceBar
@@ -2272,7 +2274,7 @@ export default function App() {
                 {/* REPORT — Phase 9.10 */}
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
                   {tabOutput("report")
-                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} />
+                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} availableDatasets={availableDatasets} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }
                 </div>
@@ -2312,6 +2314,7 @@ export default function App() {
             modelResult={activeResult}
             prefillMessage={coachPrefill}
           />
+          </SessionLogProvider>
           </SessionStateProvider>
         )}
 

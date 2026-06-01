@@ -11,6 +11,7 @@
 // Pure JS, no React imports.
 
 import { toR, toStata, toPython } from "./stepTranslators.js";
+import { buildRLoadLine, buildPyLoadLine, buildStataLoadLine } from "../services/export/loadLine.js";
 
 // ─── LANGUAGE METADATA ───────────────────────────────────────────────────────
 
@@ -91,17 +92,16 @@ function toStataFile(name) {
  * @param {object}  opts.allDatasets  - { id: { name, filename } } — for resolving join/append names
  * @returns {string}
  */
-export function generateCleanScript({ language, datasetName, filename, pipeline, allDatasets = {} }) {
+export function generateCleanScript({ language, datasetName, filename, pipeline, allDatasets = {}, loadOpts = null }) {
   const lang = LANG[language];
   if (!lang) throw new Error(`Unknown language: ${language}`);
 
   if (language === "r") {
     const df   = toDfVar(datasetName);
-    const file = filename ? `"${filename}"` : `"<path_to_${datasetName.replace(/\s+/g, "_")}.csv>"`;
     const lines = [
       rHeader(datasetName),
       `# ── Load dataset ──`,
-      `${df} <- readr::read_csv(${file})`,
+      buildRLoadLine(filename, loadOpts).replace(/^df/, df),
       ``,
     ];
     if (pipeline.length) {
@@ -117,11 +117,10 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
   }
 
   if (language === "stata") {
-    const file = filename ? `"${filename}"` : `"<path_to_${datasetName.replace(/\s+/g, "_")}.dta>"`;
     const lines = [
       stataHeader(datasetName),
       `* ── Load dataset ──`,
-      `import delimited ${file}, clear`,
+      buildStataLoadLine(filename, loadOpts),
       ``,
     ];
     if (pipeline.length) {
@@ -138,11 +137,10 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
 
   if (language === "python") {
     const df   = toDfVar(datasetName);
-    const file = filename ? `"${filename}"` : `"<path_to_${datasetName.replace(/\s+/g, "_")}.csv>"`;
     const lines = [
       pythonHeader(datasetName),
       `# ── Load dataset ──`,
-      `${df} = pd.read_csv(${file})`,
+      buildPyLoadLine(filename, loadOpts).replace(/^df/, df),
       ``,
     ];
     if (pipeline.length) {

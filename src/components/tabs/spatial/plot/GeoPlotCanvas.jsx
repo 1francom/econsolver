@@ -1,0 +1,281 @@
+// ─── ECON STUDIO · spatial/plot/GeoPlotCanvas.jsx ─ (moved verbatim from SpatialTab.jsx)
+import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import { parseWktRings } from "../shared/wkt.js";
+import { buildColorScale } from "../shared/color.js";
+import { CARTO_TILE, lonToTx, latToTy, txToLon, tyToLat, pickTileZ } from "../shared/leaflet.js";
+import { makeCabaMetricGrid } from "../shared/crs.js";
+import { geoBbox } from "./geo.js";
+import { GEO_MARGIN, appendSvgLegend } from "./legend.js";
+
+export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
+  { Plt, layers, rows, availableDatasets, title, subtitle, caption,
+    maxW = 700, maxH = 0, forceH = 0, showTiles = false, C },
+  ref
+) {
+  const canvasRef  = useRef(null);
+  const tileCanRef = useRef(null);
+  const wrapperRef = useRef(null);
+  // Track computed plot size for tile canvas positioning
+  const dimsRef    = useRef({ plotW: 0, plotH: 0, svgW: 0, innerW: 0, innerH: 0, xMin: 0, xMax: 1, yMin: 0, yMax: 1 });
+
+  useImperativeHandle(ref, () => ({
+    // Composite export: tiles canvas (if present) + SVG on top → PNG download
+    exportToPng: (filename = "geo_plot.png") => new Promise(resolve => {
+      const svg = canvasRef.current?.querySelector("svg");
+      if (!svg) { resolve(); return; }
+      const { plotW, plotH, svgW = plotW } = dimsRef.current;
+      if (!plotW || !plotH) { resolve(); return; }
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width  = svgW * scale;
+      canvas.height = plotH * scale;
+      const ctx = canvas.getContext("2d");
+
+      const drawSvgLayer = () => {
+        const svgStr  = new XMLSerializer().serializeToString(svg);
+        const svgBlob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+        const svgUrl  = URL.createObjectURL(svgBlob);
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, svgW * scale, plotH * scale);
+          URL.revokeObjectURL(svgUrl);
+          const a = document.createElement("a");
+          a.href = canvas.toDataURL("image/png");
+          a.download = filename;
+          a.click();
+          resolve();
+        };
+        img.onerror = () => { URL.revokeObjectURL(svgUrl); resolve(); };
+        img.src = svgUrl;
+      };
+
+      // Draw tile canvas first if tiles are shown
+      const tileCanvas = tileCanRef.current;
+      if (showTiles && tileCanvas && tileCanvas.width > 0) {
+        try { ctx.drawImage(tileCanvas, 0, 0, plotW * scale, plotH * scale); } catch {}
+        drawSvgLayer();
+      } else {
+        ctx.fillStyle = C?.bg ?? "#0e1117";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawSvgLayer();
+      }
+    }),
+    exportToPdf: () => {
+      const svg = canvasRef.current?.querySelector("svg");
+      if (!svg) return;
+      const { plotW, plotH, svgW = plotW } = dimsRef.current;
+      const svgStr  = new XMLSerializer().serializeToString(svg);
+      const blob    = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+      const blobUrl = URL.createObjectURL(blob);
+      const iframe  = document.createElement("iframe");
+      iframe.style.cssText = `position:fixed;top:-9999px;left:-9999px;width:${svgW}px;height:${plotH}px;border:none;`;
+      iframe.src = blobUrl;
+      iframe.onload = () => {
+        try { iframe.contentWindow.print(); } catch (_) { alert("PDF export: use the browser print dialog."); }
+        setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(iframe); }, 2000);
+      };
+      document.body.appendChild(iframe);
+    },
+  }), [showTiles]);
+
+  useEffect(() => {
+    if (!Plt || !canvasRef.current || layers.length === 0) return;
+    const el = canvasRef.current;
+    while (el.firstChild) el.removeChild(el.firstChild);
+
+    const [xMin, xMax, yMin, yMax] = geoBbox(layers, rows, availableDatasets);
+    const midLat = (yMin + yMax) / 2;
+    const cosLat = Math.max(0.1, Math.cos(midLat * Math.PI / 180));
+    const plotLegend = (() => {
+      for (const ly of [...layers].reverse()) {
+        if (!ly.visible) continue;
+        const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+        if (ly.type === "grid" && ly.mode === "wkt" && ly.colorByCol) return buildColorScale(r, ly.colorByCol).legend;
+        if (ly.type === "point" && ly.colorCol) return buildColorScale(r, ly.colorCol).legend;
+      }
+      return null;
+    })();
+    const legendW = plotLegend ? 160 : 0;
+
+    // Compute dimensions: preserve geographic aspect ratio within maxW × maxH.
+    // When height is constrained (by maxH or forceH), shrink width accordingly.
+    const xRange = xMax - xMin, yRange = yMax - yMin;
+    const ML = GEO_MARGIN.left, MR = GEO_MARGIN.right, MT = GEO_MARGIN.top, MB = GEO_MARGIN.bottom;
+    const innerMaxW = Math.max(160, maxW - legendW - ML - MR);
+    // idealH = height needed for full width at correct aspect ratio (cosLat correction)
+    const idealH    = Math.round(innerMaxW * (yRange / Math.max(xRange, 1e-9)) / cosLat) + MT + MB;
+    let plotW, plotH;
+    const effectiveMaxH = maxH > 0 ? maxH : Infinity;
+    if (forceH > 0) {
+      plotH = Math.min(forceH, effectiveMaxH === Infinity ? forceH : effectiveMaxH);
+    } else {
+      plotH = Math.min(Math.max(idealH, 180), effectiveMaxH === Infinity ? Math.max(idealH, 180) : effectiveMaxH);
+    }
+    // Back-compute plotW from plotH to maintain correct aspect ratio
+    const innerH    = Math.max(1, plotH - MT - MB);
+    const idealInnerW = Math.round(innerH * (xRange / Math.max(yRange, 1e-9)) * cosLat);
+    const innerW    = Math.min(idealInnerW, innerMaxW);
+    plotW = innerW + ML + MR;
+    const svgW = plotW + legendW;
+    dimsRef.current = { plotW, plotH, svgW, innerW, innerH, xMin, xMax, yMin, yMax };
+
+    const marks = [Plt.frame({ stroke: C?.border ?? "#2e3340", strokeWidth: 0.5 })];
+
+    for (const ly of layers) {
+      if (!ly.visible) continue;
+      const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+      if (ly.type === "point" && ly.latCol && ly.lonCol) {
+        marks.push(Plt.dot(r.filter(row => !isNaN(parseFloat(row[ly.latCol])) && !isNaN(parseFloat(row[ly.lonCol]))), {
+          x: row => parseFloat(row[ly.lonCol]), y: row => parseFloat(row[ly.latCol]),
+          fill: ly.fill ?? "#6ec8b4", r: ly.radius ?? 4,
+          fillOpacity: ly.fillOpacity ?? 0.78, stroke: "none",
+        }));
+      } else if (ly.type === "grid" && ly.mode === "wkt" && ly.wktCol) {
+        const { getColor } = buildColorScale(r, ly.colorByCol);
+        for (const row of r) {
+          const parsed = parseWktRings(row[ly.wktCol]);
+          if (!parsed) continue;
+          const fill = ly.colorByCol ? (getColor(row) ?? ly.fill ?? "none") : (ly.fill ?? "none");
+          const fillOpacity = ly.colorByCol ? (ly.colorFillOpacity ?? 0.65) : (ly.fillOpacity ?? 0.08);
+          for (const ring of parsed.rings) {
+            if (ring.length < 2) continue;
+            marks.push(Plt.line([...ring, ring[0]], {
+              x: d => d[0], y: d => d[1],
+              fill,
+              fillOpacity,
+              stroke: ly.stroke ?? "#888", strokeWidth: ly.strokeWidth ?? 0.3,
+              strokeLinejoin: "round", strokeLinecap: "round",
+            }));
+          }
+        }
+      } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "boundary" && ly.boundaryCol) {
+        try {
+          const col = ly.boundaryCol;
+          const boundaries = r.map(row => row[col]).filter(Boolean);
+          for (const boundaryWkt of boundaries) {
+            const cells = makeCabaMetricGrid(boundaryWkt, Number(ly.cellsize) || 500, ly.clipBorder !== false);
+            for (const cell of cells) {
+              const parsed = parseWktRings(cell.geometry);
+              if (!parsed) continue;
+              for (const ring of parsed.rings) {
+                if (ring.length < 2) continue;
+                marks.push(Plt.line([...ring, ring[0]], {
+                  x: d => d[0], y: d => d[1],
+                  fill: "none",
+                  stroke: ly.stroke ?? "#888", strokeWidth: ly.strokeWidth ?? 0.3,
+                  strokeLinejoin: "round", strokeLinecap: "round",
+                }));
+              }
+            }
+          }
+        } catch (_) { /* skip */ }
+      } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && ly.latCol && ly.lonCol) {
+        try {
+          const lats = r.map(row => parseFloat(row[ly.latCol])).filter(v => !isNaN(v));
+          const lons = r.map(row => parseFloat(row[ly.lonCol])).filter(v => !isNaN(v));
+          if (lats.length && lons.length) {
+            const pad = 0.0001;
+            const lat0 = Math.min(...lats) - pad, lat1 = Math.max(...lats) + pad;
+            const lon0 = Math.min(...lons) - pad, lon1 = Math.max(...lons) + pad;
+            const bboxWkt = `POLYGON((${lon0} ${lat0}, ${lon1} ${lat0}, ${lon1} ${lat1}, ${lon0} ${lat1}, ${lon0} ${lat0}))`;
+            const cells = makeCabaMetricGrid(bboxWkt, Number(ly.cellsize) || 500, false);
+            for (const cell of cells) {
+              const parsed = parseWktRings(cell.geometry);
+              if (!parsed) continue;
+              for (const ring of parsed.rings) {
+                if (ring.length < 2) continue;
+                marks.push(Plt.line([...ring, ring[0]], {
+                  x: d => d[0], y: d => d[1],
+                  fill: ly.fill ?? "none", fillOpacity: ly.fillOpacity ?? 0.35,
+                  stroke: ly.stroke ?? "#888", strokeWidth: ly.strokeWidth ?? 0.3,
+                  strokeLinejoin: "round",
+                }));
+              }
+            }
+          }
+        } catch (_) { /* skip */ }
+      } else if (ly.wktCol) {
+        for (const row of r) {
+          const parsed = parseWktRings(row[ly.wktCol]);
+          if (!parsed) continue;
+          for (const ring of parsed.rings) {
+            if (ring.length < 2) continue;
+            const closed = parsed.type === "polygon" ? [...ring, ring[0]] : ring;
+            marks.push(Plt.line(closed, {
+              x: d => d[0], y: d => d[1],
+              fill: (parsed.type === "polygon" && ly.fill !== "none") ? (ly.fill ?? "none") : "none",
+              fillOpacity: ly.fillOpacity ?? 0,
+              stroke: ly.stroke ?? "#333", strokeWidth: ly.strokeWidth ?? 0.8,
+              strokeLinejoin: "round", strokeLinecap: "round",
+            }));
+          }
+        }
+      }
+    }
+
+    try {
+      const svg = Plt.plot({
+        width: plotW, height: plotH,
+        marginTop: MT, marginRight: MR, marginBottom: MB, marginLeft: ML,
+        style: { background: showTiles ? "transparent" : (C?.bg ?? "#0e1117"), color: C?.text ?? "#c8c8c8", fontFamily: "serif", fontSize: "11px" },
+        x: { domain: [xMin, xMax], label: null, nice: false, grid: true,
+             tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°W` : `${d.toFixed(2)}°E` },
+        y: { domain: [yMin, yMax], label: null, nice: false, grid: true,
+             tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°S` : `${d.toFixed(2)}°N` },
+        marks,
+      });
+      appendSvgLegend(svg, plotLegend, C, plotW, plotH, legendW);
+      el.appendChild(svg);
+    } catch (e) {
+      const errDiv = document.createElement("div");
+      errDiv.style.cssText = "color:#c47070;font-family:monospace;font-size:10px;padding:8px";
+      errDiv.textContent = e.message;
+      el.appendChild(errDiv);
+    }
+
+    // ── Draw CARTO tiles on the tile canvas ──────────────────────────────────
+    if (showTiles && tileCanRef.current) {
+      const tc = tileCanRef.current;
+      tc.width  = plotW;
+      tc.height = plotH;
+      const ctx = tc.getContext("2d");
+      ctx.fillStyle = C?.bg ?? "#0e1117"; // theme background
+      ctx.fillRect(0, 0, plotW, plotH);
+
+      const lonToPx = lon => ML + (lon - xMin) / (xMax - xMin) * innerW;
+      const latToPy = lat => MT + (yMax - lat) / (yMax - yMin) * innerH;
+      const z = pickTileZ(xMax - xMin, yMax - yMin);
+      const tx0 = lonToTx(xMin, z), tx1 = lonToTx(xMax, z);
+      const ty0 = latToTy(yMax, z), ty1 = latToTy(yMin, z);
+
+      for (let tx = tx0; tx <= tx1; tx++) {
+        for (let ty = ty0; ty <= ty1; ty++) {
+          const lon0 = txToLon(tx,   z), lon1 = txToLon(tx + 1, z);
+          const lat1 = tyToLat(ty,   z), lat0 = tyToLat(ty + 1, z); // lat1 > lat0
+          const px0 = lonToPx(lon0), px1 = lonToPx(lon1);
+          const py0 = latToPy(lat1), py1 = latToPy(lat0);
+          const url = CARTO_TILE.replace("{z}", z).replace("{x}", tx).replace("{y}", ty);
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => { try { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); } catch {} };
+          img.onerror = () => {};
+          img.src = url;
+        }
+      }
+    }
+
+    return () => { while (el.firstChild) el.removeChild(el.firstChild); };
+  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, maxW, maxH, forceH, showTiles, C]);
+
+  return (
+    <div ref={wrapperRef} style={{ fontFamily: "serif", color: C?.text ?? "#c8c8c8", background: C?.bg ?? "#0e1117", padding: "12px 8px 8px", borderRadius: 4, border: `1px solid ${C?.border ?? "#2e3340"}` }}>
+      {title    && <div style={{ textAlign: "center", fontSize: 15, fontWeight: "bold", marginBottom: 2 }}>{title}</div>}
+      {subtitle && <div style={{ textAlign: "center", fontSize: 11, color: C?.textMuted ?? "#8a9ab0", marginBottom: 6 }}>{subtitle}</div>}
+      <div style={{ position: "relative" }}>
+        {showTiles && <canvas ref={tileCanRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />}
+        <div ref={canvasRef} style={{ position: "relative" }} />
+      </div>
+      {caption  && <div style={{ textAlign: "right", fontSize: 9, color: C?.textMuted ?? "#5a6880", marginTop: 4 }}>{caption}</div>}
+    </div>
+  );
+});
