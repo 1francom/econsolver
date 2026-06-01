@@ -59,7 +59,8 @@ src/
 │   │                                WRANGLING_TRANSFORM_PROMPT, WRANGLING_QUERY_PROMPT,
 │   │                                CLEANING_SUGGESTIONS_PROMPT
 │   ├── session/
-│   │   └── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
+│   │   ├── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
+│   │   └── sessionLog.jsx        ← React Context cross-module operation log (SessionLogProvider, useSessionLog)
 │   ├── Privacy/
 │   │   ├── index.js              ← privacy module barrel export
 │   │   ├── anonymizer.js         ← data anonymization utilities
@@ -91,7 +92,7 @@ src/
 │   │   ├── ExportMenu.jsx        ← CSV + pipeline.json export
 │   │   ├── CleanTab.jsx          ← NormalizePanel, FilterBuilder, FillNaSection
 │   │   ├── PanelTab.jsx          ← heatmap + panel declaration
-│   │   ├── FeatureTab.jsx        ← transforms: log, sq, z-score, winsorize, lag/lead, dummies, dates
+│   │   ├── FeatureTab.jsx        ← transforms: log, sq, z-score, winsorize, lag/lead, dates; Formatting tab (Numbers+Strings merged)
 │   │   ├── ReshapeTab.jsx        ← pivot_longer, group_summarize
 │   │   ├── DictionaryTab.jsx     ← AI inference + manual edit
 │   │   ├── MergeTab.jsx          ← LEFT/INNER JOIN + APPEND
