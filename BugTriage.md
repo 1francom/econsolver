@@ -34,3 +34,4 @@
 | 2026-05-30 | Spatial | Adjust size respectively to the spatial unit(s) — geometry/polygon display sizing not scaling with unit type | medium | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | open |
 | 2026-05-31 | Data | Parse error: schools_with_coordinates.xlsx — Failed to fetch dynamically imported module from cdn.sheetjs.com/xlsx-0.20.3 | high | data | `src/DataStudio.jsx` (SheetJS CDN loader) | fixed (2026-06-01 — static import * as XLSX from "xlsx") |
 | 2026-05-31 | Data | OECD proxy error 406 for DSD_NAAG@DF_NAAG_I — server rejects JSON accept header, needs content-type negotiation fix | high | data | `src/services/data/fetchers/oecd.js` | open |
+| 2026-06-01 | Data | Not all columns of .dta are recognized — columns loaded twice appear as replicated entries without names | high | data | `src/services/data/parsers/stata.js` | open |
