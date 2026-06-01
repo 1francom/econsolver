@@ -4,8 +4,10 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessAddressCol } from "../shared/guess.js";
 import { GEOCODE_BBOX_PRESETS, geocodeAddress, parseBBox, readGeocodeCache } from "../../../../services/data/geocoding.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function GeocodeSection({ rows, headers, C, onResult }) {
+  const { appendLog } = useSessionLog();
   const [addressCol, setAddressCol] = useState(() => guessAddressCol(headers));
   const [latCol,     setLatCol]     = useState("lat");
   const [lonCol,     setLonCol]     = useState("lon");
@@ -78,6 +80,7 @@ export function GeocodeSection({ rows, headers, C, onResult }) {
       });
       const matched = out.filter(r => Number.isFinite(r[latCol]) && Number.isFinite(r[lonCol])).length;
       setResult({ rows: out, matched });
+      appendLog({ module: "spatial", opType: "geocode", reproducible: false, params: { addressCol, latCol, lonCol, provider, bbox: bboxPreset }, label: `Geocode ${addressCol} → (${latCol}, ${lonCol}): ${matched}/${rows.length} matched` });
       onResult(out, [latCol, lonCol]);
     } catch (e) {
       setErr(e.message || "Geocoding failed");

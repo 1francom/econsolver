@@ -4,8 +4,10 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, isGeometryHeader } from "../shared/guess.js";
 import { assignRectGrid, assignH3Grid, assignPointsToGrid } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
+  const { appendLog } = useSessionLog();
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
   const [gridType,  setGridType]  = useState("existing"); // "existing" | "rectangular" | "hex"
@@ -63,6 +65,7 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
         const cols = [outCol, "grid_row_index", ...extraCols];
         const distinct = new Set(out.map(r => r[outCol]).filter(v => v != null)).size;
         setResult({ rows: out, distinct, matched, cols });
+        appendLog({ module: "spatial", opType: "grid_assign_existing", params: { latCol, lonCol, outCol, gridDsId, wktCol: effectiveWkt, gridIdCol: effectiveGridId, extraCols }, label: `Grid assign → ${outCol} (${distinct} cells, ${matched}/${rows.length} matched)` });
         onResult(out, cols);
         return;
       }
@@ -72,6 +75,7 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
         : assignH3Grid(rows, latCol, lonCol, Number(resolution), outCol);
       const distinct = new Set(out.map(r => r[outCol]).filter(v => v != null)).size;
       setResult({ rows: out, distinct, matched: null, cols: [outCol] });
+      appendLog({ module: "spatial", opType: gridType === "rectangular" ? "grid_rect" : "grid_hex", params: { latCol, lonCol, outCol, ...(gridType === "rectangular" ? { cellSize: Number(cellSize) } : { resolution: Number(resolution) }) }, label: `${gridType === "rectangular" ? `Rect grid ${cellSize}km` : `Hex grid res ${resolution}`} → ${outCol} (${distinct} cells)` });
       onResult(out, [outCol]);
     } catch (e) {
       setErr(e.message);

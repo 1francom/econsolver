@@ -4,8 +4,10 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, guessPointCountCol } from "../shared/guess.js";
 import { aggregateToGrid, aggregateGridById } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function AggregateToGridSection({ rows, headers, availableDatasets, C, onResult }) {
+  const { appendLog } = useSessionLog();
   const [mode, setMode] = useState("grid_id");
   const [latCol, setLatCol] = useState(() => guessLatCol(headers));
   const [lonCol, setLonCol] = useState(() => guessLonCol(headers));
@@ -42,6 +44,7 @@ export function AggregateToGridSection({ rows, headers, availableDatasets, C, on
         ? aggregateGridById(gridDs.rows, effectiveGridId, rows, pointGridCol, [spec])
         : aggregateToGrid(gridDs.rows, effectiveWkt, rows, latCol, lonCol, [spec]);
       setResult({ rows: out, cols: [outCol] });
+      appendLog({ module: "spatial", opType: "aggregate_to_grid", params: { mode, gridDsId, outCol, fn, ...(fn !== "count" ? { valueCol } : {}), ...(mode === "grid_id" ? { pointGridCol, gridIdCol: effectiveGridId } : { latCol, lonCol, wktCol: effectiveWkt }) }, label: `Aggregate ${fn === "count" ? "count" : `${fn}(${valueCol})`} → ${outCol} (${out.length} grid cells)` });
       onResult(out, [outCol], gridHeaders);
     } catch (e) {
       setErr(e.message);

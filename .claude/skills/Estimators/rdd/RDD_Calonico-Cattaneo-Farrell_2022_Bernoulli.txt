@@ -1,0 +1,1643 @@
+﻿Bernoulli 28(4), 2022, 2998–3022
+https://doi.org/10.3150/21-BEJ1445
+
+Coverage error optimal confidence intervals for
+local polynomial regression
+SEBASTIAN CALONICO1,a, MATIAS D. CATTANEO2,b and MAX H. FARRELL3,c
+
+1Department of Health Policy and Management, Columbia University, New York, New York, U.S.A.
+asebastian.calonico@columbia.edu
+2Department of Operations Research and Financial Engineering, Princeton University, Princeton, New Jersey,
+U.S.A. bcattaneo@princeton.edu
+3Booth School of Business, University of Chicago, Chicago, Illinois, U.S.A. cmax.farrell@chicagobooth.edu
+
+This paper studies higher-order inference properties of nonparametric local polynomial regression methods under
+random sampling. We prove Edgeworth expansions for t statistics and coverage error expansions for interval es-
+timators that (i) hold uniformly in the data generating process, (ii) allow for the uniform kernel, and (iii) cover
+estimation of derivatives of the regression function. The terms of the higher-order expansions, and their associ-
+ated rates as a function of the sample size and bandwidth sequence, depend on the smoothness of the population
+regression function, the smoothness exploited by the inference procedure, and on whether the evaluation point is
+in the interior or on the boundary of the support. We prove that robust bias corrected confidence intervals have the
+fastest coverage error decay rates in all cases, and we use our results to deliver novel, inference-optimal bandwidth
+selectors. The main methodological results are implemented in companion R and Stata software packages.
+
+Keywords: Edgeworth expansion; Cramér condition; nonparametric regression; robust bias correction; bandwidth
+selection; optimal inference; minimax bound
+
+1. Introduction
+
+We study local polynomial inference in the general heteroskedastic nonparametric regression model:
+
+Y = μ(X) + ε, E[ε |X] = 0, E[ε2 |X] = v(X), (1)
+
+where (Y,X) is a pair of random variables with distribution F. The parameter of interest is the level or
+derivative of the regression function at X = x: 
+
+dν
+μ(ν) = μ(ν)
+
+
+(x) := E [Y |X=x] , ν ∈ Z
+
+dxν  +, (2)
+x=x
+
+where the evaluation point x may be in the interior or on the boundary of the support of X . We drop the
+evaluation point from the notation when possible, and employ the usual convention μ = μ(0). Deriva-
+tives at boundary points are defined as one-sided derivatives from the interior. Given a random sample
+(Y1,X1), . . . ,(Yn,Xn) of size n from F, we investigate the quality of statistical inference for μ(ν) when
+using kernel-based local polynomial regression methods [17,18], focusing in particular on higher-order
+distributional properties of t statistics as well as on coverage error and length of Wald-type confidence
+interval estimators. We also employ our results to compare and optimize inference procedures for em-
+pirical practice and to shed light on the sometimes underappreciated gap between point estimation and
+inference.
+
+1350-7265 © 2022 ISI/BS
+
+
+
+Coverage error optimality 2999
+
+Our main technical contributions are novel Edgeworth expansions for local polynomial based Wald-
+type t statistics of the form
+
+θ̂ − μ(ν)
+T = , (3)
+
+ϑ̂
+
+for different choices of point estimator θ̂ and standard error estimator ϑ̂ detailed in Section 2. We study
+the accuracy of the Gaussian approximation to the distribution of such T and the error in coverage
+probability of their dual confidence interval estimators. Our expansions capture the dependence on im-
+plementation choices including the polynomial order, the kernel function, and the bandwidth sequence.
+
+Edgeworth expansions are a long-standing tool for more detailed (higher-order) analyses of asymp-
+totic distributional approximations, named after the author of a series of papers on the idea, beginning
+with [14] and treated more extensively in [15]. See [20] for a textbook review. Informally, an Edge-
+worth expansion characterizes the leading terms of the difference between the distribution of T and
+the Gaussian distribution, denoted Φ(z), for z ∈ R. That is, an Edgeworth expansion gives the leading
+terms ET ,F (z) and the rate rT ,F (which depend on the distribution generating the data, the specific t
+statistic at issue, along with n, x, and otherparticulars) such that 
+
+lim r−1 
+n→ T ,F sup PF [T < z] −Φ(z) − E 
+
+T ,F (z) = 0, (4)
+∞ z∈R
+
+where PF is the probability law when F is the true data generating process.
+We improve on prior work on valid Edgeworth expansions for nonparametric kernel-based regression
+
+in three ways: (i) the expansions hold uniformly over a class of data-generating processes (instead of
+only for one F), (ii) the uniform kernel is allowed (instead of only kernel functions with sufficient
+variation), and (iii) the expansions hold for any derivative ν ≥ 0 (instead of only for the level ν = 0). As
+discussed below, these improvements offer new theoretical and practical conclusions.
+
+Edgeworth expansions are almost always established pointwise in the underlying distribution, that
+is, for a single, fixed F, as in (4). Indeed, standard references on the subject [3,20] do not even mention
+uniformity. However, F is unknown, and a researcher would like some assurances that their inference
+is equally accurate regardless of the specific underlying data generating process. This motivates expan-
+sions that are valid uniformly over a class of plausible distributions for the data, denoted FS , encoding
+the researcher’s statistical model, accompanying assumptions, and the empirical regularities of the ap-
+plication of interest. Thus, instead of (4), in Section 3, we prove 
+
+lim sup r−1
+n→ T ,F sup PF [T < z] −Φ(z) − E 
+
+T ,F (z) = 0. (5)
+∞ F ∈FS z∈R
+
+We also characterize the worst-case rate rT = infF ∈F rT ,F of distributional approximation over FS .
+S
+
+The specific class FS we consider, defined precisely in Section 2, matches standard empirical settings
+employing kernel-based nonparametric inference for μ(ν), and therefore our theoretical and method-
+ological results speak directly to common practice. Uniformly valid expansions have some precedence
+in the literature when studying notions of optimality, perhaps originating with [2], but these results are
+rare and confined to parametric models. Our corresponding uniform results for nonparametric kernel-
+smoothing do not appear to have a direct antecedent in the literature.
+
+Second, the uniform kernel is ruled out in all prior work on Edgeworth expansions for kernel-based
+nonparametrics, both for density estimation [19–21] and regression [5,10,11], due to a technical limi-
+tation in the proofs that we overcome. Other work on nonparametric regression has assumed away the
+issue by studying non-random designs [22,25]. In fact, [19, p. 218] conjectured that valid Edgeworth
+expansions would require techniques for lattice-valued random variables if the uniform kernel was
+
+
+
+3000 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+used. On the contrary, we show that such techniques are not needed. Allowing for the uniform kernel
+is important for empirical work because it is the optimal kernel shape in terms of minimizing interval
+length (as discussed in Section 4.2) and because unweighted local least squares regression is a popular
+choice in some applications.
+
+Finally, inference on derivatives of the regression function, again ignored in prior work, is a common
+task in empirical work and therefore it is valuable to have valid Edgeworth expansions and implemen-
+tation guidance specifically for this case, including inference-optimal bandwidth selection. Moreover,
+considering derivatives yields several interesting theoretical conclusions, highlighting the difference
+between point estimation and inference: we find not only that the rate of the inference-optimal band-
+width does not depend on the specific derivative order ν being considered, analogous to the well-known
+result for mean squared error (MSE) optimal bandwidth, but also that the rate for inference itself does
+not depend on ν, in sharp contrast to the MSE of the point estimator.
+
+The main result, a generic Edgeworth expansion encompassing all three of these contributions, is
+Theorem 1 in Section 3. We then use this general result to examine the error in coverage probability of
+confidence interval estimators dual to each t statistic, and the roles of smoothing bias and Studentization
+in both the distributional approximation and the coverage error of the confidence intervals.
+
+The role of bias is concretized in Section 3.1. Given a level of smoothness of the unknown function
+μ and polynomial order of the local polynomial procedure θ̂, the nonparametric bias must be removed
+for valid inference. The method of robust bias correction (RBC) addresses this issue by incorporating
+explicit bias estimation into the centering θ̂ and then also adjusting the scale ϑ̂ to account for the ad-
+ditional variability introduced by the bias estimation [5,8]. An alternative principled inference method
+relies on removing the bias by shrinking the bandwidth used when conducting inference, often called
+undersmoothing. Other ad-hoc inference approaches rely on either upper bounding the bias, inflating
+the scale of the t statistic, or simply ignoring the bias altogether. Using our higher-order expansions,
+we show that RBC leads to demonstrable higher-order superior inference for μ(ν) relative to the other
+approaches in the literature.
+
+Our results also show that the choice of Studentization ϑ̂ is crucial for good higher-order proper-
+ties. This is in contrast to first order approximations, where only consistency of the standard errors is
+required. An important finding here is that using asymptotic approximations to the variance of θ̂ will
+increase the leading remainder terms ET ,F (z) and hence also coverage error. Using fixed-n Studen-
+tization, where ϑ̂ directly estimates the variability of θ̂, completely removes these errors. This result
+was first proved in [5], but only pointwise in F and excluding the uniform kernel and derivatives of μ.
+Section 3.2 shows this in full generality. Failure to account for the effect of using asymptotic variance
+approximations has lead to some confusion in the prior literature: for example, [11] found inflated cov-
+erage error at boundary points and [21] found that undersmoothing provides more accurate coverage
+than bias correction, but both conclusions are due to improper Studentization.
+
+A key practical consequence of the foregoing is that RBC with fixed-n Studentization has leading
+remainder terms ET ,F (z) and rate rT ,F , of the expansion (5), that vanish at least as fast as, and often
+strictly faster than, undersmoothing-based approaches, both at interior and boundary evaluation points
+and for any derivative ν. Intuitively, this holds because RBC exploits all available smoothness to remove
+bias, but is not punished (in rates) if no additional smoothness is available to remove bias. Section
+4 discusses novel implementation of RBC intervals, giving inference-optimal bandwidth and kernel
+choices that further improve the coverage properties and length of RBC intervals.
+
+More broadly, our results speak to the sometimes neglected gap between point estimation and infer-
+ence. Implementations focused on optimizing point estimation may not deliver optimal, or even valid,
+inference. In particular, they need not proceed at the same rate, and perhaps more surprisingly, the in-
+ference rate can be faster: the rate rT ,F at which the distribution of θ̂ collapses to its asymptotic value
+(namely Φ(·)) can be faster than the rate at which θ̂ itself collapses to its asymptotic value (μ(ν)). In-
+deed, there are cases where a bandwidth choice yields the fastest possible inference rate rT ,F but yields
+
+
+
+Coverage error optimality 3001
+
+invalid point estimation. This is the reverse of the better-known fact that using the estimation-optimal
+bandwidth (minimizing mean squared error) yields invalid inference. Rate optimality is not as well
+studied for inference as it is for estimation, but Section 5 follows [23] to develop minimax optimal rates
+in the sense of achieving the fastest (minimal) rate at which the worst-case (maximal) coverage error
+vanishes and finds that RBC attains this rate.
+
+The paper closes with simulation evidence supporting our theoretical and methodological work re-
+ported in Section 6, and a brief conclusion in Section 7. An appendix contains formulas omitted to
+improve the exposition, while an online supplement [4] gives all proofs, detailed simulation results,
+and other methodological results. Software implementing our main results is provided in R and Stata
+[6]. Last but not least, some of the ideas in this paper have been applied to causal inference and treat-
+ment effect estimation in the context of regression discontinuity designs in [7].
+
+2. Model assumptions and estimators
+We define the class FS of distributions for the pair (Y,X) and make precise the local polynomial
+point estimator θ̂ and scale estimator ϑ̂ of the t statistic (3). The class FS is determined through the
+following assumption. (Recall that derivatives at the boundary of the support of X correspond to one-
+sided derivatives from the interior of the support.)
+
+Assumption 1. Let FS be the set of distributions F for the pair (Y,X) which obey model (1) and for
+which there exist constants S ≥ ν, s ∈ (0,1], 0 < c < C <∞, and a neighborhood of x on the support of
+X , none of which depend on F, such that for all x, x′ in the neighborhood the following hold.
+
+1. The Lebesgue density of (Y,X), fyx(·), the Lebesgue density of X , f (·), and v(x) :=V[Y |X = x],
+are each continuous and lie inside [c,C], and E[|Y |8+c |X = x] ≤ C.
+
+2. μ(·) is S-times continuously differentiable and |μ(S)(x) − μ(S)(x′)| ≤ C |x − x′|s.
+Throughout, {(Y1,X1), . . . ,(Yn,Xn)} is a random sample from (Y,X).
+
+These conditions are not materially stronger than usual in kernel-based nonparametric settings. The
+restrictions on densities and moments are imposed to achieve uniform validity of Edgeworth expan-
+sions. The smoothness condition on μ plays a key role: the assumed smoothness, captured by S and s,
+and its relationship to the smoothness utilized in estimation, will be important for coverage error.
+
+We consider several options for the elements of the t statistic T = (θ̂ − μ(ν))/ϑ̂ given in (3). The start-
+ing point is the standard local polynomial regression point estimate of μ(ν). See [17] for an introduction.
+We index the classical local polynomial estimate by p ∈ Z+, the order of the polynomial used, assumed
+to be at least ν. Suppressing the dependence on x to simplify notation, we therefore set
+
+∑n(ν) 1
+μ̂p = ν!e′ ′ (
+
+ν β̂p = ν!e Γ−1
+nhν ν ΩY, β̂p = arg minb∈Rp+1 (Yi − r p(hX 2
+
+h,i)′
+)
+
+b) K Xh,i , (6)
+i=1
+
+where K is a kernel or weighting function, h = h(n) → 0 is a bandwidth sequence, Xh,i = (Xi − x)/h,
+r p(u) = (1,u,u2, . . . ,up)′,
+
+1 ∑n [ ]
+Γ = K(X )r (X )r
+
+nh h,i p h,i p(
+1
+
+Xh,i)′, Ω = K(X
+h h,1)r p(Xh,1), . . . ,K(Xh,n)r p(Xh,n) ,
+
+i=1
+
+eν is the (p + 1)-vector with a one in the (ν + 1)th position and zeros in the rest, and Y = (Y1, . . . ,Yn)′.
+
+
+
+3002 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+The point estimator θ̂ in T is then finalized depending on how the smoothing bias is to be accounted
+for. The traditional approach takes (ν)
+
+θ̂ = μ̂p , and then for inference to be valid undersmoothing is re-
+quired. Explicit bias correction incorporates into θ̂ an estimate of the leading bias term of (ν)
+
+μ̂p . Both
+approaches are motivated by the fact that the conditional bias of (ν)
+
+μ̂p is of order hp+1−ν and given by
+
+[ ( )
+(ν)
+μ̂  ]
+
+(
+p X1, . . . ,Xn − μ ν) = hp+1−ν μ p+1
+
+ν!e′νΓ
+−1
+
+E Λ ( + o (hp+1−ν), (7)
+p + 1)! P
+
+with Λ = Ω[Xp+1 ]′/n, provided p − ν is odd and p ≤ S − 1, the standard setting in the
+h,1 , · · · ,X
+
+p+1
+h,n
+
+literature. Section 3.1 details other cases for p and S. Throughout, asymptotic orders and their in-
+probability versions always hold uniformly in FS , as required by our framework: for example, An =
+oP(an) means supF ∈F PF [|An/an | > ε] → 0 for every ε > 0. Limits are taken as n →∞ unless stated
+
+S
+otherwise.
+
+Undersmoothing leaves the center of the interval at (ν)
+θ̂ = μ̂p unchanged and assumes that the band-
+
+width h vanishes rapidly enough to render the leading term of (7) negligible relative to the standard
+error of the point estimator. The term undersmoothing refers to using less nonparametric smoothing
+than would be optimal from a mean squared error (MSE) point estimation point of view [17, Section
+4]. The MSE-optimal bandwidth choice is the most common by far, and indeed, the default in most
+software. With p ≤ S − 1, the MSE-optimal bandwidth for (ν)
+
+μ̂p is well-defined whenever μ(p+1)(x)  0.
+However, the MSE-optimal bandwidth is too “large” for standard Gaussian inference: the bias remains
+first-order important when scaled by the standard deviation of the point estimator, and so valid inference
+requires a bandwidth that vanishes faster.
+
+Explicit bias correction, on the other hand, subtracts an estimate of the leading term of (7), of which
+only μ(p+1) is unknown. Thus we have:
+
+(ν) 1
+θ̂rbc := μ̂p − hp+1−νν!e′νΓ
+
+−1Λe′p+1 β̂p+1 = ν!e′Γ−1Ω ( )
+nhν ν rbcY, 8
+
+where −
+Ωrbc =Ω − ρp+1Λe′
+
+1
+p+1Γ̄ Ω̄ and β̂p+1, Γ̄, and Ω̄ are defined akin to β̂p , Γ, and Ω of (6), but
+
+with p + 1 in place of p and a bandwidth b := ρ−1h instead of h. The parameter ρ will play a key role
+in the Edgeworth and coverage error expansions and we will derive optimal choices below.
+
+With the point estimator θ̂ defined, we now define the choice of standard errors ϑ̂. We will focus
+primarily on “fixed-n” Studentization, also called “preasymptotic” by [18], which means choosing the
+Studentization to directly estimate V[θ̂ |X1, . . . ,Xn], a population quantity but not an asymptotic one.
+Such choices have superior coverage, as shown below, particularly compared to employing an estimator
+of an asymptotic representation of V[θ̂ |X1, . . . ,Xn]. Importantly, when θ̂ = θ̂rbc, a fixed-n approach
+makes bias correction robust, because the Studentization accounts for the variability of bias estimation.
+
+These fixed-n variances are easy to compute based on standard least squares logic. Referring to (6),
+for (ν)
+
+θ̂ = μ̂p ,
+
+nh1+2ν ( )
+V[ ν
+μ̂p |X1, . . . ,Xn] = ν!2e′νΓ
+
+−1(hΩΣΩ′/n)Γ−1eν, (9)
+
+where Σ is the n-diagonal matrix of conditional variances v(Xi). This formula applies to θ̂rbc as well,
+upon replacing Ω with Ωrbc, because the two estimators share the same structure, as shown by com-
+paring the second form in (8) to (6). The fixed-n Studentization is obtained by replacing Σ with an
+
+
+
+Coverage error optimality 3003
+
+appropriate plug-in estimator, and we then obtain the final ϑ̂ as follows:
+
+σ̂2
+p
+
+ϑ̂2 = , σ̂2 := ν!2e′Γ−1(hΩΣ̂ e
+nh1+2ν p ν pΩ
+
+′/n)Γ−1
+ν, and
+
+(10)
+σ̂2
+
+ϑ̂2 rbc
+= ϑ̂2 −1 1
+
+rbc := , σ̂2 := ν!2e′ bcΣ̂rbcΩ
+′ eν,
+
+nh1+2ν rbc νΓ (hΩr rbc/n)Γ−
+
+where Σ̂p and Σ̂rbc are the n-diagonal matrices of the squared residuals v̂(Xi) = (Yi − r p(Xi)′β̂p)2 and
+v̂(Xi) = (Yi − r p+1(Xi)′β̂p+1)2, respectively. The above variance estimators separate explicitly the “con-
+stant” portions, denoted σ̂2
+
+p and σ̂2
+rbc, which will be used in Section 4.2 for interval length optimization.
+
+More precisely, σ̂2
+p and σ̂2
+
+rbc will both be bounded and bounded away from zero in probability under
+our assumptions.
+
+To complete the set of t statistics under consideration, we impose the following standard conditions
+on the kernel function. This assumption allows for standard choices such as not only the triangular and
+Epanechnikov kernels, but also the uniform kernel.
+
+Assumption 2. The kernel K is supported on [−1,1], positive, bounded, and even. Further, K(u) is
+either constant (the uniform kernel) or (1,K(u)r ′
+
+3(k+1)(u)) is linearly independent on [−1,0] and [0,1],
+where k = p if T is based on (ν)
+
+μ̂p and σ̂p , and k = p + 1 if T uses θ̂rbc or σ̂rbc. The order p is at least
+ν.
+
+3. Uniformly valid Edgeworth and coverage error expansions
+We now give the main technical result of this paper: a uniformly valid, generic Edgeworth expansion
+as in (5), for the t-statistic T in (3) when using local polynomial regression methods as described in
+the previous section. To state the result we need some notation. Here we give only what is needed
+conceptually, leaving cumbersome formulas to the appendix. The terms of the Edgeworth expansion
+are defined as
+
+ET ,F (z)
+1
+
+= √ ω1,T ,F (z) +ΨT ,Fω2,T ,F (z) + λT ,Fω3,T ,F (z)
+nh
+
+(11)
+1
+
++ ω Ψ
+nh 4,T ,F (z) +Ψ2
+
+T ,Fω5,T ,F (
+1
+
+z) + √ T ,Fω6,T ,F (z),
+nh
+
+where z is t√he point of evaluation of the distribution, ΨT ,F denotes the generic non-random (fixed-n)
+bias of the nh1+2ν-scaled numerator of T , λT ,F denotes the mismatch between the variance of the
+numerator of the t-statistic and the population standardization used, and the six terms ωk ,T ,F (z),
+k = 1,2, . . . ,6, are non-random functions bounded uniformly in FS , and bounded away from zero for
+at least one F ∈ FS . Section 3.1 provides further details on ΨT ,F and Section 3.2 discusses λT ,F .
+The quantities ωk ,T ,F (z), k = 1,2, . . . ,6 are relatively less important, beyond their parity, because they
+cannot be altered by implementation choices.
+
+We then have the following result (Theorem 1), establishing (5). This result is general, covering
+interior and boundary points, p − ν even and odd, any derivative ν ≥ 0, and any combination of p
+and S. Different cases for each of these primarily affect the expansion, and the final rates, through the
+bias ΨT ,F , as explored in the next section. The conditions imposed are strengthened relative to typical
+pointwise first-order analyses only by log(nh) factors on the bandwidth(s) and the other uniformity
+
+
+
+3004 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+requirements of Assumption 1. (Recall that asymptotic orders and their in-probability versions are
+always required to hold uniformly in FS throughout.)
+
+Theorem 1. Let Assumptions 1 and 2 hold, and assume that
+
+log(nh)2+γ/nh = o(1), ΨT ,F log(nh)1+γ = o(1), λT ,F = o(1), ρ =O(1),
+
+for any γ bounded away from zero uniformly in FS . Then, 
+lim sup r−1
+n→ T ,F sup PF [T < z] −Φ(z) − ET ,F (z)
+
+ = 0
+∞ F ∈FS z∈R
+
+holds with ET ,F (z) of (11) and rT ,F =max{(nh)−1,Ψ2
+T ,F ,(nh)−1/2ΨT ,F ,λT ,F }.
+
+A crucial piece in the proof of Theorem 1 is establishing that the appropriate Cramér’s condition
+holds under Assumption 2, and in particular the linear independence condition. Such linear indepen-
+dence fails when K is uniform and u runs over the support of K(u), and this failure has prevented
+the uniform kernel from being covered by past work. Our key insight is that previous approaches ig-
+nored the region outside the support of K(·) but inside the neighborhood of Assumption 1. Loosely
+speaking, (1,K(u),uK(u), . . .)′ may be linearly dependent on u ∈ [−1,1] (when K is uniform), but
+(1,K( x−x
+
+h ),( x−x
+h )K( x−x
+
+h ), . . .)′ is linearly independent on x in a fixed neighborhood of x. This allows
+us to verify Cramér’s condition. See the supplement for details [4].
+
+In practice, the error in coverage probability of two-sided interval estimators may be more directly
+relevant than the distributional approximation of the Edgeworth expansion. We therefore turn to interval
+estimators dual to each t statistic, given by[ ]
+
+I = θ̂ − zu ϑ̂ , θ̂ − zl ϑ̂ , (12)
+
+where zl and zu denote chosen quantiles. Our starting point is a generic coverage error expansion for
+confidence intervals I, dual to a given T , which follows immediately from Theorem 1 by evaluating the
+Edgeworth expansion at the interval quantiles (see [4]).
+
+Corollary 1. Let the conditions of Theorem 1 hold, assume that Φ(zu) − Φ(zl) = 1 − α, and define
+CI ,F (zl, zu) = ET ,F (zu) − ET ,F (zl) =O(rI ) for some]sequence rI . Then, 
+
+lim r−1
+n→∞ I sup  [ (
+
+PF μ ν)(x) ∈ I − (1 − α) −CI ,F (z z 
+l, u) = 0.
+
+F ∈FS
+
+This result is as general as Theorem 1. The uniform-in-FS rate rI is the slowest vanishing of the
+rates of each term in the Edgeworth expansion (11), which without specifying any elements further, can
+only be known to vanish at least as fast as rT = supF ∈F rT ,F from Theorem 1. However, even at this
+
+S
+level of generality, several conclusions are already evident due to the parity of the functions ωk making
+up ET ,F (z) and hence CI ,F (zl, zu). First, regarding the choice of quantiles, we recover the classical
+finding that symmetric intervals, where zl = −zu , have superior coverage properties, because ω1 and
+ω2 are even functions of z. Asymmetric choices that still have Φ(zu) −Φ(zl) = 1 − α can yield correct
+coverage, but the error will vanish more slowly, whereas other choices will not yield uniformly correct
+coverage. Bootstrap-based quantiles will, in general, not improve coverage error rates in nonparametric
+contexts beyond the symmetric case [21], and can in fact be detrimental for coverage error [24]. Second,
+the remaining wk functions are odd, and therefore to obtain better coverage properties we should focus
+
+
+
+Coverage error optimality 3005
+
+on intervals with small (rapidly vanishing) ΨT ,F and λT ,F . The upcoming subsections discuss each of
+these pieces in turn.
+
+Our expansions highlight the conceptual gap between point estimation and inference. The rate at
+which the distribution of θ̂ collapses to its asymptotic value (Φ(·)) can be faster than the rate at which
+the point estimator θ̂ itself collapses to its asymptotic value (μ(ν)). Moreover, it is possible that coverage
+error may vanish even if mean squared error does not, and vice versa. One direction of this phenomenon
+captures the well-known result that the coverage error of a confidence interval centered at the MSE-
+optimal point estimator does not vanish. That is, (ν)
+
+μ̂p in (6) using the MSE-optimal bandwidth hmse =
+Hmsen−1/(2p+3), forsom
+
+ [e const{ant Hmse, is optimal for point estimation} ]given a fixe d p, but
+
+sup (ν) (ν)
+PF μ ∈ μ̂p ± zα/2σ̂pH−1/2
+
+mse n−1/2+(1+2ν)/(4p+6) − (1 − 
+α) 	 1,
+
+F ∈FS
+
+where a 	 b denotes that a ≤ C1b and b ≤ C1a for some constants C1 and C2.
+The other direction may be more surprising and novel: we find that the variance of θ̂ can be too
+
+large for mean-square consistency, but nonetheless be captured well enough by ϑ̂ for valid inference.
+For example, consider inference on μ(1)(x) using Ip with local linear regression (p = 1). Choosing
+h 	 n−1/3 yields rIp 	 n−2/3, which is the fastest attainable rate for Ip in this case, but also gives
+V[ (ν)
+μ̂p |X1, . . . ,Xn] 	P (nh1+2v)−1 	 1, and thus (1)
+
+μ̂p is not consistent in mean square. Therefore, we
+found a confidence interval that is optimal for coverage of μ(1), but implicitly relies on a point estimator
+that is not even consistent in mean square.
+
+3.1. Bias details
+
+We now give details for the bias term, ΨT ,F , highlighting three main points. First, the rate at which
+ΨT ,F vanishes does not depend on the derivative ν. Second, we establish that performing bias correc-
+tion never slows the rate at which ΨT ,F vanishes. The third goal is then practical: we spell out several
+cases of the rates and constants for the bias of θ̂rbc so that we may use these for bandwidth and kernel
+selection later.
+
+To describe ΨTp ,F , the bias term for Tp , let βp be the p + 1 vector with ( j + 1) element equal to
+μ(j)(x)/ j! for j = 0,1, . . . ,p as long as j ≤ S, and zero otherwise, and Bp as the n-vector with ith entry
+[μ(Xi) − r p(Xi − x)′βp]. Then,
+
+√
+ΨTp ,F = nh ν!e′νE[Γ]−1
+
+E[ΩBp]. (13)
+
+Turning to bias correction, define βp+1 and Bp+1 as above, but with p + 1 in place of p in all cases.
+Then, using the definition of Ωrbc in (8),
+
+√ ( )
+ΨTrbc ,F = nh ν!e′νE[Γ]−1
+
+E[ΩBp+1] − ρp+1
+E[Λ]e′p+1E[Γ̄]
+
+−1
+E[Ω̄Bp+1] . (14)
+
+These bias terms are non-random but otherwise non-asymptotic: all expectations are fixed-n and we
+have not done the typical Taylor expansion. The derivative ν only appears in the constant term ν!eν ,
+and therefore the rate at which ΨTp ,F vanishes does not depend on the derivative being estimated.
+Intuitively, this can be seen from the second form for (ν)
+√ μ̂p in (6), n−1h−νν!e′νΓ
+
+−1ΩY , coupled with rate
+nh1+2ν of the Studentizations of (10): together, these account for the derivative, and distributional
+
+properties of Γ−1ΩY are left independent of ν; the first conclusion of this subsection.
+
+
+
+3006 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+The rate of convergence (to zero) of ΨTp ,F or ΨTrbc ,F can be deduced by first expanding μ(Xi)
+entering Bp and Bp+1 around x, and then specializing to a given p and S. For any p, we have
+
+∑S 1 ( )
+μ(Xi) − r p(Xi − x)′βp = (X (k)(x) 1
+
++ (X − x)S μ(
+k! i − x)k μ S)(x̄) − μ(S)
+
+S! i (x) ,
+k=S∧p+1
+
+where the summation is taken to be zero if p ≥ S. To obtain the final rate, this expansion is substituted
+into Bp and the leading terms are identified by stabilizing the expectation of the terms involving (Xi −
+x)k by writing hk(Xh,i)k , thus isolating the rate. The rate will depend on the smoothness, location of x,
+parity of p − ν, and the bandwidth h. For Bp+1, replace p with p + 1 everywhere and use b in place of
+h in the second term. For details see [4].
+
+Our second point is that ΨTrbc ,F = O(ΨTp ,F ), which follows from the expansion above and taking
+ρ bounded and bounded away from zero. First, observe from the Taylor expansion applied to (14)
+that ΨTrbc ,F depends on higher order derivatives than ΨTp ,F , which follows from applying the Taylor
+expansion to (13), and therefore stabilizing leads to higher powers of h. Intuitively, the bias of (ν)
+
+μ̂p is
+the product of the rate hp+1 and the constant targeted by bias correction. Therefore, the bias of θ̂rbc is
+at most hp+1 times the bias of the bias correction plus the higher order term of (7). For a fixed sequence
+h, neither of these can be greater than hp+1. Second, the rate for ΨTrbc ,F cannot be improved by letting
+ρ = h/b vanish or diverge: ρ vanishing decreases the second term, but the first term is unchanged,
+while letting ρ diverge can only inflate the second term. Further, diverging ρ renders the effective
+sample size nb, which is smaller than nh, which would only inflate the Edgeworth expansion terms
+without reducing bias (hence the restriction in Theorem 1 to bounded ρ).
+
+Therefore, in optimizing inference later on, we will focus on θ̂rbc and take ρ bounded and bounded
+away from zero. We need the leading bias constants for this case, which follow from carrying on the
+Taylor expansion completely in (14). The bias is always of the form
+
+√
+ΨTrbc ,F =O( nhhζ )
+
+for an exponent ζ that depends on the location of x, the parity of p − ν, and the smoothness S. A
+complete list of ζ is shown in Table 1. From there, we see that if p is larg√e enough relative to S (how
+large depends on the specific case), then ζ = S + s, implying ΨTrbc ,F =O( nhhS+s).
+
+The more empirically relevant case is to treat p as fixed and smaller than S, specifically p ≤ S − 3 for
+interior x with p − ν odd and p ≤ S − 2 otherwise (i.e. for boundary points or if x is an interior point
+with p − ν even). In these cases, we can use the Taylor expansion above to characterize the leading
+term, and write
+
+√
+ΨTrbc ,F = nhhζψTrbc ,F [1 + o(1)],
+
+where ζ = p + 3 for interior x with p − ν odd and p + 2 otherwise. The term ψTrbc ,F will be referred to
+as the constant term for simplicity, though technically it is a non-random sequence with known form,
+uniformly bounded in FS , and nonzero for some F ∈ FS . Referring to Table 1 for the different cases,
+
+
+
+Coverage error optimality 3007
+
+Location of x Parity of p−ν Smoothness ζ ψTrbc ,F
+
+p + 2 ≤ S p + 2 Equation (15a)
+Boundary Odd or Even
+
+p + 2 > S S + s N/A
+
+p + 2 ≤ S p + 2 Equation (15b)
+Even
+
+p + 2 > S S + s N/A
+Interior
+
+p + 3 ≤ S p + 3 Equation (15c)
+Odd
+
+p + 2 ≥ S S + s N/A
+
+Table 1. Bias√Terms For Bias-Corrected Centering θ̂rbc. With ρ b√ounded and bounded away from zero,
+ΨTrbc ,F =O( nhhζ ) and further, if p is small relative to S, ΨTrbc ,F = nhhζψTrbc ,F [1 + o(1)].
+
+ψTrbc ,F can be
+
+⎧⎪⎪⎪⎪⎪ p+2) { }
+⎪ μ(
+
+⎪⎪⎪ ν!e′E[Γ]−1 [Λ ] − ρ−1
+E 2 E[Λ1]e′
+
+⎪ p+1E[Γ̄]
+−1
+E[Λ̄1] , (15a)
+
+⎪ (p + 2)! ν
+
+⎪⎪⎪⎪⎪⎨ μ(p+2)
+ν!e′ν
+
+⎪ (p + 2)!
+⎪⎪⎪⎪ {E[Γ]
+
+−1
+E[Λ2], or (15b)
+
+⎪ ]
+⎪ −1 μ(p+2) [
+⎪⎪⎪ ν!e′ h−1 ′ −1
+
+E[Γ]
+⎪ ν
+
+⎪ ( E[Λ −1
+p 2] − ρ−2b E[Λ1]e
++ 2) p+1E[Γ̄] E[Λ̄1]!
+
+⎪⎪⎪⎪⎩ μ(p+3) [ ] } (15c)
++ ( E[Λ
+
+p 3] − ρ−2
+E[Λ1]e′
+
++ 3) p+1E[Γ̄]
+−1
+E[Λ̄ ,
+
+! 2]
+
+where p+k
+Λ ′
+k =Ω[X , · · · p+k
+
+,X ] /n and +1+k +k
+Λ̄ Ω̄[Xp
+
+. . . ,Xp+1 ]′/n, and hence in particular Λ ≡
+h,1 h,n k = b,1 ,
+
+b,n 1
+Λ as defined in Section 2.
+
+3.2. Variance details
+In contrast to first order distributional analysis, where only consistency is required, the choice of scal-
+ing, or Studentization, is crucial for higher order properties. Our detailed expansions show that, in
+general, there are two types of higher-order terms that arise due to Studentization. One is the unavoid-
+able estimation error incurred when replacing any population quantity with a feasible counterpart. The
+second error arises from the difference between the population variability of the centering θ̂ and the
+population standardization chosen as the target. This second type of error is what is captured by λT ,F ,
+and the most important conclusion is that the fixed-n standard errors in (10) achieve λT ,F ≡ 0, and
+are therefore demonstrably superior choices for inference. That is, there should not be a “mismatch”
+between the population variability of the t statistic numerator and the population standardization.
+
+Using an asymptotic approximation to V[θ̂ |X1, . . . ,Xn] may yield nonzero λT ,F , and thus the distri-
+butional approximation (and coverage) will suffer. There are too many options to treat comprehensively,
+but several points warrant discussion. In general, if the chosen standard errors are consistent, λT ,F has
+the form λT ,F = lnL, for a rate ln → 0 and a sequence L that is bounded and bounded away from zero,
+a “constant”, capturing the difference between the variance of the numerator of the t-statistic and the
+population standardization chosen.
+
+At boundary points the use of asymptotic approximations can be particularly deleterious for cov-
+erage, and this has lead to some confusion in the literature. A headline finding of [10] is that an
+
+
+
+3008 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+empirical likelihood confidence interval estimator has coverage error of the same order at interior
+and boundary points, which is claimed (in the abstract) to be a “significant improvement over con-
+fidence intervals based directly on the asymptotic normal distribution”. This claim is based on work
+by the same authors [11] who study, in our notation, the interval with centering (0)
+
+θ̂ = μ̂1 and scaling
+ϑ̂ = (nh)−1/2v̂(x) f̂ (x)−1V, for v̂(x), f̂ (x), and V given therein, where v(x) f (x)−1V is the probability
+limit of V[(nh)1/2 (0)
+
+μ̂1 | X1, . . . ,Xn]. They find that λT ,F = lnL holds with ln = h at boundary points,
+meaning greatly increased coverage error. Concerned that this result is due to estimation error, they
+confirm that ln = h holds with the infeasible standardization ϑ = (nh)−1/2v(x) f (x)−1V. However, this
+neglects the fact that λT ,F captures the “mismatch” error, not estimation error, and their conclusion
+is entirely due to using an asymptotic standardization as opposed to a fixed-n one, and thus empirical
+likelihood, in particular, does not offer higher-order improvements over normality-based intervals.
+
+Explicit bias correction was claimed by [21] to be inferior to undersmoothing for inference; a find-
+ing also based entirely on using an asymptotic standardization. In this case, nonrobust bias correc-
+tion was studied, which pairs θ̂rbc with σ̂p . This is valid to first order if ρ = o(1), because then
+V[ (
+θ̂rbc |X1, . . . ,Xn] = V[ ν)
+
+μ̂p | X1, . . . ,Xn] = oP(n−1h−1−2ν). However, higher order expansions find
+λT ,F = ρ
+
+p+2(L1 + ρ
+p+2L2), where L1 captures the (scaled) covariance between μ̂(ν) and μ̂(p+1) and
+
+L2 the variance of μ̂(p+1). These terms lead [21] to conclude that bias correction is inferior to un-
+dersmoothing, which [5] later showed is not true for robust bias correction. Our results extend this
+conclusion to hold for derivatives, boundary points, all smoothness cases, and uniformly in FS , while
+also allowing for the uniform kernel.
+
+4. Optimizing interval estimation in practice
+We turn to optimizing inference in practice, using the conclusions from the previous sections. Collec-
+tively, the previous sections imply that the best coverage will be from using symmetric RBC intervals,
+i.e. those with zl = −zu = zα/2 =Φ
+
+−1(α/2), θ̂rbc as in (8), ϑ̂rbc as in (10), and ρ bounded and bounded
+away from zero (implying h = ρb). With an eye toward empirical work, we assume in this section that p
+is fixed and small compared to S. The other cases detailed in Section 3.1 are of relatively little practical
+value. In practice researchers first choose p and then conduct inference based on that choice (witness
+the ubiquity of local linear regression and cubic splines).
+
+Letting [ ]
+Irbc(h) = θ̂rbc + zα/2 ϑ̂rbc , θ̂rbc − zα/2 ϑ̂rbc
+
+denote the recommended RBC confidence interval, now with its dependence on the bandwidth h ex-
+plicit to enhance the exposition, we readily deduce from Corollary 1 that
+
+1
+CIrbc(h),F (zα/2,−zα/2) = 2ω 1+2ζ
+
+nh 4,rbc,F + 2nh ψTrbc ,Fω5,rbc,F + hζ2ψTrbc ,Fω6,rbc,F , (16)
+
+where the coverage error rate is rrbc =max{(nh)−1,nh1+2ζ ,hζ }, with ζ = p + 3 if p − ν is odd and x is
+a boundary point, or ζ = p + 2 otherwise. Furthermore, its interval length is
+
+| Irbc(h)|
+σ̂
+
+= 2zα/2ϑ̂rbc = 2z √ rbc
+α/2 . (17)
+
+nh1+2ν
+
+Notice that the rate of contraction of length does depend on ν, while the coverage error rate does not.
+
+
+
+Coverage error optimality 3009
+
+In the next two subsection we use the above two displays, (16) and (17), to choose the bandwidth
+parameters h and ρ = h/b, and the kernel shape. Before any choices can be made, the researcher must
+decide on the usual size versus power trade off. In our context, this translates to the relative value they
+place on coverage error, the discrepancy from nominal level, versus interval length. Because we give
+the first characterizations of coverage error in many cases, and the first uniformly valid ones, this issue
+can now be studied in detail: our theoretical ideas can inform this trade off, providing new insights to
+consider, as well as guiding implementation given a preference for coverage error and length.
+
+At one extreme is the approach that requires only that the interval is not anti-conservative, and then
+minimizes (expected) length. In this case, a shorter interval that uniformly over-covers is preferred to
+an interval that is longer but has correct coverage asymptotically. Our results lead one to consider the
+other extreme: minimize the coverage error directly, and only after optimize length. That is, seek for
+the confidence interval I such that, in the notation of Corollary 1, rI vanishes as fast as possible. In
+applications, an interval with a faster decaying coverage error may approximate its nominal level more
+closely in finite samples. Such approach focuses on the accuracy of the Gaussian approximation for
+coverage error, and thus for inference. However, both of these extremes may be unappealing in practice
+because neither may be optimal from a coverage-length (or, perhaps, size-power for the dual hypothesis
+test) perspective. Therefore, we will also consider compromises, trading off between coverage error
+and interval length. One option is to minimize length among consistent interval estimators: seek the
+shortest interval such that rI = o(1). In the context of kernel-based nonparametrics, interval estimators
+with good control of worst-case coverage are able to use larger bandwidths in general, and are thus
+shorter in large samples; an analogue to the adage that “similar tests have higher power”. In general, we
+will let the user determine a trade off between the two and thus find a bandwidth choice to implement
+their preference.
+
+4.1. Optimizing interval estimation: Bandwidth selection
+
+We now focus on choosing the bandwidth h optimally, leaving ρ and K to the next section. With
+pragmatism in mind, we restrict attention to bandwidth sequences that are polynomial in n, that is, of
+the form h = Hn−η for some constants H > 0 and η > 0. For implementation purposes, we optimize
+CIrbc(h),F (zα/2,−zα/2) pointwise in F. The optimal bandwidths will be functions of F and their imple-
+mentations are functions of the data, which are draws from F; neither depend explicitly upon FS . The
+resulting coverage error rates still hold uniformly, because the bandwidths are of the form h = Hn−η ,
+where η does not depend on F and H is well-behaved uniformly in FS . We will focus on cases where
+coverage is consistent, leveraging our new higher-order results in this paper.
+
+An obvious candidate for h in applications is the classical MSE-optimal choice, denoted hmse, for the
+point estimator (v)
+
+μ̂p (x) used as part of the centering of the confidence interval Irbc(h). This bandwidth
+choice is popular and readily available in most statistical software. Although designed to optimize
+point estimation, our theoretical results show that it yields valid robust bias corrected inference, that
+is, supF ∈F |PF [μ(ν)(x) ∈ Irbc(hmse)] − (1 − α)| → 0, in contrast to the traditional interval Ip(hmse),S
+which undercovers. This gives a principled endorsement for using hmse coupled with robust bias cor-
+rection in applications, if a researcher wishes to optimize point estimation instead of inference when
+choosing the bandwidth h. To be more precise, our results give formal justification (and demonstrate
+higher-order coverage improvements) for reporting (ν)
+
+μ̂p (x) along with Irbc(hmse), both implemented
+using the same bandwidth hmse, that is, pairing an MSE-optimal point estimator with a valid measure
+of uncertainty that uses the same samples. In fact, an interesting consequence of our results is that for
+interior points and local linear regression (p = 1), Irbc(hmse) has coverage error that vanishes as fast
+as possible: for this special case, both the mean squared error and coverage error are optimal in rates
+
+
+
+3010 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+upon setting h = Hn−1/(2p+3) for a constant H > 0. In other cases, coverage of confidence intervals
+implemented using hmse remains consistent but the coverage rate is suboptimal.
+
+To see this, we now turn to inference-optimal bandwidths. We start with the point of view that
+minimizing coverage error alone is the goal and therefore we choose h by minimizing the terms of (16).
+This means setting h −η
+
+rbc = Hn rbc for ηrbc = 1/(p+4) for interior x with p− ν odd and ηrbc = 1/(p+
+3) otherwise: Corollary 1 holds for I )/(p+3)
+
+rbc(hrbc) with rates r p+3)/(p+4)
+rbc = n−( and r (p+2
+
+rbc = n− ,
+respectively. In terms of rates, hrbc balances the variance and bias of the point estimator, instead of the
+squared bias as in MSE optimality.
+
+A natural way of choosing the constant H in practice is to minimize the constant portion of the
+coverage error of (16). P lugging in hrbc = Hn−ηrbc
+
+ −1{ } { and factoring out the rate{we get } 
+Hrbc = arg minH>0 H 2ω 1+2ζ 2 }
+
+4,rbc,F + H 2ψ ζ
+T 2 
+
+ψ
+rbc ,F
+
+ω5,rbc,F + H Trbc ,Fω6,rbc,F  .
+It is straightforward to give a data-driven version of Hrbc, and therefore of hrbc, because all quantities
+involved can be estimated. We defer the details to [4] to conserve space. In a nutshell, plug-in estimators
+can be constructed, denoted by ω̂4,rbc,F , ω̂5,rbc,F , and ω̂6,rbc,F , as well as an estimate of the bias
+constant, ψ̂rbc,F . We then numerically s}olve
+
+ { } { } 
+Ĥ = arg min H−1{2ω̂ 1+2ζ 2
+rbc H>0 4,rbc,F + H 2ψ̂ ζ
+
+rbc,F ω̂5,rbc,F + H 2 
+ψ̂rbc,F ω̂6,rbc,F  .
+
+Because this bandwidth depends on the specific data-generating process F, we view it as a rule-of-
+thumb implementation.
+
+As discussed above, we can also seek for a shorter interval (more power) by sacrificing coverage
+error (size control). Interval length (17) is reduced for larger bandwidths, meaning smaller exponents
+η. Corollary 1, or Equation (16) specifically, shows that the smallest η (i.e., the slowest vanishing
+bandwidth) such that the coverage of I −η
+
+rbc(n ) to be (uniformly) asymptotically correct is η > (1/(1+
+2ζ), where recall that ζ = p + 3 for interior points with p − ν odd and ζ = p + 2 otherwise. Therefore,
+taking h = Hn−η for any η > (1/(1+ 2ζ) and H > 0 results in the ideal interval given these preferences
+over coverage error and length.
+
+This same idea can be extended to accomplish a trade-off between coverage error and length. Re-
+searchers may want to have an interval that is closer to nominal level, and therefore may be concerned
+that in finite samples an interval with coverage error only known to obey rrbc = o(1) will not be satis-
+factory. We can therefore take h ηto
+
+to = Hton− for some ηto ∈ (1/(1+ 2ζ),ηrbc]. Note that if η > ηrbc
+(i.e. h = o(hrbc)), both the rate of coverage error decay and interval length contraction can be improved.
+There is no well-defined optimal choice in this range of asymptotically valid options, as the choice must
+reflect each researcher’s preference for length vs. coverage error. This range does not depend on ν, even
+though the resulting length will, see (17). This may affect how the researcher wishes to trade off the
+two quantities. The endpoints of the range for ηto represent preferences for only optimizing coverage
+error or only length.
+
+To select the constant for this trade off, Hto, note fi{rst that for η <} ηrbc the middle term of the
+coverage error (16) is dominant. This term, n1−ηto(1+2ζ ) 2ψ2
+
+T ,Fω5,T ,F , shares the rate of the scaled,
+squared bias. Therefore, it is natural to balance this against the square of interval length, to match the
+trade off that hto represents. The feasible choice of this constant, Ĥto, will also be a direct plug-in
+rule that uses the estimators above and a pilot version of σ̂2
+
+rbc, as well a researcher’s choice of weight
+H ∈ (0,1) capturing their trade off between the two. Put altogether, we can then set
+
+{ }
+Ĥto = arg min 1 ( ) σ̂2
+
++2ζ
+H>0 H · H 2ψ̂2
+
+rbc,F ω̂5,rbc,F + (1 −H) · 4z2 rbc
+α/2 H1+2ν
+
+
+
+Coverage error optim( ality ) 3011
+
+(1 −H)(1 + 2ν)4z2
+α/2σ̂
+
+2
+rbc
+
+= .
+H(1 + 2ζ)2ψ̂2
+
+rbc,F ω̂5,rbc,F
+
+The resulting data-driven bandwidth choice is ĥto = Ĥton−ηto , for a choice ηto ∈ (1/(1 + 2ζ),ηrbc],
+and weight H ∈ (0,1). The supplement [4] contains details and some additional results.
+
+4.2. Interval length optimality: Choosing ρ and K(·)
+To complete the implementation of Irbc(h) we need to select the bias-correction bandwidth b, which
+we do in the form of ρ = h/b, and the kernel function K(·). We choose these to optimize the length
+(17). With ρ bounded and bounded away from zero, this choice affects only the constant portions of the
+coverage error expansion of Irbc(hrbc), in particular changing the shape of the equivalent kernel of
+θ̂rbc. For more details on equivalent kernels, see [17, Sect. 3.2.2]. To find this equivalent kernel, begin
+by writing θ̂rbc = ν!e′νΓ
+
+−1ΩrbcY/nhν as a weighted average of the Yi . Recall that Xh,i = (Xi − x)/h
+and similarly for Xb,i . Then,
+
+1 ( )
+θ̂rbc = ν!e′Γ−1 Ω − ρp+1 −1
+
+nhν ν Λe′p+1Γ̄ Ω̄ Y )
+1 ∑n { (
+
+= ν!e′
+nh1+ νΓ
+
+−1 K(Xh,i)r p(Xh,i) − ρp+1 h }
+Λe′
+
+−1
+p+1Γ̄ K(Xb,i)r p+1(Xb,i) Yi .ν b
+
+i=1
+
+The weights here depend on the sample, as Γ, Λ, and Γ̄ are sample quantities. The equiva-
+lent ∫kernel replaces these with their l∫imiting versions (not, as elsew∫here, their fixed-n expecta-
+tions), which we shall denote G = f (x) K(u)r p(u)r p(u)′du, L = f (x) K(u)r p(u)up+1du, and Ḡ =
+f (x) K(u)r p+1(u)r p+1(u)′du, respectively. The integrals are over [−1,1] if x is an interior point and
+appropriately truncated when x is a boundary point. Under our assumptions, convergence to these limits
+is fast enough that, for the equivalent kern(el Krbc(u; K, ρ, ν) defined as )
+
+Krbc(u; K, ρ, ν) = ν!e′νG−1 K(u)r p(u) − ρp+2Le′
+−1
+
+p+1Ḡ K(uρ)r p+1(uρ) ,
+
+and we have the representation
+
+1 ∑n ( )
+θ̂rbc = K X
+
+nh1+ν rbc h,i; K, ρ, ν Yi {1 + oP(1)}.
+i=1
+
+It follows that the (constant po∫rti(on of the) asymp)totic length of Irbc(h) depends on K(·) and ρ only
+through the specific functional Krbc(u; K 2
+
+, ρ, ν) du, which corresponds to the asymptotic variance.
+The asymptotic variance of a local polynomial point estimator at a boundary or interior point is
+
+minimized by employing the uniform kernel [13]. Therefore, to minimize the constant term of interval
+length we choose ρ, depending on K , to make Krbc(u; K, ρ, ν) as close as possible to the optimal
+equivalent kernel, i.e. the K∗
+
+p(u) induced by the uniform kernel for a given p. If the uniform kernel
+is used initially, then ρ∗ = 1 is optimal: that is, Krbc(·;1{|u| < 1}/2,1, ν) ≡ K∗
+
+p+1(·). This highlights
+the importance of being able to accommodate the uniform kernel in our higher-order expansions. If a
+kernel other than uniform is used, we look for the optimal choice of ρ by minimizing the L2 distance
+between the induced equivalent kernel an∫d the opti
+
+ (mal varia)nce-minimizing equivalent kernel, solving
+
+∗ 2
+ρ∗ = arg minρ>0 Krbc u; K, ρ, ν −Kp+1(u) du.
+
+
+
+3012 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+Table 2. L2-Optimal Variance-Minimizing ρ
+p Kernel
+
+p Kernel
+Triangular Epanechnikov Uniform
+
+Triangular Epanechnikov Uniform
+0 0.778 0.846 1.000
+
+1 0.798 0.865 1.000
+1 0.850 0.898 1.000
+
+3 0.867 0.915 1.000
+2 0.887 0.924 1.000
+
+5 0.900 0.938 1.000
+3 0.909 0.940 1.000
+
+7 0.919 0.951 1.000
+4 0.924 0.950 1.000
+
+(b) Interior point
+(a) Boundary point
+
+Note: Optimal ρ computed by minimizing the L2 distance between the RBC induced equivalent kernel and the variance-
+minimizing equivalent kernel (Uniform Kernel).
+
+This is not a sample-dependent problem, only computational. For p − ν odd, the standard case in
+practice, Table 2 shows the optimal ρ∗, for boundary and interior points, respectively, the triangular
+kernel (K(u) = (1− |u|)1(|u| ≤ 1)) and the Epanechnikov kernel (K(u) = 0.75(1− u2)1(|u| ≤ 1)). These
+two are popular choices and are MSE-optimal at boundary and interior points, respectively. The shapes
+of the resulting equivalent kernel, Krbc(u; K, ρ∗, ν), are shown in Figure 1 for ν = {0,1}. Note that
+although ρ∗ itself does not vary with ν, the equivalent kernel shape does. Additional choices of p are
+illustrated in the supplement[4].
+
+5. Minimax coverage error decay rates
+In this section we build on [23] and look for a minimax result: characterizing the fastest (minimal)
+rate at which the worst-case (maximal) coverage error vanishes. The “optimal” interval estimator is
+one for which this maximal error is minimized. At an intuitive level, this corresponds to the desire for
+similarity in testing: the confidence interval should have “similar” coverage over the set of plausible
+distributions. [23] proposed this inference-specific notion of minimax optimality and studied it in the
+case of one-sided confidence intervals in the i.i.d. parametric location model. This problem is different
+from the more typical minimaxity considered for point estimation, though the latter is established for
+robust bias correction by [26] and is discussed more broadly for local polynomials by [13] and [16].
+
+To state the problem more formally, let Ip denote a class of confidence interval estimators. We then
+define the minimax coverage error as  [ ]
+
+MCEn := inf sup  
+(ν)
+
+PF μ ( ) ∈ I − (1 − 
+x α),
+
+I ∈Ip F ∈FS
+
+where the dependence on the fixed quantities, such as the classes Ip and FS or the level α, are
+suppressed. Our goal is to characterize the minimax optimal coverage error decay rate bound, which is
+the fastest vanishing sequence r = r(n), n ∈ N, such that for constants c1 and c2,
+
+0 < c −1 r−1
+1 ≤ lim inf r MCEn ≤ lim sup n ≤ c2 <∞. (18)
+
+n→∞  MCE
+n→∞
+
+We have already characterized the worst-case coverage error in Corollary 1 for the class of distribu-
+tions defined in Section 2. The key point here is that if we take Ip to be the class of intervals for which
+we studied worst-case coverage error in Corollary 1, then we can characterize the minimax rate r as
+
+
+
+Coverage error optimality 3013
+
+Figure 1: K∗
+p+1(u) vs. Krbc(u; K, ρ∗, ν)
+
+well as intervals which attain it. Specifically, we take Ip to be the Wald-type intervals of the form (12),
+based on a local polynomial of degree p, with any choice of centering, scaling, bandwidth(s), kernel
+shape, and quantiles, discussed in Section 2. This includes all those intervals dual to t statistics cov-
+ered by Theorem 1, but also includes other choices which are not asymptotically level 1− α. Examples
+include trivial cases such improper choices of quantiles or inconsistent variance estimators, but also
+choices such as Ip(hmse), i.e., using the MSE-optimal bandwidth sequence for with centering (ν)
+
+μ̂p and
+scaling σ̂2
+
+p/(nh1+2ν). We could also include other procedures, such as bootstrap based quantiles, empir-
+ically chosen bandwidths, or empirical likelihood methods, as these will not improve on the worst-case
+coverage error [10,21,24].
+
+Crucial to proving that such an interval is minimax optimal is that the bias vanishes at the best possi-
+ble rate, given the smoothness assumed (S) and utilized (p), and this in turn depends on whether x is an
+interior or boundary point. Collecting all the smoothness cases studied in Section 3.1, we immediately
+obtain the following result (see [4] for omitted details).
+
+
+
+3014 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+Corollary 2. Let Assumptions 1 and 2 hold and let Ip be the class of Wald-type confidence intervals
+described in the foregoing paragraph.
+
+(i) Let x be an interior point in the support of X. If p−ν is odd, then (18) holds with r = n−(p+3)/(p+4)
+if p ≤ S − 3 and r = n−(S+s)/(S+s+1) if p ≥ S − 2. If p − ν is even, then r = n−(p+2)/(p+3) if p ≤ S − 2
+and r = n−(S+s)/(S+s+1) if p ≥ S − 1.
+
+(ii) Let x be a boundary point of the support of X. Then, (18) holds with r = n−(p+2)/(p+3) if p ≤ S−2
+and r = n−(S+s)/(S+s+1) if p ≥ S − 1.
+
+For the classes FS and Ip considered herein, this result establishes the minimax rate bounds. The
+interplay between the two classes is crucial: they should be neither too “large” nor too “small” in
+order to obtain useful and interesting results. The larger is FS , the more plausible a given data set
+is generated by some F ∈ FS , but well known results dating back at least to [1] show that if FS is
+too large it is impossible to construct an “effective confidence interval” that controls the worst-case
+coverage. Our particular FS captures common restrictions in the setting of nonparametric regression,
+and therefore matches empirical practice. The class Ip is restricted to contain Wald-type interval
+estimators commonly employed in practice using nonparametric kernel-based regression methods (but
+can be trivially extended to cover alternatives mentioned above). Recall that our goal is to identify if
+RBC confidence intervals improve over other options in a uniform sense, and this result is tailored to
+that goal.
+
+The main message of Corollary 2 is that Irbc(hrbc) is minimax optimal in all cases. This strengthens
+the pointwise improvement offered by robust bias correction to optimality within the class Ip consid-
+ered here. Intuitively, this is because robust bias correction successfully exploits additional smoothness
+if it exists, but is not punished (in rates) if there is no such smoothness due to the change in Studenti-
+zation. This can be compared to Ip , the classical interval that requires undersmoothing. This interval
+is optimal only in the case when S is known so that p can be chosen large enough; for a fixed p that is
+small relative to S this interval is dominated in the minimax sense.
+
+6. Simulation study
+This section presents results from a simulation study to examine the finite-sample performance of
+our methods. Additional results and implementation details can be found in the supplement [4]. We
+focus on the performance of confidence intervals for μ(x) and μ(1)(x) based on robust bias correction
+and traditional undersmoothing. Data is generated from model (1), with Xi uniformly distributed on
+[−1,1], ε standard normal, and
+
+μ( sin(3πx/2)
+x) =
+
+1 + 18x2 ,
+(sgn(x) + 1)
+
+where sgn(x) = −1, 0, or −1 according to x > 0, x = 0 or x < 0, respectively. This function, which was
+also analyzed in [5], is displayed in Figure 2 together with μ(1)(x). By looking at different evaluation
+points, we will be able to capture the performance of the methods under different levels of complexity.
+
+We show results for sample sizes n ∈ {100,250,500,750,1000,2000}, always with 5,000 replications.
+We study inference at three evaluation points: x = −1 (boundary point), x = −0.6 (low curvature), and
+x = −0.2 (high curvature). The supplement [4] shows results for x ∈ {0.2,0.6,1}. For implementation,
+we use p = 1 (for ν = 0) and p = 2 (for ν = 1) with the Epanechnikov kernel ([4] gives results for the
+uniform kernel). Finally, we evaluate the performance of the confidence intervals using several band-
+width choices. First, following the results from Section 4, we use ĥrbc, a data-driven version of the
+inference-optimal bandwidth hrbc. We also consider the analogous version for undersmoothed confi-
+dence intervals, denoted ĥus (detailed in [4]), and the standard choice in practice, ĥmse. Robust bias
+
+
+
+Coverage error optimality 3015
+
+Figure 2: Conditional mean function and first derivative, μ(ν)(x)
+
+correction is implemented using ρ = ρ∗ according to Table 2. All implementation details are available
+for R and Stata [6].
+
+Figures 3 and 4 present empirical coverage probabilities for ν = 0 and ν = 1, respectively, for each
+evaluation point and choice of bandwidth, as a function of the sample size. Overall, we can see that
+robust bias correction yields close to accurate coverage, improving over undersmoothing in almost
+every case. Performance is highly superior at points where the functions present high curvature and
+also at the boundary. Performance is never worse even when the function is quite linear and optimal
+bandwidths are (close to) ill-defined.
+
+We also compare confidence interval performance in terms of length in Figure 5. We take coverage
+into account by looking at RBC and US confidence intervals implemented using their corresponding
+coverage error optimal bandwidth choices (ĥrbc and ĥus, respectively), which is when they perform
+best in terms of coverage. We also include other valid, but non optimal choices Irbc(ĥmse), Irbc(ĥus).
+We find that RBC confidence intervals are, on average, not larger than US, and sometimes even shorter.
+Lastly, Figure 6 shows the average estimated bandwidths at each point for each sample size, which
+behave as expected following our theory.
+
+7. Conclusion
+This paper derived higher order expansions for inference in nonparametric local polynomial regression.
+We provided new Edgeworth expansions and associated error in coverage probability expansions for
+standard and robust bias corrected methods, showing that the latter have superior coverage properties.
+Our results hold uniformly in the data generating process, cover derivative estimation, and allow for
+the uniform kernel. Using our results we developed novel bandwidth selections that target inference
+directly, achieving lower coverage error and/or shorter length.
+
+Our main results measured coverage error symmetrically, but it is worth mentioning that the absolute
+loss function may be replaced by the “check” loss function, and thus studying the maximal coverage
+error supF ∈F L(PF [θF ∈ I] − (1 − α)), with L(e) = Lτ(e) = e(τ − 1{e < 0}), and where τ ∈ (0,1)
+
+S
+encodes the researcher’s weight for over- and under-coverage. Setting τ = 1/2 recovers the above, sym-
+metric measure of coverage error. Guarding more against undercoverage (a preference for conservative
+
+
+
+3016 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+Figure 3: Empirical Coverage for 95% Confidence Intervals, ν = 0
+
+
+
+Coverage error optimality 3017
+
+Figure 4: Empirical Coverage for 95% Confidence Intervals, ν = 1
+
+
+
+3018 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+Figure 5: Average Interval Length for 95% Confidence Intervals
+
+intervals) requires choosing a τ < 1/2. For example, setting τ = 1/3 encodes the belief that undercov-
+erage is twice as bad as the same amount of overcoverage. All our results can be established for this
+loss function.
+
+Finally, this paper studied the properties of confidence intervals at a fixed evaluation point x, but
+it would be of theoretical and practical interest to extent our results to the case of confidence band
+construction. Robust bias correction has recently been used to construct valid confidence bands for
+local polynomial estimation [12] and linear sieve estimation [9]. Because the underlying distributional
+approximations for confidence band constructions are substantially more complex, obtaining results
+similar to those presented herein will require substantial extension of our technical work.
+
+Appendix: Terms of the Edgeworth expansion
+We give the definition ofωk , k = 1,2, . . . ,6. First, define the following objects, all calculated in a fixed-n
+sense, bounded uniformly in FS , and nonzero for some F ∈ FS . As shorthand, let a tilde accent denote
+
+
+
+Coverage error optimality 3019
+
+Figure 6: Average Estimated Bandwidth
+
+a fixed-n expectation, so that Γ̃ = E[Γ], Λ̃1 = E[Λ1], and so forth. Let
+
+0
+T ( −1
+
+Xi) = ν!e′ν Γ̃ (K r p)(Xp h,i);
+
+0
+T (X ) 0 ( ) − p 1 ! ′ −1
+
+Γ̃
+r c i = T X ( ′ ˜̄ −1
+
+ρ + ν e Λ̃
+p i ν 1eb p+1Γ (K r p+1)(X)b,i);
+
+1
+T (X
+p i,Xj ) = ν!e′ −1
+
+ν Γ̃ E[(K r ′
+p r p)(Xh, j )] − ( −1
+
+K r p r
+′
+p)(Xh, j ) Γ̃ (K r p)(Xh,i); )
+
+1 − { (
+1
+T (X ,X ) = 1 (X p+ 1
+rbc i j T ,
+
+p( i Xj ) − ρ ν!e′ ′
+ν Γ̃ E[(K r p r p)(Xh,)j )] − (K r p r
+
+′
+p)(
+
+−1
+Xh, j ) Γ̃ Λ̃ ′
+
+1ep+1
+
++ (K )(Xh, j )Xp+1 − E[(K r )(X )Xp+1
+r p ( h,i p h, j ] e′
+
+h,i p+1 )
++ Λ̃ ′ ˜̄ −1 }
+
+1ep+1Γ E[(K r p+1r
+′
+p+1)(Xb, j )] − (K r p+1r
+
+′ −
+p+1)(Xb, j ) Γ˜̄
+
+1
+(K r p+1)(Xb,i).
+
+
+
+3020 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+Then define σ̃2 2
+T = E[h
+
+−10 (X) v(X)] and denote the standard Normal density as φ(z). Then we define
+T
+
+[ ] { }
+ω −1
+
+1,T ,F (z) = φ(z)σ̃−3
+T E h 0
+
+T (Xi)3ε3
+i (2z2 − 1)/6 ,
+
+ω2,T ,F (z) = −φ(z)σ̃−1
+T ,
+
+ω3,T ,F (z) = −φ(z) {z/2} ,
+ω5,T ,F (z) = −φ(z)σ̃−2
+
+T {z/2} , { }
+ω6,T ,F (z) = φ(z)σ̃−4
+
+T E[h
+−10
+
+T (Xi)3ε3
+i ] z3/3 .
+
+For ω4, it is not quite as simple to state a generic version. Let G̃ stand in for Γ̃ or Γ˜̄ , p̃ stand in for p or
+p+ 1, and dn stand in for h or b, all depending on if T = Tp or Trbc. Note however, that h is still used in
+many places, in particular for stabilizing fixed-n expectations, for Trbc. Indexes i, j, and k are always
+distinct (i.e. Xh,i  Xh, j  Xh,k).
+
+[ ] { }
+ω −6
+
+4,T ,F (z) = φ(z)σ̃ h−10 3 2
+T E [ (X 3 3
+
+T i) εi z /3 + 7] z/4 + σ̃2
+T z(z2
+
+{ −}3)/4
+
++ φ(z)σ̃−2 −10
+T E h T (Xi)1
+
+T (Xi,X )ε2 2
+
+[ i i ]−{z(z − 3)/2 }
++ φ(z)σ̃−4 −1 4
+
+T E [h 0
+T (Xi) (ε4
+
+i − v(X 2
+i) ) z(z2 − 3)/8
+
+2 − ] { }
+− φ(z)σ̃−2 −
+
+T E [h 10
+T (Xi) r ′ 1
+
+p̃(Xdn ,i) G̃ (K]r p̃)[(Xdn ,i)ε
+2 z(z2
+i − 1)/2 ] { }
+
+− φ(z)σ̃−4 −1 ′
+T E [h ( )3 −1
+
+0
+T Xi r p̃(Xdn ,i) G̃ ε2 h−1
+
+i E (K r p̃)(Xdn ,i
+
+− { )0
+T (X )ε2 (z2
+
+] i i } z − 1)
+1
+
++ φ(z)σ̃−2 −2 0
+T E h  (X 2
+
+T i) (r p̃(X ′
+dn ,i) G̃ (K r p̃)(Xdn , j))
+
+2ε2 (z2
+
+[ j z − 1)/4
+
++ φ(z)σ̃−4 h−30
+T E T (Xj )2 ( −1
+
+r p̃ Xdn], j{)
+′G̃ (K r p̃)(}Xdn ,i)
+
+0
+T (Xi)r p̃(Xdn , j)
+
+′
+
+× −1
+G̃ (K r p̃)[(Xdn ,k)
+
+0
+T (Xk )ε2
+
+i{ε
+2
+k z(z2
+
+] − 1)/}2
++ φ(z)σ̃−4 −1 0
+
+T E h  4
+
+(T (Xi)4εi −z(z2
+
+[ − 3)/24 ) ] { }
++ φ(z)σ̃−4 1
+
+T E h− 0 2
+T (Xi) v(Xi) − E[0
+
+T (X
+2
+
+i) v(X )] {
+0 X 2 2 2
+
+[ i ] T ( i) εi} z(z − 1)/4
+
++ φ(z)σ̃−4 −2 2
+T E h 1
+
+T (Xi,Xj )0
+T (Xi)0
+
+(T (Xj ) ε2
+
+[ j v(Xi) z(z2 − 3) ) ]
++ φ(z)σ̃−4 2
+
+T E h− 1
+T (Xi,X 0 0
+
+j ) T (X
+2
+
+[ ( T (Xi)  j )2v(Xj ) −)E[
+0
+
+] T{(Xj ) v(Xj )] }ε
+2
+i {−z}
+
++ φ(z)σ̃−4 1
+T E h− 0 )2T (Xi v(X 2 2
+
+i) − E[0
+T (Xi) v(Xi)] −z(z2 + 1)/8 .
+
+
+
+Coverage error optimality 3021
+
+Acknowledgements
+We especially thank an Associate Editor, and the reviewers, for insightful comments that improve our
+manuscript. We also thank Chris Hansen, Michael Jansson, Adam McCloskey, Rocio Titiunik, and
+participants at various seminars and conferences for comments.
+
+Funding
+The second author gratefully acknowledges financial support from the National Science Foundation
+(SES 1357561, SES 1459931, and SES-1947805) and the National Institutes of Health (R01 GM072611-
+16). The third author gratefully acknowledges financial support from the Richard N. Rosett and John E.
+Jeuck Fellowships.
+
+Supplementary Material
+Supplement to “Coverage error optimal confidence intervals for local polynomial regression”
+(DOI: 10.3150/21-BEJ1445SUPP; .pdf). This supplement contains proofs of all results, other technical
+details, and complete simulation results.
+
+References
+[1] Bahadur, R.R. and Savage, L.J. (1956). The nonexistence of certain statistical procedures in nonparametric
+
+problems. Ann. Math. Stat. 27 1115–1122. MR0084241 https://doi.org/10.1214/aoms/1177728077
+[2] Beran, R. (1982). Estimated sampling distributions: The bootstrap and competitors. Ann. Statist. 10 212–225.
+
+MR0642733
+[3] Bhattacharya, R.N. and Ranga Rao, R. (1976). Normal Approximation and Asymptotic Expansions. Wiley
+
+Series in Probability and Mathematical Statistics. New York: Wiley. MR0436272
+[4] Calonico, S., Cattaneo, M.D. Farrell, M.H. (2022). Supplement to “Coverage error optimal confidence inter-
+
+vals for local polynomial regression.” https://doi.org/10.3150/21-BEJ1445SUPP
+[5] Calonico, S., Cattaneo, M.D. and Farrell, M.H. (2018). On the effect of bias estimation on coverage accu-
+
+racy in nonparametric inference. J. Amer. Statist. Assoc. 113 767–779. MR3832225 https://doi.org/10.1080/
+01621459.2017.1285776
+
+[6] Calonico, S., Cattaneo, M.D. and Farrell, M.H. (2019). nprobust: Nonparametric kernel-based estimation
+and robust bias-corrected inference. J. Stat. Softw. 91 1–33.
+
+[7] Calonico, S., Cattaneo, M.D. and Farrell, M.H. (2020). Optimal bandwidth choice for robust bias-corrected
+inference in regression discontinuity designs. Econom. J. 23 192–210. MR4108924 https://doi.org/10.1093/
+ectj/utz022
+
+[8] Calonico, S., Cattaneo, M.D. and Titiunik, R. (2014). Robust nonparametric confidence intervals
+for regression-discontinuity designs. Econometrica 82 2295–2326. MR3301169 https://doi.org/10.3982/
+ECTA11757
+
+[9] Cattaneo, M.D., Farrell, M.H. and Feng, Y. (2020). Large sample properties of partitioning-based series
+estimators. Ann. Statist. 48 1718–1741. MR4124341 https://doi.org/10.1214/19-AOS1865
+
+[10] Chen, S.X. and Qin, Y.S. (2000). Empirical likelihood confidence intervals for local linear smoothers.
+Biometrika 87 946–953. MR1813987 https://doi.org/10.1093/biomet/87.4.946
+
+[11] Chen, S.X. and Qin, Y.S. (2002). Confidence intervals based on local linear smoother. Scand. J. Stat. 29
+89–99. MR1894383 https://doi.org/10.1111/1467-9469.00273
+
+[12] Cheng, G. and Chen, Y.-C. (2019). Nonparametric inference via bootstrapping the debiased estimator. Elec-
+tron. J. Stat. 13 2194–2256. MR3980957 https://doi.org/10.1214/19-EJS1575
+
+
+
+3022 S. Calonico, M.D. Cattaneo and M.H. Farrell
+
+[13] Cheng, M.-Y., Fan, J. and Marron, J.S. (1997). On automatic boundary corrections. Ann. Statist. 25
+1691–1708. MR1463570 https://doi.org/10.1214/aos/1031594737
+
+[14] Edgeworth, F.Y. (1883). The law of error. The London, Edinburgh and Dublin Philosophical Magazine 5
+300–309.
+
+[15] Edgeworth, F.Y. (1906). The generalised law of error, or law of great numbers. J. Roy. Stat. Soc. 69 497–539.
+[16] Fan, J., Gasser, T., Gijbels, I., Brockmann, M. and Engel, J. (1997). Local polynomial regression: Optimal
+
+kernels and asymptotic minimax efficiency. Ann. Inst. Statist. Math. 49 79–99. MR1450693 https://doi.org/
+10.1023/A:1003162622169
+
+[17] Fan, J. and Gijbels, I. (1996). Local Polynomial Modelling and Its Applications. Monographs on Statistics
+and Applied Probability 66. London: CRC Press. MR1383587
+
+[18] Fan, J. and Yao, Q. (2003). Nonlinear Time Series: Nonparametric and Parametric Methods. Springer Series
+in Statistics. New York: Springer. MR1964455 https://doi.org/10.1007/b97702
+
+[19] Hall, P. (1991). Edgeworth expansions for nonparametric density estimators, with applications. Statistics 22
+215–232. MR1097375 https://doi.org/10.1080/02331889108802305
+
+[20] Hall, P. (1992). The Bootstrap and Edgeworth Expansion. Springer Series in Statistics. New York: Springer.
+MR1145237 https://doi.org/10.1007/978-1-4612-4384-7
+
+[21] Hall, P. (1992). Effect of bias estimation on coverage accuracy of bootstrap confidence intervals for a proba-
+bility density. Ann. Statist. 20 675–694. MR1165587 https://doi.org/10.1214/aos/1176348651
+
+[22] Hall, P. (1992). On bootstrap confidence intervals in nonparametric regression. Ann. Statist. 20 695–711.
+MR1165588 https://doi.org/10.1214/aos/1176348652
+
+[23] Hall, P. and Jing, B.-Y. (1995). Uniform coverage bounds for confidence intervals and Berry-Esseen theorems
+for Edgeworth expansion. Ann. Statist. 23 363–375. MR1332571 https://doi.org/10.1214/aos/1176324525
+
+[24] Hall, P. and Kang, K.-H. (2001). Bootstrapping nonparametric density estimators with empirically chosen
+bandwidths. Ann. Statist. 29 1443–1468. MR1873338 https://doi.org/10.1214/aos/1013203461
+
+[25] Neumann, M.H. (1997). Pointwise confidence intervals in nonparametric regression with heteroscedastic
+error structure. Statistics 29 1–36. MR1438531 https://doi.org/10.1080/02331889708802572
+
+[26] Tuvaandorj, P. (2020). Regression discontinuity designs, white noise models, and minimax. J. Econometrics
+218 587–608. MR4149240 https://doi.org/10.1016/j.jeconom.2020.04.030
+
+Received November 2020 and revised July 2021

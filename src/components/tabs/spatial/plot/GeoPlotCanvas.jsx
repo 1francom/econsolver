@@ -153,7 +153,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           const col = ly.boundaryCol;
           const boundaries = r.map(row => row[col]).filter(Boolean);
           for (const boundaryWkt of boundaries) {
-            const cells = makeCabaMetricGrid(boundaryWkt, ly.cellsize ?? 500, ly.clipBorder !== false);
+            const cells = makeCabaMetricGrid(boundaryWkt, Number(ly.cellsize) || 500, ly.clipBorder !== false);
             for (const cell of cells) {
               const parsed = parseWktRings(cell.geometry);
               if (!parsed) continue;
@@ -178,7 +178,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
             const lat0 = Math.min(...lats) - pad, lat1 = Math.max(...lats) + pad;
             const lon0 = Math.min(...lons) - pad, lon1 = Math.max(...lons) + pad;
             const bboxWkt = `POLYGON((${lon0} ${lat0}, ${lon1} ${lat0}, ${lon1} ${lat1}, ${lon0} ${lat1}, ${lon0} ${lat0}))`;
-            const cells = makeCabaMetricGrid(bboxWkt, ly.cellsize ?? 500, false);
+            const cells = makeCabaMetricGrid(bboxWkt, Number(ly.cellsize) || 500, false);
             for (const cell of cells) {
               const parsed = parseWktRings(cell.geometry);
               if (!parsed) continue;

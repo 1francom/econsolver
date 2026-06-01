@@ -4,8 +4,10 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol } from "../shared/guess.js";
 import { transformCoord, transformWKT } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function CRSTransformSection({ rows, headers, onResult, C }) {
+  const { appendLog } = useSessionLog();
   const [mode, setMode] = useState("point");
   const [source, setSource] = useState("EPSG:4326");
   const [target, setTarget] = useState("EPSG:32721");
@@ -34,6 +36,7 @@ export function CRSTransformSection({ rows, headers, onResult, C }) {
           return { ...r, [outX]: nx, [outY]: ny };
         });
         setResult({ rows: out, cols: [outX, outY] });
+        appendLog({ module: "spatial", opType: "crs_transform", params: { mode: "point", xCol, yCol, outX, outY, source, target }, label: `CRS transform ${source} → ${target}: (${xCol}, ${yCol}) → (${outX}, ${outY})` });
         onResult(out, [outX, outY]);
       } else {
         const out = rows.map(r => ({
@@ -41,6 +44,7 @@ export function CRSTransformSection({ rows, headers, onResult, C }) {
           [outWkt]: r[wktCol] ? transformWKT(String(r[wktCol]), source, target, target === "EPSG:4326" ? 8 : 3) : null,
         }));
         setResult({ rows: out, cols: [outWkt] });
+        appendLog({ module: "spatial", opType: "crs_transform", params: { mode: "wkt", wktCol, outWkt, source, target }, label: `CRS transform ${source} → ${target}: ${wktCol} → ${outWkt}` });
         onResult(out, [outWkt]);
       }
     } catch (e) {

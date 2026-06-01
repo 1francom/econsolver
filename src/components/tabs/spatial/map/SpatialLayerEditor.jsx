@@ -74,7 +74,7 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
           <ColSelect label="Longitude column" value={layer.lonCol}
             onChange={v => onChange({ ...layer, lonCol: v })} headers={lyHeaders} C={C} allowNone />
           <NumInput label="Cell size (meters)" value={layer.cellsize}
-            onChange={v => onChange({ ...layer, cellsize: Number(v) })} C={C} min={50} max={10000} step={50} />
+            onChange={v => onChange({ ...layer, cellsize: Number(v) })} C={C} min={50} max={10000} step={50} confirm />
           <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
             <input type="checkbox" checked={layer.clipBorder !== false}
               onChange={e => onChange({ ...layer, clipBorder: e.target.checked })}
@@ -87,7 +87,7 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
           <ColSelect label="Boundary WKT column" value={layer.boundaryCol}
             onChange={v => onChange({ ...layer, boundaryCol: v })} headers={geomCols} C={C} allowNone />
           <NumInput label="Cell size (meters)" value={layer.cellsize}
-            onChange={v => onChange({ ...layer, cellsize: Number(v) })} C={C} min={50} max={10000} step={50} />
+            onChange={v => onChange({ ...layer, cellsize: Number(v) })} C={C} min={50} max={10000} step={50} confirm />
           <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
             <input type="checkbox" checked={layer.clipBorder !== false}
               onChange={e => onChange({ ...layer, clipBorder: e.target.checked })}

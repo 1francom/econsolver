@@ -1,0 +1,6198 @@
+﻿Estimation and Inference in Boundary Discontinuity Designs:
+
+Distance-Based Methods∗
+
+Matias D. Cattaneo† Rocio Titiunik‡ Ruiqi (Rae) Yu§
+
+March 27, 2026
+
+Abstract
+
+We study nonparametric distance-based (isotropic) local polynomial methods for estimat-
+ing the boundary average treatment effect curve, a causal functional that captures treatment
+effect heterogeneity in boundary discontinuity designs. We establish identification, estimation,
+and inference results both pointwise and uniformly along the treatment assignment boundary.
+We show that the geometric regularity of the boundary, a one-dimensional manifold, plays a
+central role in determining feasible convergence rates and valid inference procedures. Our the-
+oretical contributions are threefold. First, we derive uniform lower and upper bounds on the
+convergence rate of the misspecification bias of isotropic local polynomial estimators. Second,
+we obtain uniform distributional approximations that justify boundary-robust inference. Third,
+we establish minimax lower bounds for a broad class of nonparametric isotropic regression es-
+timators. These results yield practical guidance for empirical implementation, including new
+bandwidth selection rules that adapt to local irregularities of the treatment-assignment bound-
+ary. We illustrate the proposed methods using simulation evidence and an empirical application,
+and provide companion general-purpose software.
+
+Keywords: regression discontinuity, treatment effects estimation, causal inference, isotropic non-
+
+parametric regression, uniform inference, minimax convergence rate.
+
+∗We thank Alberto Abadie, Boris Hanin, Kosuke Imai, Xinwei Ma, Victor Panaretos, Jörg Stoye, and Jeff
+Wooldridge for comments and discussions. The co-Editor, Associate Editor, and two reviewers provided excellent
+comments and suggestions. Cattaneo and Titiunik gratefully acknowledge financial support from the National Sci-
+ence Foundation (SES-2019432, DMS-2210561, SES-2241575 and SES-2342226). Cattaneo gratefully acknowledges
+financial support from the National Institute for Food and Agriculture (NIFA) through grant 2024-67023-42704, and
+the Data-Driven Social Science initiative at Princeton University.
+
+†Department of Operations Research and Financial Engineering, Princeton University.
+‡Department of Politics, Princeton University.
+§Department of Operations Research and Financial Engineering, Princeton University.
+
+arXiv:2510.26051v2  [econ.EM]  26 Mar 2026
+
+
+
+Contents
+
+1 Introduction 1
+
+1.1 Contributions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+
+1.2 Notation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+
+1.3 Organization . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+
+2 Setup and Assumptions 8
+
+3 Identification and Interpretation 9
+
+4 Approximation Bias 12
+
+5 Estimation and Inference 15
+
+5.1 Convergence Rates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+
+5.2 Uncertainty Quantification . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+
+5.3 Discussion and Implementation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+
+6 Distance-based Minimax Convergence Rate 21
+
+7 Numerical Results 23
+
+7.1 Simulation Study . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+
+7.2 Empirical Application . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+
+8 Extensions 29
+
+8.1 Regression Kink Designs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29
+
+8.2 Imperfect Compliance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29
+
+8.3 Pre-treatment Covariates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30
+
+9 Recommendations for Practice 31
+
+10 Conclusion 33
+
+
+
+1 Introduction
+
+Discontinuities in treatment assignment are widely used in observational studies to investigate
+
+causal effects. In regression discontinuity (RD) designs, each unit receives a univariate score (or
+
+running variable), and treatment is assigned according to a threshold rule: units with scores equal to
+
+or above a known cutoff are assigned to treatment, while units with scores below the cutoff remain
+
+in the control condition. Local treatment effects at the cutoff are identifiable under continuity
+
+(Hahn et al., 2001) or local randomization (Cattaneo et al., 2015) assumptions, and estimation
+
+and inference are typically conducted using local polynomial least squares regression methods. See
+
+Cattaneo and Titiunik (2022) for an overview of the methodological RD literature and Cattaneo
+
+et al. (2020) for a practical introduction.
+
+Boundary discontinuity (BD) designs generalize canonical RD settings to contexts in which units
+
+receive a bivariate score Xi = (X1i, X2i)
+⊤ with support X ⊆ R2, and treatment assignment is
+
+determined by a threshold rule based on a one-dimensional boundary curve B that partitions the
+
+support of the score. A prototypical example is the geographic RD design and its variants (Keele
+
+and Titiunik, 2015; Keele et al., 2015; Keele and Titiunik, 2016; Keele et al., 2017; Galiani et al.,
+
+2017; Rischard et al., 2021; Diaz and Zubizarreta, 2023), where a geographic boundary separates
+
+units into treatment and control areas according to their location. These designs are also referred to
+
+as Multi-Score RD Designs (Papay et al., 2011; Reardon and Robinson, 2012; Wong et al., 2013).
+
+A practical introduction to BD designs is provided in Cattaneo et al. (2024b, Section 5), while
+
+Cattaneo et al. (2026a) offers an overview of the empirical literature.
+
+Using standard causal inference notation (Hernán and Robins, 2020), let Yi(0) and Yi(1) denote
+
+the potential outcomes for unit i = 1, 2, . . . , n under control and treatment assignments, respec-
+
+tively. The key building block in BD designs is the Boundary Average Treatment Effect Curve
+
+(BATEC):
+
+τ(x) = E[Yi(1)− Yi(0)|Xi = x], x ∈ B,
+
+a functional causal parameter that characterizes heterogeneous treatment effects along the assign-
+
+ment boundary. Identification, estimation, and inference for the BATEC can proceed through two
+
+1
+
+
+
+distinct methodological approaches:
+
+• Location-Based Methods. This approach directly exploits the bivariate score Xi, thereby
+
+extending canonical RD methods to multidimensional settings. Early identification and es-
+
+timation results are provided by Papay et al. (2011), Reardon and Robinson (2012), Wong
+
+et al. (2013), and Keele and Titiunik (2015), while Cattaneo et al. (2026b) develop modern
+
+pointwise and uniform estimation and inference procedures.
+
+• Distance-Based Methods. This approach reduces the bivariate score Xi to a univariate
+
+distance-based running variable defined for each x ∈ B, thereby enabling the use of standard
+
+univariate RD methods. Reardon and Robinson (2012, Section 4) refer to this strategy as
+
+distance-based RD, and Keele and Titiunik (2015) discuss its use in geographic RD applica-
+
+tions. Velez and Newman (2019) provide an empirical illustration employing distance-based
+
+polynomial regression to study treatment-effect heterogeneity in a geographic RD design.
+
+The main goal of this paper is to study the identification, estimation, and inference properties
+
+of distance-based methods for the BATEC in BD designs, and to leverage the resulting theoretical
+
+insights to provide practical guidance for empirical implementation. The defining feature of these
+
+methods is the use of univariate local polynomial regression, where the running variable is the
+
+distance between Xi and each point x ∈ B. From a nonparametric smoothing perspective, this
+
+approach is closely related to isotropic regression techniques studied in statistics and machine
+
+learning. By contrast, location-based methods employ local polynomial regressions that directly
+
+incorporate the bivariate score into the polynomial approximation.
+
+In practice, researchers implementing BD designs frequently transform the multidimensional
+
+score into a univariate measure of distance to the assignment boundary and conduct estimation and
+
+inference using this distance as the running variable. Evidence compiled in Cattaneo et al. (2026a,
+
+Table 1) documents more than 80 recent empirical studies in economics and related quantitative
+
+disciplines adopting this strategy. When the goal is to study treatment-effect heterogeneity along
+
+the boundary, distance-based polynomial regression replaces the full bivariate location information
+
+in Xi with a scalar distance defined relative to each boundary point x ∈ B. In other applications,
+
+the objective is instead to pool treatment effects along the boundary, in which case researchers
+
+often use the distance to the closest point on B. This alternative strategy gives rise to pooling-
+
+2
+
+
+
+based methods, which are not the focus of this paper. Pooling-based methods discard location
+
+information and therefore identify a scalar (weighted) Boundary Average Treatment Effect (BATE)
+
+causal parameter. Cattaneo et al. (2026a) provide an introductory discussion, while ongoing work
+
+(Cattaneo et al., 2026c) develops formal identification, estimation, and inference results for pooling-
+
+based methods.
+
+We focus on distance-based methods. Beyond their empirical prevalence, distance-based methods
+
+offer important practical advantages. In many applications, precise location information may be un-
+
+available due to confidentiality restrictions, data aggregation, or measurement limitations, whereas
+
+distance-to-boundary measures can still be constructed or released. In such settings, distance-based
+
+procedures may provide the only feasible way to estimate the heterogeneous treatment effects sum-
+
+marized by the boundary average treatment effect curve τ(x). Moreover, by reducing the dimen-
+
+sionality of the running variable, these methods simplify implementation, facilitate interpretation,
+
+and enhance comparability with standard univariate RD analyses. These considerations underscore
+
+the importance of formally understanding the statistical properties of distance-based estimators in
+
+BD designs.
+
+1.1 Contributions
+
+To outline our main contributions, we first formalize the distance-based approach. The core ingre-
+
+dient is the scalar signed distance-based score for each unit i = 1, . . . , n,
+
+( )
+Di(x) = 1(Xi ∈ A1)− 1(Xi ∈ A0) ·d(Xi,x), x ∈ B,
+
+where d(·, ·) denotes a distance function, X = A0 ∪ A1 with A0 and A1 denoting the disjoint
+
+(connected) control and treatment regions, respectively, and B = bd(A0) ∩ bd(A1) with bd(At)
+
+denoting the boundary of the set At for t ∈ {0, 1}. Without loss of generality, we assume that the
+
+boundary belongs to the treatment region, that is, bd(A1) ⊂√A1 and B ∩ A0 = ∅. A canonical
+
+example is the Euclidean distance d(Xi,x) = |Xi − x| = (X1i − x1)2 + (X2i − x2)2 for x =
+
+(x1, x2)
+⊤ ∈ B, although alternative distance measures may be appropriate in spatial applications
+
+(Banerjee, 2005). For each x ∈ B, the distance-based setup is analogous to a standard univariate
+
+RD design in which Di(x) ∈ R is the running variable, the cutoff is c = 0, and Di(x) ≥ 0 (< 0)
+
+3
+
+
+
+corresponds to treatment (control) assignment.
+
+The observed outcome is Yi = 1(Di(x) ∈ I0), Yi(0) + 1(Di(x) ∈ I1), Yi(1), where I0 = (−∞, 0)
+
+and I1 = [0,∞). Following standard practice in the RD literature, the distance-based local poly-
+
+nomial treatment effect estimator for each x ∈ B is
+
+ϑ̂(x) = e⊤1 γ̂1(x)− e⊤1 γ̂0(x), x ∈ B,
+
+where, for t ∈ {0, 1},
+
+n
+1 ∑( )2
+
+γ̂t(x) = argmin Yi − rp(Di(x))
+⊤γ Kh(Di(x))1(Di(x) ∈ It), (1)
+
+γ∈Rp+1 n
+i=1
+
+with e1 the conformable first unit vector, rp(u) = (1, u, u2, . . . , up)⊤ the usual polynomial basis, and
+
+Kh(u) = K(u/h)/h a univariate kernel with bandwidth h. The kernel down-weights observations as
+
+their distance to x ∈ B increases, while the bandwidth controls the degree of localization. In this
+
+setup, observations contribute isotropically according to their univariate distance d(Xi,x) from
+
+the boundary point x.
+
+The estimator ϑ̂(x) is thus the difference of two univariate (isotropic) local polynomial regression
+
+estimators evaluated along the one-dimensional manifold B. Importantly, this estimator does not
+
+directly target τ(x). Rather, it targets the difference θ1,x(0)− θ0,x(0), where
+
+[ ∣ ] [
+θt,x(r) = E Y ∣ ∣
+
+i Di(x) = r,Di(x) ∈ It = E Yi(t)∣ ]
+d(Xi,x) = |r| , (2)
+
+are univariate conditional expectations induced by transforming the bivariate score through the dis-
+
+tance function. Our objective is therefore to characterize the conditions under which valid pointwise
+
+and uniform identification, estimation, and inference for the BATEC τ(x) can be conducted using
+
+the distance-based estimator ϑ̂(x) and its associated estimand θ1,x(0)− θ0,x(0).
+
+We begin by studying identification of τ(x) through distance-based approximations. The induced
+
+conditional expectations θt,x(r) generally differ from the bivariate regression functions µt(x) =
+
+E[Yi(t) | Xi = x]. Consequently, without restrictions on the data-generating process, the geometry
+
+of the assignment boundary, and the distance function, limr→0 θt,x(r) need not coincide with µt(x).
+
+Theorem 1 provides sufficient conditions for these parameters to agree, including restrictions ensur-
+
+4
+
+
+
+ing that B is a rectifiable curve (Federer, 2014). This result contributes to the multidimensional
+
+RD literature by establishing a new identification theory for distance-based methods (cf., Hahn
+
+et al., 2001; Papay et al., 2011; Reardon and Robinson, 2012; Wong et al., 2013; Cattaneo et al.,
+
+2016).
+
+The geometry of the boundary influences not only identification but also bias approximation.
+
+We establish two complementary results. First, Theorem 2 shows that near irregular points of the
+
+assignment boundary, such as kinks that may arise even when B is a well-behaved one-dimensional
+
+manifold, the pth-order estimator ϑ̂(x) exhibits an irreducible bias of order h, regardless of the
+
+polynomial order or the smoothness of the underlying regression functions µ0(x) and µ1(x). This
+
+phenomenon arises because the induced regression function θt,x(r) is at most Lipschitz continuous
+
+uniformly in neighborhoods of such irregular points. Second, Theorem 3 shows that when B is
+
+smooth, the usual approximation bias of order hp+1 from the nonparametric smoothing literature
+
+is recovered (Härdle et al., 2004). Hence, the bias of the distance-based estimator varies along the
+
+boundary according to its local geometric features.
+
+These findings imply that standard univariate RD procedures can exhibit unexpected behavior
+
+when applied to BD designs through distance-based running variables: geometric irregularities of
+
+the assignment boundary may induce substantially larger misspecification bias. This issue is par-
+
+ticularly relevant in geographic RD applications, where boundaries often contain kinks or other
+
+irregularities. For instance, the influential work of Mandelbrot (1967, 1983) has argued that geo-
+
+graphic borders (and other shapes in nature) are fractals; see Avnir et al. (1998), and references
+
+therein, for a recent discussion on this ongoing debate among mathematicians and philosophers.
+
+From a practical standpoint, our geometric analysis yields concrete foundational guidance for band-
+
+width choice, point estimation, and statistical inference.
+
+We next develop estimation and inference theory for τ(x) based on ϑ̂(x). Theorem 4 establishes
+
+pointwise and uniform convergence rates, while Theorem 5 provides valid uncertainty quantifica-
+
+tion both pointwise and uniformly over B. These results are formulated in terms of a generic
+
+misspecification bias component to accommodate the different interactions between the distance
+
+function and the boundary geometry. Under appropriate regularity conditions and when B is suf-
+
+ficiently smooth, the estimator achieves the optimal nonparametric convergence rate pointwise and
+
+uniformly (Tsybakov, 2008). We also construct confidence intervals for τ(x) and confidence bands
+
+5
+
+
+
+for the entire curve (τ(x) : x ∈ B), leveraging a new strong approximation result for empirical
+
+processes developed in the supplemental appendix.
+
+We also establish a minimax optimality result that highlights the fundamental limitations of
+
+distance-based methods when the assignment boundary is not smooth. Theorem 6 derives a min-
+
+imax lower bound convergence rate for isotropic nonparametric estimators of a smooth bivariate
+
+regression function evaluated along a one-dimensional rectifiable manifold. We show that, irre-
+
+spective of the smoothness of the underlying bivariate regression function, isotropic univariate
+
+estimators can achieve at most the uniform convergence rate n−1/4 (up to polylogarithmic factors).
+
+This rate coincides with the optimal minimax rate for Lipschitz continuous bivariate regression
+
+functions over the same domain, thereby demonstrating that the convergence rate attained by ϑ̂(x)
+
+is unimprovable without imposing stronger geometric restrictions on the boundary or exploiting
+
+additional structural features of the data-generating process.
+
+Our theoretical results characterize identification, estimation, and inference for the BATEC, both
+
+pointwise and uniformly over B, when this causal parameter is estimated using univariate distance-
+
+based (isotropic) local polynomial regression methods. As discussed in Section 5, these findings also
+
+inform empirical practice by motivating new “regularized” distance-based estimation and inference
+
+procedures when additional information about the geometry of the assignment boundary B is
+
+available. Section 7 presents numerical evidence based on the dataset of Londoño-Vélez et al. (2020),
+
+illustrating the finite-sample performance of the proposed methods. These results are implemented
+
+in our companion R package rd2d (https://rdpackages.github.io/rd2d); see Cattaneo et al.
+
+(2025b) for further details.
+
+Section 8 discusses several extensions of our theoretical framework, including regression kink de-
+
+signs, settings with imperfect treatment compliance, and adjustments for pre-intervention covariates
+
+aimed at either improving efficiency or heterogeneity analysis. In addition, Section 9 provides con-
+
+crete guidance for empirical implementation based on the results developed in this paper as well as
+
+those in our ongoing companion work (Cattaneo et al., 2026b,c).
+
+From a broader theoretical perspective, this paper establishes a new connection between the
+
+econometric methodology for BD designs and the statistical theory of nonparametric smoothing
+
+over submanifolds, thereby contributing to two distinct yet closely related literatures in economet-
+
+rics, statistics, machine learning, and data science. Methodologically, we provide the first founda-
+
+6
+
+
+
+tional results for the analysis and interpretation of BD designs based on distance-based estimators,
+
+an approach widely used in applied work but lacking formal theoretical justification. From a non-
+
+parametric perspective, we develop new pointwise and uniform estimation and inference results for
+
+isotropic local polynomial regression on submanifolds, thereby advancing the theory of smoothing
+
+methods in low-dimensional geometric settings.
+
+Our results are complementary to concurrent work by Chen and Gao (2026), who study es-
+
+timation and inference for integral functionals on submanifolds using series (sieve) methods. In
+
+contrast, we focus on estimation based on one-dimensional distance transformations evaluated
+
+pointwise along the submanifold, analyze isotropic local polynomial smoothing procedures, and
+
+uncover new phenomena related to uniform misspecification bias. In addition, we establish a novel
+
+minimax lower bound convergence rate for isotropic nonparametric regression estimators in this
+
+setting.
+
+1.2 Notation
+
+We employ standard concepts and notation from empirical process theory (van der Vaart and
+
+Wellner, 1996; Giné and Nickl, 2016) and geometric measure t∑heory (Simon et al., 1984; Federer,
+
+2014). For a random variable∑Vi, we write En[g(Vi)] = n−1 n
+i=1 g(Vi). For a vector v ∈ Rk,
+
+the Euclidean norm is ∥v∥ = ( k
+j=1 v
+
+2
+j )
+
+1/2. For a matrix A, λmin(A) denotes the smallest eigen-
+
+value. Ck(X,Y) denotes the class of k-times continuously differentiable functions from X to Y,
+
+and Ck(X) is a shortha∫nd for Ck(X,R). For a Borel set S ⊆ X, the De Giorgi perimeter of S is
+
+perim(S) = supg∈D2(X) R2 1(x ∈ S) div g(x)dx/∥g∥∞, where div is the divergence operator, and
+
+D2(X) denotes the space of C∞ functions with values in R2 and with compact support included in
+
+X. When S is connected, and the boundary bd(S) is a smooth simple closed curve, perim(S) sim-
+
+plifies to the curve length of bd(S). A curve B ⊆ R2 is a rectifiable curve if there exists a Lipschitz
+
+map γ : [0, 1] 7→ R2 such that B = γ([0, 1]). For a function f : R2 7→ R, Supp(f) denotes the closure
+of the set {x ∈ R2 : f(x) ̸= 0}. For real sequences an = o(bn) if lim sup |an|
+
+n→∞ |bn| = 0, an ≲ bn if there
+
+exists some constant C and N > 0 such that n > N implies |an| ≤ C|bn|. For sequences of random
+variables an = oP(bn) if plim
+
+|an|
+n→∞ |bn| = 0, |an| ≲P |bn| if lim supM→∞ lim supn→∞ P[|anb | ≥ M ] = 0.
+
+n
+
+Finally, Φ(x) denotes the standard Gaussian cumulative distribution function.
+
+7
+
+
+
+1.3 Organization
+
+Section 2 introduces the setup and assumptions used throughout the paper. Section 3 studies iden-
+
+tification of τ(x) via distance-based approximations, while Section 4 analyzes the bias properties of
+
+the distance-based estimator ϑ̂(x). Section 5 develops estimation and inference procedures for τ(x)
+
+based on distance-based local polynomial regression. Section 6 examines the fundamental minimax
+
+estimation problem underlying Theorem 2. Section 7 illustrates the finite-sample performance of
+
+the distance-based methods using simulated data. Section 8 discusses extensions of our theoretical
+
+framework, Section 9 provides implementation guidance for empirical researchers, and Section 10
+
+concludes.
+
+The supplemental appendix contains generalizations of the main theoretical results, their proofs,
+
+and additional findings that may be of independent interest. In particular, it presents a new strong
+
+approximation theorem for empirical processes with multiplicative separable structure and bounded
+
+polynomial moments, extending recent work by Cattaneo and Yu (2025).
+
+2 Setup and Assumptions
+
+The following assumption collects the core conditions imposed on the underlying data generating
+
+process.
+
+Assumption 1 (Data Generating Process). Let t ∈ {0, 1}, p ≥ 1, and v ≥ 2.
+
+(i) (Y1(t),X
+⊤
+1 )
+
+⊤, . . . , (Yn(t),X
+⊤
+n )
+
+⊤ are independent and identically distributed random vectors.
+
+(ii) The distribution of Xi admits a Lebesgue density fX(x) that is continuous and bounded away
+
+from zero on its support X = [L, U]2, for −∞ < L < U < ∞.
+
+(iii) µt(x) = E[Yi(t) | Xi = x] is (p+ 1) times continuously differentiable on X.
+
+(iv) σ2
+t (x) = V[[Yi(t) | Xi = x] is ]continuous and bounded away from zero on X.
+
+(v) supx∈X E |Yi(t)|2+v | Xi = x < ∞.
+
+Assumption 1 generalizes standard regularity conditions used in univariate RD designs (see, e.g.,
+
+Cattaneo and Titiunik, 2022, and references therein). Additional restrictions specific to distance-
+
+8
+
+
+
+based methods in BD designs are also required. Let
+
+[ (D ]
+i(x)
+
+) (D )
+i(x) ⊤
+
+Ψt,x = E rp rp Kh(Di(x))1(Di(x) ∈ It)
+h h
+
+denote the fixed-h population Gram matrix associated with the distance-based estimator.
+
+Assumption 2 (Kernel, Distance, and Boundary). Let t ∈ {0, 1}.
+
+(i) B is a rectifiable curve.
+
+(ii) The distance function d : R2 ×R2 → [0,∞) satisfies ∥x1 − x2∥ ≲ d(x1,x2) ≲ ∥x1 − x2∥ for
+
+all x1,x2 ∈ X.
+
+(iii) K : R → [0,∞) is compactly supported and Lipschitz continuous, or K(u) = 1(u ∈ [−1, 1]).
+
+(iv) lim infh↓0 infx∈B λmin(Ψt,x) ≳ 1.
+
+Assumption 2(i) imposes minimal regularity on the assignment boundary B, which facilitates
+
+the evaluation of integrals and the derivation of uniform results over the one-dimensional subman-
+
+ifold. Assumption 2(ii) requires the distance function to be equivalent (up to constants) to the
+
+Euclidean distance. Assumption 2(iii) imposes standard conditions on the univariate kernel func-
+
+tion. Assumption 2(iv) further restricts (implicitly) the geometry of the boundary B relative to the
+
+kernel and distance functions, ruling out highly irregular shapes that would generate regions with
+
+too few observations. Lemma SA-1 in the supplemental appendix provides primitive conditions
+
+for Assumption 2(iv) when d(·) is the Euclidean norm. The conditions imposed by Assumption 2
+
+are sufficient for uniform (over B) estimation and inference, although some can be weakened for
+
+pointwise results; see the supplemental appendix.
+
+3 Identification and Interpretation
+
+For each boundary point x ∈ B and corresponding signed distance score Di(x), the univariate
+
+distance-based local polynomial estimator is ϑ̂(x) = θ̂1,x(0) − θ̂0,x(0), where θ̂t,x(0) = e⊤1 γ̂t(x) =
+
+rp(0)
+⊤γ̂t(x). Conceptually, the estimator θ̂t,x(0) targets the estimand θt,x(0) defined in (2), which
+
+is the univariate conditional expectation induced by the distance transformation applied to the
+
+bivariate location variable Xi for each point x ∈ B.
+
+9
+
+
+
+The following theorem establishes identification of the causal functional parameter τ(x) through
+
+the distance-based induced conditional expectations.
+
+Theorem 1 (Identification). Suppose Assumptions 1(i)–(iii) and 2(i)–(ii) hold. Then,
+
+τ(x) = lim θ1,x(r)− lim θ0,x(r)
+r↓0 r↑0
+
+for all x ∈ B.
+
+This identification result is obtained by representing θt,x(r) as a sequence of integrals over sub-
+
+manifolds near x ∈ B, that is, over level sets of shrinking spheres generated by the distance func-
+
+tion d(·,x). Without restrictions on the data generating process, the geometry of the assignment
+
+boundary, and the distance function, the limits limr→0 θt,x(r) and µt(x) need not coincide.
+
+The identification result in Theorem 1 is new to the literature. Related continuity-based iden-
+
+tification arguments in RD designs include Hahn et al. (2001) for one-dimensional score settings;
+
+Papay et al. (2011), Reardon and Robinson (2012), and Keele and Titiunik (2015) for multi-score
+
+settings; and Cattaneo et al. (2016) for multi-cutoff designs. For example, identification of the
+
+BATEC using location-based methods takes the form
+
+τ(x) = E[Yi(1)− Yi(0)|Xi = x] = lim E[Yi|Xi = u]− lim E[Yi|Xi = u],
+u→x,u∈A1 u→x,u∈A0
+
+for all x ∈ B. Our result does not cover pooling-based methods, where identification, estimation,
+
+and inference rely on the distance to the closest boundary point and therefore aggregate treatment
+
+effects along B. See Cattaneo et al. (2026a) for an overview; formal analysis of pooling-based
+
+methods is the subject of ongoing work (Cattaneo et al., 2026c).
+
+The isotropic nonparametric procedures underlying distance-based methods naturally introduce
+
+approximation (misspecification) error when targeting τ(x). To study this issue, we interpret
+
+the estimator γ̂t(x) as the sample analogue of the coefficients from the best local mean-square
+
+approximation of the conditional expectation E[Yi(t) | Di(x)] using the polynomial basis rp(Di(x)):
+
+[( ) ]
+γ∗
+t (x) = argminE 2
+
+Yi − r ⊤
+p(Di(x)) γ Kh(Di(x))1(Di(x) ∈ It) .
+
+γ∈Rp+1
+
+10
+
+
+
+Letting θ∗t,x(0) = e⊤ ∗
+1 γt (x) = rp(0)
+
+⊤γ∗
+t (x), we obtain the standard least-squares decomposition
+
+[ ] [ −1 ]
+θ̂t,x(0)− θt,x(0) = θ∗ )− θ 1
+
+t,x(0 t,x(0) + e⊤ − ⊤
+1 Ψt,xOt,x + e1 (Ψ̂
+
+−1
+t,x −Ψt,x)Ot,x , (3)
+
+where
+
+[ (Di(x)
+) (D (x))i ⊤ ]
+
+Ψ̂t,x = En[rp( )rp Kh(Di(x))1(Di(x) ∈ It) ,
+h h
+
+D ] and
+i(x)
+
+Ot,x = En r K ∗
+p h(Di(x))(Yi − θ
+
+h t,x(Di(x)))1(Di(x) ∈ It) .
+
+In decomposition (3), the first term represents the nonrandom approximation bias, the second
+
+term is a stochastic linear component (a sample average of mean-zero random variables), and
+
+the third term is a higher-order linearization error arising from estimation of the Gram matrix.
+
+Importantly, our analysis does not impose conditional mean-zero restrictions, allowing for general
+
+forms of local misspecification.
+
+Theorem 1 together with decomposition (3) implies that
+
+ϑ̂(x)− τ(x) = B(x) + L(x) +Q(x), x ∈ B,
+
+whereB(x) = θ∗1,x(0)−θ∗0,x(0)−τ(x) denotes the nonrandom approximation bias, L(x) = e⊤1 Ψ
+−1
+1,xO1,x−
+
+−1
+e⊤ 1
+1 Ψ
+
+−
+0,xO0,x is an unconditional mean-zero linear statistic, and Q(x) = e⊤1 (Ψ̂1,x − Ψ−1
+
+1,x)O1,x −
+−1
+
+e⊤1 (Ψ̂0,x −Ψ−1
+0,x)O0,x captures higher-order linearization effects.
+
+In conventional local polynomial settings, B(x) is of order hp+1, L(x) is approximately Gaussian,
+
+and Q(x) is asymptotically negligible. In the present setting, however, these standard results need
+
+not hold because estimation is conducted along the one-dimensional boundary B and relies on
+
+isotropic smoothing based on distance to each boundary point. We show that additional geometric
+
+and smoothness conditions are required to recover the usual approximation properties, and that
+
+these properties may fail in some empirically relevant configurations.
+
+More specifically, the approximation bias B(x) plays a central role in both pointwise and uni-
+
+form inference for the BATEC. As emphasized in the RD literature (Calonico et al., 2014) and in
+
+kernel-based nonparametric inference more broadly (Calonico et al., 2018, 2022), valid large-sample
+
+11
+
+
+
+inference requires a standardized “small bias” condition of the form
+
+√B(x) √
+≲ nhB(x) → 0 (4)
+
+V[L(x)]
+
+for the bandwidth sequence employed. Because bandwidths are typically chosen to minimize mean
+
+squared error (MSE), this condition may fail in general, implying that inference cannot ignore
+
+first-order misspecification bias.
+
+Robust bias correction addresses this issue by explicitly estimating and removing the leading bias
+
+term and adjusting the variance accordingly. A common implementation proceeds in two steps:
+
+first, an MSE-optimal bandwidth and corresponding MSE-optimal point estimator are constructed
+
+using a polynomial of order p; second, inference is conducted using a higher-order polynomial (typi-
+
+cally p+1) while retaining the bandwidth from the first step. This approach yields valid confidence
+
+intervals when B(x) ≲ hp+1. While such bias behavior is standard under smoothness conditions
+
+in canonical nonparametric settings, we show in the next section that there exist configurations in
+
+which B(x) ≲ h regardless of the polynomial order. Consequently, approximation bias can sub-
+
+stantially affect both estimation and robust bias-corrected inference when employing distance-based
+
+methods.
+
+4 Approximation Bias
+
+The smoothness of the induced distance-based conditional expectation function r 7→ θt,x(r) =
+
+E[Yi(t)|Di(x) = r] depends on the smoothness of the conditional expectation µt(x) = E[Yi(t)|Xi =
+
+x], the distance function d(·, ·), and the geometric regularity of the boundary B. Consequently, the
+
+bias of the distance-based local polynomial estimator may be affected by the shape of the boundary
+
+B, regardless of the polynomial order p imposed in Assumption 1.
+
+Figure 1 illustrates this issue graphically. For a point x ∈ B sufficiently close to a kink of the
+
+boundary, the conditional expectation θ1,x(r) may fail to be differentiable for some r ≥ 0. The
+
+problem arises because, given the distance function d(·, ·), a sufficiently small value of r yields a
+
+complete arc {x ∈ A1 : d(Xi,x) = r}, whereas for larger values of r this arc becomes truncated
+
+by the boundary. In the example depicted in Figure 1, the function θ1,x(r) is smooth for r < r3
+
+12
+
+
+
+(a) Distance to b ∈ B. (b) Distance-based Conditional Expectation.
+
+Figure 1: Lack of smoothness of distance-based conditional expectation near a kink.
+Note: Analytic example of θ1,b(r) = E[Y (1)|Di(b) = r], r ≥ 0, for distance transformation Di(b) = d(Xi,b) =
+∥Xi − b∥ to point b ∈ B near a kink point on the boundary, based on location Xi = (X1i, X2i)
+
+⊤. The induced
+univariate conditional expectation r 7→ θ1,b(r) is continuous but not differentiable at r = r3.
+
+and for r > r3, but is not differentiable at r = r3. In particular, the left derivative is finite while
+
+the right derivative diverges. Details of this analytic example are provided in the supplemental
+
+appendix.
+
+Although the smoothness of the boundary B influences the regularity of θt,x(r), the locality of
+
+the distance-based estimator implies that the approximation error cannot be smaller than that of a
+
+local constant estimator, regardless of the polynomial order p ≥ 1 or the smoothness assumptions
+
+imposed on µt(x). The following theorem formalizes this observation and shows that the resulting
+
+bias order cannot be improved by increasing p.
+
+Theorem 2 (Approximation Bias: Uniform Guarantee). For some L > 0, let P be the class of
+
+data generating processes satisfying Assumptions 1(i)-(iii) with X ⊆ [−L,L]2, Assumption 2, and
+
+the following three additional conditions:
+
+(i) L−1 ≤ infx∈X fX(x) ≤ supx∈X fX(x) ≤ L,
+
+(ii) max0≤|ν|≤p supx∈∫ |∂νµt(x)−∂ν
+
+X |∂νµt(x)|+max0≤|ν|≤p sup
+µt(y)|
+
+x,y∈X ∥x−y∥ ≤ L, and
+
+(iii) lim infh↓0 infx∈B k (d u x ) u L 1
+A h ( , ) d ≥ − .
+
+t
+
+For any p ≥ 1, if nh2 → ∞ and h → 0, then
+
+B(x) B
+1 ≲ lim inf sup sup ≤ (x)
+
+lim sup sup sup ≲ 1.
+n→∞ P∈P x∈B h n→∞ P∈P x∈B h
+
+13
+
+
+
+This result precisely characterizes the uniform (over B and the data generating process) ap-
+
+proximation bias of the distance-based local polynomial estimator ϑ̂(x). The upper bound follows
+
+from the fact that, in general, |θt,x(0) − θt,x(r)| ≲ r for t ∈ 0, 1. The lower bound is established
+
+using the following example. Suppose Xi ∼ Uniform([−2, 2]2), µ0(x1, x2) = 0, µ1(x1, x2) = x2 for
+
+all (x1, x2) ∈ [−2, 2]2, and Yi(0)|Xi ∼ Normal(µ0(Xi), 1) and Yi(1)|Xi ∼ Normal(µ1(Xi), 1). Let
+
+d(·, ·) be the Euclidean distance, and define the treatment and control regions as A1 = {(x, y) ∈
+R2 : x ≤ 0, y ≥ 0} and A0 = R2/A1. The resulting assignment boundary B = {(x, y) ∈ R :
+
+−2 ≤ x ≤ 0, y = 0 or x = 0, 0 ≤ y ≤ 2} is L-shaped, with a 90◦ kink at x = (0, 0), similar to the
+
+empirical application considered in Section 7. This data generating process satisfies the conditions
+
+of Theorem 2. The supplemental appendix establishes the lower bound through a detailed analysis
+
+of the induced approximation bias.
+
+As a point of contrast, one might expect that B(x) ≲ hp+1 pointwise in x ∈ B for sufficiently
+
+small bandwidth h, provided that kinks on the boundary are sufficiently separated relative to the
+
+bandwidth and other regularity conditions hold. However, Theorem 2 shows that, regardless of
+
+sample size (and hence bandwidth), there always exists a neighborhood of a boundary kink where
+
+the misspecification bias of ϑ̂(x) is at best of order h, independently of the polynomial order p. This
+
+phenomenon arises because nonsmooth changes in the geometry of B induce nondifferentiability in
+
+θt,x(r), as illustrated in Figure 1b.
+
+When the boundary B is sufficiently smooth, sharper bias bounds can be obtained.
+
+Theorem 3 (Approximation Bias: Smooth Boundary). Suppose Assumption 1(i)-(iii) and As-
+
+sumptions 2 hold, with d(·, ·) the Euclidean distance. Let h → 0.
+
+(i) For x ∈ B, and for some δ, ε > 0, suppose that B ∩ {y : ∥y − x∥ ≤ ε} = γ([−δ, δ]),
+
+where γ : R → R2 is a one-to-one function in Cκ+2([−δ, δ],R2). Then, θ0,x(·) and θ1,x(·)
+are (κ ∧ (p+ 1))-times continuously differentiable on [0, ε]. Therefore, there exists a positive
+
+constant C such that |B(x)| ≤ Chκ∧(p+1) for all h ∈ [0, ε] and x ∈ B.
+
+(ii) Suppose B = γ([0, L]) where γ is a one-to-one function in Cι+2([0, L],R2) for some L > 0.
+
+Suppose there exists δ, ε > 0 such that for all x ∈ Bo = γ([δ, L− δ]), r ∈ [0, ε], and t = 0, 1,
+
+and the set {u ∈ R2 : d(u,x) = r} intersects with bd(At) at only two points in B. Then, for
+
+all x ∈ γ([δ, L − δ]), θ0,x(·) and θ1,x(·) are (ι ∧ (p + 1))-times continuously differentiable on
+
+14
+
+
+
+v
+[0, ε], and lim d
+
+r↓0 drv θt,x(r) exists and is finite for all 0 ≤ v ≤ p+1 and t ∈ {0, 1}. Therefore,
+
+there exists a positive constant C such that supx∈Bo |B(x)| ≤ Chι∧(p+1) for all h ∈ [0, r].
+
+This theorem provides sufficient smoothness conditions on the boundary B under which the
+
+distance-based estimator ϑ̂(x) attains the usual nonparametric smoothing bias rate, improving upon
+
+the minimal guarantee established in Theorem 2. Achieving a uniform bias bound requires that the
+
+boundary be uniformly smooth in the sense that it admits a global smooth parameterization. This
+
+condition is essential because, as demonstrated by Theorem 2, even a single kink in an otherwise
+
+smooth boundary can deteriorate the convergence rate of the misspecification bias; see Figure 1.
+
+5 Estimation and Inference
+
+The results in this section are established for a general misspecification bias B(x) of the distance-
+
+based estimator ϑ̂(x), which depends on the properties of the kernel and distance functions as well
+
+as on the geometry (smoothness) of the assignment boundary B, as demonstrated by Theorems 2
+
+and 3. We also discuss the implications of these results for empirical implementation and compare
+
+them with standard methods for univariate RD designs.
+
+5.1 Convergence Rates
+
+Using technical results established in the supplemental appendix, we obtain the following conver-
+
+gence rates for the univariate distance-based local polynomial treatment effect estimator.
+
+Theorem 4 (Convergence Rates). Suppose Assumptions 1 and 2 hold. If nh2/ log(1/h) → ∞ and
+
+h → 0, then
+
+(i) |ϑ̂(x)− τ(x)| ≲P √ 1 +√ 1
+nh2 1+v + |B(x)| for x ∈ B, and
+
+n 2+v h2
+
+(ii) supx∈B |ϑ̂(x)− τ(x)| ≲ log(1/h)
+P nh2 + log(1/h)
+
+1+v + supx∈B |B(x)|.
+n 2+v h2
+
+This theorem establishes pointwise (for each x ∈ B) and uniform (over B) convergence rates
+
+for the distance-based treatment effect estimator. In particular, by Theorem 2, ϑ̂(x) →P τ(x)
+
+both pointwise and uniformly whenever h → 0. Furthermore, by Theorem 3(i), we obtain the
+
+pointwise bound |B(x)| ≲ hp+1 for sufficiently small h when the boundary B satisfies appropriate
+
+15
+
+
+
+smoothness conditions. Similarly, Theorem 3(ii) shows that the uniform bias rate of ϑ̂(x) improves
+
+as the assignment boundary becomes smoother.
+
+The “variance” component of the distance-based estimator ϑ̂(x) is of order (nh2)−1, even though
+
+the procedure is formally a univariate local polynomial estimator. A näıve analogy with standard
+
+univariate nonparametric regression would instead suggest a rate of order (nh)−1. This difference is
+
+expected because the target estimand involves differences of bivariate regression functions, and the
+
+isotropic distance-based approach cannot circumvent the curse of dimensionality. See also Section
+
+6 for further discussion.
+
+Combining Theorems 2 and 4(ii), and for an appropriate bandwidth choice, the estimator ϑ̂(x)
+
+can attain the uniform convergence rate (n/ log n)−1/4. Section 6 shows that, over the class of rec-
+
+tifiable boundaries, no isotropic nonparametric estimator can achieve a uniform convergence rate
+
+faster than n−1/4, which coincides with the minimax mean square rate for estimating Lipschitz
+
+continuous bivariate regression functions (see, e.g., Tsybakov, 2008, and references therein). Con-
+
+sequently, the distance-based estimator ϑ̂(x) is minimax optimal (up to logarithmic factors) for
+
+suitable bandwidth sequences.
+
+Finally, valid pointwise, or integrated (over B), MSE convergence rates matching those in The-
+
+orem 4(i) can also be established. Details are provided in the supplemental appendix.
+
+5.2 Uncertainty Quantification
+
+To develop companion pointwise and uniform inference procedures along the treatment-assignment
+
+boundary B, consider the feasible t-statistic for a given bandwidth choice and each boundary point
+
+x ∈ B:
+
+ϑ̂(x
+T̂(x) √)− τ(x)
+
+= ,
+Ξ̂x,x
+
+where, using standard least squares algebra, for all x1,x2 ∈ B and t ∈ {0, 1},
+
+1
+Ξ̂x1,x2 = Ξ̂0,x1,x2 + Ξ̂1,x1,x2 , Ξ̂t,x1,x2 = e⊤
+
+−1 −1
+Ψ̂ Υ̂t, ,x Ψ̂
+
+nh2 1 t,x1 x1 2 t,x e
+2 1,
+
+16
+
+
+
+and
+
+[ (Di(x1)
+) (
+
+Υ̂t,x1,x2 = h2En rp ( kh(Di(x1)) Yi − rp(Di(x1))
+⊤ )
+γ̂
+
+h t(x1) 1(D
+
+D ]
+i(x2)
+
+)⊤ ( )i(x1) ∈ It)
+
+× rp kh(Di(x2)) Yi − rp(Di(x2))
+⊤γ̂ (x2) 1(Di(x2) ∈ It) .
+
+h t
+
+Accordingly, feasible confidence intervals and confidence bands over B take the form
+
+[ √ √ ]
+Îα(x) = ϑ̂(x)−qα Ξ̂x,x , ϑ̂(x) +qα Ξ̂x,x , x ∈ B,
+
+for any α ∈ (0, 1), where qα denotes the appropriate critical value depending on the inference
+
+procedure.
+
+For pointwise inference, we show in the supplemental appendix that supt∈R |P[T̂(x) ≤ t]−Φ(t)| →
+0for each x ∈ B, under standard regularity conditions and provided that nh2B2(x) → 0. In this
+
+case, qα = Φ−1(1− α/2) is asymptotically valid.
+
+Uniform inference over B is more challenging. The stochastic process (T̂(x) : x ∈ B) is generally
+
+not asymptotically tight and therefore does not converge weakly in the space of uniformly bounded
+
+real-valued functions on B equipped with the supremum norm (van der Vaart and Wellner, 1996;
+
+Giné and Nickl, 2016). Consequently, classical empirical process arguments based on weak conver-
+
+gence cannot be applied directly. Moreover, the geometry of the manifold B and the reliance on
+
+signed distance scores introduce additional technical complications. We address these issues by first
+
+establishing a novel strong approximation result for the entire stochastic process (T̂(x) : x ∈ B)
+
+under the usual “small bias” condition nh2 sup 2
+x∈BB (x) → 0. This approximation allows uniform
+
+inference based on critical values qα satisfying
+
+[ ] [ ∣ ∣ ]
+P τ(x) ∈ Îα(x) , for all x ∈ B = P sup ∣T̂(x)∣ ≤ qα .
+
+x∈B
+
+Our technical analysis combines a new strong approximation theorem (Theorem SA-8 in the sup-
+
+plemental appendix) with recent results from Chernozhukov et al. (2014a,b) and Chernozhuokov
+
+et al. (2022), thereby improving upon classical coupling approaches such (as Yurinskii’s coupling
+
+(see also Cattaneo et al., 2025a). Let Un denote the σ-algebra generated by (Yi, (Di(x) : x ∈ B)) :
+
+17
+
+
+
+)
+1 ≤ i ≤ n .
+
+Theorem 5 (Statistical Inference). Suppose Assumptions 1 and 2 hold.
+
+v
+(i) For all x ∈ B, if n 2+v h2 → ∞ and nh2B2(x) → 0, then
+
+[ ]
+P τ(x) ∈ Îα(x) → 1− α,
+
+for qα = Φ−1(1− α/2).
+v
+
+(ii) If n 2+v h2/ logn → ∞, lim inf log h
+n→∞ logn > −∞, nh2 supx∈BB2(x) → 0, and perim({y ∈ At :
+
+d(y,x)/h ∈ Supp(k)}) ≲ h for all x ∈ B and t ∈ {0, 1}, then
+
+[ ]
+P τ(x) ∈ Îα(x), for all x ∈ B → 1− α,
+
+for qα = inf{c > 0 : P[supx∈B |Ẑn(x)| ≥ c|Un] ≤ α}, where (Ẑn : x ∈ B) is a Ga√ussian pro-
+
+cess conditional on Un, with E[Ẑn(x1)|Un] = 0 and E[Ẑn(x1)Ẑn(x2)|Un] = Ξ̂x1,x2/ Ξ̂x1,x1Ξ̂x2,x2,
+
+for all x1,x2 ∈ B.
+
+This theorem establishes asymptotically valid inference procedures based on the distance-based
+
+local polynomial treatment-effect estimator ϑ̂(x). For uniform inference, an additional geometric
+
+restriction on the assignment boundary B is required. Specifically, the De Giorgi perimeter condi-
+
+tion can be verified when the boundary of the set y ∈ At : d(y,x)/h ∈ Supp(k) has length of order
+
+h. Because this set is contained in an h-ball centered at x, the condition holds provided that the
+
+local segment B∩y ∈ R2 : d(y,x) ≤ h is not excessively irregular. Intuitively, the one-dimensional
+
+boundary B must not be locally “too long” or highly oscillatory.
+
+5.3 Discussion and Implementation
+
+Although the distance-based estimator ϑ̂(x) resembles a univariate local polynomial procedure
+
+based on the scalar running variable Di(x), Theorem 4 shows that its pointwise and uniform vari-
+
+ance convergence rates coincide with those of a bivariate nonparametric estimator and are therefore
+
+unimprovable. Theorem 5 further shows that inference procedures developed for univariate local
+
+polynomial regression can be directly applied in distance-based settings, provided the required
+
+18
+
+
+
+side conditions are satisfied. This result follows because T̂(x) is constructed as a self-normalizing
+
+statistic and is therefore adaptive to the fact that the scalar running variable Di(x) is induced by
+
+the underlying bivariate covariate Xi. This finding highlights another advantage of pre-asymptotic
+
+variance estimation and self-normalization techniques for distributional approximation and infer-
+
+ence (Calonico et al., 2018). Consequently, standard estimation and inference methods from the
+
+univariate RD design literature (Calonico et al., 2014) can be employed in BD designs based on
+
+distance-to-boundary running variables, provided that bandwidth choices ensure that the bias in-
+
+duced by the geometry of the assignment boundary B (documented in Section 4) is sufficiently
+
+small.
+
+For implementation, first consider the case in which B(x) ≲ hp+1, that is, the assignment bound-
+
+ary B is smooth (in the sense of Theorem 3) or the bias is otherwise negligible. Establishing an
+
+exact MSE expansion for ϑ̂(x) is cumbersome due to the additional complexity introduced by the
+
+distance transformation, but the relevant convergence rates follow from Theorem 4. The incor-
+
+rect univariate MSE-optimal bandwidth is h1d,x ≍ n−1/(3+2p), whereas the correct MSE-optimal
+
+bandwidth is hMSE,x ≍ n−1/(4+2p). Treating the distance variable as an intrinsically univariate score
+
+therefore leads to a smaller-than-optimal bandwidth choice because n−1/(3+2p) < n−1/(4+2p), re-
+
+sulting in undersmoothing relative to the correct MSE-optimal bandwidth. As a consequence, the
+
+point estimator exhibits higher variance and lower bias, and associated inference procedures tend
+
+to be conservative. A simple remedy is to rescale the incorrect univariate bandwidth by the factor
+
+n1/(3+2p)−1/(4+2p), although this adjustment may be unnecessary when empirical bandwidth selec-
+
+tion employs pre-asymptotic variance estimation, as implemented in the software package rdrobust
+
+(https://rdpackages.github.io/rdrobust/); see Calonico et al. (2020) and references therein.
+
+When the assignment boundary B exhibits kinks or other geometric irregularities, there always
+
+exists a neighborhood around each kink where the bias is irreducibly of order h, regardless of
+
+sample size or polynomial order, as established by Theorem 2. In this case, the correct local
+
+MSE-optimal bandwidth near each kink is h ≍ n−1/4. Away from kink points, the MSE-optimal
+
+bandwidth behaves as described above. This lack of smoothness leads to spatially varying optimal
+
+bandwidths along B, complicating automatic implementation. A simple global strategy is therefore
+
+to set h = Ĉ, n−1/4 for all x ∈ B, where Ĉ is a rule-of-thumb constant. Although generically
+
+suboptimal, this choice is never larger than the pointwise MSE-optimal bandwidth and therefore
+
+19
+
+
+
+yields a more variable (but conservative) estimator and associated inference procedure. A more
+
+adaptive alternative is to allow bandwidths to vary with proximity to kink points, for example by
+
+defining
+
+{ {
+ĥ − }}
+
+ĥkink,x(B) = min 1/4
+MSE,x,max Ĉ · n , min d(x,b) .
+
+b∈Bkink
+
+for all x ∈ B, where Bkink denotes the set of kink points on the boundary.
+
+Given a bandwidth choice, valid statistical inference can be achieved by appropriately controlling
+
+the remaining misspecification bias. When the boundary B is smooth, robust bias-correction meth-
+
+ods developed for univariate RD designs remain applicable in the distance-based setting (Calonico
+
+et al., 2014, 2018, 2022). When B contains kinks, however, undersmoothing relative to the MSE-
+
+optimal bandwidth for p = 0 becomes necessary because increasing the polynomial order does
+
+not guarantee a reduction in misspecification bias, rendering bias-correction techniques ineffective
+
+uniformly over x ∈ B. In such cases, bandwidth and polynomial order choices should account for
+
+proximity to boundary irregularities.
+
+The companion software package rd2d implements a rule-of-thumb bandwidth selector targeting
+
+h ≍ n−1/4 as the default choice for all x ∈ B when the smoothness of B is unknown. This choice
+
+is valid for point estimation regardless of whether the boundary is smooth. For inference, following
+
+Calonico et al. (2018), the package employs an undersmoothed bandwidth of order n−1/3 to target
+
+coverage-error optimality. When B is known to be smooth, the package instead uses a rule-of-
+
+thumb selector targeting h ≍ n−1/(4+2p) for point estimation and implements robust bias-corrected
+
+inference based on that bandwidth. If the locations of kink points are known, the adaptive selector
+
+ĥkink,x(B) can also be employed. Section 7 illustrates the performance of these approaches and
+
+compares them with simple rule-of-thumb bandwidth choices obtained using the rdrobust package
+
+with p = 0. Further implementation details and simulation evidence are provided in Cattaneo et al.
+
+(2025b).
+
+Finally, uniform inference based on Theorem 5(ii) is implemented by discretizing the boundary
+
+at evaluation points b1, . . . ,bM ∈ B. The conditional Gaussian process (Ẑn(x) : x ∈ B) is then
+
+approximated by the M -dimensional (conditional) Gaussian vector Ẑn = (Ẑn(b1), . . . , Ẑn(bM ))
+
+whose covariance matrix has generic element E[Ẑn(b1)Ẑn(b2)|U]. In finite samples this estimated
+
+20
+
+
+
+covariance matrix may fail to be positive definite, in which case simple regularization can be
+
+applied (see, e.g., Cattaneo et al., 2024a). Critical values qα are then obtained by simulating the
+
+distribution of max1≤l≤M |Ẑn(bl)|.
+
+6 Distance-based Minimax Convergence Rate
+
+Theorems 2 and 3 provide precise conditions characterizing the pointwise and uniform (over B)
+
+bias and convergence rates of the distance-based local polynomial estimator ϑ̂(x). In particular,
+
+the estimator can attain at best the uniform convergence rate (n/ log n)−1/4 for an appropriate
+
+bandwidth sequence h. A natural follow-up theoretical (and potentially practical) question is
+
+whether alternative distance-based estimators could achieve faster rates. This section provides one
+
+answer: if the boundary B is rectifiable, then no isotropic nonparametric estimator of a bivariate
+
+regression function can improve upon this rate, up to polylogarithmic factors, regardless of the
+
+degree of smoothness imposed on the underlying conditional expectation function.
+
+This section is largely self-contained, as it concerns minimax theory for nonparametric estimation
+
+on curves (see, e.g., Tsybakov, 2008, and references therein). The following theorem establishes a
+
+minimax lower bound convergence rate for estimation of compactly supported bivariate regression
+
+functions using a class of isotropic nonparametric estimators.
+
+Theorem 6 (Distance-based Minimax Convergence Rate). For constants q ≥ 1 and L > 0, let
+
+PNP = PNP(L, q) be the class of (joint) probability laws P of (Y1,X1), · · · , (Yn,Xn) satisfying the
+
+following:
+
+(i) ((Yi,Xi) : 1 ≤ i ≤ n) are i.i.d. taking values in R× R2.
+
+(ii) Xi admits a Lebesgue density f that is continuous on its compact support X ⊆ [−L,L]2, with
+
+L−1 ≤ infx∈X f(x) ≤ supx∈X f(x) ≤ L, and B = bd(X) is a rectifiable curve.
+
+(iii) µ(x) = E[Yi|Xi = x] is q-times continuously differentiable on X with
+
+|∂νµ(x1)− ∂νµ(x2)|
+max sup |∂νµ(x)|+ max sup L.
+
+0≤|ν|≤⌊q⌋ q−⌊q⌋ ≤
+x∈X |ν|=q x1,x2∈X ∥x1 − x2∥
+
+(iv) σ2(x) = V[Yi|Xi = x] is continuous on X with L−1 ≤ inf 2
+x∈X σ (x) ≤ sup 2
+
+x∈X σ (x) ≤ L.
+
+In addition, let T be the class of all distance-based estimators Tn(Un(x)) with Un(x) = ((Yi, ∥Xi−
+
+21
+
+
+
+x∥)⊤ : 1 ≤ i ≤ n) for each x ∈ X. Then,
+
+[ ∣
+lim inf p ∣ ∣]
+
+n1/4 inf sup EP su Tn(Un(x))− µ(x)∣ ≳ 1,
+n→∞ Tn∈T P∈PNP x∈B
+
+where EP[·] denotes an expectation taken under the data generating process P.
+
+In sharp contrast, under the same assumptions the uniform minimax convergence rate over the
+
+unrestricted class of nonparametric estimators is
+
+( q
+n ) [ ∣ ∣]
+
+2q+2
+lim inf inf sup EP sup ∣Sn(x;Wn)− µ(x)∣ ≳ 1,
+n→∞ log n Sn∈S P∈PNP x∈B
+
+whereS denotes the unrestricted class of estimators based onWn = ((Yi,X
+⊤
+i )
+
+⊤ : 1 ≤ i ≤ n). There-
+
+fore, Theorem 6 shows that restricting attention to estimators that use only the scalar distance
+
+∥Xi − x∥ (rather than the full covariate Xi) necessarily limits the attainable uniform estimation
+
+accuracy along the boundary. In particular, for any such estimator there exists a data-generating
+
+process for which the maximal estimation error along B is of order at least n−1/4 when the bound-
+
+ary may contain countably many kinks. Notably, increasing the smoothness of the underlying
+
+regression function µ(x) does not improve the achievable uniform convergence rate within the class
+
+T, because nonsmooth boundary geometry induces effective nondifferentiability in the induced
+
+regression problem.
+
+Finally, these results can be connected to the analysis of BD designs. For expositional clarity,
+
+consider estimation of a single regression function rather than a treatment-effect difference. By
+
+Theorems 4 and 2, the distance-based p-th order local polynomial estimator
+
+[( ) ]
+µ̂(x) = e⊤1 γ̂(x), γ̂(x) = argminEn Yi − r ⊤ 2
+
+p(Di(x)) γ kh(Di(x)) , x ∈ B,
+γ∈Rp+1
+
+satisfies
+
+[( n )1/4 ∣ ∣
+lim sup lim sup sup P sup ∣µ̂(x)− µ(x)∣ ]
+
+≥ M = 0.
+M→∞ n→∞ P∈P log n x∈B
+
+Since µ̂(x) ∈ T, the distance-based local polynomial estimator is minimax optimal in the sense of
+
+Theorem 6, up to the logarithmic factor log1/4 n, which we conjecture to be unimprovable. More
+
+22
+
+
+
+precisely, this factor arises from the use of the uniform norm, whereas the lower bound in Theorem
+
+6 is derived using pointwise minimax arguments.
+
+7 Numerical Results
+
+We study the numerical performance of the distance-based methods using the real-world dataset
+
+analyzed by Londoño-Vélez et al. (2020), which evaluates the Colombian post-secondary education
+
+subsidy program Ser Pilo Paga (SPP). This anti-poverty policy provided tuition support to un-
+
+dergraduate students admitted to high-quality, government-certified higher education institutions.
+
+Eligibility for SPP was determined by a deterministic bivariate cutoff combining academic merit
+
+and economic need: students were required to obtain a SABER 11 high school exit exam score
+
+in the top 9 percent and to have a SISBEN wealth index below a region-specific threshold. The
+
+resulting treatment assignment rule induces an L-shaped boundary B with a kink at the lowest
+
+joint levels of eligibility in both score dimensions (and two additional kinks at the limits of the
+
+score support), while remaining linear elsewhere.
+
+The dataset contains n = 363, 096 complete observations for the first program cohort (2014).
+
+Each observation i = 1, . . . , n corresponds to an individual student with bivariate score Xi =
+
+(X1i, X2i)
+⊤ = (SABER11i, SISBENi)
+
+⊤, where the SABER11 test score ranges from −310 to 172 and
+
+the SISBEN wealth index ranges from −103.41 to 127.21. Without loss of generality, both score
+
+components are recentered at their respective eligibility cutoffs and standardized to facilitate the
+
+use of a common distance function and scalar bandwidth parameter. Under this normalization,
+
+the treatment assignment boundary can be written as B = {(SABER11, SISBEN) : (SABER11 ≥
+0, SISBEN = 0)} ∪ {(SABER11 = 0, SISBEN ≥ 0)}. Because the support of X is compact,
+
+the boundary B contains three kinks: the interior point (0, 0), which is of primary interest in
+
+our analysis, and two additional points where B intersects the boundary of the support of X.
+
+Our empirical analysis considers 21 evenly spaced cutoff points {b1, . . . ,b21} ⊂ B, located near
+
+the interior kink and away from the boundary of X, in order to highlight the impact of a single
+
+kink on the bias of the distance-based estimator. Throughout, we employ the Euclidean distance,
+
+Di(x) = ∥Xi − x∥ for each x ∈ B.
+
+We analyze both simulated data calibrated to match salient features of the SPP dataset and the
+
+23
+
+
+
+(a) Scatter plot score and grid points. (b) RD Plot based on Di(b1).
+
+(c) RD Plot based on Di(b11). (d) RD Plot based on Di(b21).
+
+Figure 2: Scatter Plot and Selected Distance-Based RD Plots (SPP Data)
+
+SPP dataset itself as an empirical application. All results reported in this section are implemented
+
+using our companion software package rd2d, together with the package rdrobust for RD designs
+
+with a univariate score. Additional implementation details are provided in the replication materials
+
+available at https://rdpackages.github.io/. Figure 2 summarizes key features of the SPP data.
+
+Panel (a) displays a scatterplot of the bivariate score, the treatment assignment boundary, and the
+
+21 evaluation points. Panels (b)–(c) report representative RD plots based on the induced signed
+
+distance scores Di(b1), Di(b11), and Di(b21), respectively.
+
+24
+
+
+
+7.1 Simulation Study
+
+The score Xi = (X1i, X2i)
+⊤ is generated from the distribution (100·Beta(3, 4)−25, 100·Beta(3, 4)−
+
+25)⊤ with independent components, which approximately reproduces salient features of the SPP
+
+dataset. We employ the same L-shaped treatment assignment boundary as in the empirical appli-
+
+cation, featuring a kink at x = (0, 0)⊤, corresponding to the evaluation grid point b11.
+
+For each t ∈ {0, 1} and i = 1, . . . , n, potential outcomes are generated according to the regression
+
+model Yi(t) = µt(Xi) + σt(Xi)εt,i, where Xi, ε0,i and ε1,i mutually independent, and
+
+µt(Xi) = βt,0(+X1iβt,11 +X2iβt,12 +X2
+1iβt,21 +X1iX2iβt,22 +X2
+
+2iβt,23, )
+σ2
+t (Xi) = exp γt,0 +X1iγt,11 +X2iγt,12 +X2
+
+1iγt,21 +X1iX2iγt,22 +X2
+2iγt,23 ,
+
+with εt,i ∼ Normal(0, 1). The coefficient values are calibrated using estimates obtained from the SPP
+
+dataset. We consider four data-generating processes combining linear (i.e., βt,21 = βt,22 = βt,23 = 0)
+
+or quadratic specifications with homoskedastic (i.e., γt,11 = γt,12 = γt,21 = γt,22 = γt,23 = 0) or
+
+heteroskedastic disturbances. Table 1 reports the corresponding parameter values.
+
+Linear Quadratic Homoskedastic Heteroskedastic
+
+t = 0 t = 1 t = 0 t = 1 t = 0 t = 1 t = 0 t = 1
+
+βt,0 3.35× 10−1 6.98× 10−1 3.72× 10−1 7.44× 10−1 γt,0 −2.20 −1.66 −1.57 −2.37
+βt,11 2.52× 10−3 2.74× 10−3 4.23× 10−3 2.29× 10−3 γt,11 0 0 2.19× 10−2 9.92× 10−4
+
+βt,12 −1.27× 10−3 −6.05× 10−4 −2.45× 10−3 −5.84× 10−3 γt,12 0 0 −5.08× 10−3 4.96× 10−2
+
+βt,21 0 0 1.25× 10−5 −1.33× 10−7 γt,21 0 0 −1.15× 10−4 −3.36× 10−4
+
+βt,22 0 0 3.12× 10−5 1.04× 10−4 γt,22 0 0 6.50× 10−4 −8.78× 10−4
+
+βt,23 0 0 −4.92× 10−6 2.14× 10−5 γt,23 0 0 5.23× 10−4 −3.12× 10−4
+
+(a) Population parameters: µt(Xi) (b) Population parameters: σ2
+t (Xi)
+
+Table 1: Parameters calibrated using the SPP dataset.
+
+The simulation design sets n = 20, 000 and uses 2, 000 Monte Carlo replications. We evalu-
+
+ate performance in terms of point estimation and uncertainty quantification, both pointwise and
+
+uniformly over the boundary B. Numerical results for the distance-based local polynomial proce-
+
+dures are reported in Tables 2–5, corresponding to the linear homoskedastic, linear heteroskedastic,
+
+quadratic homoskedastic, and quadratic heteroskedastic specifications, respectively. Each table
+
+contains four panels reflecting the bandwidth selection method employed. Panels (a) consider the
+
+case of a smooth boundary and uses the selector h = ĥMSE,b. Panels (b) report results based on the
+
+kink-adaptive selector h = ĥMSE,b(B), which exploits knowledge of the kink location. Panels (c) use
+
+25
+
+
+
+the rule h = Ĉ · n−1/4, which remains valid regardless of whether kinks are present in B. Panels
+
+(d) employ the bandwidth h = h1d,b from the software package rdrobust, which is designed for
+
+univariate RD settings and therefore induces undersmoothing in the present BD design.
+
+The main findings for bias are summarized in Figure 3, which reports the average value of each
+
+point estimator across the 2, 000 replications and the target population regression function for each
+
+of the four data generating processes. The results show that distance-based methods that ignore
+
+the presence of the kink in B exhibit a larger bias than procedures that explicitly account for kinks
+
+or other irregularities in the assignment boundary. This numerical evidence is consistent with the
+
+theoretical bias characterization established in Theorem 2. In this calibrated simulation study,
+
+however, the relatively large bias has limited consequences for inference because the signal-to-noise
+
+ratio is modest. As a result, coverage rates of confidence intervals and confidence bands remain
+
+close to their nominal levels across all specifications. These findings suggest that the bias induced
+
+by ignoring boundary irregularities can materially affect point estimation even when its impact on
+
+uncertainty quantification is muted. Naturally, in settings with stronger signals, failure to account
+
+for kinks or other non-smooth features of the assignment boundary may also lead to meaningful
+
+distortions in inference.
+
+7.2 Empirical Application
+
+Table 6 and Figure 4 report pointwise and uniform estimation and inference for the BATEC using
+
+the distance-based procedures and the SPP dataset. The empirical findings are broadly consistent
+
+across the alternative methods proposed in this paper and align closely with the results obtained
+
+using location-based approaches in Cattaneo et al. (2026b). Overall, the evidence reveals hetero-
+
+geneity in treatment effects along the assignment boundary: estimated effects are larger for students
+
+who are poorer and have lower academic achievement (evaluation points b1–b11), and smaller for
+
+students who are relatively wealthier and have higher academic achievement (evaluation points
+
+b11–b21).
+
+26
+
+
+
+(a) Linear Homoskedastic Model (b) Linear Heteroskedastic Model
+
+(c) Quadratic Homoskedastic Model (d) Quadratic Heteroskedastic Model
+
+Figure 3: Average of BATEC Estimators (Simulation Results). Notes: (i) Smooth denotes using
+bandwidths h = ĥMSE,x under the assumption that the boundary is smooth; (ii) Adaptive denotes
+using bandwidths ĥkink,x(B) that adapts to the kink given information about the kink location; (iii)
+Unknown Kink denotes using the bandwidth h = Ĉ · n−1/4 under kink rates; (iv) Rdrobust denotes
+the (incorrect) univariate MSE optimal bandwidth h1d,x from rdrobust; and (v) Population denotes
+the population BATEC causal parameter, τ(x), calibrated using the SPP dataset (see Table 1).
+
+27
+
+
+
+(a) h = ĥMSE,b (smooth B) (b) h = ĥMSE,b(B) (kink adaptive)
+
+(c) h = Ĉ · n−1/4 (unknown kink location) (d) h = ĥ1d,b (rdrobust+ rd2d.dist)
+
+Figure 4: BATEC Estimation and Inference (SPP Empirical Application)
+
+28
+
+
+
+8 Extensions
+
+The theoretical results developed in the supplemental appendix not only cover multidimensional
+
+location scores Xi, but also provide the foundational tools needed to address several empirically
+
+relevant settings. This section discusses three natural extensions and generalizations.
+
+8.1 Regression Kink Designs
+
+All results presented in the paper extend immediately to derivative estimation, which is useful in
+
+the context of regression kink designs (Card et al., 2015). Specifically, the distance-based local
+
+polynomial regression estimator can be modified as
+
+ϑ̂(ν)(x) = e⊤1+ν γ̂1(x)− e⊤1+ν γ̂0(x), x ∈ B,
+
+where ν ∈ {0, 1, . . . , p} denotes the derivative order. All theoretical results follow directly by
+
+replacing the selector vector e1 with e1+ν .
+
+8.2 Imperfect Compliance
+
+Our theoretical framework can also accommodate imperfect compliance (fuzzy RD designs), where
+
+treatment assignment and treatment receipt may differ for some units. Using standard potential-
+
+outcomes notation (Hernán and Robins, 2020), let Ti = 1(Di(x) < 0) · Ti(0) + 1(Di(x) ≥ 0) ·
+Ti(1) denote the observed treatment status, where Ti(t) is the potential treatment status under
+
+assignment t ∈ {0, 1}. The observed outcome is then Yi = 1(Di(x) < 0) · Yi(0, Ti(0)) + 1(Di(x) ≥
+0) · Yi(1, Ti(1)), where the potential outcome depends on both assignment and treatment receipt,
+
+that is, Yi(t, w) denotes the potential outcome for unit i when this unit is assigned to treatment
+
+t ∈ {0, 1} and takes treatment status w ∈ {0, 1}.
+The usual fuzzy estimand and estimator are
+
+τY (x) ϑ̂Y (x)
+ζ(x) = and ξ̂(x) = ,
+
+τT (x) ϑ̂T (x)
+
+where, for each x ∈ B, τY (x) = E[Yi(1, Ti(1)) − Yi(0, Ti(0))|Xi = x] and τT (x) = E[Ti(1) −
+
+29
+
+
+
+Ti(0)|Xi = x], and ϑ̂Y (x) = e⊤1 γ̂Y,1(x) − e⊤1 γ̂Y,0(x) and ϑ̂T (x) = e⊤1 γ̂D,1(x) − e⊤1 γ̂T,0(x), with
+
+γ̂A,1(x) denotes the local polynomial fit obtained using outcome variable A ∈ {Y, T} in (1).
+
+Under standard regularity conditions, our results imply that ϑ̂Y (x) = τY (x)+oP(1) and ϑ̂T (x) =
+
+τT (x)+oP(1), both pointwise and uniformly over x ∈ B. Using the exact second-order linearization,
+
+1 ( ) τ ) ( )
+ξ̂(x)− ζ(x) = ϑ̂Y (x)− τY (x) − Y (x
+
+ϑ̂T (x)− τT (x) +Rn(x)
+τT (x) τT (x)2
+
+where
+
+τY (x) ( ) ( )( )
+Rn(x) = ϑ̂T (x)−
+
+2
+τT (x) − 1
+
+ϑ̂Y (x)− τY (x) ϑ̂T (x)− τT (x)
+τ 2
+T (x) ϑ̂T (x) τT (x)ϑ̂T (x)
+
+it follows that ξ̂(x)− ζ(x) is approximated by a linear combination of ϑ̂Y (x)− τY (x) and ϑ̂T (x)−
+τT (x), yielding valid pointwise and uniform estimation and inference using the results in the supple-
+
+mental appendix. Specifically, the remainder term Rn(x) is of higher order and uniformly negligible
+
+provided infx∈B τT (x) > 0 because supx∈B |Rn(x)| ≲P supx∈B |ϑ̂T (x)− τT (x)|2 +supx∈B |ϑ̂Y (x)−
+τY (x)| supx∈B |ϑ̂T (x)− τT (x)|, and hence Theorem 4 applies separately to the outcome and treat-
+
+ment estimators. A causal interpretation of ζ(x) can be obtained under additional assumptions;
+
+see Arai et al. (2022).
+
+8.3 Pre-treatment Covariates
+
+We next discuss how to incorporate pre-treatment covariates either to improve efficiency (Calonico
+
+et al., 2019) or to study treatment-effect heterogeneity (Calonico et al., 2026). Let Z1, . . . ,Zn
+
+denote covariates of dimension dZ ≥ 1.
+
+For efficiency improvements, the covariate-adjusted estimator is
+
+ϑ̃(x) = e⊤p+2γ̃(x)
+
+with
+
+[( ]
+γ̃(x) = argmin En Yi − r̃p(Di(x), T
+
+⊤ )2
+i,Zi) γ Kh(Di(x))1(Di(x) ∈ It) ,
+
+γ∈R2(p+1)+dZ
+
+30
+
+
+
+where T ⊤
+i = 1(Di(x) ≥ 0), and r̃p(Di(x), Ti,Zi) = [rp(Di(x)) , Ti · rp(Di(x))
+
+⊤,Z⊤ ⊤
+i ] contains the
+
+full polynomial basis function for each treatment group but the pre-intervention covariates are not
+
+interacted with the treatment indicator; hence its dimension is p = 2(p+ 1) + dZ .
+
+For heterogeneity analysis, define
+
+ 
+0(2+dZ)(p+1)×dZ
+
+κ̌(x, z) = e⊤p+2γ̌(x) + γ̌(x)⊤  
+ 
+
+Id 
+Z  z
+
+0pdZ×dZ
+
+with
+
+[( ) ]
+γ̌(x) = argmin En Yi −
+
+2
+řp(Di(x), Ti,Zi)
+
+⊤γ Kh(Di(x))1(Di(x) ∈ It) ,
+γ∈R2(p+1)(dZ+1)
+
+where Id denotes the (d × d) identity matrix, 0d1×d2 denotes the (d1 × d2) matrix of zeros, z
+
+takes values on the support of Zi, and řp(Di(x), Ti,Zi) = [rp(Di(x))
+⊤, Ti ·rp(Di(x))
+
+⊤, (rp(Di(x))⊗
+Zi)
+
+⊤, Ti · (rp(Di(x))⊗ Z ⊤
+i) ]⊤ contains the full interaction between the polynomial basis function,
+
+the treatment assignment indicator, and the pre-intervention covariates.
+
+9 Recommendations for Practice
+
+Cattaneo et al. (2026a) review empirical applications of boundary discontinuity (BD) designs and
+
+document that researchers employ different empirical strategies depending on the objectives of the
+
+analysis, the assignment mechanism, and data availability. A useful taxonomy classifies methods
+
+according to how the multidimensional score Xi is utilized. In practice, three levels of aggregation
+
+lead to three different types of methods.
+
+• Location-based methods. These approaches exploit the full multidimensional score Xi and
+
+therefore extend canonical regression discontinuity techniques to multidimensional assignment
+
+settings. By preserving local variation in all score dimensions, they enable the most flexible
+
+analysis of treatment-effect heterogeneity along the assignment boundary.
+
+• Distance-based methods. These approaches reduce the multidimensional score Xi to a uni-
+
+31
+
+
+
+variate distance measure defined relative to each boundary point x ∈ B, denoted by Di(x) =
+
+d(Xi,x). This transformation allows researchers to implement standard univariate RD proce-
+
+dures locally to each point on the boundary while retaining the ability to study heterogeneous
+
+treatment effects summarized by the BATEC, denoted by τ(x) = E[Yi(1)− Yi(0)|Xi = x] for
+
+each x ∈ B.
+
+• Pooling-based methods. These approaches further aggregate the multidimensional score by
+
+using the distance between each observation’s location and the closest boundary point, Di =
+
+infx∈Bd(Xi,x), thereby collapsing all boundary locations into a single scalar running vari-
+
+able. As a result, pooling-based methods identify an aggregate, scalar causal parameter cor-
+
+r∫esponding to a weighted Boundary Average Treatment Effect (WBATE), given by τWBATE =
+
+w(x)τ(x) dx.
+B
+
+Location-based and distance-based methods both target the BATEC as the fundamental causal
+
+functional parameter. This function can subsequently be summarized through policy-relevant func-
+
+tionals, such as the Weighted Boundary Average Treatment Effect, or the Largest Boundary Aver-
+
+age Treatment Effect, given by τLBATE = supx∈B τ(x). In contrast, pooling-based methods directly
+
+estimate an aggregated WBATE parameter by construction. Location-based procedures are studied
+
+in our companion paper Cattaneo et al. (2026b), while formal analysis of pooling-based methods is
+
+the subject of ongoing research (Cattaneo et al., 2026c).
+
+From a practical perspective, location-based methods are generally preferred whenever reliable in-
+
+formation on the multidimensional scoreXi is available, as they offer the richest framework for iden-
+
+tification, estimation and inference of the key building block functional parameter, (τ(x) : x ∈ B),
+
+and functionals thereof. When such information is limited or when dimensionality considerations
+
+make location-based approaches difficult to implement, distance-based methods provide a tractable
+
+and robust alternative. In particular, they enable estimation and inference for the BATEC, and
+
+functionals thereof, using well-understood univariate RD techniques.
+
+At the same time, practitioners should recognize that distance-based estimators may exhibit
+
+different bias behavior near geometrically irregular regions of the treatment-assignment boundary,
+
+such as kink points. Empirical implementation should therefore account for boundary geometry
+
+when selecting bandwidths or interpreting results, following the results presented in this paper.
+
+32
+
+
+
+For example, researchers may restrict attention to locally smooth boundary segments or employ
+
+adaptive bandwidth strategies that vary with proximity to irregular points (e.g., our proposed
+
+bandwidth choice ĥkink,x(B)). Such choices may affect the causal estimand and should be trans-
+
+parently reported. Nevertheless, the numerical evidence presented in Section 7 suggests that the
+
+proposed distance-based procedures can remain reasonably robust in empirically relevant configu-
+
+rations involving moderate boundary irregularities.
+
+Finally, pooling-based methods remain popular in applied work because of their simplicity and
+
+ease of implementation. However, they provide the least informative causal analysis, as they aggre-
+
+gate potentially heterogeneous treatment effects into a single summary parameter. For this reason,
+
+we recommend that empirical researchers complement pooled estimates with analysis of the BATEC
+
+or related functionals whenever feasible, thereby obtaining a more comprehensive understanding of
+
+treatment-effect heterogeneity along the assignment boundary.
+
+10 Conclusion
+
+We studied the statistical properties of distance-based (isotropic) local polynomial estimation in
+
+boundary discontinuity designs. We established necessary and sufficient conditions for identifi-
+
+cation, estimation, and inference, both pointwise and uniformly along the treatment-assignment
+
+boundary. Our theoretical results highlight the central role played by the geometric regularity of
+
+the boundary—a one-dimensional manifold—along which estimation and inference are conducted.
+
+Building on these results, we provided concrete guidance for empirical implementation and illus-
+
+trated the performance of the proposed methods using both simulated and real-world data. The
+
+companion general-purpose software package rd2d implements the main procedures developed in
+
+this paper (Cattaneo et al., 2025b).
+
+Motivated by Theorem 3, which shows that distance-based methods can exhibit improved mis-
+
+specification bias when the assignment boundary is sufficiently smooth, we conjecture that new
+
+distance-based (isotropic) nonparametric smoothing procedures that (i) explicitly incorporate ge-
+
+ometric information about the boundary (e.g., knowledge of the location of kink points in B), or
+
+(ii) rely on regularization of the boundary (e.g., via smooth approximations of B), could achieve
+
+smaller misspecification bias. For example, one simple approach is to restrict estimation to locally
+
+33
+
+
+
+smooth segments of B, thereby avoiding the bias issues highlighted by Theorem 2, at the cost of
+
+altering the target estimand through an additional regularization bias.
+
+34
+
+
+
+b ∈ B h Bias SD RMSE EC IL b ∈ B h Bias SD RMSE EC IL
+
+b1 19.905 0.000 0.033 0.033 0.948 0.238 b1 19.781 0.000 0.033 0.033 0.947 0.240
+b2 19.466 -0.001 0.033 0.033 0.950 0.241 b2 18.810 -0.000 0.034 0.034 0.948 0.247
+b3 19.087 -0.000 0.033 0.033 0.946 0.243 b3 17.512 0.000 0.035 0.035 0.943 0.262
+b4 18.802 0.001 0.034 0.034 0.960 0.245 b4 15.901 0.001 0.037 0.037 0.948 0.285
+b5 18.781 0.002 0.034 0.034 0.962 0.246 b5 13.996 0.001 0.042 0.042 0.957 0.322
+b6 18.820 0.005 0.034 0.035 0.963 0.246 b6 12.000 0.001 0.049 0.049 0.950 0.375
+b7 18.930 0.007 0.035 0.035 0.960 0.246 b7 10.000 0.000 0.059 0.059 0.948 0.451
+b8 19.037 0.009 0.035 0.036 0.961 0.248 b8 8.532 -0.001 0.071 0.071 0.941 0.534
+b9 19.054 0.009 0.036 0.037 0.951 0.253 b9 8.348 0.003 0.076 0.076 0.938 0.560
+b10 19.148 0.008 0.037 0.038 0.954 0.258 b10 8.389 0.005 0.077 0.077 0.940 0.571
+b11 19.387 0.005 0.037 0.038 0.951 0.267 b11 8.494 0.004 0.080 0.080 0.952 0.585
+b12 21.239 0.002 0.038 0.038 0.945 0.279 b12 9.305 0.002 0.087 0.087 0.931 0.637
+b13 19.195 -0.005 0.037 0.037 0.955 0.264 b13 8.410 -0.005 0.079 0.079 0.940 0.581
+b14 19.151 -0.011 0.036 0.037 0.950 0.253 b14 8.390 -0.006 0.076 0.077 0.936 0.559
+b15 19.215 -0.013 0.035 0.038 0.942 0.246 b15 8.724 -0.002 0.070 0.070 0.945 0.523
+b16 18.953 -0.010 0.036 0.037 0.948 0.245 b16 11.200 -0.001 0.055 0.055 0.936 0.402
+b17 18.628 -0.004 0.036 0.037 0.955 0.247 b17 13.996 -0.001 0.043 0.043 0.938 0.322
+b18 18.436 0.000 0.035 0.035 0.956 0.251 b18 16.478 0.000 0.038 0.038 0.950 0.276
+b19 18.663 0.002 0.035 0.035 0.949 0.250 b19 18.111 0.001 0.035 0.035 0.951 0.256
+b20 19.409 0.002 0.034 0.034 0.954 0.245 b20 19.364 0.002 0.034 0.034 0.954 0.245
+b21 20.644 0.002 0.034 0.034 0.950 0.237 b21 20.644 0.002 0.034 0.034 0.950 0.237
+
+Uniform 0.945 0.374 Uniform 0.932 0.615
+
+(a) h = ĥMSE,b (smooth B) (b) h = ĥMSE,b(B) (kink adaptive)
+
+b ∈ B h Bias SD RMSE EC IL b ∈ B h Bias SD RMSE EC IL
+
+b1 8.720 0.000 0.071 0.071 0.946 0.274 b1 19.606 -0.001 0.035 0.035 0.950 0.244
+b2 8.528 -0.002 0.072 0.072 0.945 0.277 b2 19.262 -0.001 0.035 0.035 0.950 0.246
+b3 8.362 -0.000 0.074 0.074 0.942 0.280 b3 19.119 -0.001 0.035 0.035 0.950 0.246
+b4 8.238 0.001 0.073 0.073 0.948 0.283 b4 19.116 0.000 0.036 0.036 0.960 0.245
+b5 8.228 0.001 0.072 0.072 0.951 0.283 b5 19.240 0.002 0.036 0.036 0.963 0.244
+b6 8.245 0.000 0.073 0.073 0.947 0.284 b6 19.455 0.004 0.036 0.036 0.965 0.243
+b7 8.293 -0.001 0.073 0.073 0.957 0.284 b7 19.666 0.006 0.036 0.036 0.959 0.242
+b8 8.340 -0.001 0.073 0.073 0.948 0.286 b8 19.819 0.008 0.037 0.038 0.962 0.244
+b9 8.348 0.003 0.076 0.076 0.945 0.292 b9 20.168 0.008 0.038 0.039 0.950 0.245
+b10 8.389 0.005 0.077 0.077 0.955 0.298 b10 20.661 0.007 0.038 0.039 0.955 0.245
+b11 8.494 0.004 0.080 0.080 0.950 0.308 b11 21.467 0.004 0.038 0.038 0.948 0.248
+b12 9.305 0.002 0.087 0.087 0.945 0.329 b12 23.273 0.002 0.038 0.038 0.952 0.260
+b13 8.410 -0.005 0.079 0.079 0.948 0.304 b13 21.200 -0.005 0.036 0.037 0.954 0.245
+b14 8.390 -0.006 0.076 0.077 0.950 0.292 b14 20.497 -0.011 0.037 0.038 0.953 0.242
+b15 8.418 -0.002 0.074 0.074 0.948 0.283 b15 20.088 -0.013 0.037 0.039 0.946 0.240
+b16 8.303 -0.001 0.075 0.075 0.944 0.282 b16 19.726 -0.009 0.038 0.040 0.949 0.241
+b17 8.161 -0.001 0.076 0.076 0.940 0.285 b17 19.137 -0.004 0.039 0.039 0.963 0.247
+b18 8.077 -0.002 0.074 0.074 0.953 0.289 b18 18.515 0.001 0.037 0.037 0.958 0.254
+b19 8.176 0.000 0.074 0.074 0.946 0.288 b19 18.275 0.003 0.037 0.037 0.950 0.258
+b20 8.503 0.003 0.072 0.072 0.951 0.282 b20 18.526 0.004 0.037 0.037 0.949 0.257
+b21 9.044 0.002 0.070 0.070 0.951 0.272 b21 19.094 0.003 0.038 0.038 0.949 0.257
+
+Uniform 0.936 0.438 Uniform 0.948 0.370
+
+(c) h = Ĉ · n−1/4 (unknown kink location) (d) h = ĥ1d,b (rdrobust+ rd2d.dist)
+
+Table 2: Linear Homoskedastic Model (Simulation Results)
+
+35
+
+
+
+b ∈ B h Bias SD RMSE EC IL b ∈ B h Bias SD RMSE EC IL
+
+b1 20.392 -0.001 0.040 0.040 0.952 0.284 b1 20.175 -0.001 0.040 0.040 0.952 0.286
+b2 19.730 -0.001 0.041 0.041 0.949 0.284 b2 18.972 -0.001 0.041 0.041 0.948 0.293
+b3 19.172 -0.001 0.041 0.041 0.948 0.284 b3 17.574 -0.001 0.043 0.043 0.950 0.306
+b4 18.728 -0.000 0.041 0.041 0.955 0.284 b4 15.904 0.000 0.045 0.045 0.950 0.329
+b5 18.433 0.001 0.041 0.041 0.960 0.283 b5 13.994 -0.000 0.049 0.049 0.951 0.364
+b6 18.301 0.003 0.040 0.040 0.953 0.281 b6 12.000 -0.000 0.055 0.055 0.944 0.417
+b7 18.209 0.006 0.040 0.040 0.958 0.279 b7 10.000 -0.000 0.065 0.065 0.948 0.494
+b8 18.029 0.007 0.040 0.040 0.957 0.280 b8 8.238 0.001 0.079 0.079 0.944 0.591
+b9 17.695 0.008 0.041 0.042 0.961 0.286 b9 7.756 0.001 0.085 0.085 0.956 0.630
+b10 17.589 0.006 0.042 0.042 0.956 0.289 b10 7.706 0.002 0.089 0.089 0.928 0.637
+b11 17.462 0.004 0.042 0.042 0.953 0.294 b11 7.650 0.003 0.086 0.086 0.941 0.651
+b12 18.532 0.001 0.041 0.041 0.954 0.292 b12 8.119 0.001 0.087 0.087 0.932 0.645
+b13 17.349 -0.006 0.042 0.043 0.957 0.299 b13 7.601 -0.009 0.090 0.091 0.930 0.657
+b14 17.452 -0.012 0.042 0.043 0.957 0.298 b14 7.646 -0.003 0.089 0.089 0.929 0.650
+b15 17.786 -0.012 0.041 0.043 0.956 0.292 b15 8.437 -0.001 0.079 0.079 0.942 0.589
+b16 17.870 -0.007 0.042 0.042 0.957 0.294 b16 11.200 0.000 0.060 0.060 0.951 0.452
+b17 17.874 -0.001 0.043 0.043 0.961 0.298 b17 13.986 0.002 0.049 0.049 0.953 0.371
+b18 18.033 0.003 0.043 0.043 0.952 0.303 b18 16.418 0.003 0.045 0.045 0.948 0.327
+b19 18.652 0.004 0.042 0.043 0.949 0.303 b19 18.185 0.003 0.043 0.043 0.948 0.309
+b20 19.681 0.002 0.042 0.042 0.949 0.298 b20 19.629 0.002 0.042 0.042 0.949 0.298
+b21 21.067 0.001 0.041 0.041 0.956 0.291 b21 21.067 0.001 0.041 0.041 0.956 0.291
+
+Uniform 0.946 0.436 Uniform 0.922 0.697
+
+(a) h = ĥMSE,b (smooth B) (b) h = ĥMSE,b(B) (kink adaptive)
+
+b ∈ B h Bias SD RMSE EC IL b ∈ B h Bias SD RMSE EC IL
+
+b1 8.934 -0.003 0.084 0.084 0.949 0.324 b1 19.768 -0.002 0.044 0.044 0.955 0.295
+b2 8.644 -0.004 0.086 0.086 0.949 0.325 b2 19.279 -0.002 0.044 0.044 0.952 0.294
+b3 8.399 -0.004 0.087 0.087 0.953 0.325 b3 18.916 -0.002 0.045 0.045 0.953 0.292
+b4 8.205 -0.001 0.084 0.084 0.954 0.326 b4 18.722 -0.001 0.045 0.045 0.962 0.289
+b5 8.076 -0.000 0.083 0.083 0.952 0.326 b5 18.546 0.000 0.045 0.045 0.962 0.286
+b6 8.018 -0.001 0.084 0.084 0.952 0.323 b6 18.476 0.002 0.043 0.043 0.961 0.283
+b7 7.977 0.001 0.082 0.082 0.954 0.323 b7 18.502 0.004 0.042 0.043 0.963 0.280
+b8 7.899 0.001 0.083 0.083 0.955 0.324 b8 18.219 0.006 0.043 0.043 0.953 0.283
+b9 7.752 0.001 0.085 0.085 0.951 0.329 b9 17.946 0.006 0.044 0.044 0.956 0.288
+b10 7.706 0.002 0.089 0.089 0.945 0.334 b10 17.703 0.005 0.045 0.045 0.956 0.294
+b11 7.650 0.003 0.086 0.086 0.957 0.338 b11 17.842 0.003 0.046 0.046 0.961 0.294
+b12 8.119 0.001 0.087 0.087 0.945 0.338 b12 18.773 0.000 0.045 0.045 0.960 0.295
+b13 7.601 -0.009 0.090 0.091 0.942 0.344 b13 17.709 -0.007 0.047 0.047 0.953 0.300
+b14 7.646 -0.004 0.089 0.089 0.946 0.341 b14 17.820 -0.011 0.045 0.046 0.963 0.298
+b15 7.792 -0.001 0.087 0.086 0.950 0.336 b15 18.141 -0.010 0.045 0.046 0.962 0.293
+b16 7.829 -0.001 0.085 0.085 0.954 0.335 b16 18.370 -0.006 0.046 0.047 0.967 0.294
+b17 7.831 0.000 0.087 0.087 0.960 0.338 b17 18.086 0.000 0.047 0.047 0.967 0.302
+b18 7.901 0.003 0.087 0.087 0.958 0.342 b18 17.927 0.004 0.047 0.047 0.957 0.310
+b19 8.172 0.003 0.089 0.089 0.948 0.341 b19 18.144 0.005 0.048 0.048 0.955 0.315
+b20 8.622 -0.001 0.085 0.085 0.957 0.334 b20 18.610 0.004 0.047 0.047 0.956 0.316
+b21 9.229 -0.001 0.083 0.083 0.948 0.325 b21 19.280 0.004 0.047 0.048 0.959 0.319
+
+Uniform 0.945 0.506 Uniform 0.955 0.445
+
+(c) h = Ĉ · n−1/4 (unknown kink location) (d) h = ĥ1d,b (rdrobust+ rd2d.dist)
+
+Table 3: Linear Heteroskedastic Model (Simulation Results)
+
+36
+
+
+
+b ∈ B h Bias SD RMSE EC IL b ∈ B h Bias SD RMSE EC IL
+
+b1 18.653 -0.003 0.035 0.035 0.948 0.254 b1 18.592 -0.003 0.035 0.035 0.948 0.254
+b2 17.890 -0.003 0.035 0.035 0.945 0.261 b2 17.628 -0.002 0.035 0.035 0.945 0.263
+b3 17.405 -0.002 0.035 0.035 0.951 0.266 b3 16.713 -0.001 0.037 0.037 0.952 0.274
+b4 17.203 -0.001 0.037 0.037 0.946 0.268 b4 15.626 -0.000 0.039 0.039 0.946 0.290
+b5 17.336 0.002 0.039 0.039 0.954 0.266 b5 13.971 0.000 0.044 0.044 0.948 0.323
+b6 17.832 0.009 0.039 0.040 0.960 0.260 b6 12.000 0.000 0.050 0.050 0.954 0.376
+b7 18.404 0.016 0.037 0.040 0.955 0.254 b7 10.000 -0.000 0.060 0.060 0.944 0.452
+b8 18.879 0.021 0.035 0.041 0.953 0.251 b8 8.499 0.001 0.071 0.071 0.945 0.536
+b9 18.981 0.021 0.035 0.041 0.950 0.254 b9 8.316 0.005 0.076 0.076 0.942 0.563
+b10 19.089 0.016 0.036 0.040 0.948 0.259 b10 8.363 0.009 0.078 0.079 0.943 0.572
+b11 19.336 0.008 0.038 0.038 0.945 0.269 b11 8.471 0.007 0.081 0.081 0.953 0.590
+b12 21.238 -0.001 0.038 0.038 0.948 0.280 b12 9.304 -0.001 0.087 0.087 0.933 0.639
+b13 19.214 -0.009 0.037 0.038 0.952 0.263 b13 8.418 -0.007 0.077 0.078 0.955 0.580
+b14 19.046 -0.016 0.036 0.039 0.955 0.254 b14 8.344 -0.005 0.075 0.075 0.945 0.562
+b15 18.746 -0.017 0.037 0.041 0.953 0.251 b15 8.648 -0.001 0.069 0.069 0.945 0.524
+b16 17.792 -0.011 0.040 0.041 0.950 0.261 b16 11.200 0.001 0.054 0.054 0.932 0.403
+b17 16.730 -0.002 0.040 0.040 0.942 0.276 b17 13.956 0.000 0.044 0.044 0.940 0.324
+b18 16.232 -0.000 0.039 0.039 0.950 0.283 b18 15.636 -0.000 0.040 0.040 0.950 0.291
+b19 16.437 -0.001 0.038 0.038 0.954 0.283 b19 16.324 -0.001 0.038 0.038 0.954 0.284
+b20 17.181 -0.003 0.037 0.037 0.950 0.276 b20 17.174 -0.003 0.037 0.037 0.951 0.276
+b21 18.119 -0.004 0.037 0.037 0.948 0.269 b21 18.119 -0.004 0.037 0.037 0.948 0.269
+
+Uniform 0.949 0.397 Uniform 0.931 0.629
+
+(a) h = ĥMSE,b (smooth B) (b) h = ĥMSE,b(B) (kink adaptive)
+
+b ∈ B h Bias SD RMSE EC IL b ∈ B h Bias SD RMSE EC IL
+
+b1 8.172 -0.004 0.076 0.076 0.947 0.293 b1 17.750 -0.004 0.038 0.038 0.950 0.266
+b2 7.838 -0.005 0.078 0.078 0.938 0.301 b2 17.219 -0.004 0.037 0.037 0.945 0.271
+b3 7.625 -0.001 0.078 0.078 0.949 0.308 b3 16.908 -0.004 0.038 0.038 0.953 0.275
+b4 7.537 0.003 0.082 0.082 0.944 0.310 b4 16.841 -0.002 0.039 0.039 0.957 0.276
+b5 7.595 0.001 0.080 0.080 0.947 0.307 b5 17.075 0.000 0.041 0.041 0.954 0.274
+b6 7.812 -0.002 0.077 0.077 0.951 0.301 b6 17.662 0.006 0.042 0.043 0.960 0.268
+b7 8.063 -0.001 0.076 0.076 0.945 0.293 b7 18.350 0.013 0.042 0.044 0.954 0.261
+b8 8.271 0.001 0.074 0.074 0.954 0.289 b8 18.995 0.019 0.040 0.044 0.954 0.256
+b9 8.316 0.005 0.076 0.076 0.947 0.293 b9 19.565 0.019 0.038 0.043 0.949 0.253
+b10 8.363 0.009 0.078 0.079 0.947 0.299 b10 20.067 0.015 0.038 0.041 0.949 0.253
+b11 8.471 0.007 0.081 0.081 0.944 0.310 b11 21.059 0.007 0.039 0.039 0.952 0.254
+b12 9.304 -0.001 0.087 0.087 0.944 0.331 b12 22.997 -0.003 0.039 0.039 0.953 0.264
+b13 8.418 -0.007 0.077 0.078 0.955 0.304 b13 20.868 -0.010 0.038 0.039 0.959 0.248
+b14 8.344 -0.005 0.075 0.075 0.955 0.293 b14 19.975 -0.016 0.037 0.041 0.951 0.247
+b15 8.213 -0.002 0.074 0.074 0.954 0.290 b15 18.778 -0.015 0.041 0.044 0.957 0.258
+b16 7.795 0.001 0.081 0.081 0.933 0.302 b16 17.261 -0.007 0.045 0.046 0.955 0.277
+b17 7.330 0.004 0.085 0.085 0.941 0.320 b17 15.877 0.002 0.045 0.045 0.949 0.296
+b18 7.112 0.002 0.085 0.085 0.944 0.327 b18 15.257 0.003 0.043 0.043 0.951 0.303
+b19 7.201 -0.000 0.083 0.083 0.954 0.327 b19 15.423 0.001 0.041 0.041 0.955 0.301
+b20 7.527 -0.001 0.083 0.083 0.947 0.320 b20 16.010 -0.001 0.041 0.041 0.953 0.295
+b21 7.938 -0.003 0.081 0.081 0.944 0.311 b21 16.626 -0.003 0.042 0.042 0.953 0.291
+
+Uniform 0.932 0.466 Uniform 0.949 0.407
+
+(c) h = Ĉ · n−1/4 (unknown kink location) (d) h = ĥ1d,b (rdrobust+ rd2d.dist)
+
+Table 4: Quadratic Homoskedastic Model (Simulation Results)
+
+37
+
+
+
+b ∈ B h Bias SD RMSE EC IL b ∈ B h Bias SD RMSE EC IL
+
+b1 19.460 -0.002 0.041 0.041 0.952 0.297 b1 19.323 -0.002 0.041 0.041 0.951 0.299
+b2 18.555 -0.002 0.042 0.042 0.948 0.302 b2 18.151 -0.002 0.042 0.042 0.948 0.307
+b3 17.879 -0.002 0.042 0.042 0.952 0.304 b3 16.985 -0.001 0.043 0.043 0.949 0.316
+b4 17.581 -0.001 0.043 0.043 0.956 0.302 b4 15.681 -0.000 0.045 0.045 0.948 0.333
+b5 17.457 0.002 0.044 0.044 0.960 0.299 b5 13.969 -0.000 0.049 0.049 0.955 0.366
+b6 17.560 0.008 0.044 0.045 0.960 0.293 b6 12.000 -0.000 0.056 0.056 0.949 0.418
+b7 17.789 0.015 0.043 0.045 0.951 0.286 b7 10.000 -0.000 0.066 0.066 0.949 0.493
+b8 17.872 0.020 0.041 0.045 0.957 0.282 b8 8.206 -0.000 0.079 0.079 0.944 0.593
+b9 17.632 0.020 0.040 0.045 0.950 0.287 b9 7.727 0.000 0.085 0.085 0.942 0.633
+b10 17.496 0.015 0.041 0.044 0.953 0.290 b10 7.665 0.004 0.088 0.088 0.933 0.639
+b11 17.393 0.007 0.042 0.042 0.958 0.295 b11 7.620 0.006 0.090 0.090 0.924 0.652
+b12 18.550 -0.002 0.041 0.041 0.960 0.293 b12 8.127 -0.000 0.087 0.087 0.944 0.646
+b13 17.358 -0.009 0.041 0.042 0.956 0.300 b13 7.604 -0.005 0.087 0.087 0.942 0.659
+b14 17.415 -0.015 0.043 0.046 0.949 0.299 b14 7.630 0.001 0.090 0.090 0.935 0.651
+b15 17.533 -0.016 0.045 0.048 0.950 0.297 b15 8.434 0.000 0.081 0.081 0.940 0.590
+b16 17.216 -0.011 0.047 0.048 0.954 0.304 b16 11.200 -0.002 0.062 0.062 0.946 0.451
+b17 16.813 -0.004 0.047 0.047 0.961 0.316 b17 13.937 -0.002 0.051 0.051 0.959 0.372
+b18 16.660 -0.001 0.046 0.046 0.951 0.327 b18 15.819 -0.002 0.047 0.047 0.946 0.340
+b19 17.005 -0.001 0.045 0.045 0.952 0.329 b19 16.847 -0.001 0.046 0.046 0.953 0.331
+b20 17.834 -0.001 0.046 0.046 0.947 0.326 b20 17.822 -0.001 0.046 0.046 0.947 0.326
+b21 18.871 -0.003 0.046 0.046 0.952 0.321 b21 18.871 -0.003 0.046 0.046 0.952 0.321
+
+Uniform 0.959 0.455 Uniform 0.921 0.708
+
+(a) h = ĥMSE,b (smooth B) (b) h = ĥMSE,b(B) (kink adaptive)
+
+b ∈ B h Bias SD RMSE EC IL b ∈ B h Bias SD RMSE EC IL
+
+b1 8.525 -0.000 0.090 0.090 0.946 0.341 b1 18.492 -0.003 0.045 0.045 0.950 0.313
+b2 8.129 -0.001 0.089 0.089 0.950 0.347 b2 17.885 -0.003 0.045 0.045 0.954 0.314
+b3 7.833 -0.003 0.088 0.088 0.953 0.349 b3 17.365 -0.004 0.045 0.046 0.958 0.315
+b4 7.702 -0.003 0.089 0.089 0.955 0.348 b4 17.094 -0.003 0.047 0.047 0.962 0.314
+b5 7.648 -0.003 0.088 0.088 0.950 0.346 b5 17.083 -0.000 0.048 0.048 0.961 0.311
+b6 7.693 -0.002 0.087 0.087 0.950 0.338 b6 17.228 0.004 0.050 0.050 0.964 0.306
+b7 7.794 -0.001 0.087 0.087 0.951 0.330 b7 17.527 0.011 0.050 0.051 0.956 0.298
+b8 7.830 -0.000 0.084 0.084 0.949 0.327 b8 17.508 0.015 0.047 0.049 0.954 0.295
+b9 7.725 0.000 0.085 0.085 0.952 0.331 b9 17.545 0.017 0.045 0.048 0.946 0.294
+b10 7.665 0.004 0.088 0.088 0.949 0.335 b10 17.551 0.013 0.045 0.047 0.955 0.296
+b11 7.620 0.006 0.090 0.090 0.947 0.339 b11 17.736 0.006 0.045 0.045 0.956 0.295
+b12 8.127 -0.000 0.087 0.087 0.957 0.338 b12 18.702 -0.002 0.044 0.044 0.964 0.296
+b13 7.604 -0.005 0.087 0.087 0.950 0.345 b13 17.669 -0.009 0.045 0.046 0.961 0.300
+b14 7.630 0.001 0.090 0.090 0.948 0.343 b14 17.572 -0.014 0.048 0.050 0.952 0.303
+b15 7.681 0.001 0.090 0.089 0.952 0.342 b15 17.436 -0.013 0.051 0.052 0.954 0.306
+b16 7.542 -0.002 0.090 0.090 0.951 0.347 b16 16.969 -0.007 0.052 0.053 0.967 0.317
+b17 7.366 -0.001 0.092 0.092 0.954 0.360 b17 16.228 -0.001 0.052 0.052 0.964 0.335
+b18 7.299 -0.000 0.095 0.095 0.950 0.371 b18 15.825 0.002 0.051 0.051 0.955 0.347
+b19 7.450 0.002 0.097 0.097 0.949 0.372 b19 15.977 0.003 0.050 0.050 0.955 0.351
+b20 7.813 0.001 0.094 0.094 0.948 0.368 b20 16.536 0.002 0.050 0.051 0.951 0.350
+b21 8.267 -0.001 0.093 0.093 0.948 0.361 b21 17.148 0.001 0.051 0.051 0.955 0.352
+
+Uniform 0.942 0.529 Uniform 0.952 0.475
+
+(c) h = Ĉ · n−1/4 (unknown kink location) (d) h = ĥ1d,b (rdrobust+ rd2d.dist)
+
+Table 5: Quadratic Heteroskedastic Model (Simulation Results)
+
+38
+
+
+
+b ∈ B h τ(b) p-value 95% RBC CI
+b ∈ B h τ(b) p-value 95% RBC CI
+
+b1 22.000 0.325 0.000 (0.225, 0.475)
+b1 30.458 0.319 0.000 (0.239, 0.419)
+b2 32.762 0.320 0.000 (0.296, 0.459) b2 20.000 0.359 0.000 (0.243, 0.514)
+
+b3 27.994 0.334 0.000 (0.276, 0.466) b3 18.000 0.354 0.000 (0.158, 0.461)
+
+b4 28.491 0.329 0.000 (0.252, 0.436) b4 16.000 0.336 0.000 (0.219, 0.550)
+
+b5 31.169 0.324 0.000 (0.202, 0.370) b5 14.000 0.290 0.000 (0.162, 0.536)
+
+b6 34.582 0.333 0.000 (0.179, 0.332) b6 12.000 0.171 0.640 (−0.185, 0.301)
+
+b7 33.580 0.347 0.000 (0.204, 0.356) b7 11.651 0.275 0.012 (0.066, 0.527)
+
+b b
+8 35.367 0.363 0.000 (0.280, 0.417) 8 12.271 0.409 0.000 (0.299, 0.683)
+
+b 12.519 0.367 0.001 (0.144, 0.552)
+9 36.083 0.356 0.000 (0.288, 0.427) b9
+
+b 14.134 0.345 0.000 (0.167, 0.533)
+10 40.739 0.343 0.000 (0.282, 0.408) b10
+
+b 13.278 0.323 0.003 (0.102, 0.517)
+11 38.273 0.326 0.000 (0.239, 0.377) b11
+
+b 13.495 0.292 0.005 (0.092, 0.524)
+12 38.900 0.308 0.000 (0.203, 0.358) b12
+
+b 13.338 0.279 0.003 (0.105, 0.502)
+13 38.456 0.293 0.000 (0.193, 0.342) b13
+
+b14 37.502 0.277 0.000 (0.178, 0.333) b14 13.007 0.280 0.052 (−0.001, 0.447)
+
+b15 36.557 0.264 0.000 (0.178, 0.343) b15 12.680 0.308 0.064 (−0.013, 0.466)
+
+b16 34.947 0.252 0.000 (0.202, 0.378) b16 12.121 0.354 0.001 (0.162, 0.644)
+b17 36.527 0.241 0.000 (0.215, 0.389) b17 14.000 0.352 0.000 (0.196, 0.626)
+b18 35.586 0.230 0.000 (0.217, 0.406) b18 16.800 0.329 0.002 (0.106, 0.496)
+b19 35.712 0.222 0.000 (0.221, 0.421) b19 19.600 0.314 0.000 (0.190, 0.560)
+b20 36.783 0.213 0.000 (0.215, 0.418) b20 22.400 0.280 0.000 (0.261, 0.591)
+b21 36.701 0.208 0.000 (0.175, 0.391) b21 25.200 0.240 0.000 (0.169, 0.484)
+
+(a) h = ĥMSE,b (smooth B) (b) h = ĥMSE,b(B) (kink adaptive)
+
+b ∈ B h τ(b) p-value 95% RBC CI b ∈ B h τ(b) p-value 95% RBC CI
+
+b1 10.569 0.310 0.000 (0.175, 0.446) b1 42.728 0.301 0.000 (0.264, 0.392)
+b2 11.369 0.343 0.000 (0.220, 0.467) b2 49.759 0.311 0.000 (0.267, 0.376)
+b3 9.714 0.306 0.000 (0.160, 0.451) b3 64.201 0.338 0.000 (0.264, 0.352)
+b4 9.887 0.371 0.000 (0.233, 0.509) b4 65.363 0.347 0.000 (0.283, 0.368)
+b5 10.816 0.313 0.000 (0.188, 0.438) b5 67.149 0.354 0.000 (0.303, 0.385)
+b6 11.999 0.171 0.004 (0.054, 0.288) b6 65.312 0.358 0.000 (0.310, 0.393)
+b7 11.651 0.275 0.000 (0.161, 0.390) b7 62.363 0.360 0.000 (0.319, 0.404)
+b8 12.271 0.409 0.000 (0.311, 0.508) b8 57.820 0.359 0.000 (0.326, 0.415)
+b9 12.519 0.367 0.000 (0.264, 0.469) b9 64.046 0.347 0.000 (0.320, 0.402)
+b10 14.134 0.345 0.000 (0.252, 0.437) b10 67.489 0.336 0.000 (0.303, 0.382)
+b11 13.278 0.323 0.000 (0.222, 0.423) b11 60.813 0.324 0.000 (0.277, 0.368)
+b12 13.495 0.292 0.000 (0.181, 0.403) b12 55.154 0.312 0.000 (0.244, 0.358)
+b13 13.338 0.279 0.000 (0.173, 0.384) b13 52.754 0.297 0.000 (0.228, 0.341)
+b14 13.007 0.280 0.000 (0.166, 0.395) b14 49.963 0.281 0.000 (0.208, 0.327)
+b15 12.680 0.308 0.000 (0.185, 0.431) b15 50.847 0.267 0.000 (0.198, 0.318)
+b16 12.121 0.354 0.000 (0.227, 0.481) b16 49.997 0.254 0.000 (0.191, 0.316)
+b17 12.671 0.356 0.000 (0.232, 0.481) b17 52.637 0.241 0.000 (0.182, 0.306)
+b18 12.343 0.321 0.000 (0.180, 0.461) b18 59.768 0.231 0.000 (0.167, 0.282)
+b19 12.386 0.356 0.000 (0.205, 0.506) b19 60.682 0.218 0.000 (0.155, 0.275)
+b20 12.758 0.396 0.000 (0.246, 0.545) b20 62.809 0.207 0.000 (0.147, 0.268)
+b21 12.729 0.364 0.000 (0.203, 0.526) b21 66.173 0.197 0.000 (0.137, 0.258)
+
+(c) h = Ĉ · n−1/4 (unknown kink location) (d) h = ĥ1d,b (rdrobust+ rd2d.dist)
+
+Table 6: BATEC Estimation and Inference (SPP Empirical Application)
+
+39
+
+
+
+References
+
+Arai, Y., Y.-C. Hsu, T. Kitagawa, I. Mourifié, and Y. Wan (2022): “Testing Identifying
+
+Assumptions in Fuzzy Regression Discontinuity Designs,” Quantitative Economics, 13, 1–28.
+
+Avnir, D., O. Biham, D. Lidar, and O. Malcai (1998): “Is the geometry of nature fractal?”
+
+Science, 279, 39–40.
+
+Banerjee, S. (2005): “On Geodetic Distance Computations in Spatial Modeling,” Biometrics, 61,
+
+617–625.
+
+Calonico, S., M. D. Cattaneo, and M. H. Farrell (2018): “On the Effect of Bias Esti-
+
+mation on Coverage Accuracy in Nonparametric Inference,” Journal of the American Statistical
+
+Association, 113, 767–779.
+
+——— (2020): “Optimal Bandwidth Choice for Robust Bias Corrected Inference in Regression
+
+Discontinuity Designs,” Econometrics Journal, 23, 192–210.
+
+——— (2022): “Coverage Error Optimal Confidence Intervals for Local Polynomial Regression,”
+
+Bernoulli, 28, 2998–3022.
+
+Calonico, S., M. D. Cattaneo, M. H. Farrell, F. Palomba, and R. Titiunik (2026):
+
+“Treatment Effect Heterogeneity in Regression Discontinuity Designs,” Working paper.
+
+Calonico, S., M. D. Cattaneo, M. H. Farrell, and R. Titiunik (2019): “Regression
+
+Discontinuity Designs using Covariates,” Review of Economics and Statistics, 101, 442–451.
+
+Calonico, S., M. D. Cattaneo, and R. Titiunik (2014): “Robust Nonparametric Confidence
+
+Intervals for Regression-Discontinuity Designs,” Econometrica, 82, 2295–2326.
+
+Card, D., D. S. Lee, Z. Pei, and A. Weber (2015): “Inference on Causal Effects in a Gener-
+
+alized Regression Kink Design,” Econometrica, 83, 2453–2483.
+
+Cattaneo, M. D., Y. Feng, and W. G. Underwood (2024a): “Uniform Inference for Kernel
+
+Density Estimators with Dyadic Data,” Journal of the American Statistical Association, 119,
+
+2695–2708.
+
+40
+
+
+
+Cattaneo, M. D., B. Frandsen, and R. Titiunik (2015): “Randomization Inference in the
+
+Regression Discontinuity Design: An Application to Party Advantages in the U.S. Senate,”
+
+Journal of Causal Inference, 3, 1–24.
+
+Cattaneo, M. D., N. Idrobo, and R. Titiunik (2020): A Practical Introduction to Regression
+
+Discontinuity Designs: Foundations, Cambridge University Press.
+
+——— (2024b): A Practical Introduction to Regression Discontinuity Designs: Extensions, Cam-
+
+bridge University Press.
+
+Cattaneo, M. D., L. Keele, R. Titiunik, and G. Vazquez-Bare (2016): “Interpreting
+
+Regression Discontinuity Designs with Multiple Cutoffs,” Journal of Politics, 78, 1229–1248.
+
+Cattaneo, M. D., R. Masini, and W. G. Underwood (2025a): “Yurinskii’s Coupling for
+
+Martingales,” Annals of Statistics, forthcoming.
+
+Cattaneo, M. D. and R. Titiunik (2022): “Regression Discontinuity Designs,” Annual Review
+
+of Economics, 14, 821–851.
+
+Cattaneo, M. D., R. Titiunik, and R. R. Yu (2025b): “rd2d: Causal Inference in Boundary
+
+Discontinuity Designs,” arXiv:2505.07989.
+
+——— (2026a): “Boundary Discontinuity Designs: Theory and Practice,” in Advances in Eco-
+
+nomics and Econometrics: Thirteenth World Congress, ed. by R. Griffith, Y. Gorodnichenko,
+
+M. Kandori, and F. Molinari, Cambridge University Press, vol. 1, chap. 2, forthcoming.
+
+——— (2026b): “Estimation and Inference in Boundary Discontinuity Designs: Location-Based
+
+Methods,” arXiv:2505.05670.
+
+——— (2026c): “Estimation and Inference in Boundary Discontinuity Designs: Pooling-Based
+
+Methods,” Working paper.
+
+Cattaneo, M. D. and R. R. Yu (2025): “Strong Approximations for Empirical Processes Indexed
+
+by Lipschitz Functions,” Annals of Statistics, 53, 1203–1229.
+
+Chen, X. and W. Y. Gao (2026): “Thin Sets Are Not Equally Thin: Minimax Learning of
+
+Submanifold Integrals,” arXiv:2507.12673.
+
+41
+
+
+
+Chernozhukov, V., D. Chetverikov, and K. Kato (2014a): “Anti-Concentration and Honest,
+
+Adaptive Confidence Bands,” Annals of Statistics, 42, 1787–1818.
+
+——— (2014b): “Gaussian Approximation of Suprema of Empirical Processes,” Annals of Statis-
+
+tics, 42, 1564–1597.
+
+Chernozhuokov, V., D. Chetverikov, K. Kato, and Y. Koike (2022): “Improved central
+
+limit theorem and bootstrap approximations in high dimensions,” Annals of Statistics, 50, 2562–
+
+2586.
+
+Diaz, J. D. and J. R. Zubizarreta (2023): “Complex Discontinuity Designs Using Covariates
+
+for Policy Impact Evaluation,” Annals of Applied Statistics, 17, 67–88.
+
+Federer, H. (2014): Geometric measure theory, Springer.
+
+Galiani, S., P. J. McEwan, and B. Quistorff (2017): “External and Internal Validity of a
+
+Geographic Quasi-Experiment Embedded in a Cluster-Randomized Experiment,” in Regression
+
+Discontinuity Designs: Theory and Applications (Advances in Econometrics, volume 38), ed. by
+
+M. D. Cattaneo and J. C. Escanciano, Emerald Group Publishing, 195–236.
+
+Giné, E. and R. Nickl (2016): Mathematical Foundations of Infinite-dimensional Statistical
+
+Models, New York: Cambridge University Press.
+
+Hahn, J., P. Todd, and W. van der Klaauw (2001): “Identification and Estimation of
+
+Treatment Effects with a Regression-Discontinuity Design,” Econometrica, 69, 201–209.
+
+Härdle, W., M. Müller, S. Sperlich, and A. Werwatz (2004): Nonparametric and Semi-
+
+parametric Models, Heidelberg: Springer.
+
+Hernán, M. A. and J. M. Robins (2020): Causal Inference: What If, Boca Raton: Chapman
+
+& Hall/CRC.
+
+Keele, L. and R. Titiunik (2016): “Natural experiments based on geography,” Political Science
+
+Research and Methods, 4, 65–95.
+
+Keele, L. J., S. Lorch, M. Passarella, D. Small, and R. Titiunik (2017): “An Overview of
+
+Geographically Discontinuous Treatment Assignments with an Application to Children’s Health
+
+42
+
+
+
+Insurance,” in Regression Discontinuity Designs: Theory and Applications (Advances in Econo-
+
+metrics, volume 38), ed. by M. D. Cattaneo and J. C. Escanciano, Emerald Group Publishing,
+
+147–194.
+
+Keele, L. J. and R. Titiunik (2015): “Geographic Boundaries as Regression Discontinuities,”
+
+Political Analysis, 23, 127–155.
+
+Keele, L. J., R. Titiunik, and J. Zubizarreta (2015): “Enhancing a Geographic Regression
+
+Discontinuity Design Through Matching to Estimate the Effect of Ballot Initiatives on Voter
+
+Turnout,” Journal of the Royal Statistical Society: Series A, 178, 223–239.
+
+Londoño-Vélez, J., C. Rodŕıguez, and F. Sánchez (2020): “Upstream and downstream
+
+impacts of college merit-based financial aid for low-income students: Ser Pilo Paga in Colombia,”
+
+American Economic Journal: Economic Policy, 12, 193–227.
+
+Mandelbrot, B. (1967): “How long is the coast of Britain? Statistical self-similarity and frac-
+
+tional dimension,” science, 156, 636–638.
+
+Mandelbrot, B. B. (1983): “The fractal geometry of nature,” New York.
+
+Papay, J. P., J. B. Willett, and R. J. Murnane (2011): “Extending the regression-
+
+discontinuity approach to multiple assignment variables,” Journal of Econometrics, 161, 203–
+
+207.
+
+Reardon, S. F. and J. P. Robinson (2012): “Regression Discontinuity Designs with Multiple
+
+Rating-Score Variables,” Journal of Research on Educational Effectiveness, 5, 83–104.
+
+Rischard, M., Z. Branson, L. Miratrix, and L. Bornn (2021): “Do School Districts Affect
+
+NYC House Prices? Identifying Border Differences using a Bayesian Nonparametric Approach to
+
+Geographic Regression Discontinuity Designs,” Journal of the American Statistical Association,
+
+116, 619–631.
+
+Simon, L. et al. (1984): Lectures on geometric measure theory, Centre for Mathematical Analysis,
+
+Australian National University Canberra.
+
+Tsybakov, A. (2008): Introduction to Nonparametric Estimation, Springer.
+
+43
+
+
+
+van der Vaart, A. W. and J. A. Wellner (1996): Weak Convergence and Empirical Processes,
+
+Springer.
+
+Velez, Y. R. and B. J. Newman (2019): “Tuning in, not turning out: Evaluating the impact of
+
+ethnic television on political participation,” American Journal of Political Science, 63, 808–823.
+
+Wong, V. C., P. M. Steiner, and T. D. Cook (2013): “Analyzing regression-discontinuity
+
+designs with multiple assignment variables: A comparative study of four estimation methods,”
+
+Journal of Educational and Behavioral Statistics, 38, 107–141.
+
+44
+
+
+
+Estimation and Inference in Boundary Discontinuity Designs:
+
+Distance-Based Methods
+
+Supplemental Appendix
+
+Matias D. Cattaneo∗ Rocio Titiunik† Ruiqi (Rae) Yu‡
+
+March 27, 2026
+
+Abstract
+
+This supplemental appendix presents more general theoretical results encompassing those reported
+
+in the paper, their theoretical proofs, and other technical results. In particular, it presents a new strong
+
+approximation result for multiplicative-separable empirical processes leveraging and extending ideas from
+
+Cattaneo and Yu [2025].
+
+∗Department of Operations Research and Financial Engineering, Princeton University.
+†Department of Politics, Princeton University.
+‡Department of Operations Research and Financial Engineering, Princeton University.
+
+
+
+Contents
+
+SA-1 Setup 2
+SA-1.1 Notation and Definitions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+SA-1.2 Mapping between Main Paper and Supplement . . . . . . . . . . . . . . . . . . . . . . . . 5
+
+SA-2 Preliminary Lemmas 6
+
+SA-3 Identification and Point Estimation 7
+
+SA-4 Distributional Approximation and Inference 7
+
+SA-5 Gaussian Strong Approximation 9
+SA-5.1 Definitions for Function Spaces . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+SA-5.2 Multiplicative-Separable Empirical Process . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+
+SA-6 Proofs 12
+SA-6.1 Proof of Lemma SA-1 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+SA-6.2 Proof of Lemma SA-2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+SA-6.3 Proof of Lemma SA-3 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+SA-6.4 Proof of Lemma SA-4 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+SA-6.5 Proof of Lemma SA-5 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+SA-6.6 Proof of Theorem SA-1 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+SA-6.7 Proof of Theorem SA-2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+SA-6.8 Proof of Theorem SA-3 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+SA-6.9 Proof of Theorem SA-4 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+SA-6.10 Proof of Theorem SA-5 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+SA-6.11 Proof of Theorem SA-6 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+SA-6.12 Proof of Theorem SA-7 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+SA-6.13 Proof of Theorem SA-8 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+SA-6.14 Proof of Theorem 2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28
+
+SA-6.15 Proof of Theorem 3 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32
+SA-6.16 Proof of Theorem 6 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36
+
+1
+
+
+
+SA-1 Setup
+
+This supplemental appendix considers a generalized version of the problems studied in the main paper.
+Specifically, the underlying bivariate location variable Xi is d-dimensional (d ≥ 1) with support X ⊆ Rd,
+and the boundary region B is a low dimensional manifold with “effective dimension” d − 1. The results in
+the paper correspond to d = 2, that is, Xi is bivariate and B is a one-dimensional (boundary assignment)
+curve.
+Assumption 1 in the paper generalizes as follows.
+
+Assumption SA–1 (Data Generating Process). Let t ∈ {0, 1}.
+
+(i) ∏(Y1(t),X⊤
+1 )
+
+⊤, . . . , (Yn(t),X
+⊤
+n )
+
+⊤ are independent and identically distributed random vectors with X =
+d
+l=1[al, bl] for −∞ < al < bl <∞ for l = 1, · · · , d.
+
+(ii) The distribution of Xi has a Lebesgue density fX(x) that is continuous and bounded away from zero
+on X.
+
+(iii) µt(x) = E[Yi(t)|Xi = x] is (p+ 1)-times continuously differentiable on X.
+(iv) σ2
+
+t (x) = V[Yi(t)|Xi = x] is bounded away from zero and continuous on X.
+(v) supx∈X E[|Yi(t)|2+v|Xi = x] <∞ for some v ≥ 2.
+
+The support X is partitioned into two (assignment) areas, A0 ⊂ Rd and A1 ⊂ Rd, representing the control
+and treatment regions, respectively. Thus, X = A0∪A1 with A0 and A1 disjoint regions in Rd. The observed
+outcome is Yi = 1(Xi ∈ A0)Yi(0)+1(Xi ∈ A1)Yi(1), and B = bd(A0)∩bd(A1) is the boundary determined
+by the assignment regions, where bd(At) denotes the topological boundary of At.
+The conditional treatment effect curve at the boundary is
+
+τ(x) = E[Yi(1)− Yi(0)|Xi = x], x ∈ B.
+
+The univariate distance score induced by the bivariate location variable is
+
+Di(x) = [1(Xi ∈ A1)− 1(Xi ∈ A0)]d(Xi,x), x ∈ B,
+
+where d(·, ·) denotes a distance function. The distance-based treatment effect estimator process along the
+
+boundary based is (τ(x) : x ∈ B) is( )
+ϑ̂(x) = θ̂1,x(0)− θ̂0,x(0) : x ∈ B ,
+
+where, for t ∈ {0, 1}, [( ) ]
+θ̂t,x(0) = e⊤1 γ̂t(x), γ̂t(x) = argminEn Yi − r ⊤ 2
+
+p(Di(x)) γ Kh(Di(x))1I (D )
+t i(x ) ,
+
+γ∈Rp+1
+
+rp(u) = (1, u, · · · , up)⊤ andKh(u) = K(u/h)/h2 withK(·) a univariate kernel and h a bandwidth parameter,
+and I0 = (−∞, 0) and I1 = [0,∞). More generally, the least squares projection is
+
+θ̂t,x(Di(x)) = rp(Di(x))
+⊤γ̂t(x), t ∈ {0, 1}, x ∈ B.
+
+We impose the following assumptions on the kernel function, distance function, and assignment boundary
+
+2
+
+
+
+manifold. Let [ ( ) ( ]
+Di(x) Di(x)
+
+)⊤
+Ψt,x = E rp rp Kh(Di(x))1(Di(x) ∈ It) ,
+
+h h
+
+for t ∈ {0, 1}.
+
+Assumption SA–2 (Kernel, Distance, and Boundary). Let t ∈ {0, 1}.
+(i) B is compact (d− 1)-rectifiable, with Hd−1(B) positive and finite.
+
+(ii) d : Rd ×Rd → R+ is a metric on Rd equivalent to the Euclidean distance, that is, there exists positive
+constants Cu and Cl such that Cl ∥x− x′∥ ≤ d(x,x′) ≤ Cu ∥x− x′∥ for all x,x′ ∈ X.
+
+(iii) K : R → [0,∞) is compact supported and Lipschitz continuous, or K(u) = 1(u ∈ [−1, 1]).
+(iv) lim infh↓0 infx∈B λmin(Ψt,x) ≳ 1.
+
+For each t ∈ {0, 1}, the induced conditional expectation based on univariate distance is
+
+θt,x(r) = E[Yi|Di(x) = r] = E[Yi|d(Xi,x) = |r|,Xi ∈ At], r ∈ It, x ∈ B.
+
+More rigorously, for each t ∈ {0, 1}, and letting St,x(r) = {v ∈ X : d(v,x) = r,v ∈ At} for r ≥ 0 and
+x ∈ B, ∫
+
+(v)f ) (dv)
+S t X v Hd−1
+
+θ t,x(|r| (
+)
+
+t,x(r) = ∫ µ
+,
+
+f ( )Hd−1(dv)
+S ) X
+t,x(|r| v
+
+for |r| > 0,x ∈ B, t ∈ {0, 1}, and therefore (under our assumptio∫ns)
+µ v)f (v)Hd−1(dv)
+
+θt,x E | S ) t( X
+(0) = lim [Y t
+
+i|d(Xi,x) = r|,Xi ∈ At] = lim ∫,x(|r|
+r→0 r→0 f ( ) d− .
+
+1( v)
+S X
+t,x(|r| v H d
+
+)
+
+Thus, the population limit based on the induced conditional expectations is θx(0) = θ1,x(0) − θ0,x(0).
+Theorem SA-1 shows that θx(0) = τ(x) under Assumptions SA–1 and SA–2.
+
+The best mean square approximation is
+
+θ∗t,x(Di(x)) = rp(Di(x))
+⊤γ∗
+
+t (x),
+
+where [ ( ) ]
+2
+
+γ∗
+t (x) = argminE Yi − r D ⊤
+
+p( i(x)) γ Kh(Di(x))1(Di(x) ∈ It) ,
+γ∈Rp+1
+
+and uniqueness will follow from the results below. The estimation error decomposes into linear error,
+approximation error, and non-linear error : for all t ∈ {0, 1} and x ∈ B,
+
+− [ ( x)) ]
+1 Di(
+
+θ̂t,x(0)− θt,x(0) = e⊤1 Ψ̂t,xEn rp( )Kh(Di(x))Yi − θt,x(0)
+h
+
+⊤ − [
+1 D ]
+
+= e1 Ψ̂t,xE
+i(x)
+
+n rp Kh(Di(x))(Yi − θ∗t,x(Di(x))) + θ∗t,x(0)− θt,x(0)
+h
+
+= ︸θ∗t,x(0) ︷−︷ θt,x(0︸) + ︸e⊤1 Ψ−︷︷1t,xOt,x︸+ ︸ −1
+e⊤1 (Ψ̂t,x −︷︷Ψ−1
+
+t,x)Ot,x︸, (SA-1)
+
+approximation error linear error non-linear error
+
+3
+
+
+
+where [ ( ]
+Di(x)
+
+)
+Ot,x = En rp Kh(Di(x))(Yi − θ∗t,x(Di(x)))1(Di(x) ∈ It) ,
+
+h
+
+[ (D (
+i(x)
+
+) Di(x)
+)⊤ ]
+
+Ψ̂t,x = En rp rp Kh(Di(x))1(Di(x) ∈ It) ,
+h h
+
+and the misspecification bias is
+
+Bt(x) = θ∗t,x(0)− θt,x(0).
+
+Finally, we define the following for quantities for future analysis: for t ∈ {0, 1}, x1,x2 ∈ B,
+
+[ ( x )) (
+Υ̂t,x = hd
+
+D D (
+E i( 1 i x2)
+
+)⊤
+K
+
+1,x2 n rp rp h(Di(x1))Kh(Di(x2))
+h h ]
+
+[ ( (Yi − θ̂t,x (D (x )(Y
+1 i 1)) i − θ̂t,x (D ( (D (
+
+2 i x2)))1It i x1)) ,
+
+Di(x
+) (
+
+1) D )⊤
+i(x2)
+
+Υ d
+t,x1,x = h E r
+
+2 p rp Kh(Di(x1))Kh(Di(x2))
+h h
+(Yi − θ∗t,x (Di(x1)))(Yi − θ∗t,x (D (
+
+1 2 i x2))),
+
+1 −1 −1
+Ξ̂x1,x = Ξ̂
+
+2 0,x Ξ̂
+1,x +
+
+2 1,x , Ξ̂ ⊤
+1,x = e
+
+2 t,x1,x 1 Ψ̂2 nhd t,x Υ̂ Ψ̂
+1 t,x1,x2 t,x e
+
+2 1
+
+and
+
+1
+Ξ −
+x1,x2 = Ξ0,x1,x2 + Ξ1,x1,x2 . Ξt,x1,x2 = e⊤Ψ−1 Υt, ,x Ψ 1
+
+nhd 1 t,x1 x1 2 t,x e .
+2 1
+
+In particular, Ξ̂x = Ξ̂x,x, Ξx = Ξx,x, B(x) = B1(x)−B0(x), etc.
+
+SA-1.1 Notation and Definitions
+
+For textbook references on empirical process, see van der Vaart and Wellner [1996], Dudley [2014], and Giné
+
+and Nickl [2016]. For textbook reference on geometric measure theory, see Simon et al. [1984], Federer [2014],
+
+and Folland [2002]. ∑
+(i) Multi-index Notations. For a multi-index u = (u1, . . . , ud) ∈ Nd, denote |u| d
+
+= i=1 ud, u! = Πd
+i=1ud.
+
+Denote rp(u∑) = (1, u1, . . . , ud, u
+2
+1, . . . , u
+
+2
+d, . . . , u
+
+p
+1, . . . , u
+
+p
+d), that is, all monomials uα1
+
+1 · · ·uαd
+d such that
+
+αi ∈ N d
+and i=1 αi ≤ p. Define e1+ν to be the pd = (d+p)!
+
+d!p! -dimensional vector such that e⊤1+νrp(u) =
+
+uν for all u ∈ Rd. ∑
+(ii) Norms. For a vector v ∈ Rk, ∥v∥ k
+
+= ( i=1 v
+2
+i )
+
+1/2, ∥v∥∞ = max1≤i≤k |vi|. For a matrix A ∈ Rm×n,
+
+∥A∥p = sup∥x∥p=1 ∥Ax∥p, p ∈ N ∪ {∞}, and λmin(A) denotes its minimum eigenvalue. For a function
+
+f on a metric spa∫ce (S, d), ∥f∥∞ = supx∈X |f∫(x)|. For a probability measure Q on (S,S ) and p ≥ 1,
+define ∥f∥Q,p = ( |f |pdQ)1/p, and Q(f) = fdQ. For a set E ⊆ Rd, denote by m(E) the Lebesgue
+
+S
+
+measure of E.
+
+4
+
+
+
+(iii) Empirical Process∑ ∑
+. We use standard empirical process notations: En[g(vi)] = 1 n
+
+n i=1 g(vi) and
+
+Gn[g(vi)] = √1 n
+(g v ) E g v )
+
+n i=1 ( i − [ ( i ]). Let (S, d) be a semi-metric space. The covering num-
+
+ber N(S, d, ε) is the minimal number of balls Bs(ε) = {t : d(t, s) < ε} needed to cover S. A P-
+Brownian bridge is a mean-zero Gaussian random function Wn(f), f ∈ L2(X,P) with the covariance
+E[WP(f)WP(g)] = P(fg) − P(f)P(g), for f, g ∈ L2(X,P). A class F ⊆ L2(X,P) is P-pregaussian if
+there is a version of P-Brownian bridge WP such that WP ∈ ∫C(F; ρP∫) almost surely, where ρP is the
+semi-metric on L2(X,P) is defined by ρP(f, g) = (∥f−g∥2P,2−( f dP− g dP)2)1/2, for f, g ∈ L2(X,P).
+
+(iv) Geometric Measure Theory. For a set E ⊆ X, the De Giorgi perimeter of E related to X is L(E) =
+
+TV{1E},X. For d ∈ N and 0 ≤ m ≤ d, the m-dimensional Hausdorff (outer) measure is given by
+Hm(A) = limδ↓0 H
+
+m
+δ (A), A ⊆ Rd, where for each δ >∑0, Hm
+
+δ (A) is defined by taking Hm
+δ (∅) = 0, and
+
+for any non-empty A ⊆ Rd, Hm
+δ (A) = πm/2 ∞
+
+Γ(m/2+1) inf j=1(diam(Cj)/2)
+m, and the infimum is taken
+
+over all countable collections C1, C2, · · · of subsets of Rd such that diam(Cj) < δ and A ⊆ ∪∞
+j=1Cj .
+
+Integration against Hm is defined via Carathéodory’s Theorem following the classical measure-theoretic
+literature. The Hausdorff dimension dimH(A) of A is defined by dimH(A) = inf{t ≥ 0 : Ht(A) = 0}.
+A set A ⊆ Rd is said to be k-rectifiable if A is of Hausdorff dimension k, and there exist a countable
+collection {fi} of continuously differentiable maps fi : Rk → Rd such that Hk(E \ ∪∞
+
+i=0fi(Rk)) =
+0. B is a rectifiable curve if there exists a Lipschitz continuous function γ : [0, 1] → R such that
+B = γ([0, 1]). We define the curve length function of B to be L(B∑) = supπ∈Π s(π, γ), where Π =
+{(t0, t1, . . . , tN ) : N ∈ N, 0 ≤ t0 < t1 < . . . ≤ N
+
+tN ≤ 1} and s(π, γ) = i=0 ∥γ(ti)− γ(ti+1)∥2 for π =
+(t0, t1, . . . , tN ).
+
+(v) Bounds and Asymptotics. For reals sequences |an| = o(|bn|) if lim sup an
+b = 0, |an| ≲ |bn| if there exists
+n
+
+some constant C and N > 0 such that n > N implies |an| ≤ C|bn|. For sequences of random variables
+an = obP (bn) if plim
+
+an
+n→∞ b = 0, |an| ≲P |bn| if lim supM→∞ lim supn→∞ P[|an | ≥M ] = 0.
+
+n bn
+
+(vi) Distributions and Statistical Distances. For µ ∈ Rk andΣ a k×k positive definite matrix, Normal(µ,Σ)
+denotes the Gaussian distribution with mean µ and covarianceΣ. For−∞ < a < b <∞, Uniform([a, b])
+denotes the uniform distribution on [a, b]. Bernoulli(p) denotes the Bernoulli distribution with success
+probability p. Φ(·) denotes the standard Gaussian cumulative distribution function. For two distribu-
+tions P and Q, dKL(P,Q) denotes the KL-distance between P and Q, and dχ2(P,Q) denotes the χ2
+
+distance between P and Q.
+
+SA-1.2 Mapping between Main Paper and Supplement
+
+The results in the main paper are special cases of the results in this supplemental appendix as follows.
+
+• Theorem 1 in the paper corresponds to Theorem SA-1 with d = 2.
+
+• Theorem 2 in the paper is proven in Section SA-6.14.
+
+• Theorem 3 in the paper is proven in Section SA-6.15.
+
+• Theorem 4(i) in the paper corresponds in Theorem SA-2 with d = 2.
+
+• Theorem 4(ii) in the paper corresponds in Theorem SA-3 with d = 2.
+
+• Theorem 5(i) in the paper corresponds in Theorem SA-4 with d = 2.
+
+5
+
+
+
+• Theorem 5(ii) in the paper corresponds in Theorem SA-7 with d = 2.
+
+• Theorem 6 in the paper is proven in Section SA-6.16.
+
+SA-2 Preliminary Lemmas
+
+Recall that t ∈ {0, 1}.
+The following lemma gives a sufficient condition for Assumption SA–2.
+
+Lemma SA-1 (Gram Invertibility). Suppose the following conditions hold:
+
+1. Assumptions SA–1(i)(ii) and Assumption SA–2 (iii) hold.
+
+2. d(·, ·) is the Euclidean distance.
+
+3. There exists a set U ⊆∫ ∫
+Rd, such that K(∥u∥) ≥ κ > 0 for all u ∈ U , λmin( rp(∥z∥)rp(∥z∥)⊤dz) > 0,
+
+U
+
+and lim infh↓0 infx∈B K(∥u∥)1(x+ hu ∈ At)du ≳ 1.
+U
+
+Then Assumption SA–2 (iv) holds.
+
+Lemma SA-2 (Gram). Suppose Assumptions SA–1(i)(ii) and SA–2 hold. If nhd
+
+log(1/h) → ∞, then
+
+∥ og(1/h) ∥ ∥
+sup ∥ ∥ √
+
+l
+Ψ̂ ∥
+
+t,x −Ψt,x ≲P , 1 ≲P inf ∥Ψ̂ ∥ ∥∥ ∥
+t,x ≤ sup Ψ̂ ∥
+
+t,x ≲P 1,
+x∈B∥ ∥ nhd x∈B x∈B
+
+−1
+sup ∥Ψ̂ −1∥ √
+
+log(1/h)
+t,x −Ψt,x ≲P .
+
+x∈B nhd
+
+Lemma SA-3 (Stochastic Linear Approximation). Suppose Assumptions SA–1(i)(ii)(iii)(v) and SA–2 hold.
+If nhd
+
+log(1/h) → ∞, then
+
+∥ ∥ log(1/h) log(1/h)
+sup ∥O ∥ √
+
+t,x ≲P +
+
+∣ x∈B ∣ nhd 1+v ,
+n 2+v hd
+
+log(1/h)
+sup ∣e⊤ −1 ∣ √
+
+log(1/h)
+1 Ψt,xOt,x ≲P (+√ ,
+
+∣ x∈B nhd 1+v
+n 2+v hd )
+
+−1 ∣ √
+log(1/h) log(1/h) log(1/h)
+
+sup ∣e⊤1 (Ψ̂t,x −Ψ−1
+t,x)O ∣
+
+t,x ≲P + .
+x∈B nhd nhd 1+v
+
+n 2+v hd
+
+Lemma SA-4 (Covariance). Suppose Assumptions SA–1 and SA–2 hold. If nhd
+
+log(1/h) → ∞, then
+
+∥ ∥ og(1/h)
+sup ∥Υ̂ ∥ √
+
+log(1/h) l
+t,x1,x2 −Υt,x1,x2 ≲P + v ,
+
+x ∣ ∣ nhd
+1,x2∈B n 2+v hd
+
+log(1/h)
+sup nhd∣Ξ̂ ∣ √
+
+log(1/h)
+t,x ≲
+
+1,x − Ξ
+2 t,x1,x2 P + v .
+
+x nhd
+1,x2∈B n 2+v hd
+
+v
+2+v
+
+If, in addition, n hd
+
+log(1/h) → ∞, then
+
+inf λmin(Υ̂t,x,x) ≳P 1, inf Ξ̂t,x,x ≳P (nhd)−1,
+x∈B x∈B
+
+6
+
+
+
+and ∣∣ ∣ √
+x ∣ log(1/h) log(1/h)
+
+sup ∣∣√ Ξ̂t, 1,x2 − √ Ξt,x1,x2 ∣ ≲P + v .
+x1,x2∈B Ξ̂ Ξt,x ,x Ξ ∣
+
+t,x nhd n 2+v hd
+t,x1,x Ξ̂
+
+2 t,x 2,x2
+2,x
+
+2 2
+2
+
+Lemma SA-5 (Uniform Bias: Minimal Guarantee). Suppose Assumptions SA–1 (i)(ii)(iii) and SA–2 hold.
+If h→ 0, then
+
+sup |B(x)| ≲ h.
+x∈B
+
+SA-3 Identification and Point Estimation
+
+Theorem SA-1 (Distance-Based Identification). Suppose Assumptions SA–1(i)-(iii) and SA–2 hold. Then,
+τ(x) = limr↓0 θ1,x(r)− limr↑0 θ0,x(r) for all x ∈ B.
+
+Theorem SA-2 (Pointwise Convergence Rate). Suppose Assumptions SA–1 and SA–2 hold. If nhd → ∞,
+then
+
+∣∣ ∣ ∣
+ϑ̂(x)− τ(x)∣ √ 1 1
+
+≲P + ∣ ∣
+1+v + B(x)∣.
+
+nhd n 2+v hd
+
+Theorem SA-3 (Uniform Convergence Rate). Suppose Assumptions SA–1 and SA–2 hold. If nhd
+
+log(1/h) → ∞,
+then
+
+∣ ∣ √
+log(1/h) log(1/h) ∣ ∣
+
+sup ∣ϑ̂(x)− τ(x)∣ ≲P + v + sup ∣B(x)∣.
+x∈B nhd 1+
+
+n 2+v hd x∈B
+
+SA-4 Distributional Approximation and Inference
+
+Let W = ((X⊤
+1 , Y1), · · · , (X⊤
+
+n , Yn)), and recall that t ∈ {0, 1}. The feasible t-statistics is
+
+ϑ̂(x
+T̂(x) √)− τ(x)
+
+= , x ∈ B.
+Ξ̂x,x
+
+The associated 100(1− α)% confidence[ interval es√timator is √ ]
+Îα(x) = ϑ̂(x)− qα Ξ̂x,x , ϑ̂(x) + qα Ξ̂x,x ,
+
+where qα denotes an appropriate quantile depending on the desired confidence level α ∈ (0, 1), and coverage
+
+objective (pointwise vs. uniform over B). The following theorem establishes pointwise asymptotic normality
+and validity of confidence intervals. Let Φ(·) be the cumulative distribution function of a standard univariate
+
+Gaussian random variable.
+
+v
+Theorem SA-4 (Confidence Intervals). Suppose Assumptions SA–1 and SA–2 hold. If n 2+v hd → ∞ and
+
+7
+
+
+
+√
+nhd|B(x)| → 0, then ∣∣ ) ∣
+
+sup ∣ (P ≤ ∣
+T̂(x) u − Φ(u)∣ = o(1), x ∈ B,
+
+u∈R
+
+and
+
+( )
+P τ(x) ∈ Îα(x) = 1− α+ o(1), x ∈ B,
+
+provided that qα = inf{c > 0 : P(|Ẑ| ≥ c|W) ≤ α} with Ẑ|W ∼ Normal(0, Ξ̂x,x).
+
+To conduct uniform inference, and in particular construct confidence bands, we rely on a new strong
+
+approximation result established in Section SA-5. First, we approximate (uniformly over x ∈ B) the feasible
+(ν)
+
+statistic T̂ by the following linear stat(istic (which is a sum of indep)endent random variables):
+
+Tdis(x) = Ξ−1/2 e⊤ −1 −1
+x,x 1 Ψ1,xO1,x − e⊤1 Ψ0,xO0,x , x ∈ B.
+
+Theorem SA-5 (Stochastic Linearization). Suppose Assumptions SA–1 and SA–2 hold. If nhd
+
+log(1/h) → ∞,
+then
+
+∣ √ (√ )
+log(1/h) log(1/h) √
+
+sup ∣ ∣
+T̂(x)− T(x)∣ ≲P log(1/h) + v + nhd sup |B(x)|.
+
+x∈ d
+B nh n 2+v hd x∈B
+
+The pointwise (in B) analogue of this result removes the log(1/h) penalty. See the proof of Theorem
+SA-4 for more details. To establish a Gaussian strong approximation for T(x), define the class of functions
+G = {gx : x ∈ B} and M = {mx : x ∈ B}, where
+
+gx(u) = 1(u ∈ A1)K1(u;x)− 1(u ∈ A0)K0(u;x),
+
+mx(u) = −1(u ∈ A ∗
+1)K1(u;x)θ1,x(d(u,x)) + 1(u ∈ A0)K0(u;x)θ
+
+∗
+0,x(d(u,x)), (SA-2)
+
+with (d(u,x))
+Kt(u; √ 1
+
+x) = e⊤ −1
+1 Ψt,xrp Kh(d(u,x)),
+
+nΞx,x h
+
+for all u ∈ X, x ∈ B, and t ∈ {0, 1}. In addition, let R be the class of functions containing the singleton
+identity function Id : R 7→ R, Id(x) = x. Then, T(x) can be represented as
+
+∑n [ [ ]]
+T(x) = √1 gx(Xi) Id(yi) +mx(Xi)− E gx(Xi) Id(yi) +mx(Xi) .
+
+n
+i=1
+
+Following Cattaneo and Yu [2025], we define the multiplicative separable empirical processes by
+
+1 ∑n [ ]
+Mn(g, r) = √ g(xi)r(yi)− E[g(xi)r(yi)] , g ∈ G, r ∈ R,
+
+n
+i=1
+
+which implies that
+
+T(x) =Mn(gx, Id) +Mn(mx, 1), x ∈ B.
+
+8
+
+
+
+Leveraging ideas in Cattaneo and Yu [2025], Theorem SA-8 gives a new Gaussian strong approximation
+that can be applied to T(x). This new theorem allows for polynomial moment bound on the conditional
+distribution of Yi|Xi.
+
+Theorem SA-6 (Gaussian Strong Approximation: T). Suppose Assumptions SA–1 and SA–2 hold, and
+that there exists a constant C > 0 such that for t ∈ {0, 1} and for any x ∈ B, the De Giorgi perimeter
+of the set Et,x = {y ∈ At : (y − x)/h ∈ Supp(K)} satisfies L(E 1 h
+
+t,x) ≤ Chd− . If lim inf log
+n→∞ logn > −∞
+
+and nhd → ∞ as n → ∞, then (on a possibly enlarged probability space) there exists a mean-zero Gaussian
+process Z indexed by B with almost surely continuous sample path such that
+
+[ ∣ ∣] ) 1 v (
+3 1
+
+E 2d+2 v+2 1 ) 1
+2
+
+sup ∣ (
+T(x)− z(x)∣ ≲ (log(n)) 2 + log(n) v ,
+
+x∈B nhd n 2+v hd
+
+where ≲ is up to a universal constant, and Z(ν) has the same covariance structure as T; i.e., Cov[T(x1),T(x2)] =
+
+Cov[Z(x1), Z(x2)] for all x1,x2 ∈ B.
+
+Theorem SA-6 can be used to construct confidence bands for (τ(x) : x ∈ B). Let (Ẑ(x) : x ∈ B) be a
+(conditionally on W) mean-zero Gaussian process with feasible (conditional) covariance function
+
+[ ∣
+C ∣
+ov Ẑ(x1), Ẑ(x2)∣ ] √
+
+√ Ξ̂x
+W = √1,x2
+
+, x1,x2 ∈ B.
+Ξ̂x1,x1 Ξ̂x2,x2
+
+Theorem SA-7 (Confidence Bands). Sup√pose the assumptions and conditions in Theorem SA-6 hold. If
+v
+
+lim inf log h
+n→∞ logn > −∞ 2+v
+
+, n hd
+
+(log∣n)3
+→ ∞ and nhd supx∈B |B(x)| → 0, then
+
+∣ ∣
+sup ∣ ( ∣ ∣ ) (
+
+P sup ∣T̂(x)∣ ≤ u − P sup ∣ ∣ )∣∣
+Ẑ(x)∣ ∣
+
+≤ ∣
+u∣W ∣ = oP(1)
+
+u∈R x∈B x∈B
+
+and [ ]
+P τ (ν)
+
+(ν)
+(x) ∈ Îα (x), for all x ∈ B = 1− α+ o(1),
+
+{ ( ∣
+provided that q ∣ ∣ ∣
+
+) ∣ ) }
+α = inf c > 0 : P supx∈B Ẑ(ν (x)∣ ≥ c W ≤ α .
+
+SA-5 Gaussian Strong Approximation
+
+We present a Gaussian strong approximation theorem, which is the key technical tool behind Theorem SA-6.
+The theorem builds on and generalizes the results in Cattaneo and Yu [2025]. Consider the residual-based
+
+empirical process given by
+
+∑n [ ]
+Mn[g, r] = √1 g(xi)r(yi)− E[g(xi)r(yi)] , g ∈ G, r ∈ R.
+
+n
+i=1
+
+where G and R are classes of functions satisfying certain regularity conditions.
+
+9
+
+
+
+SA-5.1 Definitions for Function Spaces
+
+Let F be a class of measurable functions from a probability space (Rq,B(Rq),P) to R. We introduce several
+
+definitions that capture properties of F.
+
+(i) F is pointwise measurable if it contains a countable subset G such that for any f ∈ F, there exists a
+sequence (gm : m ≥ 1) ⊆ G such that limm→∞ gm(u) = f(u) for all u ∈ Rq.
+
+(ii) Let Supp(F) = ∪f∈F Supp(f). A probability measure QF on (Rq,B(Rq)) is a surrogate measure for
+
+P with respect to F if
+
+(i) QF agrees with P on Supp(P) ∩ Supp(F).
+
+(ii) QF(Supp(F) \ Supp(P)) = 0.
+
+Let QF = Supp(QF).
+
+(iii) For q = 1 and an interval I ⊆ R, the pointwise total variation of F over I is
+
+P∑−1
+
+pTVF,I = sup sup sup |f(ai+1)− f(ai)|,
+f∈F P≥1PP∈I i=1
+
+where PP = {(a1, . . . , aP ) : a1 ≤ · · · ≤ aP } denotes the collection of all partitions of I.
+
+(iv) For a non-empty C ⊆ Rq, the total variation of F∫ over C is
+
+TVF,C = inf sup sup f(u) div(ϕ)(u)du/∥∥ϕ∥2∥∞,
+U∈O(C) f∈F ϕ∈Dq(U) Rq
+
+where O(C) denotes the collection of all open sets that contains C, and Dq(U) denotes the space of
+infinitely differentiable functions from Rq to Rq with compact support contained in U.
+
+(v) For a non-empty C ⊆ Rq, the local total variation constant of F over C, is a positive number KF,C
+
+such that for any cube D ⊆ Rq with edges of length ℓ parallel to the coordinate axises,
+
+TVF,D∩C ≤ KF,Cℓ
+d−1.
+
+(vi) For a non-empty C ⊆ Rq, the envelopes of F over C are
+
+MF,C = supMF,C(u), MF,C(u) = sup |f(u)|, u ∈ C.
+u∈C f∈F
+
+(vii) For a non-empty C ⊆ Rq, the Lipschitz constant of F over C is
+
+|f(u1)− f(u2)|
+LF,C = sup sup .
+
+f∈F u1,u2∈C ∥u1 − u2∥∞
+
+(viii) For a non-empty C ⊆ Rq, the L1 bound of F over C∫ is
+EF,C = sup |f |dP.
+
+f∈F C
+
+10
+
+
+
+(ix) For a non-empty C ⊆ Rq, the uniform covering number of F with envelope MF,C over C is
+
+NF,C(δ,MF,C) = supN(F, ∥·∥µ,2 , δ ∥MF,C∥µ,2), δ ∈ (0,∞),
+µ
+
+where the supremum is taken over all finite discrete measures on (C,B(C)). We assume thatMF,C(u)
+
+is finite for every u ∈ C.
+
+(x) For a non-empty C ⊆ Rq, the uniform entropy integral of F with envelope MF,C over C is
+
+∫ δ√
+JC(δ,F,MF,C) = 1 + log NF,C(ε,MF,C)dε,
+
+0
+
+where it is assumed that MF,C(u) is finite for every u ∈ C.
+
+(xi) For a non-empty C ⊆ Rq, F is a VC-type class with envelope MF,C over C if (i) MF,C is measurable
+
+and MF,C(u) is finite for every u ∈ C, and (ii) there exist cF,C > 0 and dF,C > 0 such that
+
+NF,C(ε,MF,C) ≤ cF,Cε
+−dF,C , ε ∈ (0, 1).
+
+If a surrogate measure QF for P with respect to F has been assumed, and it is clear from the context, we
+drop the dependence on C = QF for all quantities in the previous definitions. That is, to save notation, we
+set TVF = TVF,Q , KF = KF,Q , M M u =
+
+F F = F,Q , M ( M (
+F F ) F,Q u), LF = LF,Q , and so on, whenever there is
+
+F F F
+
+no confusion.
+
+SA-5.2 Multiplicative-Separable Empirical Process
+
+The following theorem generalizes Cattaneo and Yu [2025, Theorem SA.1] by requiring only bounded poly-
+nomial moments for yi conditional on xi.
+
+Theorem SA-8 (Strong Approximation for (Mn(g, r) +Mn(h, s) : g ∈ G, r ∈ R, h ∈ H , s ∈ S)). Suppose
+(zi = (xi, yi) : 1 ≤ i ≤ n) are i.i.d. random vectors taking values in (Rd+1,B(Rd+1)) with common law
+PZ , where xi has distribution PX supported on X ⊆ Rd, yi has distribution PY supported on Y ⊆ R,
+supx∈X E[|yi|2+v|xi = x] ≤ 2 for some v > 0, and the following conditions hold.
+
+(i) G and H are real-valued pointwise measurable classes of functions on (Rd,B(Rd),PX).
+
+(ii) There exists a surrogate measure QG∪H for PX with respect to G ∪ H such that QG∪H = m ◦ ϕG∪H ,
+where the normalizing transformation ϕG∪H : QG∪H 7→ [0, 1]d is a diffeomorphism.
+
+(iii) G is a VC-type class with envelope MG,QG∪H over QG∪H with cG,QG∪H ≥ e and dG,QG∪H ≥ 1. H is a
+
+VC-type class with envelope MH ,QG∪H over QG∪H with cH ,QG∪H ≥ e and dH ,QG∪H ≥ 1.
+
+(iv) R and S are real-valued pointwise measurable classes of functions on (R,B(R),PY ).
+
+(v) R is a VC-type class with envelope MR,Y over Y with cR,Y ≥ e and dR,Y ≥ 1, where MR,Y(y) +
+pTVR,(−|y|,|y|) ≤ v(1 + |y|) for all y ∈ Y, for some v > 0. S is a VC-type class with envelope MS,Y
+
+over Y with cS,Y ≥ e and dS,Y ≥ 1, where MS,Y(y) + pTVS,(−|y|,|y|) ≤ v(1 + |y|) for all y ∈ Y, for
+
+some v > 0.
+
+11
+
+
+
+(vi) There exists a constant k such that | log2 E|+| log2 TV|+| log2 M| ≤ k log2(n), where E = max{EG,QG∪H , EH ,QG∪H },
+TV = max{TVG,Q V {M
+
+G∪H , T H ,Q and M = max
+G∪H } G,Q , M }.
+
+G∪H H ,QG∪H
+
+Consider the empirical process
+
+An(g, h, r, s) =Mn(g, r) +Mn(h, s), g ∈ G, r ∈ R, h ∈ H , s ∈ S.
+
+Then, on a possibly enlarged probability space, there exists a sequence of mean-zero Gaussian processes
+
+(ZA
+n (g, h, r, s) : g ∈ G, h ∈ H , r ∈ R, s ∈ S) with almost sure continuous trajectories such that:
+
+• E[An(g1, h1, r1, s1)An(g2, h2, r2, s2)] = E[ZA
+n (g1, h1, r1, s1)Z
+
+A
+n (g2, h2, r2, s2)] holds for all (g1, h1, r1, s1),
+
+(g[2∥, h2, r2, s2) ∈ G × H ×R×S, and ) 2
+2 v/2 √
+
+1
+• E ∥ ∥ ] v
+
+3 √ (
+A ZA∥ +2
+
+n − 2
+n × × ≤ C ((d log(cn)) r v log(cn)Mn− ME v+2
+
+2 ),
+G H R× v
+
+S n ( ME) v+2+d log(cn)Mn− 2+v +d
+rn
+
+where C is a universal constant, c = cG,QG∪H +cH ,QG∪H +cR,Y+cS,Y+k, d = dG,Q d
+G∪H H ,QG∪H dR,YdS,Yk,
+
+{ d d
+
+(cd +1 /(2d+2) d d
+(c 2 c 2 MTV }
+
+2 EL 2 )1/(d+2)
+r 1M
+
+d TVdE)1
+n = min , 1 2 ,
+
+n1/(2d+2) n1/(d+2)
+
+d∏−1
+1
+
+c1 = d sup σj(∇ϕG∪H (x)), c2 = sup .
+x∈Q σ ∇ϕ
+
+G∪H j=1 x∈QG∪H d( G∪H (x))
+
+SA-6 Proofs
+
+SA-6.1 Proof of Lemma SA-1
+
+Assumption SA–1 (ii) implies
+
+[ (∥X ) (
+i − x∥ ∥Xi − x∥)⊤ ]
+
+Ψt,x = ∫E rp ( rp Kh(∥Xi − x∥)1(Xi ∈ At)
+h h
+
+∥u− x∥) (∥u− x∥)⊤
+= rp∫ ( rp Kh(∥u− x∥)f(u)du
+
+A h h
+t
+
+∥u− x∥) (∥u− x∥)⊤
+= f(x) rp rp Kh(u− x)du+ o(1),
+
+A h h
+t∫
+
+where in the last line we have used (∥u−x∥ O(1) for any multi-index v from standard
+At h )vKh(∥u−x∥)du =
+
+change of variable argument.
+
+I. Polynomial Representation of Minimum Eigenvalue
+
+For simplicity, call ∫ (∥u− x∥) (∥u− x∥)⊤
+St,x = lim St,x(h), St,x(h) = rp rp Kh(∥u− x∥)du.
+
+h→0 A h h
+t
+
+A change of variable gives ∫
+St,x(h) = rp(∥z∥)rp(∥z∥)⊤K(∥z∥)1(x+ hz ∈ At)dz.
+
+12
+
+
+
+Let a ∈ Rpp , where pp = (d+p)!
+d!p! . Then the eq∫uivalent representation of minimum eigenvalue gives
+
+λmin(St,x(h)) = min ∫(a⊤rp(∥z∥))2K(∥z∥)1(x+ hz ∈ At)dz
+∥a∥=1
+
+≥ κ min (a⊤rp(∥z∥))21(x+ hz ∈ At)dz, (SA-3)
+∥a∥=1 U
+
+where in the last line we have used K(u) ≥ κ for all u ∈ U .
+
+II. Mass Retaining Ratio in Treatment/Control Region
+
+Denote Eh(x, t) = {z ∈ U : x+hz ∈ At}. A∫ssumption SA–2 (iii) implies there is some upper bound Λ > 0
+of K(·). Hence for c0 = 1/2 lim infh↓0 infx∈B ∫ K(∥u∥)1(x+ hu ∈ A )du, we av
+
+U t h e
+
+Λm(Eh(x, t)) ≥ K(∥u∥)1(x+ hu ∈ At) ≥ c0
+U
+
+for small enough h, which implies
+
+c
+m(Eh(x, t)) ≥ 0
+
+αm(U), α = . (SA-4)
+Λm(U)
+
+III. L2 Integra∫l of Polynomials in Full v.s. Treatment/Control Regions
+
+Consider S = {f ∈ Pp+1 : f(∥u∥)2du = 1}, whereP
+U p+1 is the collection of all∑(p+1)-order polynomials.
+
+Let (ϕj , 1 ≤ j ≤ p+1) be a set of orthonormal basis of (Pp+1, ∥·∥ p+1
+L ). Then T (a) = j=1 ajϕj is an isometry.
+
+2
+
+Since T (S) = {a ∈ Rp+1 : ∥a∥ = 1} is compact, S is also compact in (Pp+1, ∥·∥L ). Since P
+2 p+1 is (p + 1)-
+
+dimensional, equivalent of norms implies that S is also compact in (Pp+1, ∥·∥L∞). Now consider
+
+Φq(ε) = m({u ∈ U : |q(u)| < ε}), q ∈ S, ε > 0,
+
+and { }
+ψ(q) = sup ε > 0 : Φq(ε) ≤
+
+α
+m(U) .
+
+∫ 2
+
+Since q2 = 1 and q is polynomial on norm, limε↓0 Φq(ε) = 0 and Φq(∥q∥∞) = m(U). Continuity and
+U
+
+Lipchitzness of q ∈ S imply ψ(q) > 0 for all q ∈ S.
+Next, we want to show ψ is lower-semicontinous function on (Pp+1, ∥·∥L∞). Suppose qn → q uniformly on
+
+U . For every ε0 ∈ (0, ψ(q)), there exists η > 0 such that Φq(ε0) ≤ α
+2m(U)−η. Continuity of polynomials and
+
+the fact that level sets of polynomials have zero Lebesgue measure imply 1{|qn|<ε0}(·) → 1{|q|<ε0}(·) almost
+surely. By Dominated Convergence Theorem, Φq (ε0) → Φq(ε0). Hence for large enough n, Φ
+
+n q (ε0) ≤
+n
+
+α
+2m(U), which implies ε0 ≤ ψ(qn). This implies lim infn→∞ ψ(qn) ≥ ε0. Since ε0 is arbitrary in (0, ψ(q)), we
+have lim infn→∞ ψ(qn) ≥ ψ(q).
+
+Compactness of S and lower-semicontinuity of ψ implies ψ attains its minimum on S. Since ψ(q) > 0 for
+
+13
+
+
+
+all q ∈ S, we know ε∗ = infq∈S∫ψ(q) > 0. Then for every q ∈ S,
+
+( )
+q2 ≥ ε2∗ m( Eh(x, t) \ {|q| ≤ ε∗}
+
+Eh(x,t) )
+≥ ε2∗ m(Eh(x, t))−m({|q| ≤ ε∗})
+
+≥ α
+ε2∗ m(U).
+
+2
+
+Scaling q from S gives ∫ ∫
+q2 ≥ α
+
+ε2∗ q2, q ∈ Pp+1. (SA-5)
+Eh(x,t) 2 U
+
+IV. Lower Bound of Minimum Eigenvalue
+
+Equations (SA-3), (SA-4) and (SA-5) together give for ∫small enough h,
+
+inf λmin(St,x(h)) ≥ κ inf min ∫ (a⊤rp(∥z∥))2dz,
+x∈B x∈B ∥a∥=1 Eh(x,t)
+
+≥ α
+κε2 min ∫ (a⊤ ))2∗ ( rp(∥z∥ dz
+
+2 ∥a∥=1 U )
+≥ κε2
+
+α
+∗ λmin rp(∥z∥)rp(∥z∥)⊤dz ,
+2 U
+
+which implies lim infh→0 infx∈B λmin(St,x(h)) > 0.
+
+SA-6.2 Proof of Lemma SA-2
+
+Since Ψ̂t,x is a finite dimensional matrix, it suffices to show the stated rate of convergence for each entry.
+For 0 ≤ v ≤ p, define G = {gn(·,x)1(· ∈ At) : x ∈ X} with
+
+(d(ξ,x))v 1 (d(ξ,x))
+gn(ξ,x) = K , ξ,x ∈ X.
+
+h hd h
+
+We will show G is a VC-type of class.
+
+Constant Envelope Function. We assume K is continuous and has compact support, and hence there exists
+a constant C1 such that supx∈X∥gn(·,x)∥∞ ≤ C1h
+
+−d = G.
+
+Diameter of G in L2. For each x ∈ X, gn(·,x) is supported on {ξ : d(ξ,x) ≤ h}. By Assumption SA–1(ii)
+
+and Assumption SA–2(i), supx∈X P (d(Xi,x) ≤ h) ≲ hd. It follows that supx∈X ∥gn(·,x)∥P,2 ≤ C2h
+−d/2 for
+
+some constant C2. We can take C1 large enough so that σ = C2h
+−d/2 ≤ G = C1h
+
+−d.
+√
+
+Ratio. For some constant C3, δ =
+σ
+F = C hd3 .
+
+Covering Numbers. Case 1: K is Lipschitz. Let x,x′ ∈ X. By Assumption SA–2,
+
+∣
+sup ∣ ∣
+
+gn(ξ,x)− gn(ξ,x
+′)∣
+
+ξ∈X [(
+≤ d(ξ,x))v ( (
+
+sup − d(ξ,x′))v] d(ξ,x′))v[ ]
+Kh(d(ξ,x)) + Kh(d(ξ,x))−Kh(d(ξ,x′))
+
+ξ∈X h h h
+
+≲ h−d−1∥x− x′∥∞.
+
+14
+
+
+
+By Lipschitz continuity property of G, for any ε ∈ (0, 1] and for any finitely supported measure Q and metric
+∥·∥Q,2 based on L2(Q),
+
+(i) ( diam(X) )d (diam(X))d
+N({gn(·,x) : x ∈ X}, ∥·∥Q,2 , ε∥G∥Q,2) ≤ N(X, ∥·∥∞, ε∥G∥Q,2h
+
+d+1) ≲ ≲ ,
+ε∥G∥ d+1
+
+Q,2h εh
+
+where inequality (i) uses the fact that ε∥G∥Q,2h
+d+1 ≲ εh ≲ 1. Thus, G forms a VC-type class in
+
+that supQN(G, ∥·∥Q,2 , ε∥G∥Q,2) ≲ (C1/ϵ)
+C2 for all ϵ ∈ (0, 1] with C1 = diam(X)
+
+h and C2 = d. More-
+over, for any discrete measure Q, and for any x,x′ ∈ X, ∥gn(·,x)1(· ∈ At)− gn(·,x′)1(· ∈ At)∥Q,2 ≤
+∥gn(·,x)− gn(·,x′)∥Q,2. Therefore,
+
+supN(G, ∥·∥Q,2 , ε ∥G∥Q,2) ≤ N(G, ∥·∥Q,2 , ε ∥G∥Q,2) ≤ (C1/ε)
+C2 , ε ∈ (0, 1],
+
+Q
+
+where the supremum is taken over all finite discrete measures on X.
+Case 2: k = 1(· ∈ [−1, 1]). Consider
+
+(d(ξ,x))v 1
+mn(ξ,x) = 1(ξ ∈ At), ξ,x ∈ X,
+
+h h
+
+M = {mn(d(·,x) : x ∈ B} and the constant envelope function M = C4h
+−v−1, for some constant C4 only
+
+depending on diameter of X. The same argument as before show(s that for any discr
+
+diam(X) )ete m
+
+d (easure Q,
+
+diam(X))
+we have
+
+d
+N(M, ∥·∥Q,2 , ε ∥M∥Q,2) ≤ N(X, ∥·∥∞, ε ∥M∥Q,2 h
+
+1+v+1) ≲ ≲ .
+ε ∥M∥Q,2 h
+
+1+v+1 εh
+
+The class L = {1((· − x)/h ∈ [−1, 1]d) : x ∈ B} has VC dimension no greater than 2d [van der Vaart and
+Wellner, 1996, Example 2.6.1], and by van der Vaart and Wellner [1996, Theorem 2.6.4],
+
+supN(G, ∥·∥Q,2 , ε ∥G∥Q,2) ≤ N(G, ∥·∥Q,2 , ε ∥G∥Q,2) ≤ (C1/ε)
+C2 , ε ∈ (0, 1],
+
+Q
+
+where the supremum is taken over all finite discrete measures on X.
+
+Maximal Inequality. By Chernozhukov et al. [2014b, Corollary 5.1] for the empirical process on class G,
+
+[ ∣ ∣] σ √ ∥G∥P,2C2 log(C1/δ)E sup ∣En [l(Xi)]− E[l(Xi)]∣ ≲ √ C2 log(C1/δ) +
+l∈G n √ ( n
+
+√ 1 diam(X)) 1 (diam(X))
+≲√ d log + d log
+
+nhd h1+d/2 nhd h1+d/2
+
+log n
+≲ .
+
+√ nhd∥ ∥
+Thus, sup ∥ ∥
+
+x∈X Ψ̂t,x −Ψt,x ≲ logn
+P .
+
+nhd √
+By Weyl’s Theorem, supx∈X |λmin(Ψ̂t,x)− λmin(Ψt,x)| ≤ supx∈X ∥Ψ̂t,x −Ψt,x∥ ≲ logn
+
+P nhd . Therefore, we
+
+can lower bound the minimum eigenvalue by infx∈X λmin(Ψ̂t,x) ≥ infx∈X λmin(Ψt,x)− supx∈X |λmin(Ψ̂t,x)−
+λmin(Ψt,x)| ≳P 1.
+
+15
+
+
+
+−1
+Finally, it follows that supx∈X ∥Ψ̂t,x∥ ≲P 1 and hence
+
+∥ −1 ∥ ∥ ∥∥ ∥
+sup ∥Ψ̂ −Ψ−1∥ ∥Ψ−1∥∥
+
+t,x ≤ sup Ψ ∥∥∥ ∥ √
+−1∥ log n
+
+t,x t,x t,x − Ψ̂t,x Ψ̂t,x ≲P ,
+x∈X x∈X nhd
+
+which completes the proof.
+
+SA-6.3 Proof of Lemma SA-3
+
+Consider the class F = {(z, u) 7→ e⊤ν gx(z)(u− hx(z)) : x ∈ B}, 0 ≤ ν ≤ p, where for z ∈ X,
+
+(d(z,x))
+gx(z) = rp Kh(d(z,x)), hx(z) = γ∗
+
+t (x)
+⊤rp (d(z,x)) .
+
+h
+
+By definition of γ∗
+t (x), [ (D ) ]
+
+i(x)
+γ∗ −1
+t (x) = H Ψ−1
+
+t,xSt,x, St,x = E rp Kh(Di(x))Yi1(Xi ∈ At) . (SA-6)
+h
+
+Assumption SA–1 implies St,x is continuous in x, hence supx∈X ∥St,x∥ ≲ 1. And by Assumption SA–2(ii),
+infx∈X λmin(Ψt,x) ≳ 1. Hence
+
+∥ ∥
+sup ∥Ψ−1 ∥
+
+t,xSt,x ≲ 1. (SA-7)
+x∈B
+
+Now, consider properties of F. Definition of γ∗
+t (x) implies E[f(Xi, Yi)] = 0 for all f ∈ F. Since K is
+
+compactly supported, there exists C1, C2 > 0 such that F (z, u) = C d
+1h
+
+− (|u| + C2) is an envelope function
+for F. Denote M = max1≤i≤n F (Xi, Yi), then[ ]1/2 [ ]1/(2+v)
+
+E[M2]1/2 ≲ h−dE[ max |Yi|2 + 1 ≲ h−dE max |Y 2+v
+i|
+
+∑1≤i≤n 1≤i≤n
+
+n ∑ ]1/(2+v)
+
+≲ h−d E[|εi + 1(x ∈ At)µ
+v
+
+t(x)|2+ ] ≲ h−dn1/(2+v),
+i=1 t∈{0,1} ∑
+
+where we have used X is compact and µt is continuous, hence supx∈X | t∈{0,1} 1(x ∈ At)µt(x)| ≲ 1. Denote
+
+σ = supf∈F E[f(X 2 1/2
+i, Yi) ] . Then,
+
+σ2 ≲ sup E[∥e⊤ν g 2
+x∥2∞(|Yi|+ ∥e⊤ν hx∥∞) 1(Kh(Di(x)) ̸= 0)] ≲ h−d.
+
+x∈B
+
+To check for the co(vering n)umber of F, notice that compare to the proof of Lemma SA-2, we have one more
+term e⊤ x) ⊤
+
+ν gxhx = r d(z,
+p h Kh(d(z,x))γ∗
+
+t (x) rp (d(z,x)). All terms except for γ∗
+t (x) can be handled as in
+
+the proof of Lemma SA-2. Recall Equation (SA-6), and consider lt,x = e⊤v [R(d(·,x)/h)Kh(d(·,x))µt1(· ∈
+At) and Lt = {lt,x : x ∈ B}, v is a any multi-index. Then, for any x1,x2 ∈ B,
+
+|St,x − S
+1 t,x | ≤ ∥l
+
+2 t,x − l
+1 t,x ∥ ,
+
+2 PX ,2
+
+16
+
+
+
+and hence
+
+N({e⊤v St,x : x ∈ B}, | · |, εh−d) ≤ N(Lt, ∥·∥P h−d) ≤ supN(Lt, ∥·∥
+X ,2 , ε Q,2 , εh
+
+−d),
+Q
+
+Same argument as paragraph Covering Numbers in the(proof of L)emma SA-2 then shows
+
+d
+
+supN({gx : x ∈ B}, ∥·∥ iam(X)
+Q,2 , εC
+
+d
+1h
+
+− ) ≤ d
+
+( hε ), 0 < ε ≤ 1,
+Q
+
+d
+am( )
+
+supN({gxhx : x ∈ B}, ∥·∥ di
+Q,2 , εC
+
+d
+1h
+
+− ) ≤ X
+, 0 < ε ≤ 1,
+
+Q hε
+
+where sup is taken over all discrete measures on X. Product {gx : x ∈ B} with the singleton of identity
+
+function {u 7→ u, u ∈ R}, and adding {gxhx : x ∈ B},
+( )d
+
+diam(X)
+supN(F, ∥·∥Q,2 , ε ∥F∥Q,2) ≤
+
+2
+2 , 0 < ε ≤ 1,
+
+Q hε
+
+where sup is taken over all discrete measures on X × R. Denote C1 = d, 2(2 diam(X))d
+C2 = . Hence, by
+
+hd
+
+Chernozhukov et[al. [2014b, Co]rollar[y 5.1] ]
+E sup |e⊤ν Ot,x| = E sup |En [f(Xi, Yi)]− E[f(Xi, Y )]|
+
+x∈B f√ i
+∈F
+
+≲ √σ
+∥M∥P,2C2 log(C1 ∥M∥P,2 /σ)
+
+C√2 log(C(1 ∥M∥P,2 /σ)) +n (n )
+√ 1 diam(X) 1 diam(X)
+
+≲√ d log +
+d h1+d/2 1+v d log
+
+nh n 2+v hd h1+d/2
+
+log(1/h) log(1/h)
+≲ +
+
+nhd 1+v .
+n 2+v hd
+
+The rest follows from finite dimensionality of Ot,x, and Lemma SA-2.
+
+SA-6.4 Proof of Lemma SA-4
+
+Denote ηi,t,x = Yi − θ∗
+
+(t,x
+(Di(x)) and ξ) ( i,t,x = θ∗
+
+) t,x(Di(x))− θ̂t,x(Di(x)). Then[ ⊤ ]
+Di(x) Di(y)
+
+Υ̂ d 2
+t,x,y = En rp rp h Kh (Di(x))Kh (Di(y)) (ηi,t,x + ξi,t,x) 1(Di(x) ∈ It) ,
+
+h h
+
+and we decompose the error into
+
+Υ̂t,x,y −Υt,x[,y =(∆1,t,x,y)+∆(2,t,x,y +)∆3,t,x,y,
+⊤ ]
+
+Di(x) Di(y)
+∆ d
+
+1,t,x,y = En [rp ( )rp h Kh (Di(x))Kh (Di(y)) ξ
+2
+i,t,x1(Di(x) ∈ It) ,
+
+h ( h )⊤ ]
+Di(x) Di(y)
+
+∆2,t,x,y = 2En rp r d
+p h Kh (Di(x))Kh (Di(y)) ηi,t,xξi,t,x1(Di(x) ∈ It) ,
+
+h h
+
+17
+
+
+
+[ ( ) ( )⊤ ]
+Di(x) Di(y)
+
+∆3,t,x,y = En rp [ ( r d
+p ) ( h)Kh (Di(x))Kh (Di(y)) η
+
+2
+
+h h i,t,x1(Di(x) ∈ It)
+
+⊤ ]
+− Di(x) Di(y)E r d
+
+p rp h Kh (Di(x))Kh (Di(y)) η
+2
+i,t,x1(Di(x) ∈ It) .
+
+h h
+
+By Assumption SA–2, Kh(Di(x)) ̸= 0 implies ∥rp(Di(x)/h)∥2 ≲ 1. Hence by Lemma SA-2 and SA-3,
+
+max max sup |ξi,t,x|
+t∈{0,1} 1≤i≤n x∈B
+
+= max max sup |rp(D (x))⊤i (γ̂t,x − γ∗
+t,x)|1(Kh(Di(x)) ≥ 0)
+
+t∈{0,1} 1≤i≤n x∈B
+
+−1 −1
+= max max sup |rp(Di(x))
+
+⊤H−1(Ψ̂ + (Ψ̂ −1 0)
+t∈{ } t,xOt,x t,x −Ψt,x)Ut,x)|1(Kh(Di(x)) ≥
+
+0,1 1≤i≤∥∥n ∈B
+
+− ∥
+1 − ∥
+
+1
+≤ ∥
+√max sup ∥ x
+
+Ψ̂t,xOt,x∥ ∥∥
++ max sup ∥(Ψ̂ −1
+
+t,x − ∥
+Ψt,x)Ut,x∥
+
+t∈{0,1} x∈B 2 t∈{0,1} x∈B 2
+
+log(1/h) log(1/h)
+≲ + ,
+
+nhd 1+v
+n 2+v hd
+
+where [ ( ]
+D (x))i
+
+Ut,x = En rp Kh(D
+∗
+
+i(x))θt,x(Xi)1(Di(x) ∈ It) .
+h
+
+Assuming log(1/h)
+1+v → ∞, similar maximal inequality as in the proof of Lemma SA-2 shows
+
+n 2+v hd (√ )2
+
+sup ∥ log(1/h) log(1/h)
+∆1,t,x,y∥ ≲P max max sup |ξi,t,x|2 ≲√ + 1+v ,
+
+x,y∈X t∈{0,1} 1≤i≤n x∈ d
+B nh n 2+v hd
+
+sup ∥∆2,t,x,y∥ ≲P max max sup | /h) log(1/h)
+ξi,t,x|
+
+log(1
+≲ + 1+v . (SA-8)
+
+x,y∈X t∈{0,1} 1≤i≤n x∈B nhd n 2+v hd
+
+Consider th{e (µ, ν) ent(ry of ∆3,t),x,y. Consider the class
+
+µ+ν }
+F = (z, u) 7→ d(z,x)
+
+hdKh(d(z,x))Kh(d(z,y))(u− rp(d(z,x))⊤γ∗
+h t,x)
+
+2 : x,y ∈ X .
+
+By Assumption SA–2 and SA–1(v), we have sup −d/2
+f∈F E[f(Xi, Yi)
+
+2]1/2 ≲ h . Moreover, Assumption SA–2
+
+and Equation (SA-7) imply there exists C1, C2 > 0 such that F (z, u) = C −d
+1h (u2 + C2) is an envelope
+
+function for F, with
+
+[ ] 1 [ ] 1 [ ] 2
+
+E max F (X 2 2
+i, Yi) ≲ C −d
+
+1h (E max Y 4 2 +v 2
+2+v
+
+i + C2) ≲ C1h
+−d(E max Y 2
+
+i + C2) ≲ h−dn 2+v .
+1≤i≤n 1≤i≤n 1≤i≤n
+
+Apply Chernozhukov et[al. [2014b, Corollary 5.1] similarly]as i√n Lemma SA-3 gives
+
+E sup | log(1/h) log(1/h)
+En[f(Xi, Yi)]− E[f(Xi, Yi)]| ≲ + v .
+
+f∈F nhd n 2+v hd
+
+18
+
+
+
+Finite dimensionality of ∆3,t,x,y then implies
+
+[ ] √
+log(1/h) log(1/h
+
+E sup ∥∆3,t,x,y∥
+)
+
+≲ + v . (SA-9)
+x,y∈ nhdX n 2+v hd
+
+Putting together Equations (SA-8), (SA-9) and Lemma SA-2 gives the result.
+
+SA-6.5 Proof of Lemma SA-5
+
+By Theorem SA-1 and∣ Equation (SA-6), w∣e have
+
+sup | ∣
+B p ∣e⊤n,t(x)| = su 1 Ψ
+
+−1 ∣
+t,xSt,x − µt(x)
+
+x∈B x∈B ∣ [ ( ∣
+∣ 1 D (x)) ]∣∣
+
+= sup ∣e⊤1 Ψ−
+t,xE
+
+i
+rp Kh(Di(x))Rp(Di(x))
+
+⊤(µt(Xi)− µt(x), 0, · · · , 0))1(Xi ∈ At) ∣
+x∈B h
+
+≲ sup sup |µt(x)− µt(z)|1(Kh(d(z,x)) > 0)
+x∈B z∈X
+
+≲ h.
+
+SA-6.6 Proof of Theorem SA-1
+
+Since θx(0) = θ1,x(0)− θ0,x(0) and τ(x) = µ1(x)− µ0(x), it is enough to prove the result for one treatment
+assignment group t ∈ {0, 1}. By Assumption SA–1(iii) and Assumption SA–2(ii), for any r ̸= 0, for any
+x ∈ B and y ∈ St,x(r), |µt(y)− µt(x)| ≲ ∫|r|. Hence, for any r ̸= 0, for any x ∈ B, t ∈ {0, 1},
+
+− )
+µt(x)| ≤ ∫|µ (y)− µ (x)|f
+
+S t t X(y)Hd−1(dy)
+|θ t,x(|r|
+
+t,x(r) ≲ r.
+f ( )Hd−1(dy)
+
+St,x(|r| y
+) X
+
+implying
+
+|θt,x(0)− µt(x)| ≤ lim |θt,x(r)− µt(x)| = 0,
+r→0
+
+which establishes the result.
+
+SA-6.7 Proof of Theorem SA-2
+
+The proofs of Lemma SA-2 and Lemma SA-3 can be done when the index set is the singleton {x} instead
+
+of B, replacing Chernozhukov et al. [2014b, Corollary 5.1] by Bernstein inequality, and thus obtaining
+
+∣∣∣ ∣ 1 1
+
+∣ e⊤ 1 ∣
+1 Ψ
+
+−
+t,xOt,x∣ √
+
+≲P (+√ ,
+nhd 1+v
+
+∣ n 2+v hd
+
+∣ ∣∣ √ )
+−1 1 1 1
+
+e⊤ 1
+1 (Ψ̂ Ψ−
+
+t,x − t,x)Ot,x∣ ≲P +
+nhd nhd 1+v .
+
+n 2+v hd
+
+for all x ∈ B. In words, uniformity only adds a log(1/h) penalty. Therefore, using decomposition (SA-1),
+the pointwise convergence rate follows.
+
+19
+
+
+
+SA-6.8 Proof of Theorem SA-3
+
+Follows from Lemma SA-2, Lemma SA-3 and decomposition (SA-1).
+
+SA-6.9 Pr∑oof of Theorem SA-4
+n
+
+Define T(x) = i=1 Zi, with Zi = Z1,i − Z0,i independent random variables (i = 1, 2, . . . , n),
+
+1 (
+2 ⊤ −1 Di(x)
+
+)
+Zt,i = Ξ−1/
+
+t,xr
+∗
+
+p Kh(Di(x))(Yi − θ
+n x,x e1 Ψ h t,x(Di(x)))1(Xi ∈ At),
+
+E[Zi] = 0 and V[Zi] = n−1. By the Berry-Essen Theorem,
+
+∣∣ ) ∣∣ [ ] ∑n [ ] ∑n [ ]
+sup ∣ (P T(x) ≤ u − Φ(u)∣ ∑n
+
+≲ E |Z 3
+i| ≲ E |Z 3
+
+1,i| + E |Z 3
+0,i|
+
+u∈R i=1 i=1 i=1
+
+where
+
+[ ] ∑n [∣ (D ∣
+E | i(x)
+
+) ∣3]
+Zt,i|3 = n−3Ξ−3/2
+
+x,x E ∣∣e⊤1 Ψ−1
+t,xrp Kh(Di(x))1(Xi ∈ At)(Yi − θ∗ )∣
+
+h t,x(Di(x)
+i=1
+
+≲ n−2Ξ−3/2 3
+x,x E[|Kh(Di(x))(Yi − θ∗t,x(Di(x)))| ]
+
+≲ n−2Ξ−3/2
+x,x E[|Kh(Di(x))(E[|Yi|3|Xi] + |θ∗t,x(Di(x))|3)|]
+
+≲ (nhd)−1/2,
+
+∥ ( ∥
+noting that sup ∥ Di(x)
+
+)
+2
+
+x∈B rp h Kh(Di(x))∥ ≲ 1 holds almost surely in Xi, Ξx,x ≳ (nhd)−1/ by Lemma SA-4,
+E[|Yi|3|Xi] ≲ 1 by Assumption SA–1(v), and max1≤i≤n supx∈B |θ∗t,x(Di(x))| ≲ 1 because
+
+(D )
+i(x)
+
+θ∗t,x(Di(x)) = γ∗t (x)
+⊤rp(Di(x)) = (Ψ −1
+
+t,xSt,x) rp .
+h
+
+Since
+
+∣∣ ∣ √
+T̂(x)− T(x)∣ √ 1 1
+
+≲P + v + nhd|B(x)|,
+nhd n 2+v hd
+
+the pointwise asymptotic normality follows, under the conditions imposed. Finally, validity of the confidence
+interval estimator is immediate.
+
+SA-6.10 Proof of Theorem SA-5
+
+We make the decomposition b(ased on Equation (SA-1) and conv)ergence o(f Ξ̂x,x,
+
+∑ ∑ )
+t+1
+
+T̂ 1/2 t+1
+
+dis(x)− Tdis(x) = Ξ̂−
+x,x (−1) 2 (θ̂t,x(0)− θ 1
+
+t,x(0)) − Ξ−1/2 2
+x,x (−1) e⊤
+
+( 1 Ψ
+−
+
+) t,xOt,x
+
+t∈∑{0,1} t∈{0,1}
+t+1 ∑ t+1
+
+= Ξ̂−1/2
+x,x (−1) 2 (θ̂t,x(0)− θt,x(0))− (−1) 2 e⊤1 Ψ
+
+−1
+t,xOt,x (= ∆1,x)
+
+t∈{0,1} ∑ t∈{0,1}
+t+1
+
++ (Ξ̂−1/2 /2
+x,x − Ξ−1
+
+x,x ) (−1) −1
+2 e⊤1 Ψt,xOt,x (= ∆2,x)
+
+t∈{0,1}
+
+20
+
+
+
+By Lemma SA-2 and ∣SA-3, and the decomposition Equation (SA-1),
+
+∣ ∑ t+1 ∑ ∣
+t+1 ∣
+
+sup ∣∣ (−1) 2 (θ̂
+
+( t,x(0)− θt,x(0))− (−1) 2 e⊤ −1
+
+) 1 Ψt,xO ∣
+t,x
+
+x∈X√t∈{0,1} √ ∣
+t∈{0,1}
+
+log(1/h) log(1/h) log(1/h) ∑
+≲P + 1+v + sup |θ∗t,x(0)− θt,x(0)|.
+
+nhd nhd n 2+v hd x∈B
+t∈{0,1}
+
+Together with Lemma SA-4,
+
+3
+g(1/h) (log(1/h)) 2 √ ∑
+
+sup | lo
+∆1,x| ≲P √ + 1+v + nhd sup |θ∗t,x(0)− θt,x(0)|. (SA-10)
+
+x∈B nhd n 2+v hd x∈B
+t∈{0,1}
+
+v
+
+By Lemma SA-2, Lemma SA-3 and Lemma SA-4, and assume n 2+v hd
+
+log(1/h) → ∞, then
+
+∣∣ ( )∣ )(√ )
+h) log(1/h) log(1/h) log(1/h)
+
+sup ∣e⊤ 1 /2 1/2 ∣
+1 Ψ
+
+−
+t,xOt,x Ξ−1
+
+x,x − Ξ̂−
+x,x ∣ √ (√
+
+log(1/
+≲P nhd + + v
+
+x∈X ( nhd√ 1+v
+n 2+v)hd(√ nhd n 2+v)hd√ log(1/h) log(1/h) log(1/h)
+
+= log(1/h)(1√+ v ) +
+n 2+v hd nhd
+
+v
+n 2+v hd√ log(1/h) log(1/h)
+
+≲ log(1/h) + v .
+nhd n 2+v hd
+
+Hence
+
+3
+lo 1/h)) 2
+
+sup |∆2,x| ≲P √g(1/h) (log(
++ 1+v . (SA-11)
+
+x∈B nhd n 2+v hd
+
+Putting together Equations (SA-10), (SA-11) give the result.
+
+SA-6.11 Proof of Theorem SA-6
+
+We will verify the high level conditions stated in Theorem SA-8.
+
+Without loss of generality, we can assume X = [0, 1]d, and QF = P te measure for P
+t X is a valid surroga X
+
+with respect to G, and ϕG = Id is a valid normalizing transformation (as in Theorem SA-8). This implies
+the constants c1 and c2 from Theorem SA-8 are all 1.
+
+Recall G = {gx : x ∈ B} where
+
+gx(u) = 1(u ∈ A1)K1(u;x)− 1(u ∈ A0)K0(u;x).
+
+By standard arguments and [Cattaneo et al., 2024, Lemma 7], we get properties of G as follows:
+
+M −d/2
+G ≲ h , EG ≲ hd/2, TVG ≲ hd/2−1, supN(G, ∥·∥Q,2 , ε(2c+ 1)d+1MG) ≤ 2c′ε−d−1 + 2.
+
+Q
+
+By definition of θ∗t,x(·), for each x ∈ B, t ∈ {0, 1},
+
+(
+θ∗ ∗
+t,x(d(u,x)) = γt (x)
+
+⊤rp(d(u,x)) = (H−1Ψ−1 ⊤ ⊤ d(u,x))
+t,xSt,x) rp(d(u,x)) = (Ψ−1
+
+t,xSt,x) rp ,
+h
+
+21
+
+
+
+recalling [ ( ) ( ] [ ]
+D (
+
+i(x) D (x))⊤i D )
+i(x)
+
+Ψt,x = E rp rp Kh(Di(x))1(Di(x) ∈ It) , St,x = E rp Kh(Di(x))Yi1(Xi ∈ At) .
+h ∥ ∥ h h
+
+We can check that ∥Ψ−1∥
+t,x ≲ 1, ∥St,x∥ ≲ 1 and
+
+M −d/2
+Mt ≲ h , E /2
+
+Mt ≲ h−d , t ∈ {0, 1}.
+
+In what follows, we verify the entropy and total variation properties of M. Using product rule we can verify
+
+|θ∗t,x(d(u,x))− θ∗t,x(d(u,x′))|
+sup sup ≲ h−1.
+u∈X x,x′∈B ∥x− x′∥
+
+Define ft,x(·) = √h−d/2
+e⊤Ψ−1 Ψ−1
+
+nΞ 1 t,xrp (·)K(·)( t,xSt,x)
+⊤rp(·). Then,
+
+x,x
+
+(
+K 2 d(u,x))
+t(u;x)θ
+
+∗
+t,x(d(u,x)) = h−d/ ft,x , u ∈ X,x ∈ B, t ∈ {0, 1}.
+
+h
+
+Take Mt = {Kt(·;x)θ∗t,x(d(·,x)) : x ∈ B}, t ∈ {0, 1}. For t ∈ {0, 1}, ft,x satisfies:
+
+(i) boundedness sup sup |ft,x(u)| ≤ c,
+x∈B u∈X
+
+(ii) compact support supp(ft,x(·)) ⊆ [−c, c]d, ∀x ∈ B,
+
+|fx(u)− fx(u
+′)|
+
+(iii) Lipschitz continuity sup sup ≤ c
+x∈B u,u′∈X ∥u− u′∥
+
+|fx(u)− fx′(u)|
+sup sup ≤ ch−1,
+u∈Xx,x′∈B ∥x− x′∥
+
+for some constant c not depending on n. Then, by an argument similar to Cattaneo et al. [2024, Lemma 7],
+there exists a constant c′ only dep(ending on c and d that for a)ny 0 ≤ ε ≤ 1,
+
+supN hd/2Ht, ∥·∥Q,1 , (2c+ 1)d+1ε ≤ c′ε−d−1 + 1,
+Q
+
+where supremum is taken over all finite discrete measures. Taking a constant envelope function MM =
+t
+
+(2c+ 1)d+1h−d/2, we have for any 0 < ε(≤ 1, )
+supN Ht, ∥·∥Q,1 , εMFt ≤ c′ε−d−1 + 1.
+Q
+
+By Lemma SA-6, above implies the uniform covering number for Ht satisfies
+
+NM (ε) ≤ 4c′(ε/2)−d−1, 0 < ε ≤ 1.
+t
+
+Since M ⊆ M0 +M1, here + denotes the Minkowski sum, with MM taken to be MM0 + MM1 , a bound on the
+uniform covering number of M can be given by
+
+NM(ε) ≤ 16(c′)2(ε/2)−2d−2, 0 < ε ≤ 1.
+
+22
+
+
+
+With the assumption that L(Et,x) ≤ Chd−1 for Et,x = {y ∈ At : (y − x)/h ∈ Supp(K)} for all t ∈ {0, 1},
+x ∈ B, and the fact that TVMt ≲ hd/2−1 for t ∈ {0, 1}, the same argument as in the paragraph Total
+Variation in the proof of Theorem SA-8 shows
+
+TVM ≲ hd/2−1.
+
+Now apply Theorem SA-8 with G, M defined in Equation (SA-2), R = {Id}, S = {1}, noticing that
+
+(Tdis : x ∈ B) = (An(g,m, r, s) : (g,m, r, s) ∈ F ×R×S), F = {(gx,mx) : x ∈ B} ⊆ G ×M,
+
+the result then follows.
+
+Lemma SA-6 (VC Class to VC2 Class). Assume F is a VC class on a measure space (X,B): there exists
+an envelope function F and positive constants c(F), d(F) such that for all ε ∈ (0, 1),
+
+supN(F, ∥·∥Q,1 , ε ∥F∥Q,1) ≤ c(F)ε−d(F),
+Q
+
+where the supremum is taken over all finite discrete measures. Then, F is also VC2 class: for all ε ∈ (0, 1),
+
+supN(F, ∥·∥Q,2 , ε ∥F∥Q,2) ≤ c(F)(ε2/2)−d(F),
+Q
+
+where the supremum is taken over all finite discrete measures.
+
+P∫ ∫
+roof of Lemma SA-6. Let Q be a finite discrete probability measure. Let f, g ∈ F. Then, |f−g|2dQ ≤
+
+2 |f − g||F |dQ. Define another probability measure Q̃(ck) = F (ck)Q(ck)/ ∥F∥Q,1 on the support of Q,
+denoted by {c1, . . . , ck,∫. . .}. Then, ∫
+
+|f − g|2dQ ≤ 2 ∥F∥Q,1 |f − g|dQ̃ ≤ 2 ∥F∥Q,1 ∥f − g∥Q̃,1 .
+
+Hence, if we take an ε2/2-net in (F, ∥·∥Q̃,1) with cardinality no greater than c(F)ε−d(F), then for any f ∈ F,
+there exists a g ∈ F such that ∥f − g∥Q̃,1 ≤ ε2/2 ∥F∥Q̃,1, and hence
+
+∥f − g∥2Q,2 ≤ 2ε2/2 ∥F∥Q,1 ∥F∥Q̃,1 ≤ ε2 ∥F∥2Q,2 ,
+
+which gives the result.
+
+SA-6.12 Proof of Theorem SA-7
+
+The result follows from Theorems SA-5 and SA-6, Chernozhukov et al. [2014a], and Chernozhuokov et al.
+
+[2022].
+
+SA-6.13 Proof of Theorem SA-8
+
+Since An is the addition of two Mn processes, indexed by G × R and H × S respectively, the Gaussian
+
+strong approximation error essentially depends on the worst case scenario between G and H , and between
+R and S. Hence (1) taking maximums E = max{EG, EH }, M = max{MG, MH } and TV = max{TVG, TVH }; (2)
+noticing that An is still indexed by a VC-type class of functions, we can get the claimed result.
+
+23
+
+
+
+For a more rigor proof, we can not apply Cattaneo and Yu [2025, Theorem SA.1] on (Mn(g, r) : g ∈ G, r ∈
+R) and (Mn(h, s) : h ∈ H , s ∈ S) directly, since this ignores the dependence structure between the two
+empirical processes. However, we can still project the functions onto a Haar basis, and control the strong
+approximation error for projected process and the projection error as in the proof of Cattaneo and Yu [2025,
+Theorem SA.1] and show both errors can be controlled via worst case scenario between G and H , and
+between R and S.
+
+Reductions: Here we present some reductions to our problem. By the same argument as in Section SA-
+II.3 (Proofs of Theorem 1) in the supplemental appendix of Cattaneo and Yu [2025], we can show there
+exists ui, 1 ≤ i ≤ n i.i.d Uniform([0, 1]d) on a possibly enlarged probability space, such that
+
+f(xi) = f(ϕ−1
+G∪H (ui)), ∀f ∈ G ∪ H , ∀1 ≤ i ≤ n.
+
+With the help of Cattaneo and Yu [2025, Lemma SA.10], we can assume w.l.o.g. that xi’s are i.i.d
+Uniform(X) with X = [0, 1]d, and ϕG∪H : [0, 1]d → [0, 1]d is the identity function. Although we assume
+supx∈X E[|Yi|2+v|Xi = x] < ∞, we first present the result under the assumption supx∈X E[exp(|yi|)|xi =
+x] ≤ 2, which is the same as in Cattaneo and Yu [2025, Theorem 2]. Also in correspondence to the notations
+in Cattaneo and Yu [2025, Theorem 2], we set α = 1 throughout this proof.
+
+Cell Constructions and Projections: The constructions here are the same as those in Cattaneo and
+Yu [2025], and we present them here for completeness. Let AM,N (P, 1) = {Cj,k : 0 ≤ k < 2M+N−j , 0 ≤ j ≤
+M +N} be an axis-aligned cylindered quasi-dyadic expansion of Rd+1, with depth M for the main subspace
+Rd and depth N for the multiplier subspace R, with respect to P, the joint distribution of (xi, yi) taking
+values in Rd ×R, as in Cattaneo and Yu [2025, Definition SA.4]. To see what AM,N (P, 1) is, it can be given
+by the following iterative partition procedure:
+
+1. Initialization (q = 0): Take CM+N−q,0 = X × R where X = [0, 1]d.
+
+2. Iteration (q = 1, . . . ,M): Given CK−l,k for 0 ≤ l ≤ q − 1, 0 ≤ k < 2l, take s = (q mod d) + 1,
+and construct CK−q,2k = CK−q+1,k ∩ {(x, y) ∈ [0, 1]d × R : e⊤s x ≤ cK−q+1,k} and CK−q,2k+1 =
+CK−q+1,k ∩ {(x, y) ∈ [0, 1]d × R : e⊤s x > cK−j+1,k} such that P(CK−q,2k)/P(CK−q+1,k) ∈ [ 1
+
+1+ρ ,
+ρ
+
+1+ρ ]
+
+for all 0 ≤ k < 2q−1. Continue until (CN,k : 0 ≤ k < 2M ) has been constructed. By construction, for
+each 0 ≤ l < M , CN,l = X0,l ×Y0,N,0, with Y0,N,0 = R.
+
+3. Iteration (q =M +1, · · · ,M +N): Given CK−l,k for 0 ≤ l ≤ q−1, 0 ≤ k < 2l, each CM+N−q,k can be
+
+written as X0,l ×Yl,M+N−q,m with k = 2q−M l+m. Construct CM+N−q−1,2k = X0,l ×Yl,M+N−q−1,2m
+
+and CM+N−q−1,2k+1 = X0,l × Yl,M+N−q−1,2m+1, such that there exists some qM+N−q,k ∈ R with
+Yl,M+N−q−1,2m =Yl,M+N−q,m∩(−∞, qM+N−q,k) andYl,M+N−q−1,2m+1 =Yl,M+N−q,m∩(qM+N−q,k,∞),
+
+P(yi ∈Yl,M+N−q−1,2m|xi ∈ X0,l) = P(yi ∈Yl,M+N−q−1,2m+1|xi ∈ X0,l) =
+1
+2P(yi ∈Yl,M+N−q−1,m|xi ∈
+
+X0,l).
+
+Consider the projection Π1(AM,n(P, 1)) given in Equation (SA-7) in Cattaneo and Yu [2025], noticing that
+
+AM,N (P, 1) is one special instance of CM,N (P, ρ). That is,∑define ej,k =∑1C and ẽj,k = e
+j,k j−1,2k − ej−1,2k+1,
+
+Π1(CM,N (P, ρ))[g, r] = γM+N,0(g, r)eM+N,0 + γ̃j,k(g, r)ẽj,k, (SA-12)
+1≤j≤M+N 0≤k<2M+N−j
+
+24
+
+
+
+where ej,k = 1(Cj,k)and ẽj,k = 1(Cj−1,2k)− 1(Cj−1,2k+1), and
+
+E[g(X)r(Y )|X ∈ Xj−N,k], if N ≤ j ≤M +N,
+γj,k(g, r) =
+
+E[g(X)|X ∈ X0,l] · E[r(Y )|X ∈ X0,l, Y ∈Yl,0,m], if j < N, k = 2N−j l +m,
+
+and γ̃j,k(g, r) = γj−1,2k(g, r)− γj−1,2k+1(g, r). We will use Π1 as a shorthand for Π1(CM,N (P, ρ)).
+For simplicity, we denote Π1(AM,n(P, 1)) by Π1 instead. Now define the projected empirical process
+
+Π1An(g, h, r, s) = Π1Mn(g, r) + Π1Mn(h, s), g ∈ G, h ∈ H , r ∈ R, s ∈ S,
+
+where Π1Mn(g, r) and Π1Mn(h, s) are given in Equation (SA-10) in Cattaneo and Yu [2025], that is,
+
+n )
+√1
+
+∑(
+Π1Mn(g, r) = Π1[g, r](xi, yi)− E[Π1[g, r](xi, yi)] ,
+
+n∑i=1
+n
+
+1 ( )
+Π1Mn(h, s) = √ Π1[h, s](xi, yi)− E[Π1[h, s](xi, yi)] .
+
+n
+i=1
+
+Construction of Gaussian Process Suppose (ξ̃j,k : 0 ≤ k < 2M+N−j , 1 ≤ j ≤ M + N) are i.i.d.
+standard√Gaussian random variables. Take F(j,k),m to be the cumulative distribution function of (Sj,k −
+mpj,k)/ mpj,k(1− pj,k), where pj,k = P(Cj−1,2k)/P(Cj,k) and Sj,k is a Bin(m, pj,k) random variable, and
+G(j,k),m(t) = sup{x : F(j,k),m(x) ≤ t}. We define Uj,k, Ũj,k’s via the following iterative scheme:
+
+1. Initialization: Take UM+N,0 = n.
+
+2. Iteration: Suppose we’ve defined Ul,k for j < l ≤M +N, 0 ≤ k < 2M+N−l
+
+√ , then solve for Uj,k’s s.t.
+
+Ũj,k = Uj,kpj,k(1− pj,k)G(j,k),U ◦ Φ(ξ̃
+j,k j,k),
+
+Ũj,k = (1− pj,k)Uj−1,2k − pj,kUj−1,2k+1 = Uj−1,2k − pj,kUj,k,
+
+Uj−1,2k + Uj−1,2k+1 = Uj,k, 0 ≤ k < 2M+N−j .
+
+Continue till we have defined U0,k for 0 ≤ k < 2M+N . ∑
+Then, {Uj,k : 0 ≤ j ≤ K, 0 ≤ k < 2M+N−j} have the same joint distribution as { n
+
+i=1 ej,k(xi, yi) :
+
+0 ≤ j ≤ K, 0 ≤ k < 2M+N−j}. By Vorob’ev–Berkes–Philipp theorem [Dudley, 2014, Theorem 1.31],
+
+{ξ̃j,k : 0 ≤ k < 2M+N−j , 1 ≤ j ≤ M +N} can be con∑structed on a possibly enlarged probability space such
+n
+
+that the previously constructed Uj,k satisfies Uj,k = i=1 ej,k(xi) almost surely for all 0 ≤ j ≤M +N, 0 ≤
+k < 2M+N−j . We will show ξ̃j,k’s can be given as a Brownian bridge indexed by ẽj,k’s.
+
+Since all of G, H , R and S are VC-type, we can show G × H +R × S is also VC-type, here + is the
+
+Minkowski sum. Hence F = G × H +R×S ∪ Π1[G× H +R×S] is pre-Gaussian.
+Then, by Skorohod Embedding lemma [Dudley, 2014, Lemma 3.35], on a possibly enlarged probability
+
+space, we can construct a Brownian bridge (Zn(f) : f ∈ F) that satisfies
+
+ξ̃j,k = √ P(Cj,k)
+Zn(ẽj,k),P(Cj−1,2k)P(Cj−1,2k+1)
+
+25
+
+
+
+for 0 ≤ k < 2M+N−j , 1 ≤ j ≤M +N . Moreover, call
+
+√ √ P(Cj,k)
+Vj,k = nZn(ej,k), Ṽj,k = nZn(ẽj,k), ξ̃j,k = √ Ṽ
+
+P ,k.
+nP j
+
+(Cj−1,2k) (Cj−1,2k+1)
+
+for 0 ≤ k < 2K−j , 1 ≤ j ≤ K. We have for g ∈ G, h ∈ H , r ∈ R, s ∈ S,
+
+√ M∑+N ∑
+nΠ1An(g, h, r, s) = (γ̃j,k[g, r] + γ̃j,k[h, s])Ũj,k,
+
+j=1 0≤k<∑2M+N−j
+
+√ M∑+N
+
+nΠ1Zn(g, h, r, s) = (γ̃j,k[g, r] + γ̃j,k[h, s])Ṽj,k.
+j=1 0≤k<2M+N−j
+
+Decomposition Fix one (g, h, r, s) ∈ G × H ×R×S, we decompose by
+
+An(g, h, r, s)− Zn(g, h, r, s)
+
+= ︸Π1An(g, h, r, s)︷−︷ Π1Zn(g, h, r, s︸) + ︸An(g, h, r, s)− Π1An(g, h, r, s)︷+︷ Π1Zn(g, h, r, s)− Zn(g, h, r, s︸) .
+strong approximation (SA) error for projected projection error
+
+SA error for Projected Process The strong approximation error essentially depends on the Hilbertian
+pseudo norm
+
+M∑+N ∑ M∑+N ∑ M∑+N ∑
+(γ̃ 2
+
+j,k[g, r] + γ̃j,k[h, s])
+2 ≤ 2 (γ̃j,k[g, r])
+
+2 + 2 (γ̃j,k[h, s]) .
+j=1 0≤k<2M+N−j j=1 0≤k<2M+N−j j=1 0≤k<2M+N−j
+
+Hence, Cattaneo and Yu [2025, Lemma SA√.19] gives with probabil√ity at least 1− 2e−t,
+
+| N2α+12MEM (∥Π1[g, r]∥∞ + ∥Π1[h, s]∥∞)2(M +N)
+Π1An(g, h, r, s)− Π1Zn(g, h, r, s)| ≤ C1Cα t+ C1Cα t,
+
+n n
+
+where C1 > 0 is a universal constant and Cα = 1 + (2α)α/2.
+
+Projection Error For the projection error, we use the simple observation that
+
+|An(g, h, r, s)− Π1An(g, h, r, s)| ≤ |Mn(g, r)− Π1Mn(g, r)|+ |Mn(h, s)− Π1Mn(h, s)|,
+
+and Catt[aneo and Yu [2025, Lemma SA.23] to get for all t > N ,
+
+√ √
+P | − M ]
+
+An(g, h, r, s) Π1An(g, h, r, s)| C √C
+2 −N 2 α+ 1
+
+> 2 2α√N V+ 2 M t 2 + C C α+1
+2 α√ t ] ≤ 4ne−t
+
+[ ,
+n
+
+1 M
+P |Zn(g, h, r, s)− Π1Zn(g, h, r, s)| > C2 C 2
+
+2α N V+ C −N t
+2Cα2 M2t 2 + C2Cα√ t ≤ 4ne− ,
+
+n
+
+α
+where C α
+
+α = 1 + (2α) 2 and C2α = 1 + (4α) and C2 is a constant that only depends on the distribution of
+(x1, y1), with
+
+√
+V = min{2M, dL2−M/d}2−M/dTVH .
+
+26
+
+
+
+Uniform SA Error: Since all ofG, H , R and S are VC-type class, from a union bound argument and the
+same control over fluctuation error as in Cattaneo and Yu [2025, Lemma SA.18], denotingF = G×H ×R×S,
+we get for all t > 0 and 0 < δ < 1,
+
+[ ]
+P ∥An −An ◦ πF ∥F + ∥Z π t δ ≤ e p(−t),
+
+δ n − Zn ◦ F ∥ > C1CαFn( , ) x
+δ F
+
+α
+where Cα = 1 + (2α) 2 and
+
+(log n)α/2 (δ) M M
+Fn(t, δ) = J(δ)M+ √MJ2
+
++ √ t+ (log n)α√ tα.
+δ2 n n n
+
+where
+
+(√ √ √ √
+2cG 2cH 2cR 2cS )
+
+J(δ) =√3δ dG log( ) + dH log( ) + dR log( ) + dS log( )
+δ δ δ δ
+
+≲ d log(c/δ),
+
+recalling c = cG,[Q∥ + c
+G∪H H ,∥∥Q + c
+
+G∪H R,Y +]cS,Y + k, d = dG,Q hoosing the optimal
+G∪H dH ,QG∪H dR,YdS,Yk. C
+
+M∗, N∗ gives P ∥An − ZA
+n > C ) ≤ C −t 0, where
+
+F 1vTn(t 2e for all t >
+
+Tn(t) = min {An(t, δ) + Fn(t, δ)},
+δ∈(0,1)
+
+with
+
+√ {(
+√ cd TVdMd+1) 1 ( d) 1 }
+
+2(d+1) cd dE2M2TVdL 2(d+2)
+An(t, δ) = dmin 1E , 1c2 (t+ log(nN(δ)N∗))α+1
+
+n n2
+
+M2(M∗ +N∗)
++ (log n)α(t+ log(nN(δ)N∗))α+1,
+
+n
+(log n)α/2MJ2 √
+
+Fn(t, δ) = J(δ)M+ √ (δ)
++ √M t+ (log n)α√M tα,
+
+δ2 n n n
+
+where
+
+VR = {θ(·, r) : r ∈ R},
+N(δ) = NG,Q (δ/2, M
+
+G∪H G,Q )N (δ/2, M
+G∪H H ,QG∪H H ,Q )N
+
+G∪H R,Y(δ/2,MR)NS,Y(δ/2,MS,Y),
+
+J(δ) = ⌊2JQ G,{M( 2) +( 2J }⌋ δ/2) + 2J
+G∪H ( G,QG∪H , δ/ QG∪H (H , MH ,QG∪H , Y(R,MR,Y, δ/2) + 2JY(S,MS,Y, δ/2),
+
+c1nTV
+) d
+
+d+1 c1c2nLTV
+) d
+
+d+2
+M∗ = ⌈ log2 min {( , ,
+
+E EM
+nMd+1 ) 1 ( 2d+2 ) 1 }⌉
+
+d+1 n2M d+2
+N∗ = log2 max , .
+
+cd d d 2
+1ETV
+
+d cd1c2TV LdE
+
+Truncation Argument for yi’s with Finite Moments The above result is derived under the assumption
+that supx∈X E[exp(|yi|)|xi = x] < ∞. For the result under the condition supx∈X E[|y +v
+
+i|2 |xi = x] < ∞,
+we can use the same truncation argument as in [Cattaneo et al., 2026, Theorem SA-11 in the supplemental
+
+material] and the VC-type conditions for G,H ,R,S to get the stated conclusions.
+
+27
+
+
+
+SA-6.14 Proof of Theorem 2
+
+Part I: Upper Bound.
+
+The proof is essentially the proof for Lemma SA-5 with the data generating process ranging over P. By
+
+Theorem SA-1 and Equation (SA-6), we have
+
+sup sup |Bn )|
+P∈P x∈B ∣∣ ,t
+
+(x ∣∣
+= sup sup ∣∣e
+
+⊤Ψ−1
+1 t,xSt,x − µt(x)
+
+P∈P x∈B ∣ [ ( ∣
+D (x)) ]∣
+
+i ∣
+= sup sup ∣e⊤Ψ−1
+
+1 ∣ t,xE rp Kh(Di(x))rp(Di((x))
+⊤(µt(Xi)− µt(x), 0, · · · , 0))1(Xi ∈ At) ∣
+
+P∈P x∈B ∣ h
+D )⊤∣
+
+≲ i(x) ∣
+sup sup sup ∣ [ ( )
+
+e⊤ −1 Di(x)
+1 Ψt,xE rp Kh(Di(x))rp ∣
+
+P∈P x∈B z∈X h h
+
+· sup sup sup |µt(x)− µt(z)|1(Kh(d(z,x)) > 0)
+P∈P x∈B z∈X
+
+≲ h.
+
+Part II: Lower Bound.
+
+The lower bound is proved by considering the following data generating process. SupposeXi ∼ Uniform([−2, 2]2),
+and µ0(x1, x2) = 0 and µ1(x1, x2) = x2 for all (x1, x2) ∈ X = [−2, 2]2. Suppose Yi(0) ∼ Normal(µ0(Xi), 1)
+and Yi(1) ∼ Normal(µ1(Xi), 1). Define the treatment and control region by A1 = {(x, y) ∈ X : x ≥ 0, y ≥ 0},
+A0 = X/A1, B = {(x, y) ∈ R : 0 ≤ x ≤ 2, y = 0 or x = 0, 0 ≤ y ≤ 2}. Suppose Yi = 1(Xi ∈
+A0)Yi(0) + 1(Xi ∈ A1)Yi(1). Suppose we choose d to be the Euclidean distance and Di(x) = ∥Xi − x∥.
+In this case, although the underlying conditional mean functions µt, t ∈ {0, 1} are smooth, the conditional
+mean given distance θt,x may not even be differentiable. In this example,
+
+ 0 ≤ r ≤ s,
+θ1,(s,0)(r) =  2
+
+πr , if
+r+s
+
+π−arccos(s/r) , if r > s.
+
+Figure SA-1 plots r 7→ θ1,(3/4,0)(r) with the notation xs = (s, 0).
+Under this data generating process, we can show
+
+|Bn,1(x)−Bn,0(x)|
+inf sup > 0.
+
+0<h<1 x∈B h
+
+The proof proceeds in two steps. First, we show a scaling property of the asymptotic bias under our
+example, which gives a reduction to fixed-h bias calculation. Second, we prove the lower bound via the
+
+reduction from previous step.
+
+Step 1: A Scaling Property
+
+Let 0 < h < 1, 0 < s < 1, 0 < C < 1. Define h′ = Ch and s′ = Cs. Here C is the scaling factor and denote
+xs = (s, 0) and xs′ = (s′, 0). Denote bias for xs′ under bandwidth h
+
+′ to be
+
+[ ( ′ ) ( ′ )⊤ ]−1
+i((s , 0)) Di((s , 0))
+
+biasn,1(h
+′, s′) = e⊤
+
+D
+1 E rp rp Kh′(Di((s
+
+′, 0)))1(Xi ∈ A1)
+h′ h′
+
+28
+
+
+
+Figure SA-1: Conditional Mean Given Distance with One Kink
+
+[ ( ) ]
+D
+
+E i((s
+′, 0))
+
+r D ( ′
+p Kh′ ( i (s , 0))) (µ1(Xi − (s′, 0)))1(Xi ∈ A1) , (SA-13)
+
+h′
+
+where we have used the fact that µ1 is linear in our example, hence µ1(Xi)− µ1((s
+′, 0)) = µ1(Xi − (s′, 0)).
+
+We reserve the notation Bn,t, t = 0, 1, to the bias when bandwidth is h, that is,
+
+Bn,t(xs) ≡ biasn,t(h, s), h ∈ (0, 1), s ∈ (0, 1), t = 0, 1.
+
+Inspecting[(each element of the last vector, for all
+
+′ ) l ∈ N,
+
+l ]
+∥X , 0)∥
+
+E i − (s
+Kh′ (∥X − (s′∫ 2 ∫ i , 0)∥) (µ1(Xi − (s′), 0)))1(Xi ∈ A1)
+
+h′
+
+2( )2( ′ )l (
+1 ∥(u′ − s , v′)∥ ∥(u′ − s′, v′)∥
+
+= ) µ u , v′
+1
+
+′ ′ k 1 ((
+′ )− (s′, 0)) du′dv′∫ 0 0 h h h′ 4
+
+2/C ∫ 2/C ( 2( )l ( )
+(1) 1 ∥(Cu− Cs,Cv)∥ ∥(Cu− Cs,Cv)∥ C2
+= ∫ ( ) k ) µ1 (C(u− s, v)) dudv
+
+0 0 Ch Ch Ch 4
+2/C ∫ 2/C ( )2
+
+1 ∥ l (
+(u− s, v)∥ ∥(u− s, v)∥
+
+∫= ) ( k ) Cµ1 ((u− 1
+s, v)) dudv
+
+0 0 h h h 4
+2 ∫ 2( )2(
+
+(2) 1 ∥(u− s, v)∥ l ∥(u, v)− (s, 0)∥ 1
+=
+
+0 0[(h ) k Cµ1 ((u, v)− (s, 0)) dudv
+h h 4
+
+∥ l ]
+Xi − (s, 0)∥
+
+= CE Kh (∥Xi − (s, 0)∥)µ1(Xi − (s, 0))1(Xi ∈ A1) ,
+h ( )
+
+where in (1) we have used a change of variable (u, v) = 1 ′
+C (u , v′), and (2) holds since k ∥·−(s,0)∥
+
+h is supported
+in (s, 0) + hB(0, 1), which is contained in [0, 2] × [0, 2] ⊆ [0, 2/C] × [0, 2/C] for all 0 < h < 1, 0 < s < 1,
+
+0 < C < 1. This mean[s ( ) ]
+D (s′, 0))
+
+E i(
+rp ) (µ1(Xi − (s′, 0)))1(Xi ∈ A1)
+
+h′
+Kh′ (Di((s
+
+′, 0))
+
+29
+
+
+
+[ ( ) ]
+Di((s, 0))
+
+= CE rp Kh (Di((s, 0))) (µ1(Xi − (s, 0)))1(Xi ∈ A1) .
+h
+
+Similar[ly(, for all l ∈ N)and 0 < h < 1, 0 < s < 1, 0 < C < 1,
+
+l ] [( )l ]
+Di((s
+
+′, 0)))
+E i((s, 0))
+
+K ′ D
+h′ (Di((s , 0)))1(Xi ∈ A1) = E Kh (Di((s, 0)))1(Xi ∈ A1) ,
+
+h′ h
+
+implying [ ( ) ( )⊤ ]
+D ′
+
+i((s , 0)) Di((s
+′, 0))
+
+E r ) K ′
+
+[p ( )rp ′(Di((s , 0)))1(Xi ∈ A1)
+h′ ( h
+
+h′
+⊤ ]
+
+Di((s, 0)) Di((s, 0))
+= E rp rp Kh(Di((s, 0)))1(Xi ∈ A1) .
+
+h h
+
+It then follows that for all 0 < h < 1, 0 < s < 1, 0 < C < 1,
+
+bias ′
+n,1(h , s
+
+′) = C biasn,1(h, s).
+
+Moreover, for all 0 < h < 1, 0 < s < h, ( s)
+Bn,1(xs) = biasn,1(h, s) = h biasn,1 1, . (SA-14)
+
+h
+
+Since µ0 ≡ 0, it is easy to check that
+
+Bn,0(xs) = biasn,0(h, s) ≡ 0, 0 < h < 1, 0 < s < h.
+
+Step 2: Lower Bound on Bias
+
+Now we want to show sup0≤s≤1 | biasn,1(1, s)− biasn,0(1, s)| > 0. By Equation (SA-13),
+
+biasn,1(1, s)[− bias ⊤ 1
+n,0(1, s) = e1 Ψ
+
+−
+s Ss − µ1(xs)− 0 = e⊤ ]−1
+
+1 Ψs Ss,
+⊤
+
+Ψs = E rp (Di(xs)) rp (Di(xs)) K(Di(xs))1(Xi ∈ A1) ,
+
+Ss = E [rp (Di(xs))K(Di(xs))µ1(Xi)1(Xi ∈ A1)] .
+
+Changing to polar coordinates, we have∫ ∞ ∫ π
+
+Ψs =∫ rp(r)rp(r)
+⊤K(r)rdθdr,
+
+0 Θs(r)
+∞ ∫ π
+
+Ss = rp(r)K(r)r sin(θ)rdθdr,
+0 Θs(r)
+
+with 0, if 0 ≤ r ≤ s,
+Θs(r) = arccos(s/r), if r > s.
+
+30
+
+
+
+For notation simplicity, denote ∫ ∞ ∫ π
+
+A(s) = r ⊤
+
+∫ ∫ p(u)rp(u) K(u)udθdu = A1(s) +A2(s),
+0 Θs(u)
+∞ π
+
+B(s) = rp(u)K(u)u sin(θ)udθdu = B1(s) +B2(s),
+0 Θs(u)
+
+where ∫ s ∫ π ∫ s
+
+A1(s) = ∫ ∫ rp(u)rp(u)
+⊤K(u)udθdu = π rp(u)rp(u)
+
+⊤K(u)udu,
+0 0 0
+∞ π ∫ ∞
+
+A2(s) = rp(u)rp(u)
+⊤K(u)udθ∫ rp(u)
+
+⊤
+
+∫ ∫ du = (π − arccos(s/u))rp(u) K(u)udu,
+s arccos(s/u) s
+s π s
+
+B1(s) = ∫ ∫ rp(u)K(u)u sin(θ)udθdu = 2 rp(∫u)K(u)u2du,
+0 0 0
+∞ π ∞ s
+
+B2(s) = rp(u)K(u)u sin(θ)udθdu = (1 + )rp(u)K(u)u2du.
+s arccos(s/u) s u
+
+Evaluating the above at zero g∫ives
+π ∞ ∫ ∞
+
+A(0) = urp(u)rp(u)
+⊤K(u)du, B(0) = u2rp(u)K(u)du.
+
+2 0 0
+
+Hence [ ]
+biasn,1(1, 0)− biasn,0(1, 0) = e⊤1 A(0)−1B(0) = e⊤1 A(0)−1 2
+
+A(0)e2 = 0. (SA-15)
+π
+
+Taking derivatives with respect to s, we have
+
+Ȧ1(s) = πrp(s)rp(s)
+⊤K(s)s, ∫ ∞
+
+Ȧ2(s) = −πrp(s)rp(s)⊤ √ 1
+K(s)s+ urp(u)rp(u)
+
+⊤K(u)du,
+2
+
+s u2 − s
+
+Ḃ1(s) = 2rp(s)K(s)s2, ∫ ∞
+Ḃ2(s) = −2rp(s)K(s)s2 + urp(u)K(u)du.
+
+s
+
+Evaluating the above at zero g∫ives∞ ∫ ∞
+Ȧ(0) = rp(u)rp(u)
+
+⊤K(u)du, Ḃ(0) = urp(u)K(u)du.
+0 0
+
+Using matrix calculus, we know ∣
+d ∣
+
+biasn,1(1, s)− bia∣s ∣
+n,0(1, s)
+
+ds ∣ ∣
+s=0
+
+d
+= e⊤A(s)−1B(s)∣ (S
+ds 1 [∣s= ] A-16)
+
+0
+
+= −e⊤1 A(0)−1Ȧ(0) A(0)−1B(0) + e⊤ 1
+1 A(0)− Ḃ(0) (SA-17)
+
+31
+
+
+
+[ ] [ ]
+= −e⊤
+
+2
+1 A(0)−1 2
+
+Ȧ(0) e + e⊤2 1 e1
+
+∫ π π
+u 
+
+∞
+= − 2
+
+e⊤A(0)−1  [ ]
+u2 2
+
+π 1 · · · K(u)du+ e⊤1 e1
+0 π
+
+up+1
+
+4 2
+= − + . (SA-18)
+
+π2 π
+
+Combining Equations (SA-15) and (SA-16), and the fact that d
+ds biasn,1(1, s)− biasn,0(1, s) is continuous in
+
+s, we can show sup0≤s≤1 | biasn,1(1, s)− biasn,0(1, s)| > 0. Combining with Equation (SA-14), we have
+
+|Bn,1(x)−Bn,0(x)| biasn,1(s, h)− biasn,0(s, h)|
+inf sup ≥ |
+
+inf sup
+0<h<1 x∈B h 0<h<1 0<s<h ∣∣ ( h
+
+s
+= inf sup ∣ ) ∣∣
+
+biasn,1 1, ∣
+0<h<1 0<s<h h
+
+> 0.
+
+SA-6.15 Proof of Theorem 3
+
+The proof of part (i) follows from part (ii) with B ∩ B(x, ε) as the boundary. To prove part (ii), without
+loss of generality, we assume that ι = p + 1, and want to show supx∈Bo |Bn,t(x)| ≲ hp+1. This means we
+have assumed that B has a one-to-one curve length parametrization γ that is Cp+3 with curve length L,
+there exists ε, δ > 0 such that for all x ∈ γ([δ, L − δ]) and 0 < r < ε, S(x, r) intersects B with two points,
+s(x, r) and t(x, r). Define a(x, r) and b(x, r) to be the number in [0, 2π] such that
+
+[a(x, r), b(x, r)] = {θ : x+ r(cos θ, sin θ) ∈ A1}.
+
+Then, for x ∈ B and 0 < r < ε, θ
+
+∫1,x
+(r) has the following explicit representation:
+
+b(x,r)
+µ (x+ r(c
+
+a(x,r) 1 ∫ os θ, sin θ))fX(x+ r(cos θ, sin θ))dθ
+θ1,x(r) = .
+
+b(x,r)
+f (x+ r(c
+
+a(x,r) X os θ, sin θ))dθ
+
+Step 1: Curve length v.s. Distance to γ(0)
+
+W.l.o.g., assume γ(0) = x and γ′(0) = (1, 0). Let T : [0,∞) → [0,∞) to be a continuous increasing
+function that satisfies
+
+∥γ ◦ T (r)∥2 = r2, ∀r ∈ [0, h].
+
+Initial Case: l = 1, 2, 3.
+
+We will show that T is Cl on (0, h). For notational simplicity, define another function ϕ : [0,∞) → [0,∞)
+by ϕ(t) = ∥γ(t)∥2. Using implicit derivations iteratively,
+
+ϕ ◦ T (r) = r2,
+
+32
+
+
+
+ϕ′(T (r))T ′(r) = 2r,
+
+ϕ′′(T (r))(T ′(r))2 + ϕ′(T (r))T ′′(r) = 2,
+
+ϕ′′′(T (r))(T ′(r))3 + 3ϕ′′(T (r))T ′(r)T ′′(r) + ϕ′(T (r))T ′′′(r) = 0. (1)
+
+From the above equalities, we get
+
+T ′ 2r
+(r) = ,
+
+ϕ′(T (r))
+′ 2
+T r ) T
+
+T ′′ 2− ϕ′ ( ( ) ( ′(r))
+(r) =
+
+ϕ′
+,
+
+(T (r))
+T r
+
+T ′′′ ϕ′′′( ( )
+(r) = − )(T ′(r))3 + 3ϕ′′(T (r))T ′(r)T ′′(r)
+
+ϕ′
+.
+
+(T (r))
+
+Since we have assumed γ is Cp+3 on (0, h), ϕ is also Cp+1 on (0, h). It follows from the above calculation
+
+that T is Cp+3 on (0, h). In order to find the limit of derivatives of T at 0, we need
+
+ϕ(t) = γ1(t)
+2 + γ2(t)
+
+2, ϕ(0) = 0,
+
+ϕ′(t) = 2γ1(t)γ
+′
+1(t) + 2γ2(t)γ
+
+′
+2(t), ϕ′(0) = 0,
+
+ϕ′′(t) = 2γ′1(t)γ
+′
+1(t) + 2γ1(t)γ
+
+′′
+1 (t) + 2γ′2(t)γ
+
+′
+2(t) + 2γ2(t)γ
+
+′′
+2 (t), ϕ′′(0) = 2,
+
+ϕ′′′(t) = 6γ′1(t)γ
+′′
+1 (t) + 2γ1(t)γ
+
+′′′
+1 (t) + 6γ′2(t)γ
+
+′′
+2 (t) + 2γ2(t)γ
+
+′′′
+2 (t).
+
+Using L’Hôpital’s rule
+
+limT ′ 2 2
+(r) = lim = =⇒ limT ′
+
+r↓0 r↓0 ϕ′′(T (r))T ′ (r) = 1,
+(r) 2 limr↓0 T ′(r) r↓0
+
+limT ′′ −ϕ′′′(T (r))(T ′(r))3 − ϕ′′(T (r))2T ′(r)T ′′(r)
+(r) = lim
+
+r↓0 r↓0 ϕ′′(T (r))T ′(r)
+
+−ϕ(3)(0)− 4 limr↓0 T
+′′(r)
+
+=
+2
+
+−ϕ(3)(0)
+=
+
+6
+
+(4)(T (
+limT (3) ϕ r))(T ′(r))4 + ϕ(3)(T (r))3(T ′(r))2T ′′(r) + 3ϕ(3)(T (r))(T ′(r))2T ′′(r)
+
+(r) = − lim
+r↓0 r↓0 ϕ′′(T (r))T ′(r)
+
+3ϕ′′(T (r))T ′(r)T (3)(r)
++ lim
+
+r↓0 ϕ′′(T (r))T ′(r)
+
+= −ϕ
+(4)(0)− (ϕ(3)(0))2 + 6 limr↓0 T
+
+(3)(r)
+2
+
+= −ϕ
+(4)(0)− (ϕ(3)(0))2
+
+.
+8
+
+33
+
+
+
+Induction Step: l ≥ 4.
+
+Assume lim i)
+r↓0 T
+
+( (r) exists and is finite for 0 ≤ i ≤ l− 2 and there exists a function q(r) such that (i) q(r)
+is a polynomial of ϕ(j)(T (r)), 1 ≤ j ≤ l − 1 and T (k)(r), 1 ≤ k ≤ l − 2, (ii) limr↓0 q(r) = 0 and (iii)
+
+q(r) + ϕ′(T (r))T (l−1)(r) = 0. (2)
+
+For l = 4, this assumption can be verified from Equation (1). Using L’hopital’s rule,
+
+q(r)
+limT (l−1)(r) = lim−
+r↓0 r↓0 ϕ′(T (r)
+
+q′L′h (r)
+= lim−
+
+r↓0 ϕ′′
+.
+
+(T (r))T ′(r)
+
+From the previous paragraph, lim ′′
+r↓0 ϕ (T (r))T ′(r) exists and is finite. And q′(r) is a polynomial of
+
+ϕ(j)(T (r)), 1 ≤ j ≤ l and T (k)(r), 1 ≤ k ≤ l − 1. Hence lim (l−1)
+r↓0 T (r) can be solved from the follow-
+
+ing equation and is finite:
+
+lim q′(r) + limϕ′′(T (r))T ′(r) · limT (l−1)(r) = 0. (3)
+r↓0 r↓0 r↓0
+
+Taking derivatives on both sides of Equation (2),
+
+q′(r) + ϕ′′(T (r))T ′(r)T (l−1)(r) + ϕ′(T (r))T (l)(r) = 0.
+
+Take q2(r) = q′(r) + ϕ′′(T (r))T ′(r)T (l−1)(r). Then, (i) q2(r) is a polynomial of ϕ(j)(T (r)), 1 ≤ j ≤ l and
+T (k)(r), 1 ≤ k ≤ l − 1, (ii) limr↓0 q2(r) = 0, and (iii)
+
+q2(r) + ϕ′(T (r))T (l)(r) = 0.
+
+Continue this argument till l = p+3, lim (0)
+r↓0 T
+
+(j)(r) exists and is a polynomial of ϕ (0), . . . , ϕ(j+1)(0), which
+implies that it is bounded by a constant only depending on γ.
+
+Step 2: (p+ 1)-times continuously differentiable Sr
+
+We use the notation γ(t) = (γ1(t), γ2(t)). Define ( )
+γ2(t)
+
+A(t) = ∠γ(t)− γ(0), γ′(0) = arcsin .
+∥γ(t)∥
+
+Since γ is Cp+3, we can Taylor expand γ at 0 to get
+
+( ) ( ) ( ) ( ) ( )
+0 1 u u
+
+γ(t) = + 2 p+2 p+2 R1(t)
+0 + 0 t v t2 + · · ·
+
+2 v t + ,
+p+2 R2(t)
+
+where we have used the fact that γ′ ′
+
+∫ 2(0) = 0 and ∥γ (0)∥ = 1 and
+
+t (p+3) ∫ (p+3)
+γ (t− s)p+2 t (t− s)p+2
+
+R 1 (s) γ
+ds, R 2 (s)
+
+1(t) = 2(t) = ds.
+0 (p+ 2)! 0 (p+ 2)!
+
+34
+
+
+
+v
+Since γ is Cp+3, R1(t)/t and R2(t)/t are C
+
+p+3 on (0,∞). We claim that lim d
+t↓0 dtv (R1(t)/t) exists and is
+
+uniformly bounded for all x ∈ B, for all 0 ≤ v ≤ p+ 1. Define φ(t) = R1(t)/t. Then
+
+R1(t) R′
+φ′(t) = − 1(t)+ ,
+
+t2 t
+′ 2R1(t) 2R′ ) R′′(t)
+
+φ′ (t) = − 1(t + 1 ,
+t3 t2 t
+
+(2) (3)
+R′
+
+φ(3)( ) = −6R1(t) 6 1(t) 3R t) R
+t + − 1 (
+
++ 1 (t) · · ·
+t4 t3 t2 t
+
+where ∫ t (p+1) p+1)
+γ 2
+
+R′ γ (s)(t− s)p−1 ∫ t (
+
+= 1 (s)(t− s)p−
+1(t) =
+
+1 ds, R′′(t) ds, · · ·
+0 (p− 1)! 1
+
+0 (p− 2)! ∣ v ∣
+Since γ p+3
+
+1 is C , there exists C1 > 0 only depending on γ such that for all 0 ≤ v ≤ p + 3,∣ ddtvR1(t)∣ ≤
+C +1−v
+
+1t
+p . Hence
+
+limφ(j)(r) = 0, ∀0 ≤ j ≤ p+ 1.
+r↓0
+
+v
+Similarly, lim d
+
+r↓0 dtv (R2(t)/t) exists and is uniformly bounded for all 0 ≤ v ≤ p+ 1. Then
+
+γ2(t) √ v +2
+2t+ · · ·+ vp+2t
+
+p +R2(t)/t
+= , t > 0.
+
+∥γ(t)∥ (1 + u 2
+2t+ · · ·u p+
+
+p+2t +R1(t)/t)2 + (v2t+ · · ·+ v p+2
+p+2t +R2(t)/t)2
+
+Notice that γ2(t)/ ∥γ(t)∥ is of the form
+p(t)(1 + q(t))α,
+
+where α < 0 and p(t), q(t) are Cp+1 on (0,∞) with lim v
+r↓0 d /dtvp(t) and limr↓0 d
+
+v/dtvq(t) finite. Since the
+derivative of p(t)(1 + q(t))α is
+
+p′(t)(1 + q(t))α + p(t)α(1 + q(t))α−1q′(t),
+
+which is the sum of two terms of the form p α
+2(t)(1 + q2(t)) with p2 and q2 functions that are Cp with finite
+
+limits at 0. Continue this argument, we see that γ2(·) dv
+
+∥γ(·)∥ is Cp+1 on (0,∞) and limr↓0 dtv (γ2(t)/ ∥γ(t)∥) exist
+and are uniformly bounded for all x ∈ B and for all 0 ≤ v ≤ p+ 1.
+
+Since arcsin is Cp+1 with bounded (higher order derivatives) on [−1/2, 1/2], A is Cp+1 on (0, δ) and for
+
+all 0 ≤ v ≤ p+ 1, lim v)
+r↓0A
+
+( (t) exist and are uniformly bounded for all x ∈ B.
+
+Step 3: (p+ 1)-times continuously differentiable conditional density
+
+By the previous two steps, a(x, r) = A ◦ T (r) is Cp+1 on (0,∞) with | lim dv
+
+r↓0 drv a(x, r)| < ∞. Similarly,
+
+we can show that b(x, r) is Cp+1 in r with finite limits at r = 0. By the assumption that fX is Cp+1
+
+and bounded below by f , θ p+1
+1,x is C with lim dv
+
+r↓0 drv θ1,x(r) uniformly bounded for all x ∈ B and for all
+
+0 ≤ v ≤ p+ 1.
+
+This completes the proof.
+
+35
+
+
+
+SA-6.16 Proof of Theorem 6
+
+Let s > 0 be a parameter that is chosen later. Consider the following two data generating processes.
+
+Data Generating Process P0.
+
+Let X = {r(cos θ, sin θ) : 0 ≤ r ≤ 1, 0 ≤ θ ≤ Θ(r)}, where
+
+π, 0 ≤ r < s,
+
+Θ(r) = θ 2
+k, s+ ks ≤ r < s+ (k + 1)s2, 0 ≤ k < K,
+
+θK , s+Ks2 ≤ r < 1,
+
+with K = ⌊ 1−s
+s2 ⌋ and θk is the unique zero of
+
+sin(θ) (k + 1 2
+
+= 2 )s
+θ s+ (k + 1
+
+2 )s
+2
+
+over θ ∈ [0, π], and θK is the unique zero of
+
+sin(θ) Ks2 + 1− s
+=
+
+θ s+Ks2 + 1
+
+over θ ∈ [0, π]. Suppose Xi has density fX given by
+
+1
+fX(r(cos θ, sin θ)) = , 0 ≤ r ≤ 1, 0 ≤ θ ≤ Θ(r).
+
+2Θ(r)
+
+Suppose
+
+1 1
+µ (x1, x2) = + x1, (x1, x2) ∈ R2
+0 .
+
+2 100
+
+Suppose Yi = 1(ηi ≤ µ(Xi)) where (ηi : i : 1, · · · , n) are i.i.d. random variables independent of (Xi :
+1, · · · , n). Let η0(r) = EP [Yi| ∥Xi − (0, 0)∥ = r], for r ≥ 0. In particular, bd(X) has length π + 2. Hence,
+
+0
+
+bd(X) is a rectifiable curve.
+
+Data Generating Process P1.
+
+Let X = {r(cos θ, sin θ) : 0 ≤ r ≤ 1, 0 ≤ θ ≤ π/2}, Xi is uniformly distributed on X, and
+
+1 1
+µ1(x1, x2) = + (x1 − s), (x1, x2) ∈ R2.
+
+2 100
+
+Suppose Yi = 1(ηi ≤ µ(Xi)) where (ηi : 1, · · · , n) are i.i.d random variables independent to (Xi : 1, · · · , n).
+Let η1(r) = EP1 [Yi| ∥Xi − (0, 0)∥ = r], for r ≥ 0. In particular, bd(X) has length π/2 + 2. Hence, bd(X) is
+a rectifiable curve.
+
+36
+
+
+
+Figure SA-2: X from DGP P0
+
+Figure SA-3: X from DGP P1
+
+37
+
+
+
+Minimax Lower Bound.
+
+First, we show under the previous two models, P0(∥Xi∥ ≤ r) = P1(∥Xi∥ ≤ r) for all r ≥ 0. Since in P1, Xi
+
+is uniform distributed on R, we know P1(∥Xi∥ ≤ r) = r2, 0 ≤ r ≤ 1.
+
+∫ r ∫ Θ(s)
+
+P0(∥Xi∥ ≤ 1
+r) = sdθds = r2, 0 ≤ r ≤ 1.
+
+0 0 2Θ(s)
+
+Hence, choosing (0, 0) as the point of evaluation in both P0 and P1, we have
+
+dKL∫(P0(
+∞ ∫∥Xi − (0, 0)∥ , Yi),P1(∥Xi − (0, 0)∥ , Yi))
+
+∞ dP0(r, y)
+= ∫ dP0(r, y) log
+
+0 −∞ dP1(r, y)
+∞ ∫ ∞ dP0(r)dP0(y|r)
+
+= ∫ dP0(r)dP0(y|r) log
+0 −∞ ∫ dP1(r)dP1(y|r)
+∞ ∞ dP0(y|r)
+
+= ∫ dP0(r) dP0(y|r) log
+0 −∞ dP1(y|r)
+
+1
+
+= 2 dKL(Bernoulli(η0(r)),Bernoulli(η1(r)))rdr.
+0
+
+Under P0, Xi is uniformly distributed on {r(cos θ, sin θ) : 0 ≤ θ ≤ Θ(r)} for each 0 < r ≤ 1. Hence
+
+∫
+1 1 1 Θ(r) 1 1
+
+η0(r) = + r cos(u)du− s sin(Θ(r))
+= + r .
+
+2 100 Θ(r) 0 100 2 100 Θ(r)
+
+Thus, for 0 ≤ k < K, ( 1 ) 1 1 ( 1 sin(Θk)
+)
+
+η0 s+ (k + )s2 = + (s+ (k + )s2)
+2 2 100 2 Θk
+
+1 1 ( 1 (k + 1 )s2 )
+= + (s+ (k + )s2) 2
+
+2 ( 100 + (k + 1
+2 )s
+
+2
+
+1 ) 2 s
+
+= η1 s+ (k + )s2 .
+2
+
+Since both η0 and η1 are 1-Lipschitz on all intervals [s + ks2, s + (k + 1)s2] for all 0 ≤ k < K, we know
+|η0(r) − η1(r)| ≤ 2s2 for all r ∈ [s, 1]. Moreover, η0(r) =
+
+1
+2 for all 0 ≤ r ≤ s and η1(r) =
+
+1
+2 + 1
+
+100 (r
+2
+π − s).
+
+H∫ ence |η0(r)− η1(r)| ≤ s for all 0 ≤ r ≤ s. Hence,
+
+1 ∫ 1
+
+dKL(Bernoulli(η0(r)),Bernoulli(η1(r)))rdr ≤ ∫ dχ2(Bernoulli(η0(r)),Bernoulli(η1(r)))rdr
+0 0
+
+1 (η0(r)− η1(r)
+)2 (η0(r)− η1(r)
+
+)2
+= (η1(r)∫ + (1− η1(r)) )rdr
+
+0 η1(r) 1− η1(r)
+
+≤ 1 1
+
+∫ (η0(r)− η1(r))
+2
+
+1
+2 − 3 rdr
+
+100 0
+s ∫
+
+≤ 1 1 1
+
+1 s2rdr + 1 (2s2 2
+
+2 − 3 )
+100 0 2 − 3 rdr
+
+100 s
+
+≤ 5
+1 s4
+2 − 3 .
+
+100
+
+38
+
+
+
+Moreover, |µ0(0, 0) − µ1(0, 0)| = 1
+100s. Hence, by Tsybakov [2008, Theorem 2.2 (iii)], take 5
+
+1
+2−
+
+3 s4∗ = log 2
+n ,
+
+100
+
+and conclude that
+
+inf sup sup EP[|Tn(Un(x))− µ(x)|] ≥ 1
+s∗ ≳ n−
+
+1
+4 .
+
+Tn∈T P∈P x∈B(P) 1600
+
+This concludes the proof.
+
+References
+
+Matias D. Cattaneo and Ruiqi (Rae) Yu. Strong approximations for empirical processes indexed by lipschitz
+functions. Annals of Statistics, 53(3):1203–1229, 2025.
+
+Matias D. Cattaneo, Rajita Chandak, Michael Jansson, and Xinwei Ma. Boundary adaptive local polynomial
+
+conditional density estimators. Bernoulli, 30(4):3193–3223, 2024.
+
+Matias D. Cattaneo, Rocio Titiunik, and Ruiqi (Rae) Yu. Estimation and inference in boundary discontinuity
+designs: Location-based methods. arXiv:2505.05670, 2026.
+
+Victor Chernozhukov, Denis Chetverikov, and Kengo Kato. Anti-concentration and honest, adaptive confi-
+dence bands. Annals of Statistics, 42(5):1787–1818, 2014a.
+
+Victor Chernozhukov, Denis Chetverikov, and Kengo Kato. Gaussian approximation of suprema of empirical
+processes. Annals of Statistics, 42(4):1564–1597, 2014b.
+
+Victor Chernozhuokov, Denis Chetverikov, Kengo Kato, and Yuta Koike. Improved central limit theorem
+and bootstrap approximations in high dimensions. Annals of Statistics, 50(5):2562–2586, 2022.
+
+Richard M Dudley. Uniform central limit theorems, volume 142. Cambridge university press, 2014.
+
+Herbert Federer. Geometric measure theory. Springer, 2014.
+
+G.B. Folland. Advanced Calculus. Featured Titles for Advanced Calculus Series. Prentice Hall, 2002.
+
+Evarist Giné and Richard Nickl. Mathematical Foundations of Infinite-dimensional Statistical Models. Cam-
+
+bridge University Press, New York, 2016.
+
+Leon Simon et al. Lectures on geometric measure theory. Centre for Mathematical Analysis, Australian
+National University Canberra, 1984.
+
+A.B. Tsybakov. Introduction to Nonparametric Estimation. Springer, 2008.
+
+Aad W. van der Vaart and Jon A. Wellner. Weak Convergence and Empirical Processes. Springer, 1996.
+
+39

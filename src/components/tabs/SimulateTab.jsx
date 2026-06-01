@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useTheme, mono } from "../modeling/shared.jsx";
 import { HintBox } from "../HelpSystem.jsx";
 import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.js";
+import { useSessionLog } from "../../services/session/sessionLog.jsx";
 import StatWorkspace from "./statsim/StatWorkspace.jsx";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
@@ -469,6 +470,7 @@ let _nextId = 4;
 
 export default function SimulateTab({ onAddDataset, rows = [], headers = [], onAddColumn, onCreateDataset }) {
   const { C } = useTheme();
+  const { appendLog } = useSessionLog();
   const [n,          setN]          = useState(500);
   const [seed,       setSeed]       = useState(42);
   const [variables,  setVariables]  = useState([
@@ -546,6 +548,7 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
     if (!generated) return;
     const name = (dsName.trim() || "simulated_data") + ".csv";
     onAddDataset?.(name, generated.rows, generated.headers);
+    appendLog({ module: "simulate", opType: "dgp_save", params: { name, n: +n || 500, seed: +seed || 0, variables: variables.map(v => ({ name: v.name, dist: v.dist, params: v.params })) }, label: `DGP saved as ${name} (n=${n}, seed=${seed})` });
     setSaved(true);
   }
 
@@ -577,6 +580,7 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
       const mean = vals.reduce((a,v)=>a+v,0)/vals.length;
       const sd   = Math.sqrt(vals.reduce((a,v)=>a+(v-mean)**2,0)/vals.length);
       setMcResult({ mode:"single", betas:vals, mean, sd, reps:vals.length, stat:mcStat, varName:mcVar });
+      appendLog({ module: "simulate", opType: "mc_single", reproducible: false, params: { mcVar, mcStat, reps: vals.length, n: +n || 500 }, label: `MC simulation: ${mcStat}(${mcVar}) over ${vals.length} reps` });
       setMcRunning(false);
       return;
     }
@@ -605,6 +609,7 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
     const rmse  = isFinite(trueBeta) ? Math.sqrt(bs.reduce((a,v)=>a+(v-trueBeta)**2,0)/bs.length) : null;
     const rejectRate = betas.filter(b=>Math.abs(b.t)>crit).length/betas.length;
     setMcResult({ mode:"ols", betas:bs, mean, sd, bias, rmse, rejectRate, reps:betas.length, trueBeta:isFinite(trueBeta)?trueBeta:null });
+    appendLog({ module: "simulate", opType: "mc_ols", reproducible: false, params: { mcY, mcX, mcTrueBeta, reps: betas.length, n: +n || 500 }, label: `MC OLS: Y=${mcY}, X=${mcX}, β_true=${mcTrueBeta}, reps=${betas.length}` });
     setMcRunning(false);
   }
 

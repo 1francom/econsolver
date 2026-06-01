@@ -46,7 +46,7 @@ export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset,
         return lyRows.flatMap(r => {
           const wkt = r[col];
           if (!wkt) return [];
-          try { return makeCabaMetricGrid(wkt, ly.cellsize ?? 500, ly.clipBorder !== false); }
+          try { return makeCabaMetricGrid(wkt, Number(ly.cellsize) || 500, ly.clipBorder !== false); }
           catch { return []; }
         });
       }
@@ -58,7 +58,7 @@ export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset,
         const lat0 = Math.min(...lats) - pad, lat1 = Math.max(...lats) + pad;
         const lon0 = Math.min(...lons) - pad, lon1 = Math.max(...lons) + pad;
         const bboxWkt = `POLYGON((${lon0} ${lat0}, ${lon1} ${lat0}, ${lon1} ${lat1}, ${lon0} ${lat1}, ${lon0} ${lat0}))`;
-        try { return makeCabaMetricGrid(bboxWkt, ly.cellsize ?? 500, false); }
+        try { return makeCabaMetricGrid(bboxWkt, Number(ly.cellsize) || 500, false); }
         catch { return []; }
       }
       return [];

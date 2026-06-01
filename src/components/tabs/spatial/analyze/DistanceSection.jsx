@@ -4,8 +4,10 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignDistance, assignDistanceMetric, addDistanceBins } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function DistanceSection({ rows, headers, onResult, C }) {
+  const { appendLog } = useSessionLog();
   const [latCol,   setLatCol]   = useState(() => guessLatCol(headers));
   const [lonCol,   setLonCol]   = useState(() => guessLonCol(headers));
   const [refLat,   setRefLat]   = useState("");
@@ -30,6 +32,7 @@ export function DistanceSection({ rows, headers, onResult, C }) {
         cols.push(binCol.trim());
       }
       setResult({ rows: out, cols });
+      appendLog({ module: "spatial", opType: "distance", params: { latCol, lonCol, refLat: Number(refLat), refLon: Number(refLon), outCol, metric }, label: `Distance → ${outCol}${metric ? " (metric)" : ""}` });
       onResult(out, cols);
     } catch (e) {
       setErr(e.message);

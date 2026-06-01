@@ -1,7 +1,7 @@
 // ─── ECON STUDIO · spatial/shared/atoms.jsx ──────────────────────────────────
 // Shared UI atoms for the Spatial module. Inline styles via the `C` color object.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { mono } from "./constants.js";
 
 export function ColSelect({ label, value, onChange, headers, C, allowNone = false }) {
@@ -26,23 +26,72 @@ export function ColSelect({ label, value, onChange, headers, C, allowNone = fals
   );
 }
 
-export function NumInput({ label, value, onChange, C, min, max, step = "any", placeholder = "" }) {
+export function NumInput({ label, value, onChange, C, min, max, step = "any", placeholder = "", confirm = false }) {
+  // Staged mode (confirm): the value only commits to parent state on ✓/Enter,
+  // so heavy consumers (grid generation) never recompute on transient keystrokes.
+  const [draft, setDraft] = useState(String(value ?? ""));
+  useEffect(() => { setDraft(String(value ?? "")); }, [value]);
+
+  if (!confirm) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+          {label}
+        </label>
+        <input
+          type="number"
+          value={value}
+          onChange={e => onChange(e.target.value === "" ? "" : Number(e.target.value))}
+          min={min} max={max} step={step} placeholder={placeholder}
+          style={{
+            padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`,
+            borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10,
+            outline: "none", width: "100%",
+          }}
+        />
+      </div>
+    );
+  }
+
+  const dirty = draft !== String(value ?? "");
+  const commit = () => {
+    let v = draft === "" ? NaN : Number(draft);
+    if (!Number.isFinite(v)) v = min ?? 0;
+    if (min != null) v = Math.max(min, v);
+    if (max != null) v = Math.min(max, v);
+    onChange(v);
+    setDraft(String(v));
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
         {label}
       </label>
-      <input
-        type="number"
-        value={value}
-        onChange={e => onChange(e.target.value === "" ? "" : Number(e.target.value))}
-        min={min} max={max} step={step} placeholder={placeholder}
-        style={{
-          padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`,
-          borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10,
-          outline: "none", width: "100%",
-        }}
-      />
+      <div style={{ display: "flex", gap: 5 }}>
+        <input
+          type="number"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "Escape") setDraft(String(value ?? "")); }}
+          min={min} max={max} step={step} placeholder={placeholder}
+          style={{
+            padding: "4px 8px", background: C.surface, border: `1px solid ${dirty ? C.gold + "99" : C.border2}`,
+            borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10,
+            outline: "none", flex: 1, minWidth: 0,
+          }}
+        />
+        <button
+          onClick={commit}
+          disabled={!dirty}
+          title="Apply (Enter)"
+          style={{
+            padding: "0 10px", background: dirty ? `${C.teal}22` : "transparent",
+            border: `1px solid ${dirty ? C.teal : C.border2}`, borderRadius: 3,
+            color: dirty ? C.teal : C.textMuted, fontFamily: mono, fontSize: 11,
+            cursor: dirty ? "pointer" : "default", lineHeight: 1,
+          }}
+        >✓</button>
+      </div>
     </div>
   );
 }

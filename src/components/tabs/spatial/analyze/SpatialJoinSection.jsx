@@ -4,8 +4,10 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, isGeometryHeader } from "../shared/guess.js";
 import { spatialJoin } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
+  const { appendLog } = useSessionLog();
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
   const [polyDsId,  setPolyDsId]  = useState("");
@@ -38,6 +40,7 @@ export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResu
       const out = spatialJoin(rows, latCol, lonCol, polyDs.rows, effectiveWkt, joinCols, predicate);
       const matched = out.filter(r => r[joinCols[0]] != null).length;
       setResult({ rows: out, matched });
+      appendLog({ module: "spatial", opType: "spatial_join", params: { latCol, lonCol, polyDsId, wktCol: effectiveWkt, joinCols, predicate }, label: `Spatial join (${predicate}) → ${joinCols.join(", ")} (${matched}/${rows.length} matched)` });
       onResult(out, joinCols);
     } catch (e) {
       setErr(e.message);

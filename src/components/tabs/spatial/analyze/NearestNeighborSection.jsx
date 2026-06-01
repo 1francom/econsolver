@@ -4,8 +4,10 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { nearestNeighbor, nearestNeighborMetric, addDistanceBins } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function NearestNeighborSection({ rows, headers, availableDatasets, C, onResult }) {
+  const { appendLog } = useSessionLog();
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
   const [refDsId,   setRefDsId]   = useState("self");   // "self" or a dataset id
@@ -45,6 +47,7 @@ export function NearestNeighborSection({ rows, headers, availableDatasets, C, on
           cols.push(binCol.trim());
         }
         setResult({ rows: out, cols });
+        appendLog({ module: "spatial", opType: "nearest_neighbor", params: { latCol, lonCol, refDsId, refLatCol: effectiveRefLat, refLonCol: effectiveRefLon, outDist, outIdx, metric }, label: `Nearest neighbor → ${outDist}${metric ? " (metric)" : ""}` });
         onResult(out, cols);
       } catch (e) {
         setErr(e.message);

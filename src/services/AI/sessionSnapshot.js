@@ -63,6 +63,7 @@ export function buildSessionSnapshot({
   subsets = null,
   inferenceOpts = null,
   estimatorMeta = null,
+  sessionLog = null,
 } = {}) {
   const filename = cleanedData?.filename ?? result?.spec?.filename ?? null;
   const loadOpts = cleanedData?.loadOpts ?? result?.spec?.dataLoadOpts ?? null;
@@ -83,6 +84,7 @@ export function buildSessionSnapshot({
     subsets:        subsets && typeof subsets === "object"
       ? Object.fromEntries(Object.entries(subsets).map(([k, v]) => [k, trimResult(v)]))
       : null,
+    sessionLog:     Array.isArray(sessionLog) ? sessionLog : [],
   };
 }
 
@@ -168,6 +170,22 @@ export function serializeSnapshot(snapshot) {
     Object.entries(snapshot.subsets).forEach(([name, m]) => {
       lines.push(`  ${name}: n=${m?.n ?? "?"}, β̂=${m?.beta?.[1]?.toFixed?.(4) ?? "?"}`);
     });
+  }
+
+  // ── Session log (cross-module operations) ─────────────────────────────────
+  if (snapshot.sessionLog?.length) {
+    lines.push(`\nMODULE OPERATIONS (${snapshot.sessionLog.length}, chronological):`);
+    snapshot.sessionLog
+      .slice()
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .forEach((entry, i) => {
+        const flag = entry.reproducible ? "" : " [non-reproducible]";
+        const params = entry.params
+          ? " — " + Object.entries(entry.params).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ")
+          : "";
+        lines.push(`  ${i + 1}. [${entry.module}] ${entry.opType}${params}${flag}`);
+        if (entry.label) lines.push(`     ${entry.label}`);
+      });
   }
 
   return lines.join("\n");

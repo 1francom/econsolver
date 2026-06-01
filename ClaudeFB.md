@@ -234,8 +234,8 @@
 
 ### Bugs
 
-- [12:06] · Data
-  Parse error: schools_with_coordinates.xlsx — Failed to fetch dynamically imported module: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs (SheetJS CDN dynamic import failing at runtime)
+- [2026-05-31 12:06] · Data
+  Parse error: schools_with_coordinates.xlsx — Failed to fetch dynamically imported module: https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs
 
-- [12:06] · Data
-  OECD proxy error 406 for OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I/A..B1GQ_POP.USD_PPP_PS.NAAG_I — server responded with 406 Not Acceptable; Accept header sent does not match any SDMX format the endpoint supports
+- [2026-05-31 12:06] · Data
+  OECD proxy error 406 for OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I — acceptable content types: application/vnd.sdmx.genericdata+xml; version=2.1 and application/vnd.sdmx.data+json; version=2

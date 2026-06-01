@@ -14,9 +14,10 @@
 // "you must re-run your script to reload data" behavior.
 
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
+import * as XLSX from "xlsx";
 import { useTheme } from "./ThemeContext.jsx";
 import WranglingModule from "./WranglingModule.jsx";
-import { saveRawData } from "./services/Persistence/indexedDB.js";
+import { saveRawData, loadRawData } from "./services/Persistence/indexedDB.js";
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
 import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
@@ -91,9 +92,8 @@ function parseCSV(text, delimiter = ",") {
 }
 
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
-// Excel parser — uses the bundled SheetJS dependency so parsing works offline.
+// Excel parser — uses the installed xlsx npm package (bundled by Vite).
 async function parseExcel(file) {
-  const XLSX = await import("xlsx");
   const buf = await file.arrayBuffer();
   const wb  = XLSX.read(buf, { type: "array", cellDates: true });
   const sheetName = wb.SheetNames[0];
@@ -605,8 +605,22 @@ function ssRead(pid) {
   try { return JSON.parse(sessionStorage.getItem(ssKey(pid)) || "[]"); } catch { return []; }
 }
 function ssWrite(pid, secondaryDatasets) {
+  // Per-dataset size guard: a single oversized dataset (e.g. an Aggregate-to-Grid
+  // result carrying full WKT geometry per cell) must NOT silently sink the whole
+  // secondary array. Datasets whose payload won't fit in sessionStorage are stored
+  // durably in IndexedDB and replaced with an `_idbBacked` placeholder; they are
+  // rehydrated from IndexedDB on mount (see backfill effect below).
+  const SS_PER_DS_LIMIT = 4 * 1024 * 1024; // ~4MB per dataset
   try {
-    const s = JSON.stringify(secondaryDatasets);
+    const slim = secondaryDatasets.map(d => {
+      const payload = JSON.stringify(d);
+      if (payload.length < SS_PER_DS_LIMIT) return d;
+      // Too big for sessionStorage — persist rawData to IndexedDB, keep a placeholder.
+      if (d.rawData) saveRawData(d.id, d.rawData);
+      const { rawData, ...meta } = d;
+      return { ...meta, _idbBacked: true, headers: rawData?.headers ?? [] };
+    });
+    const s = JSON.stringify(slim);
     if (s.length < 8 * 1024 * 1024) sessionStorage.setItem(ssKey(pid), s);
   } catch { /* quota exceeded — non-fatal */ }
 }
@@ -694,6 +708,30 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     const secondary = datasets.filter(d => d.id !== primaryId);
     ssWrite(primaryId, secondary);
   }, [datasets, primaryId]);
+
+  // Backfill IndexedDB-backed secondaries on mount. Datasets too large for
+  // sessionStorage are rehydrated here from IndexedDB so they survive a reload
+  // (e.g. Aggregate-to-Grid / Spatial Join outputs carrying WKT geometry).
+  useEffect(() => {
+    const pending = datasets.filter(d => d._idbBacked && !d.rows && !d.rawData?.rows);
+    if (!pending.length) return;
+    let cancelled = false;
+    (async () => {
+      const loaded = await Promise.all(pending.map(async d => {
+        const raw = await loadRawData(d.id);
+        return raw ? { id: d.id, raw } : null;
+      }));
+      if (cancelled) return;
+      const byId = new Map(loaded.filter(Boolean).map(x => [x.id, x.raw]));
+      if (!byId.size) return;
+      setDatasets(prev => prev.map(d =>
+        byId.has(d.id)
+          ? (() => { const { _idbBacked, ...rest } = d; return { ...rest, rawData: ensureRowIds(byId.get(d.id)) }; })()
+          : d
+      ));
+    })();
+    return () => { cancelled = true; };
+  }, []); // mount only — rehydrate placeholders once
 
   // Register datasets in sessionState whenever `datasets` changes.
   // Uses registeredIds ref so each dataset is only dispatched once (idempotent
@@ -834,6 +872,10 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     // ensureRowIds: assign __ri so cell editing (patch step) works for
     // simulated / API-loaded / derived datasets, not just file uploads
     const rawData = ensureRowIds({ rows, headers });
+    // Durably persist to IndexedDB (100MB cap) so large derived datasets — e.g.
+    // spatial Aggregate-to-Grid / Spatial Join outputs carrying WKT geometry —
+    // survive a reload even when they exceed the sessionStorage size budget.
+    saveRawData(id, rawData);
     const entry = {
       id,
       filename: name,

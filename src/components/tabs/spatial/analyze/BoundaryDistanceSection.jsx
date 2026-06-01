@@ -4,8 +4,10 @@ import { mono } from "../shared/constants.js";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignBoundaryDistance } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function BoundaryDistanceSection({ rows, headers, availableDatasets, onResult, C }) {
+  const { appendLog } = useSessionLog();
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
   const [polyDsId,  setPolyDsId]  = useState("");
@@ -33,6 +35,7 @@ export function BoundaryDistanceSection({ rows, headers, availableDatasets, onRe
       const treated  = out.filter(r => r[`${outPrefix}_treat`] === 1).length;
       const newCols  = [`${outPrefix}_dist_km`, `${outPrefix}_treat`, `${outPrefix}_running`];
       setResult({ rows: out, treated, newCols });
+      appendLog({ module: "spatial", opType: "boundary_distance", params: { latCol, lonCol, polyDsId, wktCol: effectiveWkt, outPrefix }, label: `Boundary distance → ${outPrefix}_dist_km, ${outPrefix}_running (${treated} treated)` });
       onResult(out, newCols);
     } catch (e) {
       setErr(e.message);

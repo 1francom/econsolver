@@ -1,6 +1,40 @@
 // ─── ECON STUDIO · spatial/plot/GeoLayerConfig.jsx ─ (moved verbatim from SpatialTab.jsx)
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { mono } from "../shared/constants.js";
+
+// Staged numeric input — value only commits to layer state (which drives the
+// canvas recompute) on explicit confirm (✓ button or Enter). Prevents the grid
+// from recomputing on every keystroke, which froze on transient tiny cell sizes.
+function NumIn({ label, value, onChg, min, max, step, suffix, C }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); }, [value]);
+  const dirty = draft !== String(value);
+  const commit = () => {
+    let v = Number(draft);
+    if (!Number.isFinite(v)) v = min;
+    v = Math.min(max, Math.max(min, v));
+    onChg(v);
+    setDraft(String(v));
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 92 }}>
+      <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "stretch", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "stretch", flex: 1, background: C.surface, border: `1px solid ${dirty ? C.gold + "99" : C.border2}`, borderLeft: `2px solid ${C.teal}88`, borderRadius: 3, overflow: "hidden" }}>
+          <input type="number" min={min} max={max} step={step} value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "Escape") setDraft(String(value)); }}
+            style={{ width: 58, padding: "3px 5px", background: "transparent", border: "none", fontFamily: mono, fontSize: 10, color: C.text, outline: "none" }} />
+          {suffix && <span style={{ fontFamily: mono, fontSize: 8, color: C.teal, padding: "0 6px", borderLeft: `1px solid ${C.border2}`, display: "flex", alignItems: "center" }}>{suffix}</span>}
+        </div>
+        {dirty && (
+          <button onClick={commit} title="Apply (Enter)"
+            style={{ padding: "0 8px", background: `${C.teal}22`, border: `1px solid ${C.teal}99`, borderRadius: 3, color: C.teal, fontFamily: mono, fontSize: 11, cursor: "pointer", lineHeight: 1 }}>✓</button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, C }) {
   const upd = patch => onChange({ ...ly, ...patch });
@@ -79,13 +113,13 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <Sel label="Lat" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
           <Sel label="Lon" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
-          <Rng label="Cell (m)" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} fmt={v => v + "m"} />
+          <NumIn label="Cell size" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} suffix="m" C={C} />
         </div>
       )}
       {ly.type === "grid" && (ly.mode ?? "boundary") === "boundary" && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "end" }}>
           <Sel label="Boundary WKT" value={ly.boundaryCol ?? ly.wktCol ?? ""} onChg={v => upd({ boundaryCol: v, wktCol: v })} opts={geomCols} />
-          <Rng label="Cell (m)" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} fmt={v => v + "m"} />
+          <NumIn label="Cell size" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} suffix="m" C={C} />
           <label style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: mono, fontSize: 8, color: C.textMuted, marginBottom: 3 }}>
             <input type="checkbox" checked={ly.clipBorder !== false} onChange={e => upd({ clipBorder: e.target.checked })} style={{ accentColor: C.teal }} />
             clip

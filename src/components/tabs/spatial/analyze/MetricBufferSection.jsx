@@ -4,8 +4,10 @@ import { mono, BUFFER_RADIUS_PRESETS, formatRadiusLabel } from "../shared/consta
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol } from "../shared/guess.js";
 import { createMetricPointBuffers, countPointsWithinGridCentroidBuffer } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function MetricBufferSection({ rows, headers, availableDatasets, onResult, C }) {
+  const { appendLog } = useSessionLog();
   const [mode, setMode] = useState("point_buffers");
   const [latCol, setLatCol] = useState(() => guessLatCol(headers));
   const [lonCol, setLonCol] = useState(() => guessLonCol(headers));
@@ -50,6 +52,7 @@ export function MetricBufferSection({ rows, headers, availableDatasets, onResult
         ];
         const valid = out.filter(r => r.geometry).length;
         setResult({ rows: out, cols, message: `${valid} buffers created` });
+        appendLog({ module: "spatial", opType: "metric_buffer_create", params: { latCol, lonCol, radius, crs: "EPSG:32721" }, label: `Create metric buffers ${radiusText} → geometry` });
         onResult(out, cols, headers);
         return;
       }
@@ -66,6 +69,7 @@ export function MetricBufferSection({ rows, headers, availableDatasets, onResult
       );
       const cols = [countCol, radiusCol];
       setResult({ rows: out, cols, message: `${out.length} grid cells processed` });
+      appendLog({ module: "spatial", opType: "metric_buffer_count", params: { latCol, lonCol, radius, gridDsId, wktCol: effectiveWkt, outCol: countCol, prefix }, label: `Count points within ${radiusText} of grid centroids → ${countCol}` });
       onResult(out, cols, gridHeaders);
     } catch (e) {
       setErr(e.message);

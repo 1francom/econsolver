@@ -3,8 +3,10 @@ import { useState } from "react";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignBuffer } from "../../../../math/SpatialEngine.js";
+import { useSessionLog } from "../../../../../services/session/sessionLog.jsx";
 
 export function BufferSection({ rows, headers, onResult, C }) {
+  const { appendLog } = useSessionLog();
   const [latCol,   setLatCol]   = useState(() => guessLatCol(headers));
   const [lonCol,   setLonCol]   = useState(() => guessLonCol(headers));
   const [refLat,   setRefLat]   = useState("");
@@ -22,6 +24,7 @@ export function BufferSection({ rows, headers, onResult, C }) {
       const out = assignBuffer(rows, latCol, lonCol, Number(refLat), Number(refLon), Number(radius), outCol);
       const treated = out.filter(r => r[outCol] === 1).length;
       setResult({ rows: out, treated });
+      appendLog({ module: "spatial", opType: "buffer_assign", params: { latCol, lonCol, refLat: Number(refLat), refLon: Number(refLon), radius: Number(radius), outCol }, label: `Buffer ${radius}km → ${outCol} (${treated} treated)` });
       onResult(out, [outCol]);
     } catch (e) {
       setErr(e.message);
