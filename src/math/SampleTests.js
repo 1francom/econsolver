@@ -148,3 +148,31 @@ export function pairedMeanTest(a, b, { alternative = "two-sided", mu0 = 0 } = {}
   if (r.error) return r;
   return { ...r, test: "paired" };
 }
+
+// One-proportion z-test of H0: p = p0 (normal approximation, no continuity
+// correction — matches R prop.test(..., correct = FALSE)).
+export function onePropTest(successes, n, { p0 = 0.5, alternative = "two-sided" } = {}) {
+  const x = Number(successes), N = Number(n), pp = Number(p0);
+  if (!finite(x) || !finite(N) || N < 1 || x < 0 || x > N) return { error: "Need 0 ≤ successes ≤ n, n ≥ 1." };
+  if (!(pp > 0 && pp < 1)) return { error: "p0 must be in (0, 1)." };
+  const phat = x / N;
+  const se = Math.sqrt(pp * (1 - pp) / N);
+  const stat = (phat - pp) / se;
+  const pValue = clamp01(pFromCdf(pnorm(stat), alternative));
+  return { test: "one-prop", n: N, estimate: phat, phat, se, nullValue: pp, statLabel: "z", stat, alternative, pValue };
+}
+
+// Two-proportion z-test of H0: p1 = p2 with pooled-proportion SE.
+export function twoPropTest(s1, n1, s2, n2, { alternative = "two-sided" } = {}) {
+  const a = Number(s1), na = Number(n1), b = Number(s2), nb = Number(n2);
+  if ([a, na, b, nb].some(v => !finite(v)) || na < 1 || nb < 1 || a < 0 || a > na || b < 0 || b > nb)
+    return { error: "Need 0 ≤ sᵢ ≤ nᵢ, nᵢ ≥ 1." };
+  const p1 = a / na, p2 = b / nb;
+  const pPool = (a + b) / (na + nb);
+  const se = Math.sqrt(pPool * (1 - pPool) * (1 / na + 1 / nb));
+  if (!(se > 0)) return { error: "Pooled proportion gives zero SE." };
+  const diff = p1 - p2;
+  const stat = diff / se;
+  const pValue = clamp01(pFromCdf(pnorm(stat), alternative));
+  return { test: "two-prop", nA: na, nB: nb, phat1: p1, phat2: p2, estimate: diff, se, nullValue: 0, statLabel: "z", stat, alternative, pValue };
+}

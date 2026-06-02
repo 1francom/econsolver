@@ -9,7 +9,7 @@
 
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
 import { pf } from "../calcEngine.js";
-import { twoSampleMeanTest, pairedMeanTest } from "../SampleTests.js";
+import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest } from "../SampleTests.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -133,7 +133,27 @@ function suitePaired(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired]];
+function suiteProp(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  // one-prop: 50/100, p0=0.5 → phat=0.5, z=0, p=1.
+  const o = onePropTest(50, 100, { p0: 0.5 });
+  T(check("one-prop.phat", o.phat, 0.5, TOL_STAT));
+  T(check("one-prop.z", o.stat, 0, TOL_STAT));
+  T(check("one-prop.p", o.pValue, 1, TOL_P));
+  // one-prop: 60/100, p0=0.5 → se=sqrt(.25/100)=0.05, z=(0.6-0.5)/0.05=2.
+  const o2 = onePropTest(60, 100, { p0: 0.5 });
+  T(check("one-prop.z2", o2.stat, 2, TOL_STAT));
+  // two-prop: equal → z=0.
+  const t = twoPropTest(50, 100, 50, 100, {});
+  T(check("two-prop.z", t.stat, 0, TOL_STAT));
+  T(check("two-prop.diff", t.estimate, 0, TOL_STAT));
+  // Out-of-range → error.
+  T(check("one-prop.error", onePropTest(150, 100, {}).error ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));
