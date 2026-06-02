@@ -25,6 +25,7 @@ import { mulberry32 } from "../../../math/rng.js";
 import { useSessionLog } from "../../../services/session/sessionLog.jsx";
 import { useTheme } from "../../../ThemeContext.jsx";
 import SampleTestPanel from "./SampleTestPanel.jsx";
+import QTEPanel from "./QTEPanel.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
@@ -1180,6 +1181,12 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
       {/* ── 2c. Hypothesis test (mean / variance / parameter) ──────────────── */}
       <SampleTestPanel
         title="∗ Hypothesis test"
+        columns={numericHeaders.map(h => ({ name: h, values: rows.map(r => Number(r[h])) }))}
+      />
+
+      {/* ── 2d. Quantile Treatment Effects (unconditional) ─────────────────── */}
+      <QTEPanel
+        title="∗ Quantile Treatment Effects"
         columns={numericHeaders.map(h => ({ name: h, values: rows.map(r => Number(r[h])) }))}
       />
 

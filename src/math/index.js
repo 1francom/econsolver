@@ -105,3 +105,12 @@ export {
   subsampleMean,
   permutationTwoSampleMean,
 } from "./Resampling.js";
+
+export {
+  getModelTestTerms,
+  coefficientHypothesisTest,
+  generateModelHypothesisScript,
+} from "./ModelHypothesis.js";
+
+// ── Quantile Treatment Effects (unconditional) ───────────────────────────────
+export { quantileTreatmentEffect } from "./QTE.js";

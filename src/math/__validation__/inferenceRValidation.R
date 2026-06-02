@@ -18,3 +18,20 @@ library(boot)
 set.seed(1); v <- c(2, 4, 4, 4, 5, 5, 7, 9)
 bs <- boot(v, function(d, i) mean(d[i]), R = 2000)
 print(boot.ci(bs, type = c("perc", "basic", "bca")))
+
+# ── Quantile Treatment Effects (unconditional) — suiteQTE ─────────────────────
+# Fixture: location+scale shift. D = 0/1.
+y  <- c(1, 2, 3, 4, 5, 2, 4, 6, 8, 10)
+D  <- c(0, 0, 0, 0, 0, 1, 1, 1, 1, 1)
+y0 <- y[D == 0]; y1 <- y[D == 1]
+taus <- c(0.1, 0.25, 0.5, 0.75, 0.9)
+# Method 1 — difference in sample quantiles (type = 7, R default):
+q0 <- quantile(y0, taus, type = 7)   # -> 1.4, 2, 3, 4, 4.6
+q1 <- quantile(y1, taus, type = 7)   # -> 2.8, 4, 6, 8, 9.2
+print(rbind(q0, q1, qte = q1 - q0))  # qte -> 1.4, 2, 3, 4, 4.6
+# ATE benchmark == lm(Y~D) slope:
+print(coef(lm(y ~ D))["D"])          # -> 3
+# Method 2 — quantile regression of Y on D; coef on D == Method-1 QTE.
+# At data-point taus {.25,.5,.75} this matches the type-7 difference exactly.
+library(quantreg)
+for (t in taus) print(c(tau = t, qte_rq = coef(rq(y ~ D, tau = t))["D"]))

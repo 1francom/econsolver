@@ -11,6 +11,7 @@ import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "..
 import { pf } from "../calcEngine.js";
 import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest } from "../SampleTests.js";
 import { jackknife, bootstrapStatistic, bootstrapMean, permutationTest, permutationTwoSampleMean } from "../Resampling.js";
+import { quantileTreatmentEffect } from "../QTE.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -290,7 +291,58 @@ function suiteRCrossCheck(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife], ["bootstrap", suiteBootstrap], ["permutation", suitePermutation], ["R-crosscheck", suiteRCrossCheck]];
+// QTE — unconditional quantile treatment effect. Fixture (location+scale shift):
+//   y0 = 1,2,3,4,5   y1 = 2,4,6,8,10   D = 0 / 1
+// Type-7 quantiles (R quantile(type=7), idx = τ·(n−1)):
+//   q0(.1,.25,.5,.75,.9) = 1.4, 2, 3, 4, 4.6
+//   q1(.1,.25,.5,.75,.9) = 2.8, 4, 6, 8, 9.2
+//   qte                  = 1.4, 2, 3, 4, 4.6
+//   ate = mean1 − mean0 = 6 − 3 = 3 (== lm(Y~D) slope)
+// At τ ∈ {.25,.5,.75} the idx is an integer (a data point) so the QTE equals the
+// difference of order statistics — identical to rq(Y~D,τ)$coef[2] (Method 1==2).
+function suiteQTE(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  const outcome   = [1, 2, 3, 4, 5, 2, 4, 6, 8, 10];
+  const treatment = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+  const taus = [0.1, 0.25, 0.5, 0.75, 0.9];
+  const r = quantileTreatmentEffect(outcome, treatment, { taus, ci: "none" });
+  // Group quantiles.
+  const eq0 = [1.4, 2, 3, 4, 4.6], eq1 = [2.8, 4, 6, 8, 9.2], eqte = [1.4, 2, 3, 4, 4.6];
+  for (let j = 0; j < taus.length; j++) {
+    T(check(`qte.q0[${taus[j]}]`, r.q0[j], eq0[j], TOL_STAT));
+    T(check(`qte.q1[${taus[j]}]`, r.q1[j], eq1[j], TOL_STAT));
+    T(check(`qte.qte[${taus[j]}]`, r.qte[j], eqte[j], TOL_STAT));
+  }
+  // ATE benchmark == lm(Y~D) slope.
+  T(check("qte.ate", r.ate, 3, TOL_STAT));
+  T(check("qte.mean0", r.mean0, 3, TOL_STAT));
+  T(check("qte.mean1", r.mean1, 6, TOL_STAT));
+  // Group sizes + chosen levels (treated defaults to the larger level).
+  T(check("qte.n0", r.n0, 5, TOL));
+  T(check("qte.n1", r.n1, 5, TOL));
+  T(check("qte.treatedLevel", r.treatedLevel, 1, TOL));
+  T(check("qte.controlLevel", r.controlLevel, 0, TOL));
+  // ECDF coordinates: last cumulative proportion is 1, monotone.
+  T(check("qte.ecdf0.last", r.ecdf0.F[r.ecdf0.F.length - 1], 1, TOL_STAT));
+  T(check("qte.ecdf1.last", r.ecdf1.F[r.ecdf1.F.length - 1], 1, TOL_STAT));
+  // Binary guard: 3 distinct levels → error.
+  const e = quantileTreatmentEffect([1, 2, 3, 4], [0, 1, 2, 0], { ci: "none" });
+  T(check("qte.nonbinary.error", e.error ? 1 : 0, 1, TOL));
+  // Bootstrap band: seeded → reproducible, ordered, brackets the point estimate region.
+  const b1 = quantileTreatmentEffect(outcome, treatment, { taus, ci: "percentile", B: 400, seed: 42 });
+  const b2 = quantileTreatmentEffect(outcome, treatment, { taus, ci: "percentile", B: 400, seed: 42 });
+  T(check("qte.boot.repro", b1.ci.low[2], b2.ci.low[2], TOL));
+  T(check("qte.boot.seedEcho", b1.seed, 42, TOL));
+  T(check("qte.boot.ordered", b1.ci.low[2] <= b1.ci.high[2] ? 1 : 0, 1, TOL));
+  // log transform drops non-positive outcomes (count surfaced).
+  const lg = quantileTreatmentEffect([0, 1, 2, 4, 8, -1, 1, 2, 4, 8], [0, 0, 0, 0, 0, 1, 1, 1, 1, 1], { taus, transform: "log", ci: "none" });
+  T(check("qte.log.dropped", lg.droppedLog, 2, TOL)); // the 0 and the -1
+  T(check("qte.log.transformFlag", lg.transform === "log" ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife], ["bootstrap", suiteBootstrap], ["permutation", suitePermutation], ["qte", suiteQTE], ["R-crosscheck", suiteRCrossCheck]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));

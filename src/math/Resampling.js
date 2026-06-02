@@ -40,7 +40,7 @@
 import { makeRNG, shuffle, sampleWithReplacement } from "./rng.js";
 import { pnorm, qnorm } from "./calcEngine.js";
 
-function clean(values) {
+export function clean(values) {
   return values.filter(v => typeof v === "number" && isFinite(v));
 }
 
@@ -59,8 +59,8 @@ function sd(arr) {
   return Math.sqrt(s / (arr.length - 1));
 }
 
-// Linear-interpolated empirical quantile.
-function quantile(sorted, p) {
+// Linear-interpolated empirical quantile (type-7, matches R quantile(type=7)).
+export function quantile(sorted, p) {
   if (!sorted.length) return NaN;
   if (p <= 0) return sorted[0];
   if (p >= 1) return sorted[sorted.length - 1];
