@@ -10,6 +10,7 @@
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
 import { pf } from "../calcEngine.js";
 import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest } from "../SampleTests.js";
+import { jackknife } from "../Resampling.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -188,7 +189,25 @@ function suiteVarRatio(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio]];
+function suiteJackknife(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  // Jackknife of the mean is exactly unbiased: jackEstimate == estimate, bias 0.
+  const v = [2, 4, 4, 4, 5, 5, 7, 9]; // mean = 5
+  const r = jackknife(v, "mean");
+  T(check("jack.estimate", r.estimate, 5, TOL_STAT));
+  T(check("jack.jackEstimate", r.jackEstimate, 5, TOL_STAT));
+  T(check("jack.bias", r.bias, 0, TOL_STAT));
+  // Jackknife SE of the mean = sample SE = s/sqrt(n), with s the SAMPLE sd
+  // (n-1 denom). SS=32, n=8 → se = sqrt(32/(8*7)) = sqrt(32/56) = 0.7559289.
+  // (NB: 2/sqrt(8) uses the POPULATION sd and is incorrect here.)
+  T(check("jack.se", r.se, 0.7559289, 1e-6));
+  T(check("jack.loo.length", r.values.length, 8, TOL));
+  T(check("jack.error", jackknife([1], "mean").error ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));

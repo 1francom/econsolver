@@ -37,6 +37,9 @@
 //     receives `nUsed` to confirm how many observations actually entered the
 //     analysis.
 
+import { makeRNG, shuffle, sampleWithReplacement } from "./rng.js";
+import { pnorm, qnorm } from "./calcEngine.js";
+
 function clean(values) {
   return values.filter(v => typeof v === "number" && isFinite(v));
 }
@@ -65,6 +68,47 @@ function quantile(sorted, p) {
   const lo = Math.floor(idx), hi = Math.ceil(idx);
   if (lo === hi) return sorted[lo];
   return sorted[lo] + (idx - lo) * (sorted[hi] - sorted[lo]);
+}
+
+// ─── STATISTIC REGISTRY (single-sample, operate on number[]) ──────────────────
+function median(arr) {
+  const s = arr.slice().sort((a, b) => a - b);
+  const n = s.length;
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+}
+function variance(arr) {
+  const m = mean(arr);
+  let s = 0; for (let i = 0; i < arr.length; i++) { const d = arr[i] - m; s += d * d; }
+  return s / (arr.length - 1);
+}
+function trimmedMean10(arr) {
+  const s = arr.slice().sort((a, b) => a - b);
+  const k = Math.floor(arr.length * 0.1);
+  const t = s.slice(k, s.length - k);
+  return mean(t.length ? t : s);
+}
+function iqr(arr) {
+  const s = arr.slice().sort((a, b) => a - b);
+  return quantile(s, 0.75) - quantile(s, 0.25);
+}
+
+const STATISTICS = { mean, median, sd, variance, trimmedMean10, iqr };
+
+// Leave-one-out jackknife of an arbitrary statistic.
+export function jackknife(values, statName = "mean") {
+  const v = clean(values);
+  const n = v.length;
+  if (n < 2) return { error: "Need at least 2 finite observations." };
+  const stat = STATISTICS[statName];
+  if (!stat) return { error: `Unknown statistic '${statName}'.` };
+  const estimate = stat(v);
+  const loo = new Array(n);
+  for (let i = 0; i < n; i++) loo[i] = stat(v.slice(0, i).concat(v.slice(i + 1)));
+  const jm = mean(loo);
+  const bias = (n - 1) * (jm - estimate);
+  let s = 0; for (let i = 0; i < n; i++) { const d = loo[i] - jm; s += d * d; }
+  const se = Math.sqrt((n - 1) / n * s);
+  return { estimate, jackEstimate: jm, bias, se, values: loo };
 }
 
 // Fisher-Yates partial shuffle: returns first m elements of a shuffled copy
