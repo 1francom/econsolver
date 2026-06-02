@@ -8,6 +8,7 @@
 // process exit code so CI / a human notices.
 
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
+import { pf } from "../calcEngine.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -75,7 +76,24 @@ function suiteRNG(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG]];
+function suitePf(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  // x <= 0 → 0.
+  T(check("pf.zero", pf(0, 4, 4), 0, TOL));
+  T(check("pf.negative", pf(-1, 4, 4), 0, TOL));
+  // Median-ish symmetry: for equal df, F=1 sits at the median of the F dist
+  // only approximately; instead validate against R pf() reference values.
+  //   R: pf(1, 4, 4) = 0.5
+  T(check("pf.equaldf.at1", pf(1, 4, 4), 0.5, TOL_P));
+  //   R: pf(2, 5, 10) = 0.8364716   (qf inverse cross-check)
+  T(check("pf.5_10.at2", pf(2, 5, 10), 0.8364716, TOL_P));
+  //   R: pf(3, 2, 20) = 0.9268556
+  T(check("pf.2_20.at3", pf(3, 2, 20), 0.9268556, TOL_P));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));
