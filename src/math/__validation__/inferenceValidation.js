@@ -9,7 +9,7 @@
 
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
 import { pf } from "../calcEngine.js";
-import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest } from "../SampleTests.js";
+import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest } from "../SampleTests.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -171,7 +171,24 @@ function suiteCorr(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr]];
+function suiteVarRatio(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  // Equal variances (both 2.5) → F = 1, df = (4,4), two-sided p = 1.
+  const r = varianceRatioTest([1, 2, 3, 4, 5], [2, 3, 4, 5, 6], {});
+  T(check("var-ratio.F", r.stat, 1, TOL_STAT));
+  T(check("var-ratio.df1", r.df1, 4, TOL));
+  T(check("var-ratio.df2", r.df2, 4, TOL));
+  T(check("var-ratio.p", r.pValue, 1, TOL_P));
+  // a=[1,3,5,7,9] var=10, b var=2.5 → F=4.
+  const r2 = varianceRatioTest([1, 3, 5, 7, 9], [2, 3, 4, 5, 6], {});
+  T(check("var-ratio.F2", r2.stat, 4, TOL_STAT));
+  // Zero-variance group → error.
+  T(check("var-ratio.error", varianceRatioTest([2, 2, 2], [1, 2, 3], {}).error ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));

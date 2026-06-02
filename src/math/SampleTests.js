@@ -4,7 +4,7 @@
 // users can test means/variances of loaded or simulated data before modeling.
 // No React, no UI imports — math only.
 
-import { pt, pnorm, pchisq } from "./calcEngine.js";
+import { pt, pnorm, pchisq, pf } from "./calcEngine.js";
 
 function finite(v) {
   return typeof v === "number" && isFinite(v);
@@ -211,4 +211,16 @@ export function correlationTest(a, b, { method = "pearson", alternative = "two-s
   const stat = r * Math.sqrt(df / (1 - r * r));
   const pValue = clamp01(pFromCdf(pt(stat, df), alternative));
   return { test: "correlation", method, n, estimate: r, df, nullValue: 0, statLabel: "t", stat, alternative, pValue };
+}
+
+// Variance-ratio F-test of H0: σ²_A / σ²_B = 1 (assumes normality).
+// Statistic s²_A / s²_B ~ F(n_A−1, n_B−1).
+export function varianceRatioTest(a, b, { alternative = "two-sided" } = {}) {
+  const A = sampleMoments(a), B = sampleMoments(b);
+  if (A.n < 2 || B.n < 2) return { error: "Each group needs at least 2 numeric observations." };
+  if (!(A.variance > 0 && B.variance > 0)) return { error: "Both groups need positive variance." };
+  const df1 = A.n - 1, df2 = B.n - 1;
+  const stat = A.variance / B.variance;
+  const pValue = clamp01(pFromCdf(pf(stat, df1, df2), alternative));
+  return { test: "var-ratio", nA: A.n, nB: B.n, estimate: stat, df1, df2, nullValue: 1, statLabel: "F", stat, alternative, pValue };
 }
