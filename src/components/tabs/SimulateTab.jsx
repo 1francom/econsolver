@@ -7,7 +7,9 @@ import { useTheme, mono } from "../modeling/shared.jsx";
 import { HintBox } from "../HelpSystem.jsx";
 import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.js";
 import { useSessionLog } from "../../services/session/sessionLog.jsx";
+import { mulberry32 } from "../../math/rng.js";
 import StatWorkspace from "./statsim/StatWorkspace.jsx";
+import SampleTestPanel from "./statsim/SampleTestPanel.jsx";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
@@ -26,16 +28,9 @@ const fieldStyle = C => ({ background: C.surface2, border: `1px solid ${C.border
 const thStyle    = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2, whiteSpace: "nowrap" });
 const tdStyle    = C => ({ padding: "0.32rem 0.65rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
 
-// ─── SEEDED PRNG (mulberry32) ─────────────────────────────────────────────────
-function mulberry32(seed) {
-  let s = seed >>> 0;
-  return function () {
-    s |= 0; s = s + 0x6D2B79F5 | 0;
-    let t = Math.imul(s ^ s >>> 15, 1 | s);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
+// ─── SEEDED PRNG ──────────────────────────────────────────────────────────────
+// mulberry32 now lives in src/math/rng.js (shared across the Stat & Simulation
+// module). The shared algorithm is byte-identical to the previous local copy.
 
 // Box-Muller using the seeded rng
 function normalSample(rng, mean, sd) {
@@ -950,6 +945,14 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
           </div>
         )}
       </div>
+
+      {/* ── Hypothesis test on simulated data ── */}
+      {generated && (
+        <SampleTestPanel
+          title="∗ Hypothesis test — simulated data"
+          columns={generated.headers.map(h => ({ name: h, values: generated.rows.map(r => Number(r[h])) }))}
+        />
+      )}
 
       {/* ── Variable Workspace & Statistics (moved from Calculate) ── */}
       <div style={{ borderTop: `1px solid ${C.border}`, marginTop: "2rem", paddingTop: "1.8rem" }}>
