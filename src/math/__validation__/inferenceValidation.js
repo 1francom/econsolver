@@ -9,7 +9,7 @@
 
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
 import { pf } from "../calcEngine.js";
-import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest } from "../SampleTests.js";
+import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest } from "../SampleTests.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -153,7 +153,25 @@ function suiteProp(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp]];
+function suiteCorr(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  // a=[1,2,3], b=[1,3,2]: mx=my=2, sxy=1, sxx=syy=2 → r=0.5.
+  // df=1, t = 0.5*sqrt(1/(1-0.25)) = 0.5*1.1547005 = 0.5773503.
+  const r = correlationTest([1, 2, 3], [1, 3, 2], { method: "pearson" });
+  T(check("corr.pearson.r", r.estimate, 0.5, TOL_STAT));
+  T(check("corr.pearson.df", r.df, 1, TOL));
+  T(check("corr.pearson.t", r.stat, 0.5773503, 1e-6));
+  // Spearman on a monotonic-but-nonlinear pair → rank correlation 1.
+  const s = correlationTest([1, 2, 3, 4], [1, 4, 9, 16], { method: "spearman" });
+  T(check("corr.spearman.r", s.estimate, 1, TOL_STAT));
+  T(check("corr.spearman.method", s.method === "spearman" ? 1 : 0, 1, TOL));
+  // Too few pairs → error.
+  T(check("corr.error", correlationTest([1, 2], [1, 2], {}).error ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));

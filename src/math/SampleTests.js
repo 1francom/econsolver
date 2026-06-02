@@ -176,3 +176,39 @@ export function twoPropTest(s1, n1, s2, n2, { alternative = "two-sided" } = {}) 
   const pValue = clamp01(pFromCdf(pnorm(stat), alternative));
   return { test: "two-prop", nA: na, nB: nb, phat1: p1, phat2: p2, estimate: diff, se, nullValue: 0, statLabel: "z", stat, alternative, pValue };
 }
+
+// Average (fractional) ranks, 1-based, ties shared.
+function ranks(arr) {
+  const idx = arr.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]);
+  const r = new Array(arr.length);
+  let i = 0;
+  while (i < idx.length) {
+    let j = i;
+    while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++;
+    const avg = (i + j) / 2 + 1;
+    for (let k = i; k <= j; k++) r[idx[k][1]] = avg;
+    i = j + 1;
+  }
+  return r;
+}
+
+// Correlation test of H0: ρ = 0 via the t-approximation
+// t = r·√((n−2)/(1−r²)), df = n−2. method "pearson" | "spearman" (rank corr).
+export function correlationTest(a, b, { method = "pearson", alternative = "two-sided" } = {}) {
+  const x0 = (a ?? []).map(Number), y0 = (b ?? []).map(Number);
+  const k = Math.min(x0.length, y0.length);
+  let X = [], Y = [];
+  for (let i = 0; i < k; i++) if (finite(x0[i]) && finite(y0[i])) { X.push(x0[i]); Y.push(y0[i]); }
+  if (X.length < 3) return { error: "Need at least 3 complete numeric pairs." };
+  if (method === "spearman") { X = ranks(X); Y = ranks(Y); }
+  const n = X.length;
+  const mx = X.reduce((s, v) => s + v, 0) / n, my = Y.reduce((s, v) => s + v, 0) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < n; i++) { const dx = X[i] - mx, dy = Y[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
+  if (!(sxx > 0 && syy > 0)) return { error: "Zero variance — correlation undefined." };
+  const r = sxy / Math.sqrt(sxx * syy);
+  const df = n - 2;
+  const stat = r * Math.sqrt(df / (1 - r * r));
+  const pValue = clamp01(pFromCdf(pt(stat, df), alternative));
+  return { test: "correlation", method, n, estimate: r, df, nullValue: 0, statLabel: "t", stat, alternative, pValue };
+}
