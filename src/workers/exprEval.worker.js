@@ -22,6 +22,8 @@
 
 "use strict";
 
+import { drawSamples } from "../math/dgpDraw.js";
+
 // ── Helpers injected into mutate expressions ──────────────────────────────────
 const HELPERS = {
   ifelse:    (cond, a, b) => cond ? a : b,
@@ -122,7 +124,9 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
 }
 
 // ── eval_scope (DGP builder for SimulateTab) ──────────────────────────────────
-// Mirrors SimulateTab's mulberry32 / normalSample / drawSamples / buildScope.
+// drawSamples/normalSample/coerceLevel/parseLevels are imported from the shared
+// src/math/dgpDraw.js (single source — no drift vs the main-thread preview).
+// The worker keeps its own seeded mulberry32 to feed drawSamples.
 
 function mulberry32(seed) {
   let s = seed >>> 0;
@@ -132,46 +136,6 @@ function mulberry32(seed) {
     t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
-}
-
-function normalSample(rng, mean, sd) {
-  const u1 = rng(), u2 = rng();
-  const z = Math.sqrt(-2 * Math.log(u1 + 1e-15)) * Math.cos(2 * Math.PI * u2);
-  return mean + sd * z;
-}
-
-function drawSamples(rng, n, dist, params) {
-  const arr = [];
-  for (let i = 0; i < n; i++) {
-    const u = rng();
-    switch (dist) {
-      case "Normal":      arr.push(normalSample(rng, +(params.mean ?? 0), +(params.sd ?? 1))); break;
-      case "Uniform":     arr.push((+(params.min ?? 0)) + u * ((+(params.max ?? 1)) - (+(params.min ?? 0)))); break;
-      case "Bernoulli":   arr.push(u < (+(params.p ?? 0.5)) ? 1 : 0); break;
-      case "Poisson": {
-        const lam = +(params.lambda ?? 1), L = Math.exp(-lam);
-        let k = 0, p = 1;
-        do { k++; p *= rng(); } while (p > L);
-        arr.push(k - 1); break;
-      }
-      case "Exponential": arr.push(-Math.log(1 - u + 1e-15) / (+(params.lambda ?? 1))); break;
-      case "t": {
-        const df = +(params.df ?? 5);
-        const z1 = normalSample(rng, 0, 1);
-        let chi = 0;
-        for (let j = 0; j < df; j++) { const z = normalSample(rng, 0, 1); chi += z * z; }
-        arr.push(z1 / Math.sqrt(chi / df)); break;
-      }
-      case "Chi-squared": {
-        const df2 = +(params.df ?? 3);
-        let chi2 = 0;
-        for (let j = 0; j < df2; j++) { const z = normalSample(rng, 0, 1); chi2 += z * z; }
-        arr.push(chi2); break;
-      }
-      default: arr.push(0);
-    }
-  }
-  return arr;
 }
 
 function evalScope({ variables, nObs, seed }) {
@@ -197,7 +161,7 @@ function evalScope({ variables, nObs, seed }) {
       const raw = (v.params.value ?? "0").trim();
       try {
         const val = Function("N", "observations", `"use strict"; return (${raw});`)(nObs, nObs);
-        scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
+        scope[v.name] = new Array(nObs).fill(typeof val === "number" || typeof val === "string" ? val : 0);
       } catch (e) { return { error: `${v.name}: ${e.message}` }; }
 
     } else if (v.dist === "Sequence") {

@@ -20,8 +20,12 @@ import { useState, useMemo } from "react";
 import { evalExpression, buildScope,
   dnorm, pnorm, qnorm, dt, pt, qt, dbinom, pbinom, dpois, ppois, dchisq, pchisq, qchisq,
 } from "../../../math/calcEngine.js";
-import { bootstrapMean, subsampleMean, permutationTwoSampleMean } from "../../../math/Resampling.js";
+import { bootstrapMean, subsampleMean, permutationTwoSampleMean, bootstrapStatistic, permutationTest } from "../../../math/Resampling.js";
+import { mulberry32 } from "../../../math/rng.js";
+import { useSessionLog } from "../../../services/session/sessionLog.jsx";
 import { useTheme } from "../../../ThemeContext.jsx";
+import SampleTestPanel from "./SampleTestPanel.jsx";
+import QTEPanel from "./QTEPanel.jsx";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
@@ -54,7 +58,7 @@ const thStyle = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily
 const tdStyle = C => ({ padding: "0.35rem 0.75rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
 
 // ─── SCRIPT GENERATOR ────────────────────────────────────────────────────────
-export function generateCalcScript(language, variables, computeds) {
+function generateCalcScript(language, variables, computeds) {
   const lines = [];
   if (language === "r") {
     variables.forEach(v => {
@@ -422,17 +426,9 @@ function ProbCalc() {
   );
 }
 
-// ─── SEEDED PRNG (mulberry32) ─────────────────────────────────────────────────
-function mulberry32(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s += 0x6D2B79F5;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// ─── SEEDED PRNG ──────────────────────────────────────────────────────────────
+// mulberry32 now lives in src/math/rng.js (shared); local makeRNG kept for the
+// random-variate generators below.
 function makeRNG(seed) {
   if (seed == null || seed === "") return () => Math.random();
   const s = parseInt(seed, 10);
@@ -534,7 +530,6 @@ function MiniHist({ values, color }) {
   const counts = new Array(NBINS).fill(0);
   for (const v of values) counts[Math.min(NBINS - 1, Math.max(0, Math.floor((v - lo) / bw)))]++;
   const maxC = Math.max(...counts);
-  const xp = v => PL + (W - PL - PR) * (v - lo) / span;
   const yp = c => H - PB - (H - PT - PB) * (c / maxC);
   const bwPx = (W - PL - PR) / NBINS;
   return (
@@ -676,6 +671,7 @@ function DistributionsSection({ onAddColumn, onCreateDataset }) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function StatWorkspace({ rows = [], headers = [], onAddDataset, onAddColumn, onCreateDataset }) {
   const { C } = useTheme();
+  const { appendLog } = useSessionLog();
   // ── Variable workspace ─────────────────────────────────────────────────────
   const [variables,    setVariables]   = useState([]);
   const [computeds,    setComputeds]   = useState([]);
@@ -705,6 +701,11 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
   const [rsM,       setRsM]       = useState(0);
   const [rsResult,  setRsResult]  = useState(null);
   const [rsBusy,    setRsBusy]    = useState(false);
+  const [rsStat,    setRsStat]    = useState("mean");        // bootstrap statistic
+  const [rsCiType,  setRsCiType]  = useState("percentile");
+  const [rsSeed,    setRsSeed]    = useState("");
+  const [rsContrast,setRsContrast]= useState("diffMeans");
+  const [rsAlt,     setRsAlt]     = useState("two-sided");
 
   // ── Probability ─────────────────────────────────────────────────────────────
   const [probOpen,  setProbOpen]  = useState(false);
@@ -957,7 +958,6 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
           </>
         )}
       </div>
-
       {/* ── 2b. Resampling & permutation inference ─────────────────────────── */}
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
         <SectionHeader label="Resampling & permutation" open={rsOpen} onToggle={() => setRsOpen(o => !o)} badge={!rows.length ? "no active dataset" : null} />
@@ -999,10 +999,11 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
             setTimeout(() => {
               try {
                 let res;
+                const seedArg = rsSeed === "" ? null : Number(rsSeed);
                 if (rsMode === "boot") {
-                  res = bootstrapMean(colVals(rsCol), rsB, 0.05);
+                  res = bootstrapStatistic(colVals(rsCol), rsStat, { B: rsB, alpha: 0.05, ciType: rsCiType, seed: seedArg });
                 } else if (rsMode === "subsample") {
-                  res = subsampleMean(colVals(rsCol), mEffective, rsB, 0.05);
+                  res = subsampleMean(colVals(rsCol), mEffective, rsB, 0.05, seedArg);
                 } else {
                   if (!rsGroupCol || !rsLevelA || !rsLevelB || rsLevelA === rsLevelB) {
                     res = { error: "Pick two distinct levels of the group column." };
@@ -1014,10 +1015,31 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                       if (g === rsLevelA) a.push(v);
                       else if (g === rsLevelB) b.push(v);
                     }
-                    res = permutationTwoSampleMean(a, b, rsB);
+                    res = permutationTest(a, b, rsContrast, { B: rsB, exact: null, seed: seedArg, alternative: rsAlt });
                   }
                 }
                 setRsResult(res);
+                if (res && !res.error) {
+                  if (rsMode === "boot") {
+                    appendLog?.({
+                      module: "stat", opType: "bootstrap",
+                      params: { col: rsCol, statistic: rsStat, ciType: rsCiType, B: rsB, seed: res.seed },
+                      label: `Bootstrap ${rsStat}(${rsCol}): est=${res.estimate?.toFixed?.(4)}, 95% CI=[${res.ciLow?.toFixed?.(4)}, ${res.ciHigh?.toFixed?.(4)}] (${res.ciType}), seed=${res.seed}`,
+                    });
+                  } else if (rsMode === "subsample") {
+                    appendLog?.({
+                      module: "stat", opType: "subsample",
+                      params: { col: rsCol, m: res.m, B: rsB, seed: res.seed },
+                      label: `Subsample mean(${rsCol}): est=${res.meanHat?.toFixed?.(4)}, m=${res.m}, seed=${res.seed}`,
+                    });
+                  } else {
+                    appendLog?.({
+                      module: "stat", opType: "permutation",
+                      params: { col: rsCol, groupCol: rsGroupCol, levelA: rsLevelA, levelB: rsLevelB, contrast: rsContrast, alternative: rsAlt, B: rsB, exact: res.exact, seed: res.seed },
+                      label: `Permutation ${rsContrast} (${rsLevelA} vs ${rsLevelB}): obs=${res.observed?.toFixed?.(4)}, p=${res.pValue?.toFixed?.(4)}, ${res.exact ? `exact (${res.nPerm} perms)` : `MC B=${res.nPerm}, seed=${res.seed}`}`,
+                    });
+                  }
+                }
               } catch (e) {
                 setRsResult({ error: e.message });
               } finally {
@@ -1041,6 +1063,26 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                   {numericHeaders.map(h => <option key={h}>{h}</option>)}
                 </select>
 
+                {rsMode === "boot" && (
+                  <>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>statistic</span>
+                    <select value={rsStat} onChange={e => { setRsStat(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 140 }}>
+                      <option value="mean">mean</option>
+                      <option value="median">median</option>
+                      <option value="sd">sd</option>
+                      <option value="variance">variance</option>
+                      <option value="trimmedMean10">trimmed mean 10%</option>
+                      <option value="iqr">IQR</option>
+                    </select>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>CI</span>
+                    <select value={rsCiType} onChange={e => { setRsCiType(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 130 }}>
+                      <option value="percentile">percentile</option>
+                      <option value="basic">basic</option>
+                      <option value="bca">BCa</option>
+                    </select>
+                  </>
+                )}
+
                 {rsMode === "perm" && (
                   <>
                     <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>group</span>
@@ -1057,6 +1099,18 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                     <select value={rsLevelB} onChange={e => { setRsLevelB(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 140 }} disabled={!levels.length}>
                       <option value="">—</option>
                       {levels.map(l => <option key={l}>{l}</option>)}
+                    </select>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>contrast</span>
+                    <select value={rsContrast} onChange={e => { setRsContrast(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 150 }}>
+                      <option value="diffMeans">diff of means</option>
+                      <option value="diffMedians">diff of medians</option>
+                      <option value="diffSd">diff of sd</option>
+                      <option value="meanRatio">ratio of means</option>
+                    </select>
+                    <select value={rsAlt} onChange={e => { setRsAlt(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C) }}>
+                      <option value="two-sided">two-sided</option>
+                      <option value="greater">greater</option>
+                      <option value="less">less</option>
                     </select>
                   </>
                 )}
@@ -1076,6 +1130,10 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                   onChange={e => setRsB(Math.max(50, parseInt(e.target.value) || 50))}
                   style={{ ...fieldStyle(C), width: 80 }} />
 
+                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginLeft: 8 }}>seed</span>
+                <input type="number" step="1" value={rsSeed} placeholder="auto"
+                  onChange={e => setRsSeed(e.target.value)} style={{ ...fieldStyle(C), width: 80 }} />
+
                 <Btn ch={rsBusy ? "Running…" : "Run"} v="solid" color={C.teal} onClick={runRS} sm
                   dis={rsBusy || !rsCol || (rsMode === "perm" && (!rsGroupCol || !rsLevelA || !rsLevelB || rsLevelA === rsLevelB))} />
               </div>
@@ -1088,12 +1146,12 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
 
               {rsResult?.error && <ErrBox msg={rsResult.error} />}
 
-              {rsResult && !rsResult.error && rsResult.method === "bootstrap" && (
+              {rsResult && !rsResult.error && rsResult.ciType && (
                 <ResultBox color={C.teal}>
-                  <div>mean      = <span style={{ color: C.teal }}>{fmt(rsResult.meanHat, 4)}</span> &nbsp;&nbsp; n = {rsResult.nUsed} &nbsp;&nbsp; B = {rsResult.B}</div>
-                  <div>SE_boot   = {fmt(rsResult.seBoot, 4)}</div>
-                  <div>95% CI    = [{fmt(rsResult.ciLo, 4)}, {fmt(rsResult.ciHi, 4)}] &nbsp;(percentile)</div>
-                  <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.meanHat} ciLo={rsResult.ciLo} ciHi={rsResult.ciHi} />
+                  <div>{rsResult.stat}    = <span style={{ color: C.teal }}>{fmt(rsResult.estimate, 4)}</span> &nbsp;&nbsp; B = {rsResult.B} &nbsp;&nbsp; seed = {rsResult.seed}</div>
+                  <div>SE_boot   = {fmt(rsResult.bootSE, 4)} &nbsp;&nbsp; bias = {fmt(rsResult.bias, 4)}</div>
+                  <div>95% CI    = [{fmt(rsResult.ciLow, 4)}, {fmt(rsResult.ciHigh, 4)}] &nbsp;({rsResult.ciType})</div>
+                  <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.estimate} ciLo={rsResult.ciLow} ciHi={rsResult.ciHigh} />
                 </ResultBox>
               )}
 
@@ -1107,19 +1165,30 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                 </ResultBox>
               )}
 
-              {rsResult && !rsResult.error && rsResult.method === "permutation" && (
+              {rsResult && !rsResult.error && rsResult.contrast && (
                 <ResultBox color={C.gold}>
-                  <div>mean(A)   = {fmt(rsResult.meanA, 4)} &nbsp;&nbsp; n_A = {rsResult.nA}</div>
-                  <div>mean(B)   = {fmt(rsResult.meanB, 4)} &nbsp;&nbsp; n_B = {rsResult.nB}</div>
-                  <div>Δ_obs     = <span style={{ color: C.gold }}>{fmt(rsResult.diffObserved, 4)}</span></div>
-                  <div>p (2-sided) = <span style={{ color: rsResult.pTwoSided < 0.05 ? C.gold : C.textDim }}>{fmt(rsResult.pTwoSided, 4)}</span> &nbsp; B = {rsResult.B}</div>
-                  <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.diffObserved} color={C.gold} />
+                  <div>contrast  = {rsResult.contrast} &nbsp;&nbsp; ({rsLevelA} vs {rsLevelB})</div>
+                  <div>observed  = <span style={{ color: C.gold }}>{fmt(rsResult.observed, 4)}</span></div>
+                  <div>p ({rsResult.alternative}) = <span style={{ color: rsResult.pValue < 0.05 ? C.gold : C.textDim }}>{fmt(rsResult.pValue, 4)}</span> &nbsp; {rsResult.exact ? `exact (${rsResult.nPerm} perms)` : `MC B=${rsResult.nPerm}, seed=${rsResult.seed}`}</div>
+                  <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.observed} color={C.gold} />
                 </ResultBox>
               )}
             </div>
           );
         })()}
       </div>
+
+      {/* ── 2c. Hypothesis test (mean / variance / parameter) ──────────────── */}
+      <SampleTestPanel
+        title="∗ Hypothesis test"
+        columns={numericHeaders.map(h => ({ name: h, values: rows.map(r => Number(r[h])) }))}
+      />
+
+      {/* ── 2d. Quantile Treatment Effects (unconditional) ─────────────────── */}
+      <QTEPanel
+        title="∗ Quantile Treatment Effects"
+        columns={numericHeaders.map(h => ({ name: h, values: rows.map(r => Number(r[h])) }))}
+      />
 
       {/* ── 3. Dataset from vectors ─────────────────────────────────────────── */}
       {vectorVars.length > 0 && (

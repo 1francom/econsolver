@@ -7,7 +7,11 @@ import { useTheme, mono } from "../modeling/shared.jsx";
 import { HintBox } from "../HelpSystem.jsx";
 import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.js";
 import { useSessionLog } from "../../services/session/sessionLog.jsx";
+import { mulberry32 } from "../../math/rng.js";
+import { drawSamples } from "../../math/dgpDraw.js";
 import StatWorkspace from "./statsim/StatWorkspace.jsx";
+import SampleTestPanel from "./statsim/SampleTestPanel.jsx";
+import QTEPanel from "./statsim/QTEPanel.jsx";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
@@ -26,60 +30,12 @@ const fieldStyle = C => ({ background: C.surface2, border: `1px solid ${C.border
 const thStyle    = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2, whiteSpace: "nowrap" });
 const tdStyle    = C => ({ padding: "0.32rem 0.65rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
 
-// ─── SEEDED PRNG (mulberry32) ─────────────────────────────────────────────────
-function mulberry32(seed) {
-  let s = seed >>> 0;
-  return function () {
-    s |= 0; s = s + 0x6D2B79F5 | 0;
-    let t = Math.imul(s ^ s >>> 15, 1 | s);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
+// ─── SEEDED PRNG ──────────────────────────────────────────────────────────────
+// mulberry32 now lives in src/math/rng.js (shared across the Stat & Simulation
+// module). The shared algorithm is byte-identical to the previous local copy.
 
-// Box-Muller using the seeded rng
-function normalSample(rng, mean, sd) {
-  const u1 = rng(), u2 = rng();
-  const z = Math.sqrt(-2 * Math.log(u1 + 1e-15)) * Math.cos(2 * Math.PI * u2);
-  return mean + sd * z;
-}
-
-function drawSamples(rng, n, dist, params) {
-  const arr = [];
-  for (let i = 0; i < n; i++) {
-    const u = rng();
-    switch (dist) {
-      case "Normal":     arr.push(normalSample(rng, +params.mean ?? 0, +params.sd ?? 1)); break;
-      case "Uniform":    arr.push((+params.min ?? 0) + u * ((+params.max ?? 1) - (+params.min ?? 0))); break;
-      case "Bernoulli":  arr.push(u < (+params.p ?? 0.5) ? 1 : 0); break;
-      case "Poisson": {
-        const lam = +params.lambda ?? 1;
-        const L = Math.exp(-lam); let k = 0, p = 1;
-        do { k++; p *= rng(); } while (p > L);
-        arr.push(k - 1);
-        break;
-      }
-      case "Exponential": arr.push(-Math.log(1 - u + 1e-15) / (+params.lambda ?? 1)); break;
-      case "t": {
-        const df = +params.df ?? 5;
-        const z1 = normalSample(rng, 0, 1);
-        let chi = 0;
-        for (let j = 0; j < df; j++) { const z = normalSample(rng, 0, 1); chi += z * z; }
-        arr.push(z1 / Math.sqrt(chi / df));
-        break;
-      }
-      case "Chi-squared": {
-        const df2 = +params.df ?? 3;
-        let chi2 = 0;
-        for (let j = 0; j < df2; j++) { const z = normalSample(rng, 0, 1); chi2 += z * z; }
-        arr.push(chi2);
-        break;
-      }
-      default: arr.push(0);
-    }
-  }
-  return arr;
-}
+// normalSample / drawSamples / coerceLevel / parseLevels now live in the shared
+// src/math/dgpDraw.js (imported above) — single source with the worker.
 
 // ─── SCOPE BUILDER (pure — no React; shared by generate() and runMonteCarlo) ──
 function buildScope(variables, nObs, rng) {
@@ -104,7 +60,7 @@ function buildScope(variables, nObs, rng) {
       try {
         // eslint-disable-next-line no-new-func
         const val = new Function("N", "observations", `"use strict"; return (${raw});`)(nObs, nObs);
-        scope[v.name] = new Array(nObs).fill(typeof val === "number" ? val : 0);
+        scope[v.name] = new Array(nObs).fill(typeof val === "number" || typeof val === "string" ? val : 0);
       } catch (e) { return { error: `${v.name}: ${e.message}` }; }
     } else if (v.dist === "Sequence") {
       const from = +(v.params.from ?? 1), by = +(v.params.by ?? 1);
@@ -176,18 +132,22 @@ const DIST_DEFAULTS = {
   "Chi-squared": { df: 3 },
   Constant:    { value: "0" },
   Sequence:    { from: "1", by: "1" },
+  Categorical: { levels: "Control,Treatment", probs: "", asCode: false },
+  GroupID:     { groups: "10" },
+  CycleID:     { period: "5" },
   Expression:  { expr: "" },
   ForLoop:     { init: "0", update: "prev * 0.9 + eps[i]" },
   WhileLoop:   { init: "1", update: "prev * 0.95", condition: "Math.abs(prev) > 0.001", maxIter: "1000" },
 };
 
-const DIST_OPTIONS = ["Normal","Uniform","Bernoulli","Poisson","Exponential","t","Chi-squared","Constant","Sequence","Expression","ForLoop","WhileLoop"];
+const DIST_OPTIONS = ["Normal","Uniform","Bernoulli","Poisson","Exponential","t","Chi-squared","Constant","Sequence","Categorical","GroupID","CycleID","Expression","ForLoop","WhileLoop"];
 
 function distColor(C) {
   return {
     Normal: C.blue, Uniform: C.teal, Bernoulli: C.purple,
     Poisson: C.gold, Exponential: "#c88e6e", t: C.green,
     "Chi-squared": "#c87e9e", Constant: C.textMuted, Sequence: C.teal, Expression: C.textDim,
+    Categorical: C.purple, GroupID: C.gold, CycleID: "#9ec8c8",
     ForLoop: "#9ec87e", WhileLoop: "#c87e6e",
   };
 }
@@ -227,6 +187,45 @@ function ParamEditor({ dist, params, onChange }) {
           placeholder="1" style={{ ...fieldStyle(C), width: 68 }} />
       </label>
       <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>→ 1, 2, 3, …, n</span>
+    </div>
+  );
+  if (dist === "Categorical") return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>levels</span>
+        <input value={params.levels ?? ""} onChange={e => onChange({ ...params, levels: e.target.value })}
+          placeholder="Control,Treatment" style={{ ...fieldStyle(C), width: 150 }} />
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>probs</span>
+        <input value={params.probs ?? ""} onChange={e => onChange({ ...params, probs: e.target.value })}
+          placeholder="0.5,0.5 (blank=equal)" style={{ ...fieldStyle(C), width: 130 }} />
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Emit integer codes 0..k-1 instead of labels">
+        <input type="checkbox" checked={params.asCode === true || params.asCode === "true"}
+          onChange={e => onChange({ ...params, asCode: e.target.checked })} />
+        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>as code</span>
+      </label>
+    </div>
+  );
+  if (dist === "GroupID")     return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 38 }}>groups</span>
+        <input value={params.groups ?? "10"} onChange={e => onChange({ ...params, groups: e.target.value })}
+          placeholder="10" style={{ ...fieldStyle(C), width: 68 }} />
+      </label>
+      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>→ 1,1,…,2,2,… (rep each)</span>
+    </div>
+  );
+  if (dist === "CycleID")     return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 38 }}>period</span>
+        <input value={params.period ?? "5"} onChange={e => onChange({ ...params, period: e.target.value })}
+          placeholder="5" style={{ ...fieldStyle(C), width: 68 }} />
+      </label>
+      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>→ 1,2,…,T,1,2,… (rep times)</span>
     </div>
   );
   if (dist === "Constant")    return (
@@ -346,6 +345,17 @@ export function generateSimScript(language, n, seed, variables) {
     "Chi-squared":v => `rchi2(${v.params.df??3})`,
   };
 
+  const catParse = (params) => {
+    const levels = String(params.levels ?? "").split(",").map(s => s.trim()).filter(s => s.length);
+    let probs = String(params.probs ?? "").split(",").map(s => parseFloat(s)).filter(x => isFinite(x) && x >= 0);
+    if (probs.length !== levels.length) probs = levels.map(() => 1);
+    const sum = probs.reduce((a, b) => a + b, 0) || 1;
+    probs = probs.map(p => p / sum);
+    const allNum = levels.length > 0 && levels.every(s => /^-?\d*\.?\d+(?:e-?\d+)?$/i.test(s));
+    const asCode = params.asCode === true || params.asCode === "true";
+    return { levels, probs, allNum, asCode, k: levels.length };
+  };
+
   const lines = [];
   if (language === "r") {
     lines.push(`set.seed(${seed})`, `n <- ${n}`, `N <- n`, `observations <- n`);
@@ -355,6 +365,18 @@ export function generateSimScript(language, n, seed, variables) {
         lines.push(`${v.name} <- seq(${from}, by=${by}, length.out=n)`);
       } else if (v.dist === "Constant") {
         lines.push(`${v.name} <- rep(${v.params.value ?? 0}, n)`);
+      } else if (v.dist === "Categorical") {
+        const { levels, probs, allNum, asCode, k } = catParse(v.params);
+        const probR = `c(${probs.map(p => p.toFixed(4)).join(", ")})`;
+        const vec = asCode ? `0:${Math.max(0, k - 1)}`
+          : allNum ? `c(${levels.join(", ")})` : `c(${levels.map(s => `"${s}"`).join(", ")})`;
+        lines.push(`${v.name} <- sample(${vec}, n, replace=TRUE, prob=${probR})`);
+      } else if (v.dist === "GroupID") {
+        const G = Math.max(1, Math.floor(+(v.params.groups ?? 1) || 1));
+        lines.push(`${v.name} <- rep(1:${G}, each=ceiling(n/${G}))[1:n]`);
+      } else if (v.dist === "CycleID") {
+        const T = Math.max(1, Math.floor(+(v.params.period ?? 1) || 1));
+        lines.push(`${v.name} <- rep(1:${T}, length.out=n)`);
       } else if (v.dist === "Expression") {
         lines.push(`# ${v.name} = ${v.params.expr||""}`, `${v.name} <- ${v.params.expr||"NA"}`);
       } else if (v.dist === "ForLoop") {
@@ -392,6 +414,18 @@ export function generateSimScript(language, n, seed, variables) {
         lines.push(`${v.name} = np.arange(${from}, ${from} + ${by} * n, ${by})`);
       } else if (v.dist === "Constant") {
         lines.push(`${v.name} = np.full(n, ${v.params.value ?? 0})`);
+      } else if (v.dist === "Categorical") {
+        const { levels, probs, allNum, asCode, k } = catParse(v.params);
+        const probPy = `[${probs.map(p => p.toFixed(4)).join(", ")}]`;
+        const vec = asCode ? `np.arange(${k})`
+          : allNum ? `[${levels.join(", ")}]` : `[${levels.map(s => `"${s}"`).join(", ")}]`;
+        lines.push(`${v.name} = rng.choice(${vec}, size=n, p=${probPy})`);
+      } else if (v.dist === "GroupID") {
+        const G = Math.max(1, Math.floor(+(v.params.groups ?? 1) || 1));
+        lines.push(`${v.name} = np.repeat(np.arange(1, ${G} + 1), int(np.ceil(n / ${G})))[:n]`);
+      } else if (v.dist === "CycleID") {
+        const T = Math.max(1, Math.floor(+(v.params.period ?? 1) || 1));
+        lines.push(`${v.name} = (np.arange(n) % ${T}) + 1`);
       } else if (v.dist === "Expression") {
         lines.push(`# ${v.name} = ${v.params.expr||""}`, `${v.name} = ${v.params.expr||"None"}`);
       } else if (v.dist === "ForLoop") {
@@ -430,6 +464,23 @@ export function generateSimScript(language, n, seed, variables) {
         lines.push(`generate ${v.name} = (_n - 1) * ${by} + ${from}`);
       } else if (v.dist === "Constant") {
         lines.push(`generate ${v.name} = ${v.params.value ?? 0}`);
+      } else if (v.dist === "Categorical") {
+        const { levels, probs, k } = catParse(v.params);
+        let cum = 0; const thr = probs.map(p => (cum += p, cum));
+        let expr = `${Math.max(0, k - 1)}`;
+        for (let j = k - 2; j >= 0; j--) expr = `cond(_u_${v.name} < ${thr[j].toFixed(4)}, ${j}, ${expr})`;
+        lines.push(
+          `* Categorical: ${v.name} ∈ {${levels.join(", ")}} (integer codes 0..${Math.max(0, k - 1)})`,
+          `generate double _u_${v.name} = runiform()`,
+          `generate ${v.name} = ${expr}`,
+          `drop _u_${v.name}`,
+        );
+      } else if (v.dist === "GroupID") {
+        const G = Math.max(1, Math.floor(+(v.params.groups ?? 1) || 1));
+        lines.push(`generate ${v.name} = ceil(_n / ceil(_N / ${G}))`);
+      } else if (v.dist === "CycleID") {
+        const T = Math.max(1, Math.floor(+(v.params.period ?? 1) || 1));
+        lines.push(`generate ${v.name} = mod(_n - 1, ${T}) + 1`);
       } else if (v.dist === "Expression") {
         lines.push(`* ${v.name} = ${v.params.expr||""}`, `generate ${v.name} = ${v.params.expr||"."}`);
       } else if (v.dist === "ForLoop") {
@@ -509,7 +560,12 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
     const rows = [];
     for (let i = 0; i < nObs; i++) {
       const row = {};
-      headers.forEach(h => { row[h] = scope[h]?.[i] ?? 0; });
+      headers.forEach(h => {
+        const val = scope[h]?.[i];
+        // Preserve strings/labels end-to-end (Categorical, string Constant/Expression);
+        // only truly missing values fall back to "".
+        row[h] = val === undefined || val === null ? "" : val;
+      });
       rows.push(row);
     }
     setGenerated({ rows, headers });
@@ -620,6 +676,8 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
       <HintBox title="How to simulate" sections={[
         { heading: "DGP Variables", items: [
           "Define variables with distributions: normal, uniform, Bernoulli, Poisson",
+          "Categorical: sample labeled levels with probabilities (e.g. Control,Treatment) — emits strings or integer codes",
+          "GroupID / CycleID: build a balanced panel skeleton — entity ids (rep each) and time ids (rep times)",
           "Set mean, std, or probability parameters per variable",
           "Variables can reference each other to build structural equations",
         ]},
@@ -950,6 +1008,22 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
           </div>
         )}
       </div>
+
+      {/* ── Hypothesis test on simulated data ── */}
+      {generated && (
+        <SampleTestPanel
+          title="∗ Hypothesis test — simulated data"
+          columns={generated.headers.map(h => ({ name: h, values: generated.rows.map(r => Number(r[h])) }))}
+        />
+      )}
+
+      {/* ── QTE on simulated data ── */}
+      {generated && (
+        <QTEPanel
+          title="∗ Quantile Treatment Effects — simulated data"
+          columns={generated.headers.map(h => ({ name: h, values: generated.rows.map(r => Number(r[h])) }))}
+        />
+      )}
 
       {/* ── Variable Workspace & Statistics (moved from Calculate) ── */}
       <div style={{ borderTop: `1px solid ${C.border}`, marginTop: "2rem", paddingTop: "1.8rem" }}>

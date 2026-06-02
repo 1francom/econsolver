@@ -440,6 +440,13 @@ export function pchisq(x, df) {
   if (df <= 0) return NaN;
   return _regGammaP(df / 2, x / 2);
 }
+// F-distribution CDF via the regularized incomplete beta:
+//   F(x; d1, d2) = I_{ (d1·x)/(d1·x + d2) }( d1/2, d2/2 )
+export function pf(x, df1, df2) {
+  if (!(x > 0) || !(df1 > 0) || !(df2 > 0)) return 0;
+  const y = (df1 * x) / (df1 * x + df2);
+  return _incompleteBeta(y, df1 / 2, df2 / 2);
+}
 export function qchisq(p, df) {
   if (p <= 0) return 0;
   if (p >= 1) return Infinity;
@@ -488,7 +495,7 @@ export function buildScope(variables) {
     dt, pt, qt,
     dbinom, pbinom,
     dpois, ppois,
-    dchisq, pchisq,
+    dchisq, pchisq, pf,
   });
   return scope;
 }

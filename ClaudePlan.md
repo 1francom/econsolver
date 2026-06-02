@@ -14,6 +14,39 @@ Econ Studio is transitioning from a feature-based tool to a professional SaaS pr
 
 ---
 
+## Spec & Plan Index
+
+> **RULE (see CLAUDE.md → "Planning & spec tracking"):** every spec/plan created under
+> `docs/superpowers/specs/` or `docs/superpowers/plans/` gets a row here in the same change,
+> with a status. Update the status when work lands or is dropped. This table is the single
+> source of truth for what is specced vs shipped — so nothing gets orphaned again.
+>
+> Statuses below marked `(verify)` were backfilled from a code scan on 2026-06-01 and should be
+> confirmed against the current codebase before being trusted as final.
+
+| Date | Spec / Plan | Status | Notes |
+|------|-------------|--------|-------|
+| 2026-05-14 | `specs/2026-05-14-factor-variables-design.md` | DONE (verify) | `factor_interactions` step live in runner.js |
+| 2026-05-17 | `specs/2026-05-17-ai-coach-dispatch-design.md` | IN PROGRESS (verify) | `ResearchCoach.jsx` wired; full dispatch flow unconfirmed |
+| 2026-05-19 | `specs/2026-05-19-duckdb-suffstats-roadmap-design.md` | DONE | DuckDB Fase 0–8 all complete + R-validated |
+| 2026-05-21 | `specs/2026-05-21-pre-launch-roadmap.md` | IN PROGRESS (verify) | mixed; tracks multiple sub-fases |
+| 2026-05-25 | `THREAT_MODEL.md` (security spec, K1–K10) | IN PROGRESS | K1/K3/K6/K7 done; AI PII filter (X3) queued |
+| 2026-05-22 | `plans/2026-05-22-fase-x3-ai-hardening.md` | OPEN | PII strip before AI egress — not yet executed |
+| 2026-05-30 | `specs/2026-05-30-equation-workbench-design.md` | IN PROGRESS (verify) | workbench IDB store (v5) added; §10 security posture |
+| 2026-06-01 | `specs/2026-06-01-clean-tab-reorganization-and-report-ai-design.md` | OPEN | newest spec (untracked in git) |
+| 2026-06-01 | `specs/2026-06-01-spatial-engine-gaps-design.md` | OPEN | sf-parity gaps from BA-thesis audit: areal interp, buffer exposure, expand_grid + spatial-weights/regression roadmap |
+| 2026-06-01 | `specs/2026-06-01-modeling-poisson-twfe-gaps-design.md` | OPEN | BA-thesis modeling audit: two-way Poisson FE (blocker), Sun-Abraham, interaction builder, clustered SE + NB/DiD/bootstrap roadmap |
+| 2026-06-01 | `specs/2026-06-01-descriptive-viz-gaps-design.md` | OPEN | BA-thesis descriptive/viz audit: pivot_wider, quantile agg, Table 1 LaTeX, static choropleth+labels, position_dodge, KDE heatmap |
+| 2026-06-01 | `plans/2026-06-01-ba-thesis-replication-roadmap.md` | OPEN | Consolidated roadmap sequencing all 3 BA-thesis specs into 6 phases; critical path = Spatial A1/A4 → Model A1 (two-way Poisson FE) |
+| 2026-06-01 | `specs/2026-06-01-stat-sim-inference-deepening-design.md` | DONE | Spec A (data-level only): parametric tests (two-sample/paired/prop/corr/var-ratio), general bootstrap (perc/basic/BCa)+jackknife, generalized permutation, shared seeded RNG. Spec B (model-coef inference) deferred. (Math + harness green; browser validation of UI Tasks 11–13 pending Franco) |
+| 2026-06-01 | `plans/2026-06-01-stat-sim-inference-deepening.md` | DONE | Implementation plan for Spec A: 14 tasks (rng.js, pf, 6 SampleTests, bootstrapStatistic+jackknife, permutationTest, SampleTestPanel/StatWorkspace/SimulateTab UI, Node validation harness + R cross-check). All landed; harness 81/81 green. Deferred: §4.1 R/Py/Stata snippet generators |
+| 2026-06-02 | `specs/2026-06-02-qte-stat-sim-design.md` | DONE | Unconditional QTE in Stat & Simulation: `src/math/QTE.js` (`quantileTreatmentEffect`, type-7 quantiles via exported `Resampling.quantile`, seeded within-group bootstrap percentile/basic/BCa band) + `QTEPanel.jsx` (table + QTE-vs-τ SVG with dashed ATE line + overlaid-CDF SVG with QTE arrow) mounted in StatWorkspace + SimulateTab (simulated data). Validated: `inferenceValidation.js` qte suite 30 checks green (point QTE = R quantile(type=7) diff to 6dp, ATE = lm slope); R block in `inferenceRValidation.R`. Covariate-adjusted QR deferred to Modeling. Franco: browser-validate on Vercel |
+| 2026-06-02 | `specs/2026-06-02-dgp-builder-upgrade-design.md` | IN PROGRESS | DGP builder upgrade: Categorical/factor draw (A ✓), GroupID/CycleID panel-ID generators (B ✓), end-to-end string preservation (C ✓) — all landed via shared `src/math/dgpDraw.js` (imported by SimulateTab + exprEval.worker.js → parity by construction); R/Py/Stata script-export extended; structural harness `__validation__/dgpValidation.js` green (37 checks); build clean. Optional Phase D (dplyr Expression helpers) deferred. Franco: browser-validate categorical/panel sim |
+| 2026-06-01 | Supabase live RLS / advisor audit (`THREAT_MODEL.md` §3.7) | DONE | B1–B4 remediated; 2 migrations applied; 10→1 advisor lints. Open: enable leaked-password protection, rotate `AGENT_SECRET`, `db pull` migrations into repo |
+| (Phase 13.2) | Supabase `projects`/`pipelines` RLS tables + pipeline sync (in this file) | **OPEN — ORPHANED** | specced, never built; no tables, no migrations, no client sync. Cross-device resume depends on it. |
+
+---
+
 ## Phase 1: Standardised Estimation Result (Foundation) — DONE
 
 ### New file: `src/math/EstimationResult.js` — DONE

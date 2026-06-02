@@ -239,3 +239,17 @@
 
 - [2026-05-31 12:06] · Data
   OECD proxy error 406 for OECD.SDD.NAD,DSD_NAAG@DF_NAAG_I — acceptable content types: application/vnd.sdmx.genericdata+xml; version=2.1 and application/vnd.sdmx.data+json; version=2
+
+---
+
+## 2026-06-01 batch
+
+### Bugs
+
+- [13:24] · Data
+  Not all columns of .dta are recognized — columns loaded twice appear as replicated entries without names
+
+### Features
+
+- [13:26] · Data
+  Add an option to edit/assign column names directly in the Data Viewer
