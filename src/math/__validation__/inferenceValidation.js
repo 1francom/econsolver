@@ -10,7 +10,7 @@
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
 import { pf } from "../calcEngine.js";
 import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest } from "../SampleTests.js";
-import { jackknife, bootstrapStatistic, bootstrapMean } from "../Resampling.js";
+import { jackknife, bootstrapStatistic, bootstrapMean, permutationTest, permutationTwoSampleMean } from "../Resampling.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -233,7 +233,33 @@ function suiteBootstrap(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife], ["bootstrap", suiteBootstrap]];
+function suitePermutation(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  // Exact: a=[1,2], b=[3,4], diffMeans observed = 1.5-3.5 = -2.
+  // 6 splits → |d|≥2 occurs for the two extreme splits → p = 2/6 = 0.3333333.
+  const e = permutationTest([1, 2], [3, 4], "diffMeans", { exact: true });
+  T(check("perm.exact.observed", e.observed, -2, TOL_STAT));
+  T(check("perm.exact.nPerm", e.nPerm, 6, TOL));
+  T(check("perm.exact.flag", e.exact ? 1 : 0, 1, TOL));
+  T(check("perm.exact.p", e.pValue, 2 / 6, TOL_P));
+  // Auto-exact for small samples (exact:null, C(4,2)=6 ≤ 50000).
+  const auto = permutationTest([1, 2], [3, 4], "diffMeans", {});
+  T(check("perm.auto.exact", auto.exact ? 1 : 0, 1, TOL));
+  // Monte Carlo path is seeded → reproducible.
+  const big = Array.from({ length: 12 }, (_, i) => i);     // forces C(24,12) > 50000
+  const m1 = permutationTest(big, big.map(x => x + 1), "diffMeans", { B: 400, seed: 5 });
+  const m2 = permutationTest(big, big.map(x => x + 1), "diffMeans", { B: 400, seed: 5 });
+  T(check("perm.mc.notexact", m1.exact ? 0 : 1, 1, TOL));
+  T(check("perm.mc.repro", m1.pValue, m2.pValue, TOL));
+  T(check("perm.mc.seedEcho", m1.seed, 5, TOL));
+  // Legacy wrapper keeps its old shape.
+  const leg = permutationTwoSampleMean([1, 2, 3], [4, 5, 6], 200);
+  T(check("perm.legacy.shape", (leg.method === "permutation" && "pTwoSided" in leg && "diffObserved" in leg) ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife], ["bootstrap", suiteBootstrap], ["permutation", suitePermutation]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));
