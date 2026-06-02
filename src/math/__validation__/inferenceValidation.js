@@ -10,7 +10,7 @@
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
 import { pf } from "../calcEngine.js";
 import { twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest } from "../SampleTests.js";
-import { jackknife } from "../Resampling.js";
+import { jackknife, bootstrapStatistic, bootstrapMean } from "../Resampling.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -207,7 +207,33 @@ function suiteJackknife(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife]];
+function suiteBootstrap(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  const v = [2, 4, 4, 4, 5, 5, 7, 9]; // mean 5
+  // Seeded → reproducible across two calls.
+  const r1 = bootstrapStatistic(v, "mean", { B: 500, seed: 42, ciType: "percentile" });
+  const r2 = bootstrapStatistic(v, "mean", { B: 500, seed: 42, ciType: "percentile" });
+  T(check("boot.repro.estimate", r1.estimate, r2.estimate, TOL));
+  T(check("boot.repro.ciLow", r1.ciLow, r2.ciLow, TOL));
+  T(check("boot.repro.ciHigh", r1.ciHigh, r2.ciHigh, TOL));
+  T(check("boot.estimate", r1.estimate, 5, TOL_STAT));   // point estimate is exact
+  T(check("boot.seedEcho", r1.seed, 42, TOL));
+  T(check("boot.ci.ordered", r1.ciLow <= r1.ciHigh ? 1 : 0, 1, TOL));
+  T(check("boot.replicates.length", r1.replicates.length, 500, TOL));
+  // basic + bca run and produce ordered, finite CIs.
+  const rb = bootstrapStatistic(v, "median", { B: 800, seed: 7, ciType: "basic" });
+  T(check("boot.basic.ordered", (rb.ciLow <= rb.ciHigh && isFinite(rb.ciLow)) ? 1 : 0, 1, TOL));
+  const rc = bootstrapStatistic(v, "mean", { B: 800, seed: 7, ciType: "bca" });
+  T(check("boot.bca.ordered", (rc.ciLow <= rc.ciHigh && isFinite(rc.ciLow)) ? 1 : 0, 1, TOL));
+  // Legacy wrapper still returns the old shape.
+  const leg = bootstrapMean(v, 300, 0.05, 1);
+  T(check("boot.legacy.shape", (leg.method === "bootstrap" && "meanHat" in leg && "ciLo" in leg) ? 1 : 0, 1, TOL));
+  T(check("boot.error", bootstrapStatistic([1], "mean", {}).error ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife], ["bootstrap", suiteBootstrap]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));

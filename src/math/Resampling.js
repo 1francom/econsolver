@@ -111,6 +111,52 @@ export function jackknife(values, statName = "mean") {
   return { estimate, jackEstimate: jm, bias, se, values: loo };
 }
 
+// General nonparametric bootstrap of an arbitrary statistic, with a seeded RNG.
+// ciType ∈ { "percentile", "basic", "bca" }. BCa falls back to percentile when
+// the bias-correction z0 or acceleration a is non-finite.
+export function bootstrapStatistic(values, statName = "mean", { B = 2000, alpha = 0.05, ciType = "percentile", seed = null } = {}) {
+  const v = clean(values);
+  const n = v.length;
+  if (n < 2) return { error: "Need at least 2 finite observations." };
+  if (!(B >= 50)) return { error: "B must be ≥ 50." };
+  const stat = STATISTICS[statName];
+  if (!stat) return { error: `Unknown statistic '${statName}'.` };
+
+  const { rand, seed: usedSeed } = makeRNG(seed);
+  const thetaHat = stat(v);
+  const reps = new Array(B);
+  for (let b = 0; b < B; b++) reps[b] = stat(sampleWithReplacement(rand, v, n));
+  const bootSE = sd(reps);
+  const bias = mean(reps) - thetaHat;
+  const sorted = reps.slice().sort((a, b) => a - b);
+
+  let ciLow, ciHigh;
+  if (ciType === "basic") {
+    ciLow = 2 * thetaHat - quantile(sorted, 1 - alpha / 2);
+    ciHigh = 2 * thetaHat - quantile(sorted, alpha / 2);
+  } else if (ciType === "bca") {
+    let less = 0; for (let i = 0; i < B; i++) if (reps[i] < thetaHat) less++;
+    const z0 = qnorm(less / B);
+    const jk = jackknife(v, statName);
+    const jm = mean(jk.values);
+    let num = 0, den = 0;
+    for (let i = 0; i < jk.values.length; i++) { const d = jm - jk.values[i]; num += d * d * d; den += d * d; }
+    const a = num / (6 * Math.pow(den, 1.5));
+    if (!isFinite(z0) || !isFinite(a)) {
+      ciLow = quantile(sorted, alpha / 2); ciHigh = quantile(sorted, 1 - alpha / 2);
+    } else {
+      const zl = qnorm(alpha / 2), zu = qnorm(1 - alpha / 2);
+      const a1 = pnorm(z0 + (z0 + zl) / (1 - a * (z0 + zl)));
+      const a2 = pnorm(z0 + (z0 + zu) / (1 - a * (z0 + zu)));
+      ciLow = quantile(sorted, a1); ciHigh = quantile(sorted, a2);
+    }
+  } else { // percentile
+    ciLow = quantile(sorted, alpha / 2); ciHigh = quantile(sorted, 1 - alpha / 2);
+  }
+
+  return { stat: statName, estimate: thetaHat, B, alpha, ciType, ciLow, ciHigh, bootSE, bias, seed: usedSeed, replicates: reps };
+}
+
 // Fisher-Yates partial shuffle: returns first m elements of a shuffled copy
 // without paying O(n) when m ≪ n is unusual here; we shuffle the whole array.
 function shuffleInPlace(a) {
@@ -122,26 +168,12 @@ function shuffleInPlace(a) {
 }
 
 // ─── 1. Bootstrap mean (with replacement) ─────────────────────────────────────
-export function bootstrapMean(values, B = 2000, alpha = 0.05) {
-  const v = clean(values);
-  const n = v.length;
-  if (n < 2) return { error: "Need at least 2 finite observations." };
-  if (!(B >= 50)) return { error: "B must be ≥ 50." };
-
-  const meanHat = mean(v);
-  const replicates = new Float64Array(B);
-  for (let b = 0; b < B; b++) {
-    let s = 0;
-    for (let i = 0; i < n; i++) s += v[Math.floor(Math.random() * n)];
-    replicates[b] = s / n;
-  }
-  const arr = Array.from(replicates);
-  const seBoot = sd(arr);
-  const sorted = arr.slice().sort((a, b) => a - b);
-  const ciLo = quantile(sorted, alpha / 2);
-  const ciHi = quantile(sorted, 1 - alpha / 2);
-
-  return { method: "bootstrap", meanHat, seBoot, ciLo, ciHi, alpha, B, nUsed: n, replicates: arr };
+// Backward-compatible mean bootstrap (percentile CI). Routed through the seeded
+// engine; accepts an optional seed for reproducibility.
+export function bootstrapMean(values, B = 2000, alpha = 0.05, seed = null) {
+  const r = bootstrapStatistic(values, "mean", { B, alpha, ciType: "percentile", seed });
+  if (r.error) return r;
+  return { method: "bootstrap", meanHat: r.estimate, seBoot: r.bootSE, ciLo: r.ciLow, ciHi: r.ciHigh, alpha, B, nUsed: clean(values).length, seed: r.seed, replicates: r.replicates };
 }
 
 // ─── 2. Subsample mean (without replacement) ──────────────────────────────────
