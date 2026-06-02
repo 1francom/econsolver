@@ -35,3 +35,5 @@
 | 2026-05-31 | Data | Parse error: schools_with_coordinates.xlsx — Failed to fetch dynamically imported module from cdn.sheetjs.com/xlsx-0.20.3 | high | data | `src/DataStudio.jsx` (SheetJS CDN loader) | fixed (2026-06-01 — static import * as XLSX from "xlsx") |
 | 2026-05-31 | Data | OECD proxy error 406 for DSD_NAAG@DF_NAAG_I — server rejects JSON accept header, needs content-type negotiation fix | high | data | `src/services/data/fetchers/oecd.js` | open |
 | 2026-06-01 | Data | Not all columns of .dta are recognized — columns loaded twice appear as replicated entries without names | high | data | `src/services/data/parsers/stata.js` | open |
+| 2026-06-02 | Calculate | Crash on LaTeX export | critical | export | `src/ReportingModule.jsx` | open |
+| 2026-06-02 | Model | AI interpretation does not adapt to estimator-specific semantics (e.g. Poisson coefficients should be shown as incidence rate ratios / semi-elasticities, not linear marginal effects) | high | ai | `src/services/AI/Prompts/index.js`, `src/ReportingModule.jsx` | open |
