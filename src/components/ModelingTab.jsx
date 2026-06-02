@@ -19,7 +19,7 @@ import {
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
   runGMM, runLIML,
-  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runSyntheticControl,
+  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runSyntheticControl,
   runSpatialRDD,
   runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats,
   wrapResult,
@@ -87,6 +87,7 @@ import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
+import CoefficientTestPanel from "../components/modeling/CoefficientTestPanel.jsx";
 import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
 import { runPipeline } from "../pipeline/runner.js";
 import { useTheme, mono }  from "../components/modeling/shared.jsx";
@@ -1582,6 +1583,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [synthTreatTime, setSynthTreatTime] = useState("");
   const [poissonEntityCol, setPoissonEntityCol] = useState("");
   const [poissonOffsetCol, setPoissonOffsetCol] = useState("");
+  const [poissonExtraFE,   setPoissonExtraFE]   = useState([]);   // additional FE dims ⇒ multi-way Poisson FE
 
   // ── Inference / SE options ────────────────────────────────────────────────
   const [seType,      setSeType]      = useState("classical");
@@ -1936,9 +1938,16 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (!allX.length) return { error: "Select at least one regressor (X)." };
         const ec = panel?.entityCol || poissonEntityCol;
         if (!ec) return { error: "Select an Entity (i) column in the configuration panel below." };
-        const res = runPoissonFE(dataRows, y, allX, ec, seOpts);
+        // Full FE list: entity dim + any additional FE dims (dedup, drop empties/X overlaps)
+        const feCols = [ec, ...poissonExtraFE].filter((c, i, a) => c && a.indexOf(c) === i && !allX.includes(c));
+        let res;
+        if (feCols.length > 1) {
+          res = runPoissonFEMulti(dataRows, y, allX, feCols, seOpts);
+        } else {
+          res = runPoissonFE(dataRows, y, allX, ec, seOpts);
+        }
         if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
-        return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec }), panelFE: null, panelFD: null };
+        return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, feCols }), panelFE: null, panelFD: null };
 
       } else if (model === "SyntheticControl") {
         if (!panel?.entityCol || !panel?.timeCol) return { error: "Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control." };
@@ -1955,7 +1964,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } catch (e) {
       return { error: `Estimation error: ${e.message}` };
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol]);
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -2352,6 +2361,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (model === "PoissonFE") {
               entityCol = panel?.entityCol || poissonEntityCol || null;
               if (!entityCol) throw new Error("Poisson FE SQL path: entity column missing - fallback to JS");
+              // Multi-way FE has no SQL fast path yet — use the validated JS engine.
+              const extraFE = poissonExtraFE.filter(c => c && c !== entityCol && !allX.includes(c));
+              if (extraFE.length) throw new Error("Multi-way Poisson FE: no SQL path - fallback to JS runPoissonFEMulti");
               const expansion = await expandFactors({
                 xCols: [...allX, `factor(${entityCol})`],
                 tableName: duckTable,
@@ -3157,6 +3169,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime}
             poissonEntityCol={poissonEntityCol} setPoissonEntityCol={setPoissonEntityCol}
             poissonOffsetCol={poissonOffsetCol} setPoissonOffsetCol={setPoissonOffsetCol}
+            poissonExtraFE={poissonExtraFE}     setPoissonExtraFE={setPoissonExtraFE}
             rows={rows}
             headers={headers}
             panel={panel}
@@ -3805,9 +3818,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
                   <span style={{ fontSize: 10, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson FE Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.nFE > 1 && <Badge label={`${r.nFE}-way FE`} color="#9e7ec8" />}
                   {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
                                : <Badge label="⚠ did not converge" color={C.red} />}
                   {r.droppedZeroUnits > 0 && <Badge label={`${r.droppedZeroUnits} zero-Y units dropped`} color={C.yellow} />}
+                  {r.droppedZeroLevels > 0 && <Badge label={`${r.droppedZeroLevels} all-zero FE levels dropped`} color={C.yellow} />}
+                  {r.droppedSingletons > 0 && <Badge label={`${r.droppedSingletons} singleton levels dropped`} color={C.yellow} />}
                 </div>
                 <FitBar items={[
                   { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: "#9e7ec8" },
@@ -3817,10 +3833,24 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
                 <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: "0.8rem" }}>
-                  AIC/BIC penalty includes entity FEs (k = {r.k} regressors + {r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)
+                  {r.nFE > 1
+                    ? `AIC/BIC penalty includes all FE dims (k = ${r.k} regressors + ${(r.feDims ?? []).reduce((s, d) => s + d.nLevels, 0)} FE levels − ${r.nFE - 1} normalization${r.nFE - 1 > 1 ? "s" : ""} — comparable to R fixest::fepois AIC)`
+                    : `AIC/BIC penalty includes entity FEs (k = ${r.k} regressors + ${r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)`}
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Table (log-linear, with IRR)</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                {r.nFE > 1 && r.feDims && (
+                  <div style={{ marginTop: "1rem" }}>
+                    <Lbl color={C.textMuted}>Absorbed Fixed-Effect Dimensions</Lbl>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {r.feDims.map(d => (
+                        <div key={d.col} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                          {d.col}: <span style={{ color: C.text }}>{d.nLevels} levels</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {r.alphas && Object.keys(r.alphas).length > 0 && (
                   <details style={{ marginTop: "1rem" }}>
                     <summary style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", userSelect: "none" }}>
@@ -4397,6 +4427,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             </div>
           );
         })()}
+
+        {/* ── Coefficient Test (post-estimation hypothesis test) ── */}
+        {pinnedModels.length > 0 && (
+          <CoefficientTestPanel models={pinnedModels} />
+        )}
 
         {/* ── Model Buffer Bar ── */}
         <ModelBufferBar

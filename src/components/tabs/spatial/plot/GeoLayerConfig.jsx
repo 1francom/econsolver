@@ -103,8 +103,12 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
       {ly.type === "grid" && ly.mode === "wkt" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
           <Sel label="Grid WKT" value={ly.wktCol} onChg={v => upd({ wktCol: v })} opts={geomCols} />
-          <Sel label="Color by" value={ly.colorByCol ?? ""} onChg={v => upd({ colorByCol: v })} opts={dsHeaders} />
-          {ly.colorByCol && (
+          <Sel label="Fill by" value={ly.fillByCol ?? ly.colorByCol ?? ""} onChg={v => upd({ fillByCol: v, colorByCol: v })} opts={dsHeaders} />
+          <Sel label="Label by" value={ly.labelCol ?? ""} onChg={v => upd({ labelCol: v })} opts={dsHeaders} />
+          {ly.labelCol && (
+            <Rng label="Label size" value={ly.labelSize ?? 10} onChg={v => upd({ labelSize: v })} min={6} max={24} step={1} fmt={v => v.toFixed(0) + "px"} />
+          )}
+          {(ly.fillByCol || ly.colorByCol) && (
             <Rng label="Color opacity" value={ly.colorFillOpacity ?? 0.65} onChg={v => upd({ colorFillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} />
           )}
         </div>
@@ -129,10 +133,28 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
       {(ly.type === "polygon" || ly.type === "boundary" || ly.type === "line") && (
         <Sel label="Geometry (WKT)" value={ly.wktCol} onChg={v => upd({ wktCol: v })} opts={geomCols} />
       )}
-      {ly.type === "point" && (
+      {ly.type === "polygon" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <Sel label="Fill by" value={ly.fillByCol ?? ly.colorByCol ?? ""} onChg={v => upd({ fillByCol: v, colorByCol: v })} opts={dsHeaders} />
+          <Sel label="Label by" value={ly.labelCol ?? ""} onChg={v => upd({ labelCol: v })} opts={dsHeaders} />
+          {ly.labelCol && (
+            <Rng label="Label size" value={ly.labelSize ?? 10} onChg={v => upd({ labelSize: v })} min={6} max={24} step={1} fmt={v => v.toFixed(0) + "px"} />
+          )}
+          {(ly.fillByCol || ly.colorByCol) && (
+            <Rng label="Color opacity" value={ly.colorFillOpacity ?? 0.65} onChg={v => upd({ colorFillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} />
+          )}
+        </div>
+      )}
+      {(ly.type === "point" || ly.type === "heatmap") && (
         <div style={{ display: "flex", gap: 6 }}>
           <Sel label="Latitude" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
           <Sel label="Longitude" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
+        </div>
+      )}
+      {ly.type === "heatmap" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <NumIn label="Bandwidth" value={ly.bandwidth ?? 250} onChg={v => upd({ bandwidth: v })} min={10} max={10000} step={10} suffix="m" C={C} />
+          <NumIn label="Grid N" value={ly.gridN ?? 45} onChg={v => upd({ gridN: v })} min={10} max={120} step={1} C={C} />
         </div>
       )}
       {(ly.type === "polygon" || ly.type === "point" || ly.type === "grid") && (
@@ -146,7 +168,7 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
           <Rng label="Opacity" value={ly.fillOpacity ?? 0.3} onChg={v => upd({ fillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} />
         </div>
       )}
-      {ly.type !== "point" && (
+      {ly.type !== "point" && ly.type !== "heatmap" && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em" }}>Stroke</span>

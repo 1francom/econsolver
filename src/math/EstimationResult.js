@@ -166,7 +166,7 @@ function vcovFromOLS(XtXinv, s2) {
 // the type is unknown. Always returns null if yVar is missing.
 function buildFormula(type, spec) {
   if (!spec || !spec.yVar) return null;
-  const { yVar, xVars=[], zVars=[], entityCol, timeCol,
+  const { yVar, xVars=[], zVars=[], entityCol, timeCol, feCols,
           treatVar, postVar, runningVar, cutoff, weightCol,
           treatedUnit, treatTime, kPre, kPost } = spec;
   const x = xVars.length ? xVars.join(" + ") : "1";
@@ -187,7 +187,7 @@ function buildFormula(type, spec) {
     case "Logit":     return `Logit(${yVar}) ~ ${x}`;
     case "Probit":    return `Probit(${yVar}) ~ ${x}`;
     case "Poisson":   return `Poisson(${yVar}) ~ ${x}`;
-    case "PoissonFE": return `Poisson(${yVar}) ~ ${x} | ${entityCol ?? "?"}`;
+    case "PoissonFE": return `Poisson(${yVar}) ~ ${x} | ${(feCols && feCols.length ? feCols : [entityCol ?? "?"]).join(" + ")}`;
     case "EventStudy": return `${yVar} ~ event(${kPre ?? "-K"}…${kPost ?? "+K"}) | ${entityCol ?? "?"} + ${timeCol ?? "?"}`;
     case "LSDV":      return `${yVar} ~ ${x} + α_i${spec.lsdvTimeFE ? " + γ_t" : ""}`;
     case "SyntheticControl": return `${yVar} ~ SC(${treatedUnit ?? "?"}, t₀=${treatTime ?? "?"})`;
@@ -648,6 +648,12 @@ function wrapPoissonFE(eng, spec) {
     alphas:         eng.alphas         ?? null,
     converged:      eng.converged      ?? false,
     iterations:     eng.iterations     ?? null,
+    // Multi-way FE metadata (runPoissonFEMulti); absent ⇒ one-way runPoissonFE
+    nFE:               eng.nFE               ?? 1,
+    feDims:            eng.feDims            ?? null,
+    feLevels:          eng.nLevels           ?? null,
+    droppedZeroLevels: eng.droppedZeroLevels ?? 0,
+    droppedSingletons: eng.droppedSingletons ?? 0,
     // IRR: exp(beta)
     IRR:            (eng.beta ?? []).map(b => Math.exp(b)),
   };

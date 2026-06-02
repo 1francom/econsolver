@@ -441,6 +441,7 @@ export default function ModelConfiguration({
   synthTreatTime, setSynthTreatTime,
   poissonEntityCol, setPoissonEntityCol,
   poissonOffsetCol, setPoissonOffsetCol,
+  poissonExtraFE,   setPoissonExtraFE,
   rows,
   headers,
   panel,
@@ -569,29 +570,56 @@ export default function ModelConfiguration({
   }
 
   if (model === "PoissonFE") {
-    // If panel entity is already declared in Wrangling, show it read-only.
-    // Otherwise let the user pick the entity column inline.
-    if (panel?.entityCol) {
-      return (
-        <Section title="Entity Column">
-          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
-            i = <span style={{ color: C.gold }}>{panel.entityCol}</span>
-            <span style={{ color: C.textMuted }}> (from panel structure)</span>
-          </div>
-        </Section>
-      );
-    }
-    return (
-      <Section title="Entity Column (i)">
+    const entityCol = panel?.entityCol || poissonEntityCol;
+    const extraFE = poissonExtraFE ?? [];
+    const toggleExtra = (h) =>
+      setPoissonExtraFE(extraFE.includes(h) ? extraFE.filter(c => c !== h) : [...extraFE, h]);
+    // Additional fixed-effect dimensions ⇒ N-way Poisson FE (runPoissonFEMulti).
+    // Candidates exclude the entity column already used as the first FE dim.
+    const extraFEPanel = (
+      <Section title="Additional Fixed Effects (optional)">
+        <div style={{ fontSize: 10, fontFamily: mono, color: C.textMuted, marginBottom: 6 }}>
+          Add more FE dimensions (e.g. time) for two-way / N-way Poisson FE.
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {(headers ?? []).map(h => (
-            <button key={h} onClick={() => setPoissonEntityCol(h)}
-              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonEntityCol === h ? C.gold : C.border2}`, background: poissonEntityCol === h ? `${C.gold}18` : "transparent", color: poissonEntityCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
-              {poissonEntityCol === h ? "✓ " : ""}{h}
+          {(headers ?? []).filter(h => h !== entityCol).map(h => (
+            <button key={h} onClick={() => toggleExtra(h)}
+              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${extraFE.includes(h) ? C.teal : C.border2}`, background: extraFE.includes(h) ? `${C.teal}18` : "transparent", color: extraFE.includes(h) ? C.teal : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+              {extraFE.includes(h) ? "✓ " : ""}{h}
             </button>
           ))}
         </div>
       </Section>
+    );
+    // If panel entity is already declared in Wrangling, show it read-only.
+    // Otherwise let the user pick the entity column inline.
+    if (panel?.entityCol) {
+      return (
+        <>
+          <Section title="Entity Column">
+            <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+              i = <span style={{ color: C.gold }}>{panel.entityCol}</span>
+              <span style={{ color: C.textMuted }}> (from panel structure)</span>
+            </div>
+          </Section>
+          {extraFEPanel}
+        </>
+      );
+    }
+    return (
+      <>
+        <Section title="Entity Column (i)">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {(headers ?? []).map(h => (
+              <button key={h} onClick={() => setPoissonEntityCol(h)}
+                style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonEntityCol === h ? C.gold : C.border2}`, background: poissonEntityCol === h ? `${C.gold}18` : "transparent", color: poissonEntityCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+                {poissonEntityCol === h ? "✓ " : ""}{h}
+              </button>
+            ))}
+          </div>
+        </Section>
+        {poissonEntityCol ? extraFEPanel : null}
+      </>
     );
   }
 
