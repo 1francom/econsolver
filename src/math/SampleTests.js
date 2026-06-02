@@ -135,3 +135,16 @@ export function twoSampleMeanTest(a, b, { alternative = "two-sided", pooled = fa
     estimate: diff, se, df, nullValue: m0, statLabel: "t", stat, alternative, pValue, pooled,
   };
 }
+
+// Paired mean test of H0: μ_d = mu0 on the within-pair differences. Drops any
+// pair where either side is non-finite, then delegates to oneSampleMeanTest.
+export function pairedMeanTest(a, b, { alternative = "two-sided", mu0 = 0 } = {}) {
+  const x = (a ?? []).map(Number), y = (b ?? []).map(Number);
+  const k = Math.min(x.length, y.length);
+  const diffs = [];
+  for (let i = 0; i < k; i++) if (finite(x[i]) && finite(y[i])) diffs.push(x[i] - y[i]);
+  if (diffs.length < 2) return { error: "Need at least 2 complete numeric pairs." };
+  const r = oneSampleMeanTest(diffs, mu0, alternative);
+  if (r.error) return r;
+  return { ...r, test: "paired" };
+}

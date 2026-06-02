@@ -9,7 +9,7 @@
 
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
 import { pf } from "../calcEngine.js";
-import { twoSampleMeanTest } from "../SampleTests.js";
+import { twoSampleMeanTest, pairedMeanTest } from "../SampleTests.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -115,7 +115,25 @@ function suiteTwoMean(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean]];
+function suitePaired(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  // diffs = [-1, 0, 2], mean = 1/3, sd = sqrt(2.3333) = 1.5275252
+  // se = sd/sqrt(3) = 0.8819171, t = (1/3)/0.8819171 = 0.3779645, df = 2.
+  const a = [1, 2, 4], b = [2, 2, 2];
+  const r = pairedMeanTest(a, b, {});
+  T(check("paired.estimate", r.estimate, 1 / 3, TOL_STAT));
+  T(check("paired.se", r.se, 0.8819171, 1e-6));
+  T(check("paired.t", r.stat, 0.3779645, 1e-6));
+  T(check("paired.df", r.df, 2, TOL));
+  T(check("paired.test", r.test === "paired" ? 1 : 0, 1, TOL));
+  // Drops a pair when one side is non-finite.
+  const r2 = pairedMeanTest([1, 2, NaN], [2, 2, 9], {});
+  T(check("paired.dropNaN.df", r2.df, 1, TOL)); // 2 complete pairs → df = 1
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));
