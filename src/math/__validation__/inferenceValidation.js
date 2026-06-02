@@ -259,7 +259,38 @@ function suitePermutation(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife], ["bootstrap", suiteBootstrap], ["permutation", suitePermutation]];
+// Cross-check the data-level tests against values printed by
+// inferenceRValidation.R (t.test / prop.test / cor.test / var.test). The E
+// constants below are R's reference p-values, confirmed to match the
+// R-validated pt/pnorm/pf distribution functions in calcEngine.js. Tail
+// p-values use TOL_P = 1e-3. If a value disagrees beyond TOL_P, that is a real
+// bug to investigate, not a tolerance to widen.
+function suiteRCrossCheck(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  const E = {
+    pooledP: 0.3465935,    // t.test(a,b,var.equal=TRUE)$p.value
+    welchP: 0.3465935,     // t.test(a,b)$p.value (equal n & var → same as pooled)
+    pairedP: 0.7418011,    // t.test(c(1,2,4),c(2,2,2),paired=TRUE)$p.value
+    onePropP: 0.04550026,  // prop.test(60,100,p=.5,correct=FALSE)$p.value
+    twoPropP: 1,           // prop.test(c(50,50),c(100,100),correct=FALSE)$p.value
+    corrPearsonP: 0.6666667, // cor.test(c(1,2,3),c(1,3,2))$p.value
+    corrSpearmanR: 1,      // cor.test(...,method="spearman")$estimate
+    varRatioP: 0.2080,     // var.test(c(1,3,5,7,9),c(2,3,4,5,6))$p.value
+  };
+  const ab = { a: [1, 2, 3, 4, 5], b: [2, 3, 4, 5, 6] };
+  T(check("R.pooled.p", twoSampleMeanTest(ab.a, ab.b, { pooled: true }).pValue, E.pooledP, TOL_P));
+  T(check("R.welch.p", twoSampleMeanTest(ab.a, ab.b, {}).pValue, E.welchP, TOL_P));
+  T(check("R.paired.p", pairedMeanTest([1, 2, 4], [2, 2, 2], {}).pValue, E.pairedP, TOL_P));
+  T(check("R.oneProp.p", onePropTest(60, 100, { p0: 0.5 }).pValue, E.onePropP, TOL_P));
+  T(check("R.twoProp.p", twoPropTest(50, 100, 50, 100, {}).pValue, E.twoPropP, TOL_P));
+  T(check("R.corr.pearson.p", correlationTest([1, 2, 3], [1, 3, 2], { method: "pearson" }).pValue, E.corrPearsonP, TOL_P));
+  T(check("R.corr.spearman.r", correlationTest([1, 2, 3, 4], [1, 4, 9, 16], { method: "spearman" }).estimate, E.corrSpearmanR, TOL_STAT));
+  T(check("R.varRatio.p", varianceRatioTest([1, 3, 5, 7, 9], [2, 3, 4, 5, 6], {}).pValue, E.varRatioP, TOL_P));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean], ["paired", suitePaired], ["prop", suiteProp], ["corr", suiteCorr], ["var-ratio", suiteVarRatio], ["jackknife", suiteJackknife], ["bootstrap", suiteBootstrap], ["permutation", suitePermutation], ["R-crosscheck", suiteRCrossCheck]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));
