@@ -9,6 +9,7 @@
 
 import { mulberry32, makeRNG, randInt, shuffle, sampleWithReplacement } from "../rng.js";
 import { pf } from "../calcEngine.js";
+import { twoSampleMeanTest } from "../SampleTests.js";
 
 const TOL = 1e-9;
 const TOL_STAT = 1e-6;  // statistics / estimates: 6 dp
@@ -93,7 +94,28 @@ function suitePf(check) {
   return { pass, fail };
 }
 
-const SUITES = [["rng", suiteRNG], ["pf", suitePf]];
+function suiteTwoMean(check) {
+  let pass = 0, fail = 0;
+  const T = (ok) => { ok ? pass++ : fail++; };
+  const a = [1, 2, 3, 4, 5];   // mean 3, var 2.5
+  const b = [2, 3, 4, 5, 6];   // mean 4, var 2.5
+  // Pooled: sp2 = 2.5, se = sqrt(2.5*(1/5+1/5)) = 1, diff = -1, t = -1, df = 8.
+  const p = twoSampleMeanTest(a, b, { pooled: true });
+  T(check("two-mean.pooled.diff", p.estimate, -1, TOL_STAT));
+  T(check("two-mean.pooled.se", p.se, 1, TOL_STAT));
+  T(check("two-mean.pooled.t", p.stat, -1, TOL_STAT));
+  T(check("two-mean.pooled.df", p.df, 8, TOL_STAT));
+  // Welch: equal variances & equal n → same se, df = 8 here too.
+  const w = twoSampleMeanTest(a, b, {});
+  T(check("two-mean.welch.se", w.se, 1, TOL_STAT));
+  T(check("two-mean.welch.df", w.df, 8, TOL_STAT));
+  // Degenerate group → error object.
+  const e = twoSampleMeanTest([1], b, {});
+  T(check("two-mean.error", e.error ? 1 : 0, 1, TOL));
+  return { pass, fail };
+}
+
+const SUITES = [["rng", suiteRNG], ["pf", suitePf], ["two-mean", suiteTwoMean]];
 
 export function runInferenceValidation() {
   const results = SUITES.map(([n, fn]) => runSuite(n, fn));
