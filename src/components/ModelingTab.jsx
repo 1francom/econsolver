@@ -82,7 +82,7 @@ import * as modelBuffer from "../services/modelBuffer.js";
 import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
 import ModelComparison  from "./modeling/ModelComparison.jsx";
 
-import EstimatorSidebar   from "../components/modeling/EstimatorSidebar.jsx";
+import EstimatorSidebar, { FAMILY_SUPPORT } from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector   from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
@@ -1561,6 +1561,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
   // ── Spec state ───────────────────────────────────────────────────────────────
   const [model,      setModel]      = useState("OLS");
+  const [family,     setFamily]     = useState("linear"); // "linear"|"poisson"|"logit"|"probit"
   const [yVar,       setYVar]       = useState([]);
   const [xVars,      setXVars]      = useState([]);
   const [wVars,      setWVars]      = useState([]);
@@ -1736,7 +1737,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   );
 
   const handleModelSelect = useCallback((id) => {
-    setModel(id); setResult(null); setErr(null); setSeType("classical");
+    setModel(id);
+    setResult(null);
+    setErr(null);
+    setSeType("classical");
+    setFamily(prev => {
+      const support = FAMILY_SUPPORT[id] ?? {};
+      return (prev === "linear" || support[prev] === "available") ? prev : "linear";
+    });
   }, []);
 
   const toggleFactor = useCallback((col) => {
@@ -3203,6 +3211,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             modelAvail={modelAvail}
             modelHint={modelHint}
             panel={panel}
+            family={family}
+            onFamilySelect={setFamily}
           />
 
           <VariableSelector
