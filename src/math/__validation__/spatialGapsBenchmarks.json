@@ -1,0 +1,32 @@
+{
+  "area": {
+    "square": 100,
+    "donut": 64
+  },
+  "overlap": {
+    "area_intersect": 50,
+    "area_source": 100,
+    "weight": 0.5
+  },
+  "areal": {
+    "extensive": 75,
+    "intensive": 75
+  },
+  "exposure": {
+    "share": 1,
+    "area": 100,
+    "count": 2
+  },
+  "centroid": {
+    "x": 500005,
+    "y": 6000005
+  },
+  "weights": {
+    "links": 2,
+    "avgNeighbors": 1,
+    "islands": 0,
+    "moranI": -1,
+    "gearyC": 1,
+    "localMoran": [-1, -1]
+  }
+}

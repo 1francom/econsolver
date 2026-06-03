@@ -271,6 +271,86 @@ function EventStudyConfig({ numericCols, yVar, treatTimeCol, setTreatTimeCol, kP
   );
 }
 
+// ─── SunAbraham: cohort + period + control convention ─────────────────────────
+// Sun & Abraham (2021) IW event study over Poisson PPML. Absorbs unit + period
+// FE; cohort assignment is built upstream (Spatial/Clean) and consumed here.
+function SunAbrahamConfig({
+  numericCols, headers, yVar, panel,
+  cohortCol, setCohortCol, periodCol, setPeriodCol,
+  saUnitCol, setSaUnitCol, saControlMode, setSaControlMode,
+  saRefPeriod, setSaRefPeriod, wVars, setWVars,
+}) {
+  const { C } = useTheme();
+  const cols = headers ?? [];
+  const unitFromPanel = panel?.entityCol || null;
+  const colBtn = (active, accent) => ({
+    padding: "0.28rem 0.6rem",
+    border: `1px solid ${active ? accent : C.border2}`,
+    background: active ? `${accent}18` : "transparent",
+    color: active ? accent : C.textDim,
+    borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono,
+  });
+  return (
+    <>
+      <VarPanel
+        title="Cohort Column (first-treated period; never-treated = blank/NaN)"
+        color={C.teal}
+        vars={cols.filter(h => !yVar.includes(h))}
+        selected={cohortCol}
+        onToggle={setCohortCol}
+        multi={false}
+        info="Period each unit was first treated. Never-treated controls should be blank/NaN. Built upstream in Spatial/Clean."
+      />
+      <VarPanel
+        title="Period Column (calendar time)"
+        color={C.teal}
+        vars={numericCols.filter(h => !yVar.includes(h) && !cohortCol.includes(h))}
+        selected={periodCol}
+        onToggle={setPeriodCol}
+        multi={false}
+        info="Numeric calendar period. Also absorbed as a period fixed effect."
+      />
+      {unitFromPanel ? (
+        <Section title="Unit (entity) Fixed Effect">
+          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+            i = <span style={{ color: C.gold }}>{unitFromPanel}</span>
+            <span style={{ color: C.textMuted }}> (from panel structure)</span>
+          </div>
+        </Section>
+      ) : (
+        <Section title="Unit (entity) Fixed Effect">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {cols.map(h => (
+              <button key={h} onClick={() => setSaUnitCol(h)} style={colBtn(saUnitCol === h, C.gold)}>
+                {saUnitCol === h ? "✓ " : ""}{h}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+      <Section title="Control Convention" color={C.teal}>
+        <div style={{ fontSize: 10, fontFamily: mono, color: C.textMuted, marginBottom: 6 }}>
+          Which units identify the baseline. "Auto": never-treated + cohorts outside the observed period range. "Never-treated only": just blank/NaN cohorts.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Chip label="Auto (never + not-yet)" selected={saControlMode === "auto"} color={C.teal} onClick={() => setSaControlMode("auto")} />
+          <Chip label="Never-treated only" selected={saControlMode === "never"} color={C.teal} onClick={() => setSaControlMode("never")} />
+        </div>
+      </Section>
+      <Section title="Reference Relative Period" color={C.teal}>
+        <input type="number" value={saRefPeriod} onChange={e => setSaRefPeriod(e.target.value)} style={inputStyle(C)} placeholder="-1" />
+      </Section>
+      <VarPanel
+        title="W · Additional Controls (optional)"
+        color={C.blue}
+        vars={numericCols.filter(h => !yVar.includes(h) && !cohortCol.includes(h) && !periodCol.includes(h))}
+        selected={wVars}
+        onToggle={setWVars}
+      />
+    </>
+  );
+}
+
 // ─── LSDV: Time FE toggle ─────────────────────────────────────────────────────
 function LSDVConfig({ lsdvTimeFE, setLsdvTimeFE }) {
   const { C } = useTheme();
@@ -441,6 +521,12 @@ export default function ModelConfiguration({
   synthTreatTime, setSynthTreatTime,
   poissonEntityCol, setPoissonEntityCol,
   poissonOffsetCol, setPoissonOffsetCol,
+  poissonExtraFE,   setPoissonExtraFE,
+  cohortCol,      setCohortCol,
+  periodCol,      setPeriodCol,
+  saUnitCol,      setSaUnitCol,
+  saControlMode,  setSaControlMode,
+  saRefPeriod,    setSaRefPeriod,
   rows,
   headers,
   panel,
@@ -521,6 +607,10 @@ export default function ModelConfiguration({
     return <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />;
   }
 
+  if (model === "SunAbraham") {
+    return <SunAbrahamConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} cohortCol={cohortCol} setCohortCol={setCohortCol} periodCol={periodCol} setPeriodCol={setPeriodCol} saUnitCol={saUnitCol} setSaUnitCol={setSaUnitCol} saControlMode={saControlMode} setSaControlMode={setSaControlMode} saRefPeriod={saRefPeriod} setSaRefPeriod={setSaRefPeriod} wVars={wVars} setWVars={setWVars} />;
+  }
+
   if (model === "LSDV") {
     return <LSDVConfig lsdvTimeFE={lsdvTimeFE} setLsdvTimeFE={setLsdvTimeFE} />;
   }
@@ -569,29 +659,56 @@ export default function ModelConfiguration({
   }
 
   if (model === "PoissonFE") {
-    // If panel entity is already declared in Wrangling, show it read-only.
-    // Otherwise let the user pick the entity column inline.
-    if (panel?.entityCol) {
-      return (
-        <Section title="Entity Column">
-          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
-            i = <span style={{ color: C.gold }}>{panel.entityCol}</span>
-            <span style={{ color: C.textMuted }}> (from panel structure)</span>
-          </div>
-        </Section>
-      );
-    }
-    return (
-      <Section title="Entity Column (i)">
+    const entityCol = panel?.entityCol || poissonEntityCol;
+    const extraFE = poissonExtraFE ?? [];
+    const toggleExtra = (h) =>
+      setPoissonExtraFE(extraFE.includes(h) ? extraFE.filter(c => c !== h) : [...extraFE, h]);
+    // Additional fixed-effect dimensions ⇒ N-way Poisson FE (runPoissonFEMulti).
+    // Candidates exclude the entity column already used as the first FE dim.
+    const extraFEPanel = (
+      <Section title="Additional Fixed Effects (optional)">
+        <div style={{ fontSize: 10, fontFamily: mono, color: C.textMuted, marginBottom: 6 }}>
+          Add more FE dimensions (e.g. time) for two-way / N-way Poisson FE.
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {(headers ?? []).map(h => (
-            <button key={h} onClick={() => setPoissonEntityCol(h)}
-              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonEntityCol === h ? C.gold : C.border2}`, background: poissonEntityCol === h ? `${C.gold}18` : "transparent", color: poissonEntityCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
-              {poissonEntityCol === h ? "✓ " : ""}{h}
+          {(headers ?? []).filter(h => h !== entityCol).map(h => (
+            <button key={h} onClick={() => toggleExtra(h)}
+              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${extraFE.includes(h) ? C.teal : C.border2}`, background: extraFE.includes(h) ? `${C.teal}18` : "transparent", color: extraFE.includes(h) ? C.teal : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+              {extraFE.includes(h) ? "✓ " : ""}{h}
             </button>
           ))}
         </div>
       </Section>
+    );
+    // If panel entity is already declared in Wrangling, show it read-only.
+    // Otherwise let the user pick the entity column inline.
+    if (panel?.entityCol) {
+      return (
+        <>
+          <Section title="Entity Column">
+            <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+              i = <span style={{ color: C.gold }}>{panel.entityCol}</span>
+              <span style={{ color: C.textMuted }}> (from panel structure)</span>
+            </div>
+          </Section>
+          {extraFEPanel}
+        </>
+      );
+    }
+    return (
+      <>
+        <Section title="Entity Column (i)">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {(headers ?? []).map(h => (
+              <button key={h} onClick={() => setPoissonEntityCol(h)}
+                style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonEntityCol === h ? C.gold : C.border2}`, background: poissonEntityCol === h ? `${C.gold}18` : "transparent", color: poissonEntityCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+                {poissonEntityCol === h ? "✓ " : ""}{h}
+              </button>
+            ))}
+          </div>
+        </Section>
+        {poissonEntityCol ? extraFEPanel : null}
+      </>
     );
   }
 

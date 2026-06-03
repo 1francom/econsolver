@@ -6,6 +6,7 @@ import { CARTO_TILE, lonToTx, latToTy, txToLon, tyToLat, pickTileZ } from "../sh
 import { makeCabaMetricGrid } from "../shared/crs.js";
 import { geoBbox } from "./geo.js";
 import { GEO_MARGIN, appendSvgLegend } from "./legend.js";
+import { kde2d, polygonCentroid, transformCoord } from "../../../../math/SpatialEngine.js";
 
 export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
   { Plt, layers, rows, availableDatasets, title, subtitle, caption,
@@ -52,7 +53,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       // Draw tile canvas first if tiles are shown
       const tileCanvas = tileCanRef.current;
       if (showTiles && tileCanvas && tileCanvas.width > 0) {
-        try { ctx.drawImage(tileCanvas, 0, 0, plotW * scale, plotH * scale); } catch {}
+        try { ctx.drawImage(tileCanvas, 0, 0, plotW * scale, plotH * scale); } catch (err) { void err; }
         drawSvgLayer();
       } else {
         ctx.fillStyle = C?.bg ?? "#0e1117";
@@ -71,12 +72,12 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       iframe.style.cssText = `position:fixed;top:-9999px;left:-9999px;width:${svgW}px;height:${plotH}px;border:none;`;
       iframe.src = blobUrl;
       iframe.onload = () => {
-        try { iframe.contentWindow.print(); } catch (_) { alert("PDF export: use the browser print dialog."); }
+        try { iframe.contentWindow.print(); } catch (err) { void err; alert("PDF export: use the browser print dialog."); }
         setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(iframe); }, 2000);
       };
       document.body.appendChild(iframe);
     },
-  }), [showTiles]);
+  }), [showTiles, C?.bg]);
 
   useEffect(() => {
     if (!Plt || !canvasRef.current || layers.length === 0) return;
@@ -90,8 +91,10 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       for (const ly of [...layers].reverse()) {
         if (!ly.visible) continue;
         const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
-        if (ly.type === "grid" && ly.mode === "wkt" && ly.colorByCol) return buildColorScale(r, ly.colorByCol).legend;
+        const fillCol = ly.fillByCol ?? ly.colorByCol;
+        if ((ly.type === "grid" || ly.type === "polygon") && ly.mode !== "boundary" && fillCol) return buildColorScale(r, fillCol).legend;
         if (ly.type === "point" && ly.colorCol) return buildColorScale(r, ly.colorCol).legend;
+        if (ly.type === "heatmap" && ly.latCol && ly.lonCol) return buildColorScale(kde2d(r, ly.latCol, ly.lonCol, { bandwidth: ly.bandwidth, gridN: ly.gridN }).rows, "density").legend;
       }
       return null;
     })();
@@ -130,13 +133,37 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           fill: ly.fill ?? "#6ec8b4", r: ly.radius ?? 4,
           fillOpacity: ly.fillOpacity ?? 0.78, stroke: "none",
         }));
+      } else if (ly.type === "heatmap" && ly.latCol && ly.lonCol) {
+        const kde = kde2d(r, ly.latCol, ly.lonCol, {
+          bandwidth: Number(ly.bandwidth) || undefined,
+          gridN: Number(ly.gridN) || 45,
+        });
+        const { getColor } = buildColorScale(kde.rows, "density");
+        const xStep = kde.x.length > 1 ? Math.abs(kde.x[1] - kde.x[0]) : 1;
+        const yStep = kde.y.length > 1 ? Math.abs(kde.y[1] - kde.y[0]) : 1;
+        const toLonLat = (x, y) => transformCoord(x, y, kde.metricCrs, "EPSG:4326");
+        const cells = kde.rows.map(cell => {
+          const [west] = toLonLat(cell.x - xStep / 2, cell.y);
+          const [east] = toLonLat(cell.x + xStep / 2, cell.y);
+          const [, south] = toLonLat(cell.x, cell.y - yStep / 2);
+          const [, north] = toLonLat(cell.x, cell.y + yStep / 2);
+          return { ...cell, x1: west, x2: east, y1: south, y2: north };
+        });
+        marks.push(Plt.rect(cells, {
+          x1: d => d.x1, x2: d => d.x2, y1: d => d.y1, y2: d => d.y2,
+          fill: d => getColor(d) ?? "#6ec8b4",
+          fillOpacity: ly.fillOpacity ?? 0.72,
+          stroke: "none",
+        }));
       } else if (ly.type === "grid" && ly.mode === "wkt" && ly.wktCol) {
-        const { getColor } = buildColorScale(r, ly.colorByCol);
+        const fillCol = ly.fillByCol ?? ly.colorByCol;
+        const { getColor } = buildColorScale(r, fillCol);
+        const labels = [];
         for (const row of r) {
           const parsed = parseWktRings(row[ly.wktCol]);
           if (!parsed) continue;
-          const fill = ly.colorByCol ? (getColor(row) ?? ly.fill ?? "none") : (ly.fill ?? "none");
-          const fillOpacity = ly.colorByCol ? (ly.colorFillOpacity ?? 0.65) : (ly.fillOpacity ?? 0.08);
+          const fill = fillCol ? (getColor(row) ?? ly.fill ?? "none") : (ly.fill ?? "none");
+          const fillOpacity = fillCol ? (ly.colorFillOpacity ?? 0.65) : (ly.fillOpacity ?? 0.08);
           for (const ring of parsed.rings) {
             if (ring.length < 2) continue;
             marks.push(Plt.line([...ring, ring[0]], {
@@ -147,6 +174,21 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
               strokeLinejoin: "round", strokeLinecap: "round",
             }));
           }
+          if (ly.labelCol && row[ly.labelCol] != null) {
+            const cent = polygonCentroid([row], ly.wktCol)[0];
+            if (Number.isFinite(cent?.centroid_lon) && Number.isFinite(cent?.centroid_lat)) {
+              labels.push({ lon: cent.centroid_lon, lat: cent.centroid_lat, label: String(row[ly.labelCol]) });
+            }
+          }
+        }
+        if (labels.length) {
+          marks.push(Plt.text(labels, {
+            x: "lon", y: "lat", text: "label",
+            fill: ly.labelColor ?? C?.text ?? "#222",
+            fontSize: ly.labelSize ?? 10,
+            textAnchor: "middle",
+            dy: "0.32em",
+          }));
         }
       } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "boundary" && ly.boundaryCol) {
         try {
@@ -168,7 +210,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
               }
             }
           }
-        } catch (_) { /* skip */ }
+        } catch (err) { void err; }
       } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && ly.latCol && ly.lonCol) {
         try {
           const lats = r.map(row => parseFloat(row[ly.latCol])).filter(v => !isNaN(v));
@@ -193,8 +235,11 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
               }
             }
           }
-        } catch (_) { /* skip */ }
+        } catch (err) { void err; }
       } else if (ly.wktCol) {
+        const fillCol = ly.fillByCol ?? ly.colorByCol;
+        const { getColor } = buildColorScale(r, fillCol);
+        const labels = [];
         for (const row of r) {
           const parsed = parseWktRings(row[ly.wktCol]);
           if (!parsed) continue;
@@ -203,12 +248,27 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
             const closed = parsed.type === "polygon" ? [...ring, ring[0]] : ring;
             marks.push(Plt.line(closed, {
               x: d => d[0], y: d => d[1],
-              fill: (parsed.type === "polygon" && ly.fill !== "none") ? (ly.fill ?? "none") : "none",
-              fillOpacity: ly.fillOpacity ?? 0,
+              fill: (parsed.type === "polygon" && ly.fill !== "none") ? (fillCol ? (getColor(row) ?? ly.fill ?? "none") : (ly.fill ?? "none")) : "none",
+              fillOpacity: fillCol ? (ly.colorFillOpacity ?? 0.65) : (ly.fillOpacity ?? 0),
               stroke: ly.stroke ?? "#333", strokeWidth: ly.strokeWidth ?? 0.8,
               strokeLinejoin: "round", strokeLinecap: "round",
             }));
           }
+          if (parsed.type === "polygon" && ly.labelCol && row[ly.labelCol] != null) {
+            const cent = polygonCentroid([row], ly.wktCol)[0];
+            if (Number.isFinite(cent?.centroid_lon) && Number.isFinite(cent?.centroid_lat)) {
+              labels.push({ lon: cent.centroid_lon, lat: cent.centroid_lat, label: String(row[ly.labelCol]) });
+            }
+          }
+        }
+        if (labels.length) {
+          marks.push(Plt.text(labels, {
+            x: "lon", y: "lat", text: "label",
+            fill: ly.labelColor ?? C?.text ?? "#222",
+            fontSize: ly.labelSize ?? 10,
+            textAnchor: "middle",
+            dy: "0.32em",
+          }));
         }
       }
     }
@@ -257,8 +317,8 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           const url = CARTO_TILE.replace("{z}", z).replace("{x}", tx).replace("{y}", ty);
           const img = new Image();
           img.crossOrigin = "anonymous";
-          img.onload = () => { try { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); } catch {} };
-          img.onerror = () => {};
+          img.onload = () => { try { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); } catch (err) { void err; } };
+          img.onerror = () => undefined;
           img.src = url;
         }
       }

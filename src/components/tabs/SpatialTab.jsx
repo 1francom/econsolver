@@ -14,9 +14,11 @@ import { CRSTransformSection } from "./spatial/analyze/CRSTransformSection.jsx";
 import { DistanceSection } from "./spatial/analyze/DistanceSection.jsx";
 import { BufferSection } from "./spatial/analyze/BufferSection.jsx";
 import { MetricBufferSection } from "./spatial/analyze/MetricBufferSection.jsx";
+import { BufferExposureSection } from "./spatial/analyze/BufferExposureSection.jsx";
 import { GridSection } from "./spatial/analyze/GridSection.jsx";
 import { SpatialJoinSection } from "./spatial/analyze/SpatialJoinSection.jsx";
 import { AggregateToGridSection } from "./spatial/analyze/AggregateToGridSection.jsx";
+import { ArealInterpolateSection } from "./spatial/analyze/ArealInterpolateSection.jsx";
 import { NearestNeighborSection } from "./spatial/analyze/NearestNeighborSection.jsx";
 import { GeocodeSection } from "./spatial/analyze/GeocodeSection.jsx";
 import { BoundaryDistanceSection } from "./spatial/analyze/BoundaryDistanceSection.jsx";
@@ -180,6 +182,15 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
               />
             </Section>
 
+            <Section title="Buffer Exposure" badge="dissolve / overlap" C={C}>
+              <BufferExposureSection
+                rows={rows} headers={headers}
+                availableDatasets={availableDatasets}
+                onResult={handleResult}
+                C={C}
+              />
+            </Section>
+
             <Section title="Grid Assignment" badge="existing grid / id" C={C}>
               <GridSection
                 rows={rows}
@@ -187,6 +198,14 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
                 availableDatasets={availableDatasets}
                 onResult={handleResult}
                 C={C}
+              />
+            </Section>
+
+            <Section title="Areal Interpolation" badge="polygon x polygon" C={C}>
+              <ArealInterpolateSection
+                rows={rows} headers={headers}
+                availableDatasets={availableDatasets}
+                C={C} onResult={handleResult}
               />
             </Section>
 

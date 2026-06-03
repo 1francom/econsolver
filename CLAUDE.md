@@ -26,6 +26,8 @@ src/
 │   ├── SyntheticControlEngine.js   ← Frank-Wolfe synthetic control, placebo inference
 │   ├── SpatialEngine.js            ← haversine/euclidean, buffer assign, grid assign (rect+H3), spatial join, nearest-neighbor
 │   ├── timeSeries.js               ← time series utilities
+│   ├── ModelHypothesis.js          ← post-estimation coefficient/effect hypothesis tests + R/Python/Stata snippet generator
+│   ├── SampleTests.js              ← pre-model sample tests: one-sample mean t, variance χ², generic parameter t/z
 │   ├── EstimationResult.js         ← shared result type for all engines
 │   └── __validation__/
 │       ├── README.md
@@ -113,11 +115,15 @@ src/
 │   │   ├── ModelComparison.jsx   ← side-by-side model comparison table
 │   │   ├── ResearchCoach.jsx     ← AI-driven research coaching suggestions
 │   │   ├── InferenceOptions.jsx  ← collapsible SE type selector (chips + cluster/lag inputs)
-│   │   └── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
+│   │   ├── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
+│   │   └── CoefficientTestPanel.jsx ← post-estimation hypothesis test on a pinned model's coefficients (below Predict from Model)
 │   │
 │   ├── tabs/
 │   │   ├── CalculateTab.jsx      ← calculator tab; HintBox with calculator tips
-│   │   ├── SimulateTab.jsx       ← simulate tab; HintBox with simulate tips
+│   │   ├── SimulateTab.jsx       ← simulate tab; DGP builder + Monte Carlo; embeds StatWorkspace + SampleTestPanel (simulated-data tests)
+│   │   ├── statsim/
+│   │   │   ├── StatWorkspace.jsx ← variables/computed/resampling/probability/distributions (embedded in SimulateTab)
+│   │   │   └── SampleTestPanel.jsx ← shared collapsible pre-model test UI (mean/variance/parameter) over numeric columns
 │   │   ├── SpatialTab.jsx        ← spatial analytics tab root shell only (245 lines): Analyze/Map/Plot tab router + pendingRows/OutputPanel save state
 │   │   └── spatial/
 │   │       ├── shared/
@@ -193,6 +199,7 @@ src/
 | Panel LSDV | PanelEngine.js | ✓ |
 | Poisson FE | NonLinearEngine.js | ✓ |
 | Synthetic Control | SyntheticControlEngine.js | ✓ validated vs R Synth package (weights 2dp, gaps 2dp) — Frank-Wolfe vs ipop; hard benchmarks in engineValidation.js |
+| Sun & Abraham (2021) event study | NonLinearEngine.js (`runSunAbraham`) | ✓ validated vs R fixest::fepois + sunab() (coef 6dp, SE 4dp) — IW per-relative-period aggregation w/ delta-method clustered SE; single-cohort reduces exactly to Poisson TWFE `i(rel)`. Harness: `sunAbrahamRValidation.R` → `sunAbrahamBenchmarks.json` → `sunAbrahamValidation.js`. Clustered SE uses sandwich convention = fixest `ssc(fixef.K="none")`; differs from fixest default `nested` by a known df factor (~1-2%) |
 
 ## Pipeline step types (runner.js) — 23 total
 Cleaning: `rename, drop, filter, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr`
@@ -262,6 +269,12 @@ Fase 8 supplement (2026-05-21): the Fase 3a/3c robust-SE guards above are lifted
 - Patches are surgical — state what to add, what to delete, and exact location
 - Math files get validated against R to 6 decimal places on coefficients, 4 on SE
 - R validation libraries: `fixest`, `plm`, `rdrobust`, `AER`, `modelsummary`
+
+## Planning & spec tracking — never orphan a spec
+- **Every spec or plan doc you create (under `docs/superpowers/specs/` or `docs/superpowers/plans/`) MUST get a one-line reference in the `## Spec & Plan Index` at the top of `ClaudePlan.md`, with a status: `OPEN` / `IN PROGRESS` / `DONE` / `DROPPED`.** Add the index row in the *same change* that creates the spec — not later.
+- **Update the status when work lands, is abandoned, or changes scope.** ClaudePlan.md's index is the single source of truth for what is specced vs shipped.
+- **Before starting new work, scan the index** to avoid duplicating or re-orphaning an existing spec.
+- **Why:** specs were getting written and then silently dropped — e.g. Phase 13.2 specced `projects`/`pipelines` RLS tables + Supabase pipeline sync that were never built, and nothing tracked the gap until a security review surfaced it months later.
 
 ## DuckDB-Wasm performance strategy
 

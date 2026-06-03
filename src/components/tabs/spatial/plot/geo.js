@@ -19,6 +19,8 @@ export function geoBbox(layers, defaultRows, availableDatasets) {
     const r = (!ly.datasetId || ly.datasetId === "active") ? defaultRows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? defaultRows;
     if (ly.type === "point" && ly.latCol && ly.lonCol) {
       for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
+    } else if (ly.type === "heatmap" && ly.latCol && ly.lonCol) {
+      for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
     } else if (ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && ly.latCol && ly.lonCol) {
       for (const row of r) { const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]); if (!isNaN(lat) && !isNaN(lon)) exp(lon, lat); }
     } else if (ly.type === "grid" && ly.mode === "wkt" && ly.wktCol) {
@@ -43,7 +45,8 @@ export function mkGeoLayer(type, idx) {
   if (type === "polygon")  return { id, type, visible: true, datasetId: "active", wktCol: "", fill: col, fillOpacity: 0.3, stroke: "#444", strokeWidth: 0.6 };
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", fillOpacity: 0, stroke: "#222", strokeWidth: 0.8 };
   if (type === "point")    return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", fill: col, radius: 4, fillOpacity: 0.78 };
+  if (type === "heatmap")  return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", bandwidth: 250, gridN: 45, fill: col, fillOpacity: 0.72 };
   if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", fill: "none", stroke: col, strokeWidth: 1.2 };
-  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "wkt", wktCol: "", boundaryCol: "", latCol: "", lonCol: "", cellsize: 500, clipBorder: true, colorByCol: "", fill: col, fillOpacity: 0.08, colorFillOpacity: 0.65, stroke: "#888", strokeWidth: 0.3 };
+  if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "wkt", wktCol: "", boundaryCol: "", latCol: "", lonCol: "", cellsize: 500, clipBorder: true, fillByCol: "", colorByCol: "", labelCol: "", labelSize: 10, fill: col, fillOpacity: 0.08, colorFillOpacity: 0.65, stroke: "#888", strokeWidth: 0.3 };
   return { id, type, visible: true, datasetId: "active" };
 }

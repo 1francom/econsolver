@@ -111,7 +111,7 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
                 style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.textMuted, padding: "0 0 0 2px", lineHeight: 1 }}>×</button>
             </div>
           ))}
-          {[["polygon","Polygon"], ["boundary","Boundary"], ["point","Point"], ["line","Line"], ["grid","Grid"]].map(([t, lbl]) => (
+          {[["polygon","Polygon"], ["boundary","Boundary"], ["point","Point"], ["heatmap","Heatmap"], ["line","Line"], ["grid","Grid"]].map(([t, lbl]) => (
             <button key={t} onClick={() => addLayer(t)}
               style={{ padding: "2px 8px", borderRadius: 12, fontFamily: mono, fontSize: 9, background: "none", border: `1px dashed ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
             >+{lbl}</button>

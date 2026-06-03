@@ -253,3 +253,20 @@
 
 - [13:26] · Data
   Add an option to edit/assign column names directly in the Data Viewer
+
+---
+
+## 2026-06-02 batch
+
+### Bugs
+
+- [11:24] · Calculate
+  crash latex export
+
+- [13:45] · Model
+  Change the interpretation according to the specification (Poisson e.g)
+
+### Features
+
+- [12:19] · Simulate
+  You could add different types of quantiles like in R, but it might not be necessary

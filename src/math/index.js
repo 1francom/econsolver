@@ -70,6 +70,8 @@ export {
   runProbit,
   runPoisson,
   runPoissonFE,
+  runPoissonFEMulti,
+  runSunAbraham,
   normCDF,
   buildBinaryLatex,
   buildBinaryCSV,
@@ -97,6 +99,11 @@ export {
   assignRectGrid, assignH3Grid,
   pointInPolygon, parseWKTPolygon, spatialJoin,
   nearestNeighbor,
+  polygonArea, addArea, addLength, polygonCentroid,
+  polygonOverlapWeights, arealInterpolate,
+  dissolveBuffers, gridExposureShare, countBuffersIntersectingGrid,
+  polygonSetOp, buildSpatialWeights, moranI, localMoran, gearyC,
+  kde2d, kernelDensityToGrid, zonalStats, geometryDiagnostics,
 } from "./SpatialEngine.js";
 
 // ── Resampling / permutation inference ───────────────────────────────────────
