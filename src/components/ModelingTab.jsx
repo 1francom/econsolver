@@ -18,7 +18,7 @@ import {
   breuschPagan, computeVIF, hausmanTest,
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
-  runGMM, runLIML,
+  runGMM, runLIML, runIVPoisson,
   runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runSunAbraham, runSyntheticControl, runCallawayCS,
   runSpatialRDD,
   runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats,
@@ -1866,6 +1866,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const res = runGMM(dataRows, y, expX, expW, zVars, seOpts);
         if (!res || res.error) return { error: res?.error ?? "GMM failed. Check instruments and data." };
         return { result: wrapResult("GMM", res, { yVar: y, xVars: expX, wVars: expW, zVars }), panelFE: null, panelFD: null };
+
+      } else if (effModel === "IVPoisson") {
+        if (!expX.length) return { error: "Select at least one endogenous regressor (X)." };
+        if (!zVars.length) return { error: "IV-Poisson requires at least one excluded instrument (Z)." };
+        const res = runIVPoisson(dataRows, y, expX, expW, zVars, seOpts);
+        if (!res || res.error) return { error: res?.error ?? "IV-Poisson estimation failed." };
+        return { result: wrapResult("IVPoisson", res, { yVar: y, xVars: expX, wVars: expW, zVars }), panelFE: null, panelFD: null };
 
       } else if (effModel === "LIML") {
         if (!expX.length) return { error: "Select endogenous regressor(s) in Features (X)." };
@@ -3780,6 +3787,32 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           {result?.type === "LIML" && (
             <LIMLResults result={result} yVar={yVar} xVars={xVars} wVars={wVars} zVars={zVars} rows={rows} dict={dict} openReport={openReport} baseReplicateConfig={baseReplicateConfig} />
           )}
+
+          {/* IV-Poisson */}
+          {result?.type === "IVPoisson" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 10, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>IV-Poisson Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.jDf > 0 && <Badge label={`J ${r.jStat?.toFixed(3)} (p=${r.jPval?.toFixed(3)})`} color={r.jPval < 0.05 ? C.gold : C.teal} />}
+                </div>
+                {r.firstStages?.map(fs => fs && (
+                  <InfoBox key={fs.endVar} color={fs.weak ? C.gold : C.teal}>
+                    First stage F ({fs.endVar}): {fs.Fstat?.toFixed(2)} {fs.weak ? "⚠ Weak instrument" : "✓"}
+                  </InfoBox>
+                ))}
+                <Lbl color={C.textMuted}>Coefficients — IV-Poisson (exp link)</Lbl>
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se}
+                  tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel="z" />
+                <ExportBar yVar={yVar[0]} results={r} model="IVPoisson"
+                  onReport={() => openReport({ ...r, modelLabel: "IV-Poisson", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "IVPoisson", yVar: yVar[0] } } : null}
+                />
+              </div>
+            );
+          })()}
 
           {/* Fuzzy RDD */}
           {result?.type === "FuzzyRDD" && (
