@@ -5,7 +5,9 @@
 //
 // Props:
 //   result      {object}  — estimation result (type, beta, resid, Yhat, firstStages, etc.)
-//   rows        {array}   — current cleaned data rows (must be same length as result was estimated on)
+//   nRows       {number}  — FULL dataset row count the inject_column step will replay
+//                           against (not the 500-row preview). Extraction is only
+//                           offered when the result arrays span every row.
 //   yVar        {string}  — outcome variable name (for column naming)
 //   xVars       {string[]}— regressor names (for naming first-stage columns)
 //   onExtract   {fn}      — (colName: string, values: number[]) => void
@@ -13,18 +15,21 @@
 import { useState } from "react";
 import { useTheme, mono } from "./shared.jsx";
 
-export default function ExtractPanel({ result, rows, yVar, xVars, onExtract }) {
+export default function ExtractPanel({ result, nRows, yVar, xVars, onExtract }) {
   const { C } = useTheme();
   const [open, setOpen] = useState(false);
 
-  if (!result || !rows?.length) return null;
+  if (!result || !nRows) return null;
 
   // Build list of extractable columns based on result type
   const columns = buildExtractColumns(result, yVar, xVars);
   if (!columns.length) return null;
 
-  // Check length alignment
-  const aligned = result.resid?.length === rows.length || result.Yhat?.length === rows.length;
+  // Alignment against the FULL dataset: inject_column replays on rawData and
+  // requires values.length === full row count. Residual/fitted arrays only span
+  // the rows used in estimation, so NA-dropped or SQL-sampled results (length <
+  // nRows) are correctly blocked here — they cannot be spliced back row-for-row.
+  const aligned = result.resid?.length === nRows || result.Yhat?.length === nRows;
 
   return (
     <div style={{

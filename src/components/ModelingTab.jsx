@@ -4464,9 +4464,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           })()}
 
           {/* ── Two-pass: extract model outputs back to the dataset ── */}
+          {/* nRows = full dataset count (rows is a 500-row preview for DuckDB). */}
           <ExtractPanel
             result={result}
-            rows={rows}
+            nRows={cleanedData?._duckdb?.rowCount ?? rows.length}
             yVar={yVar[0]}
             xVars={[...xVars, ...wVars]}
             onExtract={onExtract}
