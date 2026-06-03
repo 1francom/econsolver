@@ -63,7 +63,7 @@
 **Suggestion:** The current `runEventStudy` in `PanelEngine.js:222` implements generic TWFE event study, which yields contaminated estimates under staggered adoption. Add `runSunAbraham` (interaction-weighted: interact cohort-dummies × calendar-time dummies, aggregate to ATT with cohort-share weights) and `runCallawaySantana` (doubly-robust with never-treated / not-yet-treated comparison groups) as new exported functions in `PanelEngine.js`. Wire two new estimator dropdown entries in `EstimatorSidebar.jsx` and route them from `ModelingTab.jsx`. Validate against `R::sunab` and `R::did` before shipping (6dp coefficients, 4dp SE).
 **Invariants:** Zero React in `PanelEngine.js`; SE type passed as argument; validate to 6dp/4dp against R.
 
----
+**Feedback:** AI does not recognize the pipeline steps in Script generation
 
 ### [high] · Model/AI · 2026-06-02
 **Feedback:** `Change the interpretation according to the specification (Poisson e.g)`
@@ -105,7 +105,7 @@
 **Suggestion:** CLAUDE.md documents this as the agreed DuckDB performance track (Rules 1–7). Immediate mitigations: (1) lower the large-file DuckDB routing threshold in `DataStudio.parseFile` from 10MB to 5MB; (2) virtualise the data-viewer table (render only 200 visible rows, never the full 900k array); (3) debounce pipeline re-runs in `WranglingModule` by 300ms to prevent cascading re-renders on column-selector changes. The permanent fix is the Parquet+OPFS pipeline described in CLAUDE.md.
 **Invariants:** DuckDB path in `duckdbRunner.js` must replay on `rawData` non-destructively; display truncation must never affect estimation or export.
 
----
+**File:** `src/components/modeling/DiagnosticsPanel.jsx`; `src/core/diagnostics/`; `src/math/LinearEngine.js`
 
 ## Other
 
@@ -181,7 +181,7 @@
 **Suggestion:** `CRSTransformSection.jsx` already handles CRS re-projection via `loadProj4` and `PRESET_CRS`. Extend the UI to display the detected EPSG code of the loaded geometry (parse it from the `AUTHORITY["EPSG","XXXX"]` substring in the WKT string, or from the user's CRS selection) as a read-only teal badge (`C.teal`). For additional geometry transforms (centroid, area, convex hull), add thin wrapper calls to the existing `SpatialEngine.js` helper functions and expose them as buttons in the section.
 **Invariants:** `SpatialEngine.js` stays React-free; inline styles only.
 
----
+**File:** `src/DataStudio.jsx` — file parser dispatch at line ~318; `src/services/data/duckdb.js`; `src/pipeline/duckdbRunner.js`; `vercel.json`
 
 ### Spatial · 2026-05-30
 **Feedback:** `Allow spatial filters for plots`
