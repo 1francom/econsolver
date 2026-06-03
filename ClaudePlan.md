@@ -44,6 +44,7 @@ Econ Studio is transitioning from a feature-based tool to a professional SaaS pr
 | 2026-06-02 | `specs/2026-06-02-dgp-builder-upgrade-design.md` | IN PROGRESS | DGP builder upgrade: Categorical/factor draw (A ✓), GroupID/CycleID panel-ID generators (B ✓), end-to-end string preservation (C ✓) — all landed via shared `src/math/dgpDraw.js` (imported by SimulateTab + exprEval.worker.js → parity by construction); R/Py/Stata script-export extended; structural harness `__validation__/dgpValidation.js` green (37 checks); build clean. Optional Phase D (dplyr Expression helpers) deferred. Franco: browser-validate categorical/panel sim |
 | 2026-06-01 | Supabase live RLS / advisor audit (`THREAT_MODEL.md` §3.7) | DONE | B1–B4 remediated; 2 migrations applied; 10→1 advisor lints. Open: enable leaked-password protection, rotate `AGENT_SECRET`, `db pull` migrations into repo |
 | (Phase 13.2) | Supabase `projects`/`pipelines` RLS tables + pipeline sync (in this file) | **OPEN — ORPHANED** | specced, never built; no tables, no migrations, no client sync. Cross-device resume depends on it. |
+| 2026-06-03 | Callaway-Sant'Anna (2021) staggered DiD (item C3 of `specs/2026-06-01-modeling-poisson-twfe-gaps-design.md`) | DONE | `src/math/CallawayEngine.js` (OR estimator + IF SEs + event-study aggregation); wired end-to-end in EstimatorSidebar / ModelConfiguration / ModelingTab / EstimationResult; validation harness `callawayValidation.js` + R script. Franco: browser-validate on mpdta or own staggered panel. |
 
 ---
 

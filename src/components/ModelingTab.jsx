@@ -19,7 +19,7 @@ import {
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
   runGMM, runLIML,
-  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runSunAbraham, runSyntheticControl,
+  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runSunAbraham, runSyntheticControl, runCallawayCS,
   runSpatialRDD,
   runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats,
   wrapResult,
@@ -1375,6 +1375,7 @@ function buildModelAvail(panelOk, panelFdOk) {
     "2SLS": true, RDD: true, FuzzyRDD: true, SpatialRDD: true, DiD: true,
     Logit: true, Probit: true, Poisson: true, PoissonFE: true,
     GMM: true, LIML: true,
+    SunAbraham: true, CallawayCS: true,
     SyntheticControl: true,
   };
 }
@@ -1590,6 +1591,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [saUnitCol,     setSaUnitCol]     = useState("");      // unit FE when no panel declared
   const [saControlMode, setSaControlMode] = useState("auto");  // "auto" | "never"
   const [saRefPeriod,   setSaRefPeriod]   = useState(-1);
+  // Callaway & Sant'Anna (2021)
+  const [csTreatCol,  setCsTreatCol]  = useState([]);   // first-treatment-period column
+  const [csEntityCol, setCsEntityCol] = useState([]);   // entity col (if no panel)
+  const [csTimeCol,   setCsTimeCol]   = useState([]);   // time col (if no panel)
+  const [csCompGroup, setCsCompGroup] = useState("nevertreated");
+  const [csRelMin,    setCsRelMin]    = useState("");
+  const [csRelMax,    setCsRelMax]    = useState("");
 
   // ── Inference / SE options ────────────────────────────────────────────────
   const [seType,      setSeType]      = useState("classical");
@@ -1981,6 +1989,37 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           panelFE: null, panelFD: null,
         };
 
+      } else if (model === "CallawayCS") {
+        const tcol = csTreatCol[0];
+        if (!tcol) return { error: "Select the First-Treatment-Period column in the configuration panel below." };
+        const ecol = panel?.entityCol || csEntityCol[0];
+        if (!ecol) return { error: "Select an Entity column or declare a panel structure in Wrangling." };
+        const timeColCS = panel?.timeCol || csTimeCol[0];
+        if (!timeColCS) return { error: "Select a Time column or declare a panel structure in Wrangling." };
+        const relMinNum = csRelMin !== "" ? Number(csRelMin) : -Infinity;
+        const relMaxNum = csRelMax !== "" ? Number(csRelMax) :  Infinity;
+        const res = runCallawayCS(
+          dataRows,
+          {
+            yCol: y, entityCol: ecol, timeCol: timeColCS,
+            treatCol: tcol,
+            compGroup: csCompGroup,
+            relMin: isFinite(relMinNum) ? relMinNum : -Infinity,
+            relMax: isFinite(relMaxNum) ? relMaxNum :  Infinity,
+          },
+          seOpts,
+        );
+        if (!res || res.error) return { error: res?.error ?? "Callaway-Sant'Anna estimation failed." };
+        return {
+          result: wrapResult("CallawayCS", res, {
+            yVar: y, xVars: [], wVars: expW,
+            entityCol: ecol, timeCol: timeColCS,
+            treatCol: tcol,
+            compGroup: csCompGroup,
+          }),
+          panelFE: null, panelFD: null,
+        };
+
       } else if (model === "SyntheticControl") {
         if (!panel?.entityCol || !panel?.timeCol) return { error: "Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control." };
         if (!treatedUnit) return { error: "Select the treated unit." };
@@ -1996,7 +2035,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } catch (e) {
       return { error: `Estimation error: ${e.message}` };
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod]);
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -3207,6 +3246,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             saUnitCol={saUnitCol}           setSaUnitCol={setSaUnitCol}
             saControlMode={saControlMode}   setSaControlMode={setSaControlMode}
             saRefPeriod={saRefPeriod}       setSaRefPeriod={setSaRefPeriod}
+            csTreatCol={csTreatCol}         setCsTreatCol={setCsTreatCol}
+            csEntityCol={csEntityCol}       setCsEntityCol={setCsEntityCol}
+            csTimeCol={csTimeCol}           setCsTimeCol={setCsTimeCol}
+            csCompGroup={csCompGroup}       setCsCompGroup={setCsCompGroup}
+            csRelMin={csRelMin}             setCsRelMin={setCsRelMin}
+            csRelMax={csRelMax}             setCsRelMax={setCsRelMax}
             rows={rows}
             headers={headers}
             panel={panel}
@@ -3827,6 +3872,46 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     cohortCol: r.spec?.cohortCol, periodCol: r.spec?.periodCol,
                     feCols: r.spec?.feCols, entityCol: r.spec?.entityCol, timeCol: r.spec?.timeCol,
                   }} : null}
+                />
+              </div>
+            );
+          })()}
+
+          {/* Callaway & Sant'Anna (2021) staggered DiD */}
+          {result?.type === "CallawayCS" && (() => {
+            const r = result;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Callaway-Sant'Anna DiD</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.csNGroups != null && <Badge label={`${r.csNGroups} cohorts`} color={C.textDim} />}
+                  {r.units != null && <Badge label={`${r.units} units`} color={C.textDim} />}
+                  <Badge label={r.csCompGroup === "nevertreated" ? "Never-treated control" : "Not-yet-treated control"} color={C.blue} />
+                </div>
+                {r.att != null && (
+                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4, fontSize: 11, fontFamily: mono }}>
+                    <span style={{ color: C.textMuted }}>Overall ATT: </span>
+                    <span style={{ color: r.att >= 0 ? C.teal : C.red }}>{r.att >= 0 ? "+" : ""}{r.att.toFixed(4)}</span>
+                    <span style={{ color: C.textMuted }}> (SE = {r.attSE?.toFixed(4) ?? "—"})</span>
+                    <span style={{ color: C.textMuted }}> · p = {r.attP < 0.001 ? "<0.001" : r.attP?.toFixed(4) ?? "—"}</span>
+                    <span style={{ marginLeft: 6, color: C.gold }}>{r.attP < 0.01 ? "***" : r.attP < 0.05 ? "**" : r.attP < 0.1 ? "*" : ""}</span>
+                  </div>
+                )}
+                <FitBar items={[
+                  { label: "Overall ATT", value: r.att?.toFixed(4) ?? "—", color: C.teal },
+                  { label: "SE",          value: r.attSE?.toFixed(4) ?? "—", color: C.textDim },
+                  { label: "p-value",     value: r.attP != null ? (r.attP < 0.001 ? "<0.001" : r.attP.toFixed(4)) : "—", color: r.attP < 0.05 ? C.gold : C.textDim },
+                  { label: "n",           value: r.n, color: C.text },
+                  { label: "cohorts",     value: r.csNGroups ?? "—", color: C.textDim },
+                ]} />
+                <Lbl color={C.textMuted}>Event-Study ATT Plot (by relative period)</Lbl>
+                <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
+                <Lbl color={C.textMuted}>Event-Study Coefficient Table</Lbl>
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel="z" />
+                <ExportBar yVar={yVar[0]} results={r} model="CallawayCS"
+                  onReport={() => openReport({ ...r, modelLabel: "Callaway-Sant'Anna DiD", yVar: yVar[0], xVars: [] })}
+                  replicateConfig={null}
                 />
               </div>
             );

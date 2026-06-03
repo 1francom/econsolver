@@ -27,6 +27,7 @@ export const MODELS = [
   { id: "TWFE",            label: "TWFE DiD",           group: "Panel",             desc: "Two-Way Fixed Effects DiD — panel required",    color: "#6ec8b4" },
   { id: "EventStudy",      label: "Event Study",        group: "Panel",             desc: "Dynamic DiD / event study — panel required",   color: "#6ec8b4" },
   { id: "SunAbraham",      label: "Event Study (Sun & Abraham)", group: "Panel",    desc: "Sun-Abraham (2021) IW event study over Poisson PPML — cohort + period required", color: "#6ec8b4" },
+  { id: "CallawayCS",      label: "Callaway-Sant'Anna DiD",      group: "Panel",    desc: "Callaway & Sant'Anna (2021) staggered DiD — outcome-regression estimator with IF SEs", color: "#6ec8b4" },
   // Causal
   { id: "2SLS",            label: "2SLS / IV",          group: "Causal",            desc: "Two-Stage Least Squares",                       color: "#c8a96e" },
   { id: "RDD",             label: "Sharp RDD",          group: "Causal",            desc: "Regression Discontinuity Design",               color: "#c88e6e" },

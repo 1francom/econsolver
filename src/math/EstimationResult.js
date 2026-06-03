@@ -103,6 +103,7 @@ const ESTIMATOR_META = {
   Poisson:         { label: "Poisson GLM",          color: "#9e7ec8" },
   PoissonFE:       { label: "Poisson FE",          color: "#9e7ec8" },
   SyntheticControl:{ label: "Synthetic Control",   color: "#c8b46e" },
+  CallawayCS:      { label: "Callaway-Sant'Anna DiD", color: "#6ec8b4" },
 };
 
 const FAMILY_MAP = {
@@ -121,6 +122,7 @@ const FAMILY_MAP = {
   Poisson: "count",
   PoissonFE: "count",
   SyntheticControl: "sc",
+  CallawayCS: "did",
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -194,6 +196,7 @@ function buildFormula(type, spec) {
     case "SunAbraham": return `Poisson(${yVar}) ~ sunab(${spec.cohortCol ?? "cohort"}, ${spec.periodCol ?? "period"})${xVars.length ? " + " + x : ""}${feCols && feCols.length ? " | " + feCols.join(" + ") : ""}`;
     case "LSDV":      return `${yVar} ~ ${x} + α_i${spec.lsdvTimeFE ? " + γ_t" : ""}`;
     case "SyntheticControl": return `${yVar} ~ SC(${treatedUnit ?? "?"}, t₀=${treatTime ?? "?"})`;
+    case "CallawayCS": return `${yVar} ~ CS_DiD(g=${spec.treatCol ?? "?"}) | ${spec.entityCol ?? "?"} + ${spec.timeCol ?? "?"}`;
     default:          return `${yVar} ~ ${x}`;
   }
 }
@@ -743,6 +746,39 @@ function wrapSyntheticControl(eng, spec) {
   };
 }
 
+// ─── CALLAWAY & SANT'ANNA (2021) ─────────────────────────────────────────────
+// eng shape: { varNames, beta, se, zStats, pVals, att, attSE, attP,
+//              n, nGroups, nPeriods, nUnits, df,
+//              eventCoeffs:[{k,beta,se,z,p,isRef}], attGT, cohorts, compGroup }
+function wrapCallawayCS(eng, spec) {
+  return {
+    ...base("CallawayCS", spec),
+    varNames:       eng.varNames       ?? [],
+    beta:           clean(eng.beta),
+    se:             clean(eng.se),
+    testStats:      clean(eng.zStats),
+    testStatLabel:  "z",
+    pVals:          clean(eng.pVals),
+    n:              eng.n              ?? 0,
+    df:             eng.df             ?? 0,
+    units:          eng.nUnits         ?? null,
+    att:            eng.att            ?? null,
+    attSE:          eng.attSE          ?? null,
+    attT:           eng.attSE && eng.att != null ? eng.att / eng.attSE : null,
+    attP:           eng.attP           ?? null,
+    resid:          [],
+    Yhat:           [],
+    // CS-specific
+    eventCoeffs:    eng.eventCoeffs    ?? [],
+    attGT:          eng.attGT          ?? [],
+    csNGroups:      eng.nGroups        ?? null,
+    csCohorts:      eng.cohorts        ?? [],
+    csCompGroup:    eng.compGroup      ?? "nevertreated",
+    converged:      true,
+    iterations:     null,
+  };
+}
+
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
 /**
@@ -796,6 +832,7 @@ export function wrapResult(type, engineOutput, spec, extras = {}) {
     case "Poisson":          r = wrapPoisson(engineOutput, spec); break;
     case "PoissonFE":        r = wrapPoissonFE(engineOutput, spec); break;
     case "SyntheticControl": r = wrapSyntheticControl(engineOutput, spec); break;
+    case "CallawayCS":       r = wrapCallawayCS(engineOutput, spec); break;
     default:
       console.warn("[EstimationResult] Unknown type:", type);
       r = { ...base(type, spec) };
