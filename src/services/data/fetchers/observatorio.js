@@ -83,3 +83,95 @@ export function dedupeIncidents(rows, { idKey = null, hashKeys = null, useHash =
   }
   return { rows, nDuplicatesDropped: 0, nPotentialDuplicates: 0 };
 }
+
+const WHITELIST = ["fecha", "provincia", "comuna", "barrio", "vinculo"];
+
+// Map real payload keys → canonical names. Defaults assume Spanish keys; if
+// discovery (Task 4) found different names, edit the right-hand sides here.
+const FIELD_MAP = {
+  id:        "id",
+  fecha:     "fecha",
+  provincia: "provincia",
+  comuna:    "comuna",
+  barrio:    "barrio",
+  vinculo:   "vinculo",
+};
+
+function recordsFrom(payload) {
+  if (Array.isArray(payload)) return payload;
+  for (const k of ["data", "rows", "value", "records"]) {
+    if (Array.isArray(payload?.[k])) return payload[k];
+  }
+  throw new Error("Observatorio payload has no recognizable record list (schema drift?).");
+}
+
+// Pure: payload → { rows, headers, meta }. Incident-level, PII-stripped.
+export function parseRegistry(payload, { dedup = {} } = {}) {
+  const raw = recordsFrom(payload);
+  if (!raw.length) throw new Error("Observatorio payload contained zero records.");
+
+  // 1. canonical-rename via FIELD_MAP
+  const renamed = raw.map(r => {
+    const o = {};
+    for (const [canon, srcKey] of Object.entries(FIELD_MAP)) {
+      if (srcKey in r) o[canon] = r[srcKey];
+    }
+    return o;
+  });
+
+  // 2. dedup (id default on; hash opt-in)
+  const dd = dedupeIncidents(renamed, {
+    idKey: "id",
+    hashKeys: ["fecha", "provincia", "vinculo"],
+    useHash: false,
+    ...dedup,
+  });
+
+  // 3. normalize dates + strip PII to whitelist
+  let nUnparsedDates = 0;
+  let minDate = null, maxDate = null;
+  const rows = dd.rows.map(r => {
+    const iso = normalizeFecha(r.fecha);
+    const out = applyWhitelist(r, WHITELIST);
+    if (iso) {
+      out.fecha = iso;
+      if (!minDate || iso < minDate) minDate = iso;
+      if (!maxDate || iso > maxDate) maxDate = iso;
+    } else {
+      out.fecha = null;
+      out._fecha_raw = r.fecha ?? null;
+      nUnparsedDates++;
+    }
+    return out;
+  });
+
+  return {
+    rows,
+    headers: WHITELIST,
+    meta: {
+      source: "Observatorio Lucía Pérez",
+      nObs: rows.length,
+      fetchedAt: new Date().toISOString(),
+      coverage: { minDate, maxDate },
+      nUnparsedDates,
+      nDuplicatesDropped: dd.nDuplicatesDropped,
+      nPotentialDuplicates: dd.nPotentialDuplicates,
+    },
+  };
+}
+
+// Live fetch: POST the discovered request descriptor to the proxy, then parse.
+export async function fetchObservatorioRegistry(opts = {}) {
+  const res = await fetch(PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`Observatorio proxy error ${res.status}${body.detail ? ": " + String(body.detail).slice(0, 200) : ""}`);
+  }
+  const json = await res.json();
+  if (json.error) throw new Error(`Observatorio API error: ${json.error}`);
+  return parseRegistry(json, opts);
+}

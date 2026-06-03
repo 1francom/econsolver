@@ -4,6 +4,6 @@
     { "id": 2, "fecha": "03/01/1984", "provincia": "Córdoba", "comuna": "Capital", "barrio": "Alberdi", "vinculo": "ex pareja", "nombre": "FAKE NAME B", "edad": 24 },
     { "id": 3, "fecha": "2001-09-09", "provincia": "Santa Fe", "comuna": "Rosario", "barrio": "Centro", "vinculo": "familiar", "nombre": "FAKE NAME C", "edad": 45 },
     { "id": 4, "fecha": "sin dato", "provincia": "Mendoza", "comuna": "", "barrio": "", "vinculo": "desconocido", "nombre": "FAKE NAME D", "edad": null },
-    { "id": 4, "fecha": "2001-09-09", "provincia": "Santa Fe", "comuna": "Rosario", "barrio": "Centro", "vinculo": "familiar", "nombre": "FAKE NAME C (update)", "edad": 45 }
+    { "id": 3, "fecha": "2001-09-09", "provincia": "Santa Fe", "comuna": "Rosario", "barrio": "Centro", "vinculo": "familiar", "nombre": "FAKE NAME C (update)", "edad": 45 }
   ]
 }

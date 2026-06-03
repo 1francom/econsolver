@@ -57,3 +57,34 @@ test("dedupeIncidents — hash opt-in drops collisions", () => {
   assert.equal(r.rows.length, 1);
   assert.equal(r.nDuplicatesDropped, 1);
 });
+
+import { parseRegistry } from "./observatorio.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const fixture = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./__fixtures__/observatorio_sample.json", import.meta.url)))
+);
+
+test("parseRegistry — strips PII, keeps whitelist, normalizes dates", () => {
+  const { rows, headers, meta } = parseRegistry(fixture);
+  // PII gone
+  assert.equal(rows.every(r => !("nombre" in r) && !("edad" in r)), true);
+  // whitelist headers only (+ _fecha_raw bookkeeping allowed)
+  assert.deepEqual(headers, ["fecha", "provincia", "comuna", "barrio", "vinculo"]);
+  // id-dedup default on: id:4 appears twice → one dropped
+  assert.equal(meta.nDuplicatesDropped, 1);
+  // dates normalized; the "sin dato" row keeps fecha:null + raw preserved
+  const r1 = rows.find(r => r.provincia === "Buenos Aires");
+  assert.equal(r1.fecha, "2024-05-15");
+  const bad = rows.find(r => r.provincia === "Mendoza");
+  assert.equal(bad.fecha, null);
+  assert.equal(meta.nUnparsedDates, 1);
+});
+
+test("parseRegistry — meta coverage spans min/max parsed dates", () => {
+  const { meta } = parseRegistry(fixture);
+  assert.equal(meta.coverage.minDate, "1984-01-03");
+  assert.equal(meta.coverage.maxDate, "2024-05-15");
+  assert.equal(meta.source, "Observatorio Lucía Pérez");
+});
