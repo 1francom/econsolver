@@ -24,7 +24,7 @@
 //   bwManual     {string}    setBwManual {fn}
 //   kernel       {string}    setKernel {fn}
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { VarPanel, Section, Chip, useTheme, mono } from "./shared.jsx";
 
 const inputStyle = C => ({
@@ -219,6 +219,30 @@ function RDDConfig({
   );
 }
 
+
+// ─── OLS: Collapsible survey-weights toggle ───────────────────────────────────
+function CollapsibleWeights(props) {
+  const { C } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginBottom: "1.4rem" }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0.4rem 0.65rem", background: "transparent",
+          border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
+          fontFamily: mono, fontSize: 10, letterSpacing: "0.14em",
+          textTransform: "uppercase", color: C.textMuted,
+        }}
+      >
+        <span>Survey weights (WLS) — optional</span>
+        <span>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && <div style={{ marginTop: 8 }}><WeightsConfig {...props} /></div>}
+    </div>
+  );
+}
 
 // ─── OLS: Survey Weights ──────────────────────────────────────────────────────
 function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
@@ -599,6 +623,7 @@ function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export default function ModelConfiguration({
   model,
+  family = "linear",
   numericCols,
   yVar,
   xVars,      setXVars,
@@ -712,11 +737,10 @@ export default function ModelConfiguration({
   }
 
   if (model === "EventStudy") {
+    if (family === "poisson") {
+      return <SunAbrahamConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} cohortCol={cohortCol} setCohortCol={setCohortCol} periodCol={periodCol} setPeriodCol={setPeriodCol} saUnitCol={saUnitCol} setSaUnitCol={setSaUnitCol} saControlMode={saControlMode} setSaControlMode={setSaControlMode} saRefPeriod={saRefPeriod} setSaRefPeriod={setSaRefPeriod} wVars={wVars} setWVars={setWVars} />;
+    }
     return <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />;
-  }
-
-  if (model === "SunAbraham") {
-    return <SunAbrahamConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} cohortCol={cohortCol} setCohortCol={setCohortCol} periodCol={periodCol} setPeriodCol={setPeriodCol} saUnitCol={saUnitCol} setSaUnitCol={setSaUnitCol} saControlMode={saControlMode} setSaControlMode={setSaControlMode} saRefPeriod={saRefPeriod} setSaRefPeriod={setSaRefPeriod} wVars={wVars} setWVars={setWVars} />;
   }
 
   if (model === "CallawayCS") {
@@ -731,19 +755,7 @@ export default function ModelConfiguration({
     return <SyntheticControlConfig numericCols={numericCols} yVar={yVar} treatedUnit={treatedUnit} setTreatedUnit={setTreatedUnit} synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime} xVars={xVars} setXVars={setXVars} rows={rows} panel={panel} />;
   }
 
-  if (model === "WLS") {
-    return (
-      <WeightsConfig
-        numericCols={numericCols}
-        yVar={yVar}
-        xVars={xVars}
-        weightVar={weightVar}
-        setWeightVar={setWeightVar}
-      />
-    );
-  }
-
-  if (model === "Poisson") {
+  if (model === "OLS" && family === "poisson") {
     // Optional: offset column (exposure / population at risk).
     // ln(offset) is added to the linear predictor with coefficient = 1,
     // converting the count model to a per-capita rate model (Osgood 2000, Eq. 3).
@@ -770,7 +782,7 @@ export default function ModelConfiguration({
     );
   }
 
-  if (model === "PoissonFE") {
+  if (model === "FE" && family === "poisson") {
     const entityCol = panel?.entityCol || poissonEntityCol;
     const extraFE = poissonExtraFE ?? [];
     const toggleExtra = (h) =>
@@ -821,6 +833,18 @@ export default function ModelConfiguration({
         </Section>
         {poissonEntityCol ? extraFEPanel : null}
       </>
+    );
+  }
+
+  if (model === "OLS" && family === "linear") {
+    return (
+      <CollapsibleWeights
+        numericCols={numericCols}
+        yVar={yVar}
+        xVars={xVars}
+        weightVar={weightVar}
+        setWeightVar={setWeightVar}
+      />
     );
   }
 

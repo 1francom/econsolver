@@ -3235,6 +3235,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           <ModelConfiguration
             model={model}
+            family={family}
             numericCols={numericCols}
             yVar={yVar}
             xVars={xVars}         setXVars={setXVars}
