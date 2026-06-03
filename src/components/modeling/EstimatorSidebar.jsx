@@ -37,7 +37,7 @@ export const MODELS = [
   { id: "FuzzyRDD",         label: "Fuzzy RDD",        group: "RD",        desc: "Fuzzy Regression Discontinuity Design",                                 color: "#c88e6e" },
   { id: "SpatialRDD",       label: "Spatial RD",       group: "RD",        desc: "Geographic RD at a boundary (Keele & Titiunik 2015)",                   color: "#c88e6e" },
   // Synthetic
-  { id: "SyntheticControl", label: "Synthetic Control",group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)",  color: "#6e9ec8" },
+  { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)",  color: "#6e9ec8" },
 ];
 
 // ordered group list (controls render order)
