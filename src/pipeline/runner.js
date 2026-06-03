@@ -1393,6 +1393,30 @@ export function applyStep(rows, headers, s, context = {}) {
         : rows;
       break;
 
+    // ── inject_column ──────────────────────────────────────────────────────────
+    // Splices a pre-computed dense column (model fitted values, residuals,
+    // first-stage fitted values, SC gap, etc.) extracted from an estimation
+    // result back into the dataset. s.values is a plain array aligned to the
+    // current pipeline row order at extraction time. If the row count has
+    // changed since extraction (pipeline mutated upstream), the step no-ops with
+    // a warning rather than corrupting the dataset.
+    case "inject_column": {
+      const { colName, values } = s;
+      if (colName) {
+        if (Array.isArray(values) && values.length === rows.length) {
+          R = rows.map((r, i) => ({ ...r, [colName]: values[i] }));
+          H = H.includes(colName) ? H : [...H, colName];
+        } else {
+          console.warn(
+            `inject_column "${colName}": length mismatch ` +
+            `(stored=${values?.length}, current=${rows.length}) — step skipped. ` +
+            `Re-extract this column after any pipeline changes.`
+          );
+        }
+      }
+      break;
+    }
+
   }
   return { rows: R, headers: H };
 }
