@@ -78,7 +78,7 @@ export {
 } from "./NonLinearEngine.js";
 
 // ── IV extensions: GMM and LIML ──────────────────────────────────────────────
-export { runGMM, runLIML } from "./GMMEngine.js";
+export { runGMM, runLIML, runIVPoisson } from "./GMMEngine.js";
 
 // ── Synthetic Control (Abadie-Diamond-Hainmueller 2010) ──────────────────────
 export { runSyntheticControl } from "./SyntheticControlEngine.js";
