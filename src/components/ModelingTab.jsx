@@ -1412,6 +1412,24 @@ function applyFactors(rows, vars, factorVars) {
   return { rows: expandedRows, vars: expandedVars };
 }
 
+// ─── ESTIMATOR RESOLVER ───────────────────────────────────────────────────────
+// Maps (identification strategy, outcome family, has-weight) → the legacy
+// estimator id that the dispatch branches + SQL fast path already understand.
+// This keeps both _runEstimation and estimate() keyed on a single resolved id
+// so the 2D (strategy × family) selector reuses every existing engine path.
+function resolveEstimator(model, family, hasWeight) {
+  if (model === "OLS") {
+    if (family === "poisson") return "Poisson";
+    if (family === "logit")   return "Logit";
+    if (family === "probit")  return "Probit";
+    return hasWeight ? "WLS" : "OLS";
+  }
+  if (model === "FE" && family === "poisson")         return "PoissonFE";
+  if (model === "EventStudy" && family === "poisson") return "SunAbraham";
+  if (model === "2SLS" && family === "poisson")       return "IVPoisson"; // engine added in a later task
+  return model;
+}
+
 // ─── B5: SESSION MODEL HISTORY ────────────────────────────────────────────────
 function ModelHistory({ history, onRestore, onClear }) {
   const { C } = useTheme();
@@ -1774,29 +1792,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     const { rows: _r1, vars: expX } = applyFactors(dataRows, xVars, factorVars);
     const { rows: expRows, vars: expW } = applyFactors(_r1, wVars, factorVars);
     dataRows = expRows; // parameter reassignment: safe in JS
+    const effModel = resolveEstimator(model, family, !!weightVar[0]);
     try {
       const allX = [...expX, ...expW];
 
-      if (model === "OLS") {
+      if (effModel === "OLS") {
         if (!allX.length) return { error: "Select at least one regressor." };
-        const wCol = weightVar[0];
-        let res;
-        if (wCol) {
-          const weights = dataRows.map(r => {
-            const v = r[wCol];
-            return typeof v === "number" && isFinite(v) && v > 0 ? v : null;
-          });
-          if (weights.every(w => w === null))
-            return { error: `Weight column '${wCol}' has no valid positive values.` };
-          res = runWLS(dataRows, y, allX, weights, seOpts);
-        } else {
-          res = runOLS(dataRows, y, allX, seOpts);
-        }
-        if (!res) return { error: diagnoseFit(dataRows, y, allX, wCol) };
-        const olsType = wCol ? "WLS" : "OLS";
-        return { result: wrapResult(olsType, res, { yVar: y, xVars: expX, wVars: expW, weightCol: wCol ?? null }), panelFE: null, panelFD: null };
+        const res = runOLS(dataRows, y, allX, seOpts);
+        if (!res) return { error: diagnoseFit(dataRows, y, allX, null) };
+        return { result: wrapResult("OLS", res, { yVar: y, xVars: expX, wVars: expW, weightCol: null }), panelFE: null, panelFD: null };
 
-      } else if (model === "FE") {
+      } else if (effModel === "FE") {
         if (!allX.length) return { error: "Select at least one regressor." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const feRaw = runFE(dataRows, y, allX, ec, tc, seOpts);
@@ -1805,7 +1811,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const feRes = wrapResult("FE", feRaw, panelSpec);
         return { result: { type: "FE", fe: feRes, fd: null }, panelFE: feRes, panelFD: null };
 
-      } else if (model === "FD") {
+      } else if (effModel === "FD") {
         if (!allX.length) return { error: "Select at least one regressor." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const fdRaw = runFD(dataRows, y, allX, ec, tc, seOpts);
@@ -1814,27 +1820,27 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const fdRes = wrapResult("FD", fdRaw, panelSpec);
         return { result: { type: "FD", fe: null, fd: fdRes }, panelFE: null, panelFD: fdRes };
 
-      } else if (model === "2SLS") {
+      } else if (effModel === "2SLS") {
         if (!expX.length) return { error: "Select endogenous regressor(s) in Features (X)." };
         if (!zVars.length) return { error: "Select at least one instrument (Z)." };
         const res = run2SLS(dataRows, y, expX, expW, zVars, seOpts);
         if (!res || res.error) return { error: res?.error ?? "2SLS failed. Check that instruments are valid (not in X) and data is sufficient." };
         return { result: wrapResult("2SLS", res, { yVar: y, xVars: expX, wVars: expW, zVars }), panelFE: null, panelFD: null };
 
-      } else if (model === "DiD") {
+      } else if (effModel === "DiD") {
         if (!postVar[0] || !treatVar[0]) return { error: "Select Post and Treated binary columns for DiD." };
         const res = run2x2DiD(dataRows, y, postVar[0], treatVar[0], expW, seOpts);
         if (!res) return { error: "DiD failed. Post and Treated must be 0/1 binary variables." };
         return { result: wrapResult("DiD", res, { yVar: y, wVars: expW, postVar: postVar[0], treatVar: treatVar[0] }), panelFE: null, panelFD: null };
 
-      } else if (model === "TWFE") {
+      } else if (effModel === "TWFE") {
         if (!treatVar[0]) return { error: "Select the treatment indicator column." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const res = runTWFEDiD(dataRows, y, ec, tc, treatVar[0], expW, seOpts);
         if (!res) return { error: "TWFE DiD failed. Check panel structure and treatment variable." };
         return { result: wrapResult("TWFE", res, { yVar: y, wVars: expW, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }), panelFE: null, panelFD: null };
 
-      } else if (model === "RDD") {
+      } else if (effModel === "RDD") {
         if (!runningVar[0]) return { error: "Select a running variable." };
         const c0 = parseFloat(cutoff);
         if (isNaN(c0)) return { error: "Enter a valid cutoff value." };
@@ -1846,29 +1852,29 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (!res) return { error: "RDD failed. Not enough observations within bandwidth." };
         return { result: wrapResult("RDD", res, { yVar: y, wVars: expW, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel, polyOrder }, { h }), panelFE: null, panelFD: null };
 
-      } else if (model === "Logit" || model === "Probit") {
+      } else if (effModel === "Logit" || effModel === "Probit") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
-        const fn  = model === "Logit" ? runLogit : runProbit;
+        const fn  = effModel === "Logit" ? runLogit : runProbit;
         const res = fn(dataRows, y, allX, seOpts);
-        if (!res || res.error) return { error: res?.error ?? `${model} failed. Ensure Y is binary (0/1) and X columns are numeric.` };
-        if (!res.converged) console.warn(`${model} did not converge after ${res.iterations} iterations.`);
-        return { result: wrapResult(model, res, { yVar: y, xVars: expX, wVars: expW }), panelFE: null, panelFD: null };
+        if (!res || res.error) return { error: res?.error ?? `${effModel} failed. Ensure Y is binary (0/1) and X columns are numeric.` };
+        if (!res.converged) console.warn(`${effModel} did not converge after ${res.iterations} iterations.`);
+        return { result: wrapResult(effModel, res, { yVar: y, xVars: expX, wVars: expW }), panelFE: null, panelFD: null };
 
-      } else if (model === "GMM") {
+      } else if (effModel === "GMM") {
         if (!expX.length) return { error: "Select endogenous regressor(s) in Features (X)." };
         if (!zVars.length) return { error: "Select at least one excluded instrument (Z)." };
         const res = runGMM(dataRows, y, expX, expW, zVars, seOpts);
         if (!res || res.error) return { error: res?.error ?? "GMM failed. Check instruments and data." };
         return { result: wrapResult("GMM", res, { yVar: y, xVars: expX, wVars: expW, zVars }), panelFE: null, panelFD: null };
 
-      } else if (model === "LIML") {
+      } else if (effModel === "LIML") {
         if (!expX.length) return { error: "Select endogenous regressor(s) in Features (X)." };
         if (!zVars.length) return { error: "Select at least one excluded instrument (Z)." };
         const res = runLIML(dataRows, y, expX, expW, zVars, seOpts);
         if (!res || res.error) return { error: res?.error ?? "LIML failed. Check instruments and data." };
         return { result: wrapResult("LIML", res, { yVar: y, xVars: expX, wVars: expW, zVars }), panelFE: null, panelFD: null };
 
-      } else if (model === "WLS") {
+      } else if (effModel === "WLS") {
         if (!allX.length) return { error: "Select at least one regressor." };
         const wCol = weightVar[0];
         if (!wCol) return { error: "WLS: select a weight variable in Model Configuration." };
@@ -1882,14 +1888,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (!res) return { error: diagnoseFit(dataRows, y, allX, wCol) };
         return { result: wrapResult("WLS", res, { yVar: y, xVars: expX, wVars: expW, weightCol: wCol }), panelFE: null, panelFD: null };
 
-      } else if (model === "LSDV") {
+      } else if (effModel === "LSDV") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const res = runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts);
         if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };
         return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc }), panelFE: null, panelFD: null };
 
-      } else if (model === "EventStudy") {
+      } else if (effModel === "EventStudy") {
         if (!treatTimeCol[0]) return { error: "Select the treatment time column (period when each unit was first treated)." };
         const ec = panel.entityCol, tc = panel.timeCol;
         const pre  = Math.max(1, kPre  || 3);
@@ -1898,7 +1904,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (!res || res.error) return { error: res?.error ?? "Event Study failed. Check panel structure and treatment time column." };
         return { result: wrapResult("EventStudy", res, { yVar: y, xVars: expX, wVars: expW, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }), panelFE: null, panelFD: null };
 
-      } else if (model === "FuzzyRDD") {
+      } else if (effModel === "FuzzyRDD") {
         if (!treatVar[0])   return { error: "Select the treatment receipt column (D: actual 0/1 take-up)." };
         if (!runningVar[0]) return { error: "Select a running variable." };
         const c0 = parseFloat(cutoff);
@@ -1911,7 +1917,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (!res || res.error) return { error: res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth." };
         return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars: expW, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel, polyOrder }), panelFE: null, panelFD: null };
 
-      } else if (model === "SpatialRDD") {
+      } else if (effModel === "SpatialRDD") {
         // Keele & Titiunik 2015 geographic RD: signed running variable built from
         // a distance-to-boundary column + a 0/1 indicator for the treated side.
         if (!treatVar[0])   return { error: "Select the treated-side indicator column (0/1)." };
@@ -1949,14 +1955,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           panelFE: null, panelFD: null,
         };
 
-      } else if (model === "Poisson") {
+      } else if (effModel === "Poisson") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
         const offCol = poissonOffsetCol || null;
         const res = runPoisson(dataRows, y, allX, seOpts, offCol);
         if (!res || res.error) return { error: res?.error ?? "Poisson GLM failed. Ensure Y is a non-negative count or rate variable." };
         return { result: wrapResult("Poisson", res, { yVar: y, xVars: allX, wVars: expW, offsetCol: offCol }), panelFE: null, panelFD: null };
 
-      } else if (model === "PoissonFE") {
+      } else if (effModel === "PoissonFE") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
         const ec = panel?.entityCol || poissonEntityCol;
         if (!ec) return { error: "Select an Entity (i) column in the configuration panel below." };
@@ -1971,7 +1977,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
         return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, feCols }), panelFE: null, panelFD: null };
 
-      } else if (model === "SunAbraham") {
+      } else if (effModel === "SunAbraham") {
         const cCol = cohortCol[0];
         const pCol = periodCol[0];
         const uCol = panel?.entityCol || saUnitCol;
@@ -1997,7 +2003,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           panelFE: null, panelFD: null,
         };
 
-      } else if (model === "CallawayCS") {
+      } else if (effModel === "CallawayCS") {
         const tcol = csTreatCol[0];
         if (!tcol) return { error: "Select the First-Treatment-Period column in the configuration panel below." };
         const ecol = panel?.entityCol || csEntityCol[0];
@@ -2028,7 +2034,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           panelFE: null, panelFD: null,
         };
 
-      } else if (model === "SyntheticControl") {
+      } else if (effModel === "SyntheticControl") {
         if (!panel?.entityCol || !panel?.timeCol) return { error: "Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control." };
         if (!treatedUnit) return { error: "Select the treated unit." };
         const synthTime = parseFloat(synthTreatTime);
@@ -2039,11 +2045,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         return { result: wrapResult("SyntheticControl", res, { yVar: y, xVars: expX, entityCol: ec, timeCol: tc, treatedUnit, treatTime: synthTime }), panelFE: null, panelFD: null };
       }
 
-      return { error: `Unknown estimator: ${model}` };
+      return { error: `Unknown estimator: ${effModel}` };
     } catch (e) {
       return { error: `Estimation error: ${e.message}` };
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -2139,11 +2145,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           rawSE === "hac"        ? "HAC"
         : rawSE.startsWith("hc") ? rawSE.toUpperCase()
         : rawSE;
+      const effModel = resolveEstimator(model, family, !!weightVar[0]);
       const dispatchCtx = {
         tableName:     duckTable ?? null,
         n:             rowCount > rows.length ? rowCount : rows.length,
         xColsExpanded: allX,
-        estimator:     model,
+        estimator:     effModel,
         seType:        seTypeNorm,
         hasWeights:    !!weightVar[0],
         weightCol:     weightVar[0] || null,
@@ -2151,13 +2158,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         clusterVar:    clusterVar ?? null,
         clusterVar2:   clusterVar2 ?? null,
         timeVar:       seTypeNorm === "HAC" ? (timeVar ?? panel?.timeCol ?? null) : null,
-        xColsEndog:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars : [],
-        zVars:         ["2SLS", "GMM", "LIML"].includes(model) ? zVars : [],
-        endogCount:    ["2SLS", "GMM", "LIML"].includes(model) ? xVars.length : 0,
-        unitCol:       ["FE", "FD", "TWFE", "EventStudy"].includes(model)
+        xColsEndog:    ["2SLS", "GMM", "LIML"].includes(effModel) ? xVars : [],
+        zVars:         ["2SLS", "GMM", "LIML"].includes(effModel) ? zVars : [],
+        endogCount:    ["2SLS", "GMM", "LIML"].includes(effModel) ? xVars.length : 0,
+        unitCol:       ["FE", "FD", "TWFE", "EventStudy"].includes(effModel)
           ? (panel?.entityCol ?? null)
-          : (model === "PoissonFE" ? (panel?.entityCol || poissonEntityCol || null) : null),
-        timeCol:       ["FD", "TWFE", "EventStudy"].includes(model) ? (panel?.timeCol ?? null)
+          : (effModel === "PoissonFE" ? (panel?.entityCol || poissonEntityCol || null) : null),
+        timeCol:       ["FD", "TWFE", "EventStudy"].includes(effModel) ? (panel?.timeCol ?? null)
           : (seTypeNorm === "HAC" ? (panel?.timeCol ?? null) : null),
         postCol:       postVar[0] || null,
         treatCol:      treatVar[0] || null,
@@ -2172,9 +2179,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         fuzzyTreatCol: treatVar[0] || null,
       };
 
-      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(model))) {
+      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(effModel))) {
         try {
-          if (model === "2SLS") {
+          if (effModel === "2SLS") {
             // ── 2SLS SQL branch (Fase 3a + Fase 8 robust-SE backfill) ──
             if (!["classical", "HC0", "HC1", "HC2", "HC3", "clustered", "twoway", "HAC"].includes(seTypeNorm)) {
               throw new Error(`2SLS SQL path does not support ${seTypeNorm} - fallback to JS`);
@@ -2344,7 +2351,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return;
           }
 
-          if (model === "WLS") {
+          if (effModel === "WLS") {
             // ── WLS SQL branch (Fase 3c + Fase 8 robust-SE backfill) ──
             if (!["classical", "HC0", "HC1", "HC2", "HC3", "clustered", "twoway", "HAC"].includes(seTypeNorm)) {
               throw new Error(`WLS SQL path does not support ${seTypeNorm} - fallback to JS`);
@@ -2429,15 +2436,15 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return;
           }
 
-          if (model === "Logit" || model === "Probit" || model === "PoissonFE") {
-            const family = model === "Logit" ? "logit"
-              : model === "Probit" ? "probit"
+          if (effModel === "Logit" || effModel === "Probit" || effModel === "PoissonFE") {
+            const irlsFamily = effModel === "Logit" ? "logit"
+              : effModel === "Probit" ? "probit"
               : "poisson";
             let irlsX = allX;
             let irlsDummy = {};
             let entityCol = null;
 
-            if (model === "PoissonFE") {
+            if (effModel === "PoissonFE") {
               entityCol = panel?.entityCol || poissonEntityCol || null;
               if (!entityCol) throw new Error("Poisson FE SQL path: entity column missing - fallback to JS");
               // Multi-way FE has no SQL fast path yet — use the validated JS engine.
@@ -2467,7 +2474,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               tableName: duckTable,
               yCol: yVar[0],
               xCols: irlsX,
-              family,
+              family: irlsFamily,
               dummySQL: irlsDummy,
               maxIter: IRLS_MAX_ITER,
               tol: IRLS_TOL,
@@ -2478,7 +2485,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             }
             logEstimate({
               path: "sql",
-              phase: `irls-${model}`,
+              phase: `irls-${effModel}`,
               n: rowCount,
               k: irlsX.length,
               seType: "classical",
@@ -2491,14 +2498,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 tableName: duckTable,
                 yCol: yVar[0],
                 xCols: irlsX,
-                family,
+                family: irlsFamily,
                 dummySQL: irlsDummy,
                 hcType: seTypeNorm,
               }));
               irlsResult = mRobust.result;
               logEstimate({
                 path: "sql",
-                phase: `irls-${model}-${seTypeNorm}`,
+                phase: `irls-${effModel}-${seTypeNorm}`,
                 n: rowCount,
                 k: irlsX.length,
                 seType: seTypeNorm,
@@ -2507,10 +2514,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             }
 
             if (!irlsResult.converged) {
-              console.warn(`${model} SQL IRLS did not converge after ${irlsResult.iterations} iterations.`);
+              console.warn(`${effModel} SQL IRLS did not converge after ${irlsResult.iterations} iterations.`);
             }
 
-            const wrapped = wrapResult(model, irlsResult, {
+            const wrapped = wrapResult(effModel, irlsResult, {
               yVar: yVar[0],
               xVars,
               wVars,
@@ -2520,7 +2527,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return;
           }
 
-          if (model === "RDD" || model === "FuzzyRDD") {
+          if (effModel === "RDD" || effModel === "FuzzyRDD") {
             if (!runningVar[0] || !Number.isFinite(cutoffNum)) {
               throw new Error("RDD SQL path: running variable or cutoff missing - fallback to JS");
             }
@@ -2541,22 +2548,22 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               dummySQL: controlsExpansion.dummySQL,
               seType: seTypeNorm,
             };
-            const mRDD = await measure(() => model === "RDD"
+            const mRDD = await measure(() => effModel === "RDD"
               ? runSharpRDDFromSuffStats(sharedRDD)
               : runFuzzyRDDFromSuffStats({ ...sharedRDD, treatCol: treatVar[0] }));
             const rddRaw = mRDD.result;
             if (!rddRaw || rddRaw.error) {
-              throw new Error(rddRaw?.error ?? `${model} SQL solve failed`);
+              throw new Error(rddRaw?.error ?? `${effModel} SQL solve failed`);
             }
             logEstimate({
               path: "sql",
-              phase: `rdd-${model}`,
+              phase: `rdd-${effModel}`,
               n: rowCount,
               k: controlsExpansion.xColsExpanded.length + 3,
               seType: seTypeNorm,
               msTotal: mRDD.ms,
             });
-            const wrapped = model === "RDD"
+            const wrapped = effModel === "RDD"
               ? wrapResult("RDD", rddRaw, {
                 yVar: yVar[0],
                 wVars,
@@ -2578,7 +2585,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return;
           }
 
-          if (model === "GMM") {
+          if (effModel === "GMM") {
             // ── GMM SQL branch (Fase 3b — classical SE only; 2-step efficient) ──
             if (seTypeNorm !== "classical") {
               throw new Error(`GMM SQL path only supports classical SE in Fase 3b (got ${seTypeNorm}) — fallback to JS`);
@@ -2617,7 +2624,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return;
           }
 
-          if (model === "LIML") {
+          if (effModel === "LIML") {
             // ── LIML SQL branch (Fase 3b + Fase 8 robust-SE backfill) ──
             if (!["classical", "HC0", "HC1", "clustered", "HAC"].includes(seTypeNorm)) {
               throw new Error(`LIML SQL path does not support ${seTypeNorm} - fallback to JS`);
@@ -2683,24 +2690,24 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return;
           }
 
-          if (model === "FE" || model === "FD" || model === "TWFE" || model === "EventStudy") {
+          if (effModel === "FE" || effModel === "FD" || effModel === "TWFE" || effModel === "EventStudy") {
             // ── Panel FE/FD/TWFE SQL branch (Fase 4b — classical/HC0/HC1/HC2/HC3/clustered/HAC) ──
             const unitCol = panel?.entityCol;
             const timeCol = panel?.timeCol;
             if (!unitCol) throw new Error("Panel SQL path: entityCol missing — fallback to JS");
-            if ((model === "FD" || model === "TWFE" || model === "EventStudy") && !timeCol)
-              throw new Error(`Panel ${model} SQL path: timeCol missing — fallback to JS`);
+            if ((effModel === "FD" || effModel === "TWFE" || effModel === "EventStudy") && !timeCol)
+              throw new Error(`Panel ${effModel} SQL path: timeCol missing — fallback to JS`);
             // HAC on FE requires a time column for Driscoll-Kraay cross-sectional aggregation
             if (seTypeNorm === "HAC" && !timeCol)
               throw new Error("HAC standard errors require a time column. Set one in the Panel tab.");
 
-            const panelMode = model === "EventStudy" ? "TWFE" : model;
+            const panelMode = effModel === "EventStudy" ? "TWFE" : effModel;
             let eventStudySynth = null;
             let twfeSynth = null;
             let wExp;
             let wDummy;
 
-            if (model === "EventStudy") {
+            if (effModel === "EventStudy") {
               const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
               eventStudySynth = buildEventStudySynthetic({
                 timeCol,
@@ -2711,7 +2718,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               });
               wExp = eventStudySynth.xColsExpanded;
               wDummy = { ...controlsExpansion.dummySQL, ...eventStudySynth.dummySQL };
-            } else if (model === "TWFE") {
+            } else if (effModel === "TWFE") {
               const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
               twfeSynth = buildTWFEDiDSynthetic({
                 treatCol: treatVar[0],
@@ -2726,7 +2733,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             }
             // Dispatcher already checked HC2/HC3 dim budget; re-check post-expansion
             if (!shouldUseSQLPath({
-              ...dispatchCtx, estimator: model,
+              ...dispatchCtx, estimator: effModel,
               xColsExpanded: wExp, timeCol,
               unitCol, clusterVar: seOpts?.clusterVar ?? null,
             })) {
@@ -2749,7 +2756,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               panelEntry = { ...m.result, dummySQL: wDummy };
               panelCache.set(panelKey, panelEntry);
               logEstimate({
-                path: "sql", phase: `withinSuffStats-${model}`,
+                path: "sql", phase: `withinSuffStats-${effModel}`,
                 n: rowCount, k: wExp.length, msTotal: m.ms,
               });
             }
@@ -2760,7 +2767,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
             // Classical solve (always needed for β and XtXinv even when robust SE follows)
             const rCls = solver({ ...panelEntry, meat: null, hcType: null });
-            if (!rCls) throw new Error(`Suff-stats ${model} solve returned null (singular within X'X)`);
+            if (!rCls) throw new Error(`Suff-stats ${effModel} solve returned null (singular within X'X)`);
 
             // ── Robust meat dispatch ──
             let rFinal = rCls;
@@ -2774,7 +2781,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   k: wExp.length,
                   beta: rCls._betaFull,
                 }));
-                logEstimate({ path: "sql", phase: `meat-${model}-${seTypeNorm}`, n: rowCount, k: wExp.length, msTotal: mm.ms });
+                logEstimate({ path: "sql", phase: `meat-${effModel}-${seTypeNorm}`, n: rowCount, k: wExp.length, msTotal: mm.ms });
                 meatResult = mm.result.meat;
                 engineHcType = seTypeNorm === "HC1" ? "HC1" : null;
 
@@ -2787,7 +2794,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   Ainv: rCls.XtXinv,
                   hcType: seTypeNorm,
                 }));
-                logEstimate({ path: "sql", phase: `meat-${model}-${seTypeNorm}`, n: rowCount, k: wExp.length, msTotal: mm.ms });
+                logEstimate({ path: "sql", phase: `meat-${effModel}-${seTypeNorm}`, n: rowCount, k: wExp.length, msTotal: mm.ms });
                 meatResult = mm.result.meat;
                 engineHcType = seTypeNorm;
 
@@ -2799,7 +2806,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   k: wExp.length,
                   beta: rCls._betaFull,
                 }));
-                logEstimate({ path: "sql", phase: `meat-${model}-clustered`, n: rowCount, k: wExp.length, msTotal: mm.ms });
+                logEstimate({ path: "sql", phase: `meat-${effModel}-clustered`, n: rowCount, k: wExp.length, msTotal: mm.ms });
                 meatResult = mm.result.meat;
                 engineHcType = null; // meat already scaled inside computeWithinClusterMeat
 
@@ -2810,18 +2817,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   beta: rCls._betaFull,
                   lag: seOpts?.lag ?? null,
                 }));
-                logEstimate({ path: "sql", phase: `meat-${model}-HAC`, n: rowCount, k: wExp.length, msTotal: mm.ms });
+                logEstimate({ path: "sql", phase: `meat-${effModel}-HAC`, n: rowCount, k: wExp.length, msTotal: mm.ms });
                 meatResult = mm.result.meat;
                 engineHcType = null; // meat pre-scaled by DK
               }
 
               if (meatResult !== null) {
                 rFinal = solver({ ...panelEntry, meat: meatResult, hcType: engineHcType });
-                if (!rFinal) throw new Error(`Suff-stats ${model} robust solve returned null`);
+                if (!rFinal) throw new Error(`Suff-stats ${effModel} robust solve returned null`);
               }
             }
 
-            if (model === "EventStudy") {
+            if (effModel === "EventStudy") {
               const idxByName = new Map(wExp.map((name, idx) => [name, idx]));
               const eventCoeffs = eventStudySynth.eventTerms.map(({ k, name }) => {
                 const idx = idxByName.get(name);
@@ -2884,7 +2891,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               return;
             }
 
-            if (model === "TWFE") {
+            if (effModel === "TWFE") {
               const twfeNames = [...twfeSynth.varNames];
               const twfeRaw = {
                 ...rFinal,
@@ -2910,13 +2917,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             }
 
             const panelSpec = { yVar: yVar[0], xVars, wVars, entityCol: unitCol, timeCol };
-            const wrapped = wrapResult(model, rFinal, panelSpec);
-            const resultBundle = model === "FE"
+            const wrapped = wrapResult(effModel, rFinal, panelSpec);
+            const resultBundle = effModel === "FE"
               ? { type: "FE", fe: wrapped, fd: null }
               : { type: "FD", fe: null, fd: wrapped };
             setResult(resultBundle);
-            if (model === "FE") { setPanelFE(wrapped); setPanelFD(null); }
-            else                { setPanelFD(wrapped); setPanelFE(null); }
+            if (effModel === "FE") { setPanelFE(wrapped); setPanelFD(null); }
+            else                   { setPanelFD(wrapped); setPanelFE(null); }
             return;
           }
 
@@ -2924,7 +2931,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           let xColsExpanded;
           let dummySQL;
           let didSynth = null;
-          if (model === "DiD") {
+          if (effModel === "DiD") {
             const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
             didSynth = buildDiD2x2Synthetic({
               postCol: postVar[0],
@@ -3040,7 +3047,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               tableName: duckTable, yCol: yVar[0], xColsExpanded, dummySQL,
               beta: raw.beta, sampleSize: 5000,
             });
-            const wrapped = model === "DiD"
+            const wrapped = effModel === "DiD"
               ? wrapResult("DiD", {
                 ...raw,
                 varNames: didSynth.varNames,
@@ -3079,7 +3086,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       logEstimate({
         path: "js", phase: "estimate",
         n: estimationRows.length, k: allX.length,
-        estimator: model, seType, msTotal: mj.ms,
+        estimator: effModel, seType, msTotal: mj.ms,
       });
       if (out.error) { setErr(out.error); }
       else { setResult(out.result); setPanelFE(out.panelFE ?? null); setPanelFD(out.panelFD ?? null); }
@@ -3089,7 +3096,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       setRunning(false);
     }
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
-      model, yVar, xVars, wVars, zVars, weightVar, factorVars, seType,
+      model, family, yVar, xVars, wVars, zVars, weightVar, factorVars, seType,
       clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
       postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol]);
 
