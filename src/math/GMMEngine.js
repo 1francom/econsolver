@@ -457,6 +457,10 @@ export function runIVPoisson(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
   // Step 2: W = Ω̂⁻¹
   beta = iterate(beta, OmegaInv);
 
+  if (!beta.every(b => isFinite(b))) {
+    return { error: "IV-Poisson: estimation diverged (non-finite coefficients) — check instrument relevance and variable scaling." };
+  }
+
   // Final quantities
   const mu   = X.map(xi => Math.exp(dot(xi, beta)));
   const eps  = Y.map((y, i) => y - mu[i]);
