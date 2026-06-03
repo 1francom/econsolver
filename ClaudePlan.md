@@ -35,9 +35,9 @@ Econ Studio is transitioning from a feature-based tool to a professional SaaS pr
 | 2026-05-30 | `specs/2026-05-30-equation-workbench-design.md` | IN PROGRESS (verify) | workbench IDB store (v5) added; §10 security posture |
 | 2026-06-01 | `specs/2026-06-01-clean-tab-reorganization-and-report-ai-design.md` | OPEN | newest spec (untracked in git) |
 | 2026-06-01 | `specs/2026-06-01-spatial-engine-gaps-design.md` | IN PROGRESS | A4 expand_grid COVERED via `balance_panel`; Part A (areal interp, buffer exposure/count) + Part C (spatial weights, Moran/Geary, KDE, zonal) landed in `SpatialEngine.js` + UI sections, harness `spatialGapsValidation.js` 18/18 green |
-| 2026-06-01 | `specs/2026-06-01-modeling-poisson-twfe-gaps-design.md` | IN PROGRESS | A1 two-way/N-way Poisson FE (`runPoissonFEMulti`) DONE + R-validated (coef 8dp vs fepois) + UI wired; browser-validation pending. C3 Callaway-Sant'Anna DONE (2026-06-03). A2/A3/A4/B1/B2 still OPEN |
+| 2026-06-01 | `specs/2026-06-01-modeling-poisson-twfe-gaps-design.md` | IN PROGRESS | A1 two-way/N-way Poisson FE (`runPoissonFEMulti`) DONE + R-validated (coef 8dp vs fepois) + UI wired + browser-validated (2026-06-03). C3 Callaway-Sant'Anna DONE (2026-06-03). A2/A3/A4/B1/B2 still OPEN |
 | 2026-06-01 | `specs/2026-06-01-descriptive-viz-gaps-design.md` | IN PROGRESS | KDE2d + color-scale math landed (harness `descriptiveVizValidation.js` 31/31 green); pivot_wider/quantiles/Table-1/dodge UI still OPEN |
-| 2026-06-01 | `plans/2026-06-01-ba-thesis-replication-roadmap.md` | IN PROGRESS | Phase 3 A1 (central blocker) landed + R-validated; browser "Validations pending (Phase 3 A1)" listed in plan. Phases 1-2 partially landed via Codex spatial/descriptive |
+| 2026-06-01 | `plans/2026-06-01-ba-thesis-replication-roadmap.md` | IN PROGRESS | Phase 3 A1 (multi-FE Poisson) fully DONE — R-validated + browser-validated 2026-06-03. Phases 1-2 partially landed via Codex spatial/descriptive. A2/A3/A4/B1/B2 still OPEN |
 | 2026-06-01 | `specs/2026-06-01-stat-sim-inference-deepening-design.md` | DONE | Spec A (data-level only): parametric tests (two-sample/paired/prop/corr/var-ratio), general bootstrap (perc/basic/BCa)+jackknife, generalized permutation, shared seeded RNG. Spec B (model-coef inference) deferred. (Math + harness green; browser validation of UI Tasks 11–13 pending Franco) |
 | 2026-06-01 | `plans/2026-06-01-stat-sim-inference-deepening.md` | DONE | Implementation plan for Spec A: 14 tasks (rng.js, pf, 6 SampleTests, bootstrapStatistic+jackknife, permutationTest, SampleTestPanel/StatWorkspace/SimulateTab UI, Node validation harness + R cross-check). All landed; harness 81/81 green. Deferred: §4.1 R/Py/Stata snippet generators |
 | 2026-06-02 | `specs/2026-06-02-qte-stat-sim-design.md` | DONE | Unconditional QTE in Stat & Simulation: `src/math/QTE.js` (`quantileTreatmentEffect`, type-7 quantiles via exported `Resampling.quantile`, seeded within-group bootstrap percentile/basic/BCa band) + `QTEPanel.jsx` (table + QTE-vs-τ SVG with dashed ATE line + overlaid-CDF SVG with QTE arrow) mounted in StatWorkspace + SimulateTab (simulated data). Validated: `inferenceValidation.js` qte suite 30 checks green (point QTE = R quantile(type=7) diff to 6dp, ATE = lm slope); R block in `inferenceRValidation.R`. Covariate-adjusted QR deferred to Modeling. Franco: browser-validate on Vercel |
@@ -45,6 +45,8 @@ Econ Studio is transitioning from a feature-based tool to a professional SaaS pr
 | 2026-06-01 | Supabase live RLS / advisor audit (`THREAT_MODEL.md` §3.7) | DONE | B1–B4 remediated; 2 migrations applied; 10→1 advisor lints. Open: enable leaked-password protection, rotate `AGENT_SECRET`, `db pull` migrations into repo |
 | (Phase 13.2) | Supabase `projects`/`pipelines` RLS tables + pipeline sync (in this file) | **OPEN — ORPHANED** | specced, never built; no tables, no migrations, no client sync. Cross-device resume depends on it. |
 | 2026-06-03 | Callaway-Sant'Anna (2021) staggered DiD (item C3 of `specs/2026-06-01-modeling-poisson-twfe-gaps-design.md`) | DONE | `src/math/CallawayEngine.js` (OR estimator + IF SEs + event-study aggregation); wired end-to-end in EstimatorSidebar / ModelConfiguration / ModelingTab / EstimationResult; validation harness `callawayValidation.js` + R script. Franco: browser-validate on mpdta or own staggered panel. |
+| 2026-06-03 | `specs/2026-06-03-outcome-family-chip-twopass.md` | DONE | Part 1: estimator dropdown refactor (identification strategy × outcome family chip row) + IV-Poisson math engine. Part 2: two-pass extraction (Extract to dataset from result panel). |
+| 2026-06-03 | `plans/2026-06-03-outcome-family-chip-twopass.md` | DONE | All 12 tasks landed. P1: MODELS→pure strategies + FAMILY_SUPPORT chip row (EstimatorSidebar), `resolveEstimator(model,family)` dispatch, family-aware ModelConfiguration, `runIVPoisson` (two-step exponential GMM, J-test, first-stage F) wired 2SLS+Poisson chip + structural/DGP-recovery harness (R exact-6dp cross-val PENDING Franco's R run). P2: `inject_column` step (runner+registry), `ExtractPanel` → `DataStudio.addInjectColumnStep`, R/Py/Stata translators. Final review: 1 Important fixed (ExtractPanel gates on full row count, not preview). Franco: browser-validate two-pass + IV-Poisson. |
 
 ---
 
@@ -324,7 +326,7 @@ lambdas   — { [time]: coeff }   time fixed effects (null if timeFE: false)
 
 ---
 
-### 5.4 Poisson FE — DONE
+### 5.4 Poisson FE (PPML) — DONE + browser-validated 2026-06-03
 
 **Target file:** `src/math/NonLinearEngine.js` (extends existing file)
 
@@ -1459,7 +1461,7 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 
 ### Done
 - `SpatialEngine.js`: haversine, buffer, grid (rect + hex), point-in-polygon, spatial join, nearest neighbour, `assignBoundaryDistance` (Spatial RD running variable)
-- `SpatialTab.jsx`: Analyze tab (Distance to Point, Buffer, Grid, Spatial Join, Nearest Neighbour, Distance to Boundary) + Plot tab (Boundary/Grid/Points layers with per-layer dataset selector)
+- `SpatialTab.jsx`: Analyze tab (Distance to Point, Buffer, Grid, **Spatial Join point-in-polygon — browser-validated 2026-06-03**, Nearest Neighbour, Distance to Boundary) + Plot tab (Boundary/Grid/Points layers with per-layer dataset selector)
 - CSV auto-delimiter detection fixed (header-only sampling avoids WKT coordinate pollution)
 - Delete sync: Data tab ↔ DatasetManager now bidirectional
 - **SpatialTab 3-tab restructure** — Analyze / Map / Plot tabs; Map tab = Leaflet layer builder (renamed from "Plot") + "Download map.html" self-contained Leaflet HTML export; Plot tab = SpatialGeoPlot (Observable Plot static maps, WKT geometry layers, geographic axes, Mercator aspect ratio, per-layer dataset selector, height slider, full save/history/compare)
