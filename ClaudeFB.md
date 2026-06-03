@@ -270,3 +270,15 @@
 
 - [12:19] · Simulate
   You could add different types of quantiles like in R, but it might not be necessary
+
+---
+
+## 2026-06-03 batch
+
+### Features
+
+- [07:14] · Spatial
+  Add geometry to plot points, not just lat and lon
+
+- [07:18] · Calculate
+  Add a "show steps button" for integrals, derivatives and optimizations
