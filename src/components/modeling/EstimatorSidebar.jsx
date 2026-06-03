@@ -63,6 +63,8 @@ export default function EstimatorSidebar({
   modelAvail,
   modelHint,
   panel,
+  family,          // "linear" | "poisson" | "logit" | "probit"
+  onFamilySelect,  // (family: string) => void
 }) {
   const { C } = useTheme();
   const [open, setOpen] = useState(false);
@@ -207,6 +209,86 @@ export default function EstimatorSidebar({
             </div>
           )}
         </div>
+
+        {/* ── Outcome family chip row ── */}
+        {(() => {
+          const support = FAMILY_SUPPORT[model] ?? {};
+          const families = [
+            { id: "linear",  label: "Linear"  },
+            { id: "poisson", label: "Poisson" },
+            { id: "logit",   label: "Logit"   },
+            { id: "probit",  label: "Probit"  },
+          ];
+          // Only render chips when at least one non-linear family is available or planned
+          const hasNonLinear = Object.keys(support).length > 0;
+          if (!hasNonLinear) return null;
+
+          const HINT = {
+            OLS_poisson:        "Poisson GLM · E[Y|X] = exp(Xβ)",
+            OLS_logit:          "Logit · P(Y=1|X) = σ(Xβ)",
+            OLS_probit:         "Probit · P(Y=1|X) = Φ(Xβ)",
+            FE_poisson:         "Poisson FE (PPML) · exp(Xβ + αᵢ)",
+            EventStudy_poisson: "Sun-Abraham (2021) IW event study",
+            "2SLS_poisson":     "IV-Poisson · E[Y|X,Z] = exp(Xβ)",
+          };
+
+          return (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 8, letterSpacing: "0.18em", textTransform: "uppercase", color: C.textMuted, marginBottom: 5, fontFamily: mono }}>
+                Outcome family
+              </div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {families.map(f => {
+                  const state = f.id === "linear" ? "available" : (support[f.id] ?? "hidden");
+                  if (state === "hidden") return null;
+                  const isActive  = family === f.id;
+                  const isPlanned = state === "planned";
+                  const chipColor = f.id === "poisson" ? "#9e7ec8"
+                                  : f.id === "logit"   ? "#c8a96e"
+                                  : f.id === "probit"  ? "#c88e6e"
+                                  : C.blue;
+                  return (
+                    <button
+                      key={f.id}
+                      disabled={isPlanned}
+                      onClick={() => !isPlanned && onFamilySelect(f.id)}
+                      title={isPlanned ? "Planned — not yet implemented" : undefined}
+                      style={{
+                        border: `1px solid ${isActive ? chipColor : "#2a2a2a"}`,
+                        borderRadius: 3,
+                        padding: "3px 9px",
+                        fontSize: 10,
+                        letterSpacing: "0.06em",
+                        fontFamily: mono,
+                        background: isActive ? `${chipColor}18` : "transparent",
+                        color: isActive ? chipColor : isPlanned ? "#333" : "#666",
+                        cursor: isPlanned ? "not-allowed" : "pointer",
+                        opacity: isPlanned ? 0.4 : 1,
+                        transition: "all 0.1s",
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Result hint */}
+              {family !== "linear" && (
+                <div style={{
+                  marginTop: 6, padding: "5px 8px",
+                  background: "#9e7ec810",
+                  border: "1px solid #9e7ec830",
+                  borderLeft: "3px solid #9e7ec8",
+                  borderRadius: 3, fontSize: 10,
+                  color: "#9e7ec8",
+                  fontFamily: mono,
+                }}>
+                  {HINT[`${model}_${family}`] ?? `${model} + ${family}`}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Section>
 
       {/* ── Panel awareness notifications ── */}
