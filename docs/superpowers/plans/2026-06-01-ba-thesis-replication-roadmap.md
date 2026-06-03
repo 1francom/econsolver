@@ -73,11 +73,11 @@ Desc C1 (KDE heatmap)        ── independent, math-heavy
 4. **B2 IRR / `(exp(β)−1)·100`** display toggle.
 **Exit:** all ~100 `Regressions_2016.R` models replicate to 6 dp coef / 4 dp SE.
 
-### Phase 4 — Event study
+### Phase 4 — Event study ✓ DONE (2026-06-03)
 **Spec:** ModelingSpec A2, B1.
-1. **B1 joint Wald/F test** (`waldTest`) — also powers A2 aggregation.
-2. **A2 `runSunAbraham`** — saturated cohort×period, aggregate to event-time ATTs, delta-method SE. Composes on Phase 3.
-**Exit:** `Event_study.R` Sun-Abraham ATTs + joint F-test replicate.
+1. **B1 joint Wald/F test** (`waldTest`) — also powers A2 aggregation. ✓
+2. **A2 `runSunAbraham`** — saturated cohort×period, aggregate to event-time ATTs, delta-method SE. Composes on Phase 3. ✓ validated vs fixest::fepois + sunab() (coef 6dp/1.96e-11, SE 4dp/1.53e-6); clustered SE uses ssc(fixef.K="none") convention. Full UI wired (EstimatorSidebar, SunAbrahamConfig, ModelingTab estimate branch + result render w/ EventCoeffsPlot, pre/post Wald boxes) + R/Python/Stata replication-script cases.
+**Exit:** `Event_study.R` Sun-Abraham ATTs + joint F-test replicate. ✓
 
 ### Phase 5 — Publication graphics
 **Spec:** DescriptiveVizSpec A3, B2, C1.

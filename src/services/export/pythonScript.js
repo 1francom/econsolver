@@ -108,7 +108,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push("# ── Estimation ─────────────────────────────────────────────────────────────");
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars: model.factorVars ?? [] }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -321,7 +321,7 @@ function transpileStep(step, allDatasets = {}) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime, weightCol = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], feCols = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
   const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
@@ -556,6 +556,30 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "SunAbraham": {
+      const coh = cohortCol ?? "cohort";
+      const per = periodCol ?? timeCol ?? "period";
+      const fes = (feCols && feCols.length ? feCols : [entityCol ?? "unit", per]);
+      const feStr = fes.join(" + ");
+      const cl = fes[0];
+      const ctrls = (xVars ?? []).length ? " + " + xVars.join(" + ") : "";
+      const ref = refPeriod != null ? Number(refPeriod) : -1;
+      lines.push(`# ── Sun & Abraham (2021) interaction-weighted event study over Poisson PPML ──`);
+      lines.push(`# Control convention: ${controlMode === "never" ? "never-treated only" : "never- + not-yet-treated (auto)"}`);
+      lines.push(`# Reference relative period: ${ref}  (omitted from the event-study path)`);
+      lines.push(`# pip install pyfixest`);
+      lines.push(`import pyfixest as pf`);
+      lines.push(`# sunab(cohort, period) builds the saturated cohort x relative-period interactions`);
+      lines.push(`# and auto-aggregates to interaction-weighted per-relative-period ATTs.`);
+      lines.push(`fit = pf.fepois("${yVar} ~ sunab(${coh}, ${per})${ctrls} | ${feStr}", data=df, vcov={"CRV1": "${cl}"})`);
+      lines.push(`pf.etable([fit])`);
+      lines.push(`import numpy as np`);
+      lines.push(`print("IRR (exp of event-study coefficients):", np.exp(fit.coef().values))`);
+      lines.push(`# Event-study path plot`);
+      lines.push(`pf.iplot([fit])`);
+      break;
+    }
+
     case "SyntheticControl": {
       const ec = entityCol ?? "unit";
       const tc = timeCol   ?? "time";
@@ -635,22 +659,36 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "Poisson": {
+      const formula = `"${yVar} ~ ${allX.map(fmtPy).join(" + ") || "1"}"`;
+      lines.push(`# Poisson regression (count GLM, log link)`);
+      lines.push(`model = smf.glm(${formula},`);
+      lines.push(`    data=df, family=sm.families.Poisson()).fit(cov_type="HC1")`);
+      lines.push(`print(model.summary())`);
+      lines.push(`# Incidence Rate Ratios (exp(beta))`);
+      lines.push(`print("IRR:")`);
+      lines.push(`print(np.exp(model.params))`);
+      lines.push(`# Overdispersion check: Pearson chi-sq / df (>> 1 -> consider NB/QMLE)`);
+      lines.push(`print(f"Pearson chi2/df = {model.pearson_chi2 / model.df_resid:.4f}")`);
+      break;
+    }
+
     case "PoissonFE": {
-      const ec  = entityCol ?? "entity";
-      const cov = xVars.map(v => `"${v}"`).join(", ");
-      lines.push(`# Poisson FE (PPML with entity fixed effects)`);
+      const fes = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]);
+      const feStr = fes.join(" + ");
+      lines.push(`# Poisson FE (PPML with ${fes.length}-way fixed effects)`);
       lines.push(`# Option 1 — pyfixest (mirrors R's fixest)`);
       lines.push(`# pip install pyfixest`);
       lines.push(`try:`);
       lines.push(`    import pyfixest as pf`);
-      lines.push(`    fit = pf.fepois("${yVar} ~ ${xVars.join(" + ") || "1"} | ${ec}", data=df, vcov={"CRV1": "${ec}"})`);
+      lines.push(`    fit = pf.fepois("${yVar} ~ ${xVars.join(" + ") || "1"} | ${feStr}", data=df, vcov={"CRV1": "${fes[0]}"})`);
       lines.push(`    pf.etable([fit])`);
       lines.push(`    import numpy as np`);
       lines.push(`    print("IRR:", np.exp(fit.coef().values))`);
       lines.push(`except ImportError:`);
-      lines.push(`    # Option 2 — statsmodels GLM with entity dummies (slow for large N)`);
+      lines.push(`    # Option 2 — statsmodels GLM with FE dummies (slow for large N)`);
       lines.push(`    import statsmodels.formula.api as smf`);
-      lines.push(`    model = smf.glm("${yVar} ~ ${[...xVars, `C(${ec})`].join(" + ") || "1"}",`);
+      lines.push(`    model = smf.glm("${yVar} ~ ${[...xVars, ...fes.map(f => `C(${f})`)].join(" + ") || "1"}",`);
       lines.push(`        data=df, family=sm.families.Poisson()).fit(cov_type="HC3")`);
       lines.push(`    print(model.summary())`);
       lines.push(`    import numpy as np`);
@@ -776,10 +814,11 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
     // Build the model call from first config, replacing "df" with "s"
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-            treatedUnit, treatTime } = configs[0].model ?? {};
+            treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod } = configs[0].model ?? {};
     const allX0 = [...xVars, ...wVars];
     const singleLines = transpileModel({ type, yVar, allX: allX0, xVars, wVars, zVars,
-      entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime,
+      feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null });
     // Strip assignment prefix, swap df → s
     const fitCall = singleLines
       .map(l => l.replace(/\bmodel\b\s*=\s*/, "").replace(/\bdf\b/g, "s"))
@@ -803,12 +842,12 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
     configs.forEach((c, i) => {
       const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-              treatedUnit, treatTime } = c.model ?? {};
+              treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       const fitName = `model_${i + 1}`;
       fitNames.push(fitName);
       lines.push(`# Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null });
       modelLines.forEach(l => lines.push(l.replace(/\bmodel\b/g, fitName)));
       lines.push("");
     });
@@ -924,9 +963,9 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
 
   const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
           entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-          treatedUnit, treatTime } = model;
+          treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod } = model;
   const allX = [...(xVars ?? []), ...(wVars ?? [])];
-  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null });
 
   lines.push(`# ── Model function ───────────────────────────────────────────────────────`);
   lines.push(`def run_model(d):`);

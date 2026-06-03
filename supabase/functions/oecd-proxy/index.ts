@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
       `?startPeriod=${startYear}&endPeriod=${endYear}&dimensionAtObservation=AllDimensions`;
 
     const res = await fetch(url, {
-      headers: { Accept: "application/vnd.sdmx.data+json;version=1.0.0" },
+      headers: { Accept: "application/vnd.sdmx.data+json; version=2" },
     });
 
     if (!res.ok) {

@@ -402,14 +402,22 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
                         execSaveSnapshot({ gStepIds, datasetIds });
                         dispatch({ type: "REMOVE_DATASET", id: ds.id });
                         onRemoveDataset?.(ds.id);
+                        const cascadeIds = new Set(pendingDelete.cascade.datasetIds);
+                        const fallback = Object.keys(datasets).find(id => id !== ds.id && !cascadeIds.has(id)) ?? null;
+                        onSelectDataset?.(fallback);
                         setPendingDelete(null);
+                        setOpen(false);
                       }}
                       onDeleteAll={() => {
                         const { gStepIds, datasetIds } = pendingDelete.cascade;
                         execCascade({ gStepIds, datasetIds });
                         dispatch({ type: "REMOVE_DATASET", id: ds.id });
                         onRemoveDataset?.(ds.id);
+                        const cascadeIds = new Set(pendingDelete.cascade.datasetIds);
+                        const fallback = Object.keys(datasets).find(id => id !== ds.id && !cascadeIds.has(id)) ?? null;
+                        onSelectDataset?.(fallback);
                         setPendingDelete(null);
+                        setOpen(false);
                       }}
                       onCancel={() => setPendingDelete(null)}
                     />

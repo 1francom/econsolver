@@ -299,12 +299,15 @@ export function parseStata(arrayBuffer) {
   }
 
   // ── Variable names ───────────────────────────────────────────────────────
+  // Format 119 (Stata 15 large): 129-byte name slots (128 chars + null).
+  // Formats 117/118: 33-byte slots (32 chars + null).
+  const NAME_LEN = format === 119 ? 129 : 33;
   const vnPos = tagPos(bytes, '<varnames>') + '<varnames>'.length;
   const headers = [];
   for (let i = 0; i < K; i++) {
-    const start = vnPos + i * 33;
+    const start = vnPos + i * NAME_LEN;
     let end = start;
-    while (end < start + 33 && bytes[end] !== 0) end++;
+    while (end < start + NAME_LEN && bytes[end] !== 0) end++;
     headers.push(dec.decode(bytes.subarray(start, end)));
   }
 

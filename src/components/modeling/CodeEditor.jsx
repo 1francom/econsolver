@@ -6,7 +6,7 @@
 // Props:
 //   result  {object}  — active model result (same shape as other modeling components)
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTheme, mono }                   from "./shared.jsx";
 import { generateRScript }                  from "../../services/export/rScript.js";
 import { generatePythonScript }             from "../../services/export/pythonScript.js";
@@ -41,6 +41,11 @@ function buildScript(tab, result, allDatasets = {}) {
       zVars:      spec.zVars      ?? [],
       entityCol:  spec.entityCol  ?? null,
       timeCol:    spec.timeCol    ?? null,
+      feCols:     spec.feCols     ?? null,
+      cohortCol:  spec.cohortCol  ?? null,
+      periodCol:  spec.periodCol  ?? null,
+      controlMode: spec.controlMode ?? null,
+      refPeriod:  spec.refPeriod  ?? null,
       postVar:    spec.postVar    ?? null,
       treatVar:   spec.treatVar   ?? null,
       runningVar: spec.runningVar ?? null,
@@ -51,13 +56,16 @@ function buildScript(tab, result, allDatasets = {}) {
   };
 
   try {
-    if (tab === "r")      return generateRScript(config);
-    if (tab === "python") return generatePythonScript(config);
-    if (tab === "stata")  return generateStataScript(config);
+    let script = "";
+    if (tab === "r") script = generateRScript(config);
+    else if (tab === "python") script = generatePythonScript(config);
+    else if (tab === "stata") script = generateStataScript(config);
+    else return "# Unknown tab.";
+
+    return script;
   } catch (e) {
     return `# Error generating script:\n# ${e.message}`;
   }
-  return "# Unknown tab.";
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
@@ -65,18 +73,18 @@ export default function CodeEditor({ result, allDatasets = {} }) {
   const { C } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [tab,     setTab]     = useState("r");
-  const [code,    setCode]    = useState("");
   const [copied,  setCopied]  = useState(false);
+  const [draft,   setDraft]   = useState({ key: "", value: "" });
 
-  // Regenerate script whenever result, tab, or allDatasets changes
-  const regenerate = useCallback(() => {
-    setCode(buildScript(tab, result, allDatasets));
-  }, [tab, result, allDatasets]);
-
-  useEffect(() => {
-    regenerate();
+  const generatedCode = useMemo(
+    () => buildScript(tab, result, allDatasets),
+    [tab, result, allDatasets]
+  );
+  const code = draft.key === generatedCode ? draft.value : generatedCode;
+  const resetCode = useCallback(() => {
+    setDraft({ key: "", value: "" });
     setCopied(false);
-  }, [regenerate]);
+  }, []);
 
   // Copy to clipboard
   const handleCopy = () => {
@@ -94,7 +102,9 @@ export default function CodeEditor({ result, allDatasets = {} }) {
         document.body.removeChild(ta);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-      } catch (_) {}
+      } catch {
+        setCopied(false);
+      }
     });
   };
 
@@ -212,7 +222,7 @@ export default function CodeEditor({ result, allDatasets = {} }) {
                 {copied ? "✓ Copied" : "Copy"}
               </button>
               <button
-                onClick={regenerate}
+                onClick={resetCode}
                 style={{
                   padding: "2px 10px",
                   fontFamily: mono,
@@ -234,7 +244,7 @@ export default function CodeEditor({ result, allDatasets = {} }) {
           {/* Code textarea */}
           <textarea
             value={code}
-            onChange={e => setCode(e.target.value)}
+            onChange={e => setDraft({ key: generatedCode, value: e.target.value })}
             spellCheck={false}
             style={{
               width: "100%",

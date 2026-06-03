@@ -71,6 +71,7 @@ export {
   runPoisson,
   runPoissonFE,
   runPoissonFEMulti,
+  runSunAbraham,
   normCDF,
   buildBinaryLatex,
   buildBinaryCSV,

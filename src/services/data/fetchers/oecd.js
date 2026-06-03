@@ -116,7 +116,8 @@ export const OECD_GROUPS = [...new Set(POPULAR_OECD.map(d => d.group))];
 // Converts OECD SDMX-JSON response → flat rows: { country, iso2, year, [value] }
 function parseSdmxJson(json, safeId) {
   const structure = json?.data?.structure ?? json?.structure;
-  const dataSets  = json?.data?.dataSets  ?? json?.dataSets;
+  // SDMX-JSON v2 uses lowercase "datasets"; v1 uses camelCase "dataSets"
+  const dataSets  = json?.data?.dataSets ?? json?.data?.datasets ?? json?.dataSets ?? json?.datasets;
 
   if (!structure || !dataSets?.length) {
     throw new Error("Unexpected SDMX-JSON structure.");

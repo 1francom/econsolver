@@ -98,6 +98,7 @@ const ESTIMATOR_META = {
   FuzzyRDD:        { label: "Fuzzy RDD",          color: "#c88e6e" },
   SpatialRDD:      { label: "Spatial RD",         color: "#c88e6e" },
   EventStudy:      { label: "Event Study",         color: "#6ec8b4" },
+  SunAbraham:      { label: "Sun & Abraham (2021)", color: "#6ec8b4" },
   LSDV:            { label: "Panel LSDV",          color: "#6e9ec8" },
   Poisson:         { label: "Poisson GLM",          color: "#9e7ec8" },
   PoissonFE:       { label: "Poisson FE",          color: "#9e7ec8" },
@@ -115,6 +116,7 @@ const FAMILY_MAP = {
   FuzzyRDD: "rdd",
   SpatialRDD: "rdd",
   EventStudy: "panel",
+  SunAbraham: "did",
   LSDV: "panel",
   Poisson: "count",
   PoissonFE: "count",
@@ -189,6 +191,7 @@ function buildFormula(type, spec) {
     case "Poisson":   return `Poisson(${yVar}) ~ ${x}`;
     case "PoissonFE": return `Poisson(${yVar}) ~ ${x} | ${(feCols && feCols.length ? feCols : [entityCol ?? "?"]).join(" + ")}`;
     case "EventStudy": return `${yVar} ~ event(${kPre ?? "-K"}…${kPost ?? "+K"}) | ${entityCol ?? "?"} + ${timeCol ?? "?"}`;
+    case "SunAbraham": return `Poisson(${yVar}) ~ sunab(${spec.cohortCol ?? "cohort"}, ${spec.periodCol ?? "period"})${xVars.length ? " + " + x : ""}${feCols && feCols.length ? " | " + feCols.join(" + ") : ""}`;
     case "LSDV":      return `${yVar} ~ ${x} + α_i${spec.lsdvTimeFE ? " + γ_t" : ""}`;
     case "SyntheticControl": return `${yVar} ~ SC(${treatedUnit ?? "?"}, t₀=${treatTime ?? "?"})`;
     default:          return `${yVar} ~ ${x}`;
@@ -569,6 +572,55 @@ function wrapEventStudy(eng, spec) {
   };
 }
 
+// ─── SUN & ABRAHAM (2021) ────────────────────────────────────────────────────
+// eng shape (runSunAbraham): { beta, se, varNames, vcov, zStats, pVals,
+//   eventCoeffs:[{k,beta,se,z,p,irr,isRef?}], preTestStat/Df/Pval,
+//   postTestStat/Df/Pval, logLik, McFaddenR2, AIC, BIC, n, k, df, nCohorts,
+//   treatedCohorts, controlCohorts, droppedAlwaysTreated, nFE, feDims,
+//   refPeriod, converged, iterations }
+// testStatLabel "z" — coefficients are PPML/Poisson, inference is normal.
+function wrapSunAbraham(eng, spec) {
+  return {
+    ...base("SunAbraham", spec),
+    varNames:       eng.varNames       ?? [],
+    beta:           clean(eng.beta),
+    se:             clean(eng.se),
+    testStats:      clean(eng.zStats),
+    testStatLabel:  "z",
+    pVals:          clean(eng.pVals),
+    n:              eng.n              ?? 0,
+    k:              eng.k              ?? (eng.beta ? eng.beta.length : null),
+    df:             eng.df             ?? 0,
+    logLik:         eng.logLik         ?? null,
+    mcFaddenR2:     eng.McFaddenR2     ?? null,
+    AIC:            eng.AIC            ?? null,
+    BIC:            eng.BIC            ?? null,
+    converged:      eng.converged      ?? false,
+    iterations:     eng.iterations     ?? null,
+    vcov:           eng.vcov           ?? null,
+    // Sun-Abraham aggregated ATT path (same shape EventStudyPlot consumes,
+    // plus IRR semi-elasticity exp(ATT_l)−1 from the Poisson link).
+    eventCoeffs:    eng.eventCoeffs    ?? [],
+    // Joint pre/post-trend Wald tests (χ²)
+    preTestStat:    eng.preTestStat    ?? null,
+    preTestDf:      eng.preTestDf      ?? null,
+    preTestPval:    eng.preTestPval    ?? null,
+    postTestStat:   eng.postTestStat   ?? null,
+    postTestDf:     eng.postTestDf     ?? null,
+    postTestPval:   eng.postTestPval   ?? null,
+    // Cohort/control diagnostics
+    nCohorts:            eng.nCohorts            ?? null,
+    treatedCohorts:      eng.treatedCohorts      ?? null,
+    controlCohorts:      eng.controlCohorts      ?? null,
+    droppedAlwaysTreated:eng.droppedAlwaysTreated?? [],
+    refPeriod:           eng.refPeriod           ?? [-1],
+    nFE:                 eng.nFE                 ?? 0,
+    feDims:              eng.feDims              ?? null,
+    // IRR semi-elasticities per relative period from eventCoeffs
+    IRR: (eng.eventCoeffs ?? []).map(e => e.irr),
+  };
+}
+
 // ─── PANEL LSDV ──────────────────────────────────────────────────────────────
 // eng shape: { varNames, beta, se, tStats, pVals, R2, adjR2, n, df, Fstat, Fpval,
 //              resid, Yhat, alphas, units, times, timeFE, refUnit }
@@ -638,6 +690,7 @@ function wrapPoissonFE(eng, spec) {
     testStatLabel:  "z",
     pVals:          clean(eng.pVals),
     n:              eng.n              ?? 0,
+    k:              eng.k              ?? (eng.beta ? eng.beta.length : null),
     df:             eng.df             ?? 0,
     logLik:         eng.logLik         ?? null,
     mcFaddenR2:     eng.McFaddenR2     ?? null,
@@ -738,6 +791,7 @@ export function wrapResult(type, engineOutput, spec, extras = {}) {
     case "LIML":   r = wrapLIML(engineOutput, spec); break;
     case "FuzzyRDD":         r = wrapFuzzyRDD(engineOutput, spec); break;
     case "EventStudy":       r = wrapEventStudy(engineOutput, spec); break;
+    case "SunAbraham":       r = wrapSunAbraham(engineOutput, spec); break;
     case "LSDV":             r = wrapLSDV(engineOutput, spec); break;
     case "Poisson":          r = wrapPoisson(engineOutput, spec); break;
     case "PoissonFE":        r = wrapPoissonFE(engineOutput, spec); break;

@@ -84,7 +84,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars: model.factorVars ?? [] }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -305,7 +305,7 @@ function transpileStep(step, allDatasets = {}) {
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], treatedUnit, treatTime, weightCol = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, factorVars = [], feCols = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
@@ -480,6 +480,33 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "SunAbraham": {
+      const fes = (feCols && feCols.length ? feCols : [entityCol ?? "unit", periodCol ?? timeCol ?? "period"]);
+      const coh = cohortCol ?? "cohort";
+      const per = periodCol ?? timeCol ?? "period";
+      const cov = (xVars ?? []).length ? ` ${xVars.join(" ")}` : "";
+      const ref = refPeriod != null ? Number(refPeriod) : -1;
+      lines.push(`* ── Sun & Abraham (2021) interaction-weighted event study over Poisson PPML ──`);
+      lines.push(`* Control convention: ${controlMode === "never" ? "never-treated only" : "never- + not-yet-treated (auto)"}`);
+      lines.push(`* Reference relative period: ${ref}`);
+      lines.push(`* eventstudyinteract (Sun & Abraham's own Stata package) over a Poisson link:`);
+      lines.push(`* If not installed: ssc install eventstudyinteract`);
+      lines.push(`* It also requires: ssc install avar`);
+      lines.push(`xtset ${fes[0]} ${per}`);
+      lines.push(`* Build relative-period dummies (rel = period - cohort); ref = ${ref} omitted`);
+      lines.push(`gen rel_period = ${per} - ${coh}`);
+      lines.push(`* never-treated units (missing cohort) act as the control group`);
+      lines.push(`gen never_treated = missing(${coh})`);
+      lines.push(`* Generate relative-time indicators g_* for each value of rel_period (excl. ${ref})`);
+      lines.push(`* then run:`);
+      lines.push(`* eventstudyinteract ${yVar}${cov} g_*, cohort(${coh}) control_cohort(never_treated) absorb(${fes.join(" ")}) vce(cluster ${fes[0]})`);
+      lines.push(`*`);
+      lines.push(`* NOTE: eventstudyinteract is built for linear (reghdfe) FE. For a Poisson/PPML`);
+      lines.push(`* version (as estimated here), prefer R fixest::fepois(y ~ sunab(cohort, period) | fe)`);
+      lines.push(`* or Python pyfixest. Stata has no native PPML Sun-Abraham aggregator.`);
+      break;
+    }
+
     case "SyntheticControl": {
       const ec = entityCol ?? "unit";
       const tc = timeCol   ?? "time";
@@ -540,12 +567,22 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "Poisson": {
+      lines.push(`* Poisson regression (count GLM, log link)`);
+      lines.push(`poisson ${yVar} ${xList}, vce(robust) irr`);
+      lines.push(`* irr option reports Incidence Rate Ratios (exp(beta))`);
+      lines.push(`estimates store m_poisson`);
+      lines.push(`* Overdispersion check: deviance / df and Pearson / df`);
+      lines.push(`estat gof`);
+      break;
+    }
+
     case "PoissonFE": {
-      const ec   = entityCol ?? "entity";
+      const fes  = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]);
       const cov  = xVars.join(" ");
-      lines.push(`* Poisson FE (PPML with entity fixed effects)`);
+      lines.push(`* Poisson FE (PPML with ${fes.length}-way fixed effects)`);
       lines.push(`* ppmlhdfe recommended — if not installed: ssc install ppmlhdfe`);
-      lines.push(`ppmlhdfe ${yVar}${cov ? ` ${cov}` : ""}, absorb(${ec}) vce(cluster ${ec})`);
+      lines.push(`ppmlhdfe ${yVar}${cov ? ` ${cov}` : ""}, absorb(${fes.join(" ")}) vce(cluster ${fes[0]})`);
       lines.push(`* Incidence Rate Ratios (manual — Stata PPML reports log-IRR by default):`);
       lines.push(`* nlcom (exp(_b[${xVars[0] ?? "x"}]))`);
       break;
@@ -650,7 +687,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     const estoreNames = [];
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-            treatedUnit, treatTime } = configs[0].model ?? {};
+            treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod } = configs[0].model ?? {};
     const allX = [...xVars, ...wVars];
 
     configs.forEach((c) => {
@@ -660,7 +697,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       lines.push(`preserve`);
       if (filterExpr) lines.push(`  keep if ${filterExpr}`);
       else            lines.push(`  * Full sample — no filter`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null });
       let hasStore = false;
       modelLines.forEach(l => {
         const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
@@ -690,10 +727,10 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       estoreNames.push({ name: estName, label: c.label ?? c.model?.type ?? `Model ${i+1}` });
       const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-              treatedUnit, treatTime } = c.model ?? {};
+              treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null });
       let hasStore = false;
       modelLines.forEach(l => {
         const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);

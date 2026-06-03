@@ -19,7 +19,7 @@ import {
   stars, buildLatex, buildCSVExport, downloadText,
   runLogit, runProbit, buildBinaryLatex, buildBinaryCSV,
   runGMM, runLIML,
-  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runSyntheticControl,
+  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runSunAbraham, runSyntheticControl,
   runSpatialRDD,
   runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats,
   wrapResult,
@@ -1584,6 +1584,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [poissonEntityCol, setPoissonEntityCol] = useState("");
   const [poissonOffsetCol, setPoissonOffsetCol] = useState("");
   const [poissonExtraFE,   setPoissonExtraFE]   = useState([]);   // additional FE dims ⇒ multi-way Poisson FE
+  // Sun & Abraham (2021) IW event study over Poisson PPML
+  const [cohortCol,     setCohortCol]     = useState([]);
+  const [periodCol,     setPeriodCol]     = useState([]);
+  const [saUnitCol,     setSaUnitCol]     = useState("");      // unit FE when no panel declared
+  const [saControlMode, setSaControlMode] = useState("auto");  // "auto" | "never"
+  const [saRefPeriod,   setSaRefPeriod]   = useState(-1);
 
   // ── Inference / SE options ────────────────────────────────────────────────
   const [seType,      setSeType]      = useState("classical");
@@ -1949,6 +1955,32 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
         return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, feCols }), panelFE: null, panelFD: null };
 
+      } else if (model === "SunAbraham") {
+        const cCol = cohortCol[0];
+        const pCol = periodCol[0];
+        const uCol = panel?.entityCol || saUnitCol;
+        if (!cCol) return { error: "Select a Cohort column in the configuration panel below." };
+        if (!pCol) return { error: "Select a Period column in the configuration panel below." };
+        if (!uCol) return { error: "Select a Unit (entity) fixed-effect column, or declare a panel structure in Wrangling." };
+        const feCols = [uCol, pCol];
+        // Extra control covariates = user X/W minus the structural cohort/period/unit cols.
+        const saControls = allX.filter(c => c !== cCol && c !== pCol && c !== uCol);
+        const res = runSunAbraham(
+          dataRows, y, saControls,
+          { cohortCol: cCol, periodCol: pCol, feCols, refPeriod: Number(saRefPeriod), controlMode: saControlMode },
+          seOpts,
+        );
+        if (!res || res.error) return { error: res?.error ?? "Sun-Abraham estimation failed. Ensure Y is a non-negative count and cohort/period are valid." };
+        return {
+          result: wrapResult("SunAbraham", res, {
+            yVar: y, xVars: saControls, wVars: expW,
+            cohortCol: cCol, periodCol: pCol, feCols,
+            entityCol: uCol, timeCol: pCol,
+            controlMode: saControlMode, refPeriod: Number(saRefPeriod),
+          }),
+          panelFE: null, panelFD: null,
+        };
+
       } else if (model === "SyntheticControl") {
         if (!panel?.entityCol || !panel?.timeCol) return { error: "Declare a panel structure (Entity + Time columns) in Wrangling before running Synthetic Control." };
         if (!treatedUnit) return { error: "Select the treated unit." };
@@ -1964,7 +1996,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } catch (e) {
       return { error: `Estimation error: ${e.message}` };
     }
-  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE]);
+  }, [model, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -3170,6 +3202,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             poissonEntityCol={poissonEntityCol} setPoissonEntityCol={setPoissonEntityCol}
             poissonOffsetCol={poissonOffsetCol} setPoissonOffsetCol={setPoissonOffsetCol}
             poissonExtraFE={poissonExtraFE}     setPoissonExtraFE={setPoissonExtraFE}
+            cohortCol={cohortCol}           setCohortCol={setCohortCol}
+            periodCol={periodCol}           setPeriodCol={setPeriodCol}
+            saUnitCol={saUnitCol}           setSaUnitCol={setSaUnitCol}
+            saControlMode={saControlMode}   setSaControlMode={setSaControlMode}
+            saRefPeriod={saRefPeriod}       setSaRefPeriod={setSaRefPeriod}
             rows={rows}
             headers={headers}
             panel={panel}
@@ -3730,6 +3767,65 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: {
                     ...baseReplicateConfig.model, type: "EventStudy",
                     yVar: yVar[0], xVars, wVars, entityCol: panel?.entityCol, timeCol: panel?.timeCol,
+                  }} : null}
+                />
+              </div>
+            );
+          })()}
+
+          {/* Sun & Abraham (2021) event study over Poisson PPML */}
+          {result?.type === "SunAbraham" && (() => {
+            const r = result;
+            const ref = Array.isArray(r.refPeriod) ? r.refPeriod.join(", ") : r.refPeriod;
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Sun & Abraham Event Study</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.nCohorts != null && <Badge label={`${r.nCohorts} treated cohorts`} color={C.textDim} />}
+                  {r.droppedAlwaysTreated?.length > 0 && <Badge label={`${r.droppedAlwaysTreated.length} always-treated dropped`} color={C.gold} />}
+                  {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
+                               : <Badge label="⚠ did not converge" color={C.red} />}
+                </div>
+                {(r.preTestStat != null || r.postTestStat != null) && (
+                  <div style={{ display: "flex", gap: 10, marginBottom: "1rem", flexWrap: "wrap" }}>
+                    {r.preTestStat != null && (
+                      <div style={{ flex: "1 1 220px", padding: "0.7rem 1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
+                        <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                          Pre-trend Wald: χ²({r.preTestDf}) = {r.preTestStat?.toFixed(3) ?? "—"} · p = {r.preTestPval < 0.001 ? "<0.001" : r.preTestPval?.toFixed(4) ?? "—"}
+                          {r.preTestPval < 0.05
+                            ? <span style={{ color: C.red }}> ⚠ Pre-trend detected</span>
+                            : <span style={{ color: C.teal }}> ✓ No pre-trend</span>}
+                        </div>
+                      </div>
+                    )}
+                    {r.postTestStat != null && (
+                      <div style={{ flex: "1 1 220px", padding: "0.7rem 1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
+                        <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                          Post-treatment Wald: χ²({r.postTestDf}) = {r.postTestStat?.toFixed(3) ?? "—"} · p = {r.postTestPval < 0.001 ? "<0.001" : r.postTestPval?.toFixed(4) ?? "—"}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <FitBar items={[
+                  { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: C.teal },
+                  { label: "Log-lik", value: r.logLik?.toFixed(3)     ?? "—", color: C.textDim },
+                  { label: "AIC",     value: r.AIC?.toFixed(1)         ?? "—", color: C.textDim },
+                  { label: "ref. period", value: ref,                       color: C.textDim },
+                  { label: "n",       value: r.n,                              color: C.text },
+                ]} />
+                <Lbl color={C.textMuted}>Event-Time ATT Plot (log points; PPML)</Lbl>
+                <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
+                <Lbl color={C.textMuted}>Saturated Coefficient Table (interactions + controls)</Lbl>
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel={r.testStatLabel} />
+                <ExportBar yVar={yVar[0]} results={r} model="SunAbraham"
+                  onReport={() => openReport({ ...r, modelLabel: "Sun & Abraham Event Study", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: {
+                    ...baseReplicateConfig.model, type: "SunAbraham",
+                    yVar: yVar[0], xVars: r.spec?.xVars ?? xVars, wVars,
+                    cohortCol: r.spec?.cohortCol, periodCol: r.spec?.periodCol,
+                    feCols: r.spec?.feCols, entityCol: r.spec?.entityCol, timeCol: r.spec?.timeCol,
                   }} : null}
                 />
               </div>

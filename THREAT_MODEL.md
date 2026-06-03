@@ -119,6 +119,32 @@ A CDN compromise or BGP hijack delivers a tampered script that reads `localStora
 - [ ] Display a visible notice in the app that data is stored locally (reinforces the privacy promise)
 - [ ] Future: session-lock with PIN for shared devices (post-MVP)
 
+### 3.7 Supabase Backend — Live RLS / Advisor Audit (2026-06-01)
+
+First live audit of the Supabase project (`zxknjfezkatuldipdskw`) via the read/write MCP. Scope: `public` schema tables, RLS policies, `SECURITY DEFINER` functions, role grants, security advisors.
+
+**State found:** only two tables — `feedback` (71 rows) and `profiles` (8 rows); both had RLS enabled. **No `projects`/`pipelines` tables exist** — `ClaudePlan.md` Phase 13.2 (Supabase pipeline sync) was specced but never built; there is no cross-device persistence today.
+
+**Already safe (verified, no change needed):**
+- **`profiles.tier` cannot be self-escalated.** `profiles` has only a SELECT policy (`read_own`: `auth.uid() = id`); no INSERT/UPDATE/DELETE policy → all API writes blocked by RLS. The premium paywall in `api/anthropic.js` holds.
+- **`feedback` row ops correctly gated** — RLS on; only an INSERT policy for `authenticated` (`with_check auth.uid() = user_id`); no SELECT/UPDATE/DELETE policy.
+
+**Findings + remediation (two migrations applied 2026-06-01):**
+
+| # | Severity | Finding | Fix |
+|---|----------|---------|-----|
+| B1 | **HIGH** | `agent_get_feedback(token)` / `agent_mark_processed(token, ids)` were `SECURITY DEFINER` (bypass RLS) and **anon-callable** via `/rest/v1/rpc/...`, guarded only by a hardcoded guessable token `'Litux-agent-FB'`. Anyone could dump all unprocessed feedback (`user_email`, free-text `description`) or tamper with `processed`. Orphaned — unused by CI (the live reader is the `collect-feedback` edge function, gated by `x-secret`/service-role). | **Dropped both functions.** |
+| B2 | MEDIUM | Three `SECURITY DEFINER` functions had a mutable `search_path` (privesc vector). | `handle_new_user` pinned to `search_path = ''`; other two dropped. |
+| B3 | MEDIUM | `handle_new_user()` (signup trigger) was publicly callable as an RPC. | `REVOKE EXECUTE … FROM PUBLIC, anon, authenticated` (trigger still fires independently of caller grants). |
+| B4 | LOW-MED | `anon` + `authenticated` held `UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER` on both tables (RLS-neutralised but bad hygiene / footgun). | Least-privilege grants: **`anon` now has zero privileges**; `authenticated` keeps only `feedback` INSERT/SELECT + `profiles` SELECT (exactly what the policies back). |
+
+**Migrations (remote-only — not yet pulled into repo):** `security_harden_feedback_rpc_and_grants`, `revoke_execute_handle_new_user`.
+
+**Remaining (open):**
+- [ ] **Auth → enable Leaked Password Protection** (HaveIBeenPwned check) — dashboard toggle, only remaining security advisor WARN. Owner: Franco.
+- [ ] **Rotate `AGENT_SECRET`** to a strong random value in both the Supabase function env and the GitHub Action secret — it is now the *only* gate on feedback data (the weak `Litux-agent-FB` fallback is gone).
+- [ ] **Pull migrations into version control** (`npx supabase db pull`) — currently applied on remote but untracked in `supabase/migrations/`.
+
 ---
 
 ## 4. Future Attack Surface (When Auth / Backend Is Added)

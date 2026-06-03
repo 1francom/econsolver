@@ -378,10 +378,11 @@ function transpileModel(model) {
     type, yVar, xVars = [], wVars = [],
     zVars = [], postVar, treatVar,
     runningVar, cutoff, bandwidth, kernel = "triangular", polyOrder = 1,
-    entityCol, timeCol, factorVars = [],
+    entityCol, timeCol, factorVars = [], feCols = null,
     treatedUnit, treatTime,
     distCol, treatmentCol,
     weightCol = null,
+    cohortCol, periodCol, controlMode, refPeriod,
   } = model;
 
   const fvSet = new Set(factorVars);
@@ -756,14 +757,41 @@ function transpileModel(model) {
       ].join("\n");
     }
 
+    case "Poisson": {
+      const ctrls = wVars.map(fmtR).join(" + ");
+      const regs  = xVars.map(fmtR).join(" + ");
+      const rhs   = [regs, ctrls].filter(Boolean).join(" + ") || "1";
+      return [
+        `# ── Poisson regression (count GLM, log link) ─────────────────────────`,
+        `library(sandwich)`,
+        `library(lmtest)`,
+        ``,
+        `fit <- glm(${y} ~ ${rhs},`,
+        `  data   = df,`,
+        `  family = poisson(link = "log"))`,
+        ``,
+        `# Coefficients with heteroskedasticity-robust (HC1) SE`,
+        `lmtest::coeftest(fit, vcov. = sandwich::vcovHC(fit, type = "HC1"))`,
+        ``,
+        `# Incidence Rate Ratios (exp(beta)) with 95% CI`,
+        `exp(cbind(IRR = coef(fit), confint(fit)))`,
+        ``,
+        `# Overdispersion check: Pearson chi-sq / df (>> 1 suggests use NB or QMLE)`,
+        `cat("Pearson chi-sq / df:", sum(residuals(fit, type = "pearson")^2) / fit$df.residual, "\\n")`,
+        `cat("AIC:", AIC(fit), "\\n")`,
+        `cat("BIC:", BIC(fit), "\\n")`,
+      ].join("\n");
+    }
+
     case "PoissonFE": {
-      const ec  = rName(entityCol ?? "entity");
+      const fes = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]).map(rName);
+      const feStr = fes.join(" + ");
       const cov = xVars.map(fmtR).join(" + ") || "1";
       return [
-        `# ── Poisson FE (PPML with entity fixed effects) ──────────────────────`,
+        `# ── Poisson FE (PPML with ${fes.length}-way fixed effects) ───────────────────`,
         `library(fixest)`,
         ``,
-        `fit <- fixest::fepois(${y} ~ ${cov} | ${ec}, data = df, vcov = ~${ec})`,
+        `fit <- fixest::fepois(${y} ~ ${cov} | ${feStr}, data = df, vcov = ~${fes[0]})`,
         ``,
         `fixest::etable(fit)`,
         `cat("Incidence Rate Ratios:\\n")`,
@@ -772,6 +800,37 @@ function transpileModel(model) {
         `# Overdispersion check: Pearson chi-sq / df`,
         `pearson_resid <- residuals(fit, type = "pearson")`,
         `cat("Pearson chi-sq / df:", sum(pearson_resid^2) / fit$nobs, "\\n")`,
+      ].join("\n");
+    }
+
+    case "SunAbraham": {
+      const fes  = (feCols && feCols.length ? feCols : [entityCol ?? "unit", periodCol ?? "period"]).map(rName);
+      const feStr = fes.join(" + ");
+      const coh  = rName(cohortCol ?? "cohort");
+      const per  = rName(periodCol ?? "period");
+      const ctrls = xVars.map(fmtR).concat(wVars.map(fmtR)).filter(Boolean);
+      const rhs  = [`sunab(${coh}, ${per})`, ...ctrls].join(" + ");
+      const cl   = fes[0];
+      const refNote = (refPeriod != null && Number(refPeriod) !== -1)
+        ? ` # NOTE: EconSolver used reference relative period ${refPeriod}; sunab() default is -1.`
+        : "";
+      return [
+        `# ── Sun & Abraham (2021) event study over Poisson PPML ───────────────`,
+        `# Interaction-weighted estimator. Never-treated / not-yet-treated cohorts`,
+        `# form the control (EconSolver control convention: "${controlMode ?? "auto"}").`,
+        `# Never-treated units must carry a large sentinel cohort (e.g. 10000) or NA.`,
+        `library(fixest)`,
+        ``,
+        `fit <- fixest::fepois(${y} ~ ${rhs} | ${feStr},`,
+        `  data    = df,`,
+        `  cluster = ~${cl})${refNote}`,
+        ``,
+        `# Aggregated per-relative-period ATTs (IW weights) + joint tests`,
+        `summary(fit)`,
+        `fixest::etable(fit)`,
+        ``,
+        `# Event-study plot of the aggregated ATTs`,
+        `fixest::iplot(fit, main = "Sun & Abraham event study", xlab = "Relative period")`,
       ].join("\n");
     }
 
@@ -1212,6 +1271,11 @@ function buildPackageList(modelType, pipeline) {
   if (modelType === "Logit" || modelType === "Probit") {
     pkgs.add("marginaleffects");
     pkgs.add("pROC");
+    pkgs.add("lmtest");
+    pkgs.delete("fixest");  // base R glm() — no fixest needed
+  }
+  if (modelType === "Poisson") {
+    pkgs.add("sandwich");
     pkgs.add("lmtest");
     pkgs.delete("fixest");  // base R glm() — no fixest needed
   }
