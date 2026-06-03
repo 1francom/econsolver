@@ -397,6 +397,107 @@ function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit
   );
 }
 
+// ─── CallawayCS: first-treat col + comparison group + event window ────────────
+function CallawayCSConfig({
+  numericCols, headers, yVar, panel,
+  csTreatCol, setCsTreatCol,
+  csEntityCol, setCsEntityCol,
+  csTimeCol, setCsTimeCol,
+  csCompGroup, setCsCompGroup,
+  csRelMin, setCsRelMin,
+  csRelMax, setCsRelMax,
+}) {
+  const { C } = useTheme();
+  const cols = headers ?? numericCols;
+  const unitFromPanel = panel?.entityCol || null;
+  const timeFromPanel = panel?.timeCol   || null;
+  return (
+    <>
+      <VarPanel
+        title="First-Treatment-Period Column"
+        color={C.teal}
+        vars={cols.filter(h => !yVar.includes(h))}
+        selected={csTreatCol}
+        onToggle={setCsTreatCol}
+        multi={false}
+        info="Numeric column with the first period each unit was treated. Never-treated units should be 0, blank, or Inf. Same as `gname` in R did package."
+      />
+      {unitFromPanel ? (
+        <Section title="Entity (unit) Column">
+          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+            i = <span style={{ color: C.gold }}>{unitFromPanel}</span>
+            <span style={{ color: C.textMuted }}> (from panel structure)</span>
+          </div>
+        </Section>
+      ) : (
+        <VarPanel
+          title="Entity (unit) Column"
+          color={C.gold}
+          vars={cols.filter(h => !yVar.includes(h))}
+          selected={csEntityCol}
+          onToggle={setCsEntityCol}
+          multi={false}
+          info="Unit identifier (e.g. county, firm). Same as `idname` in R did package."
+        />
+      )}
+      {timeFromPanel ? (
+        <Section title="Time Column">
+          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+            t = <span style={{ color: C.gold }}>{timeFromPanel}</span>
+            <span style={{ color: C.textMuted }}> (from panel structure)</span>
+          </div>
+        </Section>
+      ) : (
+        <VarPanel
+          title="Time Column"
+          color={C.gold}
+          vars={numericCols.filter(h => !yVar.includes(h))}
+          selected={csTimeCol}
+          onToggle={setCsTimeCol}
+          multi={false}
+          info="Numeric calendar time period. Same as `tname` in R did package."
+        />
+      )}
+      <Section title="Comparison Group" color={C.teal}>
+        <div style={{ fontSize: 10, fontFamily: mono, color: C.textMuted, marginBottom: 6 }}>
+          Which units serve as the counterfactual comparison for each cohort-period.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Chip label="Never-treated" selected={csCompGroup === "nevertreated"} color={C.teal} onClick={() => setCsCompGroup("nevertreated")} />
+          <Chip label="Not-yet-treated" selected={csCompGroup === "notyettreated"} color={C.teal} onClick={() => setCsCompGroup("notyettreated")} />
+        </div>
+      </Section>
+      <Section title="Event Window (relative periods)" color={C.teal}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 3 }}>Min (pre)</div>
+            <input
+              type="number"
+              value={csRelMin}
+              onChange={e => setCsRelMin(e.target.value)}
+              placeholder="-5"
+              style={inputStyle(C)}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 3 }}>Max (post)</div>
+            <input
+              type="number"
+              value={csRelMax}
+              onChange={e => setCsRelMax(e.target.value)}
+              placeholder="5"
+              style={inputStyle(C)}
+            />
+          </div>
+        </div>
+        <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 4 }}>
+          Leave blank to include all observed periods.
+        </div>
+      </Section>
+    </>
+  );
+}
+
 // ─── SpatialRDD: distance-to-boundary + treated-side indicator + bw + kernel ─
 // Keele & Titiunik 2015 geographic RD. The engine builds the signed running
 // variable internally from |dist| and the side indicator (no user-facing cutoff).
@@ -527,6 +628,13 @@ export default function ModelConfiguration({
   saUnitCol,      setSaUnitCol,
   saControlMode,  setSaControlMode,
   saRefPeriod,    setSaRefPeriod,
+  // CallawayCS
+  csTreatCol,     setCsTreatCol,
+  csEntityCol,    setCsEntityCol,
+  csTimeCol,      setCsTimeCol,
+  csCompGroup,    setCsCompGroup,
+  csRelMin,       setCsRelMin,
+  csRelMax,       setCsRelMax,
   rows,
   headers,
   panel,
@@ -609,6 +717,10 @@ export default function ModelConfiguration({
 
   if (model === "SunAbraham") {
     return <SunAbrahamConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} cohortCol={cohortCol} setCohortCol={setCohortCol} periodCol={periodCol} setPeriodCol={setPeriodCol} saUnitCol={saUnitCol} setSaUnitCol={setSaUnitCol} saControlMode={saControlMode} setSaControlMode={setSaControlMode} saRefPeriod={saRefPeriod} setSaRefPeriod={setSaRefPeriod} wVars={wVars} setWVars={setWVars} />;
+  }
+
+  if (model === "CallawayCS") {
+    return <CallawayCSConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} csTreatCol={csTreatCol} setCsTreatCol={setCsTreatCol} csEntityCol={csEntityCol} setCsEntityCol={setCsEntityCol} csTimeCol={csTimeCol} setCsTimeCol={setCsTimeCol} csCompGroup={csCompGroup} setCsCompGroup={setCsCompGroup} csRelMin={csRelMin} setCsRelMin={setCsRelMin} csRelMax={csRelMax} setCsRelMax={setCsRelMax} />;
   }
 
   if (model === "LSDV") {

@@ -250,17 +250,81 @@ I. LAGGED / LEADING VARIABLES  [metadata tag: lag-var | lead-var]
    • Level-Log → "1% increase in X → β/100 [units] change in Y."
    • Level-Level → standard unit interpretation.
 
+━━━ ESTIMATOR TYPE RULES (keyed to "Estimator type:" field) ━━━
+
+J. POISSON / PoissonFE  [Estimator type: Poisson | PoissonFE]
+   Coefficients are on the log-count scale — NEVER interpret as linear marginal effects.
+   Always compute exp(β) and report it as the Incidence Rate Ratio (IRR):
+   "A one-unit increase in X multiplies the expected count by exp(β) = [IRR],
+    i.e. a [IRR−1]×100% change in the expected count."
+   For PoissonFE: frame as within-entity variation — "Within the same entity, …"
+   Do not use R² language; use log-likelihood or deviance if fit statistics are present.
+
+K. SUN–ABRAHAM event study  [Estimator type: SunAbraham]
+   Each coefficient is the ATT for one relative period (period 0 = treatment onset).
+   Frame as event-study dynamics:
+   "In period +k relative to treatment, the treated group's expected count is
+    exp(β_k) = [IRR_k] times the counterfactual, a [%] change."
+   Pre-treatment coefficients (negative periods) should be near zero — mention
+   whether they support the parallel pre-trends assumption.
+
+L. LOGIT  [Estimator type: Logit]
+   Coefficients are log-odds — NEVER say "one-unit increase raises the probability by β."
+   Report exp(β) as the odds ratio:
+   "A one-unit increase in X multiplies the odds of [outcome=1] by exp(β) = [OR]."
+   If AME block is present, frame primary interpretation around AMEs and note ORs secondarily.
+   Mention McFadden R² < 0.2 is typical for acceptable binary-outcome fit.
+
+M. PROBIT  [Estimator type: Probit]
+   Coefficients are in latent standard-normal index units — do NOT translate directly to
+   probability changes.
+   Say: "A one-unit increase in X shifts the latent propensity index by β standard
+   deviations, implying an average marginal effect on P(Y=1) of approximately β·φ(X̄β̂)."
+   If AME block is present, quote the AME directly; skip the index-unit framing.
+
+N. FE / TWFE / LSDV / FD  [Estimator type: FE | TWFE | LSDV | FD]
+   All variation is within-entity (time-demeaned). Frame EVERY coefficient as:
+   "Within the same entity, a one-unit increase in X is associated with …"
+   NEVER interpret as a cross-sectional difference. Never write "entities with higher X …"
+   For TWFE: note that identification relies on within-unit AND within-time variation.
+
+O. 2SLS / GMM / LIML  [Estimator type: 2SLS | GMM | LIML]
+   The coefficient is a Local Average Treatment Effect (LATE) for compliers only.
+   State this explicitly: "The IV estimate of [β] represents the effect for units induced
+   to change treatment by the instrument — not the ATE for the full population."
+   Comment on first-stage F (rule of thumb: F > 10 for relevant instruments).
+
+P. DiD / EventStudy  [Estimator type: DiD | EventStudy]
+   The DiD coefficient / ATT is valid only under the parallel trends assumption.
+   State: "The ATT of [β] is interpreted as the causal effect of treatment under the
+   parallel trends assumption."
+   For event-study: describe pre-trend coefficients and post-treatment dynamics.
+
+Q. RDD / FuzzyRDD  [Estimator type: RDD | FuzzyRDD]
+   The estimate is a LATE at the cutoff — local external validity only.
+   State: "This estimate applies to units near the threshold and may not generalise."
+   Mention bandwidth choice and the continuity-at-the-cutoff assumption.
+
+R. SYNTHETIC CONTROL  [Estimator type: SyntheticControl]
+   The key quantity is the gap between the treated unit and the synthetic control.
+   Report: "Post-treatment, the treated unit's [outcome] is [gap] units above/below
+   the synthetic counterfactual."
+   Do not use regression coefficient language (β, SE, p-value) — there are none.
+
 ━━━ FORMAT RULES (mandatory) ━━━
 • Write exactly TWO paragraphs in English. Nothing else — no headers, bullets, markdown.
 • Paragraph 1 (4–6 sentences): statistical findings — sign, magnitude, significance of
   each regressor, R², N, which predictors are significant and what CIs imply.
 • Paragraph 2 (4–6 sentences): economic plausibility and model reliability.
-    – OLS/FE/FD: Are magnitudes sensible? R² in context? Flag unexpected signs,
-      possible OVB, multicollinearity risk (large SE relative to β).
-    – DiD / TWFE: Comment on parallel trends assumption and ATT interpretation.
-    – 2SLS / IV: Comment on instrument relevance (first-stage F) and exclusion restriction.
-    – RDD: Comment on bandwidth choice, local validity, and continuity assumption.
-    – Logit/Probit: Comment on marginal effects vs. odds ratios, McFadden R², separation risk.
+    Apply the ESTIMATOR TYPE RULES (J–R) to frame plausibility appropriately.
+    – OLS/WLS: Are magnitudes sensible? R² in context? Flag unexpected signs, OVB risk.
+    – FE/TWFE/FD/LSDV: Within-unit interpretation; warn if within-variation is low.
+    – DiD / TWFE: Parallel trends assumption; ATT interpretation.
+    – 2SLS / GMM / LIML: Instrument relevance (F > 10) and exclusion restriction.
+    – RDD / FuzzyRDD: Bandwidth choice, local validity, continuity assumption.
+    – Logit / Probit: ORs vs. AMEs, McFadden R², separation risk.
+    – Poisson / PoissonFE / SunAbraham: IRR interpretation, overdispersion concern.
+    – SyntheticControl: Gap size, placebo test context.
 • Do NOT start with "This study", "The results", or "In this".
 • Do NOT reproduce variable names in ALL-CAPS.
 • Quote exact β values (4 d.p.) and p-values. Mention 95% CIs for significant regressors.

@@ -121,3 +121,6 @@ export {
 
 // ── Quantile Treatment Effects (unconditional) ───────────────────────────────
 export { quantileTreatmentEffect } from "./QTE.js";
+
+// ── Callaway & Sant'Anna (2021) staggered DiD ────────────────────────────────
+export { runCallawayCS } from "./CallawayEngine.js";

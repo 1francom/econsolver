@@ -438,6 +438,7 @@ export async function interpretRegression(result, dataDictionary = null, metadat
   const userPrompt = `\
 REGRESSION OUTPUT
 Model type: ${modelLabel}
+Estimator type: ${result.type ?? "OLS"}
 Dependent variable: ${yVar}
 Functional form: ${funcForm}
 Estimated equation: ${yVar} = ${eqParts.join(" ")}
