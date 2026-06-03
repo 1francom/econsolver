@@ -577,7 +577,6 @@ function ConditionalSubTab({ headers, onAdd }) {
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   const { C } = useTheme();
   const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
-  const [fmtMode,setFmtMode]=useState("numbers");
   const [qt,setQt]=useState("log"),[qc,setQc]=useState(""),[xc2,setXc2]=useState("");
   const [pop,setPop]=useState("lag"),[pc,setPc]=useState(""),[lagN,setLagN]=useState(1);
   const [dtc,setDtc]=useState(""),[dpc,setDpc]=useState("");
@@ -1041,15 +1040,14 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
       {/* ── Formatting (Numbers + Strings combined) ── */}
       {vt==="formatting"&&(
         <div>
-          <div style={{display:"flex",gap:6,marginBottom:"1rem"}}>
-            {[["numbers","⬡ Numbers"],["strings","◈ Strings"]].map(([m,l])=>(
-              <button key={m} onClick={()=>setFmtMode(m)}
-                style={{padding:"0.28rem 0.75rem",border:`1px solid ${fmtMode===m?C.teal:C.border2}`,background:fmtMode===m?`${C.teal}18`:"transparent",color:fmtMode===m?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>
-                {l}
-              </button>
-            ))}
+          <div style={{marginBottom:"1.2rem",padding:"0.65rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
+            <div style={{fontSize:10,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:4}}>Numbers</div>
+            <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="numbers"/>
           </div>
-          <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode={fmtMode}/>
+          <div style={{padding:"0.65rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.gold}`,borderRadius:4}}>
+            <div style={{fontSize:10,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:4}}>Strings</div>
+            <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="strings"/>
+          </div>
         </div>
       )}
 

@@ -653,8 +653,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
           ["structure", "⊞ Panel Structure"],
           ["transform", "⊕ Transform"],
-          ["reshape",   "⟲ Reshape & Merge"],
           ["dictionary","◈ Dictionary"],
+          ["reshape",   "⟲ Reshape & Merge"],
         ]} active={tab} set={setTab}/>
 
         {/* ── Tab panels ── */}
@@ -684,8 +684,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         )}
         {tab === "reshape" && (
           <div>
+            <div style={{marginBottom:"0.75rem",fontSize:10,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>
+              Reshape
+            </div>
             <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
-            <div style={{margin:"1.2rem 0 0.6rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.2rem"}}>
+            <div style={{margin:"1.2rem 0 0.75rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.2rem"}}>
+              <div style={{marginBottom:"0.75rem",fontSize:10,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>
+                Merge
+              </div>
               <MergeTab rows={rows} headers={headers} filename={filename}
                 allDatasets={allDatasets} onAdd={addStep}/>
             </div>
