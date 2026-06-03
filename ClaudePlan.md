@@ -35,7 +35,7 @@ Econ Studio is transitioning from a feature-based tool to a professional SaaS pr
 | 2026-05-30 | `specs/2026-05-30-equation-workbench-design.md` | IN PROGRESS (verify) | workbench IDB store (v5) added; §10 security posture |
 | 2026-06-01 | `specs/2026-06-01-clean-tab-reorganization-and-report-ai-design.md` | OPEN | newest spec (untracked in git) |
 | 2026-06-01 | `specs/2026-06-01-spatial-engine-gaps-design.md` | IN PROGRESS | A4 expand_grid COVERED via `balance_panel`; Part A (areal interp, buffer exposure/count) + Part C (spatial weights, Moran/Geary, KDE, zonal) landed in `SpatialEngine.js` + UI sections, harness `spatialGapsValidation.js` 18/18 green |
-| 2026-06-01 | `specs/2026-06-01-modeling-poisson-twfe-gaps-design.md` | IN PROGRESS | A1 two-way/N-way Poisson FE (`runPoissonFEMulti`) DONE + R-validated (coef 8dp vs fepois) + UI wired; browser-validation pending. A2/A3/A4/B1/B2 still OPEN |
+| 2026-06-01 | `specs/2026-06-01-modeling-poisson-twfe-gaps-design.md` | IN PROGRESS | A1 two-way/N-way Poisson FE (`runPoissonFEMulti`) DONE + R-validated (coef 8dp vs fepois) + UI wired; browser-validation pending. C3 Callaway-Sant'Anna DONE (2026-06-03). A2/A3/A4/B1/B2 still OPEN |
 | 2026-06-01 | `specs/2026-06-01-descriptive-viz-gaps-design.md` | IN PROGRESS | KDE2d + color-scale math landed (harness `descriptiveVizValidation.js` 31/31 green); pivot_wider/quantiles/Table-1/dodge UI still OPEN |
 | 2026-06-01 | `plans/2026-06-01-ba-thesis-replication-roadmap.md` | IN PROGRESS | Phase 3 A1 (central blocker) landed + R-validated; browser "Validations pending (Phase 3 A1)" listed in plan. Phases 1-2 partially landed via Codex spatial/descriptive |
 | 2026-06-01 | `specs/2026-06-01-stat-sim-inference-deepening-design.md` | DONE | Spec A (data-level only): parametric tests (two-sample/paired/prop/corr/var-ratio), general bootstrap (perc/basic/BCa)+jackknife, generalized permutation, shared seeded RNG. Spec B (model-coef inference) deferred. (Math + harness green; browser validation of UI Tasks 11–13 pending Franco) |
@@ -1433,7 +1433,7 @@ No new code required — just ensure the error handling in `AIService.js` falls 
 
 ---
 
-## Overall Status Summary (last updated 2026-05-16)
+## Overall Status Summary (last updated 2026-06-03)
 
 | Phase | Title | Status |
 |-------|-------|--------|
@@ -1595,7 +1595,7 @@ Ongoing improvements to PlotBuilder.jsx, ModelPlots.jsx, and SpatialTab.jsx to m
    - `[2026-05-10] Data` — CSV parse error line 1583 (DuckDB CSV reader edge case)
    - ~~`[2026-05-11] Data` — Edit cells button does not work~~ ✓ DONE (minor bugs remain)
    - ~~`[2026-05-11] Explore` — Graph does not fit screen~~ ✓ DONE
-   - `[2026-05-13] Data` — .dta files wrongly loaded/read — **PENDING**
+   - ~~`[2026-05-13] Data` — .dta files wrongly loaded/read~~ ✓ DONE (commit d11d34c: .dta format-119 fix)
    - ~~`[2026-05-13] Spatial` — Multipolygon geometry does not work~~ ✓ DONE
    - `[2026-05-13] Spatial` — Grids: clip border cells (Sutherland-Hodgman)
    - ~~`[2026-05-13] Model` — "Matrix is singular" needs specific error~~ ✓ DONE
@@ -1612,11 +1612,18 @@ Ongoing improvements to PlotBuilder.jsx, ModelPlots.jsx, and SpatialTab.jsx to m
 
 5. **Phase 15 — Tauri** — after 14 is validated in production.
 
-### Completed since last update (2026-05-18)
+### Completed since last update (2026-06-03)
 - ✓ Codex §1 lint cleanup — 55 bugs surfaced, 7 critical runtime bombs fixed (no-undef, hook-order)
 - ✓ Geocoding (Phase 11.2) — Nominatim integration
 - ✓ Web Launch (Phase 14) — Vercel deployed
 - ✓ README replaced (Vite-template → user/dev docs)
+- ✓ Sun-Abraham (2021) event study estimator — `NonLinearEngine.js` `runSunAbraham`, harness `sunAbrahamValidation.js`, R script `sunAbrahamRValidation.R`, all green; wired end-to-end in ModelingTab (commit d11d34c)
+- ✓ CoefficientTestPanel — `src/components/modeling/CoefficientTestPanel.jsx` post-estimation hypothesis test on pinned model coefficients (commit d11d34c)
+- ✓ OECD proxy fix and dataset delete — OECD fetcher fixed, dataset delete wired bidirectionally (commit d11d34c)
+- ✓ .dta format-119 fix — Stata file loading corrected for format 119 (commit d11d34c)
+- ✓ Callaway-Sant'Anna (2021) staggered DiD — `src/math/CallawayEngine.js`, harness `callawayValidation.js` + R script; wired in EstimatorSidebar / ModelConfiguration / ModelingTab (commit ec7aed3)
+- ✓ Estimator-aware AI prompts — SHARED_CONTEXT + prompts updated for new estimators (commit ec7aed3)
+- ✓ CalculateTab cleanup — workbench refactor, new subcomponents under `src/components/calculate/workbench/` (commit ec7aed3)
 
 ---
 
