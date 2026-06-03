@@ -2212,6 +2212,7 @@ export default function App() {
                         onBack={()=>navigateToTab("explore")}
                         onResultChange={r=>setActiveResult(r)}
                         onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
+                        onExtract={(colName, values) => studioRef.current?.addInjectColumnStep?.(colName, values)}
                         pid={tabDsId("model")}
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>

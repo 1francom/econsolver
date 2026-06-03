@@ -88,6 +88,7 @@ import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
 import CoefficientTestPanel from "../components/modeling/CoefficientTestPanel.jsx";
+import ExtractPanel         from "./modeling/ExtractPanel.jsx";
 import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
 import { runPipeline } from "../pipeline/runner.js";
 import { useTheme, mono }  from "../components/modeling/shared.jsx";
@@ -1519,7 +1520,7 @@ function ModelHistory({ history, onRestore, onClear }) {
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion, pid }) {
+export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion, onExtract, pid }) {
   const { C } = useTheme();
   const rows    = cleanedData?.cleanRows ?? [];
   const dict    = cleanedData?.dataDictionary ?? {};
@@ -4461,6 +4462,15 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               </div>
             );
           })()}
+
+          {/* ── Two-pass: extract model outputs back to the dataset ── */}
+          <ExtractPanel
+            result={result}
+            rows={rows}
+            yVar={yVar[0]}
+            xVars={[...xVars, ...wVars]}
+            onExtract={onExtract}
+          />
 
         </div>
 

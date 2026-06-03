@@ -964,6 +964,15 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         desc: `Fill: ${opLabel} "${col}" → ${text.length > 40 ? text.slice(0, 40) + "…" : text}`,
       });
     },
+    // Called by ModelingTab's ExtractPanel — splices a model-derived column
+    // (fitted values, residuals, first-stage fitted, SC gap) into the active
+    // dataset's pipeline as an inject_column step (two-pass estimation).
+    addInjectColumnStep: (colName, values) => {
+      wranglingAddStepRef.current?.({
+        type: "inject_column", colName, values: Array.from(values),
+        desc: `inject "${colName}" (${values.length} values)`,
+      });
+    },
   }), [handleLoadFile, handleLoadFiles, addParsedDataset, handleSaveSubset, primaryId]);
 
   return (
