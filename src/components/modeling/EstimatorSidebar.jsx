@@ -251,7 +251,7 @@ export default function EstimatorSidebar({
                     <button
                       key={f.id}
                       disabled={isPlanned}
-                      onClick={() => !isPlanned && onFamilySelect(f.id)}
+                      onClick={() => !isPlanned && onFamilySelect?.(f.id)}
                       title={isPlanned ? "Planned — not yet implemented" : undefined}
                       style={{
                         border: `1px solid ${isActive ? chipColor : "#2a2a2a"}`,
