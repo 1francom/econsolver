@@ -173,6 +173,103 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
   return text;
 }
 
+// ─── STREAMING VARIANT ────────────────────────────────────────────────────────
+// Same egress + caching invariants as callClaude (SHARED_CONTEXT cached block,
+// anthropic-beta header). Parses the Anthropic SSE stream and forwards each text
+// delta to onText. Honors an AbortController signal — on abort, resolves with the
+// partial text accumulated so far (abort is NOT thrown as an error).
+export async function streamClaude({ system, messages, maxTokens = MAX_TOK, model = MODEL, signal, onText }) {
+  const systemArray = [
+    { type: "text", text: SHARED_CONTEXT, cache_control: { type: "ephemeral" } },
+  ];
+  if (system) systemArray.push({ type: "text", text: system });
+
+  const body = {
+    model,
+    max_tokens: maxTokens,
+    stream:     true,
+    system:     systemArray,
+    messages:   messages ?? [],
+  };
+
+  let res;
+  try {
+    if (_proxyEnabled) {
+      const token = await getAuthToken();
+      res = await fetch("/api/anthropic", {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": token ? `Bearer ${token}` : "",
+        },
+        body:   JSON.stringify(body),
+        signal,
+      });
+    } else {
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error("No API key — enter your Anthropic key in Settings (⚙), or set VITE_AI_PROXY_ENABLED=true.");
+      res = await fetch(API_URL, {
+        method:  "POST",
+        headers: {
+          "Content-Type":      "application/json",
+          "x-api-key":         apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta":    "prompt-caching-2024-07-31",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body:   JSON.stringify(body),
+        signal,
+      });
+    }
+  } catch (networkErr) {
+    if (networkErr.name === "AbortError") return "";
+    throw new Error(`Network error: ${networkErr.message ?? "could not reach API"}`);
+  }
+
+  if (!res.ok) {
+    let errBody;
+    try { errBody = await res.json(); } catch { errBody = { error: res.statusText }; }
+    if (res.status === 403 && errBody?.error === "premium_required") throw new Error("PREMIUM_REQUIRED");
+    if (res.status === 401) throw new Error("Session expired — please sign in again.");
+    throw new Error(`API error ${res.status}: ${errBody?.error ?? res.statusText}`);
+  }
+
+  const reader  = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let full   = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? ""; // last chunk may be incomplete
+      for (const evt of events) {
+        const dataLine = evt.split("\n").find(l => l.startsWith("data:"));
+        if (!dataLine) continue;
+        const json = dataLine.slice(5).trim();
+        if (!json || json === "[DONE]") continue;
+        let parsed;
+        try { parsed = JSON.parse(json); } catch { continue; }
+        if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta") {
+          const piece = parsed.delta.text ?? "";
+          full += piece;
+          onText?.(piece);
+        } else if (parsed.type === "error") {
+          throw new Error(parsed.error?.message ?? "stream error");
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name === "AbortError") return full; // partial answer retained
+    throw err;
+  }
+
+  return full;
+}
+
 // ─── 1. INFER VARIABLE UNITS ─────────────────────────────────────────────────
 export async function inferVariableUnits(headers, sampleRows) {
   if (!headers?.length) return {};
