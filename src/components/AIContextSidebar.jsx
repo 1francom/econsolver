@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { researchCoach } from "../services/AI/AIService.js";
+import { loadCoachChats, saveCoachChats } from "../services/Persistence/indexedDB.js";
 import { buildMetadataReport } from "../core/validation/metadataExtractor.js";
 import { useSessionState } from "../services/session/sessionState.jsx";
 import { useAuth } from "../services/auth/AuthContext.jsx";
@@ -250,17 +251,64 @@ function ThinkingBubble() {
 
 const PREMIUM_TIERS = new Set(["premium", "pro"]);
 
-export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null }) {
+function makeConversation() {
+  const now = Date.now();
+  return {
+    id:        `c_${now}_${Math.random().toString(36).slice(2, 7)}`,
+    title:     "New chat",
+    createdAt: now,
+    updatedAt: now,
+    messages:  [],
+  };
+}
+
+function deriveTitle(text) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return "New chat";
+  const words = trimmed.split(/\s+/).slice(0, 6).join(" ");
+  return words.length < trimmed.length ? words + "…" : words;
+}
+
+// Drop the transient multipart `content` field before persisting — it is
+// rebuilt from text + images at send time, keeping stored records small.
+function stripForStorage(conversations) {
+  return conversations.map(c => ({
+    ...c,
+    messages: c.messages.map(m => {
+      const copy = { ...m };
+      delete copy.content;
+      return copy;
+    }),
+  }));
+}
+
+export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null, pid = null }) {
   const { C } = useTheme();
   const { tier, session } = useAuth();
   const isPremium = !import.meta.env.VITE_AI_PROXY_ENABLED || import.meta.env.VITE_AI_PROXY_ENABLED !== "true" || PREMIUM_TIERS.has(tier);
   const sessionState = useSessionState();
-  const [history,       setHistory]       = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [activeId,      setActiveId]      = useState(null);
+  const active  = conversations.find(c => c.id === activeId) ?? null;
+  const history = useMemo(() => active?.messages ?? [], [active]);
   const [input,         setInput]         = useState("");
   const [loading,       setLoading]       = useState(false);
   const [pendingImages, setPendingImages] = useState([]); // [{ dataUrl, base64, mediaType }]
   const bottomRef  = useRef(null);
   const inputRef   = useRef(null);
+
+  function updateActive(mutateMessages) {
+    setConversations(prev => prev.map(c => {
+      if (c.id !== activeId) return c;
+      const messages = mutateMessages(c.messages);
+      let title = c.title;
+      if ((!c.title || c.title === "New chat") && messages.length) {
+        const firstUser = messages.find(m => m.role === "user");
+        if (firstUser) title = deriveTitle(firstUser.text);
+      }
+      return { ...c, messages, title, updatedAt: Date.now() };
+    }));
+  }
 
   function handlePaste(e) {
     const items = Array.from(e.clipboardData?.items ?? []);
@@ -292,6 +340,37 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
     }
   }, [history, loading, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    (async () => {
+      if (!pid) {
+        // No project loaded — ephemeral single conversation, not persisted.
+        setConversations(prev => {
+          if (prev.length) return prev;
+          const seed = makeConversation();
+          setActiveId(seed.id);
+          return [seed];
+        });
+        return;
+      }
+      const rec   = await loadCoachChats(pid);
+      if (cancelled) return;
+      const convs = rec?.conversations?.length ? rec.conversations : [makeConversation()];
+      setConversations(convs);
+      setActiveId(convs[0].id);
+    })();
+    return () => { cancelled = true; };
+  }, [pid, isOpen]);
+
+  useEffect(() => {
+    if (!pid || !conversations.length) return;
+    const t = setTimeout(() => {
+      saveCoachChats(pid, stripForStorage(conversations)).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [pid, conversations]);
+
   const starters = (screen === "model" && modelResult && pickEstimatorStarters(modelResult))
     || SCREEN_STARTERS[screen]
     || SCREEN_STARTERS.default;
@@ -322,7 +401,8 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
       : q;
 
     const userEntry = { role: "user", text: q || "(image)", images: imgs.length > 0 ? imgs : undefined, content: apiContent };
-    setHistory(prev => [...prev, userEntry]);
+    const priorHistory = history; // snapshot BEFORE append — used for API context
+    updateActive(msgs => [...msgs, userEntry]);
     setInput("");
     setPendingImages([]);
     setLoading(true);
@@ -333,7 +413,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
       modelResult,
       dataDictionary: cleanedData?.dataDictionary ?? null,
       metadataReport,
-      history: history.map((h, idx) => ({
+      history: priorHistory.map((h, idx) => ({
         role: h.role,
         content: h.role === "user" && idx === 0
           ? (() => {
@@ -350,7 +430,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
       })),
     });
 
-    setHistory(prev => [...prev, { role: "assistant", text: reply }]);
+    updateActive(msgs => [...msgs, { role: "assistant", text: reply }]);
     setLoading(false);
   }
 
@@ -362,7 +442,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
       const msg = err.message === "PREMIUM_REQUIRED"
         ? "Your account doesn't have premium access. Upgrade to use the AI Coach."
         : `Error: ${err.message}`;
-      setHistory(prev => [...prev, { role: "assistant", text: msg }]);
+      updateActive(msgs => [...msgs, { role: "assistant", text: msg }]);
     }
   }
 
@@ -495,7 +575,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
 
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           {history.length > 0 && (
-            <button onClick={() => { setHistory([]); setInput(""); setPendingImages([]); }}
+            <button onClick={() => { updateActive(() => []); setInput(""); setPendingImages([]); }}
               style={{ padding: "0.45rem 0.55rem", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, flexShrink: 0, transition: "all 0.12s" }}
               onMouseEnter={e => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = C.red; }}
               onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; e.currentTarget.style.borderColor = C.border; }}
