@@ -296,6 +296,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
   const [pendingImages, setPendingImages] = useState([]); // [{ dataUrl, base64, mediaType }]
   const bottomRef  = useRef(null);
   const inputRef   = useRef(null);
+  const abortRef   = useRef(null);
 
   function updateActive(mutateMessages) {
     setConversations(prev => prev.map(c => {
@@ -440,31 +441,49 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
     setPendingImages([]);
     setLoading(true);
 
-    const reply = await researchCoach({
-      question: q || "(image)",
-      images: imgs,
-      modelResult,
-      dataDictionary: cleanedData?.dataDictionary ?? null,
-      metadataReport,
-      history: priorHistory.map((h, idx) => ({
-        role: h.role,
-        content: h.role === "user" && idx === 0
-          ? (() => {
-              const prefix = `CONTEXT:\n${contextStr}\n\n────────────────────────────\n`;
-              if (h.images?.length) {
-                return [
-                  ...h.images.map(img => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } })),
-                  { type: "text", text: prefix + h.text },
-                ];
-              }
-              return prefix + h.text;
-            })()
-          : (h.content ?? h.text),
-      })),
-    });
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    updateActive(msgs => [...msgs, { role: "assistant", text: reply }]);
-    setLoading(false);
+    try {
+      await researchCoach({
+        question: q || "(image)",
+        images: imgs,
+        modelResult,
+        dataDictionary: cleanedData?.dataDictionary ?? null,
+        metadataReport,
+        signal: controller.signal,
+        onText: (piece) => {
+          updateActive(msgs => {
+            const copy = msgs.slice();
+            const last = copy[copy.length - 1];
+            if (last && last.role === "assistant") {
+              copy[copy.length - 1] = { ...last, text: last.text + piece };
+            } else {
+              copy.push({ role: "assistant", text: piece });
+            }
+            return copy;
+          });
+        },
+        history: priorHistory.map((h, idx) => ({
+          role: h.role,
+          content: h.role === "user" && idx === 0
+            ? (() => {
+                const prefix = `CONTEXT:\n${contextStr}\n\n────────────────────────────\n`;
+                if (h.images?.length) {
+                  return [
+                    ...h.images.map(img => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } })),
+                    { type: "text", text: prefix + h.text },
+                  ];
+                }
+                return prefix + h.text;
+              })()
+            : (h.content ?? h.text),
+        })),
+      });
+    } finally {
+      setLoading(false);
+      abortRef.current = null;
+    }
   }
 
   async function safeSubmit(question) {
@@ -619,7 +638,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
           )}
 
           {history.map((h, i) => <Bubble key={i} role={h.role} text={h.text} images={h.images} />)}
-          {loading && <ThinkingBubble />}
+          {loading && history[history.length - 1]?.role !== "assistant" && <ThinkingBubble />}
           <div ref={bottomRef} />
         </div>
 
@@ -672,17 +691,19 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
             onFocus={e => { e.target.style.borderColor = C.violet; }}
             onBlur={e => { e.target.style.borderColor = C.border2; }}
           />
-          <button onClick={safeSubmit} disabled={loading || (!input.trim() && pendingImages.length === 0)}
+          <button
+            onClick={loading ? () => abortRef.current?.abort() : () => safeSubmit()}
+            disabled={!loading && !input.trim() && pendingImages.length === 0}
             style={{
               padding: "0.45rem 0.85rem", borderRadius: 3, flexShrink: 0,
-              background: (input.trim() || pendingImages.length > 0) && !loading ? C.violet : "transparent",
-              border: `1px solid ${(input.trim() || pendingImages.length > 0) && !loading ? C.violet : C.border2}`,
-              color: (input.trim() || pendingImages.length > 0) && !loading ? C.bg : C.textMuted,
+              background: loading ? C.red : ((input.trim() || pendingImages.length > 0) ? C.violet : "transparent"),
+              border: `1px solid ${loading ? C.red : ((input.trim() || pendingImages.length > 0) ? C.violet : C.border2)}`,
+              color: loading ? C.bg : ((input.trim() || pendingImages.length > 0) ? C.bg : C.textMuted),
               fontFamily: mono, fontSize: 10, fontWeight: 700,
-              cursor: input.trim() && !loading ? "pointer" : "not-allowed",
+              cursor: loading || input.trim() ? "pointer" : "not-allowed",
               transition: "all 0.13s",
             }}
-          >{loading ? "…" : "Ask"}</button>
+          >{loading ? "Stop" : "Ask"}</button>
           </div>
         </div>
       </div>
