@@ -1,0 +1,12 @@
+{
+  "draw": 1,
+  "recordsTotal": 2048,
+  "recordsFiltered": 2048,
+  "data": [
+    ["1 | 3J", "03/06/2015", "La Plata", "Buenos Aires", "<a href='#'>Ampliar</a>"],
+    ["2 | NiUnaMenos", "03/06/2016", "CABA", "CABA", "<a href='#'>Ampliar</a>"],
+    ["3 | 8M", "08/03/2020", "Rosario", "Santa Fe", "<a href='#'>Ampliar</a>"],
+    ["4", "sin dato", "Mendoza", "Mendoza", "<a href='#'>Ampliar</a>"],
+    ["3 | 8M", "08/03/2020", "Rosario", "Santa Fe", "<a href='#'>Ampliar</a>"]
+  ]
+}

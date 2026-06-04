@@ -105,3 +105,40 @@ test("parseRegistryText — parses a JSON string the same as parseRegistry", () 
 test("parseRegistryText — bad JSON throws a helpful error", () => {
   assert.throws(() => parseRegistryText("not json {"), /Could not parse JSON/);
 });
+
+const marchasFixture = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./__fixtures__/observatorio_marchas_sample.json", import.meta.url)))
+);
+
+test("parseRegistry — marchas schema auto-detected by column count", () => {
+  const { headers, meta } = parseRegistry(marchasFixture);
+  assert.equal(meta.padron, "marchas");
+  assert.deepEqual(headers, ["fecha", "provincia", "localidad", "convocatoria"]);
+});
+
+test("parseRegistry — marchas keeps convocatoria tag, drops HTML link + id", () => {
+  const { rows } = parseRegistry(marchasFixture);
+  // convocatoria is the campaign tag (not PII) and survives
+  const niunamenos = rows.find(r => r.convocatoria === "NiUnaMenos");
+  assert.ok(niunamenos);
+  assert.equal(niunamenos.fecha, "2016-06-03");
+  assert.equal(niunamenos.provincia, "CABA");
+  assert.equal(niunamenos.localidad, "CABA");
+  // id never surfaces, the "Ampliar" HTML link is never read into any value
+  assert.equal(rows.every(r => !("id" in r)), true);
+  assert.equal(rows.every(r => !Object.values(r).some(v => typeof v === "string" && /<a |Ampliar|href/.test(v))), true);
+});
+
+test("parseRegistry — marchas dedup + unparsed date + coverage", () => {
+  const { rows, meta } = parseRegistry(marchasFixture);
+  // id:3 (8M) duplicated → one dropped
+  assert.equal(meta.nDuplicatesDropped, 1);
+  // "sin dato" row in Mendoza keeps fecha:null + raw preserved
+  const bad = rows.find(r => r.provincia === "Mendoza");
+  assert.equal(bad.fecha, null);
+  assert.equal(bad._fecha_raw, "sin dato");
+  assert.equal(meta.nUnparsedDates, 1);
+  // coverage spans the parsed dates
+  assert.equal(meta.coverage.minDate, "2015-06-03");
+  assert.equal(meta.coverage.maxDate, "2020-03-08");
+});

@@ -85,51 +85,68 @@ export function dedupeIncidents(rows, { idKey = null, hashKeys = null, useHash =
   return { rows, nDuplicatesDropped: 0, nPotentialDuplicates: 0 };
 }
 
-const WHITELIST = ["fecha", "provincia", "partido", "localidad", "vinculo", "edad", "hijxs"];
-
-// The admin-ajax.php response is DataTables server-side: each record is a
-// POSITIONAL array (not an object). Column order locked during discovery.
-// PII columns (name in col 0, fiscal in col 8) and the HTML link (col 9) are
-// dropped here at the boundary — they never enter Litux.
-const COL = {
-  idNombre:  0,  // "<id>|<nombre>" — split, name discarded
-  edad:      1,
-  fecha:     2,  // D/M/YYYY
-  localidad: 3,
-  partido:   4,
-  provincia: 5,
-  vinculo:   6,
-  hijxs:     7,
-  // 8 = fiscal (PII, dropped)   9 = HTML <a> link (dropped)
-};
-
 const cleanCell = v => {
   if (v == null) return null;
   const s = String(v).trim();
   return s === "" ? null : s;
 };
 
-// Split "<id>|<nombre>" → id only (name discarded). When no pipe is present,
-// treat the whole cell as the id.
-function splitId(cell) {
+// Split "<id> | <label>" → { id, label }. For femicidios the label is the victim
+// NAME (PII — dropped); for marchas it is the campaign tag (kept). Tolerates
+// optional spaces around the pipe and a missing pipe.
+function splitPipe(cell) {
   const s = cell == null ? "" : String(cell);
   const i = s.indexOf("|");
-  return (i === -1 ? s : s.slice(0, i)).trim();
+  if (i === -1) return { id: s.trim(), label: null };
+  return { id: s.slice(0, i).trim(), label: s.slice(i + 1).trim() || null };
 }
 
-// Positional record → canonical object. Deliberately never reads col 8/9 so
-// fiscal/name PII cannot leak downstream.
-function recordToObject(arr) {
-  return {
-    id:        splitId(arr[COL.idNombre]),
-    edad:      cleanCell(arr[COL.edad]),
-    fecha:     cleanCell(arr[COL.fecha]),
-    localidad: cleanCell(arr[COL.localidad]),
-    partido:   cleanCell(arr[COL.partido]),
-    provincia: cleanCell(arr[COL.provincia]),
-    vinculo:   cleanCell(arr[COL.vinculo]),
-    hijxs:     cleanCell(arr[COL.hijxs]),
-  };
+// ── Padrón schemas ────────────────────────────────────────────────────────────
+// The site serves several padrones through the same admin-ajax.php DataTables
+// endpoint, each a POSITIONAL array with a different column layout. A schema maps
+// a record → canonical object and declares its PII whitelist. PII columns
+// (victim name, fiscal) and HTML links are never read. Auto-detected by column
+// count; add a new entry to support another padrón.
+const SCHEMAS = [
+  {
+    name: "femicidios",
+    match: cols => cols >= 9,                          // 10-column layout
+    whitelist: ["fecha", "provincia", "partido", "localidad", "vinculo", "edad", "hijxs"],
+    hashKeys: ["fecha", "provincia", "vinculo"],
+    toObject: arr => ({
+      id:        splitPipe(arr[0]).id,                 // label = victim NAME → dropped (PII)
+      edad:      cleanCell(arr[1]),
+      fecha:     cleanCell(arr[2]),                    // D/M/YYYY
+      localidad: cleanCell(arr[3]),
+      partido:   cleanCell(arr[4]),
+      provincia: cleanCell(arr[5]),
+      vinculo:   cleanCell(arr[6]),
+      hijxs:     cleanCell(arr[7]),
+      // arr[8] fiscal (PII) + arr[9] link → never read
+    }),
+  },
+  {
+    name: "marchas",
+    match: cols => cols === 5,
+    whitelist: ["fecha", "provincia", "localidad", "convocatoria"],
+    hashKeys: ["fecha", "provincia", "localidad", "convocatoria"],
+    toObject: arr => {
+      const { id, label } = splitPipe(arr[0]);
+      return {
+        id,
+        convocatoria: label,                           // campaign tag, e.g. "3J" — not PII
+        fecha:     cleanCell(arr[1]),                  // D/M/YYYY
+        localidad: cleanCell(arr[2]),
+        provincia: cleanCell(arr[3]),
+        // arr[4] "Ampliar" HTML link → never read
+      };
+    },
+  },
+];
+
+function detectSchema(records) {
+  const cols = Array.isArray(records[0]) ? records[0].length : 0;
+  return SCHEMAS.find(s => s.match(cols)) || null;
 }
 
 function recordsFrom(payload) {
@@ -140,28 +157,34 @@ function recordsFrom(payload) {
   throw new Error("Observatorio payload has no recognizable record list (schema drift?).");
 }
 
-// Pure: payload → { rows, headers, meta }. Incident-level, PII-stripped.
+// Pure: payload → { rows, headers, meta }. Incident/event-level, PII-stripped.
 export function parseRegistry(payload, { dedup = {} } = {}) {
   const raw = recordsFrom(payload);
   if (!raw.length) throw new Error("Observatorio payload contained zero records.");
 
-  // 1. positional array → canonical object (drops name/fiscal/link)
-  const renamed = raw.map(recordToObject);
+  const schema = detectSchema(raw);
+  if (!schema) {
+    const cols = Array.isArray(raw[0]) ? raw[0].length : "?";
+    throw new Error(`Unrecognized Observatorio padrón (${cols} columns). Add a schema in observatorio.js.`);
+  }
+
+  // 1. positional array → canonical object (drops name/fiscal/link per schema)
+  const renamed = raw.map(schema.toObject);
 
   // 2. dedup (id default on; hash opt-in)
   const dd = dedupeIncidents(renamed, {
     idKey: "id",
-    hashKeys: ["fecha", "provincia", "vinculo"],
+    hashKeys: schema.hashKeys,
     useHash: false,
     ...dedup,
   });
 
-  // 3. normalize dates + strip PII to whitelist
+  // 3. normalize dates + strip to whitelist
   let nUnparsedDates = 0;
   let minDate = null, maxDate = null;
   const rows = dd.rows.map(r => {
     const iso = normalizeFecha(r.fecha);
-    const out = applyWhitelist(r, WHITELIST);
+    const out = applyWhitelist(r, schema.whitelist);
     if (iso) {
       out.fecha = iso;
       if (!minDate || iso < minDate) minDate = iso;
@@ -176,9 +199,10 @@ export function parseRegistry(payload, { dedup = {} } = {}) {
 
   return {
     rows,
-    headers: WHITELIST,
+    headers: schema.whitelist,
     meta: {
       source: "Observatorio Lucía Pérez",
+      padron: schema.name,
       nObs: rows.length,
       fetchedAt: new Date().toISOString(),
       coverage: { minDate, maxDate },
