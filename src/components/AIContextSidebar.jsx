@@ -310,6 +310,39 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
     }));
   }
 
+  const [showChats, setShowChats] = useState(false);
+  const [renameId,  setRenameId]  = useState(null);
+  const [renameVal, setRenameVal] = useState("");
+
+  function newChat() {
+    const c = makeConversation();
+    setConversations(prev => [c, ...prev]);
+    setActiveId(c.id);
+    setShowChats(false);
+  }
+  function selectChat(id) {
+    setActiveId(id);
+    setShowChats(false);
+  }
+  function deleteChat(id) {
+    setConversations(prev => {
+      const next = prev.filter(c => c.id !== id);
+      if (next.length === 0) {
+        const seed = makeConversation();
+        setActiveId(seed.id);
+        return [seed];
+      }
+      if (id === activeId) setActiveId(next[0].id);
+      return next;
+    });
+  }
+  function commitRename(id) {
+    const title = renameVal.trim();
+    if (title) setConversations(prev => prev.map(c => c.id === id ? { ...c, title } : c));
+    setRenameId(null);
+    setRenameVal("");
+  }
+
   function handlePaste(e) {
     const items = Array.from(e.clipboardData?.items ?? []);
     const imgItem = items.find(it => it.type.startsWith("image/"));
@@ -517,11 +550,49 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
               )}
             </div>
           </div>
+          <button onClick={() => setShowChats(s => !s)}
+            style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, padding: "0.25rem 0.5rem", marginLeft: "auto", marginRight: 8 }}>
+            ☰ Chats ({conversations.length})
+          </button>
           <button onClick={onClose}
             style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0.25rem 0.55rem" }}>
             ✕
           </button>
         </div>
+
+        {showChats && (
+          <div style={{ borderBottom: `1px solid ${C.border}`, background: C.surface, maxHeight: 240, overflowY: "auto", flexShrink: 0 }}>
+            <button onClick={newChat}
+              style={{ width: "100%", textAlign: "left", padding: "0.5rem 1rem", background: "transparent", border: "none", borderBottom: `1px solid ${C.border}`, color: C.violet, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+              + New chat
+            </button>
+            {conversations.map(c => (
+              <div key={c.id}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "0.4rem 0.75rem 0.4rem 1rem", background: c.id === activeId ? C.surface2 : "transparent", borderBottom: `1px solid ${C.border}` }}>
+                {renameId === c.id ? (
+                  <input autoFocus value={renameVal}
+                    onChange={e => setRenameVal(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") commitRename(c.id); if (e.key === "Escape") { setRenameId(null); setRenameVal(""); } }}
+                    onBlur={() => commitRename(c.id)}
+                    style={{ flex: 1, background: C.bg, border: `1px solid ${C.violet}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, padding: "0.2rem 0.35rem", outline: "none" }} />
+                ) : (
+                  <button onClick={() => selectChat(c.id)}
+                    style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", color: c.id === activeId ? C.teal : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.title}
+                  </button>
+                )}
+                <button onClick={() => { setRenameId(c.id); setRenameVal(c.title); }}
+                  title="Rename"
+                  style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px" }}>✎</button>
+                <button onClick={() => deleteChat(c.id)}
+                  title="Delete"
+                  style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px" }}
+                  onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Message area */}
         <div style={{ flex: 1, overflowY: "auto", padding: "0.85rem 1rem 0.5rem" }}>
