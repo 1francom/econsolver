@@ -50,7 +50,7 @@ export default function ObservatorioFetcher({ onLoad, onClose }) {
     try {
       const { rows, headers, meta } = parseRegistryText(text);
       setMeta(meta);
-      onLoad("observatorio_femicidios.csv", rows, headers);
+      onLoad(`observatorio_${meta.padron ?? "registro"}.csv`, rows, headers);
       onClose();
     } catch (e) {
       setError(e.message ?? "Import failed.");
@@ -107,7 +107,7 @@ export default function ObservatorioFetcher({ onLoad, onClose }) {
         )}
         {meta && (
           <div style={{ margin:"0 1.1rem 0.9rem", fontSize:10, color:C.textMuted, fontFamily:mono }}>
-            {meta.nObs} incidents · {meta.coverage?.minDate}–{meta.coverage?.maxDate} · {meta.nUnparsedDates} unparsed dates · {meta.nDuplicatesDropped} dup dropped
+            {meta.padron} · {meta.nObs} rows · {meta.coverage?.minDate}–{meta.coverage?.maxDate} · {meta.nUnparsedDates} unparsed dates · {meta.nDuplicatesDropped} dup dropped
           </div>
         )}
 
