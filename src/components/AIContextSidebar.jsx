@@ -297,6 +297,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
   const bottomRef  = useRef(null);
   const inputRef   = useRef(null);
   const abortRef   = useRef(null);
+  const loadedPidRef = useRef(null);   // pid that the in-state conversations belong to
 
   function updateActive(mutateMessages) {
     setConversations(prev => prev.map(c => {
@@ -377,6 +378,9 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    // Invalidate persistence until the conversations for THIS pid are loaded —
+    // prevents the previous project's chats from being saved under the new pid.
+    loadedPidRef.current = null;
     (async () => {
       if (!pid) {
         // No project loaded — ephemeral single conversation, not persisted.
@@ -393,12 +397,13 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
       const convs = rec?.conversations?.length ? rec.conversations : [makeConversation()];
       setConversations(convs);
       setActiveId(convs[0].id);
+      loadedPidRef.current = pid;
     })();
     return () => { cancelled = true; };
   }, [pid, isOpen]);
 
   useEffect(() => {
-    if (!pid || !conversations.length) return;
+    if (!pid || loadedPidRef.current !== pid || !conversations.length) return;
     const t = setTimeout(() => {
       saveCoachChats(pid, stripForStorage(conversations)).catch(() => {});
     }, 500);
