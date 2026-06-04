@@ -44,11 +44,12 @@
 
 import { retrofitRowId } from "../data/rowIdentity.js";
 
-const DB_VERSION           = 5;
+const DB_VERSION           = 6;
 const STORE_PIPE           = "pipelines";
 const STORE_RAW            = "raw_data";
 const STORE_PROJ           = "projects";
 const STORE_WORKBENCH      = "workbench";
+const STORE_COACH          = "coach_chats";
 const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
 
 // ── Per-user DB isolation ──────────────────────────────────────────────────────
@@ -143,6 +144,11 @@ export function openDB() {
       // v5: workbench store — Equation Workbench sessions, keyed by project pid.
       if (oldVer < 5) {
         db.createObjectStore(STORE_WORKBENCH, { keyPath: "pid" });
+      }
+
+      // v6: coach_chats store — AI Coach conversations, keyed by project pid.
+      if (oldVer < 6) {
+        db.createObjectStore(STORE_COACH, { keyPath: "pid" });
       }
     };
 
@@ -406,6 +412,7 @@ export async function listProjects() {
 export async function deleteProject(pid) {
   const db = await openDB();
   await tx(STORE_PROJ, db, "readwrite", s => s.delete(pid));
+  await deleteCoachChats(pid);
 }
 
 /**
@@ -457,12 +464,65 @@ export async function deleteWorkbenchRecord(pid) {
   } catch { /* non-fatal */ }
 }
 
+// ─── COACH CHATS API ──────────────────────────────────────────────────────────
+// AI Coach conversations, one record per project pid.
+//   Value : { pid, conversations: Conversation[], ts }
+//   Conversation : { id, title, createdAt, updatedAt, messages: Message[] }
+//   Message      : { role: "user"|"assistant", text, images? }
+
+/**
+ * Persist all conversations for a project. Overwrites the record.
+ * Returns { stored: bool }.
+ */
+export async function saveCoachChats(pid, conversations) {
+  if (!pid) return { stored: false };
+  try {
+    const db = await openDB();
+    await tx(STORE_COACH, db, "readwrite", s =>
+      s.put({ pid, conversations: Array.isArray(conversations) ? conversations : [], ts: Date.now() })
+    );
+    return { stored: true };
+  } catch (err) {
+    console.warn("[IDB] saveCoachChats failed:", err.message);
+    return { stored: false };
+  }
+}
+
+/**
+ * Load the coach-chats record for a project. Returns { pid, conversations, ts } or null.
+ */
+export async function loadCoachChats(pid) {
+  if (!pid) return null;
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const t   = db.transaction(STORE_COACH, "readonly");
+      const req = t.objectStore(STORE_COACH).get(pid);
+      req.onsuccess = e => resolve(e.target.result ?? null);
+      req.onerror   = e => reject(e.target.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete the coach-chats record for a project.
+ */
+export async function deleteCoachChats(pid) {
+  try {
+    const db = await openDB();
+    await tx(STORE_COACH, db, "readwrite", s => s.delete(pid));
+  } catch { /* non-fatal */ }
+}
+
 export async function clearAllLocalData() {
   await clearAllPipelines(); // clears STORE_PIPE + STORE_RAW
   await clearAllProjects();  // clears STORE_PROJ
   try {
     const db = await openDB();
     await tx(STORE_WORKBENCH, db, "readwrite", s => s.clear());
+    await tx(STORE_COACH,     db, "readwrite", s => s.clear());
   } catch { /* non-fatal */ }
   try { localStorage.clear(); } catch { /* non-fatal */ }
   try { sessionStorage.clear(); } catch { /* non-fatal */ }

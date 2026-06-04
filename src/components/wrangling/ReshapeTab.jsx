@@ -20,8 +20,20 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
   const [pivGroups, setPivGroups] = useState([]);      // [{prefix, colName}]
   const [keyName,   setKeyName]   = useState("year");
 
+  // pivot_wider state
+  const [wideOpen,        setWideOpen]        = useState(false);
+  const [wideIdCols,      setWideIdCols]      = useState([]);
+  const [wideNamesFrom,   setWideNamesFrom]   = useState("");
+  const [wideValuesFrom,  setWideValuesFrom]  = useState("");
+  const [wideValuesFill,  setWideValuesFill]  = useState("0");
+  const [wideNamesPrefix, setWideNamesPrefix] = useState("");
+
   // ── arrange state ─────────────────────────────────────────────────────────
   const [arrCols,   setArrCols]   = useState([]);     // [{col, dir}] sort keys
+
+  // group_summarize state
+  const [sumByCols, setSumByCols] = useState([]);
+  const [sumAggs,   setSumAggs]   = useState([]);
 
   // ── pivot helpers ─────────────────────────────────────────────────────────
   // Simple mode
@@ -67,6 +79,40 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
       .map(([prefix]) => ({ prefix, colName: prefix.replace(/_$/, "") }));
   }, [headers]);
 
+  const wideIdCandidates = useMemo(() => (
+    headers.filter(h => h !== wideNamesFrom && h !== wideValuesFrom)
+  ), [headers, wideNamesFrom, wideValuesFrom]);
+  const wideSelectedIdCols = useMemo(() => (
+    wideIdCols.filter(h => wideIdCandidates.includes(h))
+  ), [wideIdCols, wideIdCandidates]);
+  const wideEffectiveIdCols = wideSelectedIdCols;
+  const wideNameValues = useMemo(() => {
+    if (!wideNamesFrom) return [];
+    return [...new Set(rows.map(r => r[wideNamesFrom]).filter(v => v !== null && v !== undefined && v !== ""))];
+  }, [rows, wideNamesFrom]);
+  const wideOutputCols = useMemo(() => (
+    wideNameValues.map(v => `${wideNamesPrefix}${String(v)}`)
+  ), [wideNameValues, wideNamesPrefix]);
+  const wideRowCount = useMemo(() => (
+    new Set(rows.map(r => JSON.stringify(wideEffectiveIdCols.map(id => r[id] ?? null)))).size
+  ), [rows, wideEffectiveIdCols]);
+  const sumNumCols = headers.filter(h => info[h]?.isNum);
+  const SUM_FN_OPTS = [
+    ["mean","Mean"],["median","Median"],["sum","Sum"],
+    ["count","Count"],["min","Min"],["max","Max"],["sd","Std dev"],
+    ["quantile","Quantile (p...)"],
+  ];
+
+  function sumAggName(agg) {
+    if (!agg.col) return "";
+    if (agg.fn === "quantile") {
+      let q = Number(agg.q ?? 0.9);
+      if (!Number.isFinite(q)) q = 0.9;
+      return `${agg.col}_p${Math.round(Math.min(1, Math.max(0, q)) * 100)}`;
+    }
+    return `${agg.fn}_${agg.col}`;
+  }
+
   function togglePivCol(h) {
     setPivCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
   }
@@ -80,6 +126,31 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
   function removeGroup(i) {
     setPivGroups(p => p.filter((_, j) => j !== i));
   }
+
+  function toggleWideIdCol(h) {
+    setWideIdCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
+  }
+
+  function toggleSumByCol(h) {
+    setSumByCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
+  }
+  function addSumAgg(col = "", fn = "mean") {
+    const agg = { col, fn, q: fn === "quantile" ? 0.9 : undefined };
+    setSumAggs(a => [...a, { ...agg, nn: sumAggName(agg) }]);
+  }
+  function updSumAgg(i, patch) {
+    setSumAggs(a => a.map((x, j) => {
+      if (j !== i) return x;
+      const oldAuto = sumAggName(x);
+      const updated = { ...x, ...patch };
+      if (updated.fn === "quantile" && updated.q == null) updated.q = 0.9;
+      if ((!x.nn || x.nn === oldAuto) && (patch.col !== undefined || patch.fn !== undefined || patch.q !== undefined)) {
+        updated.nn = sumAggName(updated);
+      }
+      return updated;
+    }));
+  }
+  function rmSumAgg(i) { setSumAggs(a => a.filter((_, j) => j !== i)); }
 
   function doPivot() {
     if (pivMode === "multi") {
@@ -106,9 +177,45 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
     }
   }
 
+  function doWider() {
+    if (!wideNamesFrom || !wideValuesFrom) return;
+    const fill = wideValuesFill === "" ? null : Number(wideValuesFill);
+    onAdd({
+      type: "pivot_wider",
+      idCols: wideSelectedIdCols,
+      namesFrom: wideNamesFrom,
+      valuesFrom: wideValuesFrom,
+      valuesFill: fill === null || Number.isFinite(fill) ? fill : null,
+      namesPrefix: wideNamesPrefix,
+      desc: `Pivot wider: ${wideNamesFrom} -> ${wideValuesFrom}`,
+    });
+    setWideIdCols([]); setWideNamesFrom(""); setWideValuesFrom("");
+    setWideValuesFill("0"); setWideNamesPrefix("");
+  }
+
+  function doSummarizeStep() {
+    const validAggs = sumAggs.filter(a => a.col && a.fn && a.nn.trim())
+      .map(a => ({
+        col: a.col,
+        fn: a.fn,
+        nn: a.nn.trim(),
+        ...(a.fn === "quantile" ? { q: Number.isFinite(Number(a.q)) ? Math.min(1, Math.max(0, Number(a.q))) : 0.9 } : {}),
+      }));
+    if (!sumByCols.length || !validAggs.length) return;
+    onAdd({
+      type: "group_summarize",
+      by: sumByCols,
+      aggs: validAggs,
+      desc: `Group summarize by [${sumByCols.join(", ")}] (${validAggs.length} aggs)`,
+    });
+    setSumByCols([]); setSumAggs([]);
+  }
+
   const canPivot = pivMode === "multi"
     ? pivGroups.some(g => g.prefix.trim() && g.colName.trim()) && keyName.trim()
     : pivCols.length > 0 && namesTo.trim() && valuesTo.trim();
+  const canWider = Boolean(wideNamesFrom && wideValuesFrom);
+  const canSummarize = sumByCols.length > 0 && sumAggs.some(a => a.col && a.fn && a.nn.trim());
 
   const inS = { padding:"0.38rem 0.6rem", background:C.surface2,
     border:`1px solid ${C.border2}`, borderRadius:3, color:C.text,
@@ -116,7 +223,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
 
   return (
     <div>
-      <Tabs tabs={[["pivot","⟲ Pivot longer"],["arrange","↕ Sort rows"]]}
+      <Tabs tabs={[["pivot","⟲ Pivot longer"],["arrange","↕ Sort rows"],["summarize","⊞ Summarize"]]}
         active={sub} set={setSub} accent={C.teal} sm/>
 
       {/* ══════════════ PIVOT LONGER ══════════════════════════════════════ */}
@@ -322,6 +429,230 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
 
           <Btn onClick={doPivot} color={C.teal} v="solid"
             dis={!canPivot} ch="Pivot longer →"/>
+
+          <div style={{marginTop:"1.2rem",paddingTop:"1rem",borderTop:`1px solid ${C.border}`}}>
+            <button onClick={() => setWideOpen(o => !o)}
+              style={{width:"100%",padding:"0.55rem 0.75rem",display:"flex",
+                justifyContent:"space-between",alignItems:"center",
+                background:C.surface,border:`1px solid ${C.border}`,
+                borderLeft:`3px solid ${C.violet}`,borderRadius:4,
+                color:C.text,cursor:"pointer",fontFamily:mono,fontSize:11}}>
+              <span>Pivot Wider</span>
+              <span style={{color:C.violet}}>{wideOpen ? "hide" : "show"}</span>
+            </button>
+
+            {wideOpen && (
+              <div style={{padding:"0.9rem 0 0"}}>
+                <div style={{padding:"0.65rem 1rem",background:C.surface,
+                  border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.violet}`,
+                  borderRadius:4,marginBottom:"1rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+                  Converts <span style={{color:C.teal}}>long format</span> to{" "}
+                  <span style={{color:C.gold}}>wide format</span>.
+                  Equivalent to <code style={{color:C.green}}>tidyr::pivot_wider()</code>.
+                </div>
+
+                <Lbl color={C.gold}>ID columns</Lbl>
+                <div style={{marginBottom:"0.5rem",display:"flex",gap:6}}>
+                  <button onClick={()=>setWideIdCols(wideIdCandidates)}
+                    style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
+                      background:"transparent",color:C.textDim,borderRadius:2,
+                      cursor:"pointer",fontSize:9,fontFamily:mono}}>select all ids</button>
+                  <button onClick={()=>setWideIdCols([])}
+                    style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
+                      background:"transparent",color:C.textDim,borderRadius:2,
+                      cursor:"pointer",fontSize:9,fontFamily:mono}}>clear</button>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem",
+                  maxHeight:110,overflowY:"auto",padding:"0.5rem",
+                  background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
+                  {wideIdCandidates.map(h => {
+                    const sel = wideSelectedIdCols.includes(h);
+                    return (
+                      <button key={h} onClick={() => toggleWideIdCol(h)} style={{
+                        padding:"0.25rem 0.6rem",
+                        border:`1px solid ${sel ? C.gold : C.border2}`,
+                        background: sel ? `${C.gold}18` : "transparent",
+                        color: sel ? C.gold : info[h]?.isNum ? C.blue : C.textDim,
+                        borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+                        transition:"all 0.1s",
+                      }}>
+                        {h}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.8rem",marginBottom:"1rem"}}>
+                  <div>
+                    <Lbl color={C.violet}>Names from</Lbl>
+                    <select value={wideNamesFrom} onChange={e => setWideNamesFrom(e.target.value)}
+                      style={{...inS, width:"100%", boxSizing:"border-box"}}>
+                      <option value="">- column -</option>
+                      {headers.map(h=><option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Lbl color={C.teal}>Values from</Lbl>
+                    <select value={wideValuesFrom} onChange={e => setWideValuesFrom(e.target.value)}
+                      style={{...inS, width:"100%", boxSizing:"border-box"}}>
+                      <option value="">- column -</option>
+                      {headers.map(h=><option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{display:"grid",gridTemplateColumns:"120px 1fr",gap:"0.8rem",marginBottom:"1rem"}}>
+                  <div>
+                    <Lbl color={C.textDim}>Fill</Lbl>
+                    <input type="number" value={wideValuesFill}
+                      onChange={e => setWideValuesFill(e.target.value)}
+                      style={{...inS, width:"100%", boxSizing:"border-box"}}/>
+                  </div>
+                  <div>
+                    <Lbl color={C.textDim}>Names prefix</Lbl>
+                    <input value={wideNamesPrefix} onChange={e => setWideNamesPrefix(e.target.value)}
+                      placeholder="optional"
+                      style={{...inS, width:"100%", boxSizing:"border-box"}}/>
+                  </div>
+                </div>
+
+                {canWider && (
+                  <div style={{padding:"0.55rem 0.85rem",background:`${C.violet}08`,
+                    border:`1px solid ${C.violet}30`,borderRadius:3,marginBottom:"1rem",
+                    fontSize:11,fontFamily:mono,color:C.textDim,lineHeight:1.7}}>
+                    <span style={{color:C.gold}}>{"->"}</span>{" "}
+                    {rows.length} rows x {headers.length} cols{" "}
+                    <span style={{color:C.textMuted}}>{"->"}</span>{" "}
+                    <span style={{color:C.violet}}>{wideRowCount}</span> rows x {wideEffectiveIdCols.length + wideOutputCols.length} cols
+                    <div style={{fontSize:9,color:C.textMuted,marginTop:3}}>
+                      New cols: {wideOutputCols.slice(0,6).map(h=>(
+                        <span key={h} style={{color:C.text,marginRight:4}}>{h}</span>
+                      ))}
+                      {wideOutputCols.length>6 && <span>+{wideOutputCols.length-6} more</span>}
+                    </div>
+                  </div>
+                )}
+
+                <Btn onClick={doWider} color={C.violet} v="solid"
+                  dis={!canWider} ch="Pivot wider ->"/>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {sub === "summarize" && (
+        <div>
+          <div style={{padding:"0.65rem 1rem",background:C.surface,
+            border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.gold}`,
+            borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+            Collapse rows to one row per group and compute summary statistics.
+          </div>
+
+          <Lbl color={C.gold}>Group by</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem",
+            maxHeight:120,overflowY:"auto",padding:"0.5rem",
+            background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
+            {headers.map(h => {
+              const sel = sumByCols.includes(h);
+              return (
+                <button key={h} onClick={() => toggleSumByCol(h)} style={{
+                  padding:"0.25rem 0.6rem",
+                  border:`1px solid ${sel ? C.gold : C.border2}`,
+                  background: sel ? `${C.gold}18` : "transparent",
+                  color: sel ? C.gold : info[h]?.isNum ? C.blue : C.textDim,
+                  borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+                  transition:"all 0.1s",
+                }}>
+                  {sel ? "✓ " : ""}{h}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.6rem"}}>
+            <Lbl mb={0} color={C.blue}>Aggregations</Lbl>
+            <button onClick={()=>addSumAgg()} style={{
+              padding:"0.2rem 0.55rem",border:`1px solid ${C.blue}`,
+              background:`${C.blue}10`,color:C.blue,borderRadius:2,
+              cursor:"pointer",fontSize:9,fontFamily:mono}}>+ add row</button>
+          </div>
+
+          {sumNumCols.length > 0 && (
+            <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:"0.8rem"}}>
+              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,alignSelf:"center",marginRight:2}}>quick add:</span>
+              {sumNumCols.map(h => (
+                <button key={h} onClick={()=>addSumAgg(h,"mean")}
+                  style={{padding:"0.18rem 0.5rem",border:`1px solid ${C.border2}`,
+                    background:"transparent",color:C.textDim,borderRadius:2,
+                    cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.1s"}}>
+                  + {h}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {sumAggs.length === 0 && (
+            <div style={{padding:"0.65rem 1rem",background:C.surface,
+              border:`1px dashed ${C.border2}`,borderRadius:4,
+              fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"1rem"}}>
+              Add at least one aggregation.
+            </div>
+          )}
+
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:"1.2rem"}}>
+            {sumAggs.map((agg, i) => (
+              <div key={i} style={{display:"grid",
+                gridTemplateColumns:agg.fn==="quantile" ? "1fr 140px 95px 1fr auto" : "1fr 140px 1fr auto",
+                gap:6,alignItems:"end",padding:"0.5rem 0.65rem",
+                background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
+                <div>
+                  <Lbl color={C.teal}>Column</Lbl>
+                  <select value={agg.col} onChange={e=>updSumAgg(i,{col:e.target.value})}
+                    style={{...inS,width:"100%",boxSizing:"border-box"}}>
+                    <option value="">- column -</option>
+                    {sumNumCols.map(h=><option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <Lbl color={C.violet}>Function</Lbl>
+                  <select value={agg.fn} onChange={e=>{
+                    const fn = e.target.value;
+                    updSumAgg(i,{fn,...(fn==="quantile" && agg.q == null ? {q:0.9} : {})});
+                  }} style={{...inS,width:"100%",boxSizing:"border-box"}}>
+                    {SUM_FN_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                {agg.fn === "quantile" && (
+                  <div>
+                    <Lbl color={C.gold}>Percentile</Lbl>
+                    <input type="number" min="0" max="100" step="1"
+                      value={Math.round((agg.q ?? 0.9) * 100)}
+                      onChange={e=>{
+                        const raw = Number(e.target.value);
+                        const pct = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 90;
+                        updSumAgg(i,{q:pct/100});
+                      }}
+                      style={{...inS,width:"100%",boxSizing:"border-box"}}/>
+                  </div>
+                )}
+                <div>
+                  <Lbl color={C.textDim}>Output</Lbl>
+                  <input value={agg.nn}
+                    onChange={e=>setSumAggs(a=>a.map((x,j)=>j!==i?x:{...x,nn:e.target.value}))}
+                    placeholder={sumAggName(agg) || "output_col"}
+                    style={{...inS,width:"100%",boxSizing:"border-box"}}/>
+                </div>
+                <button onClick={()=>rmSumAgg(i)} style={{
+                  background:"transparent",border:`1px solid ${C.border2}`,
+                  borderRadius:2,color:C.textMuted,cursor:"pointer",
+                  fontSize:11,padding:"0.34rem 0.5rem"}}>×</button>
+              </div>
+            ))}
+          </div>
+
+          <Btn onClick={doSummarizeStep} color={C.gold} v="solid"
+            dis={!canSummarize} ch="Summarize ->"/>
         </div>
       )}
 

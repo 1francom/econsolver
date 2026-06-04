@@ -299,6 +299,20 @@ function transpileStep(step, allDatasets = {}) {
       ].join("\n");
     }
 
+    case "inject_column": {
+      const vals = (step.values ?? []).map(v => (v == null ? "." : Number(v).toFixed(8)));
+      // svmat needs an n×1 column vector (backslash separators), not a row vector.
+      // Note: Stata matrices are bounded by matsize — for very large n, export the
+      // column to a .dta and merge instead.
+      const matName = String(step.colName ?? "").replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32);
+      return [
+        `* inject_column: "${step.colName}" — extracted from model output`,
+        `matrix ${matName} = (${vals.join(" \\ ")})`,
+        `svmat ${matName}, name(${step.colName})`,
+        `rename ${step.colName}1 ${step.colName}`,
+      ].join("\n");
+    }
+
     default:
       return `* [${type}] — not yet transpiled`;
   }

@@ -341,3 +341,170 @@ export function limlKappaPower(A, B, m, maxIter = 120) {
   }
   return Math.abs(lambda) > 1e-10 ? 1 / lambda : NaN;
 }
+
+// ─── IV-POISSON (EXPONENTIAL GMM) ────────────────────────────────────────────
+//
+// Structural equation: E[Y|X,Z] = exp(Xβ), endogenous regressors in X.
+// Moment conditions:   g(β) = (1/n) Σ Zᵢ(yᵢ − exp(Xᵢβ))
+// Score Jacobian:      G(β) = −(1/n) Z′diag(μ)X    where μᵢ = exp(Xᵢβ)
+// Two-step GMM:
+//   Step 1 — W = I (identity), Newton-Raphson to convergence.
+//   Ω̂ = (1/n) Z′diag(ε̂²)Z  from step-1 residuals.
+//   Step 2 — W = Ω̂⁻¹, Newton-Raphson to convergence.
+//   V(β̂) = (1/n)[G′Ω̂⁻¹G]⁻¹
+//
+// Convention: xCols = all regressors (endogenous + exogenous, NO intercept).
+//             zCols = all instruments (replaces endogenous, keeps exogenous, NO intercept).
+//             Intercept is added automatically (first column of X and Z).
+//
+export function runIVPoisson(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
+  const overidDf = (zCols.length + wCols.length) - (xCols.length + wCols.length);
+  if (overidDf < 0) return { error: ERR_UNDERIDENTIFIED };
+
+  const allCols = [yCol, ...xCols, ...wCols, ...zCols];
+  const valid = rows.filter(r => {
+    const yv = Number(r[yCol]);
+    if (!isFinite(yv) || yv < 0) return false;
+    return allCols.every(c => r[c] != null && isFinite(Number(r[c])));
+  });
+
+  const n = valid.length;
+  // X = [1, wCols, xCols]   (full regressors including exogenous controls)
+  // Z = [1, wCols, zCols]   (instruments: exogenous controls + excluded instruments)
+  const Y  = valid.map(r => Number(r[yCol]));
+  const X  = valid.map(r => [1, ...wCols.map(c => Number(r[c])), ...xCols.map(c => Number(r[c]))]);
+  const Z  = valid.map(r => [1, ...wCols.map(c => Number(r[c])), ...zCols.map(c => Number(r[c]))]);
+  const kX = X[0].length;
+  const kZ = Z[0].length;
+
+  if (n < kX + 2) return { error: `IV-Poisson: insufficient observations (n=${n}, k=${kX}).` };
+  if (kZ < kX)   return { error: "IV-Poisson: order condition violated — need at least as many instruments as regressors." };
+
+  const Xt = transpose(X);
+  const Zt = transpose(Z);
+
+  // g(β) = (1/n) Z′(Y − μ)
+  const getMoments = (mu) =>
+    Zt.map(zj => zj.reduce((s, v, i) => s + v * (Y[i] - mu[i]), 0) / n);
+
+  // G(β) = −(1/n) Z′diag(μ)X   [kZ × kX]
+  const getJacobian = (mu) => {
+    const J = Array.from({ length: kZ }, () => new Array(kX).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < kZ; j++) {
+        for (let l = 0; l < kX; l++) {
+          J[j][l] -= Z[i][j] * mu[i] * X[i][l];
+        }
+      }
+    }
+    return J.map(row => row.map(v => v / n));
+  };
+
+  // Ω̂ = (1/n) Z′diag(ε²)Z   [kZ × kZ]
+  const getOmega = (eps) => {
+    const Om = Array.from({ length: kZ }, () => new Array(kZ).fill(0));
+    for (let i = 0; i < n; i++) {
+      const e2 = eps[i] * eps[i];
+      for (let j = 0; j < kZ; j++) {
+        for (let l = 0; l < kZ; l++) {
+          Om[j][l] += Z[i][j] * Z[i][l] * e2;
+        }
+      }
+    }
+    return Om.map(row => row.map(v => v / n));
+  };
+
+  // Newton step: β ← β − [J′WJ]⁻¹ J′Wg
+  // W = null → W = I  (just-identified step-1 with W=I simplifies to J⁻¹g when kZ=kX)
+  const newtonStep = (beta, W) => {
+    const mu  = X.map(xi => Math.exp(dot(xi, beta)));
+    const g   = getMoments(mu);
+    const J   = getJacobian(mu);
+    const Jt  = transpose(J);
+    const JtW = W ? matMul(Jt, W) : Jt;   // kX × kZ
+    const JtWJ = matMul(JtW, J);           // kX × kX
+    const JtWJi = matInv(JtWJ);
+    if (!JtWJi) return beta; // singular — stay put
+    const JtWg = JtW.map(row => dot(row, g));
+    const step = JtWJi.map(row => dot(row, JtWg));
+    return beta.map((b, i) => b - step[i]);
+  };
+
+  const iterate = (beta0, W, tol = 1e-8, maxIter = 100) => {
+    let beta = [...beta0];
+    for (let iter = 0; iter < maxIter; iter++) {
+      const beta1 = newtonStep(beta, W);
+      const diff  = beta1.reduce((mx, v, i) => Math.max(mx, Math.abs(v - beta[i])), 0);
+      beta = beta1;
+      if (diff < tol) break;
+    }
+    return beta;
+  };
+
+  // Initialise from β = 0 (safe; convergence is typically fast for Poisson)
+  let beta = new Array(kX).fill(0);
+
+  // Step 1: W = I
+  beta = iterate(beta, null);
+
+  // Estimate Ω̂ from step-1 residuals
+  const mu1   = X.map(xi => Math.exp(dot(xi, beta)));
+  const eps1  = Y.map((y, i) => y - mu1[i]);
+  const Omega = getOmega(eps1);
+  const OmegaInv = matInv(Omega);
+  if (!OmegaInv) return { error: "IV-Poisson: GMM weighting matrix Ω̂ is singular after step 1." };
+
+  // Step 2: W = Ω̂⁻¹
+  beta = iterate(beta, OmegaInv);
+
+  if (!beta.every(b => isFinite(b))) {
+    return { error: "IV-Poisson: estimation diverged (non-finite coefficients) — check instrument relevance and variable scaling." };
+  }
+
+  // Final quantities
+  const mu   = X.map(xi => Math.exp(dot(xi, beta)));
+  const eps  = Y.map((y, i) => y - mu[i]);
+  const J    = getJacobian(mu);
+  const Jt   = transpose(J);
+  const Om2  = getOmega(eps);
+  const Oi2  = matInv(Om2) ?? OmegaInv;
+
+  // V(β̂) = (1/n)[G′Ω̂⁻¹G]⁻¹
+  const JtOi = matMul(Jt, Oi2);
+  const JtOiJ = matMul(JtOi, J);
+  const Vraw = matInv(JtOiJ);
+  if (!Vraw) return { error: "IV-Poisson: asymptotic variance matrix is singular." };
+  const V   = Vraw.map(row => row.map(v => v / n));
+
+  const se     = V.map((row, i) => Math.sqrt(Math.max(0, row[i])));
+  const df     = n - kX;
+  const varNames = ["(Intercept)", ...wCols, ...xCols];
+  const tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
+  const pVals  = tStats.map(t  => isFinite(t)  ? 2 * (1 - normCDF(Math.abs(t))) : NaN);
+
+  // J-test (overidentification)
+  const g       = getMoments(mu);
+  const OIg     = Oi2.map(row => dot(row, g));
+  const jStat   = overidDf > 0 ? n * dot(g, OIg) : NaN;
+  const jPval   = overidDf > 0 ? chiSqPval(jStat, overidDf) : NaN;
+
+  // First-stage F (linear first stage — same as 2SLS)
+  const firstStages = buildFirstStages(valid, xCols, wCols, zCols);
+
+  const Ym  = Y.reduce((s, v) => s + v, 0) / n;
+  const SST = Y.reduce((s, v) => s + (v - Ym) ** 2, 0);
+  const SSR = eps.reduce((s, e) => s + e * e, 0);
+  const R2  = SST > 0 ? 1 - SSR / SST : NaN;
+
+  return {
+    type: "IVPoisson",
+    varNames,
+    beta, se, tStats, pVals,
+    n, k: kX, df,
+    R2, adjR2: NaN,          // R² not well-defined for IV-Poisson
+    jStat, jPval, jDf: overidDf,
+    resid: eps, Yhat: mu,
+    firstStages,
+    seType: seOpts.seType ?? "classical",
+  };
+}

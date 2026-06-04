@@ -367,6 +367,15 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       ].join("\n");
     }
 
+    case "inject_column": {
+      const vals = (step.values ?? []).map(v => (v == null ? "NA" : Number(v).toFixed(8))).join(", ");
+      return [
+        `# inject_column: "${step.colName}" — extracted from model output`,
+        `# Re-run estimation and extract again if the pipeline changes upstream.`,
+        `${dfVar}[["${rName(step.colName)}"]] <- c(${vals})`,
+      ].join("\n");
+    }
+
     default:
       return `# [unknown step: ${step.type}] ${stepLabel(step)}`;
   }

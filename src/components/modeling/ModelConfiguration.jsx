@@ -24,7 +24,7 @@
 //   bwManual     {string}    setBwManual {fn}
 //   kernel       {string}    setKernel {fn}
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { VarPanel, Section, Chip, useTheme, mono } from "./shared.jsx";
 
 const inputStyle = C => ({
@@ -219,6 +219,30 @@ function RDDConfig({
   );
 }
 
+
+// ─── OLS: Collapsible survey-weights toggle ───────────────────────────────────
+function CollapsibleWeights(props) {
+  const { C } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginBottom: "1.4rem" }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0.4rem 0.65rem", background: "transparent",
+          border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
+          fontFamily: mono, fontSize: 10, letterSpacing: "0.14em",
+          textTransform: "uppercase", color: C.textMuted,
+        }}
+      >
+        <span>Survey weights (WLS) — optional</span>
+        <span>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && <div style={{ marginTop: 8 }}><WeightsConfig {...props} /></div>}
+    </div>
+  );
+}
 
 // ─── OLS: Survey Weights ──────────────────────────────────────────────────────
 function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
@@ -569,6 +593,120 @@ function SpatialRDDConfig({
 }
 
 // ─── FuzzyRDD: uses RDDConfig + treatVar for D column ────────────────────────
+function SpatialRegressionConfig({
+  headers,
+  spatialModel, setSpatialModel,
+  spatialWeightsMode, setSpatialWeightsMode,
+  spatialGeomCol, setSpatialGeomCol,
+  spatialWeightsType, setSpatialWeightsType,
+  spatialWeightsStyle, setSpatialWeightsStyle,
+  spatialWeightsK, setSpatialWeightsK,
+  spatialWeightsD, setSpatialWeightsD,
+  availableDatasets,
+  spatialWeightsDatasetId, setSpatialWeightsDatasetId,
+  spatialWeightsICol, setSpatialWeightsICol,
+  spatialWeightsJCol, setSpatialWeightsJCol,
+  spatialWeightsWCol, setSpatialWeightsWCol,
+}) {
+  const { C } = useTheme();
+  const selectedDs = (availableDatasets ?? []).find(d => d.id === spatialWeightsDatasetId);
+  const selectedHeaders = selectedDs?.headers ?? [];
+  const btn = (active, color = C.teal) => ({
+    padding: "0.28rem 0.6rem",
+    border: `1px solid ${active ? color : C.border2}`,
+    background: active ? `${color}18` : "transparent",
+    color: active ? color : C.textDim,
+    borderRadius: 3,
+    cursor: "pointer",
+    fontSize: 11,
+    fontFamily: mono,
+  });
+  const selStyle = { ...inputStyle(C), cursor: "pointer" };
+
+  return (
+    <>
+      <Section title="Spatial Model" color={C.teal}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {[
+            ["SLX", "SLX"],
+            ["SAR", "SAR / lag"],
+            ["SEM", "SEM / error"],
+            ["SDM", "SDM / Durbin"],
+          ].map(([id, label]) => (
+            <button key={id} onClick={() => setSpatialModel(id)} style={btn(spatialModel === id, C.teal)}>
+              {spatialModel === id ? "✓ " : ""}{label}
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 6, fontFamily: mono }}>
+          SAR/SEM/SDM use concentrated ML over the spatial parameter; SLX is OLS on X and WX.
+        </div>
+      </Section>
+
+      <Section title="Spatial Weights W" color={C.gold}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+          <button onClick={() => setSpatialWeightsMode("inline")} style={btn(spatialWeightsMode === "inline", C.gold)}>
+            Build inline
+          </button>
+          <button onClick={() => setSpatialWeightsMode("dataset")} style={btn(spatialWeightsMode === "dataset", C.gold)}>
+            Use triples dataset
+          </button>
+        </div>
+
+        {spatialWeightsMode === "inline" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <select value={spatialGeomCol} onChange={e => setSpatialGeomCol(e.target.value)} style={selStyle}>
+              <option value="">- geometry WKT column -</option>
+              {(headers ?? []).map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {["queen", "rook", "knn", "dband"].map(t => (
+                <button key={t} onClick={() => setSpatialWeightsType(t)} style={btn(spatialWeightsType === t, C.teal)}>{t}</button>
+              ))}
+              {["W", "B"].map(s => (
+                <button key={s} onClick={() => setSpatialWeightsStyle(s)} style={btn(spatialWeightsStyle === s, C.blue)}>{s}</button>
+              ))}
+            </div>
+            {(spatialWeightsType === "knn" || spatialWeightsType === "dband") && (
+              <div style={{ display: "flex", gap: 8 }}>
+                {spatialWeightsType === "knn" && (
+                  <input type="number" min={1} value={spatialWeightsK} onChange={e => setSpatialWeightsK(e.target.value)} placeholder="k" style={inputStyle(C)} />
+                )}
+                {spatialWeightsType === "dband" && (
+                  <input type="number" min={0} value={spatialWeightsD} onChange={e => setSpatialWeightsD(e.target.value)} placeholder="distance band" style={inputStyle(C)} />
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <select value={spatialWeightsDatasetId} onChange={e => setSpatialWeightsDatasetId(e.target.value)} style={selStyle}>
+              <option value="">- select weights dataset -</option>
+              {(availableDatasets ?? []).map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
+            </select>
+            {selectedDs && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                <select value={spatialWeightsICol} onChange={e => setSpatialWeightsICol(e.target.value)} style={selStyle}>
+                  <option value="">i</option>
+                  {selectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <select value={spatialWeightsJCol} onChange={e => setSpatialWeightsJCol(e.target.value)} style={selStyle}>
+                  <option value="">j</option>
+                  {selectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <select value={spatialWeightsWCol} onChange={e => setSpatialWeightsWCol(e.target.value)} style={selStyle}>
+                  <option value="">w</option>
+                  {selectedHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+      </Section>
+    </>
+  );
+}
+
 function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, setRunningVar, cutoff, setCutoff, bwMode, setBwMode, bwManual, setBwManual, kernel, setKernel, polyOrder, setPolyOrder }) {
   const { C } = useTheme();
   return (
@@ -599,6 +737,7 @@ function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export default function ModelConfiguration({
   model,
+  family = "linear",
   numericCols,
   yVar,
   xVars,      setXVars,
@@ -635,6 +774,18 @@ export default function ModelConfiguration({
   csCompGroup,    setCsCompGroup,
   csRelMin,       setCsRelMin,
   csRelMax,       setCsRelMax,
+  spatialModel, setSpatialModel,
+  spatialWeightsMode, setSpatialWeightsMode,
+  spatialGeomCol, setSpatialGeomCol,
+  spatialWeightsType, setSpatialWeightsType,
+  spatialWeightsStyle, setSpatialWeightsStyle,
+  spatialWeightsK, setSpatialWeightsK,
+  spatialWeightsD, setSpatialWeightsD,
+  spatialWeightsDatasetId, setSpatialWeightsDatasetId,
+  spatialWeightsICol, setSpatialWeightsICol,
+  spatialWeightsJCol, setSpatialWeightsJCol,
+  spatialWeightsWCol, setSpatialWeightsWCol,
+  availableDatasets,
   rows,
   headers,
   panel,
@@ -711,12 +862,19 @@ export default function ModelConfiguration({
     return <SpatialRDDConfig numericCols={numericCols} yVar={yVar} runningVar={runningVar} setRunningVar={setRunningVar} treatVar={treatVar} setTreatVar={setTreatVar} bwMode={bwMode} setBwMode={setBwMode} bwManual={bwManual} setBwManual={setBwManual} kernel={kernel} setKernel={setKernel} polyOrder={polyOrder} setPolyOrder={setPolyOrder} />;
   }
 
+  if (model === "SpatialRegression") {
+    return <SpatialRegressionConfig headers={headers} spatialModel={spatialModel} setSpatialModel={setSpatialModel} spatialWeightsMode={spatialWeightsMode} setSpatialWeightsMode={setSpatialWeightsMode} spatialGeomCol={spatialGeomCol} setSpatialGeomCol={setSpatialGeomCol} spatialWeightsType={spatialWeightsType} setSpatialWeightsType={setSpatialWeightsType} spatialWeightsStyle={spatialWeightsStyle} setSpatialWeightsStyle={setSpatialWeightsStyle} spatialWeightsK={spatialWeightsK} setSpatialWeightsK={setSpatialWeightsK} spatialWeightsD={spatialWeightsD} setSpatialWeightsD={setSpatialWeightsD} availableDatasets={availableDatasets} spatialWeightsDatasetId={spatialWeightsDatasetId} setSpatialWeightsDatasetId={setSpatialWeightsDatasetId} spatialWeightsICol={spatialWeightsICol} setSpatialWeightsICol={setSpatialWeightsICol} spatialWeightsJCol={spatialWeightsJCol} setSpatialWeightsJCol={setSpatialWeightsJCol} spatialWeightsWCol={spatialWeightsWCol} setSpatialWeightsWCol={setSpatialWeightsWCol} />;
+  }
+
   if (model === "EventStudy") {
+    if (family === "poisson") {
+      return <SunAbrahamConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} cohortCol={cohortCol} setCohortCol={setCohortCol} periodCol={periodCol} setPeriodCol={setPeriodCol} saUnitCol={saUnitCol} setSaUnitCol={setSaUnitCol} saControlMode={saControlMode} setSaControlMode={setSaControlMode} saRefPeriod={saRefPeriod} setSaRefPeriod={setSaRefPeriod} wVars={wVars} setWVars={setWVars} />;
+    }
     return <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />;
   }
 
-  if (model === "SunAbraham") {
-    return <SunAbrahamConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} cohortCol={cohortCol} setCohortCol={setCohortCol} periodCol={periodCol} setPeriodCol={setPeriodCol} saUnitCol={saUnitCol} setSaUnitCol={setSaUnitCol} saControlMode={saControlMode} setSaControlMode={setSaControlMode} saRefPeriod={saRefPeriod} setSaRefPeriod={setSaRefPeriod} wVars={wVars} setWVars={setWVars} />;
+  if (model === "CallawayCS") {
+    return <CallawayCSConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} csTreatCol={csTreatCol} setCsTreatCol={setCsTreatCol} csEntityCol={csEntityCol} setCsEntityCol={setCsEntityCol} csTimeCol={csTimeCol} setCsTimeCol={setCsTimeCol} csCompGroup={csCompGroup} setCsCompGroup={setCsCompGroup} csRelMin={csRelMin} setCsRelMin={setCsRelMin} csRelMax={csRelMax} setCsRelMax={setCsRelMax} />;
   }
 
   if (model === "CallawayCS") {
@@ -731,19 +889,7 @@ export default function ModelConfiguration({
     return <SyntheticControlConfig numericCols={numericCols} yVar={yVar} treatedUnit={treatedUnit} setTreatedUnit={setTreatedUnit} synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime} xVars={xVars} setXVars={setXVars} rows={rows} panel={panel} />;
   }
 
-  if (model === "WLS") {
-    return (
-      <WeightsConfig
-        numericCols={numericCols}
-        yVar={yVar}
-        xVars={xVars}
-        weightVar={weightVar}
-        setWeightVar={setWeightVar}
-      />
-    );
-  }
-
-  if (model === "Poisson") {
+  if (model === "OLS" && family === "poisson") {
     // Optional: offset column (exposure / population at risk).
     // ln(offset) is added to the linear predictor with coefficient = 1,
     // converting the count model to a per-capita rate model (Osgood 2000, Eq. 3).
@@ -770,7 +916,7 @@ export default function ModelConfiguration({
     );
   }
 
-  if (model === "PoissonFE") {
+  if (model === "FE" && family === "poisson") {
     const entityCol = panel?.entityCol || poissonEntityCol;
     const extraFE = poissonExtraFE ?? [];
     const toggleExtra = (h) =>
@@ -821,6 +967,18 @@ export default function ModelConfiguration({
         </Section>
         {poissonEntityCol ? extraFEPanel : null}
       </>
+    );
+  }
+
+  if (model === "OLS" && family === "linear") {
+    return (
+      <CollapsibleWeights
+        numericCols={numericCols}
+        yVar={yVar}
+        xVars={xVars}
+        weightVar={weightVar}
+        setWeightVar={setWeightVar}
+      />
     );
   }
 

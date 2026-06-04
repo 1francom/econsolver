@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { researchCoach } from "../services/AI/AIService.js";
+import { loadCoachChats, saveCoachChats } from "../services/Persistence/indexedDB.js";
 import { buildMetadataReport } from "../core/validation/metadataExtractor.js";
 import { useSessionState } from "../services/session/sessionState.jsx";
 import { useAuth } from "../services/auth/AuthContext.jsx";
@@ -250,17 +251,99 @@ function ThinkingBubble() {
 
 const PREMIUM_TIERS = new Set(["premium", "pro"]);
 
-export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null }) {
+function makeConversation() {
+  const now = Date.now();
+  return {
+    id:        `c_${now}_${Math.random().toString(36).slice(2, 7)}`,
+    title:     "New chat",
+    createdAt: now,
+    updatedAt: now,
+    messages:  [],
+  };
+}
+
+function deriveTitle(text) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return "New chat";
+  const words = trimmed.split(/\s+/).slice(0, 6).join(" ");
+  return words.length < trimmed.length ? words + "…" : words;
+}
+
+// Drop the transient multipart `content` field before persisting — it is
+// rebuilt from text + images at send time, keeping stored records small.
+function stripForStorage(conversations) {
+  return conversations.map(c => ({
+    ...c,
+    messages: c.messages.map(m => {
+      const copy = { ...m };
+      delete copy.content;
+      return copy;
+    }),
+  }));
+}
+
+export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null, pid = null }) {
   const { C } = useTheme();
   const { tier, session } = useAuth();
   const isPremium = !import.meta.env.VITE_AI_PROXY_ENABLED || import.meta.env.VITE_AI_PROXY_ENABLED !== "true" || PREMIUM_TIERS.has(tier);
   const sessionState = useSessionState();
-  const [history,       setHistory]       = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [activeId,      setActiveId]      = useState(null);
+  const active  = conversations.find(c => c.id === activeId) ?? null;
+  const history = useMemo(() => active?.messages ?? [], [active]);
   const [input,         setInput]         = useState("");
   const [loading,       setLoading]       = useState(false);
   const [pendingImages, setPendingImages] = useState([]); // [{ dataUrl, base64, mediaType }]
   const bottomRef  = useRef(null);
   const inputRef   = useRef(null);
+  const abortRef   = useRef(null);
+  const loadedPidRef = useRef(null);   // pid that the in-state conversations belong to
+
+  function updateActive(mutateMessages) {
+    setConversations(prev => prev.map(c => {
+      if (c.id !== activeId) return c;
+      const messages = mutateMessages(c.messages);
+      let title = c.title;
+      if ((!c.title || c.title === "New chat") && messages.length) {
+        const firstUser = messages.find(m => m.role === "user");
+        if (firstUser) title = deriveTitle(firstUser.text);
+      }
+      return { ...c, messages, title, updatedAt: Date.now() };
+    }));
+  }
+
+  const [showChats, setShowChats] = useState(false);
+  const [renameId,  setRenameId]  = useState(null);
+  const [renameVal, setRenameVal] = useState("");
+
+  function newChat() {
+    const c = makeConversation();
+    setConversations(prev => [c, ...prev]);
+    setActiveId(c.id);
+    setShowChats(false);
+  }
+  function selectChat(id) {
+    setActiveId(id);
+    setShowChats(false);
+  }
+  function deleteChat(id) {
+    setConversations(prev => {
+      const next = prev.filter(c => c.id !== id);
+      if (next.length === 0) {
+        const seed = makeConversation();
+        setActiveId(seed.id);
+        return [seed];
+      }
+      if (id === activeId) setActiveId(next[0].id);
+      return next;
+    });
+  }
+  function commitRename(id) {
+    const title = renameVal.trim();
+    if (title) setConversations(prev => prev.map(c => c.id === id ? { ...c, title } : c));
+    setRenameId(null);
+    setRenameVal("");
+  }
 
   function handlePaste(e) {
     const items = Array.from(e.clipboardData?.items ?? []);
@@ -292,6 +375,41 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
     }
   }, [history, loading, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    // Invalidate persistence until the conversations for THIS pid are loaded —
+    // prevents the previous project's chats from being saved under the new pid.
+    loadedPidRef.current = null;
+    (async () => {
+      if (!pid) {
+        // No project loaded — ephemeral single conversation, not persisted.
+        setConversations(prev => {
+          if (prev.length) return prev;
+          const seed = makeConversation();
+          setActiveId(seed.id);
+          return [seed];
+        });
+        return;
+      }
+      const rec   = await loadCoachChats(pid);
+      if (cancelled) return;
+      const convs = rec?.conversations?.length ? rec.conversations : [makeConversation()];
+      setConversations(convs);
+      setActiveId(convs[0].id);
+      loadedPidRef.current = pid;
+    })();
+    return () => { cancelled = true; };
+  }, [pid, isOpen]);
+
+  useEffect(() => {
+    if (!pid || loadedPidRef.current !== pid || !conversations.length) return;
+    const t = setTimeout(() => {
+      saveCoachChats(pid, stripForStorage(conversations)).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [pid, conversations]);
+
   const starters = (screen === "model" && modelResult && pickEstimatorStarters(modelResult))
     || SCREEN_STARTERS[screen]
     || SCREEN_STARTERS.default;
@@ -322,36 +440,55 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
       : q;
 
     const userEntry = { role: "user", text: q || "(image)", images: imgs.length > 0 ? imgs : undefined, content: apiContent };
-    setHistory(prev => [...prev, userEntry]);
+    const priorHistory = history; // snapshot BEFORE append — used for API context
+    updateActive(msgs => [...msgs, userEntry]);
     setInput("");
     setPendingImages([]);
     setLoading(true);
 
-    const reply = await researchCoach({
-      question: q || "(image)",
-      images: imgs,
-      modelResult,
-      dataDictionary: cleanedData?.dataDictionary ?? null,
-      metadataReport,
-      history: history.map((h, idx) => ({
-        role: h.role,
-        content: h.role === "user" && idx === 0
-          ? (() => {
-              const prefix = `CONTEXT:\n${contextStr}\n\n────────────────────────────\n`;
-              if (h.images?.length) {
-                return [
-                  ...h.images.map(img => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } })),
-                  { type: "text", text: prefix + h.text },
-                ];
-              }
-              return prefix + h.text;
-            })()
-          : (h.content ?? h.text),
-      })),
-    });
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    setHistory(prev => [...prev, { role: "assistant", text: reply }]);
-    setLoading(false);
+    try {
+      await researchCoach({
+        question: q || "(image)",
+        images: imgs,
+        modelResult,
+        dataDictionary: cleanedData?.dataDictionary ?? null,
+        metadataReport,
+        signal: controller.signal,
+        onText: (piece) => {
+          updateActive(msgs => {
+            const copy = msgs.slice();
+            const last = copy[copy.length - 1];
+            if (last && last.role === "assistant") {
+              copy[copy.length - 1] = { ...last, text: last.text + piece };
+            } else {
+              copy.push({ role: "assistant", text: piece });
+            }
+            return copy;
+          });
+        },
+        history: priorHistory.map((h, idx) => ({
+          role: h.role,
+          content: h.role === "user" && idx === 0
+            ? (() => {
+                const prefix = `CONTEXT:\n${contextStr}\n\n────────────────────────────\n`;
+                if (h.images?.length) {
+                  return [
+                    ...h.images.map(img => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } })),
+                    { type: "text", text: prefix + h.text },
+                  ];
+                }
+                return prefix + h.text;
+              })()
+            : (h.content ?? h.text),
+        })),
+      });
+    } finally {
+      setLoading(false);
+      abortRef.current = null;
+    }
   }
 
   async function safeSubmit(question) {
@@ -362,7 +499,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
       const msg = err.message === "PREMIUM_REQUIRED"
         ? "Your account doesn't have premium access. Upgrade to use the AI Coach."
         : `Error: ${err.message}`;
-      setHistory(prev => [...prev, { role: "assistant", text: msg }]);
+      updateActive(msgs => [...msgs, { role: "assistant", text: msg }]);
     }
   }
 
@@ -437,11 +574,49 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
               )}
             </div>
           </div>
+          <button onClick={() => setShowChats(s => !s)}
+            style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, padding: "0.25rem 0.5rem", marginLeft: "auto", marginRight: 8 }}>
+            ☰ Chats ({conversations.length})
+          </button>
           <button onClick={onClose}
             style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0.25rem 0.55rem" }}>
             ✕
           </button>
         </div>
+
+        {showChats && (
+          <div style={{ borderBottom: `1px solid ${C.border}`, background: C.surface, maxHeight: 240, overflowY: "auto", flexShrink: 0 }}>
+            <button onClick={newChat}
+              style={{ width: "100%", textAlign: "left", padding: "0.5rem 1rem", background: "transparent", border: "none", borderBottom: `1px solid ${C.border}`, color: C.violet, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+              + New chat
+            </button>
+            {conversations.map(c => (
+              <div key={c.id}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "0.4rem 0.75rem 0.4rem 1rem", background: c.id === activeId ? C.surface2 : "transparent", borderBottom: `1px solid ${C.border}` }}>
+                {renameId === c.id ? (
+                  <input autoFocus value={renameVal}
+                    onChange={e => setRenameVal(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") commitRename(c.id); if (e.key === "Escape") { setRenameId(null); setRenameVal(""); } }}
+                    onBlur={() => commitRename(c.id)}
+                    style={{ flex: 1, background: C.bg, border: `1px solid ${C.violet}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, padding: "0.2rem 0.35rem", outline: "none" }} />
+                ) : (
+                  <button onClick={() => selectChat(c.id)}
+                    style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", color: c.id === activeId ? C.teal : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.title}
+                  </button>
+                )}
+                <button onClick={() => { setRenameId(c.id); setRenameVal(c.title); }}
+                  title="Rename"
+                  style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px" }}>✎</button>
+                <button onClick={() => deleteChat(c.id)}
+                  title="Delete"
+                  style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px" }}
+                  onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Message area */}
         <div style={{ flex: 1, overflowY: "auto", padding: "0.85rem 1rem 0.5rem" }}>
@@ -468,7 +643,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
           )}
 
           {history.map((h, i) => <Bubble key={i} role={h.role} text={h.text} images={h.images} />)}
-          {loading && <ThinkingBubble />}
+          {loading && history[history.length - 1]?.role !== "assistant" && <ThinkingBubble />}
           <div ref={bottomRef} />
         </div>
 
@@ -495,7 +670,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
 
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           {history.length > 0 && (
-            <button onClick={() => { setHistory([]); setInput(""); setPendingImages([]); }}
+            <button onClick={() => { updateActive(() => []); setInput(""); setPendingImages([]); }}
               style={{ padding: "0.45rem 0.55rem", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, flexShrink: 0, transition: "all 0.12s" }}
               onMouseEnter={e => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = C.red; }}
               onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; e.currentTarget.style.borderColor = C.border; }}
@@ -521,17 +696,19 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
             onFocus={e => { e.target.style.borderColor = C.violet; }}
             onBlur={e => { e.target.style.borderColor = C.border2; }}
           />
-          <button onClick={safeSubmit} disabled={loading || (!input.trim() && pendingImages.length === 0)}
+          <button
+            onClick={loading ? () => abortRef.current?.abort() : () => safeSubmit()}
+            disabled={!loading && !input.trim() && pendingImages.length === 0}
             style={{
               padding: "0.45rem 0.85rem", borderRadius: 3, flexShrink: 0,
-              background: (input.trim() || pendingImages.length > 0) && !loading ? C.violet : "transparent",
-              border: `1px solid ${(input.trim() || pendingImages.length > 0) && !loading ? C.violet : C.border2}`,
-              color: (input.trim() || pendingImages.length > 0) && !loading ? C.bg : C.textMuted,
+              background: loading ? C.red : ((input.trim() || pendingImages.length > 0) ? C.violet : "transparent"),
+              border: `1px solid ${loading ? C.red : ((input.trim() || pendingImages.length > 0) ? C.violet : C.border2)}`,
+              color: loading ? C.bg : ((input.trim() || pendingImages.length > 0) ? C.bg : C.textMuted),
               fontFamily: mono, fontSize: 10, fontWeight: 700,
-              cursor: input.trim() && !loading ? "pointer" : "not-allowed",
+              cursor: loading || input.trim() ? "pointer" : "not-allowed",
               transition: "all 0.13s",
             }}
-          >{loading ? "…" : "Ask"}</button>
+          >{loading ? "Stop" : "Ask"}</button>
           </div>
         </div>
       </div>

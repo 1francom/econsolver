@@ -378,9 +378,17 @@ export function applyStep(rows, headers, s, context = {}) {
     case "group_summarize": {
       // Collapse rows to one row per group.
       // s.by:     array of grouping column names
-      // s.aggs:   array of { col, fn, nn }
-      //           fn: "mean" | "sum" | "count" | "min" | "max" | "sd" | "median"
+      // s.aggs:   array of { col, fn, nn, q? }
+      //           fn: "mean" | "sum" | "count" | "min" | "max" | "sd" | "median" | "quantile"
       //           nn: output column name
+      const quantile7 = (sorted, p) => {
+        const n = sorted.length;
+        if (n === 0) return NaN;
+        const h = (n - 1) * p;
+        const lo = Math.floor(h);
+        const hi = Math.ceil(h);
+        return sorted[lo] + (sorted[hi] - sorted[lo]) * (h - lo);
+      };
       const byKey = row => s.by.map(b => String(row[b] ?? "")).join("||");
       const groups = new Map();
       rows.forEach(r => {
@@ -393,7 +401,7 @@ export function applyStep(rows, headers, s, context = {}) {
       for (const { _first, _rows } of groups.values()) {
         const out = {};
         s.by.forEach(b => { out[b] = _first[b]; });
-        (s.aggs || []).forEach(({ col, fn, nn }) => {
+        (s.aggs || []).forEach(({ col, fn, nn, q }) => {
           const vals = _rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v));
           if (fn === "count") { out[nn] = _rows.length; return; }
           if (!vals.length)  { out[nn] = null; return; }
@@ -412,6 +420,12 @@ export function applyStep(rows, headers, s, context = {}) {
             const sorted = [...vals].sort((a, b) => a - b);
             const mid = Math.floor(sorted.length / 2);
             out[nn] = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+            return;
+          }
+          if (fn === "quantile") {
+            const p = Math.min(1, Math.max(0, Number.isFinite(Number(q)) ? Number(q) : 0.5));
+            const sorted = [...vals].sort((a, b) => a - b);
+            out[nn] = quantile7(sorted, p);
             return;
           }
           out[nn] = null;
@@ -1224,7 +1238,53 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
-    // ── factor_interactions ───────────────────────────────────────────────────
+    // pivot_wider
+    // Long -> Wide reshape. Mirrors tidyr::pivot_wider() for one value per
+    // id/name cell; duplicate id/name pairs keep the later row's value.
+    //
+    // Inline equivalence check:
+    // rows = [{id:1, year:"2020", value:10}, {id:1, year:"2021", value:12}, {id:2, year:"2020", value:8}]
+    // pivot_wider(idCols:["id"], namesFrom:"year", valuesFrom:"value", valuesFill:0)
+    // => [{id:1, 2020:10, 2021:12}, {id:2, 2020:8, 2021:0}]
+    case "pivot_wider": {
+      const valuesFrom = Array.isArray(s.valuesFrom)
+        ? s.valuesFrom.filter(Boolean)
+        : [s.valuesFrom].filter(Boolean);
+      const namesFrom = s.namesFrom;
+      if (!namesFrom || !valuesFrom.length) break;
+
+      const idCols = Array.isArray(s.idCols) ? s.idCols : [];
+      const namesPrefix = s.namesPrefix || "";
+      const fill = s.valuesFill ?? null;
+      const nameValues = [...new Set(rows.map(r => r[namesFrom]).filter(v => v !== null && v !== undefined && v !== ""))];
+      const multiValue = valuesFrom.length > 1;
+      const wideCol = (nameVal, valueCol) => {
+        const base = `${namesPrefix}${String(nameVal)}`;
+        return multiValue ? `${base}_${valueCol}` : base;
+      };
+
+      const outById = new Map();
+      rows.forEach(r => {
+        const idKey = JSON.stringify(idCols.map(id => r[id] ?? null));
+        if (!outById.has(idKey)) {
+          const out = {};
+          idCols.forEach(id => { out[id] = r[id] ?? null; });
+          nameValues.forEach(nv => valuesFrom.forEach(vf => { out[wideCol(nv, vf)] = fill; }));
+          outById.set(idKey, out);
+        }
+        const nameVal = r[namesFrom];
+        if (nameVal === null || nameVal === undefined || nameVal === "") return;
+        const out = outById.get(idKey);
+        valuesFrom.forEach(vf => { out[wideCol(nameVal, vf)] = r[vf] ?? fill; });
+      });
+
+      const valueColNames = nameValues.flatMap(nv => valuesFrom.map(vf => wideCol(nv, vf)));
+      R = [...outById.values()];
+      H = [...new Set([...idCols, ...valueColNames])];
+      break;
+    }
+
+    // ── factor_interactions ──────────────────────────────────────────────────
     // Generates the full set of continuous × factor interactions:
     // for each dummy column in dummyCols, creates contCol × dummy → new column.
     // Equivalent to R: model.matrix(~ cont_var * factor_var - 1).
@@ -1332,6 +1392,30 @@ export function applyStep(rows, headers, s, context = {}) {
         ? rows.map(r => r.__ri === s.ri ? { ...r, [s.col]: s.value } : r)
         : rows;
       break;
+
+    // ── inject_column ──────────────────────────────────────────────────────────
+    // Splices a pre-computed dense column (model fitted values, residuals,
+    // first-stage fitted values, SC gap, etc.) extracted from an estimation
+    // result back into the dataset. s.values is a plain array aligned to the
+    // current pipeline row order at extraction time. If the row count has
+    // changed since extraction (pipeline mutated upstream), the step no-ops with
+    // a warning rather than corrupting the dataset.
+    case "inject_column": {
+      const { colName, values } = s;
+      if (colName) {
+        if (Array.isArray(values) && values.length === rows.length) {
+          R = rows.map((r, i) => ({ ...r, [colName]: values[i] }));
+          H = H.includes(colName) ? H : [...H, colName];
+        } else {
+          console.warn(
+            `inject_column "${colName}": length mismatch ` +
+            `(stored=${values?.length}, current=${rows.length}) — step skipped. ` +
+            `Re-extract this column after any pipeline changes.`
+          );
+        }
+      }
+      break;
+    }
 
   }
   return { rows: R, headers: H };

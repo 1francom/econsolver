@@ -104,6 +104,7 @@ const ESTIMATOR_META = {
   PoissonFE:       { label: "Poisson FE",          color: "#9e7ec8" },
   SyntheticControl:{ label: "Synthetic Control",   color: "#c8b46e" },
   CallawayCS:      { label: "Callaway-Sant'Anna DiD", color: "#6ec8b4" },
+  SpatialRegression:{ label: "Spatial Regression", color: "#6ec8b4" },
 };
 
 const FAMILY_MAP = {
@@ -123,6 +124,7 @@ const FAMILY_MAP = {
   PoissonFE: "count",
   SyntheticControl: "sc",
   CallawayCS: "did",
+  SpatialRegression: "spatial",
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -197,6 +199,7 @@ function buildFormula(type, spec) {
     case "LSDV":      return `${yVar} ~ ${x} + α_i${spec.lsdvTimeFE ? " + γ_t" : ""}`;
     case "SyntheticControl": return `${yVar} ~ SC(${treatedUnit ?? "?"}, t₀=${treatTime ?? "?"})`;
     case "CallawayCS": return `${yVar} ~ CS_DiD(g=${spec.treatCol ?? "?"}) | ${spec.entityCol ?? "?"} + ${spec.timeCol ?? "?"}`;
+    case "SpatialRegression": return `${spec.spatialModel ?? "SAR"}(${yVar}) ~ ${x}`;
     default:          return `${yVar} ~ ${x}`;
   }
 }
@@ -790,6 +793,35 @@ function wrapCallawayCS(eng, spec) {
  * @param {Object} [extras]     — type-specific extras (e.g. { h } for RDD)
  * @returns {EstimationResult}
  */
+function wrapSpatialRegression(eng, spec) {
+  return {
+    ...base("SpatialRegression", { ...spec, spatialModel: eng.model ?? spec?.spatialModel }),
+    label:          eng.model ? `Spatial ${eng.model}` : ESTIMATOR_META.SpatialRegression.label,
+    varNames:       eng.varNames       ?? [],
+    beta:           clean(eng.beta),
+    se:             clean(eng.se),
+    testStats:      clean(eng.zStats ?? eng.tStats),
+    testStatLabel:  eng.zStats ? "z" : "t",
+    pVals:          clean(eng.pVals),
+    R2:             eng.R2             ?? null,
+    adjR2:          eng.adjR2          ?? null,
+    n:              eng.n              ?? 0,
+    df:             eng.df             ?? 0,
+    resid:          eng.resid          ?? [],
+    Yhat:           eng.Yhat           ?? [],
+    logLik:         eng.logLik         ?? null,
+    AIC:            eng.AIC            ?? null,
+    BIC:            eng.BIC            ?? null,
+    spatialModel:   eng.model          ?? null,
+    spatialParam:   eng.spatialParam   ?? null,
+    rho:            eng.rho            ?? null,
+    lambda:         eng.lambda         ?? null,
+    weightsSummary: eng.weightsSummary ?? null,
+    XtXinv:         eng.XtXinv         ?? null,
+    s2:             eng.s2             ?? null,
+  };
+}
+
 export function wrapResult(type, engineOutput, spec, extras = {}) {
   let r;
   switch (type) {
@@ -833,6 +865,7 @@ export function wrapResult(type, engineOutput, spec, extras = {}) {
     case "PoissonFE":        r = wrapPoissonFE(engineOutput, spec); break;
     case "SyntheticControl": r = wrapSyntheticControl(engineOutput, spec); break;
     case "CallawayCS":       r = wrapCallawayCS(engineOutput, spec); break;
+    case "SpatialRegression": r = wrapSpatialRegression(engineOutput, spec); break;
     default:
       console.warn("[EstimationResult] Unknown type:", type);
       r = { ...base(type, spec) };

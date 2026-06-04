@@ -18,36 +18,45 @@ import { useTheme, mono, Section, InfoBox } from "./shared.jsx";
 // Groups determine dropdown sections.
 export const MODELS = [
   // Linear
-  { id: "OLS",             label: "OLS",                group: "Linear",            desc: "Ordinary Least Squares",                       color: "#7ab896" },
-  { id: "WLS",             label: "WLS",                group: "Linear",            desc: "Weighted Least Squares",                        color: "#7ab896" },
+  { id: "OLS",              label: "OLS",              group: "Linear",    desc: "Ordinary Least Squares",                                               color: "#7ab896" },
   // Panel
-  { id: "FE",              label: "FE",                 group: "Panel",             desc: "Fixed Effects (within estimator) — panel required",  color: "#6e9ec8" },
-  { id: "FD",              label: "FD",                 group: "Panel",             desc: "First Differences — unique (i,t) pairs required",     color: "#6e9ec8" },
-  { id: "LSDV",            label: "LSDV",               group: "Panel",             desc: "Least Squares Dummy Variables — panel required", color: "#6e9ec8" },
-  { id: "TWFE",            label: "TWFE DiD",           group: "Panel",             desc: "Two-Way Fixed Effects DiD — panel required",    color: "#6ec8b4" },
-  { id: "EventStudy",      label: "Event Study",        group: "Panel",             desc: "Dynamic DiD / event study — panel required",   color: "#6ec8b4" },
-  { id: "SunAbraham",      label: "Event Study (Sun & Abraham)", group: "Panel",    desc: "Sun-Abraham (2021) IW event study over Poisson PPML — cohort + period required", color: "#6ec8b4" },
-  { id: "CallawayCS",      label: "Callaway-Sant'Anna DiD",      group: "Panel",    desc: "Callaway & Sant'Anna (2021) staggered DiD — outcome-regression estimator with IF SEs", color: "#6ec8b4" },
-  // Causal
-  { id: "2SLS",            label: "2SLS / IV",          group: "Causal",            desc: "Two-Stage Least Squares",                       color: "#c8a96e" },
-  { id: "RDD",             label: "Sharp RDD",          group: "Causal",            desc: "Regression Discontinuity Design",               color: "#c88e6e" },
-  { id: "FuzzyRDD",        label: "Fuzzy RDD",          group: "Causal",            desc: "Fuzzy Regression Discontinuity (planned)",      color: "#c88e6e" },
-  { id: "SpatialRDD",      label: "Spatial RD",         group: "Causal",            desc: "Geographic RD at a boundary (Keele & Titiunik 2015)", color: "#c88e6e" },
-  { id: "DiD",             label: "DiD 2×2",            group: "Causal",            desc: "Classic Difference-in-Differences",             color: "#6ec8b4" },
-  // Limited Dependent
-  { id: "Logit",           label: "Logit",              group: "Limited Dependent", desc: "Binary Logistic Regression (MLE)",              color: "#9e7ec8" },
-  { id: "Probit",          label: "Probit",             group: "Limited Dependent", desc: "Probit — Normal Link (MLE)",                    color: "#9e7ec8" },
-  { id: "Poisson",         label: "Poisson GLM",        group: "Limited Dependent", desc: "Poisson GLM — count/rate data, optional offset", color: "#9e7ec8" },
-  { id: "PoissonFE",       label: "Poisson FE (PPML)",  group: "Limited Dependent", desc: "Poisson PPML with entity fixed effects",        color: "#9e7ec8" },
-  // IV / GMM
-  { id: "GMM",             label: "Two-Step GMM",       group: "IV/GMM",            desc: "Efficient GMM — HC-robust Ω̂ + J-test",         color: "#c8a96e" },
-  { id: "LIML",            label: "LIML",               group: "IV/GMM",            desc: "Limited Info. Max. Likelihood / k-class",       color: "#c8a96e" },
+  { id: "FE",               label: "FE",               group: "Panel",     desc: "Fixed Effects (within estimator) — panel required",                    color: "#6e9ec8" },
+  { id: "FD",               label: "FD",               group: "Panel",     desc: "First Differences — unique (i,t) pairs required",                      color: "#6e9ec8" },
+  { id: "LSDV",             label: "LSDV",             group: "Panel",     desc: "Least Squares Dummy Variables — panel required",                        color: "#6e9ec8" },
+  { id: "TWFE",             label: "TWFE DiD",         group: "Panel",     desc: "Two-Way Fixed Effects DiD — panel required",                            color: "#6ec8b4" },
+  { id: "EventStudy",       label: "Event Study",      group: "Panel",     desc: "Dynamic DiD / event study — panel required",                            color: "#6ec8b4" },
+  { id: "CallawayCS",       label: "CS DiD",           group: "Panel",     desc: "Callaway & Sant'Anna (2021) staggered DiD — panel required",            color: "#6ec8b4" },
+  // DiD
+  { id: "DiD",              label: "DiD 2×2",          group: "DiD",       desc: "Classic Difference-in-Differences",                                     color: "#6ec8b4" },
+  // IV
+  { id: "2SLS",             label: "2SLS / IV",        group: "IV",        desc: "Two-Stage Least Squares",                                               color: "#c8a96e" },
+  { id: "GMM",              label: "Two-Step GMM",     group: "IV",        desc: "Efficient GMM — HC-robust Ω̂ + J-test",                                  color: "#c8a96e" },
+  { id: "LIML",             label: "LIML",             group: "IV",        desc: "Limited Info. Max. Likelihood / k-class",                               color: "#c8a96e" },
+  // RD
+  { id: "RDD",              label: "Sharp RDD",        group: "RD",        desc: "Regression Discontinuity Design",                                       color: "#c88e6e" },
+  { id: "FuzzyRDD",         label: "Fuzzy RDD",        group: "RD",        desc: "Fuzzy Regression Discontinuity Design",                                 color: "#c88e6e" },
+  { id: "SpatialRDD",       label: "Spatial RD",       group: "RD",        desc: "Geographic RD at a boundary (Keele & Titiunik 2015)",                   color: "#c88e6e" },
+  // Spatial econometrics
+  { id: "SpatialRegression", label: "Spatial Reg.",    group: "Spatial",   desc: "SLX, SAR, SEM, and SDM with a spatial weights matrix",                 color: "#6ec8b4" },
   // Synthetic
-  { id: "SyntheticControl",label: "Synthetic Control",  group: "Synthetic",         desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)", color: "#6e9ec8" },
+  { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)",  color: "#6e9ec8" },
 ];
 
 // ordered group list (controls render order)
-const GROUP_ORDER = ["Linear", "Panel", "Causal", "Limited Dependent", "IV/GMM", "Synthetic"];
+const GROUP_ORDER = ["Linear", "Panel", "DiD", "IV", "RD", "Spatial", "Synthetic"];
+
+// Outcome families each strategy supports.
+// "linear" is always implied. Only non-linear entries listed.
+// "planned" = chip renders dimmed, not clickable.
+export const FAMILY_SUPPORT = {
+  OLS:              { poisson: "available", logit: "available", probit: "available" },
+  FE:               { poisson: "available", logit: "planned",   probit: "planned"   },
+  TWFE:             { poisson: "planned" },
+  EventStudy:       { poisson: "available" },
+  DiD:              { poisson: "planned" },
+  "2SLS":           { poisson: "available" },
+  // All others: Linear only — chip row hidden
+};
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function EstimatorSidebar({
@@ -56,6 +65,8 @@ export default function EstimatorSidebar({
   modelAvail,
   modelHint,
   panel,
+  family,          // "linear" | "poisson" | "logit" | "probit"
+  onFamilySelect,  // (family: string) => void
 }) {
   const { C } = useTheme();
   const [open, setOpen] = useState(false);
@@ -200,6 +211,86 @@ export default function EstimatorSidebar({
             </div>
           )}
         </div>
+
+        {/* ── Outcome family chip row ── */}
+        {(() => {
+          const support = FAMILY_SUPPORT[model] ?? {};
+          const families = [
+            { id: "linear",  label: "Linear"  },
+            { id: "poisson", label: "Poisson" },
+            { id: "logit",   label: "Logit"   },
+            { id: "probit",  label: "Probit"  },
+          ];
+          // Only render chips when at least one non-linear family is available or planned
+          const hasNonLinear = Object.keys(support).length > 0;
+          if (!hasNonLinear) return null;
+
+          const HINT = {
+            OLS_poisson:        "Poisson GLM · E[Y|X] = exp(Xβ)",
+            OLS_logit:          "Logit · P(Y=1|X) = σ(Xβ)",
+            OLS_probit:         "Probit · P(Y=1|X) = Φ(Xβ)",
+            FE_poisson:         "Poisson FE (PPML) · exp(Xβ + αᵢ)",
+            EventStudy_poisson: "Sun-Abraham (2021) IW event study",
+            "2SLS_poisson":     "IV-Poisson · E[Y|X,Z] = exp(Xβ)",
+          };
+
+          return (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 8, letterSpacing: "0.18em", textTransform: "uppercase", color: C.textMuted, marginBottom: 5, fontFamily: mono }}>
+                Outcome family
+              </div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {families.map(f => {
+                  const state = f.id === "linear" ? "available" : (support[f.id] ?? "hidden");
+                  if (state === "hidden") return null;
+                  const isActive  = family === f.id;
+                  const isPlanned = state === "planned";
+                  const chipColor = f.id === "poisson" ? "#9e7ec8"
+                                  : f.id === "logit"   ? "#c8a96e"
+                                  : f.id === "probit"  ? "#c88e6e"
+                                  : C.blue;
+                  return (
+                    <button
+                      key={f.id}
+                      disabled={isPlanned}
+                      onClick={() => !isPlanned && onFamilySelect?.(f.id)}
+                      title={isPlanned ? "Planned — not yet implemented" : undefined}
+                      style={{
+                        border: `1px solid ${isActive ? chipColor : "#2a2a2a"}`,
+                        borderRadius: 3,
+                        padding: "3px 9px",
+                        fontSize: 10,
+                        letterSpacing: "0.06em",
+                        fontFamily: mono,
+                        background: isActive ? `${chipColor}18` : "transparent",
+                        color: isActive ? chipColor : isPlanned ? "#333" : "#666",
+                        cursor: isPlanned ? "not-allowed" : "pointer",
+                        opacity: isPlanned ? 0.4 : 1,
+                        transition: "all 0.1s",
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Result hint */}
+              {family !== "linear" && (
+                <div style={{
+                  marginTop: 6, padding: "5px 8px",
+                  background: "#9e7ec810",
+                  border: "1px solid #9e7ec830",
+                  borderLeft: "3px solid #9e7ec8",
+                  borderRadius: 3, fontSize: 10,
+                  color: "#9e7ec8",
+                  fontFamily: mono,
+                }}>
+                  {HINT[`${model}_${family}`] ?? `${model} + ${family}`}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Section>
 
       {/* ── Panel awareness notifications ── */}

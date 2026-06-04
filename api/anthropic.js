@@ -89,6 +89,32 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: `Upstream network error: ${networkErr.message}` });
   }
 
+  // Streaming pass-through: forward the upstream SSE bytes unchanged so the
+  // browser sees text deltas as they arrive and an abort halts generation.
+  if (body.stream) {
+    res.status(anthropicRes.status);
+    res.setHeader("Content-Type",  "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection",    "keep-alive");
+    if (!anthropicRes.ok || !anthropicRes.body) {
+      const errText = await anthropicRes.text();
+      res.end(errText);
+      return;
+    }
+    const reader = anthropicRes.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+    } catch {
+      // client disconnect / upstream abort — fall through to end()
+    }
+    res.end();
+    return;
+  }
+
   const data = await anthropicRes.json();
   return res.status(anthropicRes.status).json(data);
 }

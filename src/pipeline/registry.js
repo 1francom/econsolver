@@ -638,6 +638,25 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "pivot_longer", cols: [], namesTo: "name", valuesTo: "value", idCols: [] }),
   },
 
+  {
+    type: "pivot_wider",
+    label: "Pivot wider (long -> wide)",
+    category: "reshape",
+    description: "Reshape a long dataset to wide format. Distinct values from one column become new columns, optionally filled when an id/name combination is missing. Equivalent to tidyr::pivot_wider().",
+    schema: [
+      { key: "idCols",      type: "cols",   label: "ID columns" },
+      { key: "namesFrom",   type: "col",    label: "Names from column" },
+      { key: "valuesFrom",  type: "cols",   label: "Value column(s)" },
+      { key: "valuesFill",  type: "number", label: "Fill value for missing cells" },
+      { key: "namesPrefix", type: "text",   label: "Prefix for new columns" },
+    ],
+    toLabel: s => {
+      const vals = Array.isArray(s.valuesFrom) ? s.valuesFrom : [s.valuesFrom].filter(Boolean);
+      return `pivot_wider ${s.namesFrom} -> [${vals.join(", ")}]`;
+    },
+    defaultStep: () => ({ type: "pivot_wider", idCols: [], namesFrom: "", valuesFrom: [], valuesFill: 0, namesPrefix: "" }),
+  },
+
   // ── FEATURES ──────────────────────────────────────────────────────────────────
 
   {
@@ -655,6 +674,21 @@ export const STEP_REGISTRY = [
     ],
     toLabel: s => `factor_interactions ${s.contCol} × [${(s.dummyCols || []).slice(0, 3).join(", ")}${(s.dummyCols||[]).length > 3 ? "…" : ""}]`,
     defaultStep: () => ({ type: "factor_interactions", contCol: "", dummyCols: [], prefix: "" }),
+  },
+
+  {
+    type: "inject_column",
+    label: "Inject column (from model result)",
+    category: "features",
+    description: "Splice a pre-computed column (fitted values, residuals, first-stage " +
+                 "fitted values, SC gap, etc.) extracted from an estimation result back " +
+                 "into the dataset. The values are aligned to the row order at extraction " +
+                 "time; re-run the estimation and re-extract if the pipeline changes upstream.",
+    schema: [
+      { key: "colName", type: "text", label: "Column name" },
+    ],
+    toLabel: s => `inject ${s.colName}`,
+    defaultStep: () => ({ type: "inject_column", colName: "", values: [] }),
   },
 
   {

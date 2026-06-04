@@ -120,6 +120,71 @@ async function parseExcel(file) {
   return { headers, rows, _sheetName: sheetName };
 }
 
+// ─── JSON PARSER ──────────────────────────────────────────────────────────────
+// Accepts generic tabular JSON (array of objects, or {data|rows|records:[...]})
+// AND the Observatorio admin-ajax payload. The latter is POSITIONAL
+// (data:[[...]]) and carries name/fiscal PII in fixed columns, so it is routed
+// through the dedicated parser that strips PII at the boundary — never loaded raw.
+const JSON_NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+
+function looksLikeObservatorio(payload) {
+  const data = payload?.data;
+  return Array.isArray(data) && data.length > 0 && Array.isArray(data[0])
+    && (typeof payload.recordsTotal === "number" || data[0].length >= 8);
+}
+
+function genericRecords(payload) {
+  if (Array.isArray(payload)) return payload;
+  for (const k of ["data", "rows", "records", "value"]) {
+    if (Array.isArray(payload?.[k])) return payload[k];
+  }
+  return null;
+}
+
+function coerceJsonValue(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number" || typeof v === "boolean") return v;
+  if (typeof v === "object") return JSON.stringify(v); // nested objects/arrays → text
+  const t = String(v).trim();
+  if (!t || JSON_NA_PAT.test(t)) return null;
+  const n = Number(t.replace(/,(?=\d{3})/g, ""));
+  return isNaN(n) ? t : n;
+}
+
+async function parseJSON(file) {
+  const text = await file.text();
+  let payload;
+  try { payload = JSON.parse(text); }
+  catch { throw new Error(`"${file.name}" is not valid JSON.`); }
+
+  // Privacy-first: Observatorio payload → PII-stripping parser.
+  if (looksLikeObservatorio(payload)) {
+    const { parseRegistry } = await import("./services/data/fetchers/observatorio.js");
+    const { rows, headers } = parseRegistry(payload);
+    if (!rows.length) throw new Error("Observatorio payload parsed to zero rows.");
+    return { headers, rows };
+  }
+
+  const records = genericRecords(payload);
+  if (!records || !records.length)
+    throw new Error(`"${file.name}": no array of records found. Expected a JSON array or { data: [...] }.`);
+  if (records.some(r => Array.isArray(r) || r === null || typeof r !== "object"))
+    throw new Error(`"${file.name}": JSON rows must be objects with named fields. Headerless/positional JSON is not supported here.`);
+
+  // Headers = first-seen union of keys across all records.
+  const headers = [];
+  const seen = new Set();
+  for (const r of records) for (const k of Object.keys(r)) if (!seen.has(k)) { seen.add(k); headers.push(k); }
+  if (!headers.length) throw new Error(`"${file.name}": records have no fields.`);
+
+  const rows = records.map(r => {
+    const row = {};
+    for (const h of headers) row[h] = coerceJsonValue(r[h]);
+    return row;
+  });
+  return { headers, rows };
+}
+
 // ─── DELIMITER DETECTION ─────────────────────────────────────────────────────
 // Samples up to 5 non-empty lines and picks the most frequent candidate delimiter.
 // Handles comma, semicolon, tab, pipe — covers sep=",", sep=";", sep="\t", sep="|".
@@ -268,7 +333,7 @@ async function validateFileMagic(file) {
     throw new Error(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(0)} MB — maximum upload size is 500 MB. Use Parquet or DuckDB for large datasets.`);
 
   const ext = file.name.split(".").pop().toLowerCase();
-  if (["csv", "tsv", "txt", "prj", "shx", "cpg"].includes(ext)) return; // text formats — no magic bytes
+  if (["csv", "tsv", "txt", "json", "prj", "shx", "cpg"].includes(ext)) return; // text formats — no magic bytes
 
   if (file.size < 4) return; // too small to check — parser will handle it
   const buf = await file.slice(0, 8).arrayBuffer();
@@ -329,6 +394,9 @@ async function parseFile(file) {
   if (["xlsx", "xls"].includes(ext)) {
     const parsed = await parseExcel(file);
     return withLoadOpts(parsed, { format: "excel", sheetName: parsed?._sheetName ?? null });
+  }
+  if (ext === "json") {
+    return withLoadOpts(await parseJSON(file), { format: "json", encoding: "utf-8" });
   }
   if (ext === "dta") {
     const { parseStata } = await import("./services/data/parsers/stata.js");
@@ -539,7 +607,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
           ref={fileRef}
           type="file"
           multiple
-          accept=".csv,.tsv,.xlsx,.xls,.txt,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.json,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files?.length) onLoadFile(e.target.files); e.target.value = ""; }}
         />
@@ -962,6 +1030,15 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
       wranglingAddStepRef.current?.({
         type: "ai_tr", col, js,
         desc: `Fill: ${opLabel} "${col}" → ${text.length > 40 ? text.slice(0, 40) + "…" : text}`,
+      });
+    },
+    // Called by ModelingTab's ExtractPanel — splices a model-derived column
+    // (fitted values, residuals, first-stage fitted, SC gap) into the active
+    // dataset's pipeline as an inject_column step (two-pass estimation).
+    addInjectColumnStep: (colName, values) => {
+      wranglingAddStepRef.current?.({
+        type: "inject_column", colName, values: Array.from(values),
+        desc: `inject "${colName}" (${values.length} values)`,
       });
     },
   }), [handleLoadFile, handleLoadFiles, addParsedDataset, handleSaveSubset, primaryId]);

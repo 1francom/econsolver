@@ -64,6 +64,8 @@ export { runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats } from "./RDDSuffSta
 // ── Spatial Regression Discontinuity (Keele & Titiunik 2015) ─────────────────
 export { runSpatialRDD } from "./SpatialRDDEngine.js";
 
+export { runSpatialRegression, runSpatialRegressionFromRows } from "./SpatialRegressionEngine.js";
+
 // ── Binary outcome models + Poisson GLM + Poisson FE ─────────────────────────
 export {
   runLogit,
@@ -78,7 +80,7 @@ export {
 } from "./NonLinearEngine.js";
 
 // ── IV extensions: GMM and LIML ──────────────────────────────────────────────
-export { runGMM, runLIML } from "./GMMEngine.js";
+export { runGMM, runLIML, runIVPoisson } from "./GMMEngine.js";
 
 // ── Synthetic Control (Abadie-Diamond-Hainmueller 2010) ──────────────────────
 export { runSyntheticControl } from "./SyntheticControlEngine.js";

@@ -28,7 +28,7 @@ import { runOLS, runWLS }                    from "../LinearEngine.js";
 import { runFE, runFD }                      from "../PanelEngine.js";
 import { run2SLS, runSharpRDD, ikBandwidth } from "../CausalEngine.js";
 import { runLogit, runProbit }               from "../NonLinearEngine.js";
-import { runGMM, runLIML }                   from "../GMMEngine.js";
+import { runGMM, runLIML, runIVPoisson }     from "../GMMEngine.js";
 import { runSyntheticControl }               from "../SyntheticControlEngine.js";
 
 // ─── TOLERANCE CONSTANTS ─────────────────────────────────────────────────────
@@ -864,6 +864,98 @@ function validateGMMvsR() {
   return { pass, fail };
 }
 
+// ─── IV-POISSON (exponential GMM) ─────────────────────────────────────────────
+//
+// Reference harness: src/math/__validation__/ivPoissonRValidation.R
+//   gmm::gmm( g(β)=Z(y−exp(Xβ)), t0=c(0,0), type="twoStep" )  on
+//   set.seed(42); n=200; z~N(0,1); x=0.6z+N(0,0.5); y~Pois(exp(0.5+0.8x))
+//   true DGP: intercept = 0.5, slope_x = 0.8
+//
+// STATUS: structural + DGP-recovery smoke test (passes now). Exact 6dp/4dp
+// cross-validation against gmm::gmm is PENDING — Franco runs ivPoissonRValidation.R
+// (which also writes ivPoisson_case1.csv) and replaces the loose `c(...)` recovery
+// bounds below with hard R values on the identical CSV dataset, per CLAUDE.md.
+//
+// Data is generated with a deterministic JS PRNG (mulberry32 + Box-Muller +
+// Knuth Poisson sampler) so the test is reproducible without R. It does NOT
+// reproduce R's RNG stream — that is what the shared-CSV step above is for.
+function makeIVPoissonData() {
+  // mulberry32: tiny deterministic PRNG → reproducible uniforms in [0,1).
+  let s = 0x9e3779b9 >>> 0;
+  const u = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  // Box-Muller standard normal.
+  const norm = () => {
+    let a = u(); if (a < 1e-12) a = 1e-12;
+    return Math.sqrt(-2 * Math.log(a)) * Math.cos(2 * Math.PI * u());
+  };
+  // Knuth Poisson sampler.
+  const pois = (lam) => {
+    const L = Math.exp(-lam);
+    let k = 0, p = 1;
+    do { k++; p *= u(); } while (p > L);
+    return k - 1;
+  };
+
+  const n = 200;
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const z   = norm();
+    const x   = 0.6 * z + 0.5 * norm();
+    const lam = Math.exp(0.5 + 0.8 * x);
+    const y   = pois(lam);
+    rows.push({ y, x, z });
+  }
+  return { rows, n };
+}
+
+function validateIVPoisson() {
+  const { rows, n } = makeIVPoissonData();
+  let pass = 0, fail = 0;
+  function c(label, got, want, tol = TOL_COEF) {
+    if (check(label, got, want, tol)) pass++; else fail++;
+  }
+
+  // X = [1, x] (one endogenous, no exogenous controls); Z = [1, z].
+  const r = runIVPoisson(rows, "y", ["x"], [], ["z"]);
+  if (!r || r.error) {
+    console.warn("  ✗ IV-Poisson returned error: " + (r?.error ?? "null"));
+    return { pass, fail: fail + 1 };
+  }
+
+  // Result-shape / structural invariants (exact).
+  c("IV-Poisson: type === 'IVPoisson'", r.type === "IVPoisson" ? 1 : 0, 1, 0);
+  c("IV-Poisson: n = 200",              r.n,                 n,             0);
+  c("IV-Poisson: k = 2",               r.k,                 2,             0);
+  c("IV-Poisson: df = n - k",          r.df,                n - 2,         0);
+  c("IV-Poisson: varNames length 2",   r.varNames.length,   2,             0);
+  c("IV-Poisson: just-identified jDf=0", r.jDf,             0,             0);
+
+  // DGP recovery (LOOSE bounds — replace with hard R values after R run).
+  c("IV-Poisson: intercept ≈ 0.5", r.beta[0], 0.5, 0.30);
+  c("IV-Poisson: slope_x ≈ 0.8",   r.beta[1], 0.8, 0.25);
+
+  // SE finite & strictly positive.
+  if (r.se.every(s2 => isFinite(s2) && s2 > 0)) pass++;
+  else { fail++; console.warn("  ✗ IV-Poisson: non-finite or non-positive SE"); }
+
+  // p-values in [0,1].
+  if (r.pVals.every(p => isFinite(p) ? p >= 0 && p <= 1 : true)) pass++;
+  else { fail++; console.warn("  ✗ IV-Poisson: pVals out of range"); }
+
+  // First-stage relevance: z should strongly predict x (F well above 10).
+  const fs = r.firstStages?.[0];
+  if (fs && isFinite(fs.Fstat) && fs.Fstat > 10) pass++;
+  else { fail++; console.warn("  ✗ IV-Poisson: weak/invalid first-stage F"); }
+
+  return { pass, fail };
+}
+
 // ─── LIML vs R ────────────────────────────────────────────────────────────────
 //
 // Hard expected values from running validation/GMM_check.R with R 4.4.1.
@@ -1057,6 +1149,7 @@ export function runAllValidations() {
     ["Logit",                     validateLogit],
     ["Probit",                    validateProbit],
     ["GMM vs R (just-id + overid)",  validateGMMvsR],
+    ["IV-Poisson (structural + DGP recovery)", validateIVPoisson],
     ["LIML vs R (just-id + overid)", validateLIMLvsR],
     ["Synthetic Control vs R Synth", validateSyntheticControl],
   ];
