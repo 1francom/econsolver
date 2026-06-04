@@ -36,12 +36,14 @@ export const MODELS = [
   { id: "RDD",              label: "Sharp RDD",        group: "RD",        desc: "Regression Discontinuity Design",                                       color: "#c88e6e" },
   { id: "FuzzyRDD",         label: "Fuzzy RDD",        group: "RD",        desc: "Fuzzy Regression Discontinuity Design",                                 color: "#c88e6e" },
   { id: "SpatialRDD",       label: "Spatial RD",       group: "RD",        desc: "Geographic RD at a boundary (Keele & Titiunik 2015)",                   color: "#c88e6e" },
+  // Spatial econometrics
+  { id: "SpatialRegression", label: "Spatial Reg.",    group: "Spatial",   desc: "SLX, SAR, SEM, and SDM with a spatial weights matrix",                 color: "#6ec8b4" },
   // Synthetic
   { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)",  color: "#6e9ec8" },
 ];
 
 // ordered group list (controls render order)
-const GROUP_ORDER = ["Linear", "Panel", "DiD", "IV", "RD", "Synthetic"];
+const GROUP_ORDER = ["Linear", "Panel", "DiD", "IV", "RD", "Spatial", "Synthetic"];
 
 // Outcome families each strategy supports.
 // "linear" is always implied. Only non-linear entries listed.

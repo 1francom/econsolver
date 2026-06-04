@@ -64,6 +64,8 @@ export { runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats } from "./RDDSuffSta
 // ── Spatial Regression Discontinuity (Keele & Titiunik 2015) ─────────────────
 export { runSpatialRDD } from "./SpatialRDDEngine.js";
 
+export { runSpatialRegression, runSpatialRegressionFromRows } from "./SpatialRegressionEngine.js";
+
 // ── Binary outcome models + Poisson GLM + Poisson FE ─────────────────────────
 export {
   runLogit,

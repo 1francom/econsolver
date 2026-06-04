@@ -21,6 +21,8 @@ import {
   runGMM, runLIML, runIVPoisson,
   runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runSunAbraham, runSyntheticControl, runCallawayCS,
   runSpatialRDD,
+  runSpatialRegressionFromRows,
+  buildSpatialWeights,
   runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats,
   wrapResult,
   diagnoseFit,
@@ -1377,6 +1379,7 @@ function buildModelAvail(panelOk, panelFdOk) {
     Logit: true, Probit: true, Poisson: true, PoissonFE: true,
     GMM: true, LIML: true,
     SunAbraham: true, CallawayCS: true,
+    SpatialRegression: true,
     SyntheticControl: true,
   };
 }
@@ -1618,6 +1621,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [csCompGroup, setCsCompGroup] = useState("nevertreated");
   const [csRelMin,    setCsRelMin]    = useState("");
   const [csRelMax,    setCsRelMax]    = useState("");
+  const [spatialModel, setSpatialModel] = useState("SAR");
+  const [spatialWeightsMode, setSpatialWeightsMode] = useState("inline");
+  const [spatialGeomCol, setSpatialGeomCol] = useState("");
+  const [spatialWeightsType, setSpatialWeightsType] = useState("queen");
+  const [spatialWeightsStyle, setSpatialWeightsStyle] = useState("W");
+  const [spatialWeightsK, setSpatialWeightsK] = useState(4);
+  const [spatialWeightsD, setSpatialWeightsD] = useState(1000);
+  const [spatialWeightsDatasetId, setSpatialWeightsDatasetId] = useState("");
+  const [spatialWeightsICol, setSpatialWeightsICol] = useState("i");
+  const [spatialWeightsJCol, setSpatialWeightsJCol] = useState("j");
+  const [spatialWeightsWCol, setSpatialWeightsWCol] = useState("w");
 
   // ── Inference / SE options ────────────────────────────────────────────────
   const [seType,      setSeType]      = useState("classical");
@@ -1631,6 +1645,53 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     timeVar: timeVar ?? panel?.timeCol ?? null,
     maxLag: maxLag ? parseInt(maxLag) : null,
   }), [seType, clusterVar, clusterVar2, timeVar, maxLag, panel]);
+
+  const resolveSpatialWeights = useCallback((dataRows) => {
+    if (spatialWeightsMode === "inline") {
+      if (!spatialGeomCol) return { error: "Select a geometry WKT column for W." };
+      try {
+        return buildSpatialWeights(dataRows, spatialGeomCol, {
+          type: spatialWeightsType,
+          style: spatialWeightsStyle,
+          k: Number(spatialWeightsK) || 4,
+          d: Number(spatialWeightsD) || 1000,
+        });
+      } catch (e) {
+        return { error: e.message || "Could not build spatial weights from geometry." };
+      }
+    }
+
+    const ds = (availableDatasets ?? []).find(d => d.id === spatialWeightsDatasetId);
+    if (!ds?.rows?.length) return { error: "Select a saved spatial weights triples dataset." };
+    const iCol = spatialWeightsICol || "i";
+    const jCol = spatialWeightsJCol || "j";
+    const wCol = spatialWeightsWCol || "w";
+    const raw = ds.rows
+      .map(r => ({ i: Number(r[iCol]), j: Number(r[jCol]), w: Number(r[wCol] ?? 1) }))
+      .filter(t => Number.isFinite(t.i) && Number.isFinite(t.j) && Number.isFinite(t.w));
+    if (!raw.length) return { error: "Weights dataset must contain numeric i, j, and w columns." };
+    const minIdx = Math.min(...raw.flatMap(t => [t.i, t.j]));
+    const maxIdx = Math.max(...raw.flatMap(t => [t.i, t.j]));
+    const shift = minIdx === 1 && maxIdx === dataRows.length ? 1 : 0;
+    const weights = raw.map(t => ({ i: t.i - shift, j: t.j - shift, w: t.w }));
+    const counts = dataRows.map((_, i) => weights.filter(t => t.i === i).length);
+    return {
+      ids: dataRows.map((_, i) => i),
+      weights,
+      summary: {
+        n: dataRows.length,
+        links: weights.length,
+        avgNeighbors: counts.reduce((s, v) => s + v, 0) / Math.max(1, dataRows.length),
+        islands: counts.filter(v => v === 0).length,
+        type: "triples",
+        style: "custom",
+      },
+    };
+  }, [
+    spatialWeightsMode, spatialGeomCol, spatialWeightsType, spatialWeightsStyle,
+    spatialWeightsK, spatialWeightsD, availableDatasets, spatialWeightsDatasetId,
+    spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol,
+  ]);
 
   // ── Results state ─────────────────────────────────────────────────────────
   const [result,       setResult]       = useState(null);
@@ -1963,6 +2024,29 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           panelFE: null, panelFD: null,
         };
 
+      } else if (effModel === "SpatialRegression") {
+        if (!allX.length) return { error: "Select at least one regressor (X)." };
+        const W = resolveSpatialWeights(dataRows);
+        if (!W || W.error) return { error: W?.error ?? "Spatial weights W could not be built." };
+        const res = runSpatialRegressionFromRows(dataRows, y, allX, W, {
+          model: spatialModel,
+          seType,
+        });
+        if (!res || res.error) return { error: res?.error ?? "Spatial regression failed." };
+        return {
+          result: wrapResult("SpatialRegression", res, {
+            yVar: y,
+            xVars: expX,
+            wVars: expW,
+            spatialModel,
+            spatialWeightsMode,
+            spatialGeomCol: spatialWeightsMode === "inline" ? spatialGeomCol : null,
+            spatialWeightsDatasetId: spatialWeightsMode === "dataset" ? spatialWeightsDatasetId : null,
+          }),
+          panelFE: null,
+          panelFD: null,
+        };
+
       } else if (effModel === "Poisson") {
         if (!allX.length) return { error: "Select at least one regressor (X)." };
         const offCol = poissonOffsetCol || null;
@@ -2057,7 +2141,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } catch (e) {
       return { error: `Estimation error: ${e.message}` };
     }
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -2187,7 +2271,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         fuzzyTreatCol: treatVar[0] || null,
       };
 
-      if (shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(effModel))) {
+      if (effModel !== "SpatialRegression" && shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(effModel))) {
         try {
           if (effModel === "2SLS") {
             // ── 2SLS SQL branch (Fase 3a + Fase 8 robust-SE backfill) ──
@@ -3278,6 +3362,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             csCompGroup={csCompGroup}       setCsCompGroup={setCsCompGroup}
             csRelMin={csRelMin}             setCsRelMin={setCsRelMin}
             csRelMax={csRelMax}             setCsRelMax={setCsRelMax}
+            spatialModel={spatialModel}     setSpatialModel={setSpatialModel}
+            spatialWeightsMode={spatialWeightsMode} setSpatialWeightsMode={setSpatialWeightsMode}
+            spatialGeomCol={spatialGeomCol} setSpatialGeomCol={setSpatialGeomCol}
+            spatialWeightsType={spatialWeightsType} setSpatialWeightsType={setSpatialWeightsType}
+            spatialWeightsStyle={spatialWeightsStyle} setSpatialWeightsStyle={setSpatialWeightsStyle}
+            spatialWeightsK={spatialWeightsK} setSpatialWeightsK={setSpatialWeightsK}
+            spatialWeightsD={spatialWeightsD} setSpatialWeightsD={setSpatialWeightsD}
+            spatialWeightsDatasetId={spatialWeightsDatasetId} setSpatialWeightsDatasetId={setSpatialWeightsDatasetId}
+            spatialWeightsICol={spatialWeightsICol} setSpatialWeightsICol={setSpatialWeightsICol}
+            spatialWeightsJCol={spatialWeightsJCol} setSpatialWeightsJCol={setSpatialWeightsJCol}
+            spatialWeightsWCol={spatialWeightsWCol} setSpatialWeightsWCol={setSpatialWeightsWCol}
+            availableDatasets={availableDatasets}
             rows={rows}
             headers={headers}
             panel={panel}
@@ -3765,6 +3861,58 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <ExportBar yVar={yVar[0]} results={r} model={r.type}
                   onReport={() => openReport({ ...r, modelLabel: r.label, yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                   replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars, weightCol: r.spec?.weightCol ?? null } }} />
+              </div>
+            );
+          })()}
+
+          {result?.type === "SpatialRegression" && (() => {
+            const r = result;
+            const paramValue = r.spatialParam === "lambda" ? r.lambda : r.rho;
+            const ws = r.weightsSummary ?? {};
+            return (
+              <div style={{ animation: "fadeUp 0.22s ease" }}>
+                <div style={{ marginBottom: "1.2rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.label} Results</span>
+                  <Badge label={`n = ${r.n}`} color={C.textDim} />
+                  {r.spatialParam && <Badge label={`${r.spatialParam} = ${paramValue?.toFixed?.(4) ?? "—"}`} color={C.gold} />}
+                  {ws.links != null && <Badge label={`W links = ${ws.links}`} color={C.textDim} />}
+                </div>
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
+                <FitBar items={[
+                  { label: "R²", value: r.R2?.toFixed(4) ?? "—", color: C.teal },
+                  { label: "Adj. R²", value: r.adjR2?.toFixed(4) ?? "—", color: C.teal },
+                  { label: "logLik", value: r.logLik?.toFixed?.(3) ?? "—", color: C.gold },
+                  { label: "AIC", value: r.AIC?.toFixed?.(2) ?? "—", color: C.gold },
+                  { label: "BIC", value: r.BIC?.toFixed?.(2) ?? "—", color: C.gold },
+                  { label: "islands", value: ws.islands ?? "—", color: C.textDim },
+                ]} />
+                <Lbl color={C.textMuted}>Spatial Coefficients</Lbl>
+                <div style={{ marginBottom: "1.2rem" }}>
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                </div>
+                {r.warnings?.length > 0 && (
+                  <div style={{ fontSize: 10, color: C.gold, fontFamily: mono, marginBottom: "1rem", lineHeight: 1.6 }}>
+                    {r.warnings.map((w, i) => <div key={i}>- {w}</div>)}
+                  </div>
+                )}
+                <PlotSelector
+                  accentColor={C.teal}
+                  defaultId="forest"
+                  plots={[
+                    { id: "forest", label: "Coefficient plot",
+                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-spatial" filename="spatial_regression_coefficients.svg" /> },
+                    { id: "yhat", label: "Y vs Ŷ",
+                      node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={yVar[0]} svgIdSuffix="-spatial" /> },
+                    { id: "resid", label: "Residuals vs Fitted",
+                      node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} svgIdSuffix="-spatial-resid" /> },
+                    { id: "qq", label: "Q-Q",
+                      node: <QQPlot resid={r.resid} svgIdSuffix="-spatial-qq" /> },
+                  ]}
+                />
+                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model={r.type} />
+                <ExportBar yVar={yVar[0]} results={r} model={r.type}
+                  onReport={() => openReport({ ...r, modelLabel: r.label, yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars, spatialModel: r.spatialModel } }} />
               </div>
             );
           })()}
