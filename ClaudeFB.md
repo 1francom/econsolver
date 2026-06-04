@@ -282,3 +282,12 @@
 
 - [07:18] · Calculate
   Add a "show steps button" for integrals, derivatives and optimizations
+
+---
+
+## 2026-06-04 batch
+
+### Features
+
+- [15:25] · Model
+  Persistence across sessions of pinned models
