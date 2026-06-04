@@ -2327,6 +2327,7 @@ export default function App() {
             cleanedData={tabOutput(activeTab)}
             modelResult={activeResult}
             prefillMessage={coachPrefill}
+            pid={pid}
           />
           </SessionLogProvider>
           </SessionStateProvider>
@@ -2341,6 +2342,7 @@ export default function App() {
         cleanedData={tabOutput(activeTab)}
         modelResult={activeResult}
         prefillMessage={coachPrefill}
+        pid={pid}
       />
     </div>
   );
