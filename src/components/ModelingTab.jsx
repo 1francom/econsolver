@@ -2751,7 +2751,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>Full Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} binaryVars={result.type === "DiD" ? ["Post", "Treated"] : []} />
                 </div>
                 <PlotSelector
                   accentColor={C.teal}

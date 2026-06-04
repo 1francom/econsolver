@@ -262,7 +262,8 @@ function ciMultiplier(df) {
   return 1.96;
 }
 
-export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [] }) {
+export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [] }) {
+  const binarySet = new Set(binaryVars);
   const { C } = useTheme();
   const [open, setOpen] = useState(null);
   const [copied, setCopied] = useState(null);
@@ -389,6 +390,106 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                   })();
                   const cleanDesc = desc && !/^entity identifier$/i.test(desc) ? desc : null;
 
+                  // Helper: is `name` a 0/1 dummy? (explicit hint, dict "dummy 1 = …",
+                  // or all of its values in the data are 0/1).
+                  const isBinaryName = (name) => {
+                    if (binarySet.has(name)) return true;
+                    if (/^dummy\s+1\s*=/i.test(dict[name] ?? "")) return true;
+                    if (rows.length > 0) {
+                      const vals = rows.map(r => r[name]).filter(x => x != null && x !== "");
+                      if (vals.length > 0 && vals.every(x => { const n = Number(x); return (n === 0 || n === 1) && !isNaN(n); })) return true;
+                    }
+                    return false;
+                  };
+
+                  // Interaction / DiD treatment terms: a "one-unit increase" reading is
+                  // wrong — the slope is conditional on the other factor. Parse components
+                  // from the label (strip a trailing "(…)" tag like "(ATT)", split on
+                  // ×, _x_, or " x ") so it works even for synthetic labels that are not
+                  // real columns (e.g. "Post × Treated (ATT)").
+                  const tag   = v.match(/\(([^)]*)\)\s*$/);
+                  const isATT = tag != null && /\bATT\b/i.test(tag[1]);
+                  const core  = v.replace(/\s*\([^)]*\)\s*$/, "").trim();
+                  const parts = core.split(/\s*[×·*]\s*|_x_| x /i).map(s => s.trim()).filter(Boolean);
+                  const isInteraction = parts.length >= 2;
+
+                  if (isInteraction || isATT) {
+                    // Dummy × dummy (or an ATT, whose components are 0/1 treatment flags):
+                    // read as a joint condition "when X1 = 1 and X2 = 1".
+                    if (isInteraction && (isATT || parts.every(isBinaryName))) {
+                      return (
+                        <>
+                          When {parts.map((pn, k) => (
+                            <span key={pn}>
+                              {k > 0 ? " and " : ""}<span style={{ color: C.text }}>{pn}</span> = 1
+                            </span>
+                          ))},{" "}
+                          <span style={{ color: C.text }}>{yVar}</span> is{" "}
+                          <span style={{ color: b >= 0 ? C.green : C.red }}>
+                            {b >= 0 ? "+" : ""}{b.toFixed(4)} {b >= 0 ? "higher" : "lower"}
+                          </span>{" "}
+                          than the baseline group, ceteris paribus.
+                          {isATT ? " This is the difference-in-differences treatment effect (ATT) under parallel trends." : ""}{" "}
+                        </>
+                      );
+                    }
+                    // ATT with no parseable components (e.g. TWFE "Treatment (ATT)").
+                    if (isATT) {
+                      return (
+                        <>
+                          Difference-in-differences estimate (ATT): the treated group&apos;s{" "}
+                          <span style={{ color: C.text }}>{yVar}</span> changed by{" "}
+                          <span style={{ color: b >= 0 ? C.green : C.red }}>
+                            {b >= 0 ? "+" : ""}{b.toFixed(4)}
+                          </span>{" "}
+                          after treatment relative to the control group&apos;s trend — the causal
+                          effect under the parallel-trends assumption.{" "}
+                        </>
+                      );
+                    }
+                    // Continuous × dummy: the dummy's marginal effect is conditional on the
+                    // continuous term. With Y = … + β_c·C + β_d·D + β_int·(C·D), the effect of
+                    // D switching 0→1 is β_d + β_int·C, and the slope of C shifts by β_int when
+                    // D = 1. Pull main-effect βs from the table when present to show numbers.
+                    if (parts.length === 2 && parts.filter(isBinaryName).length === 1) {
+                      const binFirst  = isBinaryName(parts[0]);
+                      const dummyName = binFirst ? parts[0] : parts[1];
+                      const contName  = binFirst ? parts[1] : parts[0];
+                      const cBeta     = beta[varNames.indexOf(contName)];
+                      const dBeta     = beta[varNames.indexOf(dummyName)];
+                      const slopeWhen1 = typeof cBeta === "number" ? (cBeta + b) : null;
+                      return (
+                        <>
+                          Continuous × dummy interaction (<span style={{ color: C.text }}>{dummyName}</span> is binary).
+                          When <span style={{ color: C.text }}>{dummyName}</span> = 1, the marginal effect of{" "}
+                          <span style={{ color: C.text }}>{contName}</span> on <span style={{ color: C.text }}>{yVar}</span> shifts by{" "}
+                          <span style={{ color: b >= 0 ? C.green : C.red }}>{b >= 0 ? "+" : ""}{b.toFixed(4)}</span>
+                          {slopeWhen1 != null
+                            ? <> (slope becomes <span style={{ color: C.text }}>{slopeWhen1.toFixed(4)}</span>)</>
+                            : null}.{" "}
+                          Equivalently, the effect of <span style={{ color: C.text }}>{dummyName}</span> (0→1) on{" "}
+                          <span style={{ color: C.text }}>{yVar}</span> equals{" "}
+                          <span style={{ color: C.text }}>
+                            {typeof dBeta === "number" ? dBeta.toFixed(4) : `β(${dummyName})`} {b >= 0 ? "+" : "−"} {Math.abs(b).toFixed(4)}·{contName}
+                          </span>
+                          {" "}— it depends on the level of <span style={{ color: C.text }}>{contName}</span>, ceteris paribus.{" "}
+                        </>
+                      );
+                    }
+                    // Continuous × continuous (or 3+ way): symmetric marginal-effect reading.
+                    return (
+                      <>
+                        Interaction term <span style={{ color: C.text }}>{v}</span>: a one-unit
+                        increase in one component shifts the marginal effect of the other on{" "}
+                        <span style={{ color: C.text }}>{yVar}</span> by{" "}
+                        <span style={{ color: b >= 0 ? C.green : C.red }}>
+                          {b >= 0 ? "+" : ""}{b.toFixed(4)}
+                        </span>, ceteris paribus. Interpret jointly with the constituent main
+                        effects, not in isolation.{" "}
+                      </>
+                    );
+                  }
+
                   if (dummyMatch) {
                     const lbl = dummyMatch[1].trim();
                     return (
@@ -401,7 +502,7 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                       </>
                     );
                   }
-                  if (isBinary) {
+                  if (isBinary || binarySet.has(v)) {
                     return (
                       <>
                         {cleanDesc
