@@ -877,6 +877,10 @@ export default function ModelConfiguration({
     return <CallawayCSConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} csTreatCol={csTreatCol} setCsTreatCol={setCsTreatCol} csEntityCol={csEntityCol} setCsEntityCol={setCsEntityCol} csTimeCol={csTimeCol} setCsTimeCol={setCsTimeCol} csCompGroup={csCompGroup} setCsCompGroup={setCsCompGroup} csRelMin={csRelMin} setCsRelMin={setCsRelMin} csRelMax={csRelMax} setCsRelMax={setCsRelMax} />;
   }
 
+  if (model === "CallawayCS") {
+    return <CallawayCSConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} csTreatCol={csTreatCol} setCsTreatCol={setCsTreatCol} csEntityCol={csEntityCol} setCsEntityCol={setCsEntityCol} csTimeCol={csTimeCol} setCsTimeCol={setCsTimeCol} csCompGroup={csCompGroup} setCsCompGroup={setCsCompGroup} csRelMin={csRelMin} setCsRelMin={setCsRelMin} csRelMax={csRelMax} setCsRelMax={setCsRelMax} />;
+  }
+
   if (model === "LSDV") {
     return <LSDVConfig lsdvTimeFE={lsdvTimeFE} setLsdvTimeFE={setLsdvTimeFE} />;
   }
