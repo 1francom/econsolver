@@ -11,6 +11,7 @@ import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
 import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
+import ObservatorioFetcher from './components/wrangling/ObservatorioFetcher.jsx';
 import { SessionStateProvider } from './services/session/sessionState.jsx';
 import { SessionLogProvider } from './services/session/sessionLog.jsx';
 import {
@@ -809,6 +810,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
   const [success,   setSuccess]   = useState("");
   const [wbOpen,    setWbOpen]    = useState(false);
   const [oecdOpen,  setOecdOpen]  = useState(false);
+  const [obsOpen,   setObsOpen]   = useState(false);
   const [preloadedOpen, setPreloadedOpen] = useState(false);
   const [dragOver,  setDragOver]  = useState(false);
   const [view,      setView]      = useState("overview"); // "overview" | "grid"
@@ -1161,6 +1163,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
               {[
                 {label:"↓ World Bank data", color:C.teal, action:()=>setWbOpen(true)},
                 {label:"↓ OECD data",       color:C.blue, action:()=>setOecdOpen(true)},
+                {label:"↓ Observatorio (femicidios)", color:C.gold, action:()=>setObsOpen(true)},
               ].map(({label,color,action})=>(
                 <button key={label} onClick={action} style={{
                   padding:"0.4rem 0.65rem",background:"transparent",
@@ -1257,6 +1260,16 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
             setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
           }}
           onClose={() => setOecdOpen(false)}
+        />
+      )}
+      {obsOpen && (
+        <ObservatorioFetcher
+          onLoad={(fname, rows, headers) => {
+            studioRef.current?.addApiData(fname, rows, headers);
+            setObsOpen(false);
+            setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
+          }}
+          onClose={() => setObsOpen(false)}
         />
       )}
     </div>
