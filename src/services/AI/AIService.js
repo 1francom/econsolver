@@ -829,7 +829,7 @@ function _serializeModelContext(result, dataDictionary) {
   return lines.join("\n");
 }
 
-export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null }) {
+export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, signal = undefined, onText = undefined }) {
   if (!question?.trim()) return "";
 
   const modelContext  = _serializeModelContext(modelResult, dataDictionary);
@@ -871,7 +871,7 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
       : textContent;
     apiMessages.push({ role: "user", content: newContent });
 
-    return await callClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 800 });
+    return await streamClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 800, signal, onText });
   } catch (err) {
     if (err.message === "PREMIUM_REQUIRED") throw err; // let caller handle the gate
     console.warn("[AIService] researchCoach failed:", err.message);
