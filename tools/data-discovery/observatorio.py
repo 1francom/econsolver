@@ -12,7 +12,8 @@ from interceptor import DynamicDataInterceptor
 
 # Confirmed during discovery — update if the site moves the embed.
 URL = "https://observatorioluciaperez.org/"
-PATTERN = r"admin-ajax\.php|flourish|\.csv"   # wide net; narrow after first run
+# The registry data is served by WordPress admin-ajax.php (wpDataTables).
+PATTERN = r"admin-ajax\.php"
 
 OUT = Path(__file__).parent / "out"
 
@@ -61,14 +62,26 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    caps = DynamicDataInterceptor(headless=True).intercept(URL, PATTERN)
+    # NOTE: this site sits behind Imunify360 bot-protection — headless capture is
+    # blocked at the WAF. Kept for reference only; the live import path is the
+    # in-app paste/file importer fed from the user's own browser session.
+    caps = DynamicDataInterceptor().intercept(URL, PATTERN, dwell_ms=8000)
     DynamicDataInterceptor.dump(caps, OUT)
-    print(f"Captured {len(caps)} responses → {OUT}/manifest.json")
-    df = to_dataframe(caps)
-    df = clean(df)
-    out_csv = OUT / "observatorio_clean.csv"
-    df.to_csv(out_csv, index=False)
-    print(f"Wrote {len(df)} rows → {out_csv}")
+    print(f"\nCaptured {len(caps)} responses → {OUT}/manifest.json\n")
+    for c in caps:
+        print(f"  [{c.status}] {c.content_type[:28]:28} {len(c.body_bytes):>9}B  {c.url[:110]}")
+
+    # Don't abort discovery if the registry list isn't auto-located — the
+    # summary above + manifest.json are the ground truth we're after.
+    try:
+        df = clean(to_dataframe(caps))
+        out_csv = OUT / "observatorio_clean.csv"
+        df.to_csv(out_csv, index=False)
+        print(f"\nWrote {len(df)} rows → {out_csv}")
+    except SystemExit as e:
+        print(f"\n[discovery] {e}")
+        print("[discovery] Scan the summary above for the data request "
+              "(json/csv/octet-stream body), then tell me its URL + body.")
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ test("dedupeIncidents — hash opt-in drops collisions", () => {
   assert.equal(r.nDuplicatesDropped, 1);
 });
 
-import { parseRegistry } from "./observatorio.js";
+import { parseRegistry, parseRegistryText } from "./observatorio.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -66,19 +66,25 @@ const fixture = JSON.parse(
   readFileSync(fileURLToPath(new URL("./__fixtures__/observatorio_sample.json", import.meta.url)))
 );
 
-test("parseRegistry — strips PII, keeps whitelist, normalizes dates", () => {
+test("parseRegistry — positional schema, strips name/fiscal PII, normalizes dates", () => {
   const { rows, headers, meta } = parseRegistry(fixture);
-  // PII gone
-  assert.equal(rows.every(r => !("nombre" in r) && !("edad" in r)), true);
-  // whitelist headers only (+ _fecha_raw bookkeeping allowed)
-  assert.deepEqual(headers, ["fecha", "provincia", "comuna", "barrio", "vinculo"]);
-  // id-dedup default on: id:4 appears twice → one dropped
+  // PII gone: no name, no fiscal, no raw id|nombre cell leaks through
+  assert.equal(rows.every(r => !("nombre" in r) && !("fiscal" in r) && !("id" in r)), true);
+  assert.equal(rows.every(r => !Object.values(r).some(v => typeof v === "string" && v.includes("FAKE NAME"))), true);
+  assert.equal(rows.every(r => !Object.values(r).some(v => typeof v === "string" && v.includes("Fiscal"))), true);
+  // whitelist headers only
+  assert.deepEqual(headers, ["fecha", "provincia", "partido", "localidad", "vinculo", "edad", "hijxs"]);
+  // id-dedup default on: id:3 appears twice → one dropped
   assert.equal(meta.nDuplicatesDropped, 1);
-  // dates normalized; the "sin dato" row keeps fecha:null + raw preserved
+  // analytical columns preserved
   const r1 = rows.find(r => r.provincia === "Buenos Aires");
   assert.equal(r1.fecha, "2024-05-15");
+  assert.equal(r1.partido, "La Plata");
+  assert.equal(r1.edad, "31");
+  // the "sin dato" row keeps fecha:null + raw preserved
   const bad = rows.find(r => r.provincia === "Mendoza");
   assert.equal(bad.fecha, null);
+  assert.equal(bad._fecha_raw, "sin dato");
   assert.equal(meta.nUnparsedDates, 1);
 });
 
@@ -87,4 +93,15 @@ test("parseRegistry — meta coverage spans min/max parsed dates", () => {
   assert.equal(meta.coverage.minDate, "1984-01-03");
   assert.equal(meta.coverage.maxDate, "2024-05-15");
   assert.equal(meta.source, "Observatorio Lucía Pérez");
+});
+
+test("parseRegistryText — parses a JSON string the same as parseRegistry", () => {
+  const text = JSON.stringify(fixture);
+  const { rows, meta } = parseRegistryText(text);
+  assert.equal(rows.length, 4);
+  assert.equal(meta.nDuplicatesDropped, 1);
+});
+
+test("parseRegistryText — bad JSON throws a helpful error", () => {
+  assert.throws(() => parseRegistryText("not json {"), /Could not parse JSON/);
 });

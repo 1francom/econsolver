@@ -66,7 +66,7 @@ class DynamicDataInterceptor:
         (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
 
     # ── live capture (manual smoke test; not unit-tested) ─────────────────
-    def intercept(self, url: str, pattern: str, *, wait_for: str = "networkidle") -> list[Capture]:
+    def intercept(self, url: str, pattern: str, *, wait_for: str = "networkidle", dwell_ms: int = 0) -> list[Capture]:
         from playwright.sync_api import sync_playwright
 
         captures: list[Capture] = []
@@ -98,5 +98,7 @@ class DynamicDataInterceptor:
 
             page.on("response", on_response)
             page.goto(url, wait_until=wait_for, timeout=self.timeout_ms)
+            if dwell_ms:
+                page.wait_for_timeout(dwell_ms)  # let lazy XHR/fetch fire after load
             browser.close()
         return captures

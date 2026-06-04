@@ -1,9 +1,12 @@
 {
+  "draw": 1,
+  "recordsTotal": 5321,
+  "recordsFiltered": 5321,
   "data": [
-    { "id": 1, "fecha": "15 de mayo de 2024", "provincia": "Buenos Aires", "comuna": "La Plata", "barrio": "Centro", "vinculo": "pareja", "nombre": "FAKE NAME A", "edad": 31 },
-    { "id": 2, "fecha": "03/01/1984", "provincia": "Córdoba", "comuna": "Capital", "barrio": "Alberdi", "vinculo": "ex pareja", "nombre": "FAKE NAME B", "edad": 24 },
-    { "id": 3, "fecha": "2001-09-09", "provincia": "Santa Fe", "comuna": "Rosario", "barrio": "Centro", "vinculo": "familiar", "nombre": "FAKE NAME C", "edad": 45 },
-    { "id": 4, "fecha": "sin dato", "provincia": "Mendoza", "comuna": "", "barrio": "", "vinculo": "desconocido", "nombre": "FAKE NAME D", "edad": null },
-    { "id": 3, "fecha": "2001-09-09", "provincia": "Santa Fe", "comuna": "Rosario", "barrio": "Centro", "vinculo": "familiar", "nombre": "FAKE NAME C (update)", "edad": 45 }
+    ["1|FAKE NAME A", "31", "15/05/2024", "La Plata", "La Plata", "Buenos Aires", "pareja", "2", "Fiscal FAKE 1", "<a href='#'>ver</a>"],
+    ["2|FAKE NAME B", "24", "03/01/1984", "Capital", "Capital", "Córdoba", "ex pareja", "0", "Fiscal FAKE 2", "<a href='#'>ver</a>"],
+    ["3|FAKE NAME C", "45", "09/09/2001", "Rosario", "Rosario", "Santa Fe", "familiar", "1", "Fiscal FAKE 3", "<a href='#'>ver</a>"],
+    ["4|FAKE NAME D", "", "sin dato", "", "", "Mendoza", "desconocido", "", "Fiscal FAKE 4", "<a href='#'>ver</a>"],
+    ["3|FAKE NAME C", "45", "09/09/2001", "Rosario", "Rosario", "Santa Fe", "familiar", "1", "Fiscal FAKE 3", "<a href='#'>ver</a>"]
   ]
 }

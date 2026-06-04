@@ -1,9 +1,10 @@
 // ─── ECON STUDIO · services/data/fetchers/observatorio.js ────────────────────
 // Observatorio Lucía Pérez femicide/travesticide registry.
-// Data arrives via admin-ajax.php (discovered with tools/data-discovery).
+// The site's admin-ajax.php endpoint sits behind Imunify360 bot-protection, so
+// server-side/proxy fetches are blocked by design. Instead the user pulls the
+// raw DataTables JSON from their own authenticated browser session and imports
+// it here (paste or file). This module is the pure parser for that payload.
 // Privacy-first: only analytical columns ever enter Litux (PII stripped here).
-
-const PROXY_URL = "https://zxknjfezkatuldipdskw.supabase.co/functions/v1/observatorio-proxy";
 
 // Spanish month names → number. Accent-stripped, lowercased before lookup.
 // Includes both "setiembre" and "septiembre" spellings.
@@ -84,18 +85,52 @@ export function dedupeIncidents(rows, { idKey = null, hashKeys = null, useHash =
   return { rows, nDuplicatesDropped: 0, nPotentialDuplicates: 0 };
 }
 
-const WHITELIST = ["fecha", "provincia", "comuna", "barrio", "vinculo"];
+const WHITELIST = ["fecha", "provincia", "partido", "localidad", "vinculo", "edad", "hijxs"];
 
-// Map real payload keys → canonical names. Defaults assume Spanish keys; if
-// discovery (Task 4) found different names, edit the right-hand sides here.
-const FIELD_MAP = {
-  id:        "id",
-  fecha:     "fecha",
-  provincia: "provincia",
-  comuna:    "comuna",
-  barrio:    "barrio",
-  vinculo:   "vinculo",
+// The admin-ajax.php response is DataTables server-side: each record is a
+// POSITIONAL array (not an object). Column order locked during discovery.
+// PII columns (name in col 0, fiscal in col 8) and the HTML link (col 9) are
+// dropped here at the boundary — they never enter Litux.
+const COL = {
+  idNombre:  0,  // "<id>|<nombre>" — split, name discarded
+  edad:      1,
+  fecha:     2,  // D/M/YYYY
+  localidad: 3,
+  partido:   4,
+  provincia: 5,
+  vinculo:   6,
+  hijxs:     7,
+  // 8 = fiscal (PII, dropped)   9 = HTML <a> link (dropped)
 };
+
+const cleanCell = v => {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s;
+};
+
+// Split "<id>|<nombre>" → id only (name discarded). When no pipe is present,
+// treat the whole cell as the id.
+function splitId(cell) {
+  const s = cell == null ? "" : String(cell);
+  const i = s.indexOf("|");
+  return (i === -1 ? s : s.slice(0, i)).trim();
+}
+
+// Positional record → canonical object. Deliberately never reads col 8/9 so
+// fiscal/name PII cannot leak downstream.
+function recordToObject(arr) {
+  return {
+    id:        splitId(arr[COL.idNombre]),
+    edad:      cleanCell(arr[COL.edad]),
+    fecha:     cleanCell(arr[COL.fecha]),
+    localidad: cleanCell(arr[COL.localidad]),
+    partido:   cleanCell(arr[COL.partido]),
+    provincia: cleanCell(arr[COL.provincia]),
+    vinculo:   cleanCell(arr[COL.vinculo]),
+    hijxs:     cleanCell(arr[COL.hijxs]),
+  };
+}
 
 function recordsFrom(payload) {
   if (Array.isArray(payload)) return payload;
@@ -110,14 +145,8 @@ export function parseRegistry(payload, { dedup = {} } = {}) {
   const raw = recordsFrom(payload);
   if (!raw.length) throw new Error("Observatorio payload contained zero records.");
 
-  // 1. canonical-rename via FIELD_MAP
-  const renamed = raw.map(r => {
-    const o = {};
-    for (const [canon, srcKey] of Object.entries(FIELD_MAP)) {
-      if (srcKey in r) o[canon] = r[srcKey];
-    }
-    return o;
-  });
+  // 1. positional array → canonical object (drops name/fiscal/link)
+  const renamed = raw.map(recordToObject);
 
   // 2. dedup (id default on; hash opt-in)
   const dd = dedupeIncidents(renamed, {
@@ -160,18 +189,16 @@ export function parseRegistry(payload, { dedup = {} } = {}) {
   };
 }
 
-// Live fetch: POST the discovered request descriptor to the proxy, then parse.
-export async function fetchObservatorioRegistry(opts = {}) {
-  const res = await fetch(PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(opts),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(`Observatorio proxy error ${res.status}${body.detail ? ": " + String(body.detail).slice(0, 200) : ""}`);
+// Convenience: parse a pasted/loaded JSON string — the raw admin-ajax.php
+// response the user saved from their authenticated browser session.
+export function parseRegistryText(text, opts = {}) {
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error(
+      "Could not parse JSON. Paste the full admin-ajax.php response, including the outer { data: [...] }."
+    );
   }
-  const json = await res.json();
-  if (json.error) throw new Error(`Observatorio API error: ${json.error}`);
-  return parseRegistry(json, opts);
+  return parseRegistry(payload, opts);
 }
