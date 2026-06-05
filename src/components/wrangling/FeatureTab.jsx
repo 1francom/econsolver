@@ -5,6 +5,7 @@ import { computeColStats } from "../../services/data/duckdb.js";
 const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import FormatTab from "./FormatTab.jsx";
+import VectorAssignForm from "./VectorAssignForm.jsx";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
 // dplyr-style free-form expression evaluator.
@@ -708,7 +709,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
 
   return(
     <div>
-      <Tabs tabs={[["quick","⚡ Shortcuts"],["mutate","ƒ Mutate"],["conditional","⊕ Conditional"],["date","📅 Date"],...(isP?[["panel","⊞ Panel"]]:[]),["formatting","⬡ Formatting"]]} active={vt} set={setVt} accent={C.teal} sm/>
+      <Tabs tabs={[["quick","⚡ Shortcuts"],["generate","⊕ Generate"],["mutate","ƒ Mutate"],["conditional","⊕ Conditional"],["date","📅 Date"],...(isP?[["panel","⊞ Panel"]]:[]),["formatting","⬡ Formatting"]]} active={vt} set={setVt} accent={C.teal} sm/>
 
       {/* ── Variable name input (shared by quick/panel/did) ── */}
       {(vt==="quick"||vt==="panel"||vt==="did")&&(
@@ -725,6 +726,10 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
             </>
           )
         </div>
+      )}
+
+      {vt==="generate"&&(
+        <VectorAssignForm rows={rows} headers={headers} onAdd={onAdd}/>
       )}
 
       {/* ── Quick Transforms ── */}
