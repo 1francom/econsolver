@@ -33,6 +33,73 @@ function assertNotProtected(col, stepType) {
   }
 }
 
+// Positional string splice used by the str_splice step.
+// position: 1-based; negative counts from end. mode: insert|delete|overwrite.
+function splice(value, position, mode, text = "", count = 0) {
+  if (value === null || value === undefined) return value;
+  const s = String(value);
+  const len = s.length;
+  let pos = Number(position);
+  if (!isFinite(pos)) pos = len;
+  if (pos < 0) pos = Math.max(0, len + pos + 1) - 1;
+  else pos = pos - 1;
+  pos = Math.max(0, Math.min(pos, len));
+  const n = Math.max(0, Number(count) || 0);
+  if (mode === "insert") return s.slice(0, pos) + text + s.slice(pos);
+  if (mode === "delete") return s.slice(0, pos) + s.slice(pos + n);
+  if (mode === "overwrite") return s.slice(0, pos) + text + s.slice(pos + n);
+  return s;
+}
+
+// Re-coerce a spliced result back to number when the source column was numeric
+// and the new string parses to a finite number.
+function maybeNumber(original, result) {
+  if (typeof original === "number" && result !== null && result !== "") {
+    const n = Number(result);
+    if (isFinite(n)) return n;
+  }
+  return result;
+}
+
+// Coerce a raw form value to a target dtype for add_column / set_where.
+function coerceTo(v, dtype) {
+  if (dtype === "number") {
+    const n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+  return v === undefined ? null : v;
+}
+
+// Build a row predicate from a structured where clause for set_where / filters.
+function buildPredicate(where) {
+  if (!where || !where.col || !where.op) return () => true;
+  const { col, op, value } = where;
+  const sval = value == null ? "" : String(value);
+  const num = Number(value);
+  return (r) => {
+    const raw = r[col];
+    const s = raw == null ? "" : String(raw);
+    switch (op) {
+      case "equals": return s === sval;
+      case "not_equals": return s !== sval;
+      case "contains": return s.includes(sval);
+      case "starts": return s.startsWith(sval);
+      case "ends": return s.endsWith(sval);
+      case "gt": return typeof raw === "number" ? raw > num : Number(raw) > num;
+      case "lt": return typeof raw === "number" ? raw < num : Number(raw) < num;
+      case "between": {
+        const lo = Number(Array.isArray(value) ? value[0] : value);
+        const hi = Number(Array.isArray(value) ? value[1] : value);
+        const x = typeof raw === "number" ? raw : Number(raw);
+        return isFinite(x) && x >= lo && x <= hi;
+      }
+      case "empty": return raw == null || s === "";
+      case "notempty": return raw != null && s !== "";
+      default: return true;
+    }
+  };
+}
+
 // ─── SMART NUMBER HELPERS ─────────────────────────────────────────────────────
 // Column-level locale detection. Votes over all values to decide whether
 // the column uses EU (dot=thousands, comma=decimal) or US (comma=thousands,
@@ -278,6 +345,69 @@ export function applyStep(rows, headers, s, context = {}) {
           : new Function("value", "rowIndex", js);    // body format — wrap directly
         R = rows.map((r, i) => ({ ...r, [s.col]: fn(r[s.col], i) }));
       } catch {}
+      break;
+    }
+
+    case "add_column": {
+      const nn = s.nn;
+      if (!nn) break;
+      const val = coerceTo(s.fill, s.dtype);
+      R = rows.map(r => ({ ...r, [nn]: val }));
+      if (!H.includes(nn)) H = [...H, nn];
+      break;
+    }
+
+    case "add_row": {
+      const base = 1e9 + (Number(s._seq) || 0) * 1000;
+      const count = Math.max(1, Number(s.count) || 1);
+      const vals = s.values || {};
+      const newRows = [];
+      for (let k = 0; k < count; k++) {
+        const row = { __ri: base + k };
+        H.forEach(h => { if (h !== "__ri") row[h] = (h in vals) ? vals[h] : null; });
+        newRows.push(row);
+      }
+      R = [...rows, ...newRows];
+      break;
+    }
+
+    case "set_where": {
+      const pred = buildPredicate(s.where);
+      const setVal = s.action === "clear" ? null : coerceTo(s.value, s.dtype);
+      R = rows.map(r => pred(r) ? { ...r, [s.col]: setVal } : r);
+      break;
+    }
+
+    case "replace": {
+      const mode = s.match?.mode || "exact";
+      const find = s.match?.find ?? "";
+      const repl = s.replaceWith ?? "";
+      const out = s.nn || s.col;
+      let rx = null;
+      if (mode === "regex") {
+        try { rx = new RegExp(find, "g"); } catch { rx = null; }
+      }
+      R = rows.map(r => {
+        const v = r[s.col];
+        if (v === null || v === undefined) return out === s.col ? r : { ...r, [out]: v };
+        let nv;
+        if (mode === "exact") nv = String(v) === find ? repl : v;
+        else if (mode === "contains") nv = String(v).split(find).join(repl);
+        else nv = rx ? String(v).replace(rx, repl) : v;
+        return { ...r, [out]: nv };
+      });
+      if (!H.includes(out)) H = [...H, out];
+      break;
+    }
+
+    case "str_splice": {
+      const out = s.nn || s.col;
+      R = rows.map(r => {
+        const v = r[s.col];
+        const spliced = splice(v, s.position, s.mode, s.text ?? "", s.count ?? 0);
+        return { ...r, [out]: maybeNumber(v, spliced) };
+      });
+      if (!H.includes(out)) H = [...H, out];
       break;
     }
 
