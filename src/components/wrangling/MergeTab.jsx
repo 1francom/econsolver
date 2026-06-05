@@ -32,7 +32,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
       const sj = joins[i];
       const right = allDatasets.find(d => d.id === sj.rightId);
       const prev = chain[i];
-      if (!right || !sj.rightKey) { chain.push(prev.slice()); continue; }
+      if (!right || !sj.rightKey || sj.how === "anti" || sj.how === "semi") { chain.push(prev.slice()); continue; }
       const next = prev.slice();
       for (const h of right.rawData.headers) {
         if (h === sj.rightKey) continue;
@@ -137,6 +137,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             const rDs = allDatasets.find(d => d.id === j.rightId);
             const rHdrs = rDs?.rawData?.headers || [];
             const leftHdrs = headerChain[idx] || headers;
+            const noCols = j.how === "anti" || j.how === "semi";
             return (
               <div key={idx} style={{
                 marginBottom:"1.2rem", padding:"0.9rem", background:C.surface,
@@ -233,7 +234,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                     <div>
                       <Lbl color={C.teal}>Join type</Lbl>
                       <div style={{display:"flex",gap:4}}>
-                        {[["left","LEFT"],["inner","INNER"]].map(([k,l])=>(
+                        {[["left","LEFT"],["inner","INNER"],["right","RIGHT"],["full","FULL"],["semi","SEMI"],["anti","ANTI"]].map(([k,l])=>(
                           <button key={k} onClick={()=>updateJoin(idx,{how:k})}
                             style={{padding:"0.3rem 0.7rem",border:`1px solid ${j.how===k?C.teal:C.border2}`,
                               background:j.how===k?`${C.teal}18`:"transparent",color:j.how===k?C.teal:C.textDim,
@@ -243,13 +244,19 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                         ))}
                       </div>
                     </div>
-                    <div>
-                      <Lbl color={C.textDim}>Suffix for column conflicts</Lbl>
-                      <input value={j.suffix} onChange={e=>updateJoin(idx,{suffix:e.target.value})} placeholder="_r"
-                        style={{width:"100%",boxSizing:"border-box",padding:"0.35rem 0.55rem",
-                          background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,
-                          color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
-                    </div>
+                    {noCols ? (
+                      <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,alignSelf:"center"}}>
+                        Filters rows only - no columns added.
+                      </div>
+                    ) : (
+                      <div>
+                        <Lbl color={C.textDim}>Suffix for column conflicts</Lbl>
+                        <input value={j.suffix} onChange={e=>updateJoin(idx,{suffix:e.target.value})} placeholder="_r"
+                          style={{width:"100%",boxSizing:"border-box",padding:"0.35rem 0.55rem",
+                            background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,
+                            color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+                      </div>
+                    )}
                   </div>
 
                   {/* Formula preview */}
@@ -261,9 +268,9 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                       <span style={{color:C.teal}}>{rDs.filename}</span>
                       {" ON "}<span style={{color:C.gold}}>{j.leftKey}</span>
                       {" = "}<span style={{color:C.teal}}>{j.rightKey}</span>
-                      {" → "}<span style={{color:C.green}}>
-                        +{rHdrs.filter(h=>h!==j.rightKey).length} columns
-                      </span>
+                      {" -> "}{noCols
+                        ? <span style={{color:C.yellow}}>row filter ({j.how})</span>
+                        : <span style={{color:C.green}}>+{rHdrs.filter(h=>h!==j.rightKey).length} columns</span>}
                     </div>
                   )}
                 </>)}
