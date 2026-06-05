@@ -63,6 +63,20 @@ function rCols(arr) {
   return rVec(arr);
 }
 
+function rFn(fn, col) {
+  const c = rName(col);
+  const map = {
+    mean:   `mean(${c}, na.rm = TRUE)`,
+    sum:    `sum(${c}, na.rm = TRUE)`,
+    sd:     `sd(${c}, na.rm = TRUE)`,
+    min:    `min(${c}, na.rm = TRUE)`,
+    max:    `max(${c}, na.rm = TRUE)`,
+    median: `median(${c}, na.rm = TRUE)`,
+    rank:   `dplyr::min_rank(${c})`,
+  };
+  return map[fn] ?? `mean(${c}, na.rm = TRUE)`;
+}
+
 // ─── PIPELINE TRANSPILER ──────────────────────────────────────────────────────
 // Each step type maps to one or more dplyr/tidyr/stringr/lubridate calls.
 function transpileStep(step, dfVar = "df", allDatasets = {}) {
@@ -141,6 +155,11 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
         .map(([k, v]) => `  ${rStr(k)} ~ ${rStr(v)}`)
         .join(",\n");
       return `${dfVar} <- ${dfVar} |> mutate(${col} = dplyr::case_match(${col},\n${cases},\n  .default = ${col}\n))`;
+    }
+
+    case "distinct": {
+      const cols = step.subset?.length ? `, ${step.subset.map(rName).join(", ")}` : "";
+      return `${dfVar} <- ${dfVar} |> distinct(${cols.replace(/^, /, "")}${cols ? ", " : ""}.keep_all = TRUE)`;
     }
 
     case "winz": {
@@ -284,6 +303,13 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       ].join("\n");
     }
 
+    case "group_transform": {
+      const by = (step.by ?? []).map(rName).join(", ");
+      const out = rName(step.nn ?? `${step.fn}_${step.col}`);
+      const rhs = step.fn === "count" ? "n()" : rFn(step.fn, step.col);
+      return `${dfVar} <- ${dfVar} |> group_by(${by}) |> mutate(${out} = ${rhs}) |> ungroup()`;
+    }
+
     case "pivot_longer": {
       const mode      = step.mode || "simple";
       const namesTo   = rName(step.namesTo   ?? "name");
@@ -322,7 +348,10 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     }
 
     case "join": {
-      const how       = step.how === "inner" ? "inner_join" : "left_join";
+      const how       = {
+        left:"left_join", inner:"inner_join", right:"right_join",
+        full:"full_join", semi:"semi_join", anti:"anti_join",
+      }[step.how || "left"] ?? "left_join";
       const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
       return [
         `# Load right dataset: "${rightName}"`,
@@ -338,6 +367,42 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
         `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
         `${dfVar} <- dplyr::bind_rows(${dfVar}, right_df)`,
       ].join("\n");
+    }
+
+    case "bind_cols": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      return [
+        `# Bind columns from dataset: "${rightName}"`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        `${dfVar} <- bind_cols(${dfVar}, right_df)`,
+      ].join("\n");
+    }
+
+    case "union":
+    case "intersect":
+    case "setdiff": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      return [
+        `# ${step.type}: "${rightName}"`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        `${dfVar} <- ${step.type}(${dfVar}, right_df)`,
+      ].join("\n");
+    }
+
+    case "vector_assign": {
+      const vals = rVec(step.values ?? []);
+      const out = rName(step.nn ?? "assigned");
+      const seed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      if (step.mode === "recycle") return `${dfVar}$${out} <- rep_len(${vals}, nrow(${dfVar}))`;
+      if (step.mode === "conditional") {
+        const lines = (step.rules || []).map(r => `    ${r.expr} ~ ${rStr(r.value)}`).join(",\n");
+        return `${dfVar}$${out} <- with(${dfVar}, dplyr::case_when(\n${lines}${lines ? ",\n" : ""}    TRUE ~ ${rStr(step.elseValue ?? "")}\n))`;
+      }
+      const prob = step.weights ? `, prob = c(${step.weights.join(", ")})` : "";
+      if (step.mode === "quota") {
+        return `# NOTE: EconSolver uses a seeded mulberry32 RNG; values differ, distribution matches\nset.seed(${seed}); ${dfVar}$${out} <- sample(rep_len(${vals}, nrow(${dfVar})))`;
+      }
+      return `# NOTE: EconSolver uses a seeded mulberry32 RNG; values differ, distribution matches\nset.seed(${seed}); ${dfVar}$${out} <- sample(${vals}, nrow(${dfVar}), replace = TRUE${prob})`;
     }
 
     case "patch": {
