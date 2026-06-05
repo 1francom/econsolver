@@ -509,6 +509,49 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "append", rightId: "" }),
   },
 
+  {
+    type: "bind_cols",
+    label: "Bind columns",
+    category: "merge",
+    description: "Horizontally bind another dataset's columns by row position (dplyr bind_cols). Row-count mismatch truncates to the shorter dataset.",
+    schema: [
+      { key: "rightId", type: "text", label: "Dataset to bind" },
+      { key: "suffix",  type: "text", label: "Suffix for duplicate columns (default: _r)" },
+    ],
+    toLabel: s => `bind_cols <- ${s.rightId}`,
+    defaultStep: () => ({ type: "bind_cols", rightId: "", suffix: "_r" }),
+  },
+
+  {
+    type: "union",
+    label: "Union (stack + dedup)",
+    category: "merge",
+    description: "Vertically stack another dataset and drop full-row duplicates (dplyr union).",
+    schema: [{ key: "rightId", type: "text", label: "Dataset to union" }],
+    toLabel: s => `union <- ${s.rightId}`,
+    defaultStep: () => ({ type: "union", rightId: "" }),
+  },
+
+  {
+    type: "intersect",
+    label: "Intersect",
+    category: "merge",
+    description: "Keep rows present in both datasets, matched on shared columns (dplyr intersect).",
+    schema: [{ key: "rightId", type: "text", label: "Other dataset" }],
+    toLabel: s => `intersect ${s.rightId}`,
+    defaultStep: () => ({ type: "intersect", rightId: "" }),
+  },
+
+  {
+    type: "setdiff",
+    label: "Set difference",
+    category: "merge",
+    description: "Keep rows in the current dataset that are NOT in the other, matched on shared columns (dplyr setdiff).",
+    schema: [{ key: "rightId", type: "text", label: "Other dataset" }],
+    toLabel: s => `setdiff ${s.rightId}`,
+    defaultStep: () => ({ type: "setdiff", rightId: "" }),
+  },
+
 
   // ── ADVANCED CLEANING ───────────────────────────────────────────────────────
 

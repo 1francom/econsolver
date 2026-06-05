@@ -689,6 +689,61 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    case "bind_cols": {
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const rRows = right.rows, rHeaders = right.headers;
+      const m = Math.min(rows.length, rRows.length); // truncate to shorter
+      const destOf = h => (H.includes(h) ? `${h}${s.suffix || "_r"}` : h);
+      R = [];
+      for (let i = 0; i < m; i++) {
+        const merged = { ...rows[i] };
+        rHeaders.forEach(h => { merged[destOf(h)] = rRows[i][h] ?? null; });
+        R.push(merged);
+      }
+      rHeaders.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
+      break;
+    }
+
+    case "union": {
+      // vertical stack + drop full-row duplicates over the union column set
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const rRows = right.rows, rHeaders = right.headers;
+      const onlyRight = rHeaders.filter(h => !H.includes(h));
+      const allCols = [...H, ...onlyRight];
+      const stacked = [
+        ...rows.map(r => { const c = {}; allCols.forEach(h => { c[h] = r[h] ?? null; }); return c; }),
+        ...rRows.map(r => { const c = {}; allCols.forEach(h => { c[h] = r[h] ?? null; }); return c; }),
+      ];
+      const seen = new Set();
+      R = stacked.filter(r => {
+        const key = JSON.stringify(allCols.map(h => r[h]));
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
+      });
+      onlyRight.forEach(h => { if (!H.includes(h)) H = [...H, h]; });
+      break;
+    }
+
+    case "intersect":
+    case "setdiff": {
+      // keep current rows that DO (intersect) / do NOT (setdiff) appear in the
+      // other dataset, matched on shared columns
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const shared = H.filter(h => right.headers.includes(h));
+      const rightKeys = new Set(
+        right.rows.map(r => JSON.stringify(shared.map(h => r[h] ?? null)))
+      );
+      R = rows.filter(r => {
+        const key = JSON.stringify(shared.map(h => r[h] ?? null));
+        const inRight = rightKeys.has(key);
+        return s.type === "intersect" ? inRight : !inRight;
+      });
+      break; // headers unchanged
+    }
+
     case "mutate": {
       const helpers = {
         ifelse:   (c, t, f) => c ? t : f,
