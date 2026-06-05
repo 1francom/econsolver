@@ -83,6 +83,93 @@ export const STEP_REGISTRY = [
   },
 
   {
+    type: "add_column",
+    label: "Add column",
+    category: "features",
+    description: "Add a new column filled with a constant value.",
+    schema: [
+      { key: "nn", type: "text", label: "Column name" },
+      { key: "fill", type: "text", label: "Fill value" },
+      { key: "dtype", type: "select", label: "Type", options: [
+        { value: "string", label: "String" },
+        { value: "number", label: "Number" },
+      ] },
+    ],
+    toLabel: s => `add column ${s.nn}`,
+    defaultStep: () => ({ type: "add_column", nn: "", fill: "", dtype: "string" }),
+  },
+
+  {
+    type: "add_row",
+    label: "Add row(s)",
+    category: "cleaning",
+    description: "Append blank or partially-filled rows. New rows get stable identities for later cell edits.",
+    schema: [
+      { key: "count", type: "number", label: "Number of rows" },
+    ],
+    toLabel: s => `add ${s.count || 1} row(s)`,
+    defaultStep: () => ({ type: "add_row", count: 1, values: {}, _seq: 0 }),
+  },
+
+  {
+    type: "set_where",
+    label: "Set value where...",
+    category: "cleaning",
+    description: "Set or clear a column's value on the rows matching a condition (the grid filter).",
+    schema: [
+      { key: "col", type: "col", label: "Column to set" },
+      { key: "action", type: "select", label: "Action", options: [
+        { value: "set", label: "Set to value" },
+        { value: "clear", label: "Clear (null)" },
+      ] },
+      { key: "value", type: "text", label: "Value" },
+    ],
+    toLabel: s => `set ${s.col} ${s.action === "clear" ? "= NA" : `= ${s.value}`} where ${s.where?.col} ${s.where?.op} ${s.where?.value}`,
+    defaultStep: () => ({ type: "set_where", col: "", where: { col: "", op: "equals", value: "" }, action: "set", value: "" }),
+  },
+
+  {
+    type: "replace",
+    label: "Find & replace",
+    category: "cleaning",
+    description: "Replace values in a column by exact match, substring, or regex.",
+    schema: [
+      { key: "col", type: "col", label: "Column" },
+      { key: "find", type: "text", label: "Find" },
+      { key: "replaceWith", type: "text", label: "Replace with" },
+      { key: "mode", type: "select", label: "Match", options: [
+        { value: "exact", label: "Exact" },
+        { value: "contains", label: "Contains" },
+        { value: "regex", label: "Regex" },
+      ] },
+      { key: "nn", type: "text", label: "New column (optional)" },
+    ],
+    toLabel: s => `replace in ${s.col}: "${s.match?.find ?? s.find}" -> "${s.replaceWith}"`,
+    defaultStep: () => ({ type: "replace", col: "", match: { mode: "exact", find: "" }, replaceWith: "", nn: "" }),
+  },
+
+  {
+    type: "str_splice",
+    label: "Edit characters at position",
+    category: "features",
+    description: "Insert, delete, or overwrite characters at a chosen position in each value (position 1 = first char; negative counts from the end).",
+    schema: [
+      { key: "col", type: "col", label: "Column" },
+      { key: "mode", type: "select", label: "Mode", options: [
+        { value: "insert", label: "Insert" },
+        { value: "delete", label: "Delete" },
+        { value: "overwrite", label: "Overwrite" },
+      ] },
+      { key: "position", type: "number", label: "Position (1-based; -1 = end)" },
+      { key: "text", type: "text", label: "Text" },
+      { key: "count", type: "number", label: "Count (delete/overwrite)" },
+      { key: "nn", type: "text", label: "New column (optional)" },
+    ],
+    toLabel: s => `${s.mode} chars in ${s.col} at ${s.position}`,
+    defaultStep: () => ({ type: "str_splice", col: "", mode: "insert", position: 1, text: "", count: 0, nn: "" }),
+  },
+
+  {
     type: "drop_na",
     label: "Drop missing rows",
     category: "cleaning",
