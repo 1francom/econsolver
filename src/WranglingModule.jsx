@@ -20,6 +20,7 @@ import History         from "./components/wrangling/History.jsx";
 import ExportMenu      from "./components/wrangling/ExportMenu.jsx";
 import ImportPipelineButton from "./components/wrangling/ImportPipelineButton.jsx";
 import DataQualityReport from "./components/wrangling/DataQualityReport.jsx";
+import NLCommandBar     from "./components/wrangling/NLCommandBar.jsx";
 import AuditTrail        from "./components/validation/AuditTrail.jsx";
 import { auditPipeline } from "./pipeline/auditor.js";
 
@@ -656,6 +657,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           ["dictionary","◈ Dictionary"],
           ["reshape",   "⟲ Reshape & Merge"],
         ]} active={tab} set={setTab}/>
+
+        {/* ── AI command bar (NL → validated pipeline steps) ── */}
+        <NLCommandBar rows={rows} headers={headers} onAddSteps={steps => steps.forEach(addStep)} />
 
         {/* ── Tab panels ── */}
         {tab === "clean" && (
