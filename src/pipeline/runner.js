@@ -609,25 +609,70 @@ export function applyStep(rows, headers, s, context = {}) {
       const right = context?.datasets?.[s.rightId];
       if (!right) break;
       const rRows = right.rows, rHeaders = right.headers;
+      const how = s.how || "left";
       const newCols = rHeaders.filter(h => h !== s.rightKey);
+      const destOf = h => (H.includes(h) ? `${h}${s.suffix || "_r"}` : h);
+
+      // Build right lookup (first match wins, matching prior behavior).
       const rightMap = new Map();
       rRows.forEach(r => { const k = String(r[s.rightKey] ?? ""); if (!rightMap.has(k)) rightMap.set(k, r); });
+
+      // Filtering joins: add NO columns, just keep/drop left rows.
+      if (how === "semi" || how === "anti") {
+        R = rows.filter(r => {
+          const k = String(r[s.leftKey] ?? "");
+          const has = rightMap.has(k);
+          return how === "semi" ? has : !has;
+        });
+        break;
+      }
+
+      // Right join: iterate right rows, attach matching left.
+      if (how === "right") {
+        const leftMap = new Map();
+        rows.forEach(r => { const k = String(r[s.leftKey] ?? ""); if (!leftMap.has(k)) leftMap.set(k, r); });
+        R = rRows.map(rr => {
+          const k = String(rr[s.rightKey] ?? "");
+          const lm = leftMap.get(k);
+          const merged = {};
+          H.forEach(h => { merged[h] = lm ? (lm[h] ?? null) : null; });
+          newCols.forEach(h => { merged[destOf(h)] = rr[h] ?? null; });
+          return merged;
+        });
+        newCols.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
+        break;
+      }
+
+      // Left / inner / full.
+      const matchedRightKeys = new Set();
       const outRows = [];
       rows.forEach(r => {
         const k = String(r[s.leftKey] ?? "");
         const match = rightMap.get(k);
         if (match) {
-          const merged = {...r};
-          newCols.forEach(h => { const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h; merged[dest] = match[h] ?? null; });
+          matchedRightKeys.add(k);
+          const merged = { ...r };
+          newCols.forEach(h => { merged[destOf(h)] = match[h] ?? null; });
           outRows.push(merged);
-        } else if (s.how === "left" || !s.how) {
-          const merged = {...r};
-          newCols.forEach(h => { const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h; merged[dest] = null; });
+        } else if (how === "left" || how === "full") {
+          const merged = { ...r };
+          newCols.forEach(h => { merged[destOf(h)] = null; });
           outRows.push(merged);
         }
+        // inner: drop unmatched left rows
       });
+      if (how === "full") {
+        rRows.forEach(rr => {
+          const k = String(rr[s.rightKey] ?? "");
+          if (matchedRightKeys.has(k)) return;
+          const merged = {};
+          H.forEach(h => { merged[h] = null; });
+          newCols.forEach(h => { merged[destOf(h)] = rr[h] ?? null; });
+          outRows.push(merged);
+        });
+      }
       R = outRows;
-      newCols.forEach(h => { const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h; if (!H.includes(dest)) H = [...H, dest]; });
+      newCols.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
       break;
     }
 

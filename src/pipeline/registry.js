@@ -478,7 +478,7 @@ export const STEP_REGISTRY = [
     type: "join",
     label: "Join dataset",
     category: "merge",
-    description: "Left or inner join against another loaded dataset on a key column.",
+    description: "Join against another loaded dataset on a key column: left, inner, right, full, semi, or anti.",
     schema: [
       { key: "rightId",  type: "text",   label: "Right dataset ID" },
       { key: "leftKey",  type: "col",    label: "Left key column" },
@@ -486,6 +486,10 @@ export const STEP_REGISTRY = [
       { key: "how",      type: "select", label: "Join type", options: [
         { value: "left",  label: "Left join (keep all left rows)" },
         { value: "inner", label: "Inner join (matched rows only)" },
+        { value: "right", label: "Right join (keep all right rows)" },
+        { value: "full",  label: "Full join (all rows, both sides)" },
+        { value: "semi",  label: "Semi join (left rows with a match - no new cols)" },
+        { value: "anti",  label: "Anti join (left rows without a match - no new cols)" },
       ]},
       { key: "suffix", type: "text", label: "Suffix for duplicate columns (default: _r)" },
     ],
