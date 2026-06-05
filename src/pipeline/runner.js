@@ -17,6 +17,7 @@
 
 import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
+import { assignVector } from "../core/generate/vectorAssign.js";
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
@@ -889,6 +890,38 @@ export function applyStep(rows, headers, s, context = {}) {
         return { ...r, [s.nn]: s.defaultVal ?? null };
       });
       if (!H.includes(s.nn)) H = [...H, s.nn];
+      break;
+    }
+
+    case "vector_assign": {
+      // s.nn, s.values[], s.mode, s.weights, s.seed, s.rules[{expr,value}], s.elseValue
+      const nn = s.nn || "assigned";
+      const values = Array.isArray(s.values) ? s.values : [];
+      let evalRule;
+      if (s.mode === "conditional") {
+        const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+        // compile one predicate per rule - identical to the existing case_when case
+        const ruleFns = (s.rules ?? []).map(rule => {
+          // eslint-disable-next-line no-new-func
+          try { return new Function(...safeH, `"use strict"; return !!(${rule.expr});`); }
+          catch { return null; }
+        });
+        evalRule = (r) => {
+          const args = safeH.map(h => r[h] ?? null);
+          for (let i = 0; i < (s.rules ?? []).length; i++) {
+            if (!ruleFns[i]) continue;
+            try { if (ruleFns[i](...args)) return s.rules[i].value; } catch {}
+          }
+          return undefined; // no match -> engine uses elseValue
+        };
+      }
+      const assigned = assignVector(rows, {
+        values, mode: s.mode || "random",
+        weights: s.weights ?? null, seed: s.seed,
+        evalRule, elseValue: s.elseValue ?? null,
+      });
+      R = rows.map((r, i) => ({ ...r, [nn]: assigned[i] }));
+      if (!H.includes(nn)) H = [...H, nn];
       break;
     }
 

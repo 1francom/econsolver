@@ -414,6 +414,26 @@ export const STEP_REGISTRY = [
   },
 
   {
+    type: "vector_assign",
+    label: "Generate column from vector",
+    category: "features",
+    description: "Assign a small value vector across all rows by a chosen mode: random (seeded weighted draw), conditional (rules), recycle (by position), or quota (exact proportions). Seeded for reproducible replay.",
+    schema: [
+      { key: "nn",     type: "text",   label: "Output column name" },
+      { key: "values", type: "text",   label: "Values (comma or newline separated)" },
+      { key: "mode",   type: "select", label: "Mode", options: [
+        { value: "random",      label: "Random (weighted draw)" },
+        { value: "conditional", label: "Conditional (rules)" },
+        { value: "recycle",     label: "Recycle (by row position)" },
+        { value: "quota",       label: "Quota (exact proportions)" },
+      ]},
+      { key: "seed", type: "number", label: "Random seed (random/quota)" },
+    ],
+    toLabel: s => `vector_assign ${s.nn || "col"} [${s.mode || "random"}]`,
+    defaultStep: () => ({ type: "vector_assign", nn: "", values: "", mode: "random", weights: null, rules: [], elseValue: "", seed: 42 }),
+  },
+
+  {
     type: "geocode",
     label: "Geocode address",
     category: "features",
