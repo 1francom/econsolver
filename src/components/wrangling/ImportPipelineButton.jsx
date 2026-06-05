@@ -17,6 +17,18 @@
 import { useRef, useState } from "react";
 import { useTheme, mono } from "./shared.jsx";
 import { STEP_TYPES } from "../../pipeline/registry.js";
+import { isSafeExpr } from "../../pipeline/exprGuard.js";
+
+// Collect every dynamically-evaluated expression carried by a step.
+function exprFieldsOf(s) {
+  const out = [];
+  if (typeof s.expr === "string") out.push(s.expr);
+  if (typeof s.cond === "string") out.push(s.cond);
+  if (typeof s.js === "string") out.push(s.js);
+  if (Array.isArray(s.cases)) s.cases.forEach(c => { if (typeof c?.cond === "string") out.push(c.cond); });
+  if (Array.isArray(s.rules)) s.rules.forEach(r => { if (typeof r?.expr === "string") out.push(r.expr); });
+  return out;
+}
 
 function ImportPipelineButton({ currentLength = 0, onImport }) {
   const { C } = useTheme();
@@ -58,6 +70,16 @@ function ImportPipelineButton({ currentLength = 0, onImport }) {
       if (unknown.length) {
         setError(`Unknown step types: ${[...new Set(unknown)].join(", ")}. This pipeline was built with a newer or older version.`);
         return;
+      }
+
+      // SECURITY: reject any step carrying a disallowed dynamic expression
+      // (references a forbidden identifier such as fetch/localStorage/constructor).
+      // Imported pipelines are untrusted and run automatically.
+      for (const s of steps) {
+        if (exprFieldsOf(s).some(e => !isSafeExpr(e))) {
+          setError(`Step "${s.type}" contains a disallowed expression (references a forbidden identifier). Import blocked for safety.`);
+          return;
+        }
       }
 
       // If current pipeline is empty, just apply. Otherwise gate behind confirm.

@@ -3,6 +3,7 @@
 // previewed/applied. Pure JS, no React. Threads the header set forward so a
 // step that creates a new column makes it available to later steps.
 import { STEP_REGISTRY } from "./registry.js";
+import { isSafeExpr } from "./exprGuard.js";
 
 const REG_BY_TYPE = Object.fromEntries(STEP_REGISTRY.map(s => [s.type, s]));
 
@@ -60,6 +61,14 @@ export function validateAISteps(steps, headers, { allowedCategories = ["cleaning
       try { new RegExp(step.regex); }
       catch { rejected.push({ step, reason: `invalid regex` }); continue; }
     }
+
+    // SECURITY: reject steps carrying a disallowed dynamic expression
+    const exprs = [];
+    if (typeof step.expr === "string") exprs.push(step.expr);
+    if (typeof step.cond === "string") exprs.push(step.cond);
+    if (Array.isArray(step.cases)) step.cases.forEach(c => { if (typeof c?.cond === "string") exprs.push(c.cond); });
+    if (Array.isArray(step.rules)) step.rules.forEach(r => { if (typeof r?.expr === "string") exprs.push(r.expr); });
+    if (exprs.some(e => !isSafeExpr(e))) { rejected.push({ step, reason: "unsafe expression (forbidden identifier)" }); continue; }
 
     // thread new output column forward
     if (typeof step.nn === "string" && step.nn && !H.includes(step.nn)) H = [...H, step.nn];

