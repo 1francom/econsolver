@@ -25,9 +25,11 @@ import {
   UNIFIED_SCRIPT_PROMPT,
   INTERPRET_MARGINAL_EFFECTS_PROMPT,
   INTERPRET_OPTIMIZATION_PROMPT,
+  NL_TO_PIPELINE_PROMPT,
   buildMetadataContext,
 } from "./Prompts/index.js";
 import { serializeSnapshot, loadOptsToScriptHint } from "./sessionSnapshot.js";
+import { serializeAllowedSteps } from "./appCapabilityMap.js";
 import { filterVariableNames } from "../Privacy/privacyFilter.js";
 import { getSession } from "../auth/authService.js";
 
@@ -657,6 +659,48 @@ export async function suggestCleaning(dataQualityReport) {
   } catch (err) {
     console.warn("[AIService] suggestCleaning — JSON parse failed:", err.message);
     return [];
+  }
+}
+
+// ─── 3b. NL → PIPELINE STEPS ─────────────────────────────────────────────────
+// Translates a natural-language command into declarative pipeline steps drawn
+// from STEP_REGISTRY (cleaning + features). Validation/preview happen in the
+// caller (stepValidator + runPipeline) so this stays a thin generation layer.
+//
+// command: string   columns: [{ name, dtype, samples: [...] }]
+// Returns { interpretation, steps, notes } | { error }
+export async function nlToPipeline({ command, columns = [], allowedCategories = ["cleaning", "features"], signal } = {}) {
+  if (!command?.trim()) return { error: "empty command" };
+
+  const taskPrompt = NL_TO_PIPELINE_PROMPT.replace(SHARED_CONTEXT, "").trim();
+  const colBlock = columns.map(c => {
+    const samples = (c.samples ?? []).slice(0, 5).map(v => JSON.stringify(v)).join(", ");
+    return `  ${c.name} (${c.dtype ?? "?"}): ${samples}`;
+  }).join("\n");
+  const userPrompt =
+    `${serializeAllowedSteps(allowedCategories)}\n\n` +
+    `CURRENT COLUMNS:\n${colBlock}\n\n` +
+    `INSTRUCTION: ${command.trim()}\n\nReturn the JSON now.`;
+
+  let raw;
+  try {
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 1500, signal });
+  } catch (err) {
+    console.warn("[AIService] nlToPipeline failed:", err.message);
+    return { error: err.message };
+  }
+
+  const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    return {
+      interpretation: typeof parsed.interpretation === "string" ? parsed.interpretation : "",
+      steps: Array.isArray(parsed.steps) ? parsed.steps : [],
+      notes: typeof parsed.notes === "string" ? parsed.notes : "",
+    };
+  } catch (err) {
+    console.warn("[AIService] nlToPipeline — JSON parse failed:", err.message);
+    return { error: "Could not parse the AI response. Try rephrasing." };
   }
 }
 
