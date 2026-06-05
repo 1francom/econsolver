@@ -475,6 +475,30 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "group_summarize", by: [], aggs: [] }),
   },
 
+  {
+    type: "group_transform",
+    label: "Group transform (broadcast)",
+    category: "reshape",
+    description: "Compute a group statistic and write it back to every row as a new column (does NOT collapse rows). Equivalent to dplyr group_by() |> mutate().",
+    schema: [
+      { key: "by",  type: "cols",   label: "Group by columns" },
+      { key: "col", type: "col",    label: "Source column" },
+      { key: "fn",  type: "select", label: "Statistic", options: [
+        { value: "mean",   label: "Mean" },
+        { value: "sum",    label: "Sum" },
+        { value: "sd",     label: "Std dev (sample)" },
+        { value: "min",    label: "Min" },
+        { value: "max",    label: "Max" },
+        { value: "count",  label: "Count" },
+        { value: "median", label: "Median" },
+        { value: "rank",   label: "Rank (within group, asc)" },
+      ]},
+      { key: "nn", type: "text", label: "Output column name" },
+    ],
+    toLabel: s => `group_transform ${s.fn}(${s.col}) by ${(s.by || []).join(", ")} -> ${s.nn || "auto"}`,
+    defaultStep: () => ({ type: "group_transform", by: [], col: "", fn: "mean", nn: "" }),
+  },
+
   // ── CELL EDITS ──────────────────────────────────────────────────────────────
 
   {

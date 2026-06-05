@@ -439,6 +439,49 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    case "group_transform": {
+      // s.by: string[]   s.col: string   s.fn: mean|sum|sd|min|max|count|median|rank
+      // s.nn: output column name (broadcast group stat back to every row)
+      const by = Array.isArray(s.by) ? s.by : [];
+      const col = s.col, fn = s.fn || "mean";
+      const nn = s.nn || `${fn}_${col}_by_${by.join("_")}`;
+      const keyOf = r => JSON.stringify(by.map(h => r[h] ?? null));
+
+      // bucket row indices by group
+      const groups = new Map();
+      rows.forEach((r, i) => { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); });
+
+      const num = i => { const v = rows[i][col]; return typeof v === "number" && isFinite(v) ? v : null; };
+      const agg = idxs => {
+        const xs = idxs.map(num).filter(v => v !== null);
+        if (fn === "count") return idxs.length;
+        if (!xs.length) return null;
+        const sum = xs.reduce((a, b) => a + b, 0);
+        if (fn === "sum")  return sum;
+        if (fn === "mean") return sum / xs.length;
+        if (fn === "min")  return Math.min(...xs);
+        if (fn === "max")  return Math.max(...xs);
+        if (fn === "median") { const s2 = [...xs].sort((a, b) => a - b); const m = Math.floor(s2.length / 2); return s2.length % 2 ? s2[m] : (s2[m - 1] + s2[m]) / 2; }
+        if (fn === "sd") { const mu = sum / xs.length; const v = xs.reduce((a, b) => a + (b - mu) ** 2, 0) / (xs.length - 1 || 1); return Math.sqrt(v); }
+        return null;
+      };
+
+      const valByRow = new Array(rows.length).fill(null);
+      if (fn === "rank") {
+        // min-rank within group, ascending by `col`
+        groups.forEach(idxs => {
+          const ordered = [...idxs].sort((a, b) => (num(a) ?? Infinity) - (num(b) ?? Infinity));
+          let rank = 0, prev = null, seen = 0;
+          ordered.forEach(i => { seen++; const v = num(i); if (v !== prev) { rank = seen; prev = v; } valByRow[i] = rank; });
+        });
+      } else {
+        groups.forEach(idxs => { const a = agg(idxs); idxs.forEach(i => { valByRow[i] = a; }); });
+      }
+      R = rows.map((r, i) => ({ ...r, [nn]: valByRow[i] }));
+      if (!H.includes(nn)) H = [...H, nn];
+      break;
+    }
+
     case "recode": {
       const map = s.map || {};
       R = rows.map(r => { const v = r[s.col]; const k = v != null ? String(v) : null; return { ...r, [s.col]: k != null && map[k] !== undefined ? map[k] : v }; });
