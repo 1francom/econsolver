@@ -31,6 +31,7 @@ Econ Studio is transitioning from a feature-based tool to a professional SaaS pr
 | 2026-05-19 | `specs/2026-05-19-duckdb-suffstats-roadmap-design.md` | DONE | DuckDB Fase 0–8 all complete + R-validated |
 | 2026-05-21 | `specs/2026-05-21-pre-launch-roadmap.md` | IN PROGRESS (verify) | mixed; tracks multiple sub-fases |
 | 2026-05-25 | `THREAT_MODEL.md` (security spec, K1–K10) | IN PROGRESS | K1/K3/K6/K7 done; AI PII filter (X3) queued. **2026-06-05 re-review: §3.2 expanded** — imported-pipeline + AI-command-bar code-execution delivery paths (HIGH); expr eval must move worker-only + denylist before #4 cross-device persistence ships |
+| 2026-06-05 | `specs/2026-06-05-expr-sandbox-hardening-design.md` | IN PROGRESS | Closes THREAT_MODEL §3.2 HIGH before #4. Worker-scrub network globals + shared `exprGuard.assertSafeExpr` denylist; route vector_assign-conditional to worker; kill main-thread fallback; import/AI content-check; show expr before Apply. Built directly from spec by Claude |
 | 2026-05-22 | `plans/2026-05-22-fase-x3-ai-hardening.md` | OPEN | PII strip before AI egress — not yet executed |
 | 2026-05-30 | `specs/2026-05-30-equation-workbench-design.md` | IN PROGRESS (verify) | workbench IDB store (v5) added; §10 security posture |
 | 2026-06-01 | `specs/2026-06-01-clean-tab-reorganization-and-report-ai-design.md` | OPEN | newest spec (untracked in git) |
