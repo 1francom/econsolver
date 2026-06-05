@@ -14,6 +14,7 @@ import { researchCoach } from "../services/AI/AIService.js";
 import { loadCoachChats, saveCoachChats } from "../services/Persistence/indexedDB.js";
 import { buildMetadataReport } from "../core/validation/metadataExtractor.js";
 import { useSessionState } from "../services/session/sessionState.jsx";
+import { buildSessionSnapshot } from "../services/AI/sessionSnapshot.js";
 import { useAuth } from "../services/auth/AuthContext.jsx";
 import { useTheme } from "../ThemeContext.jsx";
 
@@ -282,11 +283,22 @@ function stripForStorage(conversations) {
   }));
 }
 
-export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null, pid = null }) {
+export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null, pid = null, pinnedModels = [], subsets = null, inferenceOpts = null }) {
   const { C } = useTheme();
   const { tier, session } = useAuth();
   const isPremium = !import.meta.env.VITE_AI_PROXY_ENABLED || import.meta.env.VITE_AI_PROXY_ENABLED !== "true" || PREMIUM_TIERS.has(tier);
   const sessionState = useSessionState();
+  // Full session snapshot for the coach (pipeline, pinned models, subsets, inference).
+  // sessionLog is intentionally omitted: the second AIContextSidebar mount lives
+  // outside SessionLogProvider, and useSessionLog() throws without a provider.
+  const snapshot = useMemo(() => buildSessionSnapshot({
+    cleanedData,
+    result: modelResult,
+    pinnedModels,
+    subsets,
+    inferenceOpts,
+    sessionLog: [],
+  }), [cleanedData, modelResult, pinnedModels, subsets, inferenceOpts]);
   const [conversations, setConversations] = useState([]);
   const [activeId,      setActiveId]      = useState(null);
   const active  = conversations.find(c => c.id === activeId) ?? null;
@@ -456,6 +468,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         modelResult,
         dataDictionary: cleanedData?.dataDictionary ?? null,
         metadataReport,
+        snapshot,
         signal: controller.signal,
         onText: (piece) => {
           updateActive(msgs => {
@@ -623,7 +636,9 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
           {history.length === 0 && !loading && (
             <>
               <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "0.75rem", lineHeight: 1.6 }}>
-                I have full context of your session — {screenLabel} state{Object.keys(sessionState?.datasets ?? {}).length > 1 ? `, ${Object.keys(sessionState.datasets).length} loaded datasets` : ""}, pipeline, and model. Ask anything.
+                {snapshot?.pipeline?.length || snapshot?.activeResult
+                  ? <>I have full context of your session — {screenLabel} state{Object.keys(sessionState?.datasets ?? {}).length > 1 ? `, ${Object.keys(sessionState.datasets).length} loaded datasets` : ""}, pipeline, and model. Ask anything.</>
+                  : <>I can see your current {screenLabel} state. Ask anything.</>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: "0.75rem" }}>
                 {starters.map((q, i) => (
