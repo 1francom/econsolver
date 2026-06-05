@@ -66,12 +66,14 @@ A crafted expression silently exfiltrates whatever the main thread can read: the
 
 **Cross-device amplification:** roadmap item #4 (cross-device persistence) turns **server-synced pipelines into an auto-running untrusted-input channel** — path 1 would fire without an explicit file import. **This hardening must land before #4 ships.**
 
-**Mitigations (single highest-leverage fix = the first two together):**
-- [ ] **Worker-only evaluation.** Route all `mutate`/`if_else`/`case_when`/`vector_assign`-conditional/`ai_tr` evaluation through `src/workers/exprEval.worker.js` (no `localStorage`, no session token, no DOM). Make the worker path **mandatory for imported/synced/AI-emitted steps**, not just a large-data optimization. Pass only the needed column data in; receive only the result array back.
-- [ ] **Identifier denylist at compile time.** Reject any `expr`/`cond` containing `window`, `document`, `localStorage`, `sessionStorage`, `indexedDB`, `fetch`, `XMLHttpRequest`, `import`, `eval`, `Function`, `constructor`, `globalThis`, `__proto__`. Enforce in the compiler used by both the main-thread preview and the worker.
-- [ ] **Inspect AI/imported step expressions.** `validateAISteps` rejects AI-emitted `mutate`/`case_when`/`if_else`/`vector_assign`-conditional steps whose expressions reference denylisted identifiers; `ImportPipelineButton` runs the same content check (not just `type`).
-- [ ] **Show the payload before running.** `NLCommandBar` preview and the import-confirm dialog display the full `expr`/`cond` of any code-bearing step so the user sees what will execute before Apply.
-- [ ] Add a CSP header (see §3.5) — does not block dynamic `Function` eval but limits external script injection and can restrict `connect-src` to throttle exfiltration egress.
+**Mitigations — LANDED 2026-06-05** (spec `docs/superpowers/specs/2026-06-05-expr-sandbox-hardening-design.md`):
+- [x] **Worker global-scrub (the real boundary).** `exprEval.worker.js` nulls `fetch`/`XMLHttpRequest`/`WebSocket`/`EventSource`/`importScripts`/`Worker`/`navigator` at init → an evaluated expression (even one reconstructing a function via the constructor escape) has no network reach and no `localStorage`/`indexedDB`/DOM.
+- [x] **Route all expr to the worker + kill the unsafe fallback.** `runPipelineAsync` now routes `vector_assign`-conditional too; on worker failure it nulls the output column instead of re-evaluating on the main thread.
+- [x] **Identifier denylist** (`src/pipeline/exprGuard.js` `assertSafeExpr`/`isSafeExpr`) enforced at every compile site (worker `evalCol`+`evalScope`, and the residual sync `applyStep` mutate/if_else/case_when/vector_assign sites). Harness `exprGuard.test.mjs` 23/23.
+- [x] **Inspect AI/imported step expressions.** `ImportPipelineButton` blocks import of any step whose `expr`/`cond`/`cases`/`rules` reference a denylisted identifier; `validateAISteps` rejects unsafe AI-emitted expr steps (`stepValidator.test.mjs` 8/8).
+- [x] **Show the payload before Apply** in the `NLCommandBar` preview (raw `expr`/`cond` rendered per step). *(Import is hard-blocked on unsafe expr, so the import-confirm dialog shows the block reason rather than the payload.)*
+- [ ] **Residual (low-sev, self-scoped):** `FormatTab.applyManualPreview` builds its preview function from structured strip/replace config; the strip-`chars` are interpolated unescaped into a regex char-class (preview-only, current-user input). Escape `chars` or move to structured String ops. *Not an imported/AI vector.*
+- [ ] Add a CSP header (see §3.5) — complements the above by restricting `connect-src` to throttle exfiltration egress.
 
 ### 3.3 File Upload — Binary Parser Bounds Checking
 
