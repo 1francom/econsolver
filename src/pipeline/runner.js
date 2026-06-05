@@ -18,6 +18,7 @@
 import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 import { assignVector } from "../core/generate/vectorAssign.js";
+import { isSafeExpr } from "./exprGuard.js";
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
@@ -966,6 +967,7 @@ export function applyStep(rows, headers, s, context = {}) {
       };
       const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       const pNames = [...Object.keys(helpers), "row", ...safeH];
+      if (!isSafeExpr(s.expr)) break; // SECURITY: reject denylisted identifiers on the sync path
       let fn;
       try { fn = new Function(...pNames, `"use strict";return (${s.expr});`); } catch { break; }
       R = rows.map(r => {
@@ -987,6 +989,7 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.falseVal: literal value or column name for false branch
       // s.nn:       output column name
       const safeH_ife = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+      if (!isSafeExpr(s.cond)) break; // SECURITY: reject denylisted identifiers on the sync path
       // eslint-disable-next-line no-new-func
       let ifeFn; try { ifeFn = new Function(...safeH_ife, `"use strict"; return !!(${s.cond});`); } catch { break; }
       R = rows.map(r => {
@@ -1006,6 +1009,7 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.defaultVal: fallback value when no condition matches
       // s.nn:         output column name
       const safeH_cw = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+      if ((s.cases ?? []).some(c => !isSafeExpr(c.cond))) break; // SECURITY: reject denylisted identifiers
       const caseFns = (s.cases ?? []).map(c => {
         // eslint-disable-next-line no-new-func
         try { return new Function(...safeH_cw, `"use strict"; return !!(${c.cond});`); }
@@ -1032,6 +1036,7 @@ export function applyStep(rows, headers, s, context = {}) {
         const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
         // compile one predicate per rule - identical to the existing case_when case
         const ruleFns = (s.rules ?? []).map(rule => {
+          if (!isSafeExpr(rule.expr)) return null; // SECURITY: reject denylisted identifiers
           // eslint-disable-next-line no-new-func
           try { return new Function(...safeH, `"use strict"; return !!(${rule.expr});`); }
           catch { return null; }
@@ -1763,7 +1768,8 @@ export async function runPipelineAsync(rows, headers, pipeline, context = {}) {
     const isWorkerStep =
       step.type === "mutate" || step.type === "ai_tr" ||
       step.type === "if_else" || step.type === "case_when" ||
-      (step.type === "filter" && step.expr);
+      (step.type === "filter" && step.expr) ||
+      (step.type === "vector_assign" && step.mode === "conditional");
 
     if (!isWorkerStep) {
       s = applyStep(s.rows, s.headers, step, context);
@@ -1782,8 +1788,17 @@ export async function runPipelineAsync(rows, headers, pipeline, context = {}) {
         s = { rows: newRows, headers: newHeaders };
       }
     } catch (e) {
-      console.warn("[runPipelineAsync] worker eval failed, falling back to sync:", e.message);
-      s = applyStep(s.rows, s.headers, step, context);
+      // SECURITY: never re-evaluate an untrusted expression on the main thread.
+      // On worker failure — including an expression rejected by the sandbox
+      // guard — null the step's output column (or no-op a filter) and continue.
+      console.warn("[runPipelineAsync] worker eval rejected/failed:", e.message);
+      const outCol = step.type === "ai_tr" ? step.col : (step.nn ?? step.col);
+      if (outCol) {
+        const newRows = s.rows.map(r => ({ ...r, [outCol]: null }));
+        const newHeaders = s.headers.includes(outCol) ? s.headers : [...s.headers, outCol];
+        s = { rows: newRows, headers: newHeaders };
+      }
+      // filter with a rejected expr → keep all rows (fail-open no-op, data intact)
     }
   }
   return s;

@@ -23,6 +23,17 @@
 "use strict";
 
 import { drawSamples } from "../math/dgpDraw.js";
+import { assertSafeExpr } from "../pipeline/exprGuard.js";
+
+// ── SECURITY: scrub exfiltration / escape globals from the worker scope ────────
+// Even if an evaluated expression reconstructs a function via the constructor
+// escape, the reconstructed function runs in THIS global scope — which has no
+// network primitives after this loop. Combined with the worker's inherent lack
+// of localStorage/sessionStorage/indexedDB/DOM, an evaluated expression becomes
+// compute-only: it cannot read credentials or open an exfiltration channel.
+for (const k of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts", "Worker", "navigator", "Notification"]) {
+  try { self[k] = undefined; } catch { /* getter-only on some runtimes; denylist still covers it */ }
+}
 
 // ── Helpers injected into mutate expressions ──────────────────────────────────
 const HELPERS = {
@@ -52,10 +63,11 @@ const HELPERS = {
 };
 
 // ── eval_col ──────────────────────────────────────────────────────────────────
-function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, cases, defaultVal }) {
+function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, cases, defaultVal, rules, elseValue }) {
   if (mode === "ai_tr") {
     // ai_tr: full arrow-fn or body expression operating on a single column value
     const js = (expr || "").trim();
+    assertSafeExpr(js);
     const isFnExpr = /^(\(?\s*[\w$,\s]*\s*\)?\s*=>|\bfunction\b)/.test(js);
     const fn = isFnExpr
       ? Function(`return (${js})`)()           // extract the arrow/function
@@ -67,6 +79,7 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
   // filter: boolean expr per row → mask[]
   if (mode === "filter") {
     if (!rows || rows.length === 0) return { mask: [] };
+    assertSafeExpr(expr);
     const fH = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
     const fFn = Function(...fH, `"use strict"; return !!(${expr});`);
     return { mask: rows.map(r => { try { return fFn(...fH.map(h => r[h] ?? null)); } catch { return true; } }) };
@@ -76,6 +89,7 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
   // payload: { mode, expr: cond, trueVal, falseVal, rows }
   if (mode === "if_else") {
     if (!rows || rows.length === 0) return { newColValues: [] };
+    assertSafeExpr(expr);
     const iH  = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
     const iFn = Function(...iH, `"use strict"; return !!(${expr});`);
     const allH = Object.keys(rows[0]);
@@ -93,6 +107,7 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
   // payload: { mode, cases, defaultVal, rows }
   if (mode === "case_when") {
     if (!rows || rows.length === 0) return { newColValues: [] };
+    (cases ?? []).forEach(c => assertSafeExpr(c.cond));
     const cwH  = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
     const fns  = (cases ?? []).map(c => { try { return Function(...cwH, `"use strict"; return !!(${c.cond});`); } catch { return null; } });
     const newColValues = rows.map(r => {
@@ -106,8 +121,26 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
     return { newColValues };
   }
 
+  // vector_assign (conditional mode): rules[{expr,value}] first-match-wins, else elseValue
+  if (mode === "vector_assign") {
+    if (!rows || rows.length === 0) return { newColValues: [] };
+    (rules ?? []).forEach(rule => assertSafeExpr(rule.expr));
+    const vH  = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+    const fns = (rules ?? []).map(rule => { try { return Function(...vH, `"use strict"; return !!(${rule.expr});`); } catch { return null; } });
+    const newColValues = rows.map(r => {
+      const args = vH.map(h => r[h] ?? null);
+      for (let i = 0; i < (rules ?? []).length; i++) {
+        if (!fns[i]) continue;
+        try { if (fns[i](...args)) return rules[i].value; } catch {}
+      }
+      return elseValue ?? null;
+    });
+    return { newColValues };
+  }
+
   // mutate: expression can reference any column by name
   if (!rows || rows.length === 0) return { newColValues: [] };
+  assertSafeExpr(expr);
   const headers = Object.keys(rows[0]);
   const safeH   = headers.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
   const pNames  = [...Object.keys(HELPERS), "row", ...safeH];
@@ -149,6 +182,7 @@ function evalScope({ variables, nObs, seed }) {
       const expr = (v.params.expr || "").trim();
       if (!expr) return { error: `${v.name}: expression is empty.` };
       try {
+        assertSafeExpr(expr);
         const varNames  = Object.keys(scope);
         const varArrays = Object.values(scope);
         const fn = Function(...varNames, "N", "observations", `"use strict"; return (${expr});`);
@@ -160,6 +194,7 @@ function evalScope({ variables, nObs, seed }) {
     } else if (v.dist === "Constant") {
       const raw = (v.params.value ?? "0").trim();
       try {
+        assertSafeExpr(raw);
         const val = Function("N", "observations", `"use strict"; return (${raw});`)(nObs, nObs);
         scope[v.name] = new Array(nObs).fill(typeof val === "number" || typeof val === "string" ? val : 0);
       } catch (e) { return { error: `${v.name}: ${e.message}` }; }
@@ -174,6 +209,7 @@ function evalScope({ variables, nObs, seed }) {
       const varNames  = Object.keys(scope);
       const varArrays = Object.values(scope);
       try {
+        assertSafeExpr(initExpr); assertSafeExpr(updExpr);
         const arr    = new Array(nObs);
         const initFn = Function(...varNames, "N", "observations", `"use strict"; return (${initExpr});`);
         arr[0] = initFn(...varArrays.map(a => a[0]), nObs, nObs);
@@ -188,6 +224,7 @@ function evalScope({ variables, nObs, seed }) {
       const condExpr = (v.params.condition || "false").trim();
       const maxIter  = Math.max(1, Math.min(100000, +(v.params.maxIter) || 1000));
       try {
+        assertSafeExpr(initExpr); assertSafeExpr(condExpr); assertSafeExpr(updExpr);
         let val = Function(`"use strict"; return (${initExpr});`)();
         let iter = 0;
         const condFn = Function("prev", `"use strict"; return !!(${condExpr});`);
