@@ -1889,6 +1889,7 @@ export default function App() {
   const [initialDatasets,    setInitialDatasets]   = useState(null);
   const [sidebarOpen,        setSidebarOpen]       = useState(false);
   const [activeResult,       setActiveResult]      = useState(null);
+  const [modelingSession,    setModelingSession]   = useState({ pinnedModels: [], subsets: null, inferenceOpts: null });
   const [coachPrefill,       setCoachPrefill]      = useState(null);
   const [feedbackOpen,       setFeedbackOpen]      = useState(false);
 
@@ -2202,6 +2203,7 @@ export default function App() {
                         availableDatasets={availableDatasets}
                         onBack={()=>navigateToTab("explore")}
                         onResultChange={r=>setActiveResult(r)}
+                        onSessionStateChange={setModelingSession}
                         onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
                         onExtract={(colName, values) => studioRef.current?.addInjectColumnStep?.(colName, values)}
                         pid={tabDsId("model")}
@@ -2300,6 +2302,9 @@ export default function App() {
             screen={activeTab}
             cleanedData={tabOutput(activeTab)}
             modelResult={activeResult}
+            pinnedModels={modelingSession.pinnedModels}
+            subsets={modelingSession.subsets}
+            inferenceOpts={modelingSession.inferenceOpts}
             prefillMessage={coachPrefill}
             pid={pid}
           />
@@ -2315,6 +2320,9 @@ export default function App() {
         screen={activeTab}
         cleanedData={tabOutput(activeTab)}
         modelResult={activeResult}
+        pinnedModels={modelingSession.pinnedModels}
+        subsets={modelingSession.subsets}
+        inferenceOpts={modelingSession.inferenceOpts}
         prefillMessage={coachPrefill}
         pid={pid}
       />
