@@ -4,7 +4,7 @@
 //
 // DB layout:
 //   DB name  : "econ_studio_v1"
-//   Version  : 5
+//   Version  : 8
 //
 //   Store "projects"   — named project registry (top-level, user-visible)
 //     Key   : pid (string, same as pipeline key)
@@ -34,6 +34,11 @@
 //     Key   : pid (string)
 //     Value : { pid, sessions, ts }
 //
+//   Store "dataset_registry" — durable list of ALL a project's datasets (meta
+//                              only), keyed by project pid. No privileged primary.
+//     Key   : pid (string)
+//     Value : { pid, datasets: DatasetMeta[], ts }
+//
 // Exports:
 //   openDB()
 //   saveProject(pid, meta)               / listProjects()      / deleteProject(pid) / clearAllProjects()
@@ -41,16 +46,25 @@
 //   listPipelines()                      / deletePipeline(id)  / clearAllPipelines()
 //   saveRawData(id, rawData)             / loadRawData(id)     / deleteRawData(id)
 //   saveWorkbenchRecord(pid, sessions)   / loadWorkbenchRecord(pid)  / deleteWorkbenchRecord(pid)
+//   saveDatasetRegistry(pid, datasets)   / loadDatasetRegistry(pid)  / deleteDatasetRegistry(pid)
 
 import { retrofitRowId } from "../data/rowIdentity.js";
 
-const DB_VERSION           = 6;
+const DB_VERSION           = 8;
 const STORE_PIPE           = "pipelines";
 const STORE_RAW            = "raw_data";
 const STORE_PROJ           = "projects";
 const STORE_WORKBENCH      = "workbench";
 const STORE_COACH          = "coach_chats";
+const STORE_DS_REGISTRY    = "dataset_registry";
 const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
+
+// Every object store the app expects to exist. Used to self-heal a DB that
+// reached a given version without all stores created (e.g. an interrupted or
+// buggy prior upgrade) — see openDB() below.
+const REQUIRED_STORES = [
+  STORE_PIPE, STORE_RAW, STORE_PROJ, STORE_WORKBENCH, STORE_COACH, STORE_DS_REGISTRY,
+];
 
 // ── Per-user DB isolation ──────────────────────────────────────────────────────
 // Each authenticated user gets their own IndexedDB so projects never bleed
@@ -74,40 +88,59 @@ function getDbName() {
 
 export function openDB() {
   if (_dbPromise) return _dbPromise;
+  // Open with NO version on the first attempt so we adopt whatever version the
+  // DB already exists at (or create it fresh). Hardcoding a version risks a
+  // VersionError ("requested version is less than existing") whenever a prior
+  // session's self-heal pushed the DB past our constant. Missing stores are
+  // then repaired by reopening at version+1 (see openAt's onsuccess).
+  _dbPromise = openAt(undefined);
+  return _dbPromise;
+}
 
-  _dbPromise = new Promise((resolve, reject) => {
+// Open the DB. With `version` undefined, opens at the existing version (or v1 if
+// new) — never downgrades. If, after opening, any REQUIRED_STORES are missing (a
+// DB that reached its version via an interrupted/buggy prior upgrade, or a newly
+// added store), close it and reopen at version+1 so onupgradeneeded re-runs and
+// creates them. All store creations below are idempotent (`contains` guards), so
+// re-running is safe.
+function openAt(version) {
+  return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB not available in this environment"));
       return;
     }
 
-    const req = indexedDB.open(getDbName(), DB_VERSION);
+    const req = version === undefined
+      ? indexedDB.open(getDbName())
+      : indexedDB.open(getDbName(), version);
 
     req.onupgradeneeded = e => {
       const db     = e.target.result;
       const oldVer = e.oldVersion;
 
-      // v1: pipelines store (handles both fresh install and upgrade from v0)
-      if (oldVer < 1) {
+      // pipelines store (handles both fresh install and upgrade from v0)
+      if (!db.objectStoreNames.contains(STORE_PIPE)) {
         const pipe = db.createObjectStore(STORE_PIPE, { keyPath: "id" });
         pipe.createIndex("ts", "ts", { unique: false });
       }
 
-      // v2: raw_data store
-      if (oldVer < 2) {
+      // raw_data store
+      if (!db.objectStoreNames.contains(STORE_RAW)) {
         db.createObjectStore(STORE_RAW, { keyPath: "id" });
       }
 
-      // v3: projects store — named project registry (separate from per-dataset pipelines)
-      if (oldVer < 3) {
+      // projects store — named project registry (separate from per-dataset pipelines)
+      if (!db.objectStoreNames.contains(STORE_PROJ)) {
         const proj = db.createObjectStore(STORE_PROJ, { keyPath: "pid" });
         proj.createIndex("updatedAt", "updatedAt", { unique: false });
       }
 
-      // v4: reshape pipelines store — each pid record now holds a per-dataset
-      // map { [datasetId]: { steps, panel, dataDictionary, branchPointIndex } }
-      // instead of those fields at the top level. Legacy single-dataset records
-      // are migrated by treating the project pid as the primary dataset id.
+      // v4 migration: reshape pipelines store — each pid record now holds a
+      // per-dataset map { [datasetId]: { steps, panel, dataDictionary,
+      // branchPointIndex } } instead of those fields at the top level. Legacy
+      // single-dataset records are migrated by treating the project pid as the
+      // primary dataset id. This is a data migration (not a store creation), so
+      // it stays version-gated to run exactly once.
       if (oldVer < 4 && oldVer >= 1) {
         // Use the upgrade transaction (provided on the request) to walk
         // existing records — opening a new transaction here is illegal.
@@ -141,23 +174,41 @@ export function openDB() {
         };
       }
 
-      // v5: workbench store — Equation Workbench sessions, keyed by project pid.
-      if (oldVer < 5) {
+      // workbench store — Equation Workbench sessions, keyed by project pid.
+      if (!db.objectStoreNames.contains(STORE_WORKBENCH)) {
         db.createObjectStore(STORE_WORKBENCH, { keyPath: "pid" });
       }
 
-      // v6: coach_chats store — AI Coach conversations, keyed by project pid.
-      if (oldVer < 6) {
+      // coach_chats store — AI Coach conversations, keyed by project pid.
+      if (!db.objectStoreNames.contains(STORE_COACH)) {
         db.createObjectStore(STORE_COACH, { keyPath: "pid" });
+      }
+
+      // dataset_registry store — durable list of ALL of a project's datasets
+      // (metadata only), keyed by project pid. Replaces the old sessionStorage
+      // registry that did not survive a browser close.
+      if (!db.objectStoreNames.contains(STORE_DS_REGISTRY)) {
+        db.createObjectStore(STORE_DS_REGISTRY, { keyPath: "pid" });
       }
     };
 
-    req.onsuccess = e => resolve(e.target.result);
+    req.onsuccess = e => {
+      const db      = e.target.result;
+      const missing = REQUIRED_STORES.filter(s => !db.objectStoreNames.contains(s));
+      if (missing.length) {
+        // DB reached this version without all stores. Force a fresh upgrade at
+        // the next version so onupgradeneeded re-runs and creates them.
+        console.warn("[IDB] missing stores", missing, "— reopening at v" + (db.version + 1));
+        const next = db.version + 1;
+        db.close();
+        resolve(openAt(next));
+        return;
+      }
+      resolve(db);
+    };
     req.onerror   = e => reject(e.target.error);
     req.onblocked = () => reject(new Error("IndexedDB upgrade blocked — close other tabs and reload"));
   });
-
-  return _dbPromise;
 }
 
 // ── Internal transaction helper ────────────────────────────────────────────────
@@ -516,13 +567,77 @@ export async function deleteCoachChats(pid) {
   } catch { /* non-fatal */ }
 }
 
+// ─── DATASET REGISTRY API ─────────────────────────────────────────────────────
+// Durable list of ALL of a project's datasets, keyed by project pid. There is
+// no privileged "primary" dataset — every dataset is recorded here equally.
+//   Value : { pid, datasets: DatasetMeta[], ts }
+//   DatasetMeta : { id, filename, source?, origin?, crs?, headers?, loadOpts? }
+// Rows are NOT stored here — they live in the raw_data store keyed by dataset id.
+// The project's last-active dataset rides on the projects record as
+// `activeDatasetId` (written via saveProject), restored on reopen.
+// This replaces the old sessionStorage-only registry that did not survive a
+// browser close (only the pid-keyed primary dataset persisted).
+
+/**
+ * Persist the full dataset registry for a project. Overwrites the record.
+ * Strips any `rawData`/`rows` before storing — only metadata is kept here.
+ */
+export async function saveDatasetRegistry(pid, datasets) {
+  if (!pid) return { stored: false };
+  try {
+    const slim = (Array.isArray(datasets) ? datasets : []).map(d => {
+      // Strip row payloads — only metadata is persisted in the registry.
+      const { rawData: _rawData, rows: _rows, ...meta } = d;
+      return meta;
+    });
+    const db = await openDB();
+    await tx(STORE_DS_REGISTRY, db, "readwrite", s =>
+      s.put({ pid, datasets: slim, ts: Date.now() })
+    );
+    return { stored: true };
+  } catch (err) {
+    console.warn("[IDB] saveDatasetRegistry failed:", err.message);
+    return { stored: false };
+  }
+}
+
+/**
+ * Load the full dataset registry for a project.
+ * Returns the metadata array (possibly empty), never null.
+ */
+export async function loadDatasetRegistry(pid) {
+  if (!pid) return [];
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const t   = db.transaction(STORE_DS_REGISTRY, "readonly");
+      const req = t.objectStore(STORE_DS_REGISTRY).get(pid);
+      req.onsuccess = e => resolve(e.target.result?.datasets ?? []);
+      req.onerror   = e => reject(e.target.error);
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Delete the dataset-registry record for a project.
+ */
+export async function deleteDatasetRegistry(pid) {
+  try {
+    const db = await openDB();
+    await tx(STORE_DS_REGISTRY, db, "readwrite", s => s.delete(pid));
+  } catch { /* non-fatal */ }
+}
+
 export async function clearAllLocalData() {
   await clearAllPipelines(); // clears STORE_PIPE + STORE_RAW
   await clearAllProjects();  // clears STORE_PROJ
   try {
     const db = await openDB();
-    await tx(STORE_WORKBENCH, db, "readwrite", s => s.clear());
-    await tx(STORE_COACH,     db, "readwrite", s => s.clear());
+    await tx(STORE_WORKBENCH,    db, "readwrite", s => s.clear());
+    await tx(STORE_COACH,        db, "readwrite", s => s.clear());
+    await tx(STORE_DS_REGISTRY,  db, "readwrite", s => s.clear());
   } catch { /* non-fatal */ }
   try { localStorage.clear(); } catch { /* non-fatal */ }
   try { sessionStorage.clear(); } catch { /* non-fatal */ }

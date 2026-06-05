@@ -3,21 +3,25 @@
 // Manages a list of loaded datasets, exposes them to WranglingModule
 // for JOIN / APPEND operations, and renders the active dataset's pipeline editor.
 //
-// External interface — drop-in replacement for WranglingModule:
-//   rawData    {headers, rows}  – initial (primary) dataset, pre-parsed
-//   filename   {string}
-//   onComplete {fn}             – (cleanedData) => void — same shape as before
-//   pid        {string}         – project ID for the primary dataset
+// External interface:
+//   projectPid       {string}   – the project container id (registry key)
+//   initialDatasets  {Array}    – optional [{ filename, rawData }] to seed when
+//                                 the registry is empty (e.g. the demo project)
+//   onComplete       {fn}       – (cleanedData) => void
+//   onDatasetsChange {fn}       – (slimDatasetList) => void — mirror for parent
+//   onActiveDatasetChange {fn}  – (datasetId) => void — last-worked-on dataset
+//   activeDatasetId  {string}   – externally-selected active dataset
 //
-// Additional datasets loaded here are available in WranglingModule's Merge tab.
-// They are kept in component state (not persisted) — equivalent to R's
-// "you must re-run your script to reload data" behavior.
+// There is no privileged "primary" dataset. All datasets are equal, individually
+// deletable, and persisted to IndexedDB (registry metadata + raw_data rows), so
+// they survive a browser close. Datasets are also exposed to WranglingModule's
+// Merge tab for JOIN / APPEND.
 
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
 import * as XLSX from "xlsx";
 import { useTheme } from "./ThemeContext.jsx";
 import WranglingModule from "./WranglingModule.jsx";
-import { saveRawData, loadRawData } from "./services/Persistence/indexedDB.js";
+import { saveRawData, loadRawData, deleteRawData, saveDatasetRegistry, loadDatasetRegistry, saveProject } from "./services/Persistence/indexedDB.js";
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
 import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
@@ -665,37 +669,6 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
   );
 }
 
-// ─── SESSION STORAGE — secondary datasets persist across navigation ───────────
-// Scoped by pid so datasets from project A never appear in project B.
-const SS_PREFIX = "econ_studio_secondary_ds_";
-function ssKey(pid) { return SS_PREFIX + pid; }
-function ssRead(pid) {
-  try { return JSON.parse(sessionStorage.getItem(ssKey(pid)) || "[]"); } catch { return []; }
-}
-function ssWrite(pid, secondaryDatasets) {
-  // Per-dataset size guard: a single oversized dataset (e.g. an Aggregate-to-Grid
-  // result carrying full WKT geometry per cell) must NOT silently sink the whole
-  // secondary array. Datasets whose payload won't fit in sessionStorage are stored
-  // durably in IndexedDB and replaced with an `_idbBacked` placeholder; they are
-  // rehydrated from IndexedDB on mount (see backfill effect below).
-  const SS_PER_DS_LIMIT = 4 * 1024 * 1024; // ~4MB per dataset
-  try {
-    const slim = secondaryDatasets.map(d => {
-      const payload = JSON.stringify(d);
-      if (payload.length < SS_PER_DS_LIMIT) return d;
-      // Too big for sessionStorage — persist rawData to IndexedDB, keep a placeholder.
-      if (d.rawData) saveRawData(d.id, d.rawData);
-      const { rawData, ...meta } = d;
-      return { ...meta, _idbBacked: true, headers: rawData?.headers ?? [] };
-    });
-    const s = JSON.stringify(slim);
-    if (s.length < 8 * 1024 * 1024) sessionStorage.setItem(ssKey(pid), s);
-  } catch { /* quota exceeded — non-fatal */ }
-}
-function ssClear(pid) {
-  try { sessionStorage.removeItem(ssKey(pid)); } catch {}
-}
-
 // ─── DATA STUDIO ROOT ─────────────────────────────────────────────────────────
 // Assigns stable row identity columns: `__ri` (sequential integer, used by
 // the in-app patch step) and `__row_id` (UUID v4, used by replication
@@ -703,9 +676,8 @@ function ssClear(pid) {
 // services/data/rowIdentity.js for invariants.
 const ensureRowIds = ensureRowIdentity;
 
-const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplete, onOutputReady, pid, onDatasetsChange, activeDatasetId }, ref) {
+const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets, onComplete, onOutputReady, onDatasetsChange, onActiveDatasetChange, activeDatasetId }, ref) {
   const { C } = useTheme();
-  const primaryId = pid || genId();
   const dispatch = useSessionDispatch();
 
   // Ref exposed to WranglingModule so DataViewer can dispatch patch steps
@@ -716,90 +688,93 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
   // regardless of which code path added it (handleLoadFile, handleSaveSubset, etc).
   const registeredIds = useRef(new Set());
 
-  const [datasets, setDatasets] = useState(() => {
-    // Secondary datasets scoped to this project's pid — no cross-project leakage.
-    // Retrofit row-identity columns on rehydration so projects persisted before
-    // the __row_id invariant always observe both __ri and __row_id.
-    const secondary = ssRead(primaryId).map(d => ({
-      ...d,
-      rawData: d.rawData ? ensureRowIds(d.rawData) : d.rawData,
-    }));
-    return [
-      { id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData), crs: rawData?._crs ?? null },
-      ...secondary,
-    ];
-  });
-  const [activeId, setActiveId]   = useState(primaryId);
+  // Becomes true once the durable-registry rehydration effect has run. Until
+  // then, the persistence effect must not overwrite the registry with an empty
+  // list — that early write would wipe persisted datasets before they are
+  // restored from IndexedDB on mount.
+  const hydratedRef = useRef(false);
+
+  // No privileged "primary" dataset: start empty and hydrate the whole registry
+  // (metadata) + each dataset's rows (raw_data) on mount.
+  const [datasets, setDatasets] = useState([]);
+  const [activeId, setActiveId]   = useState(null);
   const [loading, setLoading]     = useState(false);
   const [loadErr, setLoadErr]     = useState("");
   const [wbOpen,   setWbOpen]     = useState(false);
   const [oecdOpen, setOecdOpen]   = useState(false);
 
-  // ── Persist primary raw data on first mount ────────────────────────────────
-  // This ensures "Open project" works without re-uploading.
+  // ── Hydrate the whole dataset list on mount ─────────────────────────────────
+  // Load the durable registry (metadata) and each dataset's rows (raw_data).
+  // If the registry is empty AND the parent supplied `initialDatasets` (e.g. the
+  // demo project), seed those instead and persist them. There is no privileged
+  // primary dataset and no migration of legacy pid-keyed projects.
   useEffect(() => {
-    if (rawData && primaryId) {
-      saveRawData(primaryId, rawData);
-    }
-  }, [primaryId]); // only on mount — rawData ref won't change for same project
-
-  // ── Persist primary raw data on first mount ────────────────────────────────
-  // This ensures "Open project" works without re-uploading.
-  useEffect(() => {
-    if (rawData && primaryId) {
-      saveRawData(primaryId, rawData);
-    }
-  }, [primaryId]); // only on mount — rawData ref won't change for same project
-
-  // Keep primary rawData in sync if parent re-loads a new file.
-  // If rawData actually changed (new file), clear secondary datasets — they
-  // belonged to the previous project and would produce stale join results.
-  const prevRawDataRef = useRef(rawData);
-  useEffect(() => {
-    const newFile = prevRawDataRef.current !== rawData;
-    prevRawDataRef.current = rawData;
-    if (newFile) {
-      // New primary file loaded — drop secondary datasets and clear sessionStorage
-      setDatasets([{ id: primaryId, filename: filename || "dataset.csv", rawData: ensureRowIds(rawData), crs: rawData?._crs ?? null }]);
-      setActiveId(primaryId);
-      ssClear(primaryId);
-    } else {
-      // Same file, just sync filename (rawData ref unchanged — keep ensureRowIds-processed version)
-      setDatasets(prev => prev.map(ds =>
-        ds.id === primaryId ? { ...ds, filename: filename || ds.filename } : ds
-      ));
-    }
-  }, [rawData, filename]);
-
-  // Persist secondary datasets to sessionStorage whenever the list changes
-  useEffect(() => {
-    const secondary = datasets.filter(d => d.id !== primaryId);
-    ssWrite(primaryId, secondary);
-  }, [datasets, primaryId]);
-
-  // Backfill IndexedDB-backed secondaries on mount. Datasets too large for
-  // sessionStorage are rehydrated here from IndexedDB so they survive a reload
-  // (e.g. Aggregate-to-Grid / Spatial Join outputs carrying WKT geometry).
-  useEffect(() => {
-    const pending = datasets.filter(d => d._idbBacked && !d.rows && !d.rawData?.rows);
-    if (!pending.length) return;
     let cancelled = false;
     (async () => {
-      const loaded = await Promise.all(pending.map(async d => {
-        const raw = await loadRawData(d.id);
-        return raw ? { id: d.id, raw } : null;
-      }));
-      if (cancelled) return;
-      const byId = new Map(loaded.filter(Boolean).map(x => [x.id, x.raw]));
-      if (!byId.size) return;
-      setDatasets(prev => prev.map(d =>
-        byId.has(d.id)
-          ? (() => { const { _idbBacked, ...rest } = d; return { ...rest, rawData: ensureRowIds(byId.get(d.id)) }; })()
-          : d
-      ));
+      try {
+        const registry = await loadDatasetRegistry(projectPid);
+        if (cancelled) return;
+
+        if (registry.length) {
+          const loaded = await Promise.all(registry.map(async m => {
+            const raw = await loadRawData(m.id);
+            return raw && raw.rows?.length ? { meta: m, raw } : null;
+          }));
+          if (cancelled) return;
+          const entries = loaded.filter(Boolean).map(({ meta, raw }) => ({
+            id:       meta.id,
+            filename: meta.filename,
+            rawData:  ensureRowIds(raw),
+            crs:      meta.crs ?? raw?._crs ?? null,
+            origin:   meta.origin ?? undefined,
+            source:   meta.source ?? undefined,
+          }));
+          if (entries.length) {
+            setDatasets(entries);
+            const wanted = entries.some(e => e.id === activeDatasetId) ? activeDatasetId : entries[0].id;
+            setActiveId(wanted);
+          }
+        } else if (Array.isArray(initialDatasets) && initialDatasets.length) {
+          // Seed from parent-provided datasets (demo project). Persist rows so a
+          // reopen rehydrates from IndexedDB like any other project.
+          const entries = initialDatasets.map(d => {
+            const id  = genId();
+            const raw = ensureRowIds(d.rawData);
+            saveRawData(id, raw);
+            return { id, filename: d.filename || "dataset.csv", rawData: raw, crs: raw?._crs ?? null };
+          });
+          setDatasets(entries);
+          setActiveId(entries[0].id);
+        }
+      } finally {
+        if (!cancelled) hydratedRef.current = true;
+      }
     })();
     return () => { cancelled = true; };
-  }, []); // mount only — rehydrate placeholders once
+  }, []); // mount only — hydrate once per project (DataStudio is keyed by pid)
+
+  // ── Persist the full registry + active dataset whenever they change ─────────
+  // Rows already live in raw_data (written at add time); this stores metadata
+  // for every dataset and the last-active id on the project record. Guarded so
+  // the pre-hydration empty state never clobbers the durable registry.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    saveDatasetRegistry(projectPid, datasets.map(d => ({
+      id:       d.id,
+      filename: d.filename,
+      source:   d.source ?? "loaded",
+      origin:   d.origin ?? null,
+      crs:      datasetCrs(d),
+      headers:  d.rawData?.headers ?? d.headers ?? [],
+      loadOpts: d.rawData?._loadOpts ?? d.loadOpts ?? null,
+    })));
+  }, [datasets, projectPid]);
+
+  useEffect(() => {
+    if (!hydratedRef.current || !activeId) return;
+    saveProject(projectPid, { activeDatasetId: activeId }).catch(() => {});
+    onActiveDatasetChange?.(activeId);
+  }, [activeId, projectPid]);
 
   // Register datasets in sessionState whenever `datasets` changes.
   // Uses registeredIds ref so each dataset is only dispatched once (idempotent
@@ -923,15 +898,16 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
   }, [addParsedDataset, handleLoadFile]);
 
   const handleRemove = useCallback((id) => {
-    if (id === primaryId) return; // primary dataset is protected
     setDatasets(prev => {
       const ds = prev.find(d => d.id === id);
       const key = ds?.rawData?._duckdb?.opfsCacheKey;
       if (key) deleteCacheEntry(key); // fire-and-forget OPFS cleanup
-      return prev.filter(d => d.id !== id);
+      deleteRawData(id);              // free durable rows for the removed dataset
+      const next = prev.filter(d => d.id !== id);
+      setActiveId(cur => cur === id ? (next[0]?.id ?? null) : cur);
+      return next;
     });
-    setActiveId(prev => prev === id ? primaryId : prev);
-  }, [primaryId]);
+  }, []);
 
   // Save a derived dataset (pipeline output or summarize result) into the manager.
   // Appears immediately in the sidebar with its own empty pipeline.
@@ -974,26 +950,28 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     addApiData:       (fname, rows, headers) => handleSaveSubset(fname, rows, headers),
     switchToDataset:  (id) => setActiveId(id),
     removeDataset:    (id) => {
-      if (id === primaryId) return; // never remove primary
       setDatasets(prev => {
         const ds = prev.find(d => d.id === id);
         const key = ds?.rawData?._duckdb?.opfsCacheKey;
         if (key) deleteCacheEntry(key);
-        return prev.filter(d => d.id !== id);
+        deleteRawData(id);
+        const next = prev.filter(d => d.id !== id);
+        setActiveId(cur => cur === id ? (next[0]?.id ?? null) : cur);
+        return next;
       });
-      setActiveId(prev => prev === id ? primaryId : prev);
       if (dispatch) dispatch({ type: "REMOVE_DATASET", id }); // sync sessionState
     },
     removeDatasetLocal: (id) => {
       // Called by DatasetManager which already dispatched to sessionState
-      if (id === primaryId) return;
       setDatasets(prev => {
         const ds = prev.find(d => d.id === id);
         const key = ds?.rawData?._duckdb?.opfsCacheKey;
         if (key) deleteCacheEntry(key);
-        return prev.filter(d => d.id !== id);
+        deleteRawData(id);
+        const next = prev.filter(d => d.id !== id);
+        setActiveId(cur => cur === id ? (next[0]?.id ?? null) : cur);
+        return next;
       });
-      setActiveId(prev => prev === id ? primaryId : prev);
     },
     patchDatasetColumns: (id, newRows, newCols) => {
       // Adds new columns to an existing dataset in-place — no new dataset created.
@@ -1041,7 +1019,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
         desc: `inject "${colName}" (${values.length} values)`,
       });
     },
-  }), [handleLoadFile, handleLoadFiles, addParsedDataset, handleSaveSubset, primaryId]);
+  }), [handleLoadFile, handleLoadFiles, addParsedDataset, handleSaveSubset]);
 
   return (
     <div style={{
@@ -1050,7 +1028,7 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
     }}>
       {/* ── Main panel: WranglingModule for active dataset ── */}
       {/* DatasetSidebar removed — dataset management lives in WorkspaceBar DatasetManager */}
-      {activeDs && (
+      {activeDs ? (
         <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
           {/*
             key={activeDs.id} ensures a fresh WranglingModule instance per dataset.
@@ -1064,11 +1042,19 @@ const DataStudio = forwardRef(function DataStudio({ rawData, filename, onComplet
             onComplete={onComplete}
             onReady={r => onOutputReady?.(r, activeDs.id)}
             pid={activeDs.id}
-            projectPid={primaryId}
+            projectPid={projectPid}
             allDatasets={otherDatasets}
             onSaveSubset={handleSaveSubset}
             addStepRef={wranglingAddStepRef}
           />
+        </div>
+      ) : (
+        <div style={{
+          flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+          color: C.textMuted, fontFamily: mono, fontSize: 12, textAlign: "center", padding: "2rem",
+        }}>
+          No datasets in this project yet.<br/>
+          Go to the <span style={{ color: C.teal }}>Data</span> tab to load one.
         </div>
       )}
 

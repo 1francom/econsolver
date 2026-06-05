@@ -112,24 +112,6 @@ import {
 } from "./modeling/helpers.js";
 import { dispatchEstimation } from "./modeling/runners/estimationDispatch.js";
 
-// ─── ESTIMATOR RESOLVER ───────────────────────────────────────────────────────
-// Maps (identification strategy, outcome family, has-weight) → the legacy
-// estimator id that the dispatch branches + SQL fast path already understand.
-// This keeps both _runEstimation and estimate() keyed on a single resolved id
-// so the 2D (strategy × family) selector reuses every existing engine path.
-function resolveEstimator(model, family, hasWeight) {
-  if (model === "OLS") {
-    if (family === "poisson") return "Poisson";
-    if (family === "logit")   return "Logit";
-    if (family === "probit")  return "Probit";
-    return hasWeight ? "WLS" : "OLS";
-  }
-  if (model === "FE" && family === "poisson")         return "PoissonFE";
-  if (model === "EventStudy" && family === "poisson") return "SunAbraham";
-  if (model === "2SLS" && family === "poisson")       return "IVPoisson"; // engine added in a later task
-  return model;
-}
-
 // ─── B5: SESSION MODEL HISTORY ────────────────────────────────────────────────
 function ModelHistory({ history, onRestore, onClear }) {
   const { C } = useTheme();

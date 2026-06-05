@@ -95,7 +95,7 @@ Spatial Part C (spatial weights, Moran's I, SAR/SEM/SLX/SDM), ModelingSpec Part 
 Each phase R-validates before the next starts (Franco's rule: browser-validate before proceeding). Fixtures per spec:
 `spatialEngineGapsRValidation.R`, `modelingGapsRValidation.R`, `descriptiveVizRValidation.R` → respective `*Benchmarks.json` → `window.__validation.*`. Tolerances: coef 6 dp, SE 4 dp (3 dp for bootstrap/df-sensitive cells).
 
-### Validations pending (Phase 3 A1 — multi-FE Poisson UI) — PENDING, browser
+### Validations pending (Phase 3 A1 — multi-FE Poisson UI) — DONE, browser-validated 2026-06-03
 R-validation vs `fepois` already passed (coef 8 dp). Remaining = browser checks on a real dataset before this lands as fully DONE:
 1. **One-way no-op:** PoissonFE with entity only, no extra FE → identical coefs/SE to pre-change `runPoissonFE` (confirms the existing path is untouched).
 2. **Two-way FE:** entity + 1 extra FE (e.g. time) → `2-way FE` badge, formula `Poisson(y) ~ x | entity + time`, "Absorbed Fixed-Effect Dimensions" block shows correct level counts, coefs ≈ `fepois(y ~ x | f1 + f2)`.

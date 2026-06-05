@@ -15,7 +15,7 @@ import ObservatorioFetcher from './components/wrangling/ObservatorioFetcher.jsx'
 import { SessionStateProvider } from './services/session/sessionState.jsx';
 import { SessionLogProvider } from './services/session/sessionLog.jsx';
 import {
-  listPipelines, deletePipeline, clearAllPipelines, loadPipeline, loadRawData,
+  listPipelines, deletePipeline, clearAllPipelines, loadPipeline,
   saveProject, listProjects, deleteProject, clearAllProjects,
 } from "./services/Persistence/indexedDB.js";
 import { useTheme } from "./ThemeContext.jsx";
@@ -801,7 +801,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
 }
 
 // Dataset overview + load controls (file upload, World Bank, OECD).
-function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset, onLoadPrimary }) {
+function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset }) {
   const { C } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","JSON","DTA","RDS","DBF","SHP","ZIP"];
   const fileRef  = useRef();
@@ -815,11 +815,14 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
   const [dragOver,  setDragOver]  = useState(false);
   const [view,      setView]      = useState("overview"); // "overview" | "grid"
 
-  // Cleaned data takes priority for display; raw is the fallback
-  const viewRows    = cleanedData?.cleanRows ?? rawData?.rows ?? [];
-  const viewHeaders = cleanedData?.headers   ?? rawData?.headers ?? [];
-  const viewFile    = cleanedData?.filename  ?? filename ?? "dataset";
+  // The active dataset (from the availableDatasets mirror) is the display source.
+  const activeDs    = availableDatasets.find(d => d.id === activeDatasetId) ?? null;
+  // Cleaned pipeline output takes priority; the active dataset's raw rows are the fallback.
+  const viewRows    = cleanedData?.cleanRows ?? activeDs?.rows ?? [];
+  const viewHeaders = cleanedData?.headers   ?? activeDs?.headers ?? [];
+  const viewFile    = cleanedData?.filename  ?? activeDs?.filename ?? filename ?? "dataset";
   const isPipelined = !!cleanedData;
+  const hasData     = !!(activeDs || cleanedData);
 
   // Summary stats derived from active data
   const totalNAs = useMemo(() => {
@@ -852,23 +855,14 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
         throw new Error(errors.map(e => `${e.filename}: ${e.error}`).join("; ") || "No files could be parsed.");
       }
 
-      let firstName = ok[0].filename;
-      let queue = ok;
+      const firstName = ok[0].filename;
 
-      if (!rawData && onLoadPrimary) {
-        // First parsed entry becomes the primary dataset.
-        await onLoadPrimary(ok[0].parsed, ok[0].filename);
-        queue = ok.slice(1);
-      }
-
-      // Remaining entries go to the studio as secondary datasets. studioRef
-      // may not be mounted yet on the very first load — wait a frame so the
-      // ref settles after onLoadPrimary triggers the studio mount.
-      if (queue.length) {
-        if (!studioRef.current) await new Promise(r => requestAnimationFrame(r));
-        for (const r of queue) {
-          if (studioRef.current?.addParsed) studioRef.current.addParsed(r.filename, r.parsed);
-        }
+      // Every parsed entry goes through the same add path — no privileged
+      // primary. studioRef may not be mounted on the very first load, so wait
+      // a frame for the ref to settle (DataStudio is always mounted now).
+      if (!studioRef.current) await new Promise(r => requestAnimationFrame(r));
+      for (const r of ok) {
+        if (studioRef.current?.addParsed) studioRef.current.addParsed(r.filename, r.parsed);
       }
 
       const errSuffix = errors.length ? ` (${errors.length} failed)` : "";
@@ -894,14 +888,9 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
       const parsed = await parseFileForPrimary(file);
       if (!parsed?.headers?.length || !parsed?.rows?.length) throw new Error("Dataset is empty or could not be parsed.");
 
-      if (!rawData && onLoadPrimary) {
-        await onLoadPrimary(parsed, ds.filename);
-        setSuccess(`"${ds.filename}" loaded as primary dataset.`);
-      } else {
-        if (!studioRef.current) await new Promise(r => requestAnimationFrame(r));
-        studioRef.current?.addParsed?.(ds.filename, parsed);
-        setSuccess(`"${ds.filename}" loaded — visible in Dataset Manager.`);
-      }
+      if (!studioRef.current) await new Promise(r => requestAnimationFrame(r));
+      studioRef.current?.addParsed?.(ds.filename, parsed);
+      setSuccess(`"${ds.filename}" loaded — visible in Dataset Manager.`);
       setPreloadedOpen(false);
     } catch (e) {
       setErr("Preloaded dataset error: " + (e?.message || "unknown"));
@@ -930,7 +919,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
       </div>
 
       {/* Overview panel */}
-      {view === "overview" && !rawData && (
+      {view === "overview" && !hasData && (
         /* ── No data state: show a centered load prompt ── */
         <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem"}}>
           <div style={{maxWidth:460,width:"100%",display:"flex",flexDirection:"column",gap:20}}>
@@ -1009,7 +998,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
         </div>
       )}
 
-      {view === "overview" && rawData && (
+      {view === "overview" && hasData && (
         <div style={{display:"flex",flex:1,minHeight:0,overflow:"hidden"}}>
 
           {/* ── Left column: dataset info + column table ── */}
@@ -1020,9 +1009,8 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
               <div style={{marginBottom:"1.4rem"}}>
                 <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>Session datasets</div>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {availableDatasets.map((ds, idx) => {
+                  {availableDatasets.map((ds) => {
                     const isActive = ds.id === activeDatasetId;
-                    const isPrimary = idx === 0;
                     return (
                       <div key={ds.id} style={{display:"flex",alignItems:"center",gap:4}}>
                         <button onClick={() => onSelectDataset?.(ds.id)}
@@ -1045,18 +1033,16 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
                             </span>
                           )}
                         </button>
-                        {!isPrimary && (
-                          <button
-                            onClick={() => onDeleteDataset?.(ds.id)}
-                            title="Remove dataset"
-                            style={{flexShrink:0,width:20,height:20,display:"flex",alignItems:"center",
-                                    justifyContent:"center",background:"transparent",border:"none",
-                                    cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,
-                                    borderRadius:2,transition:"color 0.1s"}}
-                            onMouseEnter={e => e.currentTarget.style.color = C.text}
-                            onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
-                          >×</button>
-                        )}
+                        <button
+                          onClick={() => onDeleteDataset?.(ds.id)}
+                          title="Remove dataset"
+                          style={{flexShrink:0,width:20,height:20,display:"flex",alignItems:"center",
+                                  justifyContent:"center",background:"transparent",border:"none",
+                                  cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,
+                                  borderRadius:2,transition:"color 0.1s"}}
+                          onMouseEnter={e => e.currentTarget.style.color = C.text}
+                          onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                        >×</button>
                       </div>
                     );
                   })}
@@ -1065,16 +1051,15 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
             )}
 
             {/* Active dataset card */}
-            {rawData && (
+            {hasData && (
               <div style={{border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden",marginBottom:"1.6rem"}}>
                 {/* Header */}
                 <div style={{background:C.surface2,padding:"0.6rem 0.9rem",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${C.border}`}}>
                   <span style={{fontSize:9,color:C.teal}}>●</span>
-                  <span style={{fontSize:12,color:C.text}}>{filename}</span>
+                  <span style={{fontSize:12,color:C.text}}>{viewFile}</span>
                   {isPipelined && (
                     <span style={{fontSize:9,color:C.teal,border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 5px"}}>pipeline applied</span>
                   )}
-                  <span style={{marginLeft:"auto",fontSize:9,color:C.textMuted,padding:"1px 6px",border:`1px solid ${C.border2}`,borderRadius:2}}>primary</span>
                 </div>
 
                 {/* Stats grid */}
@@ -1232,7 +1217,7 @@ function DataTab({ filename, rawData, studioRef, cleanedData, availableDatasets 
           filename={viewFile}
           onPatch={(ri, col, value) => studioRef.current?.addPatchStep?.(ri, col, value)}
           onFillColumn={(col, op, text) => studioRef.current?.addFillColumnStep?.(col, op, text)}
-          duckdbMeta={cleanedData?._duckdb ?? rawData?._duckdb ?? null}
+          duckdbMeta={cleanedData?._duckdb ?? activeDs?._duckdb ?? null}
         />
       )}
       {view === "grid" && viewRows.length === 0 && (
@@ -1886,7 +1871,6 @@ export default function App() {
   const { C } = useTheme();
   const [screen,             setScreen]            = useState("dashboard");
   const [tourStep,           setTourStep]          = useState(-1);
-  const [rawData,            setRawData]           = useState(null);
   const [filename,           setFilename]          = useState("");
   const [projectName,        setProjectName]       = useState("");
   const [pid,                setPid]               = useState(null);
@@ -1897,6 +1881,12 @@ export default function App() {
     data: null, clean: null, explore: null, model: null,
     spatial: null, simulate: null, calculate: null, report: null,
   });
+  // The project-wide last-worked-on dataset — the fallback for any tab that has
+  // no explicit per-tab selection. Replaces the old "primary == pid" fallback.
+  const [activeDatasetId,    setActiveDatasetId]   = useState(null);
+  // Optional datasets to seed a freshly-opened project whose registry is empty
+  // (used by the demo project). Consumed by DataStudio on mount.
+  const [initialDatasets,    setInitialDatasets]   = useState(null);
   const [sidebarOpen,        setSidebarOpen]       = useState(false);
   const [activeResult,       setActiveResult]      = useState(null);
   const [coachPrefill,       setCoachPrefill]      = useState(null);
@@ -1942,6 +1932,8 @@ export default function App() {
     setProjectName(p.name || (p.filename || "").replace(/\.[^.]+$/, "") || "Project");
     setPid(p.id);
     setOutputs({});
+    setActiveDatasetId(p.activeDatasetId ?? null);
+    setInitialDatasets(null);
     navHistory.current = [];   // fresh history for this project
     setCanGoBack(false);
 
@@ -1952,23 +1944,14 @@ export default function App() {
       const coerced = rows.map(r => {
         const o = {}; headers.forEach(h => { o[h] = coerce(r[h], types[h]); }); return o;
       });
-      const ensRi = ensureRowIdentity;
-      setRawData(ensRi({ headers, rows: coerced }));
-      setActiveTab("data");
-      setScreen("workspace");
-      return;
+      // Seed the demo through DataStudio's normal add/persist path.
+      setInitialDatasets([{ filename: "wages_panel_demo.csv", rawData: { headers, rows: coerced } }]);
     }
 
-    const stored = await loadRawData(p.id);
-    if (stored && stored.rows?.length) {
-      const ensRi = ensureRowIdentity;
-      setRawData(ensRi(stored));
-      setActiveTab("clean");
-    } else {
-      // No data yet — open workspace on the Data tab so user can load data
-      setRawData(null);
-      setActiveTab("data");
-    }
+    // DataStudio hydrates datasets from the registry (and seeds initialDatasets
+    // when the registry is empty). Open on Clean; if the project is empty the
+    // DataStudio empty-state points the user to the Data tab.
+    setActiveTab("clean");
     setScreen("workspace");
   };
 
@@ -1982,7 +1965,8 @@ export default function App() {
     } catch (e) {
       console.warn("[Projects] saveProject failed:", e);
     }
-    setRawData(null);
+    setInitialDatasets(null);
+    setActiveDatasetId(null);
     setFilename(projectName);
     setProjectName(projectName);
     setPid(newPid);
@@ -1993,22 +1977,19 @@ export default function App() {
     setScreen("workspace");
   };
 
-  // ── Called by DataTab when user loads the first (primary) dataset ─────────
-  const handlePrimaryLoad = async (data, fname) => {
-    const ensRi = ensureRowIdentity;
-    setRawData(ensRi(data));
-    setFilename(fname);
-    // Update project metadata with real row/col counts
-    if (pid) {
-      try {
-        await saveProject(pid, { filename: fname, rowCount: data.rows?.length ?? 0, colCount: data.headers?.length ?? 0, datasetCount: 1 });
-      } catch (e) { /* non-fatal */ }
-    }
-  };
-
   // ── Per-tab helpers ───────────────────────────────────────────────────────
-  const tabDsId  = (tab) => activeDatasetIds[tab] ?? pid;
-  const tabOutput = (tab) => outputs[tabDsId(tab)] ?? outputs[pid] ?? null;
+  // Fallback is the project-wide active dataset (no privileged "primary == pid").
+  const tabDsId   = (tab) => activeDatasetIds[tab] ?? activeDatasetId;
+  const tabOutput = (tab) => outputs[tabDsId(tab)] ?? null;
+
+  // Rows/headers for a tab's active dataset, sourced from the availableDatasets
+  // mirror (which already carries rows+headers from DataStudio). Replaces the
+  // old single `rawData` primary prop.
+  const tabRawData = (tab) => {
+    const id = tabDsId(tab);
+    const ds = availableDatasets.find(d => d.id === id);
+    return ds ? { rows: ds.rows ?? [], headers: ds.headers ?? [] } : null;
+  };
 
   // Setter: update one tab's selection; optionally call switchToDataset
   const selectDataset = (tab, id, switchDs = false) => {
@@ -2133,10 +2114,11 @@ export default function App() {
                   studioRef.current?.removeDatasetLocal(id);
                   // Purge stale pipeline output so modules see fresh data
                   setOutputs(prev => { const { [id]: _, ...rest } = prev; return rest; });
-                  // Reset any tab that was scoped to the deleted dataset → fall back to primary
+                  // Reset any tab scoped to the deleted dataset → clear its
+                  // selection so it falls back to the project-wide active dataset.
                   setActiveDatasetIds(prev => {
                     const next = { ...prev };
-                    Object.keys(next).forEach(tab => { if (next[tab] === id) next[tab] = pid; });
+                    Object.keys(next).forEach(tab => { if (next[tab] === id) next[tab] = null; });
                     return next;
                   });
                 }}
@@ -2167,35 +2149,31 @@ export default function App() {
                 {/* DATA — dataset overview + file upload + WB/OECD fetchers */}
                 <div style={{...tabPanel, display: activeTab==="data" ? "flex" : "none", flexDirection:"column"}}>
                   <DataTab
-                    filename={filename} rawData={rawData} studioRef={studioRef}
+                    filename={filename} studioRef={studioRef}
                     cleanedData={tabOutput("data")}
                     availableDatasets={availableDatasets}
                     activeDatasetId={tabDsId("data")}
                     onSelectDataset={id => selectDataset("data", id, true)}
                     onDeleteDataset={id => { studioRef.current?.removeDataset(id); }}
-                    onLoadPrimary={handlePrimaryLoad}
                   />
                 </div>
 
                 {/* CLEAN — only mounted when there is data */}
                 <div style={{...tabPanel, display: activeTab==="clean" ? "flex" : "none", flexDirection:"column"}}>
-                  {rawData
-                    ? <DataStudio
-                        ref={studioRef}
-                        key={pid}
-                        rawData={rawData}
-                        filename={filename}
-                        pid={pid}
-                        onComplete={handleComplete}
-                        onOutputReady={handleOutputReady}
-                        onDatasetsChange={dsList => {
-                          setAvailableDatasets(dsList);
-                          if (pid?.startsWith("proj_")) saveProject(pid, { datasetCount: dsList.length }).catch(()=>{});
-                        }}
-                        activeDatasetId={tabDsId("clean")}
-                      />
-                    : <NeedsData onGoToData={() => navigateToTab("data")}/>
-                  }
+                  <DataStudio
+                    ref={studioRef}
+                    key={pid}
+                    projectPid={pid}
+                    initialDatasets={initialDatasets}
+                    onComplete={handleComplete}
+                    onOutputReady={handleOutputReady}
+                    onDatasetsChange={dsList => {
+                      setAvailableDatasets(dsList);
+                      if (pid?.startsWith("proj_")) saveProject(pid, { datasetCount: dsList.length }).catch(()=>{});
+                    }}
+                    onActiveDatasetChange={id => setActiveDatasetId(id)}
+                    activeDatasetId={tabDsId("clean")}
+                  />
                 </div>
 
                 {/* EXPLORE */}
@@ -2235,8 +2213,8 @@ export default function App() {
                 {/* SPATIAL — Phase 11 */}
                 <div style={{...tabPanel, display: activeTab==="spatial" ? "flex" : "none", flexDirection:"column"}}>
                   <SpatialTab
-                    rows={tabOutput("spatial")?.cleanRows ?? rawData?.rows ?? []}
-                    headers={tabOutput("spatial")?.headers ?? rawData?.headers ?? []}
+                    rows={tabOutput("spatial")?.cleanRows ?? tabRawData("spatial")?.rows ?? []}
+                    headers={tabOutput("spatial")?.headers ?? tabRawData("spatial")?.headers ?? []}
                     availableDatasets={availableDatasets}
                     pid={tabDsId("spatial")}
                     onAddDataset={(name, rows, headers) => {
@@ -2260,20 +2238,16 @@ export default function App() {
                 {/* SIMULATE — Phase 9.8 */}
                 <div style={{...tabPanel, display: activeTab==="simulate" ? "flex" : "none", flexDirection:"column"}}>
                   <SimulateTab
-                    rows={tabOutput("simulate")?.cleanRows ?? rawData?.rows ?? []}
-                    headers={tabOutput("simulate")?.headers ?? rawData?.headers ?? []}
+                    rows={tabOutput("simulate")?.cleanRows ?? tabRawData("simulate")?.rows ?? []}
+                    headers={tabOutput("simulate")?.headers ?? tabRawData("simulate")?.headers ?? []}
                     onAddDataset={(name, rows, headers) => {
-                      if (!rawData) {
-                        handlePrimaryLoad({ headers, rows }, name).then(() => setActiveTab("clean"));
-                      } else {
-                        const newId = studioRef.current?.addApiData(name, rows, headers);
-                        if (newId) selectDataset("simulate", newId); // auto-select only in Simulate
-                      }
+                      const newId = studioRef.current?.addApiData(name, rows, headers);
+                      if (newId) selectDataset("simulate", newId); // auto-select only in Simulate
                     }}
                     onAddColumn={(colName, values) => {
-                      const baseRows = tabOutput("simulate")?.cleanRows ?? rawData?.rows ?? [];
+                      const baseRows = tabOutput("simulate")?.cleanRows ?? tabRawData("simulate")?.rows ?? [];
                       const merged = baseRows.map((r, i) => ({ ...r, [colName]: values[i] ?? null }));
-                      const baseHdrs = tabOutput("simulate")?.headers ?? rawData?.headers ?? [];
+                      const baseHdrs = tabOutput("simulate")?.headers ?? tabRawData("simulate")?.headers ?? [];
                       const newHdrs = baseHdrs.includes(colName) ? baseHdrs : [...baseHdrs, colName];
                       const newId = studioRef.current?.addApiData(colName + "_augmented", merged, newHdrs);
                       if (newId) selectDataset("simulate", newId);
@@ -2297,16 +2271,16 @@ export default function App() {
                 <div style={{...tabPanel, display: activeTab==="calculate" ? "flex" : "none", flexDirection:"column"}}>
                   <CalculateTab
                     pid={pid}
-                    rows={tabOutput("calculate")?.cleanRows ?? rawData?.rows ?? []}
-                    headers={tabOutput("calculate")?.headers ?? rawData?.headers ?? []}
+                    rows={tabOutput("calculate")?.cleanRows ?? tabRawData("calculate")?.rows ?? []}
+                    headers={tabOutput("calculate")?.headers ?? tabRawData("calculate")?.headers ?? []}
                     onAddDataset={(name, rows, headers) => {
                       const newId = studioRef.current?.addApiData(name, rows, headers);
                       if (newId) selectDataset("calculate", newId);
                     }}
                     onAddColumn={(colName, values) => {
-                      const baseRows = tabOutput("calculate")?.cleanRows ?? rawData?.rows ?? [];
+                      const baseRows = tabOutput("calculate")?.cleanRows ?? tabRawData("calculate")?.rows ?? [];
                       const merged = baseRows.map((r, i) => ({ ...r, [colName]: values[i] ?? null }));
-                      const baseHdrs = tabOutput("calculate")?.headers ?? rawData?.headers ?? [];
+                      const baseHdrs = tabOutput("calculate")?.headers ?? tabRawData("calculate")?.headers ?? [];
                       const newHdrs = baseHdrs.includes(colName) ? baseHdrs : [...baseHdrs, colName];
                       const newId = studioRef.current?.addApiData(colName + "_augmented", merged, newHdrs);
                       if (newId) selectDataset("calculate", newId);
