@@ -56,7 +56,7 @@ src/
 ├── services/
 │   ├── AI/
 │   │   ├── AIService.js          ← callClaude (exported), inferVariableUnits, interpretRegression, nlToPipeline
-│   │   ├── appCapabilityMap.js   ← serializeAllowedSteps (registry-derived NL step catalogue; future: serializeCapabilityMap)
+│   │   ├── appCapabilityMap.js   ← serializeAllowedSteps (NL step catalogue) + APP_CAPABILITY_MAP/serializeCapabilityMap (app structure for the coach)
 │   │   ├── LocalAI.js            ← local/offline AI fallback
 │   │   └── Prompts/
 │   │       └── index.js          ← SHARED_CONTEXT, INFER_UNITS_PROMPT, INTERPRET_REGRESSION_PROMPT,
@@ -268,6 +268,7 @@ Fase 8 supplement (2026-05-21): the Fase 3a/3c robust-SE guards above are lifted
 - Small focused files over monoliths (WranglingModule refactor: 3200 lines → 11 files)
 
 ## Working conventions
+- **When adding a workspace tab/sub-tab, add its row to `APP_CAPABILITY_MAP` in `src/services/AI/appCapabilityMap.js`** so the AI coach's navigation guidance stays accurate. (Pipeline steps are auto-derived from `STEP_REGISTRY` — no edit needed there.)
 - Franco validates in the browser before proceeding to next task
 - Patches are surgical — state what to add, what to delete, and exact location
 - Math files get validated against R to 6 decimal places on coefficients, 4 on SE
