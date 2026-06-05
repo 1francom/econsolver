@@ -682,6 +682,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
 
   // Ref exposed to WranglingModule so DataViewer can dispatch patch steps
   const wranglingAddStepRef = useRef(null);
+  const addRowSeqRef = useRef(0);
 
   // Track which dataset IDs have already been registered in sessionState.
   // Prevents duplicate dispatches while ensuring every new dataset gets registered
@@ -1008,6 +1009,37 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       wranglingAddStepRef.current?.({
         type: "ai_tr", col, js,
         desc: `Fill: ${opLabel} "${col}" → ${text.length > 40 ? text.slice(0, 40) + "…" : text}`,
+      });
+    },
+    addColumnStep: (nn, fill, dtype) => {
+      wranglingAddStepRef.current?.({
+        type: "add_column", nn, fill, dtype,
+        desc: `add column ${nn}`,
+      });
+    },
+    addRowStep: (values = {}, count = 1) => {
+      const seq = ++addRowSeqRef.current;
+      wranglingAddStepRef.current?.({
+        type: "add_row", values, count, _seq: seq,
+        desc: `add ${count} row(s)`,
+      });
+    },
+    addSetWhereStep: (col, where, action, value) => {
+      wranglingAddStepRef.current?.({
+        type: "set_where", col, where, action, value,
+        desc: `set ${col} ${action === "clear" ? "= NA" : `= ${value}`} where ${where?.col} ${where?.op} ${where?.value}`,
+      });
+    },
+    addReplaceStep: (col, match, replaceWith, nn) => {
+      wranglingAddStepRef.current?.({
+        type: "replace", col, match, replaceWith, nn: nn || "",
+        desc: `replace in ${col}: "${match?.find}" -> "${replaceWith}"`,
+      });
+    },
+    addStrSpliceStep: (col, position, mode, text, count, nn) => {
+      wranglingAddStepRef.current?.({
+        type: "str_splice", col, position, mode, text, count, nn: nn || "",
+        desc: `${mode} chars in ${col} at ${position}`,
       });
     },
     // Called by ModelingTab's ExtractPanel — splices a model-derived column
