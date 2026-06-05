@@ -234,16 +234,16 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
         onMouseLeave={e => { if (!open) e.currentTarget.style.color = C.textDim; }}
       >
         <span style={{
-          fontSize: 8,
-          padding: "1px 5px",
-          background: open ? `${C.gold}20` : `${C.teal}18`,
-          border: `1px solid ${open ? C.goldDim : C.teal + "50"}`,
-          borderRadius: 2,
+          fontSize: 9,
+          padding: "2px 7px",
+          background: open ? `${C.gold}28` : `${C.teal}22`,
+          border: `1px solid ${open ? C.gold : C.teal + "80"}`,
+          borderRadius: 3,
           color: open ? C.gold : C.teal,
-          fontWeight: 600,
-          letterSpacing: "0.04em",
+          fontWeight: 700,
+          letterSpacing: "0.06em",
         }}>
-          D·{count || 0}
+          {count || 0} dataset{count === 1 ? "" : "s"}
         </span>
 
         {primary && (
@@ -270,7 +270,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
           top: "100%",
           left: 0,
           zIndex: 200,
-          width: 280,
+          width: 360,
           background: C.surface,
           border: `1px solid ${C.border2}`,
           borderTop: `2px solid ${C.gold}`,
