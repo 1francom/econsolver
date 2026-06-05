@@ -91,9 +91,107 @@ export function generateStataScript(config = {}) {
 }
 
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────
+function stVar(s) {
+  return String(s ?? "").replace(/[^a-zA-Z0-9_]/g, "_").replace(/^([0-9])/, "_$1").slice(0, 32);
+}
+
+function stStr(s) {
+  return `"${String(s ?? "").replace(/"/g, `""`)}"`;
+}
+
+function stValue(v, dtype = null) {
+  if (v === null || v === undefined) return ".";
+  if (dtype === "number" || typeof v === "number") {
+    const n = Number(v);
+    return isFinite(n) ? String(n) : ".";
+  }
+  return stStr(v);
+}
+
+function stWhere(where) {
+  if (!where?.col || !where?.op) return "1";
+  const c = stVar(where.col);
+  const v = where.value;
+  switch (where.op) {
+    case "equals": return `${c} == ${stValue(v)}`;
+    case "not_equals": return `${c} != ${stValue(v)}`;
+    case "contains": return `strpos(${c}, ${stStr(v ?? "")}) > 0`;
+    case "starts": return `substr(${c}, 1, length(${stStr(v ?? "")})) == ${stStr(v ?? "")}`;
+    case "ends": return `substr(${c}, -length(${stStr(v ?? "")}), .) == ${stStr(v ?? "")}`;
+    case "gt": return `${c} > ${Number(v)}`;
+    case "lt": return `${c} < ${Number(v)}`;
+    case "between": {
+      const lo = Number(Array.isArray(v) ? v[0] : v);
+      const hi = Number(Array.isArray(v) ? v[1] : v);
+      return `${c} >= ${lo} & ${c} <= ${hi}`;
+    }
+    case "empty": return `missing(${c}) | ${c} == ""`;
+    case "notempty": return `!missing(${c}) & ${c} != ""`;
+    default: return "1";
+  }
+}
+
+function isGridEditStep(step) {
+  return ["add_column", "add_row", "set_where", "replace", "str_splice"].includes(step.type);
+}
+
 function transpileStep(step, allDatasets = {}) {
   const { type, params = {} } = step;
   switch (type) {
+    case "add_column": {
+      const out = stVar(step.nn);
+      if (step.dtype === "number") return `gen double ${out} = ${stValue(step.fill, "number")}`;
+      return `gen strL ${out} = ${stValue(step.fill)}`;
+    }
+    case "add_row": {
+      const count = Math.max(1, Number(step.count) || 1);
+      const assigns = Object.entries(step.values || {})
+        .map(([k, v]) => `replace ${stVar(k)} = ${stValue(v)} in \`i'`);
+      return [
+        `* add_row: append ${count} synthetic row(s); unspecified columns remain missing`,
+        `local __oldN = _N`,
+        `set obs \`= _N + ${count}'`,
+        `forvalues i = \`= \`__oldN' + 1'/\`=_N' {`,
+        ...assigns.map(x => `  ${x}`),
+        `}`,
+      ].join("\n");
+    }
+    case "set_where": {
+      const target = stVar(step.col);
+      if (step.action === "clear") {
+        return [
+          `capture confirm string variable ${target}`,
+          `if !_rc replace ${target} = "" if ${stWhere(step.where)}`,
+          `else replace ${target} = . if ${stWhere(step.where)}`,
+        ].join("\n");
+      }
+      return `replace ${target} = ${stValue(step.value, step.dtype)} if ${stWhere(step.where)}`;
+    }
+    case "replace": {
+      const src = stVar(step.col);
+      const out = stVar(step.nn || step.col);
+      const mode = step.match?.mode || "exact";
+      const find = step.match?.find ?? "";
+      const repl = step.replaceWith ?? "";
+      const init = step.nn ? `capture confirm string variable ${src}\nif !_rc gen strL ${out} = ${src}\nelse gen double ${out} = ${src}\n` : "";
+      if (mode === "exact") return `${init}replace ${out} = ${stValue(repl)} if ${out} == ${stValue(find)}`;
+      if (mode === "contains") return `${init}replace ${out} = subinstr(${out}, ${stStr(find)}, ${stStr(repl)}, .)`;
+      return `${init}replace ${out} = regexr(${out}, ${stStr(find)}, ${stStr(repl)})`;
+    }
+    case "str_splice": {
+      const src = stVar(step.col);
+      const out = stVar(step.nn || step.col);
+      const pos = Number(step.position) || 1;
+      const n = Math.max(0, Number(step.count) || 0);
+      const text = stStr(step.text ?? "");
+      const init = step.nn
+        ? `gen strL ${out} = string(${src})\n`
+        : `capture confirm string variable ${out}\nif _rc tostring ${out}, replace force\n`;
+      const p = `cond(${pos} < 0, max(1, length(${out}) + ${pos} + 1), ${pos})`;
+      if (step.mode === "delete") return `${init}replace ${out} = substr(${out}, 1, ${p} - 1) + substr(${out}, ${p} + ${n}, .)`;
+      if (step.mode === "overwrite") return `${init}replace ${out} = substr(${out}, 1, ${p} - 1) + ${text} + substr(${out}, ${p} + ${n}, .)`;
+      return `${init}replace ${out} = substr(${out}, 1, ${p} - 1) + ${text} + substr(${out}, ${p}, .)`;
+    }
     case "rename":
       return `rename ${params.from} ${params.to}`;
     case "drop":
@@ -778,7 +876,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
   if (pipeline.length) {
     lines.push(`* ── Data pipeline ────────────────────────────────────────────────────────`);
     pipeline.forEach(step => {
-      const out = toStata(step, "df");
+      const out = isGridEditStep(step) ? transpileStep(step, opts.allDatasets ?? {}) : toStata(step, "df");
       if (Array.isArray(out)) out.forEach(l => lines.push(l));
       else if (out) lines.push(out);
     });
