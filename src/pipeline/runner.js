@@ -460,6 +460,23 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    case "distinct": {
+      // s.subset: string[] (cols to dedup on; empty = all)  s.keep: "first"|"last"
+      const cols = (Array.isArray(s.subset) && s.subset.length) ? s.subset : H;
+      const keep = s.keep === "last" ? "last" : "first";
+      const keyOf = r => JSON.stringify(cols.map(h => r[h] ?? null));
+      if (keep === "first") {
+        const seen = new Set();
+        R = rows.filter(r => { const k = keyOf(r); if (seen.has(k)) return false; seen.add(k); return true; });
+      } else {
+        const lastIdx = new Map();
+        rows.forEach((r, i) => lastIdx.set(keyOf(r), i));
+        const keepIdx = new Set(lastIdx.values());
+        R = rows.filter((_, i) => keepIdx.has(i));
+      }
+      break;
+    }
+
     // ── date_parse ────────────────────────────────────────────────────────────
     // Converts a raw date column (numeric YYYYMMDD, string YYYYMMDD, or any
     // JS-parseable string) into a normalised "YYYY-MM-DD" string in-place

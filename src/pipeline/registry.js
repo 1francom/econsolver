@@ -181,6 +181,22 @@ export const STEP_REGISTRY = [
   },
 
   {
+    type: "distinct",
+    label: "Distinct (drop duplicate rows)",
+    category: "cleaning",
+    description: "Remove duplicate rows. Optionally dedup on a subset of columns; keep first or last occurrence. Equivalent to dplyr distinct() / pandas drop_duplicates().",
+    schema: [
+      { key: "subset", type: "cols",   label: "Columns to dedup on (empty = all)" },
+      { key: "keep",   type: "select", label: "Keep", options: [
+        { value: "first", label: "First occurrence" },
+        { value: "last",  label: "Last occurrence" },
+      ]},
+    ],
+    toLabel: s => `distinct${(s.subset?.length) ? ` on ${s.subset.join(", ")}` : ""}`,
+    defaultStep: () => ({ type: "distinct", subset: [], keep: "first" }),
+  },
+
+  {
     type: "winz",
     label: "Winsorize",
     category: "cleaning",
