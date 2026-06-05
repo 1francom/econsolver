@@ -201,7 +201,7 @@ function ModelHistory({ history, onRestore, onClear }) {
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onCoachQuestion, onExtract, pid }) {
+export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onSessionStateChange, onCoachQuestion, onExtract, pid }) {
   const { C } = useTheme();
   const rows    = cleanedData?.cleanRows ?? [];
   const dict    = cleanedData?.dataDictionary ?? {};
@@ -465,6 +465,16 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
+
+  // Surface modeling session state (pinned models, subsets, inference) so the
+  // global AI coach sidebar can build a full session snapshot.
+  useEffect(() => {
+    onSessionStateChange?.({
+      pinnedModels,
+      subsets,
+      inferenceOpts: { seType, clusterVar, clusterVar2 },
+    });
+  }, [pinnedModels, subsets, seType, clusterVar, clusterVar2]);
 
   // B5: push non-null results to session history
   useEffect(() => {
