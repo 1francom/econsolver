@@ -111,6 +111,13 @@ Compute a group statistic and **broadcast it back to every row** as a new column
 1. New **Vector** sub-tab in MergeTab.
 2. New **Generate column** section in FeatureTab.
 
+**Shared UI component:** `src/components/wrangling/VectorAssignForm.jsx`.
+- Export `VectorAssignForm({ rows, headers, onAdd })` as the single custom form for both entry points. Do not duplicate Vector Join state or submit logic inside `MergeTab.jsx` or `FeatureTab.jsx`.
+- The component owns the local form state for output column name, raw values text, mode, seed, per-value weights, conditional rules, and conditional fallback.
+- It parses the values textarea on comma or newline, trims values, and drops empty entries before emitting the step.
+- On submit, it calls `onAdd({ type: "vector_assign", nn, values, mode, seed, ...modeSpecificFields, desc })`, with `weights` set only for `random`/`quota` and `rules`/`elseValue` set only for `conditional`.
+- It may import React hooks and wrangling shared UI helpers (`useTheme`, `mono`, `Lbl`, `Btn`), but all assignment math remains in `src/core/generate/vectorAssign.js`.
+
 ### Step shape
 ```js
 {
@@ -185,6 +192,7 @@ Note in each generated script that random/quota seeds reproduce EconSolver's ass
 - [ ] `src/core/generate/vectorAssign.js` — new pure engine (`assignVector`, `mulberry32`).
 - [ ] `src/pipeline/registry.js` — entries for all new steps; extend `join` `how` options.
 - [ ] `src/components/wrangling/MergeTab.jsx` — six join types + anti/semi UI handling; new Combine sub-tab; new Vector sub-tab.
+- [ ] `src/components/wrangling/VectorAssignForm.jsx` — shared Vector Join form consumed by MergeTab and FeatureTab.
 - [ ] `src/components/wrangling/CleanTab.jsx` — `distinct` UI.
 - [ ] `src/components/wrangling/ReshapeTab.jsx` — `group_transform` UI.
 - [ ] `src/components/wrangling/FeatureTab.jsx` — "Generate column" (vector_assign) section.
