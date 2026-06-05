@@ -50,16 +50,18 @@ src/
 │   ├── runner.js       ← applyStep + runPipeline — 23 step types
 │   ├── validator.js    ← validatePanel, buildInfo
 │   ├── registry.js     ← STEP_REGISTRY (must stay in sync with runner.js)
-│   └── auditor.js      ← auditPipeline → AuditTrail + markdown
+│   ├── auditor.js      ← auditPipeline → AuditTrail + markdown
+│   └── stepValidator.js ← validateAISteps (registry-checked validation of AI-emitted steps)
 │
 ├── services/
 │   ├── AI/
-│   │   ├── AIService.js          ← callClaude (exported), inferVariableUnits, interpretRegression
+│   │   ├── AIService.js          ← callClaude (exported), inferVariableUnits, interpretRegression, nlToPipeline
+│   │   ├── appCapabilityMap.js   ← serializeAllowedSteps (registry-derived NL step catalogue; future: serializeCapabilityMap)
 │   │   ├── LocalAI.js            ← local/offline AI fallback
 │   │   └── Prompts/
 │   │       └── index.js          ← SHARED_CONTEXT, INFER_UNITS_PROMPT, INTERPRET_REGRESSION_PROMPT,
 │   │                                WRANGLING_TRANSFORM_PROMPT, WRANGLING_QUERY_PROMPT,
-│   │                                CLEANING_SUGGESTIONS_PROMPT
+│   │                                CLEANING_SUGGESTIONS_PROMPT, NL_TO_PIPELINE_PROMPT
 │   ├── session/
 │   │   ├── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
 │   │   └── sessionLog.jsx        ← React Context cross-module operation log (SessionLogProvider, useSessionLog)
@@ -99,6 +101,7 @@ src/
 │   │   ├── DictionaryTab.jsx     ← AI inference + manual edit
 │   │   ├── MergeTab.jsx          ← LEFT/INNER JOIN + APPEND
 │   │   ├── DataQualityReport.jsx
+│   │   ├── NLCommandBar.jsx      ← AI command bar: NL → validated pipeline steps (preview/apply); mounted by WranglingModule
 │   │   ├── WorldBankFetcher.jsx  ← World Bank data fetch UI
 │   │   ├── OECDFetcher.jsx       ← OECD data fetch UI
 │   │   └── SubsetManager.jsx     ← multi-subset workflow UI
