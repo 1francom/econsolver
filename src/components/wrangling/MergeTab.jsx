@@ -14,8 +14,12 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   const [joins, setJoins]         = useState([emptyJoin()]);
   // APPEND state
   const [appendId, setAppendId]   = useState("");
+  const [combineId, setCombineId] = useState("");
+  const [combineOp, setCombineOp] = useState("union");
+  const [combineSuffix, setCombineSuffix] = useState("_r");
 
   const appendDs  = allDatasets.find(d => d.id === appendId);
+  const combineDs = allDatasets.find(d => d.id === combineId);
 
   const updateJoin = (i, patch) =>
     setJoins(js => js.map((j, k) => k === i ? { ...j, ...patch } : j));
@@ -74,6 +78,18 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
     };
   }, [appendDs, headers]);
 
+  const combinePreview = useMemo(() => {
+    if (!combineDs) return null;
+    const rH = combineDs.rawData.headers, rN = combineDs.rawData.rows.length;
+    const shared = headers.filter(h => rH.includes(h));
+    if (combineOp === "bind_cols") {
+      return { kind:"bind_cols", outRows: Math.min(rows.length, rN),
+        mismatch: rows.length !== rN, lN: rows.length, rN,
+        outCols: headers.length + rH.length };
+    }
+    return { kind:"set", shared, rN };
+  }, [combineDs, combineOp, headers, rows.length]);
+
   const completeJoins = joins.filter(j => j.rightId && j.leftKey && j.rightKey);
 
   function doJoinAll() {
@@ -91,6 +107,14 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
     onAdd({ type:"append", rightId:appendId,
       desc:`APPEND ${appendDs?.filename} (+${appendDs?.rawData?.rows?.length} rows)` });
     setAppendId("");
+  }
+  function doCombine() {
+    if (!combineId) return;
+    const base = { rightId: combineId };
+    if (combineOp === "bind_cols") base.suffix = combineSuffix;
+    onAdd({ type: combineOp, ...base,
+      desc: `${combineOp.toUpperCase()} ${combineDs?.filename}` });
+    setCombineId("");
   }
 
   const colBtnStyle = (sel, color) => ({
@@ -117,7 +141,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   return (
     <div>
       {/* ── Sub-tabs: JOIN / APPEND ── */}
-      <Tabs tabs={[["join","⊞ Join"],["append","⊕ Append"]]} active={subTab} set={setSubTab} accent={C.teal} sm/>
+      <Tabs tabs={[["join","⊞ Join"],["append","⊕ Append"],["combine","⊜ Combine"],["vector","⊕ Vector"]]} active={subTab} set={setSubTab} accent={C.teal} sm/>
 
       {/* ════════════ JOIN ════════════ */}
       {subTab==="join" && (
@@ -363,6 +387,75 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             </div>
             <Btn onClick={doAppend} color={C.violet} v="solid" ch="Add APPEND to pipeline →"/>
           </>)}
+        </div>
+      )}
+
+      {subTab==="combine" && (
+        <div>
+          <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
+            borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.2rem",
+            fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+            Set & bind operations against another dataset - dplyr <span style={{color:C.gold}}>bind_cols</span> /{" "}
+            <span style={{color:C.gold}}>union</span> / <span style={{color:C.gold}}>intersect</span> /{" "}
+            <span style={{color:C.gold}}>setdiff</span>.
+          </div>
+
+          <Lbl color={C.gold}>Operation</Lbl>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:"1.2rem"}}>
+            {[["union","Union (stack + dedup)"],["bind_cols","Bind columns (by position)"],
+              ["intersect","Intersect (rows in both)"],["setdiff","Set diff (rows not in other)"]].map(([k,l])=>(
+              <button key={k} onClick={()=>setCombineOp(k)}
+                style={{padding:"0.35rem 0.7rem",border:`1px solid ${combineOp===k?C.gold:C.border2}`,
+                  background:combineOp===k?`${C.gold}18`:"transparent",color:combineOp===k?C.gold:C.textDim,
+                  borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>
+                {combineOp===k?"✓ ":""}{l}
+              </button>
+            ))}
+          </div>
+
+          <Lbl color={C.gold}>Other dataset</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:"1.2rem"}}>
+            {allDatasets.map(d=>(
+              <button key={d.id} onClick={()=>setCombineId(d.id)}
+                style={{padding:"0.4rem 0.9rem",border:`1px solid ${combineId===d.id?C.gold:C.border2}`,
+                  background:combineId===d.id?`${C.gold}18`:"transparent",color:combineId===d.id?C.gold:C.textDim,
+                  borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>
+                {combineId===d.id?"✓ ":""}{d.filename}
+                <span style={{fontSize:9,color:C.textMuted,marginLeft:6}}>
+                  {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {combineOp==="bind_cols" && (
+            <div style={{marginBottom:"1rem"}}>
+              <Lbl color={C.textDim}>Suffix for column conflicts</Lbl>
+              <input value={combineSuffix} onChange={e=>setCombineSuffix(e.target.value)} placeholder="_r"
+                style={{padding:"0.35rem 0.55rem",background:C.surface2,border:`1px solid ${C.border2}`,
+                  borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+            </div>
+          )}
+
+          {combinePreview && (
+            <div style={{padding:"0.55rem 0.8rem",background:C.surface2,border:`1px solid ${C.border}`,
+              borderRadius:4,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.6}}>
+              {combinePreview.kind==="bind_cols" ? (<>
+                Result: <span style={{color:C.gold}}>{combinePreview.outRows.toLocaleString()}</span> rows ×{" "}
+                <span style={{color:C.gold}}>{combinePreview.outCols}</span> cols
+                {combinePreview.mismatch && (
+                  <div style={{color:C.yellow,marginTop:4}}>
+                    Row counts differ ({combinePreview.lN.toLocaleString()} vs {combinePreview.rN.toLocaleString()}) - truncated to shorter.
+                  </div>
+                )}
+              </>) : (<>
+                Matched on shared columns: <span style={{color:C.gold}}>{combinePreview.shared.join(", ") || "(none - no overlap!)"}</span>
+              </>)}
+            </div>
+          )}
+
+          <Btn onClick={doCombine} color={C.gold} v="solid" dis={!combineId}
+            ch={`Add ${combineOp.toUpperCase()} to pipeline →`}/>
         </div>
       )}
 
