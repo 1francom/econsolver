@@ -1598,6 +1598,39 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
   );
 }
 
+function DistinctSection({ headers, onAdd, C }) {
+  const [subset, setSubset] = useState([]);
+  const [keep, setKeep] = useState("first");
+  const toggle = h => setSubset(s => s.includes(h) ? s.filter(x=>x!==h) : [...s, h]);
+  return (
+    <div style={{marginBottom:"1.2rem"}}>
+      <Lbl color={C.teal}>Distinct - drop duplicate rows</Lbl>
+      <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:6}}>
+        Select columns to dedup on (none = entire row).
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+        {headers.map(h=>(
+          <button key={h} onClick={()=>toggle(h)}
+            style={{padding:"0.2rem 0.5rem",border:`1px solid ${subset.includes(h)?C.teal:C.border2}`,
+              background:subset.includes(h)?`${C.teal}18`:"transparent",color:subset.includes(h)?C.teal:C.textDim,
+              borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{h}</button>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        {[["first","Keep first"],["last","Keep last"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setKeep(k)}
+            style={{padding:"0.25rem 0.6rem",border:`1px solid ${keep===k?C.teal:C.border2}`,
+              background:keep===k?`${C.teal}18`:"transparent",color:keep===k?C.teal:C.textDim,
+              borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{l}</button>
+        ))}
+        <span style={{flex:1}}/>
+        <Btn onClick={()=>onAdd({type:"distinct",subset,keep,desc:`distinct${subset.length?` on ${subset.join(", ")}`:""}`})}
+          color={C.teal} v="solid" ch="Add distinct ->"/>
+      </div>
+    </div>
+  );
+}
+
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
 function CleanTab({rows,headers,info,rawData,onAdd}){
   const { C } = useTheme();
@@ -1682,6 +1715,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
       )}
       {/* ─ Smart Clean ─ */}
       <SmartCleanSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
+      <DistinctSection headers={headers} onAdd={onAdd} C={C}/>
       {/* Standalone filter button */}
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.9rem"}}>
         <Lbl mb={0}>Columns <span style={{color:C.textMuted}}>({headers.length})</span></Lbl>
