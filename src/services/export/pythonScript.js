@@ -122,6 +122,14 @@ function buildPackageList(modelType, pipeline = []) {
   return pkgs;
 }
 
+function pyStr(s) {
+  return JSON.stringify(String(s ?? ""));
+}
+
+function pyList(arr) {
+  return `[${(arr ?? []).map(pyStr).join(", ")}]`;
+}
+
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────
 function transpileStep(step, allDatasets = {}) {
   const { type, params = {} } = step;
@@ -241,8 +249,14 @@ function transpileStep(step, allDatasets = {}) {
       return `# normalize_cats: manual step`;
     case "extract_regex":
       return `df["${params.newCol}"] = df["${params.col}"].str.extract(r"${params.regex}")`;
+    case "distinct": {
+      const subset = step.subset ?? params.subset ?? [];
+      const keep = step.keep ?? params.keep ?? "first";
+      const subsetArg = subset.length ? `subset=${pyList(subset)}, ` : "";
+      return `df = df.drop_duplicates(${subsetArg}keep=${pyStr(keep)}).reset_index(drop=True)`;
+    }
     case "join": {
-      const how      = step.how === "inner" ? "inner" : "left";
+      const how      = step.how || "left";
       const lk       = step.leftKey  ?? "id";
       const rk       = step.rightKey ?? lk;
       const sfx      = step.suffix   ?? "_r";
@@ -250,10 +264,21 @@ function transpileStep(step, allDatasets = {}) {
       const byExpr   = lk === rk
         ? `on="${lk}"`
         : `left_on="${lk}", right_on="${rk}"`;
+      if (how === "semi" || how === "anti") {
+        const keepExpr = how === "semi"
+          ? `df["${lk}"].isin(df_right["${rk}"])`
+          : `~df["${lk}"].isin(df_right["${rk}"])`;
+        return [
+          `# ${how} join: filter rows using right dataset "${rightName}"`,
+          `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
+          `df = df[${keepExpr}].reset_index(drop=True)`,
+        ].join("\n");
+      }
+      const pyHow = { left:"left", inner:"inner", right:"right", full:"outer" }[how] ?? "left";
       return [
         `# Join: load right dataset "${rightName}" and merge on ${lk}`,
         `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
-        `df = df.merge(df_right, ${byExpr}, how="${how}", suffixes=("", "${sfx}"))`,
+        `df = df.merge(df_right, ${byExpr}, how="${pyHow}", suffixes=("", "${sfx}"))`,
       ].join("\n");
     }
     case "append": {
@@ -263,6 +288,55 @@ function transpileStep(step, allDatasets = {}) {
         `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
         `df = pd.concat([df, df_right], ignore_index=True)`,
       ].join("\n");
+    }
+    case "bind_cols": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      return [
+        `# bind_cols: align rows by current order from right dataset "${rightName}"`,
+        `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
+        `df = pd.concat([df.reset_index(drop=True), df_right.reset_index(drop=True)], axis=1)`,
+      ].join("\n");
+    }
+    case "union":
+    case "intersect":
+    case "setdiff": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      const load = [
+        `# ${type}: compare with right dataset "${rightName}"`,
+        `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
+      ];
+      if (type === "union") {
+        return [...load, `df = pd.concat([df, df_right], ignore_index=True).drop_duplicates().reset_index(drop=True)`].join("\n");
+      }
+      if (type === "intersect") {
+        return [...load, `df = df.merge(df_right, how="inner").drop_duplicates().reset_index(drop=True)`].join("\n");
+      }
+      return [...load, `df = df.merge(df_right, how="left", indicator=True).query('_merge == "left_only"').drop(columns="_merge").reset_index(drop=True)`].join("\n");
+    }
+    case "group_transform": {
+      const by = step.by ?? params.by ?? [];
+      const col = step.col ?? params.col ?? by[0] ?? "";
+      const out = step.nn ?? params.nn ?? `${step.fn ?? params.fn}_${col}`;
+      const fn = step.fn ?? params.fn ?? "mean";
+      const group = `df.groupby(${pyList(by)})["${col}"]`;
+      if (fn === "count") return `df["${out}"] = ${group}.transform("size")`;
+      if (fn === "sd") return `df["${out}"] = ${group}.transform("std")`;
+      if (fn === "rank") return `df["${out}"] = ${group}.transform(lambda s: s.rank(method="min"))`;
+      return `df["${out}"] = ${group}.transform("${fn}")`;
+    }
+    case "vector_assign": {
+      const vals = pyList(step.values ?? []);
+      const out = step.nn ?? "assigned";
+      const seed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      if (step.mode === "recycle") return `df["${out}"] = np.resize(${vals}, len(df))`;
+      if (step.mode === "conditional") {
+        const conds = (step.rules || []).map(r => `df.eval(${pyStr(r.expr)})`).join(", ");
+        const choices = (step.rules || []).map(r => pyStr(r.value)).join(", ");
+        return `df["${out}"] = np.select([${conds}], [${choices}], default=${pyStr(step.elseValue ?? "")})`;
+      }
+      const weights = Array.isArray(step.weights) ? step.weights.join(", ") : "";
+      const p = weights ? `, p=np.array([${weights}]) / np.sum([${weights}])` : "";
+      return `# NOTE: EconSolver uses a seeded mulberry32 RNG; exported values differ but the distribution matches\ndf["${out}"] = np.random.default_rng(${seed}).choice(${vals}, size=len(df)${p})`;
     }
     case "ai_tr": {
       const col    = step.col ?? "col";
