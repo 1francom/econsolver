@@ -29,7 +29,7 @@ import {
   buildMetadataContext,
 } from "./Prompts/index.js";
 import { serializeSnapshot, loadOptsToScriptHint } from "./sessionSnapshot.js";
-import { serializeAllowedSteps } from "./appCapabilityMap.js";
+import { serializeAllowedSteps, serializeCapabilityMap } from "./appCapabilityMap.js";
 import { filterVariableNames } from "../Privacy/privacyFilter.js";
 import { getSession } from "../auth/authService.js";
 
@@ -38,6 +38,13 @@ const MODEL         = "claude-sonnet-4-6";        // orchestrator: narratives, c
 const MODEL_FAST    = "claude-haiku-4-5-20251001"; // unit inference — cheap, fast
 const MODEL_ADVISOR = "claude-opus-4-7";           // specialist: focused technical sub-questions
 const MAX_TOK       = 700;
+
+// Static app capability map — built once, sent as a cached block to the coach.
+let _capabilityMapCache = null;
+function getCapabilityMap() {
+  if (_capabilityMapCache == null) _capabilityMapCache = serializeCapabilityMap();
+  return _capabilityMapCache;
+}
 
 // ── API routing ───────────────────────────────────────────────────────────────
 // VITE_AI_PROXY_ENABLED=true  → /api/anthropic Vercel Function (key never reaches browser)
@@ -180,10 +187,11 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
 // anthropic-beta header). Parses the Anthropic SSE stream and forwards each text
 // delta to onText. Honors an AbortController signal — on abort, resolves with the
 // partial text accumulated so far (abort is NOT thrown as an error).
-export async function streamClaude({ system, messages, maxTokens = MAX_TOK, model = MODEL, signal, onText }) {
+export async function streamClaude({ system, messages, maxTokens = MAX_TOK, model = MODEL, signal, onText, extraCached = null }) {
   const systemArray = [
     { type: "text", text: SHARED_CONTEXT, cache_control: { type: "ephemeral" } },
   ];
+  if (extraCached) systemArray.push({ type: "text", text: extraCached, cache_control: { type: "ephemeral" } });
   if (system) systemArray.push({ type: "text", text: system });
 
   const body = {
@@ -873,13 +881,22 @@ function _serializeModelContext(result, dataDictionary) {
   return lines.join("\n");
 }
 
-export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, signal = undefined, onText = undefined }) {
+function _specialistSnapshotLine(snapshot) {
+  if (!snapshot) return "";
+  const steps  = snapshot.pipeline?.length ? `${snapshot.pipeline.length} pipeline steps` : "no pipeline";
+  const se     = snapshot.inferenceOpts?.seType ? `, SE=${snapshot.inferenceOpts.seType}` : "";
+  const pinned = snapshot.pinnedModels?.length ? `, ${snapshot.pinnedModels.length} pinned models` : "";
+  return `\nSESSION: ${steps}${se}${pinned}.`;
+}
+
+export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, snapshot = null, signal = undefined, onText = undefined }) {
   if (!question?.trim()) return "";
 
   const modelContext  = _serializeModelContext(modelResult, dataDictionary);
   const taskPrompt    = RESEARCH_COACH_PROMPT.replace(SHARED_CONTEXT, "").trim();
   const metaCtx       = metadataReport ? "\n" + buildMetadataContext(metadataReport) : "";
-  const contextPrefix = `MODEL CONTEXT:\n${modelContext}${metaCtx}\n\n────────────────────────────\n`;
+  const snapshotBlk   = snapshot ? "\nSESSION CONTEXT:\n" + serializeSnapshot(snapshot) + "\n" : "";
+  const contextPrefix = `MODEL CONTEXT:\n${modelContext}${metaCtx}${snapshotBlk}\n\n────────────────────────────\n`;
 
   try {
     // ── Step 1: Opus specialist — focused technical sub-question (≤250 tokens) ─
@@ -887,7 +904,7 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
     // Short prompt + short answer → cheap. Sonnet uses this insight to write better.
     const opusInsight = await callClaude({
       system: "You are a specialist econometrician advising a PhD researcher. Given the research context below, identify and answer the single most important technical or methodological concern in the question. Focus on identification strategy, causal assumptions, instrument validity, or statistical interpretation. Be direct and specific. Maximum 3 sentences.",
-      user:   `RESEARCH CONTEXT:\n${modelContext}\n\nRESEARCHER QUESTION: ${question.trim()}`,
+      user:   `RESEARCH CONTEXT:\n${modelContext}${_specialistSnapshotLine(snapshot)}\n\nRESEARCHER QUESTION: ${question.trim()}`,
       maxTokens: 250,
       model: MODEL_ADVISOR,
     }).catch(() => null); // non-fatal — Sonnet proceeds without it if Opus fails
@@ -915,7 +932,7 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
       : textContent;
     apiMessages.push({ role: "user", content: newContent });
 
-    return await streamClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 800, signal, onText });
+    return await streamClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 800, signal, onText, extraCached: getCapabilityMap() });
   } catch (err) {
     if (err.message === "PREMIUM_REQUIRED") throw err; // let caller handle the gate
     console.warn("[AIService] researchCoach failed:", err.message);
