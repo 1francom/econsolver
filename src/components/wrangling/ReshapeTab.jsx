@@ -2,6 +2,48 @@
 import { useState, useMemo } from "react";
 import { useTheme, mono, Lbl, Tabs, Btn } from "./shared.jsx";
 
+function GroupTransformSection({ headers, onAdd, C }) {
+  const [by, setBy]   = useState([]);
+  const [col, setCol] = useState("");
+  const [fn, setFn]   = useState("mean");
+  const [nn, setNn]   = useState("");
+  const toggle = h => setBy(s => s.includes(h) ? s.filter(x=>x!==h) : [...s, h]);
+  const auto = `${fn}_${col}_by_${by.join("_")}`;
+  return (
+    <div style={{marginBottom:"1.2rem"}}>
+      <Lbl color={C.gold}>Group transform - broadcast a group stat back to every row</Lbl>
+      <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:6}}>
+        Like group_by() |&gt; mutate(): adds a column, keeps all rows.
+      </div>
+      <Lbl color={C.gold}>Group by</Lbl>
+      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+        {headers.map(h=>(
+          <button key={h} onClick={()=>toggle(h)}
+            style={{padding:"0.2rem 0.5rem",border:`1px solid ${by.includes(h)?C.gold:C.border2}`,
+              background:by.includes(h)?`${C.gold}18`:"transparent",color:by.includes(h)?C.gold:C.textDim,
+              borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{h}</button>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+        <select value={col} onChange={e=>setCol(e.target.value)}
+          style={{padding:"0.3rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11}}>
+          <option value="">- column -</option>
+          {headers.map(h=><option key={h} value={h}>{h}</option>)}
+        </select>
+        <select value={fn} onChange={e=>setFn(e.target.value)}
+          style={{padding:"0.3rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11}}>
+          {["mean","sum","sd","min","max","count","median","rank"].map(f=><option key={f} value={f}>{f}</option>)}
+        </select>
+        <input value={nn} onChange={e=>setNn(e.target.value)} placeholder={auto}
+          style={{flex:1,minWidth:120,padding:"0.3rem 0.5rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+      </div>
+      <Btn onClick={()=>onAdd({type:"group_transform",by,col,fn,nn:nn||auto,
+        desc:`group_transform ${fn}(${col}) by ${by.join(", ")} -> ${nn||auto}`})}
+        color={C.gold} v="solid" dis={!col||!by.length} ch="Add group transform ->"/>
+    </div>
+  );
+}
+
 // ─── RESHAPE TAB ──────────────────────────────────────────────────────────────
 // pivot_longer (wide→long) + sort rows.
 // Group & Summarize lives in ExplorerModule for non-destructive descriptive stats.
@@ -548,6 +590,8 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
             borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
             Collapse rows to one row per group and compute summary statistics.
           </div>
+
+          <GroupTransformSection headers={headers} onAdd={onAdd} C={C}/>
 
           <Lbl color={C.gold}>Group by</Lbl>
           <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem",
