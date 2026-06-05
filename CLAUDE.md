@@ -204,11 +204,11 @@ src/
 | Synthetic Control | SyntheticControlEngine.js | ✓ validated vs R Synth package (weights 2dp, gaps 2dp) — Frank-Wolfe vs ipop; hard benchmarks in engineValidation.js |
 | Sun & Abraham (2021) event study | NonLinearEngine.js (`runSunAbraham`) | ✓ validated vs R fixest::fepois + sunab() (coef 6dp, SE 4dp) — IW per-relative-period aggregation w/ delta-method clustered SE; single-cohort reduces exactly to Poisson TWFE `i(rel)`. Harness: `sunAbrahamRValidation.R` → `sunAbrahamBenchmarks.json` → `sunAbrahamValidation.js`. Clustered SE uses sandwich convention = fixest `ssc(fixef.K="none")`; differs from fixest default `nested` by a known df factor (~1-2%) |
 
-## Pipeline step types (runner.js) — 23 total
-Cleaning: `rename, drop, filter, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr`
-Features: `log, sq, std, dummy, lag, lead, diff, ix, did, date_parse, date_extract, mutate, factor_interactions`
-Reshape: `arrange, group_summarize, pivot_longer`
-Merge: `join, append`
+## Pipeline step types (runner.js) — 30 total
+Cleaning: `rename, drop, filter, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr, distinct`
+Features: `log, sq, std, dummy, lag, lead, diff, ix, did, date_parse, date_extract, mutate, factor_interactions, vector_assign`
+Reshape: `arrange, group_summarize, group_transform, pivot_longer`
+Merge: `join` (`left, inner, right, full, semi, anti`), `append, bind_cols, union, intersect, setdiff`
 
 **Registry must stay in sync with runner.js at all times.**
 
