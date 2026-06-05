@@ -6,6 +6,7 @@ const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import FormatTab from "./FormatTab.jsx";
 import VectorAssignForm from "./VectorAssignForm.jsx";
+import { isSafeExpr } from "../../pipeline/exprGuard.js";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
 // dplyr-style free-form expression evaluator.
@@ -93,6 +94,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
   // Live preview — tracks active step
   const preview=useMemo(()=>{
     const e=activeExpr.trim();if(!e)return null;
+    if(!isSafeExpr(e))return{error:"Disallowed identifier (e.g. fetch, localStorage, constructor)",vals:[],grouped:false};
     if(!isGrouped){
       const pN=[...Object.keys(ROW_H),"row",...safeH];
       let fn;try{fn=new Function(...pN,`"use strict";return(${e});`);}catch(err){return{error:`Syntax: ${err.message}`,vals:[],grouped:false};}

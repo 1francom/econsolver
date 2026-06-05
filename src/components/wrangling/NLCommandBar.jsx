@@ -74,11 +74,21 @@ export default function NLCommandBar({ rows = [], headers = [], onAddSteps }) {
           <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, marginBottom: 6 }}>
             {result.interpretation}
           </div>
-          {result.valid.map((s, i) => (
-            <div key={`v${i}`} style={{ fontSize: 11, color: C.green, fontFamily: mono }}>
-              ✓ {i + 1}. {s.type} — {s.desc ?? ""}
-            </div>
-          ))}
+          {result.valid.map((s, i) => {
+            // Surface any dynamic expression so the user sees exactly what will run.
+            const code = s.expr ?? s.cond
+              ?? (Array.isArray(s.rules) ? s.rules.map(r => r.expr).filter(Boolean).join(" ; ") : null);
+            return (
+              <div key={`v${i}`} style={{ fontSize: 11, color: C.green, fontFamily: mono }}>
+                ✓ {i + 1}. {s.type} — {s.desc ?? ""}
+                {code && (
+                  <div style={{ color: C.textMuted, fontSize: 10, marginLeft: 14, wordBreak: "break-all" }}>
+                    ↳ {String(code).slice(0, 200)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           {result.rejected.map((r, i) => (
             <div key={`r${i}`} style={{ fontSize: 11, color: C.yellow, fontFamily: mono }}>
               ✗ {r.step?.type ?? "?"} — {r.reason}
