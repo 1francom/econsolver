@@ -2334,6 +2334,7 @@ export default function App() {
                 onTabChange={navigateToTab}
                 hasOutput={!!tabOutput(activeTab)}
                 activeDatasetId={tabDsId(activeTab)}
+                pid={pid}
                 onSelectDataset={id => selectDataset(activeTab, id, activeTab === "clean")}
                 onRemoveDataset={id => {
                   studioRef.current?.removeDatasetLocal(id);
@@ -2430,7 +2431,7 @@ export default function App() {
                         onSessionStateChange={setModelingSession}
                         onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
                         onExtract={(colName, values) => studioRef.current?.addInjectColumnStep?.(colName, values)}
-                        pid={tabDsId("model")}
+                        pid={pid}
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
