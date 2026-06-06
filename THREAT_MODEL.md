@@ -175,6 +175,16 @@ These risks do not exist yet but **must be addressed before any backend code is 
 - If datasets are ever stored server-side: validate MIME type + magic bytes (not just extension), enforce per-user storage quotas, never execute uploaded content
 - **Prefer keeping datasets client-side** — this is the privacy-first promise; push computation to the browser
 
+### 4.2a Opt-in E2EE Cloud Sync
+
+- Cloud sync is opt-in per project. Plaintext artifacts stay in the browser; Supabase stores only AES-256-GCM ciphertext blobs, encrypted manifests, salt, and encrypted verifier material.
+- The sync passphrase and derived key are never sent to Supabase and are not logged. The key lives in memory for the browser session; recovery export is a user-held raw key file.
+- KDF/cipher boundary: `src/services/sync/crypto.js` is the only crypto module and uses WebCrypto PBKDF2-SHA-256 (310k iterations or higher) plus random 12-byte AES-GCM IVs per blob.
+- Server visibility: Supabase can see authenticated user id, project pid, object paths, blob sizes, timestamps, and versions. It cannot decrypt project metadata, raw data, pipelines, workbench state, model buffers, spatial maps, or coach chats.
+- RLS boundary: `synced_projects` rows are owner-scoped, and `synced-blobs` storage policies restrict object paths to the authenticated user's `auth.uid()/` prefix. Migration apply and advisor review remain pending Franco review.
+- Untrusted-pull guard: every decrypted pipeline is treated as hostile input and must pass `pipeline/exprGuard.assertSafeExpr` over `expr`, `cond`, `cases[].cond`, `rules[].expr`, and `js` before any IndexedDB write.
+- Sharing/key exchange is out of scope for Phase 4a-1 and must not be inferred from this model.
+
 ### 4.3 Server-Side Expression Evaluation
 
 - Never evaluate `mutate`/pipeline expressions server-side

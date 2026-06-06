@@ -87,6 +87,7 @@ src/
 │   ├── Persistence/
 │   │   ├── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage; coach_chats store; v9 model_buffer + spatial_maps stores (save/load/delete per project; cascade on deleteProject)
 │   │   └── trimResult.js         ← shared comparison-sufficient EstimationResult projection (modelBuffer + sessionSnapshot)
+│   ├── sync/                     ← opt-in E2EE cloud sync: crypto.js only for WebCrypto, syncEngine.js/supabaseClient.js only for Supabase egress
 │   └── modelBuffer.js            ← model buffer state management
 │
 ├── components/
@@ -286,7 +287,7 @@ Fase 8 supplement (2026-05-21): the Fase 3a/3c robust-SE guards above are lifted
 **Problem:** tab/module transitions take ~15 s with large datasets (900 k rows). Root cause: JS object allocation + React re-renders on the full table, not SQL performance.
 
 **Non-starters (break privacy-first constraint):**
-- Any server-side computation (DuckDB on server, Postgres, ClickHouse, BigQuery) — dataset never leaves the browser.
+- Any server-side computation (DuckDB on server, Postgres, ClickHouse, BigQuery) — plaintext data never leaves the browser; opt-in cloud uploads only client-side-encrypted blobs the server can't decrypt.
 
 **Agreed rules (enforce in all new code):**
 

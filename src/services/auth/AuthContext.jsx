@@ -4,6 +4,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { getSession, onAuthStateChange, getTier } from "./authService.js";
 import { setCurrentUser } from "../Persistence/indexedDB.js";
+import { clearSession, listCloudProjects } from "../sync/syncEngine.js";
 
 const AuthContext = createContext(null);
 
@@ -17,7 +18,24 @@ export function AuthProvider({ children }) {
     const u = s?.user ?? null;
     setUser(u);
     setCurrentUser(u?.id ?? null);
-    setTier(u ? await getTier(u.id) : "free");
+    if (!u) {
+      clearSession();
+      setTier("free");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("econsolver:cloud-logout"));
+      }
+      return;
+    }
+
+    setTier(await getTier(u.id));
+    try {
+      const projects = await listCloudProjects();
+      if (projects.length && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("econsolver:cloud-login", { detail: { projects } }));
+      }
+    } catch {
+      // Cloud sync may not be configured or the migration may still be pending.
+    }
   }
 
   useEffect(() => {

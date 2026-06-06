@@ -271,6 +271,26 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
     return () => { cancelled = true; };
   }, [user?.id, primaryDatasetId]);
 
+  useEffect(() => {
+    function onCloudLogin(e) {
+      const projects = Array.isArray(e.detail?.projects) ? e.detail.projects : [];
+      setCloudProjects(projects);
+      if (projects.length && !hasSyncSession()) setUnlockOpen(true);
+      refreshCloudState();
+    }
+    function onCloudLogout() {
+      setUnlocked(false);
+      setUnlockOpen(false);
+      setRestoreOpen(false);
+    }
+    window.addEventListener("econsolver:cloud-login", onCloudLogin);
+    window.addEventListener("econsolver:cloud-logout", onCloudLogout);
+    return () => {
+      window.removeEventListener("econsolver:cloud-login", onCloudLogin);
+      window.removeEventListener("econsolver:cloud-logout", onCloudLogout);
+    };
+  }, []);
+
   function syncLabel() {
     if (!user) return "offline";
     if (!syncMeta.published) return "local";
