@@ -19,6 +19,7 @@ import {
   lockSession,
   hasSyncSession,
 } from "../../services/sync/syncEngine.js";
+import { createShare, listMyShares, revokeShare } from "../../services/sync/shareEngine.js";
 import { getSyncMeta, listProjects } from "../../services/Persistence/indexedDB.js";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
@@ -211,6 +212,14 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [conflictOpen, setConflictOpen] = useState(false);
   const [unlocked, setUnlocked] = useState(hasSyncSession());
+  // ── Share state ──────────────────────────────────────────────────────────────
+  const [shareOpen,    setShareOpen]    = useState(false);
+  const [shareEmail,   setShareEmail]   = useState("");
+  const [shareCanEdit, setShareCanEdit] = useState(false);
+  const [shareResult,  setShareResult]  = useState(null); // { shareUrl, shareId }
+  const [shareBusy,    setShareBusy]    = useState(false);
+  const [shareErr,     setShareErr]     = useState("");
+  const [myShares,     setMyShares]     = useState([]);
   const ref = useRef();
 
   // Close on outside click
@@ -379,6 +388,40 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
   async function chooseConflict(choice) {
     await runSyncAction(() => resolveConflict(pid, choice));
     setConflictOpen(false);
+  }
+
+  // ── Share handlers ───────────────────────────────────────────────────────────
+  async function openSharePanel() {
+    setShareOpen(true);
+    setShareResult(null);
+    setShareErr("");
+    if (pid) {
+      try { setMyShares(await listMyShares(pid)); } catch { setMyShares([]); }
+    }
+  }
+
+  async function handleCreateShare() {
+    if (!shareEmail.trim() || !pid) return;
+    setShareBusy(true);
+    setShareErr("");
+    try {
+      const result = await createShare(pid, shareEmail.trim(), shareCanEdit);
+      setShareResult(result);
+      setMyShares(await listMyShares(pid));
+    } catch (e) {
+      setShareErr(e?.message ?? "Share failed.");
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function handleRevokeShare(shareId) {
+    try {
+      await revokeShare(shareId);
+      setMyShares(await listMyShares(pid));
+    } catch (e) {
+      setShareErr(e?.message ?? "Revoke failed.");
+    }
   }
 
   // ── Dispatch helpers ────────────────────────────────────────────────────────
@@ -568,6 +611,22 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                       Resolve
                     </button>
                   )}
+                  <button
+                    onClick={openSharePanel}
+                    disabled={!user}
+                    style={{
+                      padding: "0.24rem 0.52rem",
+                      background: `${C.blue}18`,
+                      border: `1px solid ${C.blue}`,
+                      borderRadius: 3,
+                      color: C.blue,
+                      cursor: "pointer",
+                      fontFamily: mono,
+                      fontSize: 9,
+                    }}
+                  >
+                    Share →
+                  </button>
                   <button
                     onClick={() => runSyncAction(() => unpublish(pid))}
                     disabled={syncBusy}
@@ -953,6 +1012,108 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
             <button onClick={() => chooseConflict("keep-cloud")} style={{ padding: "0.42rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>Keep cloud</button>
             <button onClick={() => chooseConflict("fork")} style={{ padding: "0.42rem 0.75rem", background: `${C.gold}16`, border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>Keep both</button>
           </div>
+        </CloudModal>
+      )}
+
+      {/* ── Share modal ── */}
+      {shareOpen && (
+        <CloudModal C={C} onClose={() => { setShareOpen(false); setShareResult(null); setShareErr(""); setShareEmail(""); }}>
+          <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, color: C.blue, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 4 }}>
+              Share project
+            </div>
+            <div style={{ fontSize: 10, color: C.textMuted }}>
+              An encrypted copy is created. The recipient imports it on their device.
+            </div>
+          </div>
+
+          {!shareResult ? (
+            <div style={{ padding: "1rem 1.1rem", display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Recipient email</div>
+                <input
+                  type="email"
+                  value={shareEmail}
+                  onChange={e => setShareEmail(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") handleCreateShare(); }}
+                  placeholder="colleague@university.edu"
+                  style={{ width: "100%", padding: "0.45rem 0.6rem", fontFamily: mono, fontSize: 11, background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, outline: "none", boxSizing: "border-box" }}
+                  onFocus={e => e.target.style.borderColor = C.blue}
+                  onBlur={e => e.target.style.borderColor = C.border2}
+                />
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 10, color: C.textDim }}>
+                <input
+                  type="checkbox"
+                  checked={shareCanEdit}
+                  onChange={e => setShareCanEdit(e.target.checked)}
+                  style={{ accentColor: C.blue }}
+                />
+                Allow recipient to edit
+              </label>
+              {shareErr && <div style={{ fontSize: 10, color: "#e07070" }}>{shareErr}</div>}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button
+                  onClick={handleCreateShare}
+                  disabled={shareBusy || !shareEmail.trim()}
+                  style={{ padding: "0.42rem 1rem", background: shareBusy || !shareEmail.trim() ? C.surface2 : C.blue, border: "none", borderRadius: 3, color: shareBusy || !shareEmail.trim() ? C.textMuted : "#fff", cursor: "pointer", fontFamily: mono, fontSize: 10, fontWeight: 700 }}
+                >
+                  {shareBusy ? "Creating share…" : "Create share link"}
+                </button>
+              </div>
+
+              {/* Existing shares */}
+              {myShares.length > 0 && (
+                <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+                  <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>Active shares</div>
+                  {myShares.map(s => (
+                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.3rem 0", borderBottom: `1px solid ${C.border}` }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 10, color: C.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.recipient_email}</div>
+                        <div style={{ fontSize: 9, color: C.textMuted }}>{s.can_edit ? "can edit" : "view only"}</div>
+                      </div>
+                      <button
+                        onClick={() => handleRevokeShare(s.id)}
+                        title="Revoke share"
+                        style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "0 2px" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#e07070"}
+                        onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ padding: "1rem 1.1rem", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 10, color: C.teal }}>✓ Share created for {shareEmail}</div>
+              <div>
+                <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 5 }}>Share link — send this to the recipient:</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    readOnly
+                    value={shareResult.shareUrl}
+                    style={{ flex: 1, padding: "0.4rem 0.55rem", fontFamily: mono, fontSize: 10, background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, outline: "none" }}
+                    onFocus={e => e.target.select()}
+                  />
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(shareResult.shareUrl)}
+                    style={{ padding: "0.4rem 0.7rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: C.teal, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+                  >Copy</button>
+                </div>
+              </div>
+              <a
+                href={`mailto:${shareEmail}?subject=Litux project shared with you&body=I shared a research project with you on Litux.%0D%0AOpen this link to import it:%0D%0A%0D%0A${encodeURIComponent(shareResult.shareUrl)}%0D%0A%0D%0AYou will need to sign in (or create a free account) to access it.`}
+                style={{ fontSize: 10, color: C.blue, textDecoration: "none" }}
+              >
+                ✉ Open in email client →
+              </a>
+              <button
+                onClick={() => { setShareResult(null); setShareEmail(""); setShareCanEdit(false); }}
+                style={{ alignSelf: "flex-end", padding: "0.32rem 0.8rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+              >Share another</button>
+            </div>
+          )}
         </CloudModal>
       )}
     </div>

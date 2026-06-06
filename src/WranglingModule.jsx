@@ -59,7 +59,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const [pipeline,         setPipeline]        = useState([]);
   const [panel,            setPanel]            = useState(null);
   const [dataDictionary,   setDataDictionary]   = useState(null);
-  const [tab,              setTab]              = useState("clean");
+  const [tab,              setTab]              = useState(() => sessionStorage.getItem(`litux:wrangle_tab:${pid}`) || "clean");
+  // Persist active sub-tab so refresh restores to the same wrangling view.
+  useEffect(() => { sessionStorage.setItem(`litux:wrangle_tab:${pid}`, tab); }, [tab, pid]);
   const [idbReady,         setIdbReady]         = useState(false);
   const [auditTrail,       setAuditTrail]       = useState(null);
   const [branchPointIndex, setBranchPointIndex] = useState(null);
