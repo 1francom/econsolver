@@ -134,6 +134,14 @@ export async function importRecoveryKey(rawKeyB64) {
   );
 }
 
+export async function sha256B64(bytes) {
+  if (!(bytes instanceof Uint8Array)) {
+    bytes = new Uint8Array(bytes);
+  }
+  const digest = await getCrypto().subtle.digest("SHA-256", bytes);
+  return bytesToB64(new Uint8Array(digest));
+}
+
 export const cryptoParams = Object.freeze({
   kdf: "PBKDF2-SHA-256",
   iterations: PBKDF2_ITERATIONS,
