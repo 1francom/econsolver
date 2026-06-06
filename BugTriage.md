@@ -38,3 +38,4 @@
 | 2026-06-02 | Calculate | Crash on LaTeX export | critical | export | `src/ReportingModule.jsx` | needs-repro (2026-06-03 — code audit found no crash path; may have been transient) |
 | 2026-06-02 | Model | AI interpretation does not adapt to estimator-specific semantics (e.g. Poisson coefficients should be shown as incidence rate ratios / semi-elasticities, not linear marginal effects) | high | ai | `src/services/AI/Prompts/index.js`, `src/services/AI/AIService.js` | fixed (2026-06-03 — ESTIMATOR TYPE RULES J–R added to INTERPRET_REGRESSION_PROMPT; result.type threaded into user prompt) |
 | 2026-06-05 | Data | Numbers are rounded when inserting, deleting or overwriting cells in the data viewer | medium | ui | `src/ExplorerModule.jsx` | open |
+| 2026-06-06 | Spatial | Geocoding directions might be upgraded — geocoder address resolution quality needs improvement | low | data | `src/components/tabs/spatial/analyze/GeocodeSection.jsx` | open |
