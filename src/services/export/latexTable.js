@@ -19,7 +19,7 @@ import { stars } from "../../math/index.js";
  * @returns {string} LaTeX table source
  */
 export function buildStargazer(models, options = {}) {
-  const { showFirstStage = false } = options;
+  const { showFirstStage = false, varLabels = {} } = options;
 
   const fmtB = (b, p) => {
     if (b == null || !isFinite(b)) return "        N/A";
@@ -123,7 +123,8 @@ export function buildStargazer(models, options = {}) {
 
   // ─── Main regressors ──────────────────────────────────────────────────────
   allVars.forEach(v => {
-    const label = v.replace(/_/g, "\\_");
+    const display = varLabels[v] ?? v;
+    const label = display.replace(/_/g, "\\_");
     rows.push(`  ${label}${sep}${models.map(m => modelVal(m, v, "b")).join(sep)} \\\\`);
     rows.push(`  ${" ".repeat(label.length)}${sep}${models.map(m => modelVal(m, v, "se")).join(sep)} \\\\`);
   });

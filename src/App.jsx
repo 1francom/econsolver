@@ -454,7 +454,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const stats      = selCol ? colStats(selCol, rows) : null;
   const fmt = v => {
     if (v === null || v === undefined) return <span style={{color:C.textMuted,fontStyle:"italic"}}>NA</span>;
-    if (typeof v === "number") return <span style={{color:"#9ecff5"}}>{Number.isInteger(v) ? v : v.toFixed(4)}</span>;
+    if (typeof v === "number") return <span style={{color:"#9ecff5"}}>{String(v)}</span>;
     return String(v);
   };
 
