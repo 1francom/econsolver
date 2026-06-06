@@ -2320,23 +2320,23 @@ function Dashboard({onNew, onLoad}) {
                   <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"0.42rem 0.6rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3}}>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:11,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                        {s.pid}
+                        {s.name || s.pid}
                       </div>
                       <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>
                         {s.can_edit ? "can edit" : "view only"} · shared {s.created_at ? new Date(s.created_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : ""}
                       </div>
                     </div>
-                    {isLocal ? (
-                      <span style={{fontSize:9,color:C.teal,flexShrink:0}}>✓ local</span>
-                    ) : (
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                      {isLocal && <span style={{fontSize:9,color:C.teal}}>✓ local</span>}
                       <button
                         onClick={() => handlePullShare(s.token)}
                         disabled={isBusy}
-                        style={{padding:"0.26rem 0.65rem",background:`${C.blue}18`,border:`1px solid ${C.blue}`,borderRadius:3,color:C.blue,cursor:"pointer",fontFamily:mono,fontSize:9,flexShrink:0,opacity:isBusy?0.5:1}}
+                        title={isLocal ? "Re-import from share" : "Import to this device"}
+                        style={{padding:"0.26rem 0.65rem",background:`${C.blue}18`,border:`1px solid ${C.blue}`,borderRadius:3,color:C.blue,cursor:"pointer",fontFamily:mono,fontSize:9,opacity:isBusy?0.5:1}}
                       >
-                        {isBusy ? "Importing…" : "Import →"}
+                        {isBusy ? "Importing…" : isLocal ? "↻ Restore" : "Import →"}
                       </button>
-                    )}
+                    </div>
                   </div>
                 );
               })}
