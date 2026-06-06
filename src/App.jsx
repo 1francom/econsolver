@@ -18,6 +18,8 @@ import {
   listPipelines, deletePipeline, clearAllPipelines, loadPipeline,
   saveProject, listProjects, deleteProject, clearAllProjects,
 } from "./services/Persistence/indexedDB.js";
+import { useAuth } from "./services/auth/AuthContext.jsx";
+import { listCloudProjects, lockSession, pullProject, hasSyncSession } from "./services/sync/syncEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage } from "./services/data/duckdb.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
@@ -1518,6 +1520,7 @@ function WorkspaceRegistrar({ filename, rawData }) {
 
 function Dashboard({onNew, onLoad}) {
   const { C, theme, setTheme } = useTheme();
+  const { user } = useAuth();
   const [projects,    setProjects]    = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [selected,    setSelected]    = useState(null);
@@ -1526,6 +1529,17 @@ function Dashboard({onNew, onLoad}) {
   const [renameVal,   setRenameVal]   = useState("");
   const [editingDesc, setEditingDesc] = useState(null);  // pid with open desc editor
   const [descVal,     setDescVal]     = useState("");
+
+  // ── Cloud sync state ────────────────────────────────────────────────────────
+  const [cloudProjects, setCloudProjects] = useState([]);
+  const [cloudLoading,  setCloudLoading]  = useState(false);
+  const [unlocked,      setUnlocked]      = useState(false);
+  const [unlockPass,    setUnlockPass]    = useState("");
+  const [unlockFile,    setUnlockFile]    = useState(""); // recovery key string
+  const [unlockErr,     setUnlockErr]     = useState("");
+  const [unlockBusy,    setUnlockBusy]    = useState(false);
+  const [pulling,       setPulling]       = useState(new Set()); // pids currently being pulled
+  const [pullErr,       setPullErr]       = useState("");
 
   const fmt = ts => ts
     ? new Date(ts).toLocaleDateString("en-GB", {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})
@@ -1566,6 +1580,62 @@ function Dashboard({onNew, onLoad}) {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
+
+  // Cloud: fetch list + check unlock state when user signs in/out.
+  useEffect(() => {
+    setUnlocked(hasSyncSession());
+    if (!user) { setCloudProjects([]); return; }
+    setCloudLoading(true);
+    listCloudProjects()
+      .then(list => setCloudProjects(list ?? []))
+      .catch(() => setCloudProjects([]))
+      .finally(() => setCloudLoading(false));
+  }, [user?.id]);
+
+  async function handleUnlock() {
+    setUnlockErr("");
+    setUnlockBusy(true);
+    try {
+      const ok = await lockSession(unlockFile ? { recoveryKey: unlockFile } : { passphrase: unlockPass });
+      if (ok) {
+        setUnlocked(true);
+        setUnlockPass("");
+        setUnlockFile("");
+      }
+    } catch (e) {
+      setUnlockErr(e?.message ?? "Unlock failed.");
+    } finally {
+      setUnlockBusy(false);
+    }
+  }
+
+  async function handlePull(cpid) {
+    setPullErr("");
+    setPulling(prev => new Set([...prev, cpid]));
+    try {
+      await pullProject(cpid);
+      const updated = await listProjects();
+      setProjects(updated);
+    } catch (e) {
+      setPullErr(e?.message ?? "Pull failed.");
+    } finally {
+      setPulling(prev => { const n = new Set(prev); n.delete(cpid); return n; });
+    }
+  }
+
+  async function handleReadRecoveryFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      setUnlockFile(parsed?.key ?? text.trim());
+    } catch {
+      setUnlockFile("");
+      setUnlockErr("Could not read recovery key file.");
+    }
+  }
 
   // When selected project changes, load its pipeline for detail display.
   useEffect(() => {
@@ -1973,6 +2043,144 @@ function Dashboard({onNew, onLoad}) {
               : "Create a new project to get started."}
           </div>
         )}
+
+        {/* ── Cloud projects card ── */}
+        <div style={{
+          border:`1px solid ${C.border}`,
+          borderRadius:5, overflow:"hidden",
+        }}>
+          {/* Header */}
+          <div style={{
+            padding:"0.7rem 1rem",
+            background:C.surface2,
+            borderBottom:`1px solid ${C.border}`,
+            display:"flex", alignItems:"center", gap:8,
+          }}>
+            <span style={{fontSize:13, color:C.teal}}>☁</span>
+            <span style={{fontSize:12, color:C.text}}>Cloud projects</span>
+            {cloudLoading && <span style={{fontSize:9,color:C.textMuted,marginLeft:"auto"}}>loading…</span>}
+            {user && !cloudLoading && (
+              <span style={{fontSize:9,color:C.textMuted,marginLeft:"auto"}}>
+                {user.email}
+              </span>
+            )}
+          </div>
+
+          <div style={{padding:"0.85rem 1rem", display:"flex", flexDirection:"column", gap:10}}>
+
+            {/* Not signed in */}
+            {!user && (
+              <div style={{fontSize:10,color:C.textMuted,lineHeight:1.7}}>
+                Sign in to access your cloud-synced projects on this device.
+              </div>
+            )}
+
+            {/* Signed in but locked */}
+            {user && !unlocked && (
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{fontSize:10,color:C.textMuted}}>
+                  Enter your sync passphrase to access cloud projects.
+                </div>
+                <input
+                  type="password"
+                  value={unlockPass}
+                  onChange={e => { setUnlockPass(e.target.value); setUnlockErr(""); }}
+                  onKeyDown={e => { if (e.key === "Enter") handleUnlock(); }}
+                  placeholder="Sync passphrase…"
+                  disabled={unlockBusy}
+                  style={{
+                    padding:"0.42rem 0.6rem", fontFamily:mono, fontSize:11,
+                    background:C.surface, border:`1px solid ${C.border2}`,
+                    borderRadius:3, color:C.text, outline:"none", width:"100%",
+                    boxSizing:"border-box",
+                  }}
+                  onFocus={e => e.target.style.borderColor = C.teal}
+                  onBlur={e => e.target.style.borderColor = C.border2}
+                />
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <button
+                    onClick={handleUnlock}
+                    disabled={unlockBusy || (!unlockPass && !unlockFile)}
+                    style={{
+                      padding:"0.32rem 0.8rem", background:C.teal, border:"none",
+                      borderRadius:3, color:C.bg, cursor:"pointer",
+                      fontFamily:mono, fontSize:10, fontWeight:700,
+                      opacity: (unlockBusy || (!unlockPass && !unlockFile)) ? 0.5 : 1,
+                    }}
+                  >
+                    {unlockBusy ? "Unlocking…" : "Unlock"}
+                  </button>
+                  <label style={{
+                    fontSize:9, color:C.textMuted, cursor:"pointer",
+                    textDecoration:"underline", textDecorationStyle:"dotted",
+                  }}>
+                    Use recovery key
+                    <input type="file" accept=".json" onChange={handleReadRecoveryFile} style={{display:"none"}} />
+                  </label>
+                  {unlockFile && (
+                    <span style={{fontSize:9,color:C.teal}}>✓ recovery key loaded</span>
+                  )}
+                </div>
+                {unlockErr && (
+                  <div style={{fontSize:10,color:"#e07070"}}>{unlockErr}</div>
+                )}
+              </div>
+            )}
+
+            {/* Signed in + unlocked */}
+            {user && unlocked && (
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {pullErr && (
+                  <div style={{fontSize:10,color:"#e07070",marginBottom:2}}>{pullErr}</div>
+                )}
+                {cloudProjects.length === 0 && !cloudLoading && (
+                  <div style={{fontSize:10,color:C.textMuted}}>
+                    No cloud projects yet. Publish a project from inside the workspace.
+                  </div>
+                )}
+                {cloudProjects.map(cp => {
+                  const isLocal = projects.some(lp => lp.pid === cp.pid);
+                  const isPulling = pulling.has(cp.pid);
+                  return (
+                    <div key={cp.pid} style={{
+                      display:"flex", alignItems:"center", gap:8,
+                      padding:"0.45rem 0.6rem",
+                      background:C.surface,
+                      border:`1px solid ${C.border}`,
+                      borderRadius:3,
+                    }}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {cp.name || cp.pid}
+                        </div>
+                        <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>
+                          v{cp.version} · {cp.updated_at ? new Date(cp.updated_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : ""}
+                        </div>
+                      </div>
+                      {isLocal ? (
+                        <span style={{fontSize:9,color:C.teal,flexShrink:0}}>✓ local</span>
+                      ) : (
+                        <button
+                          onClick={() => handlePull(cp.pid)}
+                          disabled={isPulling}
+                          style={{
+                            padding:"0.26rem 0.65rem", background:`${C.teal}18`,
+                            border:`1px solid ${C.teal}`, borderRadius:3,
+                            color:C.teal, cursor:"pointer",
+                            fontFamily:mono, fontSize:9, flexShrink:0,
+                            opacity: isPulling ? 0.5 : 1,
+                          }}
+                        >
+                          {isPulling ? "Pulling…" : "Pull →"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Workflow hint */}
         <div style={{
