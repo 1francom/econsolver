@@ -9,6 +9,7 @@ import { transformWKT } from "../../../../math/SpatialEngine.js";
 import { MapLegend } from "./MapLegend.jsx";
 import { SpatialLayerEditor } from "./SpatialLayerEditor.jsx";
 import { mkSLayer } from "./layers.js";
+import { loadSpatialMaps, saveSpatialMaps } from "../../../../services/Persistence/indexedDB.js";
 
 export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid }) {
   const wrapRef    = useRef(null);
@@ -208,6 +209,31 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
   const [proj4fn,    setProj4fn]    = useState(null);   // ([x,y]) => [lon,lat]
   const [crsErr,     setCrsErr]     = useState("");
   const [crsLoading, setCrsLoading] = useState(false);
+
+  // ── Persist / restore map config per project (Phase 4b) ──────────────────────
+  // The layer config (mkSLayer objects) + basemap + CRS string are plain-
+  // serializable; the Leaflet render is rebuilt from them by the effects below.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    hydratedRef.current = false;
+    loadSpatialMaps(pid).then(rec => {
+      if (cancelled) return;
+      const m = rec?.maps;
+      if (m) {
+        if (Array.isArray(m.layers)) setLayers(m.layers);
+        if (m.basemap)               setBasemap(m.basemap);
+        if (typeof m.crsInput === "string") setCrsInput(m.crsInput);
+      }
+      hydratedRef.current = true;
+    });
+    return () => { cancelled = true; };
+  }, [pid]);
+  useEffect(() => {
+    if (!pid || !hydratedRef.current) return; // don't overwrite before restore completes
+    const t = setTimeout(() => saveSpatialMaps(pid, { layers, basemap, crsInput }), 400);
+    return () => clearTimeout(t);
+  }, [pid, layers, basemap, crsInput]);
 
   // Detect if any visible dataset contains projected WKT.
   const hasProjected = useMemo(() => {
