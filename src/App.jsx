@@ -20,6 +20,7 @@ import {
 } from "./services/Persistence/indexedDB.js";
 import { useAuth } from "./services/auth/AuthContext.jsx";
 import { listCloudProjects, lockSession, pullProject, hasSyncSession } from "./services/sync/syncEngine.js";
+import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage } from "./services/data/duckdb.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
@@ -1540,6 +1541,11 @@ function Dashboard({onNew, onLoad}) {
   const [unlockBusy,    setUnlockBusy]    = useState(false);
   const [pulling,       setPulling]       = useState(new Set()); // pids currently being pulled
   const [pullErr,       setPullErr]       = useState("");
+  const [sharedWithMe,  setSharedWithMe]  = useState([]);
+  const [pullingShare,  setPullingShare]  = useState(new Set());
+  const [shareErr,      setShareErr]      = useState("");
+  // incoming share token from URL (?share=TOKEN)
+  const [incomingToken, setIncomingToken] = useState(() => new URLSearchParams(window.location.search).get("share") ?? "");
 
   const fmt = ts => ts
     ? new Date(ts).toLocaleDateString("en-GB", {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})
@@ -1581,16 +1587,37 @@ function Dashboard({onNew, onLoad}) {
     }).catch(() => setLoading(false));
   }, []);
 
-  // Cloud: fetch list + check unlock state when user signs in/out.
+  // Cloud: fetch list + shared-with-me + check unlock state when user signs in/out.
   useEffect(() => {
     setUnlocked(hasSyncSession());
-    if (!user) { setCloudProjects([]); return; }
+    if (!user) { setCloudProjects([]); setSharedWithMe([]); return; }
     setCloudLoading(true);
-    listCloudProjects()
-      .then(list => setCloudProjects(list ?? []))
-      .catch(() => setCloudProjects([]))
-      .finally(() => setCloudLoading(false));
+    Promise.all([
+      listCloudProjects().catch(() => []),
+      listSharedWithMe().catch(() => []),
+    ]).then(([cloud, shared]) => {
+      setCloudProjects(cloud ?? []);
+      setSharedWithMe(shared ?? []);
+    }).finally(() => setCloudLoading(false));
   }, [user?.id]);
+
+  async function handlePullShare(token) {
+    setShareErr("");
+    setPullingShare(prev => new Set([...prev, token]));
+    try {
+      await pullShare(token);
+      const updated = await listProjects();
+      setProjects(updated);
+      if (incomingToken === token) {
+        setIncomingToken("");
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    } catch (e) {
+      setShareErr(e?.message ?? "Import failed.");
+    } finally {
+      setPullingShare(prev => { const n = new Set(prev); n.delete(token); return n; });
+    }
+  }
 
   async function handleUnlock() {
     setUnlockErr("");
@@ -2181,6 +2208,73 @@ function Dashboard({onNew, onLoad}) {
             )}
           </div>
         </div>
+
+        {/* ── Incoming share banner (URL ?share=TOKEN) ── */}
+        {incomingToken && user && (
+          <div style={{
+            border:`1px solid ${C.blue}`,
+            borderRadius:5, padding:"0.85rem 1rem",
+            background:`${C.blue}0d`,
+            display:"flex", flexDirection:"column", gap:8,
+          }}>
+            <div style={{fontSize:11,color:C.blue}}>↓ Incoming shared project</div>
+            <div style={{fontSize:10,color:C.textMuted}}>Someone shared a project with you via link. Import it to your dashboard?</div>
+            {shareErr && <div style={{fontSize:10,color:"#e07070"}}>{shareErr}</div>}
+            <div style={{display:"flex",gap:8}}>
+              <button
+                onClick={() => handlePullShare(incomingToken)}
+                disabled={pullingShare.has(incomingToken)}
+                style={{padding:"0.35rem 0.9rem",background:C.blue,border:"none",borderRadius:3,color:"#fff",cursor:"pointer",fontFamily:mono,fontSize:10,fontWeight:700}}
+              >
+                {pullingShare.has(incomingToken) ? "Importing…" : "Import project"}
+              </button>
+              <button
+                onClick={() => { setIncomingToken(""); window.history.replaceState({}, "", window.location.pathname); }}
+                style={{padding:"0.35rem 0.7rem",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily:mono,fontSize:10}}
+              >Dismiss</button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Shared with me card ── */}
+        {user && sharedWithMe.length > 0 && (
+          <div style={{border:`1px solid ${C.border}`,borderRadius:5,overflow:"hidden"}}>
+            <div style={{padding:"0.7rem 1rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13,color:C.blue}}>⇄</span>
+              <span style={{fontSize:12,color:C.text}}>Shared with me</span>
+            </div>
+            <div style={{padding:"0.7rem 1rem",display:"flex",flexDirection:"column",gap:6}}>
+              {shareErr && <div style={{fontSize:10,color:"#e07070",marginBottom:2}}>{shareErr}</div>}
+              {sharedWithMe.map(s => {
+                const isLocal = projects.some(p => p.pid === s.pid);
+                const isBusy  = pullingShare.has(s.token);
+                return (
+                  <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"0.42rem 0.6rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:11,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {s.pid}
+                      </div>
+                      <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>
+                        {s.can_edit ? "can edit" : "view only"} · shared {s.created_at ? new Date(s.created_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : ""}
+                      </div>
+                    </div>
+                    {isLocal ? (
+                      <span style={{fontSize:9,color:C.teal,flexShrink:0}}>✓ local</span>
+                    ) : (
+                      <button
+                        onClick={() => handlePullShare(s.token)}
+                        disabled={isBusy}
+                        style={{padding:"0.26rem 0.65rem",background:`${C.blue}18`,border:`1px solid ${C.blue}`,borderRadius:3,color:C.blue,cursor:"pointer",fontFamily:mono,fontSize:9,flexShrink:0,opacity:isBusy?0.5:1}}
+                      >
+                        {isBusy ? "Importing…" : "Import →"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Workflow hint */}
         <div style={{
