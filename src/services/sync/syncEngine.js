@@ -364,11 +364,13 @@ export async function enableCloud(pid, passphrase) {
   await uploadArtifacts(uploads);
   const encryptedManifest = await encryptJSON(key, manifest);
 
+  const projectName = (await listProjects()).find(p => p.pid === pid)?.name ?? null;
+
   const supabase = getSyncSupabase();
   const { error } = await supabase.from("synced_projects").upsert({
     user_id: userId,
     pid,
-    name: null,
+    name: projectName,
     salt,
     verifier: verifierToText(verifier),
     manifest: manifestToText(encryptedManifest),
@@ -470,6 +472,21 @@ export async function unpublish(pid) {
   const deleted = await supabase.from("synced_projects").delete().eq("pid", pid);
   if (deleted.error) throw deleted.error;
   await setSyncMeta(pid, { published: false, lastSyncedVersion: 0, dirty: false });
+}
+
+/**
+ * Update the human-readable name for a cloud project (owner only).
+ * Also saves the name to local IndexedDB so the two stay in sync.
+ */
+export async function renameCloudProject(pid, name) {
+  const supabase = getSyncSupabase();
+  const { error } = await supabase
+    .from("synced_projects")
+    .update({ name: name || null })
+    .eq("pid", pid);
+  if (error) throw error;
+  // Keep local copy in sync
+  await saveProject(pid, { name });
 }
 
 export async function lockSession(input = {}) {

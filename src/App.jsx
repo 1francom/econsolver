@@ -19,7 +19,7 @@ import {
   saveProject, listProjects, deleteProject, clearAllProjects,
 } from "./services/Persistence/indexedDB.js";
 import { useAuth } from "./services/auth/AuthContext.jsx";
-import { listCloudProjects, lockSession, pullProject, hasSyncSession } from "./services/sync/syncEngine.js";
+import { listCloudProjects, lockSession, pullProject, hasSyncSession, renameCloudProject } from "./services/sync/syncEngine.js";
 import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage } from "./services/data/duckdb.js";
@@ -1536,6 +1536,8 @@ function Dashboard({onNew, onLoad}) {
   const [cloudLoading,  setCloudLoading]  = useState(false);
   const [unlocked,      setUnlocked]      = useState(false);
   const [unlockPass,    setUnlockPass]    = useState("");
+  const [cloudRenaming, setCloudRenaming] = useState(null);  // pid being renamed in cloud list
+  const [cloudRenameVal,setCloudRenameVal]= useState("");
   const [unlockFile,    setUnlockFile]    = useState(""); // recovery key string
   const [unlockErr,     setUnlockErr]     = useState("");
   const [unlockBusy,    setUnlockBusy]    = useState(false);
@@ -1694,7 +1696,25 @@ function Dashboard({onNew, onLoad}) {
     if (!trimmed) { setRenaming(null); return; }
     await saveProject(pid, { name: trimmed });
     setProjects(prev => prev.map(p => p.pid === pid ? { ...p, name: trimmed } : p));
+    // Keep cloud copy name in sync if this project is published
+    if (cloudProjects.some(cp => cp.pid === pid)) {
+      renameCloudProject(pid, trimmed).catch(() => {});
+      setCloudProjects(prev => prev.map(cp => cp.pid === pid ? { ...cp, name: trimmed } : cp));
+    }
     setRenaming(null);
+  }
+
+  async function handleCloudRename(pid) {
+    const trimmed = cloudRenameVal.trim();
+    setCloudRenaming(null);
+    if (!trimmed) return;
+    try {
+      await renameCloudProject(pid, trimmed);
+      setCloudProjects(prev => prev.map(cp => cp.pid === pid ? { ...cp, name: trimmed } : cp));
+      setProjects(prev => prev.map(p => p.pid === pid ? { ...p, name: trimmed } : p));
+    } catch (e) {
+      console.error("Cloud rename failed:", e);
+    }
   }
 
   async function handleDescriptionSave(pid) {
@@ -1806,20 +1826,35 @@ function Dashboard({onNew, onLoad}) {
                       }}
                     />
                   ) : (
-                    <div
-                      onDoubleClick={e => {
-                        e.stopPropagation();
-                        setRenaming(p.pid);
-                        setRenameVal(p.name || p.filename || "");
-                      }}
-                      title="Double-click to rename"
-                      style={{
-                        fontSize:12, color: isSel ? C.text : C.textDim,
-                        fontWeight: isSel ? 600 : 400,
-                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                      }}
-                    >
-                      {p.name || p.filename || "Unnamed"}
+                    <div style={{display:"flex",alignItems:"center",gap:4,minWidth:0}}>
+                      <div
+                        onDoubleClick={e => {
+                          e.stopPropagation();
+                          setRenaming(p.pid);
+                          setRenameVal(p.name || p.filename || "");
+                        }}
+                        title="Double-click to rename"
+                        style={{
+                          fontSize:12, color: isSel ? C.text : C.textDim,
+                          fontWeight: isSel ? 600 : 400,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                          flex:1, minWidth:0,
+                        }}
+                      >
+                        {p.name || p.filename || "Unnamed"}
+                      </div>
+                      <span
+                        onClick={e => {
+                          e.stopPropagation();
+                          setRenaming(p.pid);
+                          setRenameVal(p.name || p.filename || "");
+                        }}
+                        title="Rename"
+                        style={{
+                          fontSize:10, color:C.border2, cursor:"pointer", flexShrink:0,
+                          lineHeight:1, userSelect:"none",
+                        }}
+                      >✎</span>
                     </div>
                   )}
                   <div style={{fontSize:9, color:C.textMuted, marginTop:2, display:"flex", gap:8, flexWrap:"wrap"}}>
@@ -1927,6 +1962,7 @@ function Dashboard({onNew, onLoad}) {
           <div style={{
             border:`1px solid ${C.border}`,
             borderRadius:5, overflow:"hidden",
+            display:"flex", flexDirection:"column", maxHeight:"60vh",
           }}>
             {/* Project header */}
             <div style={{
@@ -1947,6 +1983,9 @@ function Dashboard({onNew, onLoad}) {
                 <Badge ch={`Panel · i=${selPipeline.panel.entityCol} · t=${selPipeline.panel.timeCol}`} color={C.blue}/>
               )}
             </div>
+
+            {/* Scrollable body — stats + description + pipeline steps */}
+            <div style={{overflowY:"auto", flex:1}}>
 
             {/* Stats grid */}
             <div style={{
@@ -2039,6 +2078,8 @@ function Dashboard({onNew, onLoad}) {
               </div>
               );
             })()}
+
+            </div>{/* end scrollable body */}
 
             {/* Open button */}
             <div style={{
@@ -2168,6 +2209,7 @@ function Dashboard({onNew, onLoad}) {
                 {cloudProjects.map(cp => {
                   const isLocal = projects.some(lp => lp.pid === cp.pid);
                   const isPulling = pulling.has(cp.pid);
+                  const isCloudRen = cloudRenaming === cp.pid;
                   return (
                     <div key={cp.pid} style={{
                       display:"flex", alignItems:"center", gap:8,
@@ -2177,30 +2219,56 @@ function Dashboard({onNew, onLoad}) {
                       borderRadius:3,
                     }}>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:11,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {cp.name || cp.pid}
-                        </div>
+                        {isCloudRen ? (
+                          <input
+                            autoFocus
+                            value={cloudRenameVal}
+                            onChange={e => setCloudRenameVal(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === "Enter") { e.preventDefault(); handleCloudRename(cp.pid); }
+                              if (e.key === "Escape") setCloudRenaming(null);
+                            }}
+                            onBlur={() => handleCloudRename(cp.pid)}
+                            style={{
+                              fontSize:11, fontFamily:mono, background:C.surface2,
+                              border:`1px solid ${C.teal}`, borderRadius:2,
+                              color:C.text, padding:"1px 5px", width:"100%",
+                              outline:"none", boxSizing:"border-box",
+                            }}
+                          />
+                        ) : (
+                          <div style={{display:"flex",alignItems:"center",gap:4,minWidth:0}}>
+                            <div style={{fontSize:11,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>
+                              {cp.name || cp.pid}
+                            </div>
+                            <span
+                              onClick={() => { setCloudRenaming(cp.pid); setCloudRenameVal(cp.name || ""); }}
+                              title="Rename"
+                              style={{fontSize:10,color:C.border2,cursor:"pointer",flexShrink:0,lineHeight:1,userSelect:"none"}}
+                            >✎</span>
+                          </div>
+                        )}
                         <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>
                           v{cp.version} · {cp.updated_at ? new Date(cp.updated_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : ""}
                         </div>
                       </div>
-                      {isLocal ? (
-                        <span style={{fontSize:9,color:C.teal,flexShrink:0}}>✓ local</span>
-                      ) : (
+                      <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                        {isLocal && <span style={{fontSize:9,color:C.teal}}>✓ local</span>}
                         <button
                           onClick={() => handlePull(cp.pid)}
                           disabled={isPulling}
+                          title={isLocal ? "Re-pull from cloud (overwrite local)" : "Download to this device"}
                           style={{
                             padding:"0.26rem 0.65rem", background:`${C.teal}18`,
                             border:`1px solid ${C.teal}`, borderRadius:3,
                             color:C.teal, cursor:"pointer",
-                            fontFamily:mono, fontSize:9, flexShrink:0,
+                            fontFamily:mono, fontSize:9,
                             opacity: isPulling ? 0.5 : 1,
                           }}
                         >
-                          {isPulling ? "Pulling…" : "Pull →"}
+                          {isPulling ? "Pulling…" : isLocal ? "↻ Restore" : "Pull →"}
                         </button>
-                      )}
+                      </div>
                     </div>
                   );
                 })}
