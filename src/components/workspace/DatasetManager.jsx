@@ -187,7 +187,7 @@ function CloudModal({ children, C, onClose }) {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function DatasetManager({ activeDatasetId, onSelectDataset, onRemoveDataset }) {
+export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, onRemoveDataset }) {
   const { C } = useTheme();
   const { user } = useAuth();
   const { datasets, primaryDatasetId, globalPipeline } = useSessionState();
@@ -232,14 +232,14 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
   async function refreshCloudState() {
     setSyncError("");
     setUnlocked(hasSyncSession());
-    if (primaryDatasetId) {
-      const meta = await getSyncMeta(primaryDatasetId);
+    if (pid) {
+      const meta = await getSyncMeta(pid);
       setSyncMetaState(meta);
       if (!user) {
         setSyncState(meta.published ? "offline" : "local");
       } else if (meta.published) {
         try {
-          const conflict = await detectConflict(primaryDatasetId);
+          const conflict = await detectConflict(pid);
           setSyncState(conflict);
         } catch {
           setSyncState("offline");
@@ -269,7 +269,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
     }
     run();
     return () => { cancelled = true; };
-  }, [user?.id, primaryDatasetId]);
+  }, [user?.id, pid]);
 
   useEffect(() => {
     function onCloudLogin(e) {
@@ -327,8 +327,8 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
   }
 
   async function publishCurrentProject() {
-    if (!primaryDatasetId || publishPass.length < 10) return;
-    const result = await runSyncAction(() => enableCloud(primaryDatasetId, publishPass));
+    if (!pid || publishPass.length < 10) return;
+    const result = await runSyncAction(() => enableCloud(pid, publishPass));
     setPublishPass("");
     if (result?.recoveryKey) setRecoveryKey(result.recoveryKey);
   }
@@ -343,7 +343,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
     const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `econsolver-recovery-${primaryDatasetId ?? "cloud"}.json`;
+    a.download = `econsolver-recovery-${pid ?? "cloud"}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -377,7 +377,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
   }
 
   async function chooseConflict(choice) {
-    await runSyncAction(() => resolveConflict(primaryDatasetId, choice));
+    await runSyncAction(() => resolveConflict(pid, choice));
     setConflictOpen(false);
   }
 
@@ -518,15 +518,15 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
               {!syncMeta.published ? (
                 <button
                   onClick={() => setPublishOpen(true)}
-                  disabled={!user || !primaryDatasetId}
+                  disabled={!user || !pid}
                   title={user ? "Publish this project as client-side encrypted cloud blobs" : "Sign in to publish this project"}
                   style={{
                     padding: "0.24rem 0.62rem",
                     background: `${C.teal}14`,
                     border: `1px solid ${C.teal}90`,
                     borderRadius: 3,
-                    color: user && primaryDatasetId ? C.teal : C.textMuted,
-                    cursor: user && primaryDatasetId ? "pointer" : "not-allowed",
+                    color: user && pid ? C.teal : C.textMuted,
+                    cursor: user && pid ? "pointer" : "not-allowed",
                     fontFamily: mono,
                     fontSize: 9,
                   }}
@@ -536,7 +536,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
               ) : (
                 <div style={{ display: "flex", gap: 6 }}>
                   <button
-                    onClick={() => runSyncAction(() => pushProject(primaryDatasetId, { immediate: true }))}
+                    onClick={() => runSyncAction(() => pushProject(pid, { immediate: true }))}
                     disabled={!unlocked || syncBusy}
                     style={{
                       padding: "0.24rem 0.52rem",
@@ -569,7 +569,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
                     </button>
                   )}
                   <button
-                    onClick={() => runSyncAction(() => unpublish(primaryDatasetId))}
+                    onClick={() => runSyncAction(() => unpublish(pid))}
                     disabled={syncBusy}
                     style={{
                       padding: "0.24rem 0.52rem",
@@ -945,7 +945,7 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
               Choose sync version
             </div>
             <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.55 }}>
-              This device has {count} dataset{count === 1 ? "" : "s"} and local version {syncMeta.lastSyncedVersion}. Cloud has version {cloudProjects.find(cp => cp.pid === primaryDatasetId)?.version ?? "?"}.
+              This device has {count} dataset{count === 1 ? "" : "s"} and local version {syncMeta.lastSyncedVersion}. Cloud has version {cloudProjects.find(cp => cp.pid === pid)?.version ?? "?"}.
             </div>
           </div>
           <div style={{ padding: "1rem 1.1rem", display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
