@@ -326,6 +326,14 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
   const [lang,           setLang]           = useState("r");
   const [customLabels,   setCustomLabels]   = useState(() => models.map((m, i) => m.label ?? m.type ?? `M${i + 1}`));
   const [showFirstStage, setShowFirstStage] = useState(false);
+  const [varLabels,      setVarLabels]      = useState({});  // technical name → display label for LaTeX rows
+
+  // All unique variable names across pinned models (same union as buildStargazer)
+  const allVarNames = useMemo(() => {
+    const set = new Set();
+    models.forEach(m => (m.varNames ?? []).forEach(v => { if (v !== "(Intercept)") set.add(v); }));
+    return [...set];
+  }, [models]);
 
   // Sync label array when models change (pin/unpin)
   useEffect(() => {
@@ -345,7 +353,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
           result: m,
           yVar:   m.spec?.yVar ?? m.yVar ?? "y",
         })),
-        { showFirstStage: hasIV && showFirstStage }
+        { showFirstStage: hasIV && showFirstStage, varLabels }
       );
     }
     const configs = models.map(m => ({
@@ -373,7 +381,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
     if (lang === "python") return generateMultiModelPythonScript(configs, dataDictionary, scriptOpts);
     if (lang === "stata")  return generateMultiModelStataScript(configs, dataDictionary, scriptOpts);
     return "";
-  }, [models, dataDictionary, lang, customLabels, showFirstStage, hasIV, pipeline, filename]);
+  }, [models, dataDictionary, lang, customLabels, showFirstStage, hasIV, varLabels, pipeline, filename]);
 
   const ext = lang === "r" ? ".R" : lang === "python" ? ".py" : lang === "stata" ? ".do" : ".tex";
   const LANGS = [
@@ -454,6 +462,47 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
               </label>
             )}
           </div>
+
+          {/* Editable row labels */}
+          {allVarNames.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 4 }}>
+                Row labels — edit to rename variables in the table:
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {allVarNames.map(v => (
+                  <div key={v} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, minWidth: 160,
+                                   maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis",
+                                   whiteSpace: "nowrap", flexShrink: 0 }}
+                          title={v}>
+                      {v}
+                    </span>
+                    <span style={{ fontSize: 9, color: C.border2, fontFamily: mono }}>→</span>
+                    <input
+                      value={varLabels[v] ?? ""}
+                      onChange={e => setVarLabels(prev => ({ ...prev, [v]: e.target.value }))}
+                      placeholder={v}
+                      spellCheck={false}
+                      style={{
+                        flex: 1, background: C.surface2, border: `1px solid ${C.border2}`,
+                        borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 9,
+                        padding: "2px 6px", outline: "none",
+                      }}
+                    />
+                    {varLabels[v] && (
+                      <button
+                        onClick={() => setVarLabels(prev => { const n = { ...prev }; delete n[v]; return n; })}
+                        style={{ background: "none", border: "none", cursor: "pointer",
+                                 color: C.textMuted, fontSize: 11, padding: "0 2px", lineHeight: 1 }}
+                        title="Reset to original"
+                      >×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
       <pre style={{

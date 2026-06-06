@@ -454,7 +454,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const stats      = selCol ? colStats(selCol, rows) : null;
   const fmt = v => {
     if (v === null || v === undefined) return <span style={{color:C.textMuted,fontStyle:"italic"}}>NA</span>;
-    if (typeof v === "number") return <span style={{color:"#9ecff5"}}>{Number.isInteger(v) ? v : v.toFixed(4)}</span>;
+    if (typeof v === "number") return <span style={{color:"#9ecff5"}}>{String(v)}</span>;
     return String(v);
   };
 
@@ -2211,6 +2211,17 @@ export default function App() {
     if (switchDs) studioRef.current?.switchToDataset(id);
   };
 
+  // Stable cleanedData for ModelingTab: prefer pipeline output, fall back to raw
+  // dataset so users can go straight to Model without visiting Clean first.
+  const modelCleanedData = useMemo(() => {
+    const out = tabOutput("model");
+    if (out) return out;
+    const rd = tabRawData("model");
+    if (!rd?.rows?.length) return null;
+    return { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0 };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outputs, activeDatasetIds, activeDatasetId, availableDatasets]);
+
   // ── Pipeline output — fired by DataStudio when user clicks "→ Analyze" ───
   const handleComplete = r => {
     const id = tabDsId("clean");
@@ -2410,9 +2421,9 @@ export default function App() {
 
                 {/* MODEL */}
                 <div style={{...tabPanel, display: activeTab==="model" ? "flex" : "none", flexDirection:"column"}}>
-                  {tabOutput("model")
+                  {modelCleanedData
                     ? <ModelingTab
-                        cleanedData={tabOutput("model")}
+                        cleanedData={modelCleanedData}
                         availableDatasets={availableDatasets}
                         onBack={()=>navigateToTab("explore")}
                         onResultChange={r=>setActiveResult(r)}
