@@ -101,7 +101,9 @@ const map=L.map("map");
 L.tileLayer(BASEMAP.url,{attribution:BASEMAP.attribution,maxZoom:19,detectRetina:true,crossOrigin:true}).addTo(map);
 const group=L.featureGroup().addTo(map);
 for(const ly of LAYERS){
-  if(ly.type==="points"&&ly.latCol&&ly.lonCol){
+  if(ly.type==="points"&&ly.mode==="wkt"&&ly.wktCol){
+    for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo||geo.type!=="point")continue;L.circleMarker(geo.latlng,{radius:ly.radius??4,fillColor:ly.fillColor??"#6ec8b4",color:ly.fillColor??"#6ec8b4",weight:1,fillOpacity:0.78}).addTo(group);}
+  }else if(ly.type==="points"&&ly.latCol&&ly.lonCol){
     for(const row of ly._data){const lat=parseFloat(row[ly.latCol]),lon=parseFloat(row[ly.lonCol]);if(isNaN(lat)||isNaN(lon))continue;L.circleMarker([lat,lon],{radius:ly.radius??4,fillColor:ly.fillColor??"#6ec8b4",color:ly.fillColor??"#6ec8b4",weight:1,fillOpacity:0.78}).addTo(group);}
   }else if(ly.type==="boundary"&&ly.wktCol){
     for(const row of ly._data){const geo=parseWkt(row[ly.wktCol]);if(!geo)continue;if(geo.type==="point"){L.circleMarker(geo.latlng,{radius:6,fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}else{L.polygon(geo.rings,{fillColor:ly.fillColor??"#6e9ec8",color:ly.borderColor??"#333",weight:ly.borderWidth??0.8,fillOpacity:ly.fillOpacity??0.55}).addTo(group);}}
@@ -349,7 +351,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         let cells = [];
         if (ly.mode === "wkt" && ly.wktCol) {
           cells = lyRows(ly).filter(r => r[ly.wktCol]);
-          const { getColor } = buildColorScale(cells, ly.colorByCol);
+          const { getColor } = buildColorScale(cells, ly.colorByCol, ly.palette);
           for (const cell of cells) {
             const geo = wktToLeaflet(cell[ly.wktCol], proj4fn);
             if (!geo || geo.type === "point") continue;
@@ -372,21 +374,34 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
       }
 
       // ── Points ────────────────────────────────────────────────────────────
-      if (ly.type === "points" && ly.latCol && ly.lonCol) {
+      if (ly.type === "points") {
         const ptRows = lyRows(ly);
-        const { getColor } = buildColorScale(ptRows, ly.colorCol);
-        for (const row of ptRows) {
-          let lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]);
-          if (isNaN(lat) || isNaN(lon)) continue;
-          // J2: reproject from projected CRS (easting=lon col, northing=lat col) → WGS84
-          if (proj4fn) { const [wLon, wLat] = proj4fn([lon, lat]); lon = wLon; lat = wLat; }
-          if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
-          const color = (ly.colorCol ? getColor(row) : null) ?? ly.fillColor;
-          const op    = ly.opacity ?? 0.78;
-          const tipParts = [`lat: ${lat.toFixed(4)}`, `lon: ${lon.toFixed(4)}`];
-          if (ly.colorCol) tipParts.push(`${esc(ly.colorCol)}: ${esc(row[ly.colorCol])}`);
-          L.circleMarker([lat, lon], { radius: ly.radius, fillColor: color, color, weight: 1, opacity: op, fillOpacity: op * 0.78 })
-            .bindTooltip(tipParts.join("<br>")).addTo(group);
+        const { getColor } = buildColorScale(ptRows, ly.colorCol, ly.palette);
+        const op = ly.opacity ?? 0.78;
+
+        if (ly.mode === "wkt" && ly.wktCol) {
+          for (const row of ptRows) {
+            const geo = wktToLeaflet(row[ly.wktCol], proj4fn);
+            if (!geo || geo.type !== "point") continue;
+            const color = (ly.colorCol ? getColor(row) : null) ?? ly.fillColor;
+            const tipParts = [`lat: ${geo.latlng[0].toFixed(4)}`, `lon: ${geo.latlng[1].toFixed(4)}`];
+            if (ly.colorCol) tipParts.push(`${esc(ly.colorCol)}: ${esc(row[ly.colorCol])}`);
+            L.circleMarker(geo.latlng, { radius: ly.radius, fillColor: color, color, weight: 1, opacity: op, fillOpacity: op * 0.78 })
+              .bindTooltip(tipParts.join("<br>")).addTo(group);
+          }
+        } else if (ly.latCol && ly.lonCol) {
+          for (const row of ptRows) {
+            let lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]);
+            if (isNaN(lat) || isNaN(lon)) continue;
+            // J2: reproject from projected CRS (easting=lon col, northing=lat col) → WGS84
+            if (proj4fn) { const [wLon, wLat] = proj4fn([lon, lat]); lon = wLon; lat = wLat; }
+            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
+            const color = (ly.colorCol ? getColor(row) : null) ?? ly.fillColor;
+            const tipParts = [`lat: ${lat.toFixed(4)}`, `lon: ${lon.toFixed(4)}`];
+            if (ly.colorCol) tipParts.push(`${esc(ly.colorCol)}: ${esc(row[ly.colorCol])}`);
+            L.circleMarker([lat, lon], { radius: ly.radius, fillColor: color, color, weight: 1, opacity: op, fillOpacity: op * 0.78 })
+              .bindTooltip(tipParts.join("<br>")).addTo(group);
+          }
         }
       }
 
@@ -416,8 +431,8 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
     for (const ly of [...layers].reverse()) {
       if (!ly.visible) continue;
       const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
-      if (ly.type === "grid"   && ly.mode === "wkt" && ly.colorByCol) return buildColorScale(r, ly.colorByCol).legend;
-      if (ly.type === "points" && ly.colorCol)                         return buildColorScale(r, ly.colorCol).legend;
+      if (ly.type === "grid"   && ly.mode === "wkt" && ly.colorByCol) return buildColorScale(r, ly.colorByCol, ly.palette).legend;
+      if (ly.type === "points" && ly.colorCol)                         return buildColorScale(r, ly.colorCol, ly.palette).legend;
     }
     return null;
   }, [layers, rows, availableDatasets]);
@@ -533,7 +548,8 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                 {ly.type === "grid" && (ly.mode === "latlon" || ly.mode === "generate") && ` · ${ly.cellsize}m`}
                 {ly.type === "grid" && ly.mode === "wkt" && ly.wktCol && ` · ${ly.wktCol}`}
                 {ly.type === "line" && ly.wktCol && ` · ${ly.wktCol}`}
-                {ly.type === "points" && ly.latCol && ` · ${ly.latCol}/${ly.lonCol}`}
+                {ly.type === "points" && ly.mode === "wkt" && ly.wktCol && ` · ${ly.wktCol}`}
+                {ly.type === "points" && ly.mode !== "wkt" && ly.latCol && ` · ${ly.latCol}/${ly.lonCol}`}
               </span>
               <button onClick={e => { e.stopPropagation(); updateLayer({ ...ly, visible: !ly.visible }); }}
                 style={{ background: "none", border: "none", cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px", color: ly.visible ? C.textDim : C.textMuted }}

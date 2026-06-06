@@ -499,7 +499,7 @@ function ColCard({h, info, sug, selected, onSel, onAct}){
         style={{position:"absolute",top:"100%",right:0,zIndex:99,background:C.surface2,
           border:`1px solid ${C.border}`,borderRadius:4,boxShadow:"0 6px 24px #000b",
           minWidth:140,overflow:"hidden"}}>
-        {[["rename","Rename"],["filter","Filter"],["drop","Drop"]].map(([a,l])=>(
+        {[["rename","Rename"],["filter","Filter"],["cast","Change type"],["drop","Drop"]].map(([a,l])=>(
           <button key={a} onClick={()=>{onAct(h,a);setMo(false);}}
             style={{width:"100%",padding:"0.45rem 0.8rem",background:"transparent",border:"none",
               color:a==="drop"?C.red:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,textAlign:"left"}}>{l}</button>
@@ -1703,6 +1703,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
   function doRename(){if(!sel||!rv.trim())return;onAdd({type:"rename",col:sel,newName:rv.trim(),desc:`Rename '${sel}' → '${rv.trim()}'`});setRv("");setAct(null);setSel(null);}
   function doFilter(step){ onAdd(step); setShowFilter(false); setAct(null); }
   function doDrop(){if(!sel)return;onAdd({type:"drop",col:sel,desc:`Drop '${sel}'`});setAct(null);setSel(null);}
+  function doCast(to){if(!sel)return;onAdd({type:"type_cast",col:sel,to,desc:`Cast '${sel}' → ${to}`});setAct(null);setSel(null);}
 
   const selIsCat=sel&&info[sel]&&!info[sel].isNum&&info[sel].isCat;
   const inS={width:"100%",boxSizing:"border-box",padding:"0.48rem 0.75rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"};
@@ -1814,6 +1815,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
             />
           )}
           {act==="drop"&&<div><div style={{fontSize:12,color:C.red,marginBottom:"0.8rem",fontFamily:mono}}>Drop column '{sel}'?</div><div style={{display:"flex",gap:8}}><Btn onClick={doDrop} color={C.red} v="solid" ch="Confirm Drop"/><Btn onClick={()=>setAct(null)} ch="Cancel"/></div></div>}
+          {act==="cast"&&<div><div style={{fontSize:11,color:C.textDim,marginBottom:"0.7rem",fontFamily:mono}}>Change type of '<span style={{color:C.text}}>{sel}</span>' to:</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{[["number","number",C.blue],["integer","integer",C.blue],["string","string",C.teal],["categorical","categorical",C.purple],["boolean","boolean (0/1)",C.gold]].map(([to,label,color])=><Btn key={to} onClick={()=>doCast(to)} color={color} v="solid" sm ch={label}/>)}<Btn onClick={()=>setAct(null)} sm ch="Cancel"/></div></div>}
         </div>
       )}
       {/* ── Fill Missing Values ── */}

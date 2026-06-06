@@ -1,5 +1,6 @@
 // ─── ECON STUDIO · spatial/map/MapLegend.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { mono } from "../shared/constants.js";
+import { paletteToCss } from "../shared/color.js";
 
 export function MapLegend({ legend, C }) {
   if (!legend) return null;
@@ -15,7 +16,7 @@ export function MapLegend({ legend, C }) {
       </div>
       {legend.type === "gradient" && (
         <div>
-          <div style={{ height: 8, borderRadius: 2, background: "linear-gradient(to right,#6ec8b4,#c8a96e)", marginBottom: 4 }} />
+          <div style={{ height: 8, borderRadius: 2, background: paletteToCss(legend.pal), marginBottom: 4 }} />
           <div style={{ display: "flex", justifyContent: "space-between", color: C.textDim }}>
             <span>{Number(legend.min).toFixed(2)}</span>
             <span>{Number(legend.max).toFixed(2)}</span>

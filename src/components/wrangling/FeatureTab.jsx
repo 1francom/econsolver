@@ -58,6 +58,8 @@ function MutateSubTab({rows, headers, info, onAdd}){
     clamp:(x,lo,hi)=>typeof x==="number"?Math.max(lo,Math.min(hi,x)):null,
     rescale:(x,o0,o1,n0=0,n1=1)=>(typeof x==="number"&&o1!==o0)?(n0+(x-o0)*(n1-n0)/(o1-o0)):null,
     case_when:(...p)=>{for(let i=0;i<p.length-1;i+=2){if(p[i])return p[i+1];}return p.length%2===1?p[p.length-1]:null;},
+    as_integer:(x)=>{if(x===null||x===undefined)return null;const n=Number(x);return isFinite(n)?Math.trunc(n):null;},
+    as_factor: (x)=>(x===null||x===undefined)?null:String(x),
   };
 
   // Group-aware helpers (array context) — injected when Group by is set
@@ -183,6 +185,10 @@ function MutateSubTab({rows, headers, info, onAdd}){
       ["isna(x)  notna(x)","1 if null · 1 if not null"],
       ["coalesce(a, b, …)","First non-null arg  ·  coalesce(val, 0)"],
     ]},
+    {label:"Type casting",color:C.gold,items:[
+      ["as_integer(x)","Truncate to integer · null if not numeric  ·  as_integer(2.9) → 2  ·  as_integer('7') → 7"],
+      ["as_factor(x)","Convert to categorical string · use for coded numerics  ·  as_factor(region_code)"],
+    ]},
     {label:"Group functions — active when Group by is set",color:C.purple,items:[
       ["any(col)","1 if any row in group has a non-zero value  ·  use Filter for row conditions"],
       ["all(col)","1 if all rows in group have a non-zero value"],
@@ -194,7 +200,8 @@ function MutateSubTab({rows, headers, info, onAdd}){
   ];
   const EXAMPLES=[["gdp_per_cap","gdp / population"],["log_wage","log(wage)"],["treat_post","treated * post"],
     ["income_real","income / cpi * 100"],["age_sq","age ** 2"],["hi_edu","ifelse(educ >= 16, 1, 0)"],
-    ["wage_clamp","clamp(wage, 0, 500)"],["size_cat","case_when(area < 10, 'small', area < 50, 'medium', 'large')"]];
+    ["wage_clamp","clamp(wage, 0, 500)"],["size_cat","case_when(area < 10, 'small', area < 50, 'medium', 'large')"],
+    ["year_int","as_integer(year)"],["region_cat","as_factor(region_code)"]];
   const G_EXAMPLES=[["treat","any(trarrprop)"],["muni_gdp","sum(gdp)"],["avg_income","mean(income)"],["n_obs","count()"]];
 
   return(

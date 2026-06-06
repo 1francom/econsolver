@@ -27,10 +27,47 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       const { plotW, plotH, svgW = plotW } = dimsRef.current;
       if (!plotW || !plotH) { resolve(); return; }
       const scale = 2;
+
+      // Compute vertical space for title/subtitle and caption (drawn on canvas, not in SVG)
+      const TH = (title ? 22 : 0) + (subtitle ? 18 : 0) + (title || subtitle ? 6 : 0);
+      const BH = caption ? 22 : 0;
+      const totalH = plotH + TH + BH;
+
       const canvas = document.createElement("canvas");
       canvas.width  = svgW * scale;
-      canvas.height = plotH * scale;
+      canvas.height = totalH * scale;
       const ctx = canvas.getContext("2d");
+
+      // Background
+      ctx.fillStyle = showTiles ? "#f5f3f0" : (C?.bg ?? "#0e1117");
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw title / subtitle text directly on canvas
+      ctx.save();
+      ctx.scale(scale, scale);
+      const textColor = showTiles ? "#111" : (C?.text ?? "#c8c8c8");
+      const mutedColor = showTiles ? "#555" : (C?.textMuted ?? "#8a9ab0");
+      if (title) {
+        ctx.font = "bold 15px serif";
+        ctx.fillStyle = textColor;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(title, svgW / 2, 20);
+      }
+      if (subtitle) {
+        ctx.font = "11px serif";
+        ctx.fillStyle = mutedColor;
+        ctx.textAlign = "center";
+        ctx.fillText(subtitle, svgW / 2, title ? 40 : 20);
+      }
+      // Caption at bottom
+      if (caption) {
+        ctx.font = "9px serif";
+        ctx.fillStyle = mutedColor;
+        ctx.textAlign = "right";
+        ctx.fillText(caption, svgW - 8, totalH - 6);
+      }
+      ctx.restore();
 
       const drawSvgLayer = () => {
         const svgStr  = new XMLSerializer().serializeToString(svg);
@@ -38,7 +75,8 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
         const svgUrl  = URL.createObjectURL(svgBlob);
         const img = new Image();
         img.onload = () => {
-          ctx.drawImage(img, 0, 0, svgW * scale, plotH * scale);
+          // SVG drawn below title area
+          ctx.drawImage(img, 0, TH * scale, svgW * scale, plotH * scale);
           URL.revokeObjectURL(svgUrl);
           const a = document.createElement("a");
           a.href = canvas.toDataURL("image/png");
@@ -50,14 +88,12 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
         img.src = svgUrl;
       };
 
-      // Draw tile canvas first if tiles are shown
+      // Draw tile canvas first if tiles are shown (offset by TH so it aligns with the map in the SVG)
       const tileCanvas = tileCanRef.current;
       if (showTiles && tileCanvas && tileCanvas.width > 0) {
-        try { ctx.drawImage(tileCanvas, 0, 0, plotW * scale, plotH * scale); } catch (err) { void err; }
+        try { ctx.drawImage(tileCanvas, 0, TH * scale, plotW * scale, plotH * scale); } catch (err) { void err; }
         drawSvgLayer();
       } else {
-        ctx.fillStyle = C?.bg ?? "#0e1117";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
         drawSvgLayer();
       }
     }),
@@ -77,7 +113,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       };
       document.body.appendChild(iframe);
     },
-  }), [showTiles, C?.bg]);
+  }), [showTiles, C?.bg, title, subtitle, caption]);
 
   useEffect(() => {
     if (!Plt || !canvasRef.current || layers.length === 0) return;
@@ -92,9 +128,9 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
         if (!ly.visible) continue;
         const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
         const fillCol = ly.fillByCol ?? ly.colorByCol;
-        if ((ly.type === "grid" || ly.type === "polygon") && ly.mode !== "boundary" && fillCol) return buildColorScale(r, fillCol).legend;
-        if (ly.type === "point" && ly.colorCol) return buildColorScale(r, ly.colorCol).legend;
-        if (ly.type === "heatmap" && ly.latCol && ly.lonCol) return buildColorScale(kde2d(r, ly.latCol, ly.lonCol, { bandwidth: ly.bandwidth, gridN: ly.gridN }).rows, "density").legend;
+        if ((ly.type === "grid" || ly.type === "polygon") && ly.mode !== "boundary" && fillCol) return buildColorScale(r, fillCol, ly.palette).legend;
+        if (ly.type === "point" && ly.colorCol) return buildColorScale(r, ly.colorCol, ly.palette).legend;
+        if (ly.type === "heatmap" && ly.latCol && ly.lonCol) return buildColorScale(kde2d(r, ly.latCol, ly.lonCol, { bandwidth: ly.bandwidth, gridN: ly.gridN }).rows, "density", ly.palette).legend;
       }
       return null;
     })();
@@ -127,10 +163,25 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     for (const ly of layers) {
       if (!ly.visible) continue;
       const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
-      if (ly.type === "point" && ly.latCol && ly.lonCol) {
-        marks.push(Plt.dot(r.filter(row => !isNaN(parseFloat(row[ly.latCol])) && !isNaN(parseFloat(row[ly.lonCol]))), {
+      if (ly.type === "point" && ly.mode === "wkt" && ly.wktCol) {
+        const ptData = r.flatMap(row => {
+          const p = parseWktRings(row[ly.wktCol]);
+          return p?.type === "point" ? [{ ...row, _lon: p.rings[0][0][0], _lat: p.rings[0][0][1] }] : [];
+        });
+        const { getColor: getPtColor } = buildColorScale(ptData, ly.colorCol, ly.palette);
+        marks.push(Plt.dot(ptData, {
+          x: d => d._lon, y: d => d._lat,
+          fill: ly.colorCol ? (d => getPtColor(d) ?? ly.fill ?? "#6ec8b4") : (ly.fill ?? "#6ec8b4"),
+          r: ly.radius ?? 4,
+          fillOpacity: ly.fillOpacity ?? 0.78, stroke: "none",
+        }));
+      } else if (ly.type === "point" && ly.latCol && ly.lonCol) {
+        const ptRows = r.filter(row => !isNaN(parseFloat(row[ly.latCol])) && !isNaN(parseFloat(row[ly.lonCol])));
+        const { getColor: getPtColor } = buildColorScale(ptRows, ly.colorCol, ly.palette);
+        marks.push(Plt.dot(ptRows, {
           x: row => parseFloat(row[ly.lonCol]), y: row => parseFloat(row[ly.latCol]),
-          fill: ly.fill ?? "#6ec8b4", r: ly.radius ?? 4,
+          fill: ly.colorCol ? (row => getPtColor(row) ?? ly.fill ?? "#6ec8b4") : (ly.fill ?? "#6ec8b4"),
+          r: ly.radius ?? 4,
           fillOpacity: ly.fillOpacity ?? 0.78, stroke: "none",
         }));
       } else if (ly.type === "heatmap" && ly.latCol && ly.lonCol) {
@@ -138,7 +189,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           bandwidth: Number(ly.bandwidth) || undefined,
           gridN: Number(ly.gridN) || 45,
         });
-        const { getColor } = buildColorScale(kde.rows, "density");
+        const { getColor } = buildColorScale(kde.rows, "density", ly.palette);
         const xStep = kde.x.length > 1 ? Math.abs(kde.x[1] - kde.x[0]) : 1;
         const yStep = kde.y.length > 1 ? Math.abs(kde.y[1] - kde.y[0]) : 1;
         const toLonLat = (x, y) => transformCoord(x, y, kde.metricCrs, "EPSG:4326");
@@ -157,7 +208,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
         }));
       } else if (ly.type === "grid" && ly.mode === "wkt" && ly.wktCol) {
         const fillCol = ly.fillByCol ?? ly.colorByCol;
-        const { getColor } = buildColorScale(r, fillCol);
+        const { getColor } = buildColorScale(r, fillCol, ly.palette);
         const labels = [];
         for (const row of r) {
           const parsed = parseWktRings(row[ly.wktCol]);
@@ -238,7 +289,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
         } catch (err) { void err; }
       } else if (ly.wktCol) {
         const fillCol = ly.fillByCol ?? ly.colorByCol;
-        const { getColor } = buildColorScale(r, fillCol);
+        const { getColor } = buildColorScale(r, fillCol, ly.palette);
         const labels = [];
         for (const row of r) {
           const parsed = parseWktRings(row[ly.wktCol]);
@@ -333,7 +384,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       {subtitle && <div style={{ textAlign: "center", fontSize: 11, color: C?.textMuted ?? "#8a9ab0", marginBottom: 6 }}>{subtitle}</div>}
       <div style={{ position: "relative" }}>
         {showTiles && <canvas ref={tileCanRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />}
-        <div ref={canvasRef} style={{ position: "relative" }} />
+        <div ref={canvasRef} style={{ position: "relative", textAlign: "center" }} />
       </div>
       {caption  && <div style={{ textAlign: "right", fontSize: 9, color: C?.textMuted ?? "#5a6880", marginTop: 4 }}>{caption}</div>}
     </div>

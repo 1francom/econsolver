@@ -1,6 +1,29 @@
 // ─── ECON STUDIO · spatial/plot/GeoLayerConfig.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useMemo, useState, useEffect } from "react";
 import { mono } from "../shared/constants.js";
+import { PALETTE_DEFS, paletteToCss } from "../shared/color.js";
+
+function PalettePicker({ value, onChange, C }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>Scale</span>
+      {Object.entries(PALETTE_DEFS).map(([key, pal]) => {
+        const active = (value ?? "teal-gold") === key;
+        return (
+          <button key={key} onClick={() => onChange(key)} title={pal.label}
+            style={{
+              padding: 0, border: `2px solid ${active ? C.teal : C.border2}`,
+              borderRadius: 3, cursor: "pointer", background: "none",
+              outline: active ? `1px solid ${C.teal}` : "none", outlineOffset: 1,
+            }}
+          >
+            <div style={{ width: 32, height: 9, borderRadius: 1, background: paletteToCss(pal) }} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // Staged numeric input — value only commits to layer state (which drives the
 // canvas recompute) on explicit confirm (✓ button or Enter). Prevents the grid
@@ -36,6 +59,25 @@ function NumIn({ label, value, onChg, min, max, step, suffix, C }) {
   );
 }
 
+// Staged range slider — local draft updates instantly; commits to parent only on
+// pointer-up so the expensive Observable Plot rebuild fires once per gesture, not
+// on every pixel of drag. Defined outside GeoLayerConfig so React doesn't remount
+// it on every parent render (which would kill slider focus mid-drag).
+function StagedRng({ label, value, onChg, min, max, step, fmt, C }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+      <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>{label}</span>
+      <input type="range" min={min} max={max} step={step} value={draft}
+        onChange={e => setDraft(parseFloat(e.target.value))}
+        onPointerUp={e => onChg(parseFloat(e.target.value))}
+        style={{ width: 60, accentColor: C.teal }} />
+      <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted, minWidth: 28 }}>{fmt ? fmt(draft) : draft}</span>
+    </div>
+  );
+}
+
 export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, C }) {
   const upd = patch => onChange({ ...ly, ...patch });
 
@@ -67,14 +109,7 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
       </select>
     </div>
   );
-  const Rng = ({ label, value, onChg, min, max, step, fmt }) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-      <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>{label}</span>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChg(parseFloat(e.target.value))}
-        style={{ width: 60, accentColor: C.teal }} />
-      <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted, minWidth: 28 }}>{fmt ? fmt(value) : value}</span>
-    </div>
-  );
+  const Rng = StagedRng;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* Dataset selector */}
@@ -106,11 +141,14 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
           <Sel label="Fill by" value={ly.fillByCol ?? ly.colorByCol ?? ""} onChg={v => upd({ fillByCol: v, colorByCol: v })} opts={dsHeaders} />
           <Sel label="Label by" value={ly.labelCol ?? ""} onChg={v => upd({ labelCol: v })} opts={dsHeaders} />
           {ly.labelCol && (
-            <Rng label="Label size" value={ly.labelSize ?? 10} onChg={v => upd({ labelSize: v })} min={6} max={24} step={1} fmt={v => v.toFixed(0) + "px"} />
+            <Rng label="Label size" value={ly.labelSize ?? 10} onChg={v => upd({ labelSize: v })} min={6} max={24} step={1} fmt={v => v.toFixed(0) + "px"} C={C} />
           )}
-          {(ly.fillByCol || ly.colorByCol) && (
-            <Rng label="Color opacity" value={ly.colorFillOpacity ?? 0.65} onChg={v => upd({ colorFillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} />
-          )}
+          {(ly.fillByCol || ly.colorByCol) && (<>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <PalettePicker value={ly.palette} onChange={v => upd({ palette: v })} C={C} />
+            </div>
+            <Rng label="Color opacity" value={ly.colorFillOpacity ?? 0.65} onChg={v => upd({ colorFillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} C={C} />
+          </>)}
         </div>
       )}
       {ly.type === "grid" && (ly.mode ?? "boundary") === "latlon" && (
@@ -138,26 +176,59 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
           <Sel label="Fill by" value={ly.fillByCol ?? ly.colorByCol ?? ""} onChg={v => upd({ fillByCol: v, colorByCol: v })} opts={dsHeaders} />
           <Sel label="Label by" value={ly.labelCol ?? ""} onChg={v => upd({ labelCol: v })} opts={dsHeaders} />
           {ly.labelCol && (
-            <Rng label="Label size" value={ly.labelSize ?? 10} onChg={v => upd({ labelSize: v })} min={6} max={24} step={1} fmt={v => v.toFixed(0) + "px"} />
+            <Rng label="Label size" value={ly.labelSize ?? 10} onChg={v => upd({ labelSize: v })} min={6} max={24} step={1} fmt={v => v.toFixed(0) + "px"} C={C} />
           )}
-          {(ly.fillByCol || ly.colorByCol) && (
-            <Rng label="Color opacity" value={ly.colorFillOpacity ?? 0.65} onChg={v => upd({ colorFillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} />
-          )}
+          {(ly.fillByCol || ly.colorByCol) && (<>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <PalettePicker value={ly.palette} onChange={v => upd({ palette: v })} C={C} />
+            </div>
+            <Rng label="Color opacity" value={ly.colorFillOpacity ?? 0.65} onChg={v => upd({ colorFillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} C={C} />
+          </>)}
         </div>
       )}
-      {(ly.type === "point" || ly.type === "heatmap") && (
+      {ly.type === "point" && (
+        <>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[["latlon", "Lat/Lon"], ["wkt", "WKT geometry"]].map(([m, lbl]) => (
+              <button key={m} onClick={() => upd({ mode: m })}
+                style={{
+                  flex: 1, padding: "2px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                  background: (ly.mode ?? "latlon") === m ? `${C.teal}18` : "transparent",
+                  border: `1px solid ${(ly.mode ?? "latlon") === m ? C.teal + "55" : C.border2}`,
+                  color: (ly.mode ?? "latlon") === m ? C.teal : C.textMuted,
+                }}
+              >{lbl}</button>
+            ))}
+          </div>
+          {(ly.mode === "latlon" || !ly.mode) && (
+            <div style={{ display: "flex", gap: 6 }}>
+              <Sel label="Latitude" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
+              <Sel label="Longitude" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
+            </div>
+          )}
+          {ly.mode === "wkt" && (
+            <Sel label="WKT geometry" value={ly.wktCol ?? ""} onChg={v => upd({ wktCol: v })} opts={geomCols} />
+          )}
+          <Sel label="Fill by (optional)" value={ly.colorCol ?? ""} onChg={v => upd({ colorCol: v })} opts={dsHeaders} />
+          {ly.colorCol && <PalettePicker value={ly.palette} onChange={v => upd({ palette: v })} C={C} />}
+        </>
+      )}
+      {ly.type === "heatmap" && (
         <div style={{ display: "flex", gap: 6 }}>
           <Sel label="Latitude" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
           <Sel label="Longitude" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
         </div>
       )}
       {ly.type === "heatmap" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-          <NumIn label="Bandwidth" value={ly.bandwidth ?? 250} onChg={v => upd({ bandwidth: v })} min={10} max={10000} step={10} suffix="m" C={C} />
-          <NumIn label="Grid N" value={ly.gridN ?? 45} onChg={v => upd({ gridN: v })} min={10} max={120} step={1} C={C} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <NumIn label="Bandwidth" value={ly.bandwidth ?? 250} onChg={v => upd({ bandwidth: v })} min={10} max={10000} step={10} suffix="m" C={C} />
+            <NumIn label="Grid N" value={ly.gridN ?? 45} onChg={v => upd({ gridN: v })} min={10} max={120} step={1} C={C} />
+          </div>
+          <PalettePicker value={ly.palette} onChange={v => upd({ palette: v })} C={C} />
         </div>
       )}
-      {(ly.type === "polygon" || ly.type === "point" || ly.type === "grid") && (
+      {(ly.type === "polygon" || ly.type === "point" || ly.type === "grid") && !(ly.type === "point" && ly.colorCol) && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em" }}>Fill</span>
@@ -165,8 +236,11 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
               onChange={e => upd({ fill: e.target.value })}
               style={{ width: 26, height: 18, cursor: "pointer", border: "none", padding: 0, background: "none" }} />
           </div>
-          <Rng label="Opacity" value={ly.fillOpacity ?? 0.3} onChg={v => upd({ fillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} />
+          <Rng label="Opacity" value={ly.fillOpacity ?? 0.3} onChg={v => upd({ fillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} C={C} />
         </div>
+      )}
+      {ly.type === "point" && ly.colorCol && (
+        <Rng label="Opacity" value={ly.fillOpacity ?? 0.78} onChg={v => upd({ fillOpacity: v })} min={0} max={1} step={0.05} fmt={v => (v * 100).toFixed(0) + "%"} C={C} />
       )}
       {ly.type !== "point" && ly.type !== "heatmap" && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -175,11 +249,11 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
             <input type="color" value={ly.stroke ?? "#333333"} onChange={e => upd({ stroke: e.target.value })}
               style={{ width: 26, height: 18, cursor: "pointer", border: "none", padding: 0, background: "none" }} />
           </div>
-          <Rng label="Width" value={ly.strokeWidth ?? 0.8} onChg={v => upd({ strokeWidth: v })} min={0.1} max={4} step={0.1} fmt={v => v.toFixed(1) + "px"} />
+          <Rng label="Width" value={ly.strokeWidth ?? 0.8} onChg={v => upd({ strokeWidth: v })} min={0.1} max={4} step={0.1} fmt={v => v.toFixed(1) + "px"} C={C} />
         </div>
       )}
       {ly.type === "point" && (
-        <Rng label="Radius" value={ly.radius ?? 4} onChg={v => upd({ radius: v })} min={1} max={14} step={0.5} fmt={v => v.toFixed(1)} />
+        <Rng label="Radius" value={ly.radius ?? 4} onChg={v => upd({ radius: v })} min={1} max={14} step={0.5} fmt={v => v.toFixed(1)} C={C} />
       )}
     </div>
   );
