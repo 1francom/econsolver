@@ -388,6 +388,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [activeBufferId, setActiveBufferId] = useState(null);
   const pinnedModels = useMemo(() => modelBuffer.getAll(), [bufferVersion]);
 
+  // Restore this project's pinned-model buffer when the project opens / changes.
+  useEffect(() => {
+    let cancelled = false;
+    modelBuffer.setProject(pid).then(() => { if (!cancelled) setBufferVersion(v => v + 1); });
+    return () => { cancelled = true; };
+  }, [pid]);
+
   // ── Predict from Model ────────────────────────────────────────────────────
   const [predOpen,     setPredOpen]    = useState(false);
   const [predModelId,  setPredModelId] = useState("");
