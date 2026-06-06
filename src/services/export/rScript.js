@@ -1185,6 +1185,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
   const filename     = opts.filename ?? "dataset.csv";
   const pipeline     = opts.pipeline ?? [];
   const dataLoadOpts = opts.dataLoadOpts ?? null;
+  const allDatasets  = opts.allDatasets ?? {};
   const ts = new Date().toISOString().slice(0, 10);
   const allTypes = [...new Set(configs.map(c => c.model?.type).filter(Boolean))];
   const pkgsSet = new Set(["dplyr", "tidyr", "readr", "fixest", "modelsummary", "lmtest", "car"]);
@@ -1306,7 +1307,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
 //     model           ModelConfig
 //     dataDictionary  Record|null
 //   }
-export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null, dataLoadOpts = null } = {}) {
+export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null, dataLoadOpts = null, allDatasets = {} } = {}) {
   const ts      = new Date().toISOString().slice(0, 10);
   const stem    = filename.replace(/\.[^.]+$/, "");
   const pkgs    = buildPackageList(model.type, [...pipeline, ...perSubsetSteps]);
