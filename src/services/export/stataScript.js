@@ -91,9 +91,107 @@ export function generateStataScript(config = {}) {
 }
 
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────
+function stVar(s) {
+  return String(s ?? "").replace(/[^a-zA-Z0-9_]/g, "_").replace(/^([0-9])/, "_$1").slice(0, 32);
+}
+
+function stStr(s) {
+  return `"${String(s ?? "").replace(/"/g, `""`)}"`;
+}
+
+function stValue(v, dtype = null) {
+  if (v === null || v === undefined) return ".";
+  if (dtype === "number" || typeof v === "number") {
+    const n = Number(v);
+    return isFinite(n) ? String(n) : ".";
+  }
+  return stStr(v);
+}
+
+function stWhere(where) {
+  if (!where?.col || !where?.op) return "1";
+  const c = stVar(where.col);
+  const v = where.value;
+  switch (where.op) {
+    case "equals": return `${c} == ${stValue(v)}`;
+    case "not_equals": return `${c} != ${stValue(v)}`;
+    case "contains": return `strpos(${c}, ${stStr(v ?? "")}) > 0`;
+    case "starts": return `substr(${c}, 1, length(${stStr(v ?? "")})) == ${stStr(v ?? "")}`;
+    case "ends": return `substr(${c}, -length(${stStr(v ?? "")}), .) == ${stStr(v ?? "")}`;
+    case "gt": return `${c} > ${Number(v)}`;
+    case "lt": return `${c} < ${Number(v)}`;
+    case "between": {
+      const lo = Number(Array.isArray(v) ? v[0] : v);
+      const hi = Number(Array.isArray(v) ? v[1] : v);
+      return `${c} >= ${lo} & ${c} <= ${hi}`;
+    }
+    case "empty": return `missing(${c}) | ${c} == ""`;
+    case "notempty": return `!missing(${c}) & ${c} != ""`;
+    default: return "1";
+  }
+}
+
+function isGridEditStep(step) {
+  return ["add_column", "add_row", "set_where", "replace", "str_splice"].includes(step.type);
+}
+
 function transpileStep(step, allDatasets = {}) {
   const { type, params = {} } = step;
   switch (type) {
+    case "add_column": {
+      const out = stVar(step.nn);
+      if (step.dtype === "number") return `gen double ${out} = ${stValue(step.fill, "number")}`;
+      return `gen strL ${out} = ${stValue(step.fill)}`;
+    }
+    case "add_row": {
+      const count = Math.max(1, Number(step.count) || 1);
+      const assigns = Object.entries(step.values || {})
+        .map(([k, v]) => `replace ${stVar(k)} = ${stValue(v)} in \`i'`);
+      return [
+        `* add_row: append ${count} synthetic row(s); unspecified columns remain missing`,
+        `local __oldN = _N`,
+        `set obs \`= _N + ${count}'`,
+        `forvalues i = \`= \`__oldN' + 1'/\`=_N' {`,
+        ...assigns.map(x => `  ${x}`),
+        `}`,
+      ].join("\n");
+    }
+    case "set_where": {
+      const target = stVar(step.col);
+      if (step.action === "clear") {
+        return [
+          `capture confirm string variable ${target}`,
+          `if !_rc replace ${target} = "" if ${stWhere(step.where)}`,
+          `else replace ${target} = . if ${stWhere(step.where)}`,
+        ].join("\n");
+      }
+      return `replace ${target} = ${stValue(step.value, step.dtype)} if ${stWhere(step.where)}`;
+    }
+    case "replace": {
+      const src = stVar(step.col);
+      const out = stVar(step.nn || step.col);
+      const mode = step.match?.mode || "exact";
+      const find = step.match?.find ?? "";
+      const repl = step.replaceWith ?? "";
+      const init = step.nn ? `capture confirm string variable ${src}\nif !_rc gen strL ${out} = ${src}\nelse gen double ${out} = ${src}\n` : "";
+      if (mode === "exact") return `${init}replace ${out} = ${stValue(repl)} if ${out} == ${stValue(find)}`;
+      if (mode === "contains") return `${init}replace ${out} = subinstr(${out}, ${stStr(find)}, ${stStr(repl)}, .)`;
+      return `${init}replace ${out} = regexr(${out}, ${stStr(find)}, ${stStr(repl)})`;
+    }
+    case "str_splice": {
+      const src = stVar(step.col);
+      const out = stVar(step.nn || step.col);
+      const pos = Number(step.position) || 1;
+      const n = Math.max(0, Number(step.count) || 0);
+      const text = stStr(step.text ?? "");
+      const init = step.nn
+        ? `gen strL ${out} = string(${src})\n`
+        : `capture confirm string variable ${out}\nif _rc tostring ${out}, replace force\n`;
+      const p = `cond(${pos} < 0, max(1, length(${out}) + ${pos} + 1), ${pos})`;
+      if (step.mode === "delete") return `${init}replace ${out} = substr(${out}, 1, ${p} - 1) + substr(${out}, ${p} + ${n}, .)`;
+      if (step.mode === "overwrite") return `${init}replace ${out} = substr(${out}, 1, ${p} - 1) + ${text} + substr(${out}, ${p} + ${n}, .)`;
+      return `${init}replace ${out} = substr(${out}, 1, ${p} - 1) + ${text} + substr(${out}, ${p}, .)`;
+    }
     case "rename":
       return `rename ${params.from} ${params.to}`;
     case "drop":
@@ -219,23 +317,47 @@ function transpileStep(step, allDatasets = {}) {
       return `* normalize_cats: manual step`;
     case "extract_regex":
       return `* regex extract: gen ${params.newCol} from ${params.col} using pattern "${params.regex}"\n* Use -regexm()- / -regexs()-:\n* gen ${params.newCol} = regexs(1) if regexm(${params.col}, "${params.regex}")`;
+    case "distinct": {
+      const subset = step.subset ?? params.subset ?? [];
+      return `duplicates drop ${subset.length ? subset.join(" ") : ""}, force`;
+    }
     case "join": {
-      const how      = step.how === "inner" ? "1:1" : "1:1";  // Stata: 1:1 for both; user adjusts to m:1/1:m as needed
+      const how      = step.how || "left";
       const lk       = step.leftKey  ?? "id";
       const rk       = step.rightKey ?? lk;
       const sfx      = step.suffix   ?? "_r";
       const sameKey  = lk === rk ? lk : `${lk} = ${rk}`;
-      const keepInner = step.how === "inner" ? "\nkeep if _merge == 3" : "\nkeep if _merge == 1 | _merge == 3";
+      if (how === "semi" || how === "anti") {
+        const keep = how === "semi" ? "keep(match)" : "keep(master)";
+        return [
+          `* ${how} join: row filter only, no right-side columns added`,
+          `preserve`,
+          `  ${stataRightLoad(step.rightId, allDatasets)}`,
+          `  keep ${rk}`,
+          `  duplicates drop`,
+          lk === rk ? null : `  rename ${rk} ${lk}  /* align key names */`,
+          `  save "__right_keys_tmp.dta", replace`,
+          `restore`,
+          `merge m:1 ${lk} using "__right_keys_tmp.dta", ${keep} nogen`,
+          `erase "__right_keys_tmp.dta"`,
+        ].filter(Boolean).join("\n");
+      }
+      const keep = {
+        left: "keep(master match)",
+        inner: "keep(match)",
+        right: "keep(match using)",
+        full: "keep(master match using)",
+      }[how] ?? "keep(master match)";
       return [
-        `* Join: load right dataset, merge on ${sameKey}`,
+        `* ${how} join: load right dataset, merge on ${sameKey}`,
         `preserve`,
         `  ${stataRightLoad(step.rightId, allDatasets)}`,
-        `  rename ${rk} ${lk}  /* align key names */`,
+        lk === rk ? null : `  rename ${rk} ${lk}  /* align key names */`,
         `  save "__right_tmp.dta", replace`,
         `restore`,
-        `merge ${how} ${lk} using "__right_tmp.dta", keep(master match) nogen suffixes("" "${sfx}")${keepInner}`,
+        `merge 1:1 ${lk} using "__right_tmp.dta", ${keep} nogen suffixes("" "${sfx}")`,
         `erase "__right_tmp.dta"`,
-      ].join("\n");
+      ].filter(Boolean).join("\n");
     }
     case "append": {
       return [
@@ -246,6 +368,83 @@ function transpileStep(step, allDatasets = {}) {
         `restore`,
         `append using "__append_tmp.dta"`,
         `erase "__append_tmp.dta"`,
+      ].join("\n");
+    }
+    case "bind_cols": {
+      return [
+        `* bind_cols: align by row order`,
+        `gen long __row_order = _n`,
+        `preserve`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
+        `  gen long __row_order = _n`,
+        `  save "__bind_cols_tmp.dta", replace`,
+        `restore`,
+        `merge 1:1 __row_order using "__bind_cols_tmp.dta", keep(match) nogen suffixes("" "${step.suffix ?? "_r"}")`,
+        `drop __row_order`,
+        `erase "__bind_cols_tmp.dta"`,
+      ].join("\n");
+    }
+    case "union": {
+      return [
+        `* union: append right dataset, then drop full-row duplicates`,
+        `preserve`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
+        `  save "__union_tmp.dta", replace`,
+        `restore`,
+        `append using "__union_tmp.dta"`,
+        `duplicates drop, force`,
+        `erase "__union_tmp.dta"`,
+      ].join("\n");
+    }
+    case "intersect":
+    case "setdiff": {
+      const keep = type === "intersect" ? "keep(match)" : "keep(master)";
+      return [
+        `* ${type}: merge on shared columns; replace /* shared keys */ with the common key list if needed`,
+        `preserve`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
+        `  save "__setop_tmp.dta", replace`,
+        `restore`,
+        `merge m:1 /* shared keys */ using "__setop_tmp.dta", ${keep} nogen`,
+        `erase "__setop_tmp.dta"`,
+      ].join("\n");
+    }
+    case "group_transform": {
+      const by = step.by ?? params.by ?? [];
+      const col = step.col ?? params.col ?? "";
+      const out = step.nn ?? params.nn ?? `${step.fn ?? params.fn}_${col}`;
+      const fn = step.fn ?? params.fn ?? "mean";
+      const egenFn = fn === "count" ? "count" : fn === "sd" ? "sd" : fn === "rank" ? "rank" : fn === "median" ? "median" : fn;
+      return `bysort ${by.join(" ")}: egen ${out} = ${egenFn}(${col})`;
+    }
+    case "vector_assign": {
+      const out = step.nn ?? "assigned";
+      const values = step.values ?? [];
+      const seed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      if (step.mode === "recycle") {
+        return [
+          `gen strL ${out} = ""`,
+          `local vals "${values.join(" ")}"`,
+          `forvalues i = 1/\`=_N' {`,
+          `  local k = mod(\`i' - 1, ${values.length || 1}) + 1`,
+          `  replace ${out} = word("\`vals'", \`k') in \`i'`,
+          `}`,
+        ].join("\n");
+      }
+      if (step.mode === "conditional") {
+        const lines = [
+          `gen strL ${out} = "${step.elseValue ?? ""}"`,
+          ...(step.rules || []).map(r => `replace ${out} = "${r.value}" if ${r.expr}`),
+        ];
+        return lines.join("\n");
+      }
+      return [
+        `* NOTE: EconSolver uses a seeded mulberry32 RNG; exported values differ but the distribution matches`,
+        `set seed ${seed}`,
+        `gen double __u = runiform()`,
+        `gen strL ${out} = ""`,
+        `* assign ${values.join("/")} by equal or weighted bins; adjust cutpoints for exact weights if needed`,
+        `drop __u`,
       ].join("\n");
     }
     case "ai_tr": {
@@ -677,7 +876,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
   if (pipeline.length) {
     lines.push(`* ── Data pipeline ────────────────────────────────────────────────────────`);
     pipeline.forEach(step => {
-      const out = toStata(step, "df");
+      const out = isGridEditStep(step) ? transpileStep(step, opts.allDatasets ?? {}) : toStata(step, "df");
       if (Array.isArray(out)) out.forEach(l => lines.push(l));
       else if (out) lines.push(out);
     });

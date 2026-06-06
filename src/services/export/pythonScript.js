@@ -122,10 +122,103 @@ function buildPackageList(modelType, pipeline = []) {
   return pkgs;
 }
 
+function pyStr(s) {
+  return JSON.stringify(String(s ?? ""));
+}
+
+function pyList(arr) {
+  return `[${(arr ?? []).map(pyStr).join(", ")}]`;
+}
+
+function pyValue(v, dtype = null) {
+  if (v === null || v === undefined) return "None";
+  if (dtype === "number" || typeof v === "number") {
+    const n = Number(v);
+    return isFinite(n) ? String(n) : "None";
+  }
+  return pyStr(v);
+}
+
+function pyWhere(where) {
+  if (!where?.col || !where?.op) return "pd.Series(True, index=df.index)";
+  const c = pyStr(where.col);
+  const v = where.value;
+  switch (where.op) {
+    case "equals": return `(df[${c}].astype("string") == ${pyStr(v ?? "")})`;
+    case "not_equals": return `(df[${c}].astype("string") != ${pyStr(v ?? "")})`;
+    case "contains": return `df[${c}].astype("string").str.contains(${pyStr(v ?? "")}, regex=False, na=False)`;
+    case "starts": return `df[${c}].astype("string").str.startswith(${pyStr(v ?? "")}, na=False)`;
+    case "ends": return `df[${c}].astype("string").str.endswith(${pyStr(v ?? "")}, na=False)`;
+    case "gt": return `(pd.to_numeric(df[${c}], errors="coerce") > ${Number(v)})`;
+    case "lt": return `(pd.to_numeric(df[${c}], errors="coerce") < ${Number(v)})`;
+    case "between": {
+      const lo = Number(Array.isArray(v) ? v[0] : v);
+      const hi = Number(Array.isArray(v) ? v[1] : v);
+      return `pd.to_numeric(df[${c}], errors="coerce").between(${lo}, ${hi})`;
+    }
+    case "empty": return `(df[${c}].isna() | (df[${c}].astype("string") == ""))`;
+    case "notempty": return `(df[${c}].notna() & (df[${c}].astype("string") != ""))`;
+    default: return "pd.Series(True, index=df.index)";
+  }
+}
+
+function isGridEditStep(step) {
+  return ["add_column", "add_row", "set_where", "replace", "str_splice"].includes(step.type);
+}
+
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────
 function transpileStep(step, allDatasets = {}) {
   const { type, params = {} } = step;
   switch (type) {
+    case "add_column":
+      return `df[${pyStr(step.nn)}] = ${pyValue(step.fill, step.dtype)}`;
+    case "add_row": {
+      const count = Math.max(1, Number(step.count) || 1);
+      const values = JSON.stringify(step.values || {});
+      return [
+        `# add_row: append ${count} synthetic row(s); unspecified columns become NaN`,
+        `_new_rows = pd.DataFrame([${values}] * ${count})`,
+        `df = pd.concat([df, _new_rows], ignore_index=True)`,
+      ].join("\n");
+    }
+    case "set_where":
+      return `df.loc[${pyWhere(step.where)}, ${pyStr(step.col)}] = ${step.action === "clear" ? "None" : pyValue(step.value, step.dtype)}`;
+    case "replace": {
+      const col = pyStr(step.col);
+      const out = pyStr(step.nn || step.col);
+      const mode = step.match?.mode || "exact";
+      const find = step.match?.find ?? "";
+      const repl = step.replaceWith ?? "";
+      if (mode === "exact") {
+        return [
+          ...(step.nn ? [`df[${out}] = df[${col}]`] : []),
+          `df[${out}] = df[${out}].replace(${pyStr(find)}, ${pyStr(repl)})`,
+        ].join("\n");
+      }
+      return [
+        ...(step.nn ? [`df[${out}] = df[${col}]`] : []),
+        `df[${out}] = df[${out}].astype("string").str.replace(${pyStr(find)}, ${pyStr(repl)}, regex=${mode === "regex" ? "True" : "False"})`,
+      ].join("\n");
+    }
+    case "str_splice": {
+      const col = pyStr(step.col);
+      const out = pyStr(step.nn || step.col);
+      return [
+        `def _litux_splice(v, position, mode, text="", count=0):`,
+        `    if pd.isna(v):`,
+        `        return v`,
+        `    s = str(v)`,
+        `    pos = len(s) if position is None else int(position)`,
+        `    pos = max(0, min((len(s) + pos + 1) - 1 if pos < 0 else pos - 1, len(s)))`,
+        `    n = max(0, int(count or 0))`,
+        `    if mode == "insert": return s[:pos] + text + s[pos:]`,
+        `    if mode == "delete": return s[:pos] + s[pos+n:]`,
+        `    if mode == "overwrite": return s[:pos] + text + s[pos+n:]`,
+        `    return s`,
+        `df[${out}] = df[${col}].apply(lambda v: _litux_splice(v, ${Number(step.position) || 1}, ${pyStr(step.mode || "insert")}, ${pyStr(step.text ?? "")}, ${Number(step.count) || 0}))`,
+        `df[${out}] = pd.to_numeric(df[${out}], errors="ignore")`,
+      ].join("\n");
+    }
     case "rename":
       return `df = df.rename(columns={"${params.from}": "${params.to}"})`;
     case "drop":
@@ -241,8 +334,14 @@ function transpileStep(step, allDatasets = {}) {
       return `# normalize_cats: manual step`;
     case "extract_regex":
       return `df["${params.newCol}"] = df["${params.col}"].str.extract(r"${params.regex}")`;
+    case "distinct": {
+      const subset = step.subset ?? params.subset ?? [];
+      const keep = step.keep ?? params.keep ?? "first";
+      const subsetArg = subset.length ? `subset=${pyList(subset)}, ` : "";
+      return `df = df.drop_duplicates(${subsetArg}keep=${pyStr(keep)}).reset_index(drop=True)`;
+    }
     case "join": {
-      const how      = step.how === "inner" ? "inner" : "left";
+      const how      = step.how || "left";
       const lk       = step.leftKey  ?? "id";
       const rk       = step.rightKey ?? lk;
       const sfx      = step.suffix   ?? "_r";
@@ -250,10 +349,21 @@ function transpileStep(step, allDatasets = {}) {
       const byExpr   = lk === rk
         ? `on="${lk}"`
         : `left_on="${lk}", right_on="${rk}"`;
+      if (how === "semi" || how === "anti") {
+        const keepExpr = how === "semi"
+          ? `df["${lk}"].isin(df_right["${rk}"])`
+          : `~df["${lk}"].isin(df_right["${rk}"])`;
+        return [
+          `# ${how} join: filter rows using right dataset "${rightName}"`,
+          `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
+          `df = df[${keepExpr}].reset_index(drop=True)`,
+        ].join("\n");
+      }
+      const pyHow = { left:"left", inner:"inner", right:"right", full:"outer" }[how] ?? "left";
       return [
         `# Join: load right dataset "${rightName}" and merge on ${lk}`,
         `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
-        `df = df.merge(df_right, ${byExpr}, how="${how}", suffixes=("", "${sfx}"))`,
+        `df = df.merge(df_right, ${byExpr}, how="${pyHow}", suffixes=("", "${sfx}"))`,
       ].join("\n");
     }
     case "append": {
@@ -263,6 +373,55 @@ function transpileStep(step, allDatasets = {}) {
         `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
         `df = pd.concat([df, df_right], ignore_index=True)`,
       ].join("\n");
+    }
+    case "bind_cols": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      return [
+        `# bind_cols: align rows by current order from right dataset "${rightName}"`,
+        `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
+        `df = pd.concat([df.reset_index(drop=True), df_right.reset_index(drop=True)], axis=1)`,
+      ].join("\n");
+    }
+    case "union":
+    case "intersect":
+    case "setdiff": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      const load = [
+        `# ${type}: compare with right dataset "${rightName}"`,
+        `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
+      ];
+      if (type === "union") {
+        return [...load, `df = pd.concat([df, df_right], ignore_index=True).drop_duplicates().reset_index(drop=True)`].join("\n");
+      }
+      if (type === "intersect") {
+        return [...load, `df = df.merge(df_right, how="inner").drop_duplicates().reset_index(drop=True)`].join("\n");
+      }
+      return [...load, `df = df.merge(df_right, how="left", indicator=True).query('_merge == "left_only"').drop(columns="_merge").reset_index(drop=True)`].join("\n");
+    }
+    case "group_transform": {
+      const by = step.by ?? params.by ?? [];
+      const col = step.col ?? params.col ?? by[0] ?? "";
+      const out = step.nn ?? params.nn ?? `${step.fn ?? params.fn}_${col}`;
+      const fn = step.fn ?? params.fn ?? "mean";
+      const group = `df.groupby(${pyList(by)})["${col}"]`;
+      if (fn === "count") return `df["${out}"] = ${group}.transform("size")`;
+      if (fn === "sd") return `df["${out}"] = ${group}.transform("std")`;
+      if (fn === "rank") return `df["${out}"] = ${group}.transform(lambda s: s.rank(method="min"))`;
+      return `df["${out}"] = ${group}.transform("${fn}")`;
+    }
+    case "vector_assign": {
+      const vals = pyList(step.values ?? []);
+      const out = step.nn ?? "assigned";
+      const seed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      if (step.mode === "recycle") return `df["${out}"] = np.resize(${vals}, len(df))`;
+      if (step.mode === "conditional") {
+        const conds = (step.rules || []).map(r => `df.eval(${pyStr(r.expr)})`).join(", ");
+        const choices = (step.rules || []).map(r => pyStr(r.value)).join(", ");
+        return `df["${out}"] = np.select([${conds}], [${choices}], default=${pyStr(step.elseValue ?? "")})`;
+      }
+      const weights = Array.isArray(step.weights) ? step.weights.join(", ") : "";
+      const p = weights ? `, p=np.array([${weights}]) / np.sum([${weights}])` : "";
+      return `# NOTE: EconSolver uses a seeded mulberry32 RNG; exported values differ but the distribution matches\ndf["${out}"] = np.random.default_rng(${seed}).choice(${vals}, size=len(df)${p})`;
     }
     case "ai_tr": {
       const col    = step.col ?? "col";
@@ -791,7 +950,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   if (pipeline.length) {
     lines.push(`# ── Data pipeline ─────────────────────────────────────────────────────────`);
     pipeline.forEach(step => {
-      const out = toPython(step, "df");
+      const out = isGridEditStep(step) ? transpileStep(step, opts.allDatasets ?? {}) : toPython(step, "df");
       if (Array.isArray(out)) out.forEach(l => lines.push(l));
       else if (out) lines.push(out);
     });

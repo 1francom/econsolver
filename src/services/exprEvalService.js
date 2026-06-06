@@ -70,6 +70,16 @@ export function evalColumn(step, rows) {
       rows,
     });
   }
+  // vector_assign (conditional mode) — rules evaluated in the sandboxed worker
+  if (step.type === "vector_assign") {
+    return request("eval_col", {
+      mode:      "vector_assign",
+      rules:     step.rules,
+      elseValue: step.elseValue,
+      rows,
+      newCol:    step.nn,
+    });
+  }
   // mutate
   return request("eval_col", {
     mode:   "mutate",

@@ -50,16 +50,18 @@ src/
 │   ├── runner.js       ← applyStep + runPipeline — 23 step types
 │   ├── validator.js    ← validatePanel, buildInfo
 │   ├── registry.js     ← STEP_REGISTRY (must stay in sync with runner.js)
-│   └── auditor.js      ← auditPipeline → AuditTrail + markdown
+│   ├── auditor.js      ← auditPipeline → AuditTrail + markdown
+│   └── stepValidator.js ← validateAISteps (registry-checked validation of AI-emitted steps)
 │
 ├── services/
 │   ├── AI/
-│   │   ├── AIService.js          ← callClaude (exported), inferVariableUnits, interpretRegression
+│   │   ├── AIService.js          ← callClaude (exported), inferVariableUnits, interpretRegression, nlToPipeline
+│   │   ├── appCapabilityMap.js   ← serializeAllowedSteps (NL step catalogue) + APP_CAPABILITY_MAP/serializeCapabilityMap (app structure for the coach)
 │   │   ├── LocalAI.js            ← local/offline AI fallback
 │   │   └── Prompts/
 │   │       └── index.js          ← SHARED_CONTEXT, INFER_UNITS_PROMPT, INTERPRET_REGRESSION_PROMPT,
 │   │                                WRANGLING_TRANSFORM_PROMPT, WRANGLING_QUERY_PROMPT,
-│   │                                CLEANING_SUGGESTIONS_PROMPT
+│   │                                CLEANING_SUGGESTIONS_PROMPT, NL_TO_PIPELINE_PROMPT
 │   ├── session/
 │   │   ├── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
 │   │   └── sessionLog.jsx        ← React Context cross-module operation log (SessionLogProvider, useSessionLog)
@@ -83,7 +85,9 @@ src/
 │   │   ├── pythonScript.js       ← pipeline + model → Python script; generateSubsetPythonScript() dict+comprehension pattern
 │   │   └── replicationBundle.js  ← ZIP bundle (R + Stata + Python scripts + data); buildMultiSubsetBundle() + downloadMultiSubsetBundle()
 │   ├── Persistence/
-│   │   └── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage; v6 coach_chats store (saveCoachChats/loadCoachChats/deleteCoachChats — per-project AI Coach conversations)
+│   │   ├── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage; coach_chats store; v9 model_buffer + spatial_maps stores (save/load/delete per project; cascade on deleteProject)
+│   │   └── trimResult.js         ← shared comparison-sufficient EstimationResult projection (modelBuffer + sessionSnapshot)
+│   ├── sync/                     ← opt-in E2EE cloud sync: crypto.js only for WebCrypto, syncEngine.js/supabaseClient.js only for Supabase egress
 │   └── modelBuffer.js            ← model buffer state management
 │
 ├── components/
@@ -99,6 +103,7 @@ src/
 │   │   ├── DictionaryTab.jsx     ← AI inference + manual edit
 │   │   ├── MergeTab.jsx          ← LEFT/INNER JOIN + APPEND
 │   │   ├── DataQualityReport.jsx
+│   │   ├── NLCommandBar.jsx      ← AI command bar: NL → validated pipeline steps (preview/apply); mounted by WranglingModule
 │   │   ├── WorldBankFetcher.jsx  ← World Bank data fetch UI
 │   │   ├── OECDFetcher.jsx       ← OECD data fetch UI
 │   │   └── SubsetManager.jsx     ← multi-subset workflow UI
@@ -201,11 +206,11 @@ src/
 | Synthetic Control | SyntheticControlEngine.js | ✓ validated vs R Synth package (weights 2dp, gaps 2dp) — Frank-Wolfe vs ipop; hard benchmarks in engineValidation.js |
 | Sun & Abraham (2021) event study | NonLinearEngine.js (`runSunAbraham`) | ✓ validated vs R fixest::fepois + sunab() (coef 6dp, SE 4dp) — IW per-relative-period aggregation w/ delta-method clustered SE; single-cohort reduces exactly to Poisson TWFE `i(rel)`. Harness: `sunAbrahamRValidation.R` → `sunAbrahamBenchmarks.json` → `sunAbrahamValidation.js`. Clustered SE uses sandwich convention = fixest `ssc(fixef.K="none")`; differs from fixest default `nested` by a known df factor (~1-2%) |
 
-## Pipeline step types (runner.js) — 23 total
-Cleaning: `rename, drop, filter, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr`
-Features: `log, sq, std, dummy, lag, lead, diff, ix, did, date_parse, date_extract, mutate, factor_interactions`
-Reshape: `arrange, group_summarize, pivot_longer`
-Merge: `join, append`
+## Pipeline step types (runner.js) — 35 total
+Cleaning: `rename, drop, filter, add_row, set_where, replace, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr, distinct`
+Features: `add_column, log, sq, std, dummy, lag, lead, diff, ix, did, date_parse, date_extract, mutate, str_splice, factor_interactions, vector_assign`
+Reshape: `arrange, group_summarize, group_transform, pivot_longer`
+Merge: `join` (`left, inner, right, full, semi, anti`), `append, bind_cols, union, intersect, setdiff`
 
 **Registry must stay in sync with runner.js at all times.**
 
@@ -265,6 +270,7 @@ Fase 8 supplement (2026-05-21): the Fase 3a/3c robust-SE guards above are lifted
 - Small focused files over monoliths (WranglingModule refactor: 3200 lines → 11 files)
 
 ## Working conventions
+- **When adding a workspace tab/sub-tab, add its row to `APP_CAPABILITY_MAP` in `src/services/AI/appCapabilityMap.js`** so the AI coach's navigation guidance stays accurate. (Pipeline steps are auto-derived from `STEP_REGISTRY` — no edit needed there.)
 - Franco validates in the browser before proceeding to next task
 - Patches are surgical — state what to add, what to delete, and exact location
 - Math files get validated against R to 6 decimal places on coefficients, 4 on SE
@@ -281,7 +287,7 @@ Fase 8 supplement (2026-05-21): the Fase 3a/3c robust-SE guards above are lifted
 **Problem:** tab/module transitions take ~15 s with large datasets (900 k rows). Root cause: JS object allocation + React re-renders on the full table, not SQL performance.
 
 **Non-starters (break privacy-first constraint):**
-- Any server-side computation (DuckDB on server, Postgres, ClickHouse, BigQuery) — dataset never leaves the browser.
+- Any server-side computation (DuckDB on server, Postgres, ClickHouse, BigQuery) — plaintext data never leaves the browser; opt-in cloud uploads only client-side-encrypted blobs the server can't decrypt.
 
 **Agreed rules (enforce in all new code):**
 

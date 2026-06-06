@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { useTheme, mono } from "../modeling/shared.jsx";
 import { HintBox } from "../HelpSystem.jsx";
+import { assertSafeExpr } from "../../pipeline/exprGuard.js";
 import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.js";
 import { useSessionLog } from "../../services/session/sessionLog.jsx";
 import { mulberry32 } from "../../math/rng.js";
@@ -47,6 +48,7 @@ function buildScope(variables, nObs, rng) {
       if (!expr) return { error: `${v.name}: expression is empty.` };
       try {
         const varNames = Object.keys(scope), varArrays = Object.values(scope);
+        assertSafeExpr(expr); // SECURITY: reject denylisted identifiers
         // The expression evaluator is intentional — user-defined DGP expressions
         // are evaluated in a sandboxed scope with only DGP variables exposed.
         // eslint-disable-next-line no-new-func
@@ -58,6 +60,7 @@ function buildScope(variables, nObs, rng) {
     } else if (v.dist === "Constant") {
       const raw = (v.params.value ?? "0").trim();
       try {
+        assertSafeExpr(raw); // SECURITY: reject denylisted identifiers
         // eslint-disable-next-line no-new-func
         const val = new Function("N", "observations", `"use strict"; return (${raw});`)(nObs, nObs);
         scope[v.name] = new Array(nObs).fill(typeof val === "number" || typeof val === "string" ? val : 0);
@@ -69,6 +72,7 @@ function buildScope(variables, nObs, rng) {
       const initExpr = (v.params.init || "0").trim(), updExpr = (v.params.update || "prev").trim();
       const varNames = Object.keys(scope), varArrays = Object.values(scope);
       try {
+        assertSafeExpr(initExpr); assertSafeExpr(updExpr); // SECURITY
         const arr = new Array(nObs);
         // eslint-disable-next-line no-new-func
         const initFn = new Function(...varNames, "N", "observations", `"use strict"; return (${initExpr});`);
@@ -83,6 +87,7 @@ function buildScope(variables, nObs, rng) {
       const condExpr = (v.params.condition || "false").trim();
       const maxIter = Math.max(1, Math.min(100000, +(v.params.maxIter) || 1000));
       try {
+        assertSafeExpr(initExpr); assertSafeExpr(condExpr); assertSafeExpr(updExpr); // SECURITY
         // eslint-disable-next-line no-new-func
         let val = new Function(`"use strict"; return (${initExpr});`)();
         let iter = 0;

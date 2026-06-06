@@ -22,6 +22,8 @@
 //   await interpretRegression(result, dataDictionary, null, rows, { snapshot: snap });
 //   await generateUnifiedScript(sections, "r", dataDictionary, { snapshot: snap });
 
+import { trimResult } from "../Persistence/trimResult.js";
+
 // Helper: keep payloads small for the cached system prompt budget.
 function trimPipeline(pipeline) {
   if (!Array.isArray(pipeline)) return [];
@@ -39,22 +41,7 @@ function trimDict(dict, max = 60) {
   return Object.fromEntries(entries.slice(0, max));
 }
 
-function trimResult(r) {
-  if (!r || typeof r !== "object") return null;
-  const {
-    type, label, modelLabel, spec, yVar, xVars, varNames, beta, se, pVals,
-    testStats, tStats, R2, adjR2, n, df, Fstat, Fpval, att, attSE, attP,
-    seType, kernel, bandwidth, cutoff, runningVar, treatVar, postVar,
-    entityCol, timeCol, zVars, wVars,
-  } = r;
-  return {
-    type, label: label ?? modelLabel,
-    spec: spec ?? { yVar, xVars, zVars, wVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel },
-    varNames, beta, se, pVals,
-    tStats: tStats ?? testStats,
-    R2, adjR2, n, df, Fstat, Fpval, att, attSE, attP, seType,
-  };
-}
+// trimResult is now the shared helper imported above (services/Persistence/trimResult.js).
 
 export function buildSessionSnapshot({
   cleanedData = null,

@@ -7,6 +7,19 @@
 import { useState, useRef, useEffect } from "react";
 import { useSessionState, useSessionDispatch } from "../../services/session/sessionState.jsx";
 import { useTheme } from "../../ThemeContext.jsx";
+import { useAuth } from "../../services/auth/AuthContext.jsx";
+import {
+  enableCloud,
+  pushProject,
+  pullProject,
+  listCloudProjects,
+  detectConflict,
+  resolveConflict,
+  unpublish,
+  lockSession,
+  hasSyncSession,
+} from "../../services/sync/syncEngine.js";
+import { getSyncMeta, listProjects } from "../../services/Persistence/indexedDB.js";
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
@@ -147,15 +160,57 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
   );
 }
 
+function CloudModal({ children, C, onClose }) {
+  return (
+    <>
+      <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 500 }} onClick={onClose} />
+      <div style={{
+        position: "fixed",
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: "min(520px, calc(100vw - 28px))",
+        maxHeight: "calc(100vh - 40px)",
+        overflow: "auto",
+        background: C.surface,
+        border: `1px solid ${C.border2}`,
+        borderTop: `2px solid ${C.teal}`,
+        borderRadius: 6,
+        boxShadow: "0 16px 48px #000c",
+        zIndex: 501,
+        fontFamily: mono,
+      }}>
+        {children}
+      </div>
+    </>
+  );
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function DatasetManager({ activeDatasetId, onSelectDataset, onRemoveDataset }) {
   const { C } = useTheme();
+  const { user } = useAuth();
   const { datasets, primaryDatasetId, globalPipeline } = useSessionState();
   const dispatch = useSessionDispatch();
   const [open, setOpen] = useState(false);
   const [interactionsOpen, setInteractionsOpen] = useState(true);
   // pendingDelete: { kind: "gstep"|"dataset", id, cascade } | null
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [syncMeta, setSyncMetaState] = useState({ published: false, lastSyncedVersion: 0, dirty: false });
+  const [syncState, setSyncState] = useState("local");
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [cloudProjects, setCloudProjects] = useState([]);
+  const [localProjects, setLocalProjects] = useState([]);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishPass, setPublishPass] = useState("");
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [unlockOpen, setUnlockOpen] = useState(false);
+  const [unlockPass, setUnlockPass] = useState("");
+  const [unlockRecovery, setUnlockRecovery] = useState("");
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [unlocked, setUnlocked] = useState(hasSyncSession());
   const ref = useRef();
 
   // Close on outside click
@@ -172,6 +227,159 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
   const count   = list.length;
   const active  = activeDatasetId ?? primaryDatasetId;
   const primary = datasets[active];
+  const cloudMissingLocally = cloudProjects.filter(cp => !localProjects.some(lp => lp.pid === cp.pid));
+
+  async function refreshCloudState() {
+    setSyncError("");
+    setUnlocked(hasSyncSession());
+    if (primaryDatasetId) {
+      const meta = await getSyncMeta(primaryDatasetId);
+      setSyncMetaState(meta);
+      if (!user) {
+        setSyncState(meta.published ? "offline" : "local");
+      } else if (meta.published) {
+        try {
+          const conflict = await detectConflict(primaryDatasetId);
+          setSyncState(conflict);
+        } catch {
+          setSyncState("offline");
+        }
+      } else {
+        setSyncState("local");
+      }
+    }
+    try {
+      const [cloud, local] = user ? await Promise.all([listCloudProjects(), listProjects()]) : [[], await listProjects()];
+      setCloudProjects(cloud);
+      setLocalProjects(local);
+      if (user && cloud.length && !hasSyncSession()) setUnlockOpen(true);
+      if (user && cloud.length && hasSyncSession() && cloud.some(cp => !local.some(lp => lp.pid === cp.pid))) {
+        setRestoreOpen(true);
+      }
+    } catch {
+      if (user) setSyncState("offline");
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (cancelled) return;
+      await refreshCloudState();
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [user?.id, primaryDatasetId]);
+
+  useEffect(() => {
+    function onCloudLogin(e) {
+      const projects = Array.isArray(e.detail?.projects) ? e.detail.projects : [];
+      setCloudProjects(projects);
+      if (projects.length && !hasSyncSession()) setUnlockOpen(true);
+      refreshCloudState();
+    }
+    function onCloudLogout() {
+      setUnlocked(false);
+      setUnlockOpen(false);
+      setRestoreOpen(false);
+    }
+    window.addEventListener("econsolver:cloud-login", onCloudLogin);
+    window.addEventListener("econsolver:cloud-logout", onCloudLogout);
+    return () => {
+      window.removeEventListener("econsolver:cloud-login", onCloudLogin);
+      window.removeEventListener("econsolver:cloud-logout", onCloudLogout);
+    };
+  }, []);
+
+  function syncLabel() {
+    if (!user) return "offline";
+    if (!syncMeta.published) return "local";
+    if (!unlocked) return "locked";
+    if (syncBusy) return "syncing";
+    if (syncState === "diverged") return "conflict";
+    if (syncState === "server-ahead") return "cloud ahead";
+    if (syncState === "local-ahead" || syncMeta.dirty) return "local changes";
+    if (syncState === "offline") return "offline";
+    return "synced";
+  }
+
+  function syncColor() {
+    const label = syncLabel();
+    if (label === "synced") return C.teal;
+    if (label === "conflict") return C.red;
+    if (label === "local changes" || label === "cloud ahead" || label === "syncing") return C.gold;
+    return C.textMuted;
+  }
+
+  async function runSyncAction(fn) {
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      const result = await fn();
+      await refreshCloudState();
+      return result;
+    } catch (err) {
+      setSyncError(err?.message ?? "Cloud sync failed.");
+      return null;
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function publishCurrentProject() {
+    if (!primaryDatasetId || publishPass.length < 10) return;
+    const result = await runSyncAction(() => enableCloud(primaryDatasetId, publishPass));
+    setPublishPass("");
+    if (result?.recoveryKey) setRecoveryKey(result.recoveryKey);
+  }
+
+  function downloadRecoveryKey() {
+    if (!recoveryKey) return;
+    const payload = JSON.stringify({
+      type: "econsolver-sync-recovery-key-v1",
+      key: recoveryKey,
+      createdAt: new Date().toISOString(),
+    }, null, 2);
+    const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `econsolver-recovery-${primaryDatasetId ?? "cloud"}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function unlockCloud() {
+    const recovery = unlockRecovery.trim();
+    const passphrase = unlockPass;
+    if (!recovery && !passphrase) return;
+    const ok = await runSyncAction(() => lockSession(recovery ? { recoveryKey: recovery } : { passphrase }));
+    if (ok !== null) {
+      setUnlockOpen(false);
+      setUnlockPass("");
+      setUnlockRecovery("");
+      setUnlocked(true);
+      if (cloudMissingLocally.length) setRestoreOpen(true);
+    }
+  }
+
+  async function readRecoveryFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      setUnlockRecovery(parsed?.key ?? text.trim());
+    } catch {
+      setUnlockRecovery("");
+      setSyncError("Recovery key file could not be read.");
+    }
+  }
+
+  async function chooseConflict(choice) {
+    await runSyncAction(() => resolveConflict(primaryDatasetId, choice));
+    setConflictOpen(false);
+  }
 
   // ── Dispatch helpers ────────────────────────────────────────────────────────
   function execCascade({ gStepIds, datasetIds }) {
@@ -292,6 +500,98 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
               Dataset Manager
             </span>
             <span style={{ fontSize: 9, color: C.textMuted }}>{count} loaded</span>
+          </div>
+
+          <div style={{ padding: "0.55rem 0.85rem", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+              <span style={{
+                fontSize: 8,
+                padding: "2px 7px",
+                border: `1px solid ${syncColor()}80`,
+                borderRadius: 3,
+                color: syncColor(),
+                textTransform: "uppercase",
+                letterSpacing: "0.12em",
+              }}>
+                {syncLabel()}
+              </span>
+              {!syncMeta.published ? (
+                <button
+                  onClick={() => setPublishOpen(true)}
+                  disabled={!user || !primaryDatasetId}
+                  title={user ? "Publish this project as client-side encrypted cloud blobs" : "Sign in to publish this project"}
+                  style={{
+                    padding: "0.24rem 0.62rem",
+                    background: `${C.teal}14`,
+                    border: `1px solid ${C.teal}90`,
+                    borderRadius: 3,
+                    color: user && primaryDatasetId ? C.teal : C.textMuted,
+                    cursor: user && primaryDatasetId ? "pointer" : "not-allowed",
+                    fontFamily: mono,
+                    fontSize: 9,
+                  }}
+                >
+                  Publish to cloud
+                </button>
+              ) : (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    onClick={() => runSyncAction(() => pushProject(primaryDatasetId, { immediate: true }))}
+                    disabled={!unlocked || syncBusy}
+                    style={{
+                      padding: "0.24rem 0.52rem",
+                      background: "transparent",
+                      border: `1px solid ${C.border2}`,
+                      borderRadius: 3,
+                      color: unlocked ? C.textDim : C.textMuted,
+                      cursor: unlocked ? "pointer" : "not-allowed",
+                      fontFamily: mono,
+                      fontSize: 9,
+                    }}
+                  >
+                    Sync now
+                  </button>
+                  {(syncState === "diverged" || syncState === "server-ahead") && (
+                    <button
+                      onClick={() => setConflictOpen(true)}
+                      style={{
+                        padding: "0.24rem 0.52rem",
+                        background: `${C.gold}16`,
+                        border: `1px solid ${C.gold}`,
+                        borderRadius: 3,
+                        color: C.gold,
+                        cursor: "pointer",
+                        fontFamily: mono,
+                        fontSize: 9,
+                      }}
+                    >
+                      Resolve
+                    </button>
+                  )}
+                  <button
+                    onClick={() => runSyncAction(() => unpublish(primaryDatasetId))}
+                    disabled={syncBusy}
+                    style={{
+                      padding: "0.24rem 0.52rem",
+                      background: "transparent",
+                      border: `1px solid ${C.border2}`,
+                      borderRadius: 3,
+                      color: C.textMuted,
+                      cursor: syncBusy ? "wait" : "pointer",
+                      fontFamily: mono,
+                      fontSize: 9,
+                    }}
+                  >
+                    Unpublish
+                  </button>
+                </div>
+              )}
+            </div>
+            {syncError && (
+              <div style={{ marginTop: 6, fontSize: 9, color: C.red, lineHeight: 1.45 }}>
+                {syncError}
+              </div>
+            )}
           </div>
 
           {/* Dataset list */}
@@ -542,6 +842,118 @@ export default function DatasetManager({ activeDatasetId, onSelectDataset, onRem
             )}
           </div>
         </div>
+      )}
+
+      {publishOpen && (
+        <CloudModal C={C} onClose={() => setPublishOpen(false)}>
+          <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
+              Publish encrypted cloud copy
+            </div>
+            <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.55 }}>
+              Choose a separate sync passphrase. Plaintext stays in this browser; the server receives only AES-GCM encrypted blobs and cannot recover this passphrase.
+            </div>
+          </div>
+          <div style={{ padding: "1rem 1.1rem" }}>
+            <input
+              type="password"
+              value={publishPass}
+              onChange={e => setPublishPass(e.target.value)}
+              placeholder="Sync passphrase"
+              style={{ width: "100%", boxSizing: "border-box", padding: "0.55rem 0.7rem", background: C.bg, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: mono }}
+            />
+            <div style={{ marginTop: 7, fontSize: 9, color: publishPass.length >= 16 ? C.teal : C.gold }}>
+              {publishPass.length >= 16 ? "Strength: good" : "Use at least 16 characters for a stronger key."}
+            </div>
+            {recoveryKey && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 10, color: C.gold, marginBottom: 8 }}>
+                  Save this recovery key once. Anyone with it can unlock your cloud copy.
+                </div>
+                <button onClick={downloadRecoveryKey} style={{ padding: "0.4rem 0.75rem", background: `${C.gold}14`, border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+                  Download recovery key
+                </button>
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button onClick={() => setPublishOpen(false)} style={{ padding: "0.4rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+                Close
+              </button>
+              <button onClick={publishCurrentProject} disabled={syncBusy || publishPass.length < 10} style={{ padding: "0.4rem 0.75rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: publishPass.length >= 10 ? C.teal : C.textMuted, cursor: publishPass.length >= 10 ? "pointer" : "not-allowed", fontFamily: mono, fontSize: 10 }}>
+                {syncBusy ? "Publishing..." : "Publish"}
+              </button>
+            </div>
+          </div>
+        </CloudModal>
+      )}
+
+      {unlockOpen && (
+        <CloudModal C={C} onClose={() => setUnlockOpen(false)}>
+          <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
+              Unlock cloud sync
+            </div>
+            <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.55 }}>
+              Enter your sync passphrase or import the recovery key. Neither leaves this browser.
+            </div>
+          </div>
+          <div style={{ padding: "1rem 1.1rem" }}>
+            <input type="password" value={unlockPass} onChange={e => setUnlockPass(e.target.value)} placeholder="Sync passphrase" style={{ width: "100%", boxSizing: "border-box", padding: "0.55rem 0.7rem", background: C.bg, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: mono }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+              <input type="file" accept="application/json,.json,.txt" onChange={readRecoveryFile} style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }} />
+              {unlockRecovery && <span style={{ fontSize: 9, color: C.teal }}>recovery key loaded</span>}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button onClick={() => setUnlockOpen(false)} style={{ padding: "0.4rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+                Later
+              </button>
+              <button onClick={unlockCloud} disabled={syncBusy || (!unlockPass && !unlockRecovery)} style={{ padding: "0.4rem 0.75rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: unlockPass || unlockRecovery ? C.teal : C.textMuted, cursor: unlockPass || unlockRecovery ? "pointer" : "not-allowed", fontFamily: mono, fontSize: 10 }}>
+                Unlock
+              </button>
+            </div>
+          </div>
+        </CloudModal>
+      )}
+
+      {restoreOpen && cloudMissingLocally.length > 0 && (
+        <CloudModal C={C} onClose={() => setRestoreOpen(false)}>
+          <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+              Restore cloud projects
+            </div>
+          </div>
+          <div style={{ padding: "0.5rem 1.1rem 1rem" }}>
+            {cloudMissingLocally.map(cp => (
+              <div key={cp.pid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0.55rem 0", borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: C.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cp.name ?? cp.pid}</div>
+                  <div style={{ fontSize: 9, color: C.textMuted }}>version {cp.version} | {cp.updated_at ? new Date(cp.updated_at).toLocaleString() : "cloud"}</div>
+                </div>
+                <button onClick={() => runSyncAction(() => pullProject(cp.pid))} disabled={!unlocked || syncBusy} style={{ padding: "0.35rem 0.7rem", background: `${C.teal}14`, border: `1px solid ${C.teal}`, borderRadius: 3, color: unlocked ? C.teal : C.textMuted, cursor: unlocked ? "pointer" : "not-allowed", fontFamily: mono, fontSize: 10 }}>
+                  Restore
+                </button>
+              </div>
+            ))}
+          </div>
+        </CloudModal>
+      )}
+
+      {conflictOpen && (
+        <CloudModal C={C} onClose={() => setConflictOpen(false)}>
+          <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
+              Choose sync version
+            </div>
+            <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.55 }}>
+              This device has {count} dataset{count === 1 ? "" : "s"} and local version {syncMeta.lastSyncedVersion}. Cloud has version {cloudProjects.find(cp => cp.pid === primaryDatasetId)?.version ?? "?"}.
+            </div>
+          </div>
+          <div style={{ padding: "1rem 1.1rem", display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button onClick={() => chooseConflict("keep-local")} style={{ padding: "0.42rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>Keep this device</button>
+            <button onClick={() => chooseConflict("keep-cloud")} style={{ padding: "0.42rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>Keep cloud</button>
+            <button onClick={() => chooseConflict("fork")} style={{ padding: "0.42rem 0.75rem", background: `${C.gold}16`, border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>Keep both</button>
+          </div>
+        </CloudModal>
       )}
     </div>
   );

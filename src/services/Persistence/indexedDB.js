@@ -42,6 +42,7 @@
 // Exports:
 //   openDB()
 //   saveProject(pid, meta)               / listProjects()      / deleteProject(pid) / clearAllProjects()
+//   markDirty(pid)                       / setSyncMeta(pid)    / getSyncMeta(pid)
 //   savePipeline(pid, datasetId, record) / loadPipeline(pid, datasetId)
 //   listPipelines()                      / deletePipeline(id)  / clearAllPipelines()
 //   saveRawData(id, rawData)             / loadRawData(id)     / deleteRawData(id)
@@ -50,13 +51,15 @@
 
 import { retrofitRowId } from "../data/rowIdentity.js";
 
-const DB_VERSION           = 8;
+const DB_VERSION           = 9;
 const STORE_PIPE           = "pipelines";
 const STORE_RAW            = "raw_data";
 const STORE_PROJ           = "projects";
 const STORE_WORKBENCH      = "workbench";
 const STORE_COACH          = "coach_chats";
 const STORE_DS_REGISTRY    = "dataset_registry";
+const STORE_MODEL_BUFFER   = "model_buffer";
+const STORE_SPATIAL_MAPS   = "spatial_maps";
 const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
 
 // Every object store the app expects to exist. Used to self-heal a DB that
@@ -64,6 +67,7 @@ const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
 // buggy prior upgrade) — see openDB() below.
 const REQUIRED_STORES = [
   STORE_PIPE, STORE_RAW, STORE_PROJ, STORE_WORKBENCH, STORE_COACH, STORE_DS_REGISTRY,
+  STORE_MODEL_BUFFER, STORE_SPATIAL_MAPS,
 ];
 
 // ── Per-user DB isolation ──────────────────────────────────────────────────────
@@ -190,6 +194,15 @@ function openAt(version) {
       if (!db.objectStoreNames.contains(STORE_DS_REGISTRY)) {
         db.createObjectStore(STORE_DS_REGISTRY, { keyPath: "pid" });
       }
+
+      // v9: model_buffer store — pinned-model comparison buffer, keyed by pid.
+      if (!db.objectStoreNames.contains(STORE_MODEL_BUFFER)) {
+        db.createObjectStore(STORE_MODEL_BUFFER, { keyPath: "pid" });
+      }
+      // v9: spatial_maps store — serialized spatial map/layer configs, keyed by pid.
+      if (!db.objectStoreNames.contains(STORE_SPATIAL_MAPS)) {
+        db.createObjectStore(STORE_SPATIAL_MAPS, { keyPath: "pid" });
+      }
     };
 
     req.onsuccess = e => {
@@ -221,6 +234,30 @@ function tx(store, db, mode, fn) {
     t.onerror    = e => reject(e.target.error);
     t.onabort    = e => reject(e.target.error ?? new Error("Transaction aborted"));
   });
+}
+
+function normalizeSyncMeta(project = {}) {
+  return {
+    published: Boolean(project.published),
+    lastSyncedVersion: Number.isFinite(project.lastSyncedVersion) ? project.lastSyncedVersion : 0,
+    dirty: Boolean(project.dirty),
+  };
+}
+
+async function getProjectRecord(pid) {
+  if (!pid) return null;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE_PROJ, "readonly");
+    const req = t.objectStore(STORE_PROJ).get(pid);
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function markDirtyIfPublished(pid) {
+  const meta = await getSyncMeta(pid);
+  if (meta.published) await markDirty(pid);
 }
 
 // ─── PIPELINE API ─────────────────────────────────────────────────────────────
@@ -290,6 +327,7 @@ export async function savePipeline(projectPid, datasetId, record = {}) {
   if (pipelineLength != null) next.pipelineLength = pipelineLength;
 
   await tx(STORE_PIPE, db, "readwrite", s => s.put(next));
+  await markDirtyIfPublished(projectPid);
 }
 
 /**
@@ -371,6 +409,7 @@ export async function saveRawData(id, rawData) {
     await tx(STORE_RAW, db, "readwrite", s =>
       s.put({ id, headers: rawData.headers, rows: rawData.rows, byteSize, ts: Date.now() })
     );
+    await markDirtyIfPublished(id);
     return { stored: true, byteSize };
   } catch (err) {
     console.error("[IDB] saveRawData failed:", err);
@@ -431,15 +470,16 @@ export async function saveProject(pid, meta) {
     req.onsuccess = e => resolve(e.target.result ?? null);
     req.onerror   = e => reject(e.target.error);
   });
-  await tx(STORE_PROJ, db, "readwrite", s =>
-    s.put({
+  const next = {
       createdAt: now,
       ...existing,
       ...meta,
       pid,
       updatedAt: now,
-    })
-  );
+    };
+  const syncMeta = normalizeSyncMeta(next);
+  await tx(STORE_PROJ, db, "readwrite", s => s.put({ ...next, ...syncMeta }));
+  if (syncMeta.published && meta?.dirty !== false) await markDirty(pid);
 }
 
 /**
@@ -451,10 +491,49 @@ export async function listProjects() {
     const t   = db.transaction(STORE_PROJ, "readonly");
     const req = t.objectStore(STORE_PROJ).getAll();
     req.onsuccess = e => resolve(
-      (e.target.result ?? []).sort((a, b) => b.updatedAt - a.updatedAt)
+      (e.target.result ?? [])
+        .map(project => ({ ...project, ...normalizeSyncMeta(project) }))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
     );
     req.onerror = e => reject(e.target.error);
   });
+}
+
+export async function getSyncMeta(pid) {
+  const project = await getProjectRecord(pid);
+  return normalizeSyncMeta(project ?? {});
+}
+
+export async function setSyncMeta(pid, patch = {}) {
+  if (!pid) throw new Error("setSyncMeta: pid required");
+  const db = await openDB();
+  const existing = await getProjectRecord(pid);
+  const now = Date.now();
+  const next = {
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: existing?.updatedAt ?? now,
+    ...(existing ?? {}),
+    pid,
+    ...normalizeSyncMeta({ ...(existing ?? {}), ...patch }),
+  };
+  if ("updatedAt" in patch) next.updatedAt = patch.updatedAt;
+  await tx(STORE_PROJ, db, "readwrite", s => s.put(next));
+  return normalizeSyncMeta(next);
+}
+
+export async function markDirty(pid) {
+  if (!pid) return normalizeSyncMeta({});
+  const db = await openDB();
+  const existing = await getProjectRecord(pid);
+  if (!existing) return normalizeSyncMeta({});
+  const next = {
+    ...existing,
+    ...normalizeSyncMeta(existing),
+    dirty: true,
+    updatedAt: Date.now(),
+  };
+  await tx(STORE_PROJ, db, "readwrite", s => s.put(next));
+  return normalizeSyncMeta(next);
 }
 
 /**
@@ -464,6 +543,8 @@ export async function deleteProject(pid) {
   const db = await openDB();
   await tx(STORE_PROJ, db, "readwrite", s => s.delete(pid));
   await deleteCoachChats(pid);
+  await deleteModelBuffer(pid);
+  await deleteSpatialMaps(pid);
 }
 
 /**
@@ -488,6 +569,7 @@ export async function saveWorkbenchRecord(pid, sessions) {
   await tx(STORE_WORKBENCH, db, "readwrite", s =>
     s.put({ pid, sessions: Array.isArray(sessions) ? sessions : [], ts: Date.now() })
   );
+  await markDirtyIfPublished(pid);
   return { stored: true };
 }
 
@@ -532,6 +614,7 @@ export async function saveCoachChats(pid, conversations) {
     await tx(STORE_COACH, db, "readwrite", s =>
       s.put({ pid, conversations: Array.isArray(conversations) ? conversations : [], ts: Date.now() })
     );
+    await markDirtyIfPublished(pid);
     return { stored: true };
   } catch (err) {
     console.warn("[IDB] saveCoachChats failed:", err.message);
@@ -567,6 +650,60 @@ export async function deleteCoachChats(pid) {
   } catch { /* non-fatal */ }
 }
 
+// ─── MODEL BUFFER (pinned-model comparison set, per project) ──────────────────
+export async function saveModelBuffer(pid, models) {
+  if (!pid) return { stored: false };
+  try {
+    const db = await openDB();
+    await tx(STORE_MODEL_BUFFER, db, "readwrite", s =>
+      s.put({ pid, models: Array.isArray(models) ? models : [], ts: Date.now() }));
+    await markDirtyIfPublished(pid);
+    return { stored: true };
+  } catch (err) { console.warn("[IDB] saveModelBuffer failed:", err.message); return { stored: false }; }
+}
+export async function loadModelBuffer(pid) {
+  if (!pid) return null;
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const t = db.transaction(STORE_MODEL_BUFFER, "readonly");
+      const req = t.objectStore(STORE_MODEL_BUFFER).get(pid);
+      req.onsuccess = e => resolve(e.target.result ?? null);
+      req.onerror = e => reject(e.target.error);
+    });
+  } catch { return null; }
+}
+export async function deleteModelBuffer(pid) {
+  try { const db = await openDB(); await tx(STORE_MODEL_BUFFER, db, "readwrite", s => s.delete(pid)); } catch { /* non-fatal */ }
+}
+
+// ─── SPATIAL MAPS (serialized map/layer configs, per project) ─────────────────
+export async function saveSpatialMaps(pid, maps) {
+  if (!pid) return { stored: false };
+  try {
+    const db = await openDB();
+    await tx(STORE_SPATIAL_MAPS, db, "readwrite", s =>
+      s.put({ pid, maps: maps ?? null, ts: Date.now() }));
+    await markDirtyIfPublished(pid);
+    return { stored: true };
+  } catch (err) { console.warn("[IDB] saveSpatialMaps failed:", err.message); return { stored: false }; }
+}
+export async function loadSpatialMaps(pid) {
+  if (!pid) return null;
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const t = db.transaction(STORE_SPATIAL_MAPS, "readonly");
+      const req = t.objectStore(STORE_SPATIAL_MAPS).get(pid);
+      req.onsuccess = e => resolve(e.target.result ?? null);
+      req.onerror = e => reject(e.target.error);
+    });
+  } catch { return null; }
+}
+export async function deleteSpatialMaps(pid) {
+  try { const db = await openDB(); await tx(STORE_SPATIAL_MAPS, db, "readwrite", s => s.delete(pid)); } catch { /* non-fatal */ }
+}
+
 // ─── DATASET REGISTRY API ─────────────────────────────────────────────────────
 // Durable list of ALL of a project's datasets, keyed by project pid. There is
 // no privileged "primary" dataset — every dataset is recorded here equally.
@@ -594,6 +731,7 @@ export async function saveDatasetRegistry(pid, datasets) {
     await tx(STORE_DS_REGISTRY, db, "readwrite", s =>
       s.put({ pid, datasets: slim, ts: Date.now() })
     );
+    await markDirtyIfPublished(pid);
     return { stored: true };
   } catch (err) {
     console.warn("[IDB] saveDatasetRegistry failed:", err.message);

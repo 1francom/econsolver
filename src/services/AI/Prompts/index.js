@@ -548,6 +548,69 @@ on a skewed numeric, {"p_lo":0.01,"p_hi":0.99} for winz on extreme outliers).
 Otherwise set "params": {}.
 `;
 
+// ─── PROMPT: NL → PIPELINE STEPS ─────────────────────────────────────────────
+// v1.0 — used by nlToPipeline() in AIService.js.
+// Translates a natural-language command into declarative pipeline steps drawn
+// from STEP_REGISTRY (cleaning + features). The allowed-step catalogue is
+// injected into the user payload by nlToPipeline (from serializeAllowedSteps()).
+/**
+ * @expectedOutput JSON object:
+ *   {
+ *     "interpretation": string,   // one sentence restating the request
+ *     "steps": Step[],            // each { type, ...schemaKeys, desc }
+ *     "notes": string             // optional caveats; "" if none
+ *   }
+ * Bump SHARED_CONTEXT.promptVersion when this schema changes.
+ */
+export const NL_TO_PIPELINE_PROMPT = `\
+${SHARED_CONTEXT}
+────────────────────────────────────────────────────────────────────
+TASK: NATURAL LANGUAGE → PIPELINE STEPS
+────────────────────────────────────────────────────────────────────
+You convert a researcher's instruction into a sequence of declarative data-
+cleaning pipeline steps for an econometrics tool. You will be given the current
+columns (name, dtype, sample values) and the catalogue of ALLOWED steps.
+
+Return ONLY valid JSON — no markdown fences, no preamble:
+{
+  "interpretation": "one sentence restating what the user asked",
+  "steps": [ { "type": "<allowed type>", "...schemaKeys": "...", "desc": "short label" } ],
+  "notes": "optional caveats; empty string if none"
+}
+
+RULES:
+- Use ONLY step types from the ALLOWED STEPS catalogue. Provide every key it lists.
+- Reference only column names that exist in the provided column list.
+- Put each new column in its own output column via the step's name key (e.g. "nn").
+  NEVER overwrite the source column unless the user explicitly says "replace".
+- Multi-column results require multiple steps (e.g. extracting lat AND lon = two steps).
+- For extracting numbers from strings, prefer "extract_regex" with a capture group;
+  it coerces the captured group to a float. Set "locale":"dot" for 1,234.56-style numbers.
+- If the request cannot be expressed with allowed steps, return "steps": [] and explain in "notes".
+- "desc" is a short human label for the History panel (<= 6 words).
+
+EXAMPLES:
+Instruction: "split the geometry column into latitude and longitude"
+Columns: geometry (string) e.g. "POINT (-58.491021 -34.5509234)"
+Output:
+` + String.raw`{"interpretation":"Extract longitude and latitude from the WKT geometry column.",
+ "steps":[
+   {"type":"extract_regex","col":"geometry","nn":"lon","regex":"\(\s*(-?\d+\.?\d+)","locale":"dot","desc":"extract longitude"},
+   {"type":"extract_regex","col":"geometry","nn":"lat","regex":"\s(-?\d+\.?\d+)\s*\)","locale":"dot","desc":"extract latitude"}
+ ],
+ "notes":"Assumes WKT POINT order is (lon lat)."}` + `
+
+Instruction: "make income numeric then take its log"
+Columns: income (string) e.g. "US$ 1,200"
+Output:
+{"interpretation":"Coerce income to numeric, then add its natural log.",
+ "steps":[
+   {"type":"extract_regex","col":"income","nn":"income_num","locale":"dot","desc":"income to numeric"},
+   {"type":"log","col":"income_num","nn":"ln_income","desc":"log income"}
+ ],
+ "notes":""}
+`;
+
 // ─── PROMPT: COMPARE MODELS ──────────────────────────────────────────────────
 // v2.0 — updated for N-way comparison (2–8 models). Called by compareModels() in AIService.js.
 export const COMPARE_MODELS_PROMPT = `\
@@ -647,6 +710,13 @@ CONDUCT RULES (mandatory):
 7.  Do not repeat the full model output back to the user — they can see it.
     Reference specific numbers only when they drive your reasoning.
 8.  English only.
+9.  You know the app's structure (see the WHERE TO DO THINGS map in the system
+    context) and the user's full session (pipeline, pinned models, subsets, SE
+    choices). When the user asks how to perform an action, or when your advice
+    implies a change, name the exact location: Module → Tab → Section. Prefer
+    concrete navigation over generic instructions. Reference the user's actual
+    pipeline steps, pinned models, and SE settings when relevant. Never invent a
+    tab or operation that is not in the map.
 
 RESPONSE FORMAT:
 - Plain text. No markdown headers. Bullet points are fine for lists of checks.

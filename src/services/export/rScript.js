@@ -63,6 +63,52 @@ function rCols(arr) {
   return rVec(arr);
 }
 
+function rFn(fn, col) {
+  const c = rName(col);
+  const map = {
+    mean:   `mean(${c}, na.rm = TRUE)`,
+    sum:    `sum(${c}, na.rm = TRUE)`,
+    sd:     `sd(${c}, na.rm = TRUE)`,
+    min:    `min(${c}, na.rm = TRUE)`,
+    max:    `max(${c}, na.rm = TRUE)`,
+    median: `median(${c}, na.rm = TRUE)`,
+    rank:   `dplyr::min_rank(${c})`,
+  };
+  return map[fn] ?? `mean(${c}, na.rm = TRUE)`;
+}
+
+function rValue(v, dtype = null) {
+  if (v === null || v === undefined) return "NA";
+  if (dtype === "number" || typeof v === "number") {
+    const n = Number(v);
+    return isFinite(n) ? String(n) : "NA";
+  }
+  return rStr(v);
+}
+
+function rWhere(where) {
+  if (!where?.col || !where?.op) return "TRUE";
+  const c = rName(where.col);
+  const v = where.value;
+  switch (where.op) {
+    case "equals": return `${c} == ${rValue(v)}`;
+    case "not_equals": return `${c} != ${rValue(v)}`;
+    case "contains": return `stringr::str_detect(as.character(${c}), stringr::fixed(${rStr(v ?? "")}))`;
+    case "starts": return `stringr::str_starts(as.character(${c}), ${rStr(v ?? "")})`;
+    case "ends": return `stringr::str_ends(as.character(${c}), ${rStr(v ?? "")})`;
+    case "gt": return `${c} > ${Number(v)}`;
+    case "lt": return `${c} < ${Number(v)}`;
+    case "between": {
+      const lo = Number(Array.isArray(v) ? v[0] : v);
+      const hi = Number(Array.isArray(v) ? v[1] : v);
+      return `${c} >= ${lo} & ${c} <= ${hi}`;
+    }
+    case "empty": return `is.na(${c}) | as.character(${c}) == ""`;
+    case "notempty": return `!is.na(${c}) & as.character(${c}) != ""`;
+    default: return "TRUE";
+  }
+}
+
 // ─── PIPELINE TRANSPILER ──────────────────────────────────────────────────────
 // Each step type maps to one or more dplyr/tidyr/stringr/lubridate calls.
 function transpileStep(step, dfVar = "df", allDatasets = {}) {
@@ -89,6 +135,60 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
         lte:   `${col} <= ${step.value}`,
       };
       return `${dfVar} <- ${dfVar} |> filter(${opMap[step.op] ?? "TRUE"})`;
+    }
+
+    case "add_column":
+      return `${dfVar} <- ${dfVar} |> mutate(${rName(step.nn)} = ${rValue(step.fill, step.dtype)})`;
+
+    case "add_row": {
+      const count = Math.max(1, Number(step.count) || 1);
+      const assigns = Object.entries(step.values || {})
+        .map(([k, v]) => `__new_rows[[${rStr(k)}]] <- ${rValue(v)}`);
+      return [
+        `# add_row: append ${count} synthetic row(s); unspecified columns remain NA`,
+        `__new_rows <- ${dfVar}[rep(NA_integer_, ${count}), , drop = FALSE]`,
+        ...assigns,
+        `${dfVar} <- dplyr::bind_rows(${dfVar}, __new_rows)`,
+        `rm(__new_rows)`,
+      ].join("\n");
+    }
+
+    case "set_where": {
+      const setVal = step.action === "clear" ? "NA" : rValue(step.value, step.dtype);
+      return `${dfVar} <- ${dfVar} |> mutate(${rName(step.col)} = ifelse(${rWhere(step.where)}, ${setVal}, ${rName(step.col)}))`;
+    }
+
+    case "replace": {
+      const mode = step.match?.mode || "exact";
+      const find = step.match?.find ?? "";
+      const out = rName(step.nn || step.col);
+      const src = rName(step.col);
+      if (mode === "exact") {
+        return `${dfVar} <- ${dfVar} |> mutate(${out} = dplyr::if_else(${src} == ${rValue(find)}, ${rValue(step.replaceWith)}, ${src}))`;
+      }
+      const pattern = mode === "contains" ? `stringr::fixed(${rStr(find)})` : rStr(find);
+      return `${dfVar} <- ${dfVar} |> mutate(${out} = stringr::str_replace_all(as.character(${src}), ${pattern}, ${rValue(step.replaceWith)}))`;
+    }
+
+    case "str_splice": {
+      const src = rName(step.col);
+      const out = rName(step.nn || step.col);
+      const pos = Number(step.position) || 1;
+      const n = Math.max(0, Number(step.count) || 0);
+      const text = rStr(step.text ?? "");
+      const pExpr = `ifelse(${pos} < 0, pmax(1, nchar(x) + ${pos} + 1), ${pos})`;
+      const body = step.mode === "delete"
+        ? `stringr::str_c(stringr::str_sub(x, 1, p - 1), stringr::str_sub(x, p + ${n}))`
+        : step.mode === "overwrite"
+          ? `stringr::str_c(stringr::str_sub(x, 1, p - 1), ${text}, stringr::str_sub(x, p + ${n}))`
+          : `stringr::str_c(stringr::str_sub(x, 1, p - 1), ${text}, stringr::str_sub(x, p))`;
+      return [
+        `${dfVar} <- ${dfVar} |> mutate(${out} = {`,
+        `  x <- as.character(${src})`,
+        `  p <- pmin(pmax(${pExpr}, 1), nchar(x) + 1)`,
+        `  ${body}`,
+        `})`,
+      ].join("\n");
     }
 
     case "drop_na": {
@@ -141,6 +241,11 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
         .map(([k, v]) => `  ${rStr(k)} ~ ${rStr(v)}`)
         .join(",\n");
       return `${dfVar} <- ${dfVar} |> mutate(${col} = dplyr::case_match(${col},\n${cases},\n  .default = ${col}\n))`;
+    }
+
+    case "distinct": {
+      const cols = step.subset?.length ? `, ${step.subset.map(rName).join(", ")}` : "";
+      return `${dfVar} <- ${dfVar} |> distinct(${cols.replace(/^, /, "")}${cols ? ", " : ""}.keep_all = TRUE)`;
     }
 
     case "winz": {
@@ -284,6 +389,13 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       ].join("\n");
     }
 
+    case "group_transform": {
+      const by = (step.by ?? []).map(rName).join(", ");
+      const out = rName(step.nn ?? `${step.fn}_${step.col}`);
+      const rhs = step.fn === "count" ? "n()" : rFn(step.fn, step.col);
+      return `${dfVar} <- ${dfVar} |> group_by(${by}) |> mutate(${out} = ${rhs}) |> ungroup()`;
+    }
+
     case "pivot_longer": {
       const mode      = step.mode || "simple";
       const namesTo   = rName(step.namesTo   ?? "name");
@@ -322,7 +434,10 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     }
 
     case "join": {
-      const how       = step.how === "inner" ? "inner_join" : "left_join";
+      const how       = {
+        left:"left_join", inner:"inner_join", right:"right_join",
+        full:"full_join", semi:"semi_join", anti:"anti_join",
+      }[step.how || "left"] ?? "left_join";
       const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
       return [
         `# Load right dataset: "${rightName}"`,
@@ -338,6 +453,42 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
         `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
         `${dfVar} <- dplyr::bind_rows(${dfVar}, right_df)`,
       ].join("\n");
+    }
+
+    case "bind_cols": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      return [
+        `# Bind columns from dataset: "${rightName}"`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        `${dfVar} <- bind_cols(${dfVar}, right_df)`,
+      ].join("\n");
+    }
+
+    case "union":
+    case "intersect":
+    case "setdiff": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      return [
+        `# ${step.type}: "${rightName}"`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        `${dfVar} <- ${step.type}(${dfVar}, right_df)`,
+      ].join("\n");
+    }
+
+    case "vector_assign": {
+      const vals = rVec(step.values ?? []);
+      const out = rName(step.nn ?? "assigned");
+      const seed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      if (step.mode === "recycle") return `${dfVar}$${out} <- rep_len(${vals}, nrow(${dfVar}))`;
+      if (step.mode === "conditional") {
+        const lines = (step.rules || []).map(r => `    ${r.expr} ~ ${rStr(r.value)}`).join(",\n");
+        return `${dfVar}$${out} <- with(${dfVar}, dplyr::case_when(\n${lines}${lines ? ",\n" : ""}    TRUE ~ ${rStr(step.elseValue ?? "")}\n))`;
+      }
+      const prob = step.weights ? `, prob = c(${step.weights.join(", ")})` : "";
+      if (step.mode === "quota") {
+        return `# NOTE: EconSolver uses a seeded mulberry32 RNG; values differ, distribution matches\nset.seed(${seed}); ${dfVar}$${out} <- sample(rep_len(${vals}, nrow(${dfVar})))`;
+      }
+      return `# NOTE: EconSolver uses a seeded mulberry32 RNG; values differ, distribution matches\nset.seed(${seed}); ${dfVar}$${out} <- sample(${vals}, nrow(${dfVar}), replace = TRUE${prob})`;
     }
 
     case "patch": {
@@ -1043,6 +1194,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
     if (t === "Logit" || t === "Probit") { pkgsSet.add("marginaleffects"); pkgsSet.add("pROC"); pkgsSet.add("lmtest"); }
   });
   if (pipeline.some(s => s.type === "dummy")) pkgsSet.add("fastDummies");
+  if (pipeline.some(s => ["set_where", "replace", "str_splice"].includes(s.type))) pkgsSet.add("stringr");
   if (pipeline.some(s => ["date_parse","date_extract"].includes(s.type))) pkgsSet.add("lubridate");
   const pkgs = pkgsSet;
 
@@ -1293,6 +1445,7 @@ function buildPackageList(modelType, pipeline) {
   pipeline.forEach(s => {
     if (s.type === "dummy")        pkgs.add("fastDummies");
     if (s.type === "quickclean")   pkgs.add("stringr");
+    if (["set_where", "replace", "str_splice"].includes(s.type)) pkgs.add("stringr");
     if (s.type === "date_extract") pkgs.add("lubridate");
     if (["join", "append"].includes(s.type)) pkgs.add("readr");
     if (s.filename?.match(/\.xlsx?$/i)) pkgs.add("readxl");

@@ -17,6 +17,8 @@
 
 import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
+import { assignVector } from "../core/generate/vectorAssign.js";
+import { isSafeExpr } from "./exprGuard.js";
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
@@ -30,6 +32,73 @@ function assertNotProtected(col, stepType) {
       `__row_id and __ri must persist unchanged across all steps so cell-edit translations to R / Stata / Python remain valid.`
     );
   }
+}
+
+// Positional string splice used by the str_splice step.
+// position: 1-based; negative counts from end. mode: insert|delete|overwrite.
+function splice(value, position, mode, text = "", count = 0) {
+  if (value === null || value === undefined) return value;
+  const s = String(value);
+  const len = s.length;
+  let pos = Number(position);
+  if (!isFinite(pos)) pos = len;
+  if (pos < 0) pos = Math.max(0, len + pos + 1) - 1;
+  else pos = pos - 1;
+  pos = Math.max(0, Math.min(pos, len));
+  const n = Math.max(0, Number(count) || 0);
+  if (mode === "insert") return s.slice(0, pos) + text + s.slice(pos);
+  if (mode === "delete") return s.slice(0, pos) + s.slice(pos + n);
+  if (mode === "overwrite") return s.slice(0, pos) + text + s.slice(pos + n);
+  return s;
+}
+
+// Re-coerce a spliced result back to number when the source column was numeric
+// and the new string parses to a finite number.
+function maybeNumber(original, result) {
+  if (typeof original === "number" && result !== null && result !== "") {
+    const n = Number(result);
+    if (isFinite(n)) return n;
+  }
+  return result;
+}
+
+// Coerce a raw form value to a target dtype for add_column / set_where.
+function coerceTo(v, dtype) {
+  if (dtype === "number") {
+    const n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+  return v === undefined ? null : v;
+}
+
+// Build a row predicate from a structured where clause for set_where / filters.
+function buildPredicate(where) {
+  if (!where || !where.col || !where.op) return () => true;
+  const { col, op, value } = where;
+  const sval = value == null ? "" : String(value);
+  const num = Number(value);
+  return (r) => {
+    const raw = r[col];
+    const s = raw == null ? "" : String(raw);
+    switch (op) {
+      case "equals": return s === sval;
+      case "not_equals": return s !== sval;
+      case "contains": return s.includes(sval);
+      case "starts": return s.startsWith(sval);
+      case "ends": return s.endsWith(sval);
+      case "gt": return typeof raw === "number" ? raw > num : Number(raw) > num;
+      case "lt": return typeof raw === "number" ? raw < num : Number(raw) < num;
+      case "between": {
+        const lo = Number(Array.isArray(value) ? value[0] : value);
+        const hi = Number(Array.isArray(value) ? value[1] : value);
+        const x = typeof raw === "number" ? raw : Number(raw);
+        return isFinite(x) && x >= lo && x <= hi;
+      }
+      case "empty": return raw == null || s === "";
+      case "notempty": return raw != null && s !== "";
+      default: return true;
+    }
+  };
 }
 
 // ─── SMART NUMBER HELPERS ─────────────────────────────────────────────────────
@@ -280,6 +349,69 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    case "add_column": {
+      const nn = s.nn;
+      if (!nn) break;
+      const val = coerceTo(s.fill, s.dtype);
+      R = rows.map(r => ({ ...r, [nn]: val }));
+      if (!H.includes(nn)) H = [...H, nn];
+      break;
+    }
+
+    case "add_row": {
+      const base = 1e9 + (Number(s._seq) || 0) * 1000;
+      const count = Math.max(1, Number(s.count) || 1);
+      const vals = s.values || {};
+      const newRows = [];
+      for (let k = 0; k < count; k++) {
+        const row = { __ri: base + k };
+        H.forEach(h => { if (h !== "__ri") row[h] = (h in vals) ? vals[h] : null; });
+        newRows.push(row);
+      }
+      R = [...rows, ...newRows];
+      break;
+    }
+
+    case "set_where": {
+      const pred = buildPredicate(s.where);
+      const setVal = s.action === "clear" ? null : coerceTo(s.value, s.dtype);
+      R = rows.map(r => pred(r) ? { ...r, [s.col]: setVal } : r);
+      break;
+    }
+
+    case "replace": {
+      const mode = s.match?.mode || "exact";
+      const find = s.match?.find ?? "";
+      const repl = s.replaceWith ?? "";
+      const out = s.nn || s.col;
+      let rx = null;
+      if (mode === "regex") {
+        try { rx = new RegExp(find, "g"); } catch { rx = null; }
+      }
+      R = rows.map(r => {
+        const v = r[s.col];
+        if (v === null || v === undefined) return out === s.col ? r : { ...r, [out]: v };
+        let nv;
+        if (mode === "exact") nv = String(v) === find ? repl : v;
+        else if (mode === "contains") nv = String(v).split(find).join(repl);
+        else nv = rx ? String(v).replace(rx, repl) : v;
+        return { ...r, [out]: nv };
+      });
+      if (!H.includes(out)) H = [...H, out];
+      break;
+    }
+
+    case "str_splice": {
+      const out = s.nn || s.col;
+      R = rows.map(r => {
+        const v = r[s.col];
+        const spliced = splice(v, s.position, s.mode, s.text ?? "", s.count ?? 0);
+        return { ...r, [out]: maybeNumber(v, spliced) };
+      });
+      if (!H.includes(out)) H = [...H, out];
+      break;
+    }
+
     case "log":
       R = rows.map(r => { const v = r[s.col]; return { ...r, [s.nn]: (typeof v === "number" && v > 0) ? Math.log(v) : null }; });
       if (!H.includes(s.nn)) H = [...H, s.nn];
@@ -439,6 +571,49 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    case "group_transform": {
+      // s.by: string[]   s.col: string   s.fn: mean|sum|sd|min|max|count|median|rank
+      // s.nn: output column name (broadcast group stat back to every row)
+      const by = Array.isArray(s.by) ? s.by : [];
+      const col = s.col, fn = s.fn || "mean";
+      const nn = s.nn || `${fn}_${col}_by_${by.join("_")}`;
+      const keyOf = r => JSON.stringify(by.map(h => r[h] ?? null));
+
+      // bucket row indices by group
+      const groups = new Map();
+      rows.forEach((r, i) => { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); });
+
+      const num = i => { const v = rows[i][col]; return typeof v === "number" && isFinite(v) ? v : null; };
+      const agg = idxs => {
+        const xs = idxs.map(num).filter(v => v !== null);
+        if (fn === "count") return idxs.length;
+        if (!xs.length) return null;
+        const sum = xs.reduce((a, b) => a + b, 0);
+        if (fn === "sum")  return sum;
+        if (fn === "mean") return sum / xs.length;
+        if (fn === "min")  return Math.min(...xs);
+        if (fn === "max")  return Math.max(...xs);
+        if (fn === "median") { const s2 = [...xs].sort((a, b) => a - b); const m = Math.floor(s2.length / 2); return s2.length % 2 ? s2[m] : (s2[m - 1] + s2[m]) / 2; }
+        if (fn === "sd") { const mu = sum / xs.length; const v = xs.reduce((a, b) => a + (b - mu) ** 2, 0) / (xs.length - 1 || 1); return Math.sqrt(v); }
+        return null;
+      };
+
+      const valByRow = new Array(rows.length).fill(null);
+      if (fn === "rank") {
+        // min-rank within group, ascending by `col`
+        groups.forEach(idxs => {
+          const ordered = [...idxs].sort((a, b) => (num(a) ?? Infinity) - (num(b) ?? Infinity));
+          let rank = 0, prev = null, seen = 0;
+          ordered.forEach(i => { seen++; const v = num(i); if (v !== prev) { rank = seen; prev = v; } valByRow[i] = rank; });
+        });
+      } else {
+        groups.forEach(idxs => { const a = agg(idxs); idxs.forEach(i => { valByRow[i] = a; }); });
+      }
+      R = rows.map((r, i) => ({ ...r, [nn]: valByRow[i] }));
+      if (!H.includes(nn)) H = [...H, nn];
+      break;
+    }
+
     case "recode": {
       const map = s.map || {};
       R = rows.map(r => { const v = r[s.col]; const k = v != null ? String(v) : null; return { ...r, [s.col]: k != null && map[k] !== undefined ? map[k] : v }; });
@@ -457,6 +632,23 @@ export function applyStep(rows, headers, s, context = {}) {
         else if (mode === "title") out = t.replace(/\b\w/g, c => c.toUpperCase()).replace(/\B\w/g, c => c.toLowerCase());
         return { ...r, [s.col]: out };
       });
+      break;
+    }
+
+    case "distinct": {
+      // s.subset: string[] (cols to dedup on; empty = all)  s.keep: "first"|"last"
+      const cols = (Array.isArray(s.subset) && s.subset.length) ? s.subset : H;
+      const keep = s.keep === "last" ? "last" : "first";
+      const keyOf = r => JSON.stringify(cols.map(h => r[h] ?? null));
+      if (keep === "first") {
+        const seen = new Set();
+        R = rows.filter(r => { const k = keyOf(r); if (seen.has(k)) return false; seen.add(k); return true; });
+      } else {
+        const lastIdx = new Map();
+        rows.forEach((r, i) => lastIdx.set(keyOf(r), i));
+        const keepIdx = new Set(lastIdx.values());
+        R = rows.filter((_, i) => keepIdx.has(i));
+      }
       break;
     }
 
@@ -609,25 +801,70 @@ export function applyStep(rows, headers, s, context = {}) {
       const right = context?.datasets?.[s.rightId];
       if (!right) break;
       const rRows = right.rows, rHeaders = right.headers;
+      const how = s.how || "left";
       const newCols = rHeaders.filter(h => h !== s.rightKey);
+      const destOf = h => (H.includes(h) ? `${h}${s.suffix || "_r"}` : h);
+
+      // Build right lookup (first match wins, matching prior behavior).
       const rightMap = new Map();
       rRows.forEach(r => { const k = String(r[s.rightKey] ?? ""); if (!rightMap.has(k)) rightMap.set(k, r); });
+
+      // Filtering joins: add NO columns, just keep/drop left rows.
+      if (how === "semi" || how === "anti") {
+        R = rows.filter(r => {
+          const k = String(r[s.leftKey] ?? "");
+          const has = rightMap.has(k);
+          return how === "semi" ? has : !has;
+        });
+        break;
+      }
+
+      // Right join: iterate right rows, attach matching left.
+      if (how === "right") {
+        const leftMap = new Map();
+        rows.forEach(r => { const k = String(r[s.leftKey] ?? ""); if (!leftMap.has(k)) leftMap.set(k, r); });
+        R = rRows.map(rr => {
+          const k = String(rr[s.rightKey] ?? "");
+          const lm = leftMap.get(k);
+          const merged = {};
+          H.forEach(h => { merged[h] = lm ? (lm[h] ?? null) : null; });
+          newCols.forEach(h => { merged[destOf(h)] = rr[h] ?? null; });
+          return merged;
+        });
+        newCols.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
+        break;
+      }
+
+      // Left / inner / full.
+      const matchedRightKeys = new Set();
       const outRows = [];
       rows.forEach(r => {
         const k = String(r[s.leftKey] ?? "");
         const match = rightMap.get(k);
         if (match) {
-          const merged = {...r};
-          newCols.forEach(h => { const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h; merged[dest] = match[h] ?? null; });
+          matchedRightKeys.add(k);
+          const merged = { ...r };
+          newCols.forEach(h => { merged[destOf(h)] = match[h] ?? null; });
           outRows.push(merged);
-        } else if (s.how === "left" || !s.how) {
-          const merged = {...r};
-          newCols.forEach(h => { const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h; merged[dest] = null; });
+        } else if (how === "left" || how === "full") {
+          const merged = { ...r };
+          newCols.forEach(h => { merged[destOf(h)] = null; });
           outRows.push(merged);
         }
+        // inner: drop unmatched left rows
       });
+      if (how === "full") {
+        rRows.forEach(rr => {
+          const k = String(rr[s.rightKey] ?? "");
+          if (matchedRightKeys.has(k)) return;
+          const merged = {};
+          H.forEach(h => { merged[h] = null; });
+          newCols.forEach(h => { merged[destOf(h)] = rr[h] ?? null; });
+          outRows.push(merged);
+        });
+      }
       R = outRows;
-      newCols.forEach(h => { const dest = H.includes(h) ? `${h}${s.suffix || "_r"}` : h; if (!H.includes(dest)) H = [...H, dest]; });
+      newCols.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
       break;
     }
 
@@ -642,6 +879,61 @@ export function applyStep(rows, headers, s, context = {}) {
       ];
       onlyRight.forEach(h => { if (!H.includes(h)) H = [...H, h]; });
       break;
+    }
+
+    case "bind_cols": {
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const rRows = right.rows, rHeaders = right.headers;
+      const m = Math.min(rows.length, rRows.length); // truncate to shorter
+      const destOf = h => (H.includes(h) ? `${h}${s.suffix || "_r"}` : h);
+      R = [];
+      for (let i = 0; i < m; i++) {
+        const merged = { ...rows[i] };
+        rHeaders.forEach(h => { merged[destOf(h)] = rRows[i][h] ?? null; });
+        R.push(merged);
+      }
+      rHeaders.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
+      break;
+    }
+
+    case "union": {
+      // vertical stack + drop full-row duplicates over the union column set
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const rRows = right.rows, rHeaders = right.headers;
+      const onlyRight = rHeaders.filter(h => !H.includes(h));
+      const allCols = [...H, ...onlyRight];
+      const stacked = [
+        ...rows.map(r => { const c = {}; allCols.forEach(h => { c[h] = r[h] ?? null; }); return c; }),
+        ...rRows.map(r => { const c = {}; allCols.forEach(h => { c[h] = r[h] ?? null; }); return c; }),
+      ];
+      const seen = new Set();
+      R = stacked.filter(r => {
+        const key = JSON.stringify(allCols.map(h => r[h]));
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
+      });
+      onlyRight.forEach(h => { if (!H.includes(h)) H = [...H, h]; });
+      break;
+    }
+
+    case "intersect":
+    case "setdiff": {
+      // keep current rows that DO (intersect) / do NOT (setdiff) appear in the
+      // other dataset, matched on shared columns
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const shared = H.filter(h => right.headers.includes(h));
+      const rightKeys = new Set(
+        right.rows.map(r => JSON.stringify(shared.map(h => r[h] ?? null)))
+      );
+      R = rows.filter(r => {
+        const key = JSON.stringify(shared.map(h => r[h] ?? null));
+        const inRight = rightKeys.has(key);
+        return s.type === "intersect" ? inRight : !inRight;
+      });
+      break; // headers unchanged
     }
 
     case "mutate": {
@@ -675,6 +967,7 @@ export function applyStep(rows, headers, s, context = {}) {
       };
       const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       const pNames = [...Object.keys(helpers), "row", ...safeH];
+      if (!isSafeExpr(s.expr)) break; // SECURITY: reject denylisted identifiers on the sync path
       let fn;
       try { fn = new Function(...pNames, `"use strict";return (${s.expr});`); } catch { break; }
       R = rows.map(r => {
@@ -696,6 +989,7 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.falseVal: literal value or column name for false branch
       // s.nn:       output column name
       const safeH_ife = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+      if (!isSafeExpr(s.cond)) break; // SECURITY: reject denylisted identifiers on the sync path
       // eslint-disable-next-line no-new-func
       let ifeFn; try { ifeFn = new Function(...safeH_ife, `"use strict"; return !!(${s.cond});`); } catch { break; }
       R = rows.map(r => {
@@ -715,6 +1009,7 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.defaultVal: fallback value when no condition matches
       // s.nn:         output column name
       const safeH_cw = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+      if ((s.cases ?? []).some(c => !isSafeExpr(c.cond))) break; // SECURITY: reject denylisted identifiers
       const caseFns = (s.cases ?? []).map(c => {
         // eslint-disable-next-line no-new-func
         try { return new Function(...safeH_cw, `"use strict"; return !!(${c.cond});`); }
@@ -729,6 +1024,39 @@ export function applyStep(rows, headers, s, context = {}) {
         return { ...r, [s.nn]: s.defaultVal ?? null };
       });
       if (!H.includes(s.nn)) H = [...H, s.nn];
+      break;
+    }
+
+    case "vector_assign": {
+      // s.nn, s.values[], s.mode, s.weights, s.seed, s.rules[{expr,value}], s.elseValue
+      const nn = s.nn || "assigned";
+      const values = Array.isArray(s.values) ? s.values : [];
+      let evalRule;
+      if (s.mode === "conditional") {
+        const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+        // compile one predicate per rule - identical to the existing case_when case
+        const ruleFns = (s.rules ?? []).map(rule => {
+          if (!isSafeExpr(rule.expr)) return null; // SECURITY: reject denylisted identifiers
+          // eslint-disable-next-line no-new-func
+          try { return new Function(...safeH, `"use strict"; return !!(${rule.expr});`); }
+          catch { return null; }
+        });
+        evalRule = (r) => {
+          const args = safeH.map(h => r[h] ?? null);
+          for (let i = 0; i < (s.rules ?? []).length; i++) {
+            if (!ruleFns[i]) continue;
+            try { if (ruleFns[i](...args)) return s.rules[i].value; } catch {}
+          }
+          return undefined; // no match -> engine uses elseValue
+        };
+      }
+      const assigned = assignVector(rows, {
+        values, mode: s.mode || "random",
+        weights: s.weights ?? null, seed: s.seed,
+        evalRule, elseValue: s.elseValue ?? null,
+      });
+      R = rows.map((r, i) => ({ ...r, [nn]: assigned[i] }));
+      if (!H.includes(nn)) H = [...H, nn];
       break;
     }
 
@@ -1440,7 +1768,8 @@ export async function runPipelineAsync(rows, headers, pipeline, context = {}) {
     const isWorkerStep =
       step.type === "mutate" || step.type === "ai_tr" ||
       step.type === "if_else" || step.type === "case_when" ||
-      (step.type === "filter" && step.expr);
+      (step.type === "filter" && step.expr) ||
+      (step.type === "vector_assign" && step.mode === "conditional");
 
     if (!isWorkerStep) {
       s = applyStep(s.rows, s.headers, step, context);
@@ -1459,8 +1788,17 @@ export async function runPipelineAsync(rows, headers, pipeline, context = {}) {
         s = { rows: newRows, headers: newHeaders };
       }
     } catch (e) {
-      console.warn("[runPipelineAsync] worker eval failed, falling back to sync:", e.message);
-      s = applyStep(s.rows, s.headers, step, context);
+      // SECURITY: never re-evaluate an untrusted expression on the main thread.
+      // On worker failure — including an expression rejected by the sandbox
+      // guard — null the step's output column (or no-op a filter) and continue.
+      console.warn("[runPipelineAsync] worker eval rejected/failed:", e.message);
+      const outCol = step.type === "ai_tr" ? step.col : (step.nn ?? step.col);
+      if (outCol) {
+        const newRows = s.rows.map(r => ({ ...r, [outCol]: null }));
+        const newHeaders = s.headers.includes(outCol) ? s.headers : [...s.headers, outCol];
+        s = { rows: newRows, headers: newHeaders };
+      }
+      // filter with a rejected expr → keep all rows (fail-open no-op, data intact)
     }
   }
   return s;

@@ -83,6 +83,93 @@ export const STEP_REGISTRY = [
   },
 
   {
+    type: "add_column",
+    label: "Add column",
+    category: "features",
+    description: "Add a new column filled with a constant value.",
+    schema: [
+      { key: "nn", type: "text", label: "Column name" },
+      { key: "fill", type: "text", label: "Fill value" },
+      { key: "dtype", type: "select", label: "Type", options: [
+        { value: "string", label: "String" },
+        { value: "number", label: "Number" },
+      ] },
+    ],
+    toLabel: s => `add column ${s.nn}`,
+    defaultStep: () => ({ type: "add_column", nn: "", fill: "", dtype: "string" }),
+  },
+
+  {
+    type: "add_row",
+    label: "Add row(s)",
+    category: "cleaning",
+    description: "Append blank or partially-filled rows. New rows get stable identities for later cell edits.",
+    schema: [
+      { key: "count", type: "number", label: "Number of rows" },
+    ],
+    toLabel: s => `add ${s.count || 1} row(s)`,
+    defaultStep: () => ({ type: "add_row", count: 1, values: {}, _seq: 0 }),
+  },
+
+  {
+    type: "set_where",
+    label: "Set value where...",
+    category: "cleaning",
+    description: "Set or clear a column's value on the rows matching a condition (the grid filter).",
+    schema: [
+      { key: "col", type: "col", label: "Column to set" },
+      { key: "action", type: "select", label: "Action", options: [
+        { value: "set", label: "Set to value" },
+        { value: "clear", label: "Clear (null)" },
+      ] },
+      { key: "value", type: "text", label: "Value" },
+    ],
+    toLabel: s => `set ${s.col} ${s.action === "clear" ? "= NA" : `= ${s.value}`} where ${s.where?.col} ${s.where?.op} ${s.where?.value}`,
+    defaultStep: () => ({ type: "set_where", col: "", where: { col: "", op: "equals", value: "" }, action: "set", value: "" }),
+  },
+
+  {
+    type: "replace",
+    label: "Find & replace",
+    category: "cleaning",
+    description: "Replace values in a column by exact match, substring, or regex.",
+    schema: [
+      { key: "col", type: "col", label: "Column" },
+      { key: "find", type: "text", label: "Find" },
+      { key: "replaceWith", type: "text", label: "Replace with" },
+      { key: "mode", type: "select", label: "Match", options: [
+        { value: "exact", label: "Exact" },
+        { value: "contains", label: "Contains" },
+        { value: "regex", label: "Regex" },
+      ] },
+      { key: "nn", type: "text", label: "New column (optional)" },
+    ],
+    toLabel: s => `replace in ${s.col}: "${s.match?.find ?? s.find}" -> "${s.replaceWith}"`,
+    defaultStep: () => ({ type: "replace", col: "", match: { mode: "exact", find: "" }, replaceWith: "", nn: "" }),
+  },
+
+  {
+    type: "str_splice",
+    label: "Edit characters at position",
+    category: "features",
+    description: "Insert, delete, or overwrite characters at a chosen position in each value (position 1 = first char; negative counts from the end).",
+    schema: [
+      { key: "col", type: "col", label: "Column" },
+      { key: "mode", type: "select", label: "Mode", options: [
+        { value: "insert", label: "Insert" },
+        { value: "delete", label: "Delete" },
+        { value: "overwrite", label: "Overwrite" },
+      ] },
+      { key: "position", type: "number", label: "Position (1-based; -1 = end)" },
+      { key: "text", type: "text", label: "Text" },
+      { key: "count", type: "number", label: "Count (delete/overwrite)" },
+      { key: "nn", type: "text", label: "New column (optional)" },
+    ],
+    toLabel: s => `${s.mode} chars in ${s.col} at ${s.position}`,
+    defaultStep: () => ({ type: "str_splice", col: "", mode: "insert", position: 1, text: "", count: 0, nn: "" }),
+  },
+
+  {
     type: "drop_na",
     label: "Drop missing rows",
     category: "cleaning",
@@ -178,6 +265,22 @@ export const STEP_REGISTRY = [
     ],
     toLabel: s => `normalize_cats ${s.col} (${Object.keys(s.map || {}).length} mappings)`,
     defaultStep: () => ({ type: "normalize_cats", col: "", map: {} }),
+  },
+
+  {
+    type: "distinct",
+    label: "Distinct (drop duplicate rows)",
+    category: "cleaning",
+    description: "Remove duplicate rows. Optionally dedup on a subset of columns; keep first or last occurrence. Equivalent to dplyr distinct() / pandas drop_duplicates().",
+    schema: [
+      { key: "subset", type: "cols",   label: "Columns to dedup on (empty = all)" },
+      { key: "keep",   type: "select", label: "Keep", options: [
+        { value: "first", label: "First occurrence" },
+        { value: "last",  label: "Last occurrence" },
+      ]},
+    ],
+    toLabel: s => `distinct${(s.subset?.length) ? ` on ${s.subset.join(", ")}` : ""}`,
+    defaultStep: () => ({ type: "distinct", subset: [], keep: "first" }),
   },
 
   {
@@ -398,6 +501,26 @@ export const STEP_REGISTRY = [
   },
 
   {
+    type: "vector_assign",
+    label: "Generate column from vector",
+    category: "features",
+    description: "Assign a small value vector across all rows by a chosen mode: random (seeded weighted draw), conditional (rules), recycle (by position), or quota (exact proportions). Seeded for reproducible replay.",
+    schema: [
+      { key: "nn",     type: "text",   label: "Output column name" },
+      { key: "values", type: "text",   label: "Values (comma or newline separated)" },
+      { key: "mode",   type: "select", label: "Mode", options: [
+        { value: "random",      label: "Random (weighted draw)" },
+        { value: "conditional", label: "Conditional (rules)" },
+        { value: "recycle",     label: "Recycle (by row position)" },
+        { value: "quota",       label: "Quota (exact proportions)" },
+      ]},
+      { key: "seed", type: "number", label: "Random seed (random/quota)" },
+    ],
+    toLabel: s => `vector_assign ${s.nn || "col"} [${s.mode || "random"}]`,
+    defaultStep: () => ({ type: "vector_assign", nn: "", values: "", mode: "random", weights: null, rules: [], elseValue: "", seed: 42 }),
+  },
+
+  {
     type: "geocode",
     label: "Geocode address",
     category: "features",
@@ -459,6 +582,30 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "group_summarize", by: [], aggs: [] }),
   },
 
+  {
+    type: "group_transform",
+    label: "Group transform (broadcast)",
+    category: "reshape",
+    description: "Compute a group statistic and write it back to every row as a new column (does NOT collapse rows). Equivalent to dplyr group_by() |> mutate().",
+    schema: [
+      { key: "by",  type: "cols",   label: "Group by columns" },
+      { key: "col", type: "col",    label: "Source column" },
+      { key: "fn",  type: "select", label: "Statistic", options: [
+        { value: "mean",   label: "Mean" },
+        { value: "sum",    label: "Sum" },
+        { value: "sd",     label: "Std dev (sample)" },
+        { value: "min",    label: "Min" },
+        { value: "max",    label: "Max" },
+        { value: "count",  label: "Count" },
+        { value: "median", label: "Median" },
+        { value: "rank",   label: "Rank (within group, asc)" },
+      ]},
+      { key: "nn", type: "text", label: "Output column name" },
+    ],
+    toLabel: s => `group_transform ${s.fn}(${s.col}) by ${(s.by || []).join(", ")} -> ${s.nn || "auto"}`,
+    defaultStep: () => ({ type: "group_transform", by: [], col: "", fn: "mean", nn: "" }),
+  },
+
   // ── CELL EDITS ──────────────────────────────────────────────────────────────
 
   {
@@ -478,7 +625,7 @@ export const STEP_REGISTRY = [
     type: "join",
     label: "Join dataset",
     category: "merge",
-    description: "Left or inner join against another loaded dataset on a key column.",
+    description: "Join against another loaded dataset on a key column: left, inner, right, full, semi, or anti.",
     schema: [
       { key: "rightId",  type: "text",   label: "Right dataset ID" },
       { key: "leftKey",  type: "col",    label: "Left key column" },
@@ -486,6 +633,10 @@ export const STEP_REGISTRY = [
       { key: "how",      type: "select", label: "Join type", options: [
         { value: "left",  label: "Left join (keep all left rows)" },
         { value: "inner", label: "Inner join (matched rows only)" },
+        { value: "right", label: "Right join (keep all right rows)" },
+        { value: "full",  label: "Full join (all rows, both sides)" },
+        { value: "semi",  label: "Semi join (left rows with a match - no new cols)" },
+        { value: "anti",  label: "Anti join (left rows without a match - no new cols)" },
       ]},
       { key: "suffix", type: "text", label: "Suffix for duplicate columns (default: _r)" },
     ],
@@ -503,6 +654,49 @@ export const STEP_REGISTRY = [
     ],
     toLabel: s => `append ← ${s.rightId}`,
     defaultStep: () => ({ type: "append", rightId: "" }),
+  },
+
+  {
+    type: "bind_cols",
+    label: "Bind columns",
+    category: "merge",
+    description: "Horizontally bind another dataset's columns by row position (dplyr bind_cols). Row-count mismatch truncates to the shorter dataset.",
+    schema: [
+      { key: "rightId", type: "text", label: "Dataset to bind" },
+      { key: "suffix",  type: "text", label: "Suffix for duplicate columns (default: _r)" },
+    ],
+    toLabel: s => `bind_cols <- ${s.rightId}`,
+    defaultStep: () => ({ type: "bind_cols", rightId: "", suffix: "_r" }),
+  },
+
+  {
+    type: "union",
+    label: "Union (stack + dedup)",
+    category: "merge",
+    description: "Vertically stack another dataset and drop full-row duplicates (dplyr union).",
+    schema: [{ key: "rightId", type: "text", label: "Dataset to union" }],
+    toLabel: s => `union <- ${s.rightId}`,
+    defaultStep: () => ({ type: "union", rightId: "" }),
+  },
+
+  {
+    type: "intersect",
+    label: "Intersect",
+    category: "merge",
+    description: "Keep rows present in both datasets, matched on shared columns (dplyr intersect).",
+    schema: [{ key: "rightId", type: "text", label: "Other dataset" }],
+    toLabel: s => `intersect ${s.rightId}`,
+    defaultStep: () => ({ type: "intersect", rightId: "" }),
+  },
+
+  {
+    type: "setdiff",
+    label: "Set difference",
+    category: "merge",
+    description: "Keep rows in the current dataset that are NOT in the other, matched on shared columns (dplyr setdiff).",
+    schema: [{ key: "rightId", type: "text", label: "Other dataset" }],
+    toLabel: s => `setdiff ${s.rightId}`,
+    defaultStep: () => ({ type: "setdiff", rightId: "" }),
   },
 
 

