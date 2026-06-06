@@ -291,3 +291,17 @@
 
 - [15:25] · Model
   Persistence across sessions of pinned models
+
+---
+
+## 2026-06-05 batch
+
+### Bugs
+
+- [21:27] · Data
+  Don't round the numbers when inserting, deleting or overwriting
+
+### Features
+
+- [12:23] · Spatial
+  Allow for colour selection with the "color by" option, useful for scales also
