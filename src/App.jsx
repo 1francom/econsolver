@@ -2412,6 +2412,43 @@ export default function App() {
   const coachSeqRef  = useRef(0);
   const studioRef    = useRef(null);
 
+  // ── Session restore: persist navigation state to sessionStorage ──────────────
+  const NAV_KEY = "litux:nav";
+
+  // On mount: if the user was in the workspace, reload that project + tab.
+  useEffect(() => {
+    const saved = sessionStorage.getItem(NAV_KEY);
+    if (!saved) return;
+    try {
+      const { pid: savedPid, activeTab: savedTab, projectName: savedName, filename: savedFilename, activeDatasetId: savedDsId } = JSON.parse(saved);
+      if (!savedPid) return;
+      listProjects().then(projects => {
+        const p = projects.find(x => x.pid === savedPid);
+        if (!p) { sessionStorage.removeItem(NAV_KEY); return; }
+        setFilename(savedFilename || p.filename || p.name || "project");
+        setProjectName(savedName || p.name || "Project");
+        setPid(savedPid);
+        setOutputs({});
+        setActiveDatasetId(savedDsId ?? null);
+        setInitialDatasets(null);
+        navHistory.current = [];
+        setCanGoBack(false);
+        setActiveTab(savedTab || "clean");
+        setScreen("workspace");
+      }).catch(() => {});
+    } catch { sessionStorage.removeItem(NAV_KEY); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist current workspace position whenever it changes.
+  useEffect(() => {
+    if (screen === "workspace" && pid) {
+      sessionStorage.setItem(NAV_KEY, JSON.stringify({ pid, activeTab, projectName, filename, activeDatasetId }));
+    } else if (screen === "dashboard") {
+      sessionStorage.removeItem(NAV_KEY);
+    }
+  }, [screen, pid, activeTab, projectName, filename, activeDatasetId]);
+
   // ── Navigation history — tracks {screen, tab} entries for ← back button ──
   const navHistory = useRef([]);                  // stack of past states
   const [canGoBack, setCanGoBack]   = useState(false);
