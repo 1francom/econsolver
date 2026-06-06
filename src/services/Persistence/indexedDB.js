@@ -42,6 +42,7 @@
 // Exports:
 //   openDB()
 //   saveProject(pid, meta)               / listProjects()      / deleteProject(pid) / clearAllProjects()
+//   markDirty(pid)                       / setSyncMeta(pid)    / getSyncMeta(pid)
 //   savePipeline(pid, datasetId, record) / loadPipeline(pid, datasetId)
 //   listPipelines()                      / deletePipeline(id)  / clearAllPipelines()
 //   saveRawData(id, rawData)             / loadRawData(id)     / deleteRawData(id)
@@ -235,6 +236,30 @@ function tx(store, db, mode, fn) {
   });
 }
 
+function normalizeSyncMeta(project = {}) {
+  return {
+    published: Boolean(project.published),
+    lastSyncedVersion: Number.isFinite(project.lastSyncedVersion) ? project.lastSyncedVersion : 0,
+    dirty: Boolean(project.dirty),
+  };
+}
+
+async function getProjectRecord(pid) {
+  if (!pid) return null;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE_PROJ, "readonly");
+    const req = t.objectStore(STORE_PROJ).get(pid);
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function markDirtyIfPublished(pid) {
+  const meta = await getSyncMeta(pid);
+  if (meta.published) await markDirty(pid);
+}
+
 // ─── PIPELINE API ─────────────────────────────────────────────────────────────
 // Each project pid owns a single store record whose `datasetPipelines` map
 // holds one entry per dataset id. For single-dataset projects, datasetId
@@ -302,6 +327,7 @@ export async function savePipeline(projectPid, datasetId, record = {}) {
   if (pipelineLength != null) next.pipelineLength = pipelineLength;
 
   await tx(STORE_PIPE, db, "readwrite", s => s.put(next));
+  await markDirtyIfPublished(projectPid);
 }
 
 /**
@@ -383,6 +409,7 @@ export async function saveRawData(id, rawData) {
     await tx(STORE_RAW, db, "readwrite", s =>
       s.put({ id, headers: rawData.headers, rows: rawData.rows, byteSize, ts: Date.now() })
     );
+    await markDirtyIfPublished(id);
     return { stored: true, byteSize };
   } catch (err) {
     console.error("[IDB] saveRawData failed:", err);
@@ -443,15 +470,16 @@ export async function saveProject(pid, meta) {
     req.onsuccess = e => resolve(e.target.result ?? null);
     req.onerror   = e => reject(e.target.error);
   });
-  await tx(STORE_PROJ, db, "readwrite", s =>
-    s.put({
+  const next = {
       createdAt: now,
       ...existing,
       ...meta,
       pid,
       updatedAt: now,
-    })
-  );
+    };
+  const syncMeta = normalizeSyncMeta(next);
+  await tx(STORE_PROJ, db, "readwrite", s => s.put({ ...next, ...syncMeta }));
+  if (syncMeta.published && meta?.dirty !== false) await markDirty(pid);
 }
 
 /**
@@ -463,10 +491,49 @@ export async function listProjects() {
     const t   = db.transaction(STORE_PROJ, "readonly");
     const req = t.objectStore(STORE_PROJ).getAll();
     req.onsuccess = e => resolve(
-      (e.target.result ?? []).sort((a, b) => b.updatedAt - a.updatedAt)
+      (e.target.result ?? [])
+        .map(project => ({ ...project, ...normalizeSyncMeta(project) }))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
     );
     req.onerror = e => reject(e.target.error);
   });
+}
+
+export async function getSyncMeta(pid) {
+  const project = await getProjectRecord(pid);
+  return normalizeSyncMeta(project ?? {});
+}
+
+export async function setSyncMeta(pid, patch = {}) {
+  if (!pid) throw new Error("setSyncMeta: pid required");
+  const db = await openDB();
+  const existing = await getProjectRecord(pid);
+  const now = Date.now();
+  const next = {
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: existing?.updatedAt ?? now,
+    ...(existing ?? {}),
+    pid,
+    ...normalizeSyncMeta({ ...(existing ?? {}), ...patch }),
+  };
+  if ("updatedAt" in patch) next.updatedAt = patch.updatedAt;
+  await tx(STORE_PROJ, db, "readwrite", s => s.put(next));
+  return normalizeSyncMeta(next);
+}
+
+export async function markDirty(pid) {
+  if (!pid) return normalizeSyncMeta({});
+  const db = await openDB();
+  const existing = await getProjectRecord(pid);
+  if (!existing) return normalizeSyncMeta({});
+  const next = {
+    ...existing,
+    ...normalizeSyncMeta(existing),
+    dirty: true,
+    updatedAt: Date.now(),
+  };
+  await tx(STORE_PROJ, db, "readwrite", s => s.put(next));
+  return normalizeSyncMeta(next);
 }
 
 /**
@@ -502,6 +569,7 @@ export async function saveWorkbenchRecord(pid, sessions) {
   await tx(STORE_WORKBENCH, db, "readwrite", s =>
     s.put({ pid, sessions: Array.isArray(sessions) ? sessions : [], ts: Date.now() })
   );
+  await markDirtyIfPublished(pid);
   return { stored: true };
 }
 
@@ -546,6 +614,7 @@ export async function saveCoachChats(pid, conversations) {
     await tx(STORE_COACH, db, "readwrite", s =>
       s.put({ pid, conversations: Array.isArray(conversations) ? conversations : [], ts: Date.now() })
     );
+    await markDirtyIfPublished(pid);
     return { stored: true };
   } catch (err) {
     console.warn("[IDB] saveCoachChats failed:", err.message);
@@ -588,6 +657,7 @@ export async function saveModelBuffer(pid, models) {
     const db = await openDB();
     await tx(STORE_MODEL_BUFFER, db, "readwrite", s =>
       s.put({ pid, models: Array.isArray(models) ? models : [], ts: Date.now() }));
+    await markDirtyIfPublished(pid);
     return { stored: true };
   } catch (err) { console.warn("[IDB] saveModelBuffer failed:", err.message); return { stored: false }; }
 }
@@ -614,6 +684,7 @@ export async function saveSpatialMaps(pid, maps) {
     const db = await openDB();
     await tx(STORE_SPATIAL_MAPS, db, "readwrite", s =>
       s.put({ pid, maps: maps ?? null, ts: Date.now() }));
+    await markDirtyIfPublished(pid);
     return { stored: true };
   } catch (err) { console.warn("[IDB] saveSpatialMaps failed:", err.message); return { stored: false }; }
 }
@@ -660,6 +731,7 @@ export async function saveDatasetRegistry(pid, datasets) {
     await tx(STORE_DS_REGISTRY, db, "readwrite", s =>
       s.put({ pid, datasets: slim, ts: Date.now() })
     );
+    await markDirtyIfPublished(pid);
     return { stored: true };
   } catch (err) {
     console.warn("[IDB] saveDatasetRegistry failed:", err.message);
