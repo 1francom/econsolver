@@ -345,6 +345,7 @@ export function applyStep(rows, headers, s, context = {}) {
           ? new Function(`return (${js})`)()          // eval to get the arrow fn, then call per row
           : new Function("value", "rowIndex", js);    // body format — wrap directly
         R = rows.map((r, i) => ({ ...r, [s.col]: fn(r[s.col], i) }));
+        if (!H.includes(s.col)) H = [...H, s.col];   // new output col not always present in original headers
       } catch {}
       break;
     }
