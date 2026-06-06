@@ -50,13 +50,15 @@
 
 import { retrofitRowId } from "../data/rowIdentity.js";
 
-const DB_VERSION           = 8;
+const DB_VERSION           = 9;
 const STORE_PIPE           = "pipelines";
 const STORE_RAW            = "raw_data";
 const STORE_PROJ           = "projects";
 const STORE_WORKBENCH      = "workbench";
 const STORE_COACH          = "coach_chats";
 const STORE_DS_REGISTRY    = "dataset_registry";
+const STORE_MODEL_BUFFER   = "model_buffer";
+const STORE_SPATIAL_MAPS   = "spatial_maps";
 const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
 
 // Every object store the app expects to exist. Used to self-heal a DB that
@@ -64,6 +66,7 @@ const RAW_DATA_LIMIT_BYTES = 100 * 1024 * 1024; // 100 MB hard cap
 // buggy prior upgrade) — see openDB() below.
 const REQUIRED_STORES = [
   STORE_PIPE, STORE_RAW, STORE_PROJ, STORE_WORKBENCH, STORE_COACH, STORE_DS_REGISTRY,
+  STORE_MODEL_BUFFER, STORE_SPATIAL_MAPS,
 ];
 
 // ── Per-user DB isolation ──────────────────────────────────────────────────────
@@ -189,6 +192,15 @@ function openAt(version) {
       // registry that did not survive a browser close.
       if (!db.objectStoreNames.contains(STORE_DS_REGISTRY)) {
         db.createObjectStore(STORE_DS_REGISTRY, { keyPath: "pid" });
+      }
+
+      // v9: model_buffer store — pinned-model comparison buffer, keyed by pid.
+      if (!db.objectStoreNames.contains(STORE_MODEL_BUFFER)) {
+        db.createObjectStore(STORE_MODEL_BUFFER, { keyPath: "pid" });
+      }
+      // v9: spatial_maps store — serialized spatial map/layer configs, keyed by pid.
+      if (!db.objectStoreNames.contains(STORE_SPATIAL_MAPS)) {
+        db.createObjectStore(STORE_SPATIAL_MAPS, { keyPath: "pid" });
       }
     };
 
@@ -464,6 +476,8 @@ export async function deleteProject(pid) {
   const db = await openDB();
   await tx(STORE_PROJ, db, "readwrite", s => s.delete(pid));
   await deleteCoachChats(pid);
+  await deleteModelBuffer(pid);
+  await deleteSpatialMaps(pid);
 }
 
 /**
@@ -565,6 +579,58 @@ export async function deleteCoachChats(pid) {
     const db = await openDB();
     await tx(STORE_COACH, db, "readwrite", s => s.delete(pid));
   } catch { /* non-fatal */ }
+}
+
+// ─── MODEL BUFFER (pinned-model comparison set, per project) ──────────────────
+export async function saveModelBuffer(pid, models) {
+  if (!pid) return { stored: false };
+  try {
+    const db = await openDB();
+    await tx(STORE_MODEL_BUFFER, db, "readwrite", s =>
+      s.put({ pid, models: Array.isArray(models) ? models : [], ts: Date.now() }));
+    return { stored: true };
+  } catch (err) { console.warn("[IDB] saveModelBuffer failed:", err.message); return { stored: false }; }
+}
+export async function loadModelBuffer(pid) {
+  if (!pid) return null;
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const t = db.transaction(STORE_MODEL_BUFFER, "readonly");
+      const req = t.objectStore(STORE_MODEL_BUFFER).get(pid);
+      req.onsuccess = e => resolve(e.target.result ?? null);
+      req.onerror = e => reject(e.target.error);
+    });
+  } catch { return null; }
+}
+export async function deleteModelBuffer(pid) {
+  try { const db = await openDB(); await tx(STORE_MODEL_BUFFER, db, "readwrite", s => s.delete(pid)); } catch { /* non-fatal */ }
+}
+
+// ─── SPATIAL MAPS (serialized map/layer configs, per project) ─────────────────
+export async function saveSpatialMaps(pid, maps) {
+  if (!pid) return { stored: false };
+  try {
+    const db = await openDB();
+    await tx(STORE_SPATIAL_MAPS, db, "readwrite", s =>
+      s.put({ pid, maps: maps ?? null, ts: Date.now() }));
+    return { stored: true };
+  } catch (err) { console.warn("[IDB] saveSpatialMaps failed:", err.message); return { stored: false }; }
+}
+export async function loadSpatialMaps(pid) {
+  if (!pid) return null;
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const t = db.transaction(STORE_SPATIAL_MAPS, "readonly");
+      const req = t.objectStore(STORE_SPATIAL_MAPS).get(pid);
+      req.onsuccess = e => resolve(e.target.result ?? null);
+      req.onerror = e => reject(e.target.error);
+    });
+  } catch { return null; }
+}
+export async function deleteSpatialMaps(pid) {
+  try { const db = await openDB(); await tx(STORE_SPATIAL_MAPS, db, "readwrite", s => s.delete(pid)); } catch { /* non-fatal */ }
 }
 
 // ─── DATASET REGISTRY API ─────────────────────────────────────────────────────
