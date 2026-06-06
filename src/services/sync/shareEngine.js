@@ -209,11 +209,8 @@ export async function createShare(pid, recipientEmail, canEdit = false) {
   const encKey = await deriveKey(token, salt);
   const verifier = await makeVerifier(encKey);
 
-  // Read + encrypt + upload bundle
-  const bundle = await readProjectBundle(pid);
-  const index  = await encryptAndUpload(supabase, token, encKey, bundle);
-
-  // Store share row
+  // Insert the DB row FIRST so storage RLS policies can verify ownership
+  // via the project_shares row when artifact uploads arrive.
   const { data, error } = await supabase.from("project_shares").insert({
     owner_id:        userId,
     pid,
@@ -221,17 +218,21 @@ export async function createShare(pid, recipientEmail, canEdit = false) {
     can_edit:        canEdit,
     token,
     salt,
-    verifier:        JSON.stringify(verifier),
+    verifier:        JSON.stringify(verifier),  // indexIv added in final update below
     version:         1,
   }).select("id").single();
   if (error) throw error;
 
-  // Store artifact index as a small JSON blob alongside the artifacts
+  // Read, encrypt, and upload bundle (storage RLS now passes — row exists)
+  const bundle = await readProjectBundle(pid);
+  const index  = await encryptAndUpload(supabase, token, encKey, bundle);
+
+  // Encrypt + upload artifact index
   const idxBytes  = encode(index);
   const { ct: idxCt, iv: idxIv } = await encryptBytes(encKey, idxBytes);
   await uploadArtifact(supabase, token, "__index__", idxCt);
 
-  // Persist the IV for the index in the share row (update)
+  // Persist the IV for the index in the share row
   await supabase.from("project_shares")
     .update({ verifier: JSON.stringify({ ...verifier, indexIv: idxIv }) })
     .eq("id", data.id);
