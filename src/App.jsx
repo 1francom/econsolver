@@ -1927,6 +1927,7 @@ function Dashboard({onNew, onLoad}) {
           <div style={{
             border:`1px solid ${C.border}`,
             borderRadius:5, overflow:"hidden",
+            display:"flex", flexDirection:"column", maxHeight:"60vh",
           }}>
             {/* Project header */}
             <div style={{
@@ -1947,6 +1948,9 @@ function Dashboard({onNew, onLoad}) {
                 <Badge ch={`Panel · i=${selPipeline.panel.entityCol} · t=${selPipeline.panel.timeCol}`} color={C.blue}/>
               )}
             </div>
+
+            {/* Scrollable body — stats + description + pipeline steps */}
+            <div style={{overflowY:"auto", flex:1}}>
 
             {/* Stats grid */}
             <div style={{
@@ -2039,6 +2043,8 @@ function Dashboard({onNew, onLoad}) {
               </div>
               );
             })()}
+
+            </div>{/* end scrollable body */}
 
             {/* Open button */}
             <div style={{
