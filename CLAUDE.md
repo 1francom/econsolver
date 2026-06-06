@@ -85,7 +85,8 @@ src/
 │   │   ├── pythonScript.js       ← pipeline + model → Python script; generateSubsetPythonScript() dict+comprehension pattern
 │   │   └── replicationBundle.js  ← ZIP bundle (R + Stata + Python scripts + data); buildMultiSubsetBundle() + downloadMultiSubsetBundle()
 │   ├── Persistence/
-│   │   └── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage; v6 coach_chats store (saveCoachChats/loadCoachChats/deleteCoachChats — per-project AI Coach conversations)
+│   │   ├── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage; coach_chats store; v9 model_buffer + spatial_maps stores (save/load/delete per project; cascade on deleteProject)
+│   │   └── trimResult.js         ← shared comparison-sufficient EstimationResult projection (modelBuffer + sessionSnapshot)
 │   └── modelBuffer.js            ← model buffer state management
 │
 ├── components/
