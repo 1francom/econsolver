@@ -78,7 +78,7 @@ function StagedRng({ label, value, onChg, min, max, step, fmt, C }) {
   );
 }
 
-export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDatasets, C }) {
+export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availableDatasets, C }) {
   const upd = patch => onChange({ ...ly, ...patch });
 
   // Resolve headers for the currently selected dataset
@@ -87,6 +87,29 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
     const ds = availableDatasets.find(d => d.id === ly.datasetId);
     return ds?.headers ?? headers;
   }, [ly.datasetId, headers, availableDatasets]);
+
+  // Resolve rows for the currently selected dataset
+  const dsRows = useMemo(() => {
+    if (!ly.datasetId || ly.datasetId === "active") return rows ?? [];
+    const ds = availableDatasets.find(d => d.id === ly.datasetId);
+    return ds?.rows ?? rows ?? [];
+  }, [ly.datasetId, rows, availableDatasets]);
+
+  // Diagnostic: check lat/lon column values against WGS84 bounds
+  const ptDiagnostic = useMemo(() => {
+    if ((ly.type !== "point" && ly.type !== "heatmap") || !ly.latCol || !ly.lonCol || ly.mode === "wkt") return null;
+    let total = 0, valid = 0, outOfBounds = 0;
+    const sample = dsRows.slice(0, 200);
+    for (const row of sample) {
+      const lat = parseFloat(row[ly.latCol]), lon = parseFloat(row[ly.lonCol]);
+      if (isNaN(lat) || isNaN(lon)) continue;
+      total++;
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) outOfBounds++;
+      else valid++;
+    }
+    if (total === 0) return null;
+    return { total: sample.length, checked: total, valid, outOfBounds };
+  }, [ly.type, ly.latCol, ly.lonCol, ly.mode, dsRows]);
 
   const dsWktHeaders = useMemo(() =>
     dsHeaders.filter(h => {
@@ -201,10 +224,23 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, availableDat
             ))}
           </div>
           {(ly.mode === "latlon" || !ly.mode) && (
-            <div style={{ display: "flex", gap: 6 }}>
-              <Sel label="Latitude" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
-              <Sel label="Longitude" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
-            </div>
+            <>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Sel label="Latitude" value={ly.latCol} onChg={v => upd({ latCol: v })} opts={dsHeaders} />
+                <Sel label="Longitude" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
+              </div>
+              {ptDiagnostic && ptDiagnostic.valid === 0 && (
+                <div style={{ padding: "5px 8px", borderRadius: 3, background: `${C.gold}12`, border: `1px solid ${C.gold}50`, fontFamily: mono, fontSize: 8, color: C.gold, lineHeight: 1.5 }}>
+                  ⚠ All sampled values outside WGS84 bounds (lat: −90…90, lon: −180…180).
+                  If integer-encoded, use DataViewer → Position to insert the decimal point.
+                </div>
+              )}
+              {ptDiagnostic && ptDiagnostic.valid > 0 && ptDiagnostic.outOfBounds > 0 && (
+                <div style={{ padding: "4px 8px", borderRadius: 3, background: `${C.gold}0c`, border: `1px solid ${C.gold}30`, fontFamily: mono, fontSize: 8, color: C.gold }}>
+                  ⚠ {ptDiagnostic.outOfBounds} of {ptDiagnostic.checked} sampled rows have out-of-bounds coordinates
+                </div>
+              )}
+            </>
           )}
           {ly.mode === "wkt" && (
             <Sel label="WKT geometry" value={ly.wktCol ?? ""} onChg={v => upd({ wktCol: v })} opts={geomCols} />

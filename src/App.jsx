@@ -372,6 +372,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const [spliceCount,  setSpliceCount] = useState(0);
   const [spliceNewCol, setSpliceNewCol] = useState("");
   const [dbPageRows,   setDbPageRows]  = useState([]);  // DuckDB-fetched page
+  const [roundDec,     setRoundDec]    = useState("");   // "" = no rounding; "4" = 4 decimal places
 
   // When the table changes (new dataset or pipeline step), reset to page 0
   useEffect(() => { setPage(0); setDbPageRows([]); }, [duckdbMeta?.tableName]);
@@ -455,9 +456,15 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   });
   // Stats computed from preview rows (approximate for large DuckDB datasets)
   const stats      = selCol ? colStats(selCol, rows) : null;
+  const roundDecN = roundDec !== "" ? parseInt(roundDec, 10) : null;
   const fmt = v => {
     if (v === null || v === undefined) return <span style={{color:C.textMuted,fontStyle:"italic"}}>NA</span>;
-    if (typeof v === "number") return <span style={{color:"#9ecff5"}}>{String(v)}</span>;
+    if (typeof v === "number") {
+      const display = (roundDecN !== null && Number.isFinite(roundDecN) && roundDecN >= 0)
+        ? v.toFixed(roundDecN)
+        : String(v);
+      return <span style={{color:"#9ecff5"}}>{display}</span>;
+    }
     return String(v);
   };
 
@@ -515,6 +522,33 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
           style={{padding:"3px 8px",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,
                   color:C.text,fontFamily:mono,fontSize:10,width:140,outline:"none"}}
         />
+        {/* Decimal rounding control */}
+        <div style={{display:"flex",alignItems:"center",gap:4}}>
+          <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,whiteSpace:"nowrap"}}>dec:</span>
+          <input
+            type="number"
+            min="0"
+            max="20"
+            value={roundDec}
+            onChange={e => setRoundDec(e.target.value)}
+            placeholder="auto"
+            title="Round numeric cells to N decimal places (leave blank for full precision)"
+            style={{
+              width:52, padding:"3px 5px", background:C.surface, border:`1px solid ${C.border2}`,
+              borderRadius:3, color: roundDec !== "" ? C.teal : C.textMuted,
+              fontFamily:mono, fontSize:9, outline:"none",
+            }}
+          />
+          {roundDec !== "" && (
+            <button
+              onClick={() => setRoundDec("")}
+              title="Clear rounding — show full precision"
+              style={{padding:"1px 5px",background:"transparent",border:`1px solid ${C.border2}`,
+                      borderRadius:3,color:C.textMuted,fontFamily:mono,fontSize:9,cursor:"pointer"}}>
+              ×
+            </button>
+          )}
+        </div>
         {totalPages > 1 && (
           <div style={{display:"flex",alignItems:"center",gap:4}}>
             <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>rows {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, totalCount)}</span>
