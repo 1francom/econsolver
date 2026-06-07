@@ -457,7 +457,11 @@ function Auditor({sug,aiP,onApply,onNormalize,loading}){
 }
 
 // ─── COLUMN CARD ──────────────────────────────────────────────────────────────
-function ColCard({h, info, sug, selected, onSel, onAct}){
+// Maps a type_cast `to` value → display label + color key
+const CAST_LABEL = { number:"num", number_smart:"num", integer:"int", string:"str", categorical:"cat", boolean:"bool" };
+const CAST_COLOR = { num:"blue", int:"blue", str:"teal", cat:"purple", bool:"gold" };
+
+function ColCard({h, info, sug, castType, selected, onSel, onAct}){
   const { C } = useTheme();
   const c = info[h] || {};
   const [mo, setMo] = useState(false);
@@ -488,7 +492,11 @@ function ColCard({h, info, sug, selected, onSel, onAct}){
             borderRadius:2,color:C.textMuted,cursor:"pointer",fontSize:9,padding:"1px 4px",flexShrink:0}}>⋯</button>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
-        <Badge ch={c.isNum?"num":"cat"} color={c.isNum?C.blue:C.purple}/>
+        {(()=>{
+          const lbl  = castType ? (CAST_LABEL[castType] ?? castType) : (c.isNum ? "num" : "cat");
+          const ckey = castType ? (CAST_COLOR[lbl] ?? "textMuted")  : (c.isNum ? "blue" : "purple");
+          return <Badge ch={lbl} color={C[ckey] ?? C.textMuted}/>;
+        })()}
         <NA pct={c.naPct||0}/>
         {isConst    && <Badge ch="const" color={C.red}/>}
         {hasNA      && <Badge ch={`${(c.naPct*100).toFixed(0)}% NA`} color={highSev?C.red:C.yellow}/>}
@@ -1632,7 +1640,7 @@ function DistinctSection({ headers, onAdd, C }) {
 }
 
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
-function CleanTab({rows,headers,info,rawData,onAdd}){
+function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
   const { C } = useTheme();
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
   const [rv,setRv]=useState("");
@@ -1644,6 +1652,15 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
   // E4 — Jaro-Winkler toggle for the normalizer ("levenshtein" | "jaroWinkler")
   const [normMethod,setNormMethod]=useState("levenshtein");
   const ran=useRef(false);
+
+  // Derive the most recent explicit type_cast for each column so ColCard
+  // can show the exact cast target ("str", "int", "bool"…) instead of just
+  // the coarse buildInfo heuristic ("num" / "cat").
+  const castTypes = useMemo(() => {
+    const map = {};
+    pipeline.forEach(s => { if (s.type === "type_cast" && s.col) map[s.col] = s.to; });
+    return map;
+  }, [pipeline]);
 
   useEffect(()=>{
     if(ran.current||!headers.length) return;
@@ -1741,7 +1758,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
         </div>
       )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"0.75rem"}}>
-        {headers.map(h=><ColCard key={h} h={h} info={info} sug={sug} selected={sel===h}
+        {headers.map(h=><ColCard key={h} h={h} info={info} sug={sug} castType={castTypes[h]} selected={sel===h}
           onSel={h=>{setSel(h);setAct(null);setARes(null);setASt("idle");}}
           onAct={(h,a)=>{setSel(h);setAct(a);}}/>)}
       </div>
