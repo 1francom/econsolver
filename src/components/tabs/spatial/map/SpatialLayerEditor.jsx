@@ -3,6 +3,31 @@ import { useMemo } from "react";
 import { mono } from "../shared/constants.js";
 import { ColSelect, NumInput } from "../shared/atoms.jsx";
 import { ColorRow } from "./ColorRow.jsx";
+import { PALETTE_DEFS, paletteToCss } from "../shared/color.js";
+
+function PalettePicker({ value, onChange, C }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>Color scale</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {Object.entries(PALETTE_DEFS).map(([key, pal]) => {
+          const active = (value ?? "teal-gold") === key;
+          return (
+            <button key={key} onClick={() => onChange(key)} title={pal.label}
+              style={{
+                padding: 0, border: `2px solid ${active ? C.teal : C.border}`,
+                borderRadius: 3, cursor: "pointer", background: "none",
+                outline: active ? `1px solid ${C.teal}` : "none", outlineOffset: 1,
+              }}
+            >
+              <div style={{ width: 36, height: 10, borderRadius: 1, background: paletteToCss(pal) }} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders, availableDatasets, C }) {
   const lyDs      = (layer.datasetId && layer.datasetId !== "active")
@@ -101,10 +126,11 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
             onChange={v => onChange({ ...layer, wktCol: v })} headers={geomCols} C={C} allowNone />
           <ColSelect label="Choropleth variable" value={layer.colorByCol}
             onChange={v => onChange({ ...layer, colorByCol: v })} headers={lyHeaders} C={C} allowNone />
-          {layer.colorByCol && (
+          {layer.colorByCol && (<>
+            <PalettePicker value={layer.palette} onChange={v => onChange({ ...layer, palette: v })} C={C} />
             <NumInput label="Choropleth fill opacity" value={layer.colorFillOpacity}
               onChange={v => onChange({ ...layer, colorFillOpacity: Number(v) })} C={C} min={0} max={1} step={0.05} />
-          )}
+          </>)}
         </>)}
 
         <ColorRow label="Fill" color={layer.fillColor} opacity={layer.fillOpacity}
@@ -130,14 +156,36 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
 
       {/* ── Points ────────────────────────────────────────────────────────── */}
       {layer.type === "points" && (<>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <ColSelect label="Latitude" value={layer.latCol}
-            onChange={v => onChange({ ...layer, latCol: v })} headers={lyHeaders} C={C} allowNone />
-          <ColSelect label="Longitude" value={layer.lonCol}
-            onChange={v => onChange({ ...layer, lonCol: v })} headers={lyHeaders} C={C} allowNone />
+        {/* Mode toggle */}
+        <div style={{ display: "flex", gap: 4 }}>
+          {[["latlon", "Lat/Lon"], ["wkt", "WKT geometry"]].map(([m, lbl]) => (
+            <button key={m} onClick={() => onChange({ ...layer, mode: m })}
+              style={{
+                flex: 1, padding: "3px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                background: layer.mode === m ? `${C.teal}18` : "transparent",
+                border: `1px solid ${layer.mode === m ? C.teal + "60" : C.border}`,
+                color: layer.mode === m ? C.teal : C.textMuted,
+              }}
+            >{lbl}</button>
+          ))}
         </div>
+        {(layer.mode === "latlon" || !layer.mode) && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <ColSelect label="Latitude" value={layer.latCol}
+              onChange={v => onChange({ ...layer, latCol: v })} headers={lyHeaders} C={C} allowNone />
+            <ColSelect label="Longitude" value={layer.lonCol}
+              onChange={v => onChange({ ...layer, lonCol: v })} headers={lyHeaders} C={C} allowNone />
+          </div>
+        )}
+        {layer.mode === "wkt" && (
+          <ColSelect label="WKT geometry column" value={layer.wktCol}
+            onChange={v => onChange({ ...layer, wktCol: v })} headers={geomCols} C={C} allowNone />
+        )}
         <ColSelect label="Color by (optional)" value={layer.colorCol}
           onChange={v => onChange({ ...layer, colorCol: v })} headers={lyHeaders} C={C} allowNone />
+        {layer.colorCol && (
+          <PalettePicker value={layer.palette} onChange={v => onChange({ ...layer, palette: v })} C={C} />
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
           <NumInput label="Radius (px)" value={layer.radius}
             onChange={v => onChange({ ...layer, radius: Number(v) })} C={C} min={1} max={20} step={1} />

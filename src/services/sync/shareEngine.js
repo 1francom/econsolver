@@ -209,11 +209,15 @@ export async function createShare(pid, recipientEmail, canEdit = false) {
   const encKey = await deriveKey(token, salt);
   const verifier = await makeVerifier(encKey);
 
+  // Resolve project name for display in recipient's "Shared with me" list
+  const projectName = (await listProjects()).find(p => p.pid === pid)?.name ?? null;
+
   // Insert the DB row FIRST so storage RLS policies can verify ownership
   // via the project_shares row when artifact uploads arrive.
   const { data, error } = await supabase.from("project_shares").insert({
     owner_id:        userId,
     pid,
+    name:            projectName,
     recipient_email: recipientEmail.trim().toLowerCase(),
     can_edit:        canEdit,
     token,
@@ -248,7 +252,7 @@ export async function listMyShares(pid) {
   const supabase = getSyncSupabase();
   const { data, error } = await supabase
     .from("project_shares")
-    .select("id,pid,recipient_email,can_edit,token,version,created_at")
+    .select("id,pid,name,recipient_email,can_edit,token,version,created_at")
     .eq("pid", pid)
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -262,7 +266,7 @@ export async function listSharedWithMe() {
   const supabase = getSyncSupabase();
   const { data, error } = await supabase
     .from("project_shares")
-    .select("id,pid,recipient_email,can_edit,token,version,created_at,owner_id")
+    .select("id,pid,name,recipient_email,can_edit,token,version,created_at,owner_id")
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data ?? [];

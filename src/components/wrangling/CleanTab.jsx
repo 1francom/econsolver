@@ -457,7 +457,11 @@ function Auditor({sug,aiP,onApply,onNormalize,loading}){
 }
 
 // ─── COLUMN CARD ──────────────────────────────────────────────────────────────
-function ColCard({h, info, sug, selected, onSel, onAct}){
+// Maps a type_cast `to` value → display label + color key
+const CAST_LABEL = { number:"num", number_smart:"num", integer:"int", string:"str", categorical:"cat", boolean:"bool" };
+const CAST_COLOR = { num:"blue", int:"blue", str:"teal", cat:"purple", bool:"gold" };
+
+function ColCard({h, info, sug, castType, selected, onSel, onAct}){
   const { C } = useTheme();
   const c = info[h] || {};
   const [mo, setMo] = useState(false);
@@ -488,7 +492,11 @@ function ColCard({h, info, sug, selected, onSel, onAct}){
             borderRadius:2,color:C.textMuted,cursor:"pointer",fontSize:9,padding:"1px 4px",flexShrink:0}}>⋯</button>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
-        <Badge ch={c.isNum?"num":"cat"} color={c.isNum?C.blue:C.purple}/>
+        {(()=>{
+          const lbl  = castType ? (CAST_LABEL[castType] ?? castType) : (c.isNum ? "num" : "cat");
+          const ckey = castType ? (CAST_COLOR[lbl] ?? "textMuted")  : (c.isNum ? "blue" : "purple");
+          return <Badge ch={lbl} color={C[ckey] ?? C.textMuted}/>;
+        })()}
         <NA pct={c.naPct||0}/>
         {isConst    && <Badge ch="const" color={C.red}/>}
         {hasNA      && <Badge ch={`${(c.naPct*100).toFixed(0)}% NA`} color={highSev?C.red:C.yellow}/>}
@@ -499,7 +507,7 @@ function ColCard({h, info, sug, selected, onSel, onAct}){
         style={{position:"absolute",top:"100%",right:0,zIndex:99,background:C.surface2,
           border:`1px solid ${C.border}`,borderRadius:4,boxShadow:"0 6px 24px #000b",
           minWidth:140,overflow:"hidden"}}>
-        {[["rename","Rename"],["filter","Filter"],["drop","Drop"]].map(([a,l])=>(
+        {[["rename","Rename"],["filter","Filter"],["cast","Change type"],["drop","Drop"]].map(([a,l])=>(
           <button key={a} onClick={()=>{onAct(h,a);setMo(false);}}
             style={{width:"100%",padding:"0.45rem 0.8rem",background:"transparent",border:"none",
               color:a==="drop"?C.red:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,textAlign:"left"}}>{l}</button>
@@ -1632,7 +1640,7 @@ function DistinctSection({ headers, onAdd, C }) {
 }
 
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
-function CleanTab({rows,headers,info,rawData,onAdd}){
+function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
   const { C } = useTheme();
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
   const [rv,setRv]=useState("");
@@ -1644,6 +1652,15 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
   // E4 — Jaro-Winkler toggle for the normalizer ("levenshtein" | "jaroWinkler")
   const [normMethod,setNormMethod]=useState("levenshtein");
   const ran=useRef(false);
+
+  // Derive the most recent explicit type_cast for each column so ColCard
+  // can show the exact cast target ("str", "int", "bool"…) instead of just
+  // the coarse buildInfo heuristic ("num" / "cat").
+  const castTypes = useMemo(() => {
+    const map = {};
+    pipeline.forEach(s => { if (s.type === "type_cast" && s.col) map[s.col] = s.to; });
+    return map;
+  }, [pipeline]);
 
   useEffect(()=>{
     if(ran.current||!headers.length) return;
@@ -1703,6 +1720,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
   function doRename(){if(!sel||!rv.trim())return;onAdd({type:"rename",col:sel,newName:rv.trim(),desc:`Rename '${sel}' → '${rv.trim()}'`});setRv("");setAct(null);setSel(null);}
   function doFilter(step){ onAdd(step); setShowFilter(false); setAct(null); }
   function doDrop(){if(!sel)return;onAdd({type:"drop",col:sel,desc:`Drop '${sel}'`});setAct(null);setSel(null);}
+  function doCast(to){if(!sel)return;onAdd({type:"type_cast",col:sel,to,desc:`Cast '${sel}' → ${to}`});setAct(null);setSel(null);}
 
   const selIsCat=sel&&info[sel]&&!info[sel].isNum&&info[sel].isCat;
   const inS={width:"100%",boxSizing:"border-box",padding:"0.48rem 0.75rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"};
@@ -1740,7 +1758,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
         </div>
       )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"0.75rem"}}>
-        {headers.map(h=><ColCard key={h} h={h} info={info} sug={sug} selected={sel===h}
+        {headers.map(h=><ColCard key={h} h={h} info={info} sug={sug} castType={castTypes[h]} selected={sel===h}
           onSel={h=>{setSel(h);setAct(null);setARes(null);setASt("idle");}}
           onAct={(h,a)=>{setSel(h);setAct(a);}}/>)}
       </div>
@@ -1814,6 +1832,7 @@ function CleanTab({rows,headers,info,rawData,onAdd}){
             />
           )}
           {act==="drop"&&<div><div style={{fontSize:12,color:C.red,marginBottom:"0.8rem",fontFamily:mono}}>Drop column '{sel}'?</div><div style={{display:"flex",gap:8}}><Btn onClick={doDrop} color={C.red} v="solid" ch="Confirm Drop"/><Btn onClick={()=>setAct(null)} ch="Cancel"/></div></div>}
+          {act==="cast"&&<div><div style={{fontSize:11,color:C.textDim,marginBottom:"0.7rem",fontFamily:mono}}>Change type of '<span style={{color:C.text}}>{sel}</span>' to:</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{[["number","number",C.blue],["integer","integer",C.blue],["string","string",C.teal],["categorical","categorical",C.purple],["boolean","boolean (0/1)",C.gold]].map(([to,label,color])=><Btn key={to} onClick={()=>doCast(to)} color={color} v="solid" sm ch={label}/>)}<Btn onClick={()=>setAct(null)} sm ch="Cancel"/></div></div>}
         </div>
       )}
       {/* ── Fill Missing Values ── */}

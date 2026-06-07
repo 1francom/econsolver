@@ -37,9 +37,9 @@ export function appendSvgLegend(svg, legend, C, plotW, plotH, gutterW = 160) {
   g.appendChild(bg);
 
   const title = document.createElementNS(ns, "text");
-  title.setAttribute("x", x + 8);
+  title.setAttribute("x", x + 14);
   title.setAttribute("y", y + 14);
-  title.setAttribute("fill", C?.textMuted ?? "#666");
+  title.setAttribute("fill", "#444");
   title.setAttribute("font-size", "8");
   title.textContent = String(legend.col ?? "").toUpperCase();
   g.appendChild(title);
@@ -51,7 +51,13 @@ export function appendSvgLegend(svg, legend, C, plotW, plotH, gutterW = 160) {
     grad.setAttribute("id", gradId);
     grad.setAttribute("x1", "0%");
     grad.setAttribute("x2", "100%");
-    [["0%", "#6ec8b4"], ["100%", "#c8a96e"]].forEach(([offset, color]) => {
+    const pal = legend.pal;
+    const stops = pal?.stops
+      ? pal.stops.map(([r, g, b], i, arr) => [`${Math.round(i / (arr.length - 1) * 100)}%`, `rgb(${r},${g},${b})`])
+      : pal?.low && pal?.high
+        ? [["0%", `rgb(${pal.low.join(",")})`], ["100%", `rgb(${pal.high.join(",")})`]]
+        : [["0%", "#149470"], ["100%", "#d27d12"]];
+    stops.forEach(([offset, color]) => {
       const stop = document.createElementNS(ns, "stop");
       stop.setAttribute("offset", offset);
       stop.setAttribute("stop-color", color);

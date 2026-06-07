@@ -965,6 +965,8 @@ export function applyStep(rows, headers, s, context = {}) {
           for (let i = 0; i < pairs.length - 1; i += 2) { if (pairs[i]) return pairs[i + 1]; }
           return pairs.length % 2 === 1 ? pairs[pairs.length - 1] : null;
         },
+        as_integer: (x) => { if (x === null || x === undefined) return null; const n = Number(x); return isFinite(n) ? Math.trunc(n) : null; },
+        as_factor:  (x) => (x === null || x === undefined) ? null : String(x),
       };
       const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       const pNames = [...Object.keys(helpers), "row", ...safeH];
@@ -1082,6 +1084,11 @@ export function applyStep(rows, headers, s, context = {}) {
         } else if (s.to === "number_smart") {
           out = parseSmartNumber(v, colLocaleCache);
         } else if (s.to === "string") {
+          out = String(v);
+        } else if (s.to === "integer") {
+          const n = typeof v === "number" ? v : Number(v);
+          out = isFinite(n) ? Math.trunc(n) : null;
+        } else if (s.to === "categorical") {
           out = String(v);
         } else if (s.to === "boolean") {
           // Truthy strings: "1", "true", "yes", "y" (case-insensitive)

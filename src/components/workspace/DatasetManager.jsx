@@ -261,7 +261,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       const [cloud, local] = user ? await Promise.all([listCloudProjects(), listProjects()]) : [[], await listProjects()];
       setCloudProjects(cloud);
       setLocalProjects(local);
-      if (user && cloud.length && !hasSyncSession()) setUnlockOpen(true);
+      // Unlock prompt removed — users unlock manually via the sync panel when needed
       if (user && cloud.length && hasSyncSession() && cloud.some(cp => !local.some(lp => lp.pid === cp.pid))) {
         setRestoreOpen(true);
       }
@@ -284,7 +284,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
     function onCloudLogin(e) {
       const projects = Array.isArray(e.detail?.projects) ? e.detail.projects : [];
       setCloudProjects(projects);
-      if (projects.length && !hasSyncSession()) setUnlockOpen(true);
+      // Unlock prompt removed — users unlock manually via the sync panel when needed
       refreshCloudState();
     }
     function onCloudLogout() {

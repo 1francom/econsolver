@@ -665,7 +665,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
         {/* ── Tab panels ── */}
         {tab === "clean" && (
-          <CleanTab rows={rows} headers={headers} info={info} rawData={rawData} onAdd={addStep}/>
+          <CleanTab rows={rows} headers={headers} info={info} rawData={rawData} pipeline={pipeline} onAdd={addStep}/>
         )}
         {tab === "quality" && (
           <DataQualityReport

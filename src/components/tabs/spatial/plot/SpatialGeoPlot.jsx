@@ -5,6 +5,7 @@ import { getPlotHistory, savePlotHistory } from "../../../../services/Persistenc
 import { loadGeoPlt, mkGeoLayer } from "./geo.js";
 import { GeoLayerConfig } from "./GeoLayerConfig.jsx";
 import { GeoPlotCanvas } from "./GeoPlotCanvas.jsx";
+import { guessLatCol, guessLonCol } from "../shared/guess.js";
 
 export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const [Plt,     setPlt]     = useState(null);
@@ -42,7 +43,16 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
     return typeof s === "string" && /^(POINT|POLYGON|MULTI|LINE)/i.test(s.trim());
   }), [rows, headers]);
 
-  const addLayer    = type => { const ly = mkGeoLayer(type, layers.length); setLayers(p => [...p, ly]); setActiveId(ly.id); setHistIdx(null); };
+  const addLayer    = type => {
+    const ly = mkGeoLayer(type, layers.length);
+    if (type === "point" || type === "heatmap") {
+      ly.latCol = guessLatCol(headers);
+      ly.lonCol = guessLonCol(headers);
+    }
+    setLayers(p => [...p, ly]);
+    setActiveId(ly.id);
+    setHistIdx(null);
+  };
   const updateLayer = upd  => setLayers(p => p.map(l => l.id === upd.id ? upd : l));
   const removeLayer = id   => { setLayers(p => p.filter(l => l.id !== id)); setActiveId(p => p === id ? null : p); };
   const activeLayer = layers.find(l => l.id === activeId) ?? null;
@@ -121,7 +131,7 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
         {/* Row 2 — active layer config */}
         {activeLayer && histIdx === null && (
           <div style={{ padding: "8px 10px", background: C.surface, borderRadius: 4, border: `1px solid ${C.border2}` }}>
-            <GeoLayerConfig ly={activeLayer} onChange={updateLayer} headers={headers} wktHeaders={wktHeaders} availableDatasets={availableDatasets} C={C} />
+            <GeoLayerConfig ly={activeLayer} onChange={updateLayer} headers={headers} wktHeaders={wktHeaders} rows={rows} availableDatasets={availableDatasets} C={C} />
           </div>
         )}
 

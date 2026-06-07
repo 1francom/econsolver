@@ -305,3 +305,20 @@
 
 - [12:23] · Spatial
   Allow for colour selection with the "color by" option, useful for scales also
+
+---
+
+## 2026-06-06 batch
+
+### Bugs
+
+- [12:57] · Spatial
+  Geocoding directions might be upgraded — geocoder address resolution quality needs improvement
+
+### Features
+
+- [08:44] · Calculate
+  Add derivatives with endogenous functions (e.g. f(x) = 2x² − c(x), compute dc/dx symbolically)
+
+- [08:52] · Model
+  Allow users to edit LaTeX table variable names — currently RDD always shows "D (treatment)", "running − c", "D x (running − c)" regardless of actual column names
