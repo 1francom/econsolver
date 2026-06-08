@@ -54,11 +54,11 @@ export default function ConditionsPanel({ conditions, results, names, onAdd, onP
               <input type="checkbox" checked={c.enabled !== false}
                 onChange={(e) => onPatch(c.id, { enabled: e.target.checked })}
                 style={{ accentColor: C.gold }} title="enable" />
-              <input value={c.lhs} placeholder="f" onChange={(e) => onPatch(c.id, { lhs: e.target.value.slice(0, 64) })} style={fld(C, 56)} />
+              <input value={c.lhs} placeholder="f" onChange={(e) => onPatch(c.id, { lhs: e.target.value.slice(0, 64) })} style={fld(C, T, 56)} />
               <span style={{ color: C.textDim }}>=</span>
-              <input value={c.rhs} placeholder="g" onChange={(e) => onPatch(c.id, { rhs: e.target.value.slice(0, 64) })} style={fld(C, 56)} />
+              <input value={c.rhs} placeholder="g" onChange={(e) => onPatch(c.id, { rhs: e.target.value.slice(0, 64) })} style={fld(C, T, 56)} />
               <span style={{ fontSize: T.caption.fontSize, color: C.textDim }}>w.r.t</span>
-              <input value={c.wrt} placeholder="K" onChange={(e) => onPatch(c.id, { wrt: e.target.value.slice(0, 64) })} style={fld(C, 80)} />
+              <input value={c.wrt} placeholder="K" onChange={(e) => onPatch(c.id, { wrt: e.target.value.slice(0, 64) })} style={fld(C, T, 80)} />
               <button onClick={() => onRemove(c.id)} title="remove"
                 style={{ marginLeft: "auto", fontSize: T.code.fontSize, lineHeight: 1, padding: "1px 6px", cursor: "pointer",
                   background: "transparent", color: C.textDim, border: `1px solid ${C.border2}`, borderRadius: 4, fontFamily: T.code.fontFamily }}>
@@ -90,7 +90,7 @@ export default function ConditionsPanel({ conditions, results, names, onAdd, onP
   );
 }
 
-function fld(C, w) {
+function fld(C, T, w) {
   return { width: w, background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
     fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 5px" };
 }

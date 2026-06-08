@@ -22,11 +22,11 @@ export default function EquationsPanel({ equations, view, onAdd, onPatch, onRemo
     <div style={{ fontFamily: T.code.fontFamily }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button onClick={() => addNamed()}
-          style={btn(C, C.teal)}>+ Equation</button>
+          style={btn(C, T, C.teal)}>+ Equation</button>
         <button onClick={() => addNamed({ kind: "constraint", label: "g" })}
-          style={btn(C, C.blue)}>+ Constraint</button>
+          style={btn(C, T, C.blue)}>+ Constraint</button>
         <button onClick={() => setShowTemplates((v) => !v)}
-          style={btn(C, C.gold)}>{showTemplates ? "Hide" : "Templates"}</button>
+          style={btn(C, T, C.gold)}>{showTemplates ? "Hide" : "Templates"}</button>
       </div>
 
       {showTemplates && (
@@ -78,7 +78,7 @@ function groupBy(arr) {
   for (const t of arr) (out[t.group] = out[t.group] || []).push(t);
   return out;
 }
-function btn(C, color) {
+function btn(C, T, color) {
   return { fontSize: T.code.fontSize, padding: "5px 10px", borderRadius: 6, cursor: "pointer",
     background: "transparent", color, border: `1px solid ${color}`, fontFamily: T.code.fontFamily };
 }

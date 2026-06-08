@@ -71,6 +71,7 @@ export default function ParametersPanel({ detectedSymbols, params, choiceVars, o
 // Compact numeric input for a slider bound. Commits on blur/Enter; ignores
 // blank or non-finite input so a half-typed value never corrupts the slider.
 function Bound({ C, label, value, onCommit }) {
+  const { T } = useTheme();
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: T.caption.fontSize, color: C.textDim }}>
       {label}

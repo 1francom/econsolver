@@ -146,6 +146,7 @@ export default function ResultsPanel({ session, equations, results, backend, esc
 }
 
 function NumericReadout({ op, numeric, C }) {
+  const { T } = useTheme();
   if (!numeric) return null;
   const dim = C.textDim || "#888";
   const fmt = (x) => (Number.isFinite(x) ? x.toFixed(4) : "—");

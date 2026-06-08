@@ -35,9 +35,9 @@ export default function SweepPanel({ detectedSymbols, params, sweep, onChange })
         Comparative statics
       </div>
 
-      <label style={row(C)}>
+      <label style={row(C, T)}>
         sweep parameter
-        <select value={sw.param || ""} onChange={(e) => pickParam(e.target.value)} style={sel(C)}>
+        <select value={sw.param || ""} onChange={(e) => pickParam(e.target.value)} style={sel(C, T)}>
           <option value="">none</option>
           {detectedSymbols.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -46,23 +46,23 @@ export default function SweepPanel({ detectedSymbols, params, sweep, onChange })
       {sw.param && (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
-            <label style={row(C)}>from<input type="number" value={sw.from ?? ""} onChange={(e) => setNum("from", e.target.value)} style={num(C)} /></label>
-            <label style={row(C)}>to<input type="number" value={sw.to ?? ""} onChange={(e) => setNum("to", e.target.value)} style={num(C)} /></label>
-            <label style={row(C)}>
+            <label style={row(C, T)}>from<input type="number" value={sw.from ?? ""} onChange={(e) => setNum("from", e.target.value)} style={num(C, T)} /></label>
+            <label style={row(C, T)}>to<input type="number" value={sw.to ?? ""} onChange={(e) => setNum("to", e.target.value)} style={num(C, T)} /></label>
+            <label style={row(C, T)}>
               steps
               <input type="number" min={2} max={12} step={1} value={sw.steps ?? 5}
                 onChange={(e) => { const v = Math.round(Number(e.target.value)); if (Number.isFinite(v)) onChange({ steps: Math.min(12, Math.max(2, v)) }); }}
-                style={num(C)} />
+                style={num(C, T)} />
             </label>
           </div>
 
-          <label style={{ ...row(C), marginTop: 6, cursor: "pointer" }}>
+          <label style={{ ...row(C, T), marginTop: 6, cursor: "pointer" }}>
             <input type="checkbox" checked={sw.showFamily !== false}
               onChange={(e) => onChange({ showFamily: e.target.checked })} style={{ accentColor: C.teal }} />
             show family of curves
           </label>
 
-          <div style={{ ...row(C), marginTop: 6, gap: 10 }}>
+          <div style={{ ...row(C, T), marginTop: 6, gap: 10 }}>
             <span>optimum locus</span>
             {[["off", "off"], ["argmax", "x*"], ["value", "f(x*)"]].map(([val, label]) => (
               <label key={val} style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", color: (sw.locus || "off") === val ? C.gold : C.textDim }}>
@@ -78,14 +78,14 @@ export default function SweepPanel({ detectedSymbols, params, sweep, onChange })
   );
 }
 
-function row(C) {
+function row(C, T) {
   return { display: "flex", alignItems: "center", gap: 6, fontSize: T.caption.fontSize, color: C.textDim || "#888" };
 }
-function num(C) {
+function num(C, T) {
   return { width: 64, background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
     fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 4px" };
 }
-function sel(C) {
+function sel(C, T) {
   return { background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
     fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 4px" };
 }
