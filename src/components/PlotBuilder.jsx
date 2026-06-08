@@ -18,6 +18,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme, mono } from "./modeling/shared.jsx";
+import { PLOT_PALETTES } from "../theme.js";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
@@ -92,6 +93,7 @@ const GEOMS = [
 
 const PALETTE_PRESETS = [
   { id: "",             label: "Manual"      },
+  { id: "teal-gold",    label: "Teal-Gold"   },
   { id: "tableau10",    label: "Tableau"     },
   { id: "observable10", label: "Observable"  },
   { id: "dark2",        label: "Dark2"       },
@@ -100,6 +102,9 @@ const PALETTE_PRESETS = [
   { id: "paired",       label: "Paired"      },
   { id: "accent",       label: "Accent"      },
 ];
+
+// Maps appearance prefs plotPalette → PALETTE_PRESETS id
+const PREF_TO_PRESET = { "teal-gold": "teal-gold", observable: "observable10", tableau: "tableau10" };
 
 
 
@@ -545,9 +550,14 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       ];
 
       const hasColorChannel = layers.some(ly => ly.visible && ly.aes?.color);
+      const tealGoldRange = PLOT_PALETTES["teal-gold"];
       const colorOpts = hasColorChannel
-        ? { scheme: scheme || "observable10", legend: true }
-        : scheme ? { scheme } : {};
+        ? (scheme === "teal-gold"
+            ? { range: tealGoldRange, legend: true }
+            : { scheme: scheme || "observable10", legend: true })
+        : scheme === "teal-gold"
+            ? { range: tealGoldRange }
+            : scheme ? { scheme } : {};
       const el = Plt.plot({
         width:        width || 580,
         height:       height || 310,
@@ -1134,7 +1144,7 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid }) {
-  const { C } = useTheme();
+  const { C, prefs } = useTheme();
   const [layers,      setLayers]      = useState(initialLayers);
   const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
   const [title,       setTitle]       = useState("");
@@ -1173,6 +1183,11 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Initialise palette from appearance prefs on first mount
+  useEffect(() => {
+    setScheme(PREF_TO_PRESET[prefs?.plotPalette] || "");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load plot history from IndexedDB on mount / pid change
   useEffect(() => {
