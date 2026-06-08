@@ -3,7 +3,7 @@
 // Must be a named component (not an IIFE) — React Rules of Hooks.
 
 import { useState } from "react";
-import { useTheme, mono } from "../shared.jsx";
+import { useTheme } from "../shared.jsx";
 import { hausmanTest } from "../../../math/index.js";
 import { Lbl, Badge, InfoBox, RegressionEquation, ForestPlot, CoeffTable, FitBar, ExportBar } from "../resultDisplay.jsx";
 import { PlotSelector, YFittedPlot } from "../ModelPlots.jsx";
@@ -11,7 +11,7 @@ import { ResidualVsFitted, QQPlot } from "../ResidualPlots.jsx";
 import DiagnosticsPanel from "../DiagnosticsPanel.jsx";
 
 export default function PanelResults({ result, panel, xVars, wVars, yVar, panelFE, panelFD, rows, dict = {}, openReport, baseReplicateConfig }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tab, setTab] = useState("fe");
   const fe     = result.fe, fd = result.fd;
   const hausman = fe && fd ? hausmanTest(fe, fd, [...xVars, ...wVars]) : null;
@@ -21,7 +21,7 @@ export default function PanelResults({ result, panel, xVars, wVars, yVar, panelF
   return (
     <div style={{ animation: "fadeUp 0.22s ease" }}>
       <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span style={{ fontSize: 10, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>Panel Results</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>Panel Results</span>
         {panel && <Badge label={`${panel.entityCol} × ${panel.timeCol}`} color={C.blue} />}
       </div>
       <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
@@ -31,7 +31,7 @@ export default function PanelResults({ result, panel, xVars, wVars, yVar, panelF
               flex: 1, padding: "0.6rem 1rem",
               background: tab === k ? C.goldFaint : C.surface,
               border: "none", color: tab === k ? C.gold : C.textDim,
-              cursor: "pointer", fontFamily: mono, fontSize: 11,
+              cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
               borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent",
               transition: "all 0.15s",
             }}>

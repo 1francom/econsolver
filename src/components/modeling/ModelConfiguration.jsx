@@ -25,23 +25,23 @@
 //   kernel       {string}    setKernel {fn}
 
 import { useMemo, useState } from "react";
-import { VarPanel, Section, Chip, useTheme, mono } from "./shared.jsx";
+import { VarPanel, Section, Chip, useTheme } from "./shared.jsx";
 
-const inputStyle = C => ({
+const inputStyle = (C, T) => ({
   width: "100%",
   background: C.surface2,
   border: `1px solid ${C.border2}`,
   color: C.text,
   padding: "0.4rem 0.6rem",
-  fontFamily: mono,
-  fontSize: 12,
+  fontFamily: T.code.fontFamily,
+  fontSize: T.code.fontSize,
   borderRadius: 3,
   outline: "none",
 });
 
 // ─── 2SLS: Excluded Instruments ──────────────────────────────────────────────
 function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const avail = numericCols.filter(
     h => !yVar.includes(h) && !xVars.includes(h) && !wVars.includes(h)
   );
@@ -59,7 +59,7 @@ function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }
 
 // ─── DiD 2×2: Treated + Post + Controls ──────────────────────────────────────
 function DiDConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, setPostVar, wVars, setWVars }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <>
       <VarPanel
@@ -93,7 +93,7 @@ function DiDConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, setPostV
 
 // ─── TWFE: Treatment indicator + Controls ─────────────────────────────────────
 function TWFEConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, wVars, setWVars }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <>
       <VarPanel
@@ -119,7 +119,7 @@ function TWFEConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, wVars, 
 
 // ─── Shared polynomial order selector ────────────────────────────────────────
 function PolyOrderSection({ polyOrder, setPolyOrder }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <Section title="Polynomial Order" color={C.orange}>
       <div style={{ display: "flex", gap: 4 }}>
@@ -147,7 +147,7 @@ function RDDConfig({
   kernel, setKernel,
   polyOrder, setPolyOrder,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <>
       {/* Running variable */}
@@ -167,7 +167,7 @@ function RDDConfig({
           value={cutoff}
           onChange={e => setCutoff(e.target.value)}
           placeholder="e.g. 0"
-          style={inputStyle(C)}
+          style={inputStyle(C, T)}
         />
       </Section>
 
@@ -193,7 +193,7 @@ function RDDConfig({
             value={bwManual}
             onChange={e => setBwManual(e.target.value)}
             placeholder="bandwidth h"
-            style={inputStyle(C)}
+            style={inputStyle(C, T)}
           />
         )}
       </Section>
@@ -222,7 +222,7 @@ function RDDConfig({
 
 // ─── OLS: Collapsible survey-weights toggle ───────────────────────────────────
 function CollapsibleWeights(props) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   return (
     <div style={{ marginBottom: "1.4rem" }}>
@@ -232,7 +232,7 @@ function CollapsibleWeights(props) {
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "0.4rem 0.65rem", background: "transparent",
           border: `1px solid ${C.border}`, borderRadius: 3, cursor: "pointer",
-          fontFamily: mono, fontSize: 10, letterSpacing: "0.14em",
+          fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.14em",
           textTransform: "uppercase", color: C.textMuted,
         }}
       >
@@ -246,14 +246,14 @@ function CollapsibleWeights(props) {
 
 // ─── OLS: Survey Weights ──────────────────────────────────────────────────────
 function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const avail = numericCols.filter(
     h => !yVar.includes(h) && !xVars.includes(h)
   );
   return (
     <VarPanel
       title="W̃ · Observation Weight"
-      color="#9e7ec8"
+      color={C.violet}
       vars={avail}
       selected={weightVar}
       onToggle={setWeightVar}
@@ -266,7 +266,7 @@ function WeightsConfig({ numericCols, yVar, xVars, weightVar, setWeightVar }) {
 
 // ─── EventStudy: TreatTime column + window ────────────────────────────────────
 function EventStudyConfig({ numericCols, yVar, treatTimeCol, setTreatTimeCol, kPre, setKPre, kPost, setKPost, wVars, setWVars }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <>
       <VarPanel
@@ -279,10 +279,10 @@ function EventStudyConfig({ numericCols, yVar, treatTimeCol, setTreatTimeCol, kP
         info="Column with the first period unit was treated. Never-treated units should have null/NaN."
       />
       <Section title="Pre-Period Window (kPre)" color={C.teal}>
-        <input type="number" min={1} max={20} value={kPre} onChange={e => setKPre(e.target.value)} style={inputStyle(C)} placeholder="3" />
+        <input type="number" min={1} max={20} value={kPre} onChange={e => setKPre(e.target.value)} style={inputStyle(C, T)} placeholder="3" />
       </Section>
       <Section title="Post-Period Window (kPost)" color={C.teal}>
-        <input type="number" min={1} max={20} value={kPost} onChange={e => setKPost(e.target.value)} style={inputStyle(C)} placeholder="3" />
+        <input type="number" min={1} max={20} value={kPost} onChange={e => setKPost(e.target.value)} style={inputStyle(C, T)} placeholder="3" />
       </Section>
       <VarPanel
         title="W · Additional Controls"
@@ -304,7 +304,7 @@ function SunAbrahamConfig({
   saUnitCol, setSaUnitCol, saControlMode, setSaControlMode,
   saRefPeriod, setSaRefPeriod, wVars, setWVars,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const cols = headers ?? [];
   const unitFromPanel = panel?.entityCol || null;
   const colBtn = (active, accent) => ({
@@ -312,7 +312,7 @@ function SunAbrahamConfig({
     border: `1px solid ${active ? accent : C.border2}`,
     background: active ? `${accent}18` : "transparent",
     color: active ? accent : C.textDim,
-    borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono,
+    borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily,
   });
   return (
     <>
@@ -336,7 +336,7 @@ function SunAbrahamConfig({
       />
       {unitFromPanel ? (
         <Section title="Unit (entity) Fixed Effect">
-          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+          <div style={{ fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
             i = <span style={{ color: C.gold }}>{unitFromPanel}</span>
             <span style={{ color: C.textMuted }}> (from panel structure)</span>
           </div>
@@ -353,7 +353,7 @@ function SunAbrahamConfig({
         </Section>
       )}
       <Section title="Control Convention" color={C.teal}>
-        <div style={{ fontSize: 10, fontFamily: mono, color: C.textMuted, marginBottom: 6 }}>
+        <div style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textMuted, marginBottom: 6 }}>
           Which units identify the baseline. "Auto": never-treated + cohorts outside the observed period range. "Never-treated only": just blank/NaN cohorts.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -362,7 +362,7 @@ function SunAbrahamConfig({
         </div>
       </Section>
       <Section title="Reference Relative Period" color={C.teal}>
-        <input type="number" value={saRefPeriod} onChange={e => setSaRefPeriod(e.target.value)} style={inputStyle(C)} placeholder="-1" />
+        <input type="number" value={saRefPeriod} onChange={e => setSaRefPeriod(e.target.value)} style={inputStyle(C, T)} placeholder="-1" />
       </Section>
       <VarPanel
         title="W · Additional Controls (optional)"
@@ -377,7 +377,7 @@ function SunAbrahamConfig({
 
 // ─── LSDV: Time FE toggle ─────────────────────────────────────────────────────
 function LSDVConfig({ lsdvTimeFE, setLsdvTimeFE }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <Section title="Time Fixed Effects" color={C.blue}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -390,7 +390,7 @@ function LSDVConfig({ lsdvTimeFE, setLsdvTimeFE }) {
 
 // ─── SyntheticControl: treated unit + treat time + predictors ─────────────────
 function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit, synthTreatTime, setSynthTreatTime, xVars, setXVars, rows, panel }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const unitCol = panel?.entityCol;
   const uniqueUnits = useMemo(
     () => unitCol ? [...new Set(rows.map(r => r[unitCol]).filter(v => v != null))].sort() : [],
@@ -401,13 +401,13 @@ function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit
     <>
       <Section title="Treated Unit" color={C.gold}>
         <select value={treatedUnit} onChange={e => setTreatedUnit(e.target.value)}
-          style={{ ...inputStyle(C), cursor: "pointer" }}>
+          style={{ ...inputStyle(C, T), cursor: "pointer" }}>
           <option value="">— select treated unit —</option>
           {uniqueUnits.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
       </Section>
       <Section title="Treatment Time Period (numeric)" color={C.gold}>
-        <input type="number" value={synthTreatTime} onChange={e => setSynthTreatTime(e.target.value)} placeholder="e.g. 1990" style={inputStyle(C)} />
+        <input type="number" value={synthTreatTime} onChange={e => setSynthTreatTime(e.target.value)} placeholder="e.g. 1990" style={inputStyle(C, T)} />
       </Section>
       <VarPanel
         title="Predictor Variables (pre-period)"
@@ -431,7 +431,7 @@ function CallawayCSConfig({
   csRelMin, setCsRelMin,
   csRelMax, setCsRelMax,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const cols = headers ?? numericCols;
   const unitFromPanel = panel?.entityCol || null;
   const timeFromPanel = panel?.timeCol   || null;
@@ -448,7 +448,7 @@ function CallawayCSConfig({
       />
       {unitFromPanel ? (
         <Section title="Entity (unit) Column">
-          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+          <div style={{ fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
             i = <span style={{ color: C.gold }}>{unitFromPanel}</span>
             <span style={{ color: C.textMuted }}> (from panel structure)</span>
           </div>
@@ -466,7 +466,7 @@ function CallawayCSConfig({
       )}
       {timeFromPanel ? (
         <Section title="Time Column">
-          <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+          <div style={{ fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
             t = <span style={{ color: C.gold }}>{timeFromPanel}</span>
             <span style={{ color: C.textMuted }}> (from panel structure)</span>
           </div>
@@ -483,7 +483,7 @@ function CallawayCSConfig({
         />
       )}
       <Section title="Comparison Group" color={C.teal}>
-        <div style={{ fontSize: 10, fontFamily: mono, color: C.textMuted, marginBottom: 6 }}>
+        <div style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textMuted, marginBottom: 6 }}>
           Which units serve as the counterfactual comparison for each cohort-period.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -494,27 +494,27 @@ function CallawayCSConfig({
       <Section title="Event Window (relative periods)" color={C.teal}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 3 }}>Min (pre)</div>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 3 }}>Min (pre)</div>
             <input
               type="number"
               value={csRelMin}
               onChange={e => setCsRelMin(e.target.value)}
               placeholder="-5"
-              style={inputStyle(C)}
+              style={inputStyle(C, T)}
             />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 3 }}>Max (post)</div>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 3 }}>Max (post)</div>
             <input
               type="number"
               value={csRelMax}
               onChange={e => setCsRelMax(e.target.value)}
               placeholder="5"
-              style={inputStyle(C)}
+              style={inputStyle(C, T)}
             />
           </div>
         </div>
-        <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 4 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
           Leave blank to include all observed periods.
         </div>
       </Section>
@@ -534,7 +534,7 @@ function SpatialRDDConfig({
   kernel,     setKernel,
   polyOrder,  setPolyOrder,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <>
       <VarPanel
@@ -572,7 +572,7 @@ function SpatialRDDConfig({
             value={bwManual}
             onChange={e => setBwManual(e.target.value)}
             placeholder="bandwidth h (distance units)"
-            style={inputStyle(C)}
+            style={inputStyle(C, T)}
           />
         )}
       </Section>
@@ -608,7 +608,7 @@ function SpatialRegressionConfig({
   spatialWeightsJCol, setSpatialWeightsJCol,
   spatialWeightsWCol, setSpatialWeightsWCol,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const selectedDs = (availableDatasets ?? []).find(d => d.id === spatialWeightsDatasetId);
   const selectedHeaders = selectedDs?.headers ?? [];
   const btn = (active, color = C.teal) => ({
@@ -618,10 +618,10 @@ function SpatialRegressionConfig({
     color: active ? color : C.textDim,
     borderRadius: 3,
     cursor: "pointer",
-    fontSize: 11,
-    fontFamily: mono,
+    fontSize: T.code.fontSize,
+    fontFamily: T.code.fontFamily,
   });
-  const selStyle = { ...inputStyle(C), cursor: "pointer" };
+  const selStyle = { ...inputStyle(C, T), cursor: "pointer" };
 
   return (
     <>
@@ -638,7 +638,7 @@ function SpatialRegressionConfig({
             </button>
           ))}
         </div>
-        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 6, fontFamily: mono }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 6, fontFamily: T.code.fontFamily }}>
           SAR/SEM/SDM use concentrated ML over the spatial parameter; SLX is OLS on X and WX.
         </div>
       </Section>
@@ -670,10 +670,10 @@ function SpatialRegressionConfig({
             {(spatialWeightsType === "knn" || spatialWeightsType === "dband") && (
               <div style={{ display: "flex", gap: 8 }}>
                 {spatialWeightsType === "knn" && (
-                  <input type="number" min={1} value={spatialWeightsK} onChange={e => setSpatialWeightsK(e.target.value)} placeholder="k" style={inputStyle(C)} />
+                  <input type="number" min={1} value={spatialWeightsK} onChange={e => setSpatialWeightsK(e.target.value)} placeholder="k" style={inputStyle(C, T)} />
                 )}
                 {spatialWeightsType === "dband" && (
-                  <input type="number" min={0} value={spatialWeightsD} onChange={e => setSpatialWeightsD(e.target.value)} placeholder="distance band" style={inputStyle(C)} />
+                  <input type="number" min={0} value={spatialWeightsD} onChange={e => setSpatialWeightsD(e.target.value)} placeholder="distance band" style={inputStyle(C, T)} />
                 )}
               </div>
             )}
@@ -708,7 +708,7 @@ function SpatialRegressionConfig({
 }
 
 function FuzzyRDDConfig({ numericCols, yVar, treatVar, setTreatVar, runningVar, setRunningVar, cutoff, setCutoff, bwMode, setBwMode, bwManual, setBwManual, kernel, setKernel, polyOrder, setPolyOrder }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <>
       <VarPanel
@@ -790,7 +790,7 @@ export default function ModelConfiguration({
   headers,
   panel,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (model === "2SLS" || model === "GMM" || model === "LIML") {
     return (
       <InstrumentSelector
@@ -895,19 +895,19 @@ export default function ModelConfiguration({
     // converting the count model to a per-capita rate model (Osgood 2000, Eq. 3).
     return (
       <Section title="Exposure (optional)">
-        <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 6, fontFamily: mono }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 6, fontFamily: T.code.fontFamily }}>
           Select a column holding population size or observation length to model rates rather than counts.
           Its log will be added as an offset with coefficient fixed at 1.
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           <button
             onClick={() => setPoissonOffsetCol("")}
-            style={{ padding: "0.28rem 0.6rem", border: `1px solid ${!poissonOffsetCol ? C.teal : C.border2}`, background: !poissonOffsetCol ? `${C.teal}18` : "transparent", color: !poissonOffsetCol ? C.teal : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+            style={{ padding: "0.28rem 0.6rem", border: `1px solid ${!poissonOffsetCol ? C.teal : C.border2}`, background: !poissonOffsetCol ? `${C.teal}18` : "transparent", color: !poissonOffsetCol ? C.teal : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
             {!poissonOffsetCol ? "✓ " : ""}None (count model)
           </button>
           {(headers ?? []).map(h => (
             <button key={h} onClick={() => setPoissonOffsetCol(h)}
-              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonOffsetCol === h ? C.gold : C.border2}`, background: poissonOffsetCol === h ? `${C.gold}18` : "transparent", color: poissonOffsetCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonOffsetCol === h ? C.gold : C.border2}`, background: poissonOffsetCol === h ? `${C.gold}18` : "transparent", color: poissonOffsetCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
               {poissonOffsetCol === h ? "✓ " : ""}{h}
             </button>
           ))}
@@ -925,13 +925,13 @@ export default function ModelConfiguration({
     // Candidates exclude the entity column already used as the first FE dim.
     const extraFEPanel = (
       <Section title="Additional Fixed Effects (optional)">
-        <div style={{ fontSize: 10, fontFamily: mono, color: C.textMuted, marginBottom: 6 }}>
+        <div style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textMuted, marginBottom: 6 }}>
           Add more FE dimensions (e.g. time) for two-way / N-way Poisson FE.
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {(headers ?? []).filter(h => h !== entityCol).map(h => (
             <button key={h} onClick={() => toggleExtra(h)}
-              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${extraFE.includes(h) ? C.teal : C.border2}`, background: extraFE.includes(h) ? `${C.teal}18` : "transparent", color: extraFE.includes(h) ? C.teal : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${extraFE.includes(h) ? C.teal : C.border2}`, background: extraFE.includes(h) ? `${C.teal}18` : "transparent", color: extraFE.includes(h) ? C.teal : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
               {extraFE.includes(h) ? "✓ " : ""}{h}
             </button>
           ))}
@@ -944,7 +944,7 @@ export default function ModelConfiguration({
       return (
         <>
           <Section title="Entity Column">
-            <div style={{ fontSize: 11, fontFamily: mono, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+            <div style={{ fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, padding: "0.4rem 0.6rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3 }}>
               i = <span style={{ color: C.gold }}>{panel.entityCol}</span>
               <span style={{ color: C.textMuted }}> (from panel structure)</span>
             </div>
@@ -959,7 +959,7 @@ export default function ModelConfiguration({
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
             {(headers ?? []).map(h => (
               <button key={h} onClick={() => setPoissonEntityCol(h)}
-                style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonEntityCol === h ? C.gold : C.border2}`, background: poissonEntityCol === h ? `${C.gold}18` : "transparent", color: poissonEntityCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono }}>
+                style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonEntityCol === h ? C.gold : C.border2}`, background: poissonEntityCol === h ? `${C.gold}18` : "transparent", color: poissonEntityCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
                 {poissonEntityCol === h ? "✓ " : ""}{h}
               </button>
             ))}

@@ -25,34 +25,32 @@ import { useTheme } from "../../ThemeContext.jsx";
 import Workbench from "../calculate/workbench/Workbench.jsx";
 import { useSessionLog } from "../../services/session/sessionLog.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
-  const { C } = useTheme();
-  return <div style={{ fontSize: 10, color: color ?? C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: mono }}>{children}</div>;
+  const { C, T } = useTheme();
+  return <div style={{ fontSize: T.caption.fontSize, color: color ?? C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: T.code.fontFamily }}>{children}</div>;
 }
 function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const btnColor = color ?? C.gold;
-  const b = { padding: sm ? "0.28rem 0.65rem" : "0.45rem 0.9rem", borderRadius: 3, cursor: dis ? "not-allowed" : "pointer", fontFamily: mono, fontSize: sm ? 10 : 11, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
+  const b = { padding: sm ? "0.28rem 0.65rem" : "0.45rem 0.9rem", borderRadius: 3, cursor: dis ? "not-allowed" : "pointer", fontFamily: T.code.fontFamily, fontSize: sm ? T.caption.fontSize : T.code.fontSize, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
   if (v === "solid") return <button onClick={onClick} disabled={dis} style={{ ...b, background: btnColor, color: C.bg, border: `1px solid ${btnColor}`, fontWeight: 700 }}>{ch}</button>;
   if (v === "ghost") return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: "none", color: dis ? C.textMuted : btnColor }}>{ch}</button>;
   return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: `1px solid ${C.border2}`, color: dis ? C.textMuted : C.textDim }}>{ch}</button>;
 }
 function SectionHeader({ label, open, onToggle, badge }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div onClick={onToggle} style={{ background: C.surface2, padding: "0.55rem 0.85rem", borderBottom: open ? `1px solid ${C.border}` : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▾" : "▸"}</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{open ? "▾" : "▸"}</span>
       <Lbl color={C.textDim} mb={0}>{label}</Lbl>
-      {badge && <span style={{ marginLeft: "auto", fontSize: 9, color: C.textMuted }}>{badge}</span>}
+      {badge && <span style={{ marginLeft: "auto", fontSize: T.caption.fontSize, color: C.textMuted }}>{badge}</span>}
     </div>
   );
 }
-const fieldStyle = C => ({ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" });
-const typeColor = C => ({ Integer: C.blue, Float: C.blue, Slider: C.teal, String: C.teal, Date: C.teal, Boolean: "#c88e6e", Vector: C.purple, Expression: C.gold, Computed: C.textMuted });
-const thStyle = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2 });
+const fieldStyle = (C, T) => ({ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none" });
+const typeColor = C => ({ Integer: C.blue, Float: C.blue, Slider: C.teal, String: C.teal, Date: C.teal, Boolean: C.orange, Vector: C.purple, Expression: C.gold, Computed: C.textMuted });
+const thStyle = (C, T) => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: T.code.fontFamily, fontWeight: 400, fontSize: T.caption.fontSize, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2 });
 const tdStyle = C => ({ padding: "0.35rem 0.75rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
 
 // ─── SCRIPT GENERATOR ────────────────────────────────────────────────────────
@@ -132,7 +130,7 @@ function fmt(n, d = 6) {
 // Sturges-ish default for B ∈ [500, 50_000]). Optional vertical marker for the
 // observed statistic (e.g. permutation Δ_obs) and shaded CI band.
 function ReplicateHistogram({ replicates, marker, ciLo, ciHi, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const col = color ?? C.teal;
   if (!replicates?.length) return null;
   const W = 360, H = 90, PAD = { l: 8, r: 8, t: 6, b: 14 };
@@ -164,49 +162,49 @@ function ReplicateHistogram({ replicates, marker, ciLo, ciHi, color }) {
           stroke={C.gold} strokeWidth={1.5}/>
       )}
       <line x1={PAD.l} x2={W - PAD.r} y1={H - PAD.b} y2={H - PAD.b} stroke={C.border} />
-      <text x={PAD.l} y={H - 2} fontSize={8} fontFamily={mono} fill={C.textMuted}>{lo.toFixed(3)}</text>
-      <text x={W - PAD.r} y={H - 2} textAnchor="end" fontSize={8} fontFamily={mono} fill={C.textMuted}>{hi.toFixed(3)}</text>
+      <text x={PAD.l} y={H - 2} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} fill={C.textMuted}>{lo.toFixed(3)}</text>
+      <text x={W - PAD.r} y={H - 2} textAnchor="end" fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} fill={C.textMuted}>{hi.toFixed(3)}</text>
     </svg>
   );
 }
 
 // ─── RESULT BOX ───────────────────────────────────────────────────────────────
 function ResultBox({ children, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const col = color ?? C.teal;
   return (
-    <div style={{ background: `${col}0a`, border: `1px solid ${col}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: mono, fontSize: 11, color: C.text, lineHeight: 1.9, marginTop: 8 }}>
+    <div style={{ background: `${col}0a`, border: `1px solid ${col}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text, lineHeight: 1.9, marginTop: 8 }}>
       {children}
     </div>
   );
 }
 function ErrBox({ msg }) {
-  const { C } = useTheme();
-  return <div style={{ color: C.red, fontFamily: mono, fontSize: 10, marginTop: 6 }}>{msg}</div>;
+  const { C, T } = useTheme();
+  return <div style={{ color: C.red, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, marginTop: 6 }}>{msg}</div>;
 }
 
 // ─── VALUE INPUT ──────────────────────────────────────────────────────────────
 function ValueInput({ type, value, onChange }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (type === "Boolean") return (
-    <select value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1 }}>
+    <select value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C, T), flex: 1 }}>
       <option>TRUE</option><option>FALSE</option>
     </select>
   );
-  if (type === "Date") return <input type="date" value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1 }} />;
+  if (type === "Date") return <input type="date" value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C, T), flex: 1 }} />;
   if (type === "Expression") return (
     <input type="text" placeholder="e.g. 2*alpha + sqrt(beta)" value={value}
-      onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1, minWidth: 160 }} />
+      onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C, T), flex: 1, minWidth: 160 }} />
   );
   const isNum = type === "Integer" || type === "Float";
   return <input type={isNum ? "number" : "text"} step={type === "Float" ? "any" : type === "Integer" ? "1" : undefined}
     placeholder={type === "Vector" ? "1.2, 0.8, -0.3" : isNum ? "0" : "…"}
-    value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1, minWidth: 80 }} />;
+    value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C, T), flex: 1, minWidth: 80 }} />;
 }
 
 // ─── EQUATION PICKER (load saved equations into any expression input) ─────────
 function EquationPicker({ savedEqs, onLoad, label = "Load ▾" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   const hasJs = savedEqs.filter(e => e.jsExpr);
   if (!hasJs.length) return null;
@@ -214,7 +212,7 @@ function EquationPicker({ savedEqs, onLoad, label = "Load ▾" }) {
     <div style={{ position: "relative", flexShrink: 0 }}>
       <button onClick={() => setOpen(o => !o)}
         style={{ padding: "0.2rem 0.55rem", background: "transparent", border: `1px solid ${C.gold}`, borderRadius: 3,
-          color: C.gold, cursor: "pointer", fontFamily: mono, fontSize: 9, whiteSpace: "nowrap" }}
+          color: C.gold, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, whiteSpace: "nowrap" }}
         onMouseEnter={e => e.currentTarget.style.background = `${C.gold}18`}
         onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
         {label}
@@ -230,8 +228,8 @@ function EquationPicker({ savedEqs, onLoad, label = "Load ▾" }) {
               style={{ padding: "0.4rem 0.75rem", cursor: "pointer", borderBottom: `1px solid ${C.border}` }}
               onMouseEnter={e => e.currentTarget.style.background = `${C.gold}15`}
               onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-              <div style={{ fontFamily: mono, fontSize: 10, color: C.gold }}>{eq.name}</div>
-              <div style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginTop: 2 }}>{eq.jsExpr}</div>
+              <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold }}>{eq.name}</div>
+              <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 2 }}>{eq.jsExpr}</div>
             </div>
           ))}
         </div>
@@ -326,27 +324,27 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
     ["Ramsey RESET",   "\\hat{u}_i^2 = \\gamma_0 + \\gamma_1 \\hat{y}_i^2 + \\gamma_2 \\hat{y}_i^3"],
   ];
 
-  const ghost = { background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, cursor: "pointer", fontFamily: mono, transition: "all 0.1s" };
+  const ghost = { background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, cursor: "pointer", fontFamily: T.code.fontFamily, transition: "all 0.1s" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
       {/* ── Header ── */}
       <div>
-        <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", marginBottom: 3 }}>Math Pad</div>
-        <div style={{ fontSize: 18, color: C.text, letterSpacing: "-0.01em" }}>Equation Editor</div>
-        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 4 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", marginBottom: 3 }}>Math Pad</div>
+        <div style={{ fontSize: T.h2.fontSize, color: C.text, letterSpacing: "-0.01em" }}>Equation Editor</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 4 }}>
           Write LaTeX — live KaTeX preview + export to Overleaf
         </div>
       </div>
 
       {/* ── Greek letters ── */}
       <div>
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Greek</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Greek</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
           {GREEKS.map(([sym, cmd]) => (
             <button key={cmd} onClick={() => insert(cmd)} title={cmd}
-              style={{ ...ghost, width: 26, height: 24, color: C.gold, fontSize: 13, padding: 0 }}
+              style={{ ...ghost, width: 26, height: 24, color: C.gold, fontSize: T.body.fontSize, padding: 0 }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.background = `${C.gold}18`; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.background = "transparent"; }}>
               {sym}
@@ -357,11 +355,11 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
 
       {/* ── Operators ── */}
       <div>
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Operators & Structures</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Operators & Structures</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
           {OPS.map(([sym, cmd]) => (
             <button key={cmd} onClick={() => insert(cmd)} title={cmd}
-              style={{ ...ghost, padding: "0 7px", height: 24, color: C.teal, fontSize: 10, whiteSpace: "nowrap" }}
+              style={{ ...ghost, padding: "0 7px", height: 24, color: C.teal, fontSize: T.caption.fontSize, whiteSpace: "nowrap" }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.background = `${C.teal}18`; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.background = "transparent"; }}>
               {sym}
@@ -372,13 +370,13 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
 
       {/* ── LaTeX input ── */}
       <div>
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>LaTeX Input</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>LaTeX Input</div>
         <textarea
           ref={taRef}
           value={latex}
           onChange={e => setLatex(e.target.value)}
           rows={4}
-          style={{ ...fieldStyle(C), width: "100%", resize: "vertical", lineHeight: 1.65, boxSizing: "border-box" }}
+          style={{ ...fieldStyle(C, T), width: "100%", resize: "vertical", lineHeight: 1.65, boxSizing: "border-box" }}
           placeholder="\frac{1}{1-\alpha}"
           spellCheck={false}
         />
@@ -386,14 +384,14 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
 
       {/* ── Live preview ── */}
       <div>
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Preview</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Preview</div>
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "1.2rem 1.5rem", minHeight: 72, background: C.surface2, display: "flex", alignItems: "center", justifyContent: "center" }}>
           {!katexLoaded
-            ? <span style={{ color: C.textMuted, fontSize: 10 }}>Loading KaTeX…</span>
+            ? <span style={{ color: C.textMuted, fontSize: T.caption.fontSize }}>Loading KaTeX…</span>
             : !latex.trim()
-              ? <span style={{ color: C.textMuted, fontSize: 10, fontFamily: mono }}>Enter LaTeX above to preview</span>
+              ? <span style={{ color: C.textMuted, fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily }}>Enter LaTeX above to preview</span>
               : rendered.error
-                ? <span style={{ color: C.red, fontSize: 10, fontFamily: mono, lineHeight: 1.5 }}>{rendered.error}</span>
+                ? <span style={{ color: C.red, fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, lineHeight: 1.5 }}>{rendered.error}</span>
                 : <div dangerouslySetInnerHTML={{ __html: rendered.html }} style={{ color: C.text }} />
           }
         </div>
@@ -401,10 +399,10 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
 
       {/* ── JS expression + Send to field ── */}
       <div style={{ background: `${C.teal}0a`, border: `1px solid ${C.teal}25`, borderRadius: 4, padding: "0.7rem 0.85rem", display: "flex", flexDirection: "column", gap: 6 }}>
-        <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 2 }}>JS Expression (for computation)</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 2 }}>JS Expression (for computation)</div>
         <input value={padJsExpr} onChange={e => setPadJsExpr(e.target.value)}
           placeholder="e.g. 1/(1-alpha)  or  A * K**alpha * L**(1-alpha)"
-          style={{ ...fieldStyle(C), width: "100%", boxSizing: "border-box", borderColor: padJsExpr.trim() ? C.teal : C.border2 }} />
+          style={{ ...fieldStyle(C, T), width: "100%", boxSizing: "border-box", borderColor: padJsExpr.trim() ? C.teal : C.border2 }} />
         <button
           onClick={() => {
             if (!padJsExpr.trim()) return;
@@ -413,14 +411,14 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
               setSendFlash(true); setTimeout(() => setSendFlash(false), 1200);
             }
           }}
-          style={{ ...ghost, padding: "0.3rem 0.8rem", fontSize: 10,
+          style={{ ...ghost, padding: "0.3rem 0.8rem", fontSize: T.caption.fontSize,
             color: sendFlash ? C.bg : (padJsExpr.trim() && activeFieldRef?.current ? C.teal : C.textMuted),
             borderColor: sendFlash ? C.teal : (padJsExpr.trim() && activeFieldRef?.current ? C.teal : C.border2),
             background: sendFlash ? C.teal : "transparent",
             alignSelf: "flex-start" }}>
           {sendFlash ? "✓ Sent!" : "→ Send to focused field"}
         </button>
-        <div style={{ fontSize: 9, color: C.textMuted, lineHeight: 1.5 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5 }}>
           Click any expression input on the left, then click "Send" to inject this JS expression into it.
         </div>
       </div>
@@ -428,20 +426,20 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
       {/* ── Export row ── */}
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
         <button onClick={copyLatex}
-          style={{ ...ghost, padding: "0.3rem 0.7rem", fontSize: 10, color: copied ? C.teal : C.textDim, borderColor: copied ? C.teal : C.border2 }}
+          style={{ ...ghost, padding: "0.3rem 0.7rem", fontSize: T.caption.fontSize, color: copied ? C.teal : C.textDim, borderColor: copied ? C.teal : C.border2 }}
           onMouseEnter={e => { if (!copied) { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}}
           onMouseLeave={e => { if (!copied) { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}}>
           {copied ? "✓ Copied!" : "Copy $$…$$"}
         </button>
         <button onClick={downloadTex}
-          style={{ ...ghost, padding: "0.3rem 0.7rem", fontSize: 10, color: C.textDim }}
+          style={{ ...ghost, padding: "0.3rem 0.7rem", fontSize: T.caption.fontSize, color: C.textDim }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.color = C.gold; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>
           ↓ .tex
         </button>
         <button onClick={openOverleaf}
-          style={{ ...ghost, padding: "0.3rem 0.7rem", fontSize: 10, color: C.textDim }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = "#4caf82"; e.currentTarget.style.color = "#4caf82"; }}
+          style={{ ...ghost, padding: "0.3rem 0.7rem", fontSize: T.caption.fontSize, color: C.textDim }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.green; e.currentTarget.style.color = C.green; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>
           Open in Overleaf ↗
         </button>
@@ -449,13 +447,13 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
 
       {/* ── Save equations ── */}
       <div>
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>Saved Equations</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>Saved Equations</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
           <div style={{ display: "flex", gap: 5 }}>
             <input value={eqName} onChange={e => setEqName(e.target.value)}
               placeholder="equation name"
               onKeyDown={e => { if (e.key === "Enter" && eqName.trim() && latex.trim()) { setSavedEqs(s => [...s, { id: Date.now(), name: eqName.trim(), latex, jsExpr: padJsExpr.trim() }]); setEqName(""); setPadJsExpr(""); } }}
-              style={{ ...fieldStyle(C), flex: 1 }} />
+              style={{ ...fieldStyle(C, T), flex: 1 }} />
             <Btn ch="Save" v="solid" color={C.gold} sm
               dis={!eqName.trim() || !latex.trim()}
               onClick={() => { setSavedEqs(s => [...s, { id: Date.now(), name: eqName.trim(), latex, jsExpr: padJsExpr.trim() }]); setEqName(""); setPadJsExpr(""); }} />
@@ -464,14 +462,14 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           {savedEqs.map(eq => (
             <div key={eq.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0.3rem 0.6rem", background: C.surface2, borderRadius: 3, border: `1px solid ${C.border}` }}>
-              <span style={{ fontFamily: mono, fontSize: 10, color: C.gold, minWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{eq.name}</span>
-              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{eq.latex}</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold, minWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{eq.name}</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{eq.latex}</span>
               <button onClick={() => setLatex(eq.latex)}
-                style={{ ...ghost, padding: "0.1rem 0.45rem", fontSize: 9, color: C.teal, borderColor: C.teal }}
+                style={{ ...ghost, padding: "0.1rem 0.45rem", fontSize: T.caption.fontSize, color: C.teal, borderColor: C.teal }}
                 onMouseEnter={e => e.currentTarget.style.background = `${C.teal}20`}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>Load</button>
               <button onClick={() => setSavedEqs(s => s.filter(x => x.id !== eq.id))}
-                style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 14 }}
+                style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.h2.fontSize }}
                 onMouseEnter={e => e.currentTarget.style.color = C.red}
                 onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
             </div>
@@ -481,11 +479,11 @@ function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFiel
 
       {/* ── Macro / econometrics templates ── */}
       <div>
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>Templates</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>Templates</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {TEMPLATES.map(([name, tmpl]) => (
             <button key={name} onClick={() => setLatex(tmpl)}
-              style={{ ...ghost, padding: "0.2rem 0.6rem", fontSize: 9, color: C.textDim }}
+              style={{ ...ghost, padding: "0.2rem 0.6rem", fontSize: T.caption.fontSize, color: C.textDim }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; e.currentTarget.style.background = `${C.teal}10`; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; e.currentTarget.style.background = "transparent"; }}>
               {name}
@@ -546,7 +544,7 @@ function _prange(dist, p) {
 }
 
 function ProbCalc() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [dist,   setDistId2] = useState("normal");
   const [params, setParams]  = useState({ μ:"0", σ:"1" });
   const [mode,   setMode]    = useState("cdf");
@@ -634,16 +632,16 @@ function ProbCalc() {
       {/* Distribution + params */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end", marginBottom:10 }}>
         <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-          <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
-          <select value={dist} onChange={e=>switchDist(e.target.value)} style={{...fieldStyle(C),width:122}}>
+          <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
+          <select value={dist} onChange={e=>switchDist(e.target.value)} style={{...fieldStyle(C, T),width:122}}>
             {PROB_DISTS.map(d=><option key={d.id} value={d.id}>{d.label}</option>)}
           </select>
         </label>
         {cfg?.params.map(({k})=>(
           <label key={k} style={{ display:"flex", flexDirection:"column", gap:3 }}>
-            <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
             <input value={params[k]??""} onChange={e=>setParams(p=>({...p,[k]:e.target.value}))}
-              style={{...fieldStyle(C),width:68}}/>
+              style={{...fieldStyle(C, T),width:68}}/>
           </label>
         ))}
       </div>
@@ -654,7 +652,7 @@ function ProbCalc() {
             style={{ padding:"0.28rem 0.6rem", background:"transparent", border:"none",
               borderBottom:mode===id?`2px solid ${C.teal}`:"2px solid transparent",
               color:mode===id?C.teal:C.textMuted,
-              cursor:"pointer", fontFamily:mono, fontSize:9, letterSpacing:"0.06em", transition:"all 0.1s" }}>
+              cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing:"0.06em", transition:"all 0.1s" }}>
             {label}
           </button>
         ))}
@@ -663,34 +661,34 @@ function ProbCalc() {
       <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:10, flexWrap:"wrap" }}>
         {(mode==="cdf"||mode==="pdf") && (
           <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>x =</span>
-            <input value={xVal} onChange={e=>setXVal(e.target.value)} style={{...fieldStyle(C),width:100}}/>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>x =</span>
+            <input value={xVal} onChange={e=>setXVal(e.target.value)} style={{...fieldStyle(C, T),width:100}}/>
           </label>
         )}
         {mode==="between" && <>
           <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>a =</span>
-            <input value={aVal} onChange={e=>setAVal(e.target.value)} style={{...fieldStyle(C),width:88}}/>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>a =</span>
+            <input value={aVal} onChange={e=>setAVal(e.target.value)} style={{...fieldStyle(C, T),width:88}}/>
           </label>
           <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>b =</span>
-            <input value={bVal} onChange={e=>setBVal(e.target.value)} style={{...fieldStyle(C),width:88}}/>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>b =</span>
+            <input value={bVal} onChange={e=>setBVal(e.target.value)} style={{...fieldStyle(C, T),width:88}}/>
           </label>
         </>}
         {mode==="quantile" && (
           <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>p =</span>
-            <input value={pVal} onChange={e=>setPVal(e.target.value)} style={{...fieldStyle(C),width:100}}/>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>p =</span>
+            <input value={pVal} onChange={e=>setPVal(e.target.value)} style={{...fieldStyle(C, T),width:100}}/>
           </label>
         )}
       </div>
       {/* Result */}
       {result && (
         <div style={{ marginBottom:10, display:"flex", alignItems:"baseline", gap:10 }}>
-          <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>{result.label} =</span>
+          <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>{result.label} =</span>
           {result.val!=null
-            ? <span style={{ fontSize:16, color:C.teal, fontFamily:mono }}>{result.val.toFixed(6)}</span>
-            : <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>{result.label}</span>}
+            ? <span style={{ fontSize: T.h2.fontSize, color:C.teal, fontFamily: T.code.fontFamily }}>{result.val.toFixed(6)}</span>
+            : <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>{result.label}</span>}
         </div>
       )}
       {/* Mini curve */}
@@ -821,7 +819,7 @@ const DIST_CONFIGS = {
 
 // ─── MINI INLINE HISTOGRAM ────────────────────────────────────────────────────
 function MiniHist({ values, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const col = color ?? C.teal;
   if (!values?.length) return null;
   const W = 340, H = 72, PL = 6, PR = 6, PT = 6, PB = 14;
@@ -843,15 +841,15 @@ function MiniHist({ values, color }) {
           height={H - PB - yp(c)} fill={col} opacity={0.55}/>
       ))}
       <line x1={PL} x2={W - PR} y1={H - PB} y2={H - PB} stroke={C.border}/>
-      <text x={PL} y={H - 2} fontSize={8} fontFamily={mono} fill={C.textMuted}>{lo.toFixed(2)}</text>
-      <text x={W - PR} y={H - 2} textAnchor="end" fontSize={8} fontFamily={mono} fill={C.textMuted}>{hi.toFixed(2)}</text>
+      <text x={PL} y={H - 2} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} fill={C.textMuted}>{lo.toFixed(2)}</text>
+      <text x={W - PR} y={H - 2} textAnchor="end" fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} fill={C.textMuted}>{hi.toFixed(2)}</text>
     </svg>
   );
 }
 
 // ─── D2 + D4: DISTRIBUTIONS SECTION ──────────────────────────────────────────
 function DistributionsSection({ onAddColumn, onCreateDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen]     = useState(false);
   const [dist, setDist]     = useState("normal");
   const [params, setParams] = useState({ mean:"0", sd:"1" });
@@ -900,36 +898,36 @@ function DistributionsSection({ onAddColumn, onCreateDataset }) {
         <div style={{ padding:"0.85rem", background:C.surface, display:"flex", flexDirection:"column", gap:10 }}>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
-              <select value={dist} onChange={e => switchDist(e.target.value)} style={{ ...fieldStyle(C), width:130 }}>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
+              <select value={dist} onChange={e => switchDist(e.target.value)} style={{ ...fieldStyle(C, T), width:130 }}>
                 {Object.entries(DIST_CONFIGS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
             </label>
             {cfg.params.map(({ k }) => (
               <label key={k} style={{ display:"flex", flexDirection:"column", gap:3 }}>
-                <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
+                <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
                 <input type="number" step="any" value={params[k] ?? ""}
                   onChange={e => setParams(p => ({ ...p, [k]: e.target.value }))}
-                  style={{ ...fieldStyle(C), width:72 }}/>
+                  style={{ ...fieldStyle(C, T), width:72 }}/>
               </label>
             ))}
           </div>
 
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>N samples</span>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>N samples</span>
               <input type="number" min={1} max={100000} step={1} value={nSamples}
-                onChange={e => setNSamples(e.target.value)} style={{ ...fieldStyle(C), width:90 }}/>
+                onChange={e => setNSamples(e.target.value)} style={{ ...fieldStyle(C, T), width:90 }}/>
             </label>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Seed (optional)</span>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Seed (optional)</span>
               <input type="number" step={1} value={seed} placeholder="random"
-                onChange={e => setSeed(e.target.value)} style={{ ...fieldStyle(C), width:100 }}/>
+                onChange={e => setSeed(e.target.value)} style={{ ...fieldStyle(C, T), width:100 }}/>
             </label>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Column name</span>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Column name</span>
               <input value={colName} onChange={e => setColName(e.target.value)}
-                style={{ ...fieldStyle(C), width:130 }}/>
+                style={{ ...fieldStyle(C, T), width:130 }}/>
             </label>
             <div style={{ alignSelf:"flex-end" }}>
               <Btn ch="Generate ▸" v="solid" color={C.teal} sm onClick={generate} dis={!colName.trim()}/>
@@ -940,11 +938,11 @@ function DistributionsSection({ onAddColumn, onCreateDataset }) {
 
           {generated?.values && (
             <ResultBox color={C.teal}>
-              <div style={{ fontSize:9, color:C.textMuted, marginBottom:4 }}>
+              <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, marginBottom:4 }}>
                 Preview (first 5 of {generated.values.length}):&nbsp;
                 <span style={{ color:C.teal }}>{generated.values.slice(0,5).map(v => Number(v).toFixed(4)).join(", ")}</span>
               </div>
-              <div style={{ fontSize:9, color:C.textMuted, marginBottom:2 }}>
+              <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, marginBottom:2 }}>
                 mean = {(generated.values.reduce((a,b)=>a+b,0)/generated.values.length).toFixed(4)}
                 {" · "}sd = {(() => { const m=generated.values.reduce((a,b)=>a+b,0)/generated.values.length; return Math.sqrt(generated.values.reduce((a,b)=>a+(b-m)**2,0)/generated.values.length).toFixed(4); })()}
               </div>
@@ -958,9 +956,9 @@ function DistributionsSection({ onAddColumn, onCreateDataset }) {
                 dis={!colName.trim() || !onAddColumn}/>
               <Btn ch="New dataset from this column" v="out" sm onClick={newDataset}
                 dis={!colName.trim()}/>
-              {addedMsg && <span style={{ fontFamily:mono, fontSize:10, color:C.teal }}>{addedMsg}</span>}
+              {addedMsg && <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color:C.teal }}>{addedMsg}</span>}
               {!onAddColumn && (
-                <span style={{ fontFamily:mono, fontSize:9, color:C.textMuted }}>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color:C.textMuted }}>
                   (onAddColumn not wired — TODO in parent)
                 </span>
               )}
@@ -985,7 +983,7 @@ function _buildMCScope(rng) {
 }
 
 function MonteCarloSection({ onAddColumn, onCreateDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen]         = useState(false);
   const [expr, setExpr]         = useState("rnorm(1) * 2 + runif(1)");
   const [nRep, setNRep]         = useState("1000");
@@ -1040,7 +1038,7 @@ function MonteCarloSection({ onAddColumn, onCreateDataset }) {
       <SectionHeader label="⊡ Monte Carlo" open={open} onToggle={() => setOpen(o => !o)} />
       {open && (
         <div style={{ padding:"0.85rem", background:C.surface, display:"flex", flexDirection:"column", gap:10 }}>
-          <div style={{ fontSize:9, color:C.textMuted, lineHeight:1.65 }}>
+          <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, lineHeight:1.65 }}>
             Expression evaluated N times. Scope:&nbsp;
             <span style={{ color:C.teal }}>rnorm(n,mean,sd)</span>&nbsp;
             <span style={{ color:C.teal }}>runif(n,min,max)</span>&nbsp;
@@ -1052,23 +1050,23 @@ function MonteCarloSection({ onAddColumn, onCreateDataset }) {
           </div>
 
           <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-            <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Expression (returns a number each iteration)</span>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Expression (returns a number each iteration)</span>
             <textarea rows={2} value={expr} onChange={e => { setExpr(e.target.value); setResult(null); }}
               placeholder="rnorm(1) * 2 + runif(1)"
-              style={{ ...fieldStyle(C), resize:"vertical", lineHeight:1.65, width:"100%", boxSizing:"border-box" }}
+              style={{ ...fieldStyle(C, T), resize:"vertical", lineHeight:1.65, width:"100%", boxSizing:"border-box" }}
               spellCheck={false}/>
           </div>
 
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Repetitions (max 10000)</span>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Repetitions (max 10000)</span>
               <input type="number" min={1} max={10000} step={100} value={nRep}
-                onChange={e => setNRep(e.target.value)} style={{ ...fieldStyle(C), width:120 }}/>
+                onChange={e => setNRep(e.target.value)} style={{ ...fieldStyle(C, T), width:120 }}/>
             </label>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Seed (optional)</span>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Seed (optional)</span>
               <input type="number" step={1} value={seed} placeholder="random"
-                onChange={e => setSeed(e.target.value)} style={{ ...fieldStyle(C), width:100 }}/>
+                onChange={e => setSeed(e.target.value)} style={{ ...fieldStyle(C, T), width:100 }}/>
             </label>
             <div style={{ alignSelf:"flex-end" }}>
               <Btn ch={busy ? "Running…" : "Run ▸"} v="solid" color={C.teal} sm
@@ -1084,7 +1082,7 @@ function MonteCarloSection({ onAddColumn, onCreateDataset }) {
               ["Math.max(rnorm(1), 0)", "Truncated normal"],
             ].map(([ex, label]) => (
               <button key={ex} onClick={() => { setExpr(ex); setResult(null); }}
-                style={{ padding:"0.18rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:9 }}
+                style={{ padding:"0.18rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor=C.teal; e.currentTarget.style.color=C.teal; }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor=C.border2; e.currentTarget.style.color=C.textDim; }}>
                 {label}
@@ -1106,20 +1104,20 @@ function MonteCarloSection({ onAddColumn, onCreateDataset }) {
               <MiniHist values={result.values} color={C.blue}/>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end", marginTop:2 }}>
                 <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-                  <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Column name</span>
+                  <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Column name</span>
                   <input value={resColName} onChange={e => setResColName(e.target.value)}
-                    style={{ ...fieldStyle(C), width:130 }}/>
+                    style={{ ...fieldStyle(C, T), width:130 }}/>
                 </label>
                 <div style={{ alignSelf:"flex-end", display:"flex", gap:6 }}>
                   <Btn ch="Add to dataset" v="solid" color={C.gold} sm onClick={addResults}
                     dis={!resColName.trim() || !onAddColumn}/>
                   <Btn ch="New dataset" v="out" sm onClick={newDataset}
                     dis={!resColName.trim()}/>
-                  {addedMsg && <span style={{ fontFamily:mono, fontSize:10, color:C.teal }}>{addedMsg}</span>}
+                  {addedMsg && <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color:C.teal }}>{addedMsg}</span>}
                 </div>
               </div>
               {!onAddColumn && (
-                <span style={{ fontFamily:mono, fontSize:9, color:C.textMuted }}>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color:C.textMuted }}>
                   (onAddColumn not wired — TODO in parent)
                 </span>
               )}
@@ -1133,7 +1131,7 @@ function MonteCarloSection({ onAddColumn, onCreateDataset }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function CalculateTab({ pid, rows = [], headers = [], onAddDataset, onAddColumn, onCreateDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { appendLog } = useSessionLog();
   // ── Variable workspace ─────────────────────────────────────────────────────
   const [variables,    setVariables]   = useState([]);
@@ -1416,32 +1414,32 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
       const step = parseFloat(v.sliderStep ?? "0.1");
       return (
         <tr>
-          <td style={tdStyle(C)}><span style={{ fontFamily: mono, fontSize: 11, color: C.text }}>{v.name}</span></td>
-          <td style={tdStyle(C)}><span style={{ fontSize: 9, padding: "2px 6px", border: `1px solid ${C.teal}`, color: C.teal, borderRadius: 2, fontFamily: mono }}>Slider</span></td>
+          <td style={tdStyle(C)}><span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text }}>{v.name}</span></td>
+          <td style={tdStyle(C)}><span style={{ fontSize: T.caption.fontSize, padding: "2px 6px", border: `1px solid ${C.teal}`, color: C.teal, borderRadius: 2, fontFamily: T.code.fontFamily }}>Slider</span></td>
           <td style={{ ...tdStyle(C), maxWidth: 340 }}>
             {editingBounds
               ? <span style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
                   {["min","max","step"].map(k => (
                     <span key={k} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ fontSize: 8, color: C.textMuted, fontFamily: mono }}>{k}</span>
+                      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{k}</span>
                       <input type="number" step="any" value={boundsForm[k]}
                         onChange={e => setBoundsForm(f => ({ ...f, [k]: e.target.value }))}
-                        style={{ ...fieldStyle(C), width: 60 }} />
+                        style={{ ...fieldStyle(C, T), width: 60 }} />
                     </span>
                   ))}
                   <Btn ch="✓" sm v="ghost" color={C.teal} onClick={saveBounds} />
                   <Btn ch="✕" sm v="ghost" color={C.textMuted} onClick={() => setEditingBounds(false)} />
                 </span>
               : <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, minWidth: 28 }}>{min}</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 28 }}>{min}</span>
                   <input type="range" min={min} max={max} step={step} value={val}
                     onChange={e => setVariables(vs => vs.map(x => x.id === v.id ? { ...x, rawValue: e.target.value } : x))}
                     style={{ flex: 1, accentColor: C.teal, cursor: "pointer" }} />
-                  <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, minWidth: 28, textAlign: "right" }}>{max}</span>
-                  <span style={{ fontFamily: mono, fontSize: 12, color: C.teal, minWidth: 44, textAlign: "right" }}>{val}</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 28, textAlign: "right" }}>{max}</span>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.teal, minWidth: 44, textAlign: "right" }}>{val}</span>
                   <button onClick={() => { setBoundsForm({ min: v.sliderMin ?? "0", max: v.sliderMax ?? "10", step: v.sliderStep ?? "0.1" }); setEditingBounds(true); }}
                     title="Edit range"
-                    style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "0 2px" }}
+                    style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0 2px" }}
                     onMouseEnter={e => e.currentTarget.style.color = C.teal}
                     onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>⚙</button>
                 </span>
@@ -1449,7 +1447,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
           </td>
           <td style={{ ...tdStyle(C), textAlign: "right" }}>
             <button onClick={() => setVariables(vs => vs.filter(x => x.id !== v.id))}
-              style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 14 }}
+              style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.h2.fontSize }}
               onMouseEnter={e => e.currentTarget.style.color = C.red}
               onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
           </td>
@@ -1472,8 +1470,8 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
 
     return (
       <tr>
-        <td style={tdStyle(C)}><span style={{ fontFamily: mono, fontSize: 11, color: C.text }}>{v.name}</span></td>
-        <td style={tdStyle(C)}><span style={{ fontSize: 9, padding: "2px 6px", border: `1px solid ${typeColor(C)[v.type]}`, color: typeColor(C)[v.type], borderRadius: 2, fontFamily: mono }}>{v.type}</span></td>
+        <td style={tdStyle(C)}><span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text }}>{v.name}</span></td>
+        <td style={tdStyle(C)}><span style={{ fontSize: T.caption.fontSize, padding: "2px 6px", border: `1px solid ${typeColor(C)[v.type]}`, color: typeColor(C)[v.type], borderRadius: 2, fontFamily: T.code.fontFamily }}>{v.type}</span></td>
         <td style={{ ...tdStyle(C), maxWidth: 300 }}>
           {editing
             ? <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -1482,14 +1480,14 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                 <Btn ch="✕" sm v="ghost" color={C.textMuted} onClick={() => setEditing(false)} />
               </span>
             : <span onClick={() => { setEditVal(v.rawValue); setEditing(true); }} title="Click to edit"
-                style={{ cursor: "text", fontFamily: mono, fontSize: 11 }}>
+                style={{ cursor: "text", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
                 {displayVal()}
               </span>
           }
         </td>
         <td style={{ ...tdStyle(C), textAlign: "right" }}>
           <button onClick={() => setVariables(vs => vs.filter(x => x.id !== v.id))}
-            style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 14 }}
+            style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.h2.fontSize }}
             onMouseEnter={e => e.currentTarget.style.color = C.red}
             onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
         </td>
@@ -1500,7 +1498,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
   const vectorVars = variables.filter(v => v.type === "Vector");
 
   return (
-    <div style={{ height: "100%", display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,460px)", fontFamily: mono, color: C.text, overflow: "hidden" }}>
+    <div style={{ height: "100%", display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,460px)", fontFamily: T.code.fontFamily, color: C.text, overflow: "hidden" }}>
 
       {/* ── Left: variable workspace + tools ── */}
       <div style={{ overflowY: "auto", padding: "1.8rem 1.5rem 1.8rem 2.4rem" }}>
@@ -1545,8 +1543,8 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
 
       {/* Header */}
       <div style={{ marginBottom: "1.6rem" }}>
-        <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", marginBottom: 3 }}>Calculate</div>
-        <div style={{ fontSize: 18, color: C.text, letterSpacing: "-0.01em" }}>Math Tools</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", marginBottom: 3 }}>Calculate</div>
+        <div style={{ fontSize: T.h2.fontSize, color: C.text, letterSpacing: "-0.01em" }}>Math Tools</div>
       </div>
 
       {/* ── 6. Math Tools ─────────────────────────────────────────────────────── */}
@@ -1559,7 +1557,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
               style={{ flex: 1, padding: "0.5rem 0.35rem", background: "transparent", border: "none",
                 borderBottom: activeTool === id ? `2px solid ${C.teal}` : `2px solid ${C.border}`,
                 color: activeTool === id ? C.teal : C.textMuted,
-                cursor: "pointer", fontFamily: mono, fontSize: 9,
+                cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 letterSpacing: "0.04em", textTransform: "uppercase", transition: "all 0.12s" }}>
               {label}
             </button>
@@ -1575,7 +1573,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                   style={{ flex: 1, padding: "0.4rem 0.7rem", background: "transparent", border: "none",
                     borderBottom: solverMode === id ? `2px solid ${C.gold}` : "2px solid transparent",
                     color: solverMode === id ? C.gold : C.textMuted,
-                    cursor: "pointer", fontFamily: mono, fontSize: 10, letterSpacing: "0.06em", transition: "all 0.12s" }}>
+                    cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.06em", transition: "all 0.12s" }}>
                   {label}
                 </button>
               ))}
@@ -1587,20 +1585,20 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                     placeholder="2*x = 4*x - 10  or  x**2 - 4"
                     onKeyDown={e => e.key === "Enter" && runSolver()}
                     onFocus={() => focusField(setSolExpr)}
-                    style={{ ...fieldStyle(C), flex: 1, minWidth: 180 }} />
+                    style={{ ...fieldStyle(C, T), flex: 1, minWidth: 180 }} />
                   <EquationPicker savedEqs={savedEqs} onLoad={setSolExpr} />
                   <Btn ch="Solve" v="solid" color={C.gold} sm onClick={runSolver} />
                 </div>
-                <div style={{ fontSize: 9, color: C.textMuted }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
                   Scope: {Object.keys(scope).filter(k => typeof scope[k] !== "function").join(", ") || "none"}
                   {" · "}pnorm, qnorm, pt, qt, pbinom, ppois, pchisq available
                 </div>
                 {solResult && (solResult.error ? <ErrBox msg={solResult.error} />
                   : <ResultBox>
                       <div><span style={{ color: C.textMuted }}>root </span><span style={{ color: C.gold }}>{fmt(solResult.root, 10)}</span></div>
-                      <div><span style={{ color: C.textMuted }}>f(root) </span><span style={{ color: C.teal, fontSize: 10 }}>≈ 0</span></div>
+                      <div><span style={{ color: C.textMuted }}>f(root) </span><span style={{ color: C.teal, fontSize: T.caption.fontSize }}>≈ 0</span></div>
                       <div><span style={{ color: C.textMuted }}>iterations </span>{solResult.iter}</div>
-                      {!solResult.converged && <div style={{ color: C.red, fontSize: 10 }}>Warning: did not fully converge.</div>}
+                      {!solResult.converged && <div style={{ color: C.red, fontSize: T.caption.fontSize }}>Warning: did not fully converge.</div>}
                     </ResultBox>
                 )}
               </div>
@@ -1608,32 +1606,32 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
             {solverMode === "algebraic" && (
               <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>solve for</span>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>solve for</span>
                   <input value={algSolveVar} onChange={e => { setAlgSolveVar(e.target.value); setAlgSolveResult(null); }}
-                    placeholder="q" style={{ ...fieldStyle(C), width: 70 }} />
+                    placeholder="q" style={{ ...fieldStyle(C, T), width: 70 }} />
                   <input value={algSolveExpr} onChange={e => { setAlgSolveExpr(e.target.value); setAlgSolveResult(null); }}
                     placeholder="p = a - b*q"
                     onKeyDown={e => e.key === "Enter" && runAlgebraicSolver()}
                     onFocus={() => focusField(setAlgSolveExpr)}
-                    style={{ ...fieldStyle(C), flex: 1, minWidth: 220 }} />
+                    style={{ ...fieldStyle(C, T), flex: 1, minWidth: 220 }} />
                   <EquationPicker savedEqs={savedEqs} onLoad={expr => { setAlgSolveExpr(expr); setAlgSolveResult(null); }} />
                   <Btn ch="Solve algebraically" v="solid" color={C.gold} sm onClick={runAlgebraicSolver} />
                 </div>
-                <div style={{ fontSize: 9, color: C.textMuted, lineHeight: 1.5 }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5 }}>
                   Symbolic parameters stay symbolic. Supports linear and quadratic equations before falling back to numeric solving.
                 </div>
 
                 {algSolveResult && (algSolveResult.error ? (
                   <ResultBox color={C.gold}>
-                    <div style={{ color: C.red, fontSize: 10 }}>{algSolveResult.error}</div>
+                    <div style={{ color: C.red, fontSize: T.caption.fontSize }}>{algSolveResult.error}</div>
                     {algSolveResult.normalized && <div><span style={{ color: C.textMuted }}>normalized </span>{algSolveResult.normalized}</div>}
                     {(algSolveResult.recommendation ?? []).map((line, i) => (
-                      <div key={i} style={{ fontSize: 9, color: C.textMuted }}>{line}</div>
+                      <div key={i} style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{line}</div>
                     ))}
                   </ResultBox>
                 ) : (
                   <ResultBox color={C.gold}>
-                    <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, letterSpacing: "0.14em" }}>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 8, letterSpacing: "0.14em" }}>
                       {String(algSolveResult.method ?? "ALGEBRAIC").toUpperCase()} {algSolveResult.degree != null ? `- DEGREE ${algSolveResult.degree}` : ""}
                     </div>
                     <div><span style={{ color: C.textMuted }}>normalized </span>{algSolveResult.normalized}</div>
@@ -1643,23 +1641,23 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                           <div key={i}>
                             <span style={{ color: C.gold }}>{algSolveResult.variable}{algSolveResult.solutions.length > 1 ? `_${i + 1}` : ""} = </span>
                             <span style={{ color: C.text }}>{s.expr}</span>
-                            {s.condition && <span style={{ color: C.textMuted, fontSize: 9 }}> ; {s.condition}</span>}
+                            {s.condition && <span style={{ color: C.textMuted, fontSize: T.caption.fontSize }}> ; {s.condition}</span>}
                           </div>
                         ))
                       : <div style={{ color: C.textMuted }}>{algSolveResult.message}</div>}
                     {algSolveResult.coefficients && (
-                      <div style={{ marginTop: 8, fontSize: 9, color: C.textMuted }}>
+                      <div style={{ marginTop: 8, fontSize: T.caption.fontSize, color: C.textMuted }}>
                         coefficients: {Object.entries(algSolveResult.coefficients).map(([k, v]) => `${k}=${v}`).join(", ")}
                       </div>
                     )}
                     {(algSolveResult.recommendation ?? []).map((line, i) => (
-                      <div key={i} style={{ fontSize: 9, color: C.textMuted }}>{line}</div>
+                      <div key={i} style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{line}</div>
                     ))}
                   </ResultBox>
                 ))}
 
                 <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
-                  <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 6, letterSpacing: "0.14em" }}>EXAMPLES</div>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 6, letterSpacing: "0.14em" }}>EXAMPLES</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {[
                       ["p = a - b*q", "q", "Inverse demand"],
@@ -1668,7 +1666,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                       ["w = MPL", "L", "Factor condition"],
                     ].map(([eq, v, label]) => (
                       <button key={`${eq}-${v}`} onClick={() => { setAlgSolveExpr(eq); setAlgSolveVar(v); setAlgSolveResult(null); }}
-                        style={{ padding: "0.22rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+                        style={{ padding: "0.22rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}
                         onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.color = C.gold; }}
                         onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>
                         {label}
@@ -1686,45 +1684,45 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
 
                   {/* Unknowns */}
                   <div>
-                    <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", marginBottom: 6 }}>UNKNOWNS (comma-separated)</div>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", marginBottom: 6 }}>UNKNOWNS (comma-separated)</div>
                     <input value={sysVarStr} onChange={e => { setSysVarStr(e.target.value); setSysResult(null); const names = e.target.value.split(",").map(s => s.trim()).filter(Boolean); setSysGuesses(prev => { const next = {}; names.forEach(n => { next[n] = prev[n] ?? "1"; }); return next; }); }}
-                      placeholder="x_1, x_2, lambda" style={{ ...fieldStyle(C), width: "100%" }} />
+                      placeholder="x_1, x_2, lambda" style={{ ...fieldStyle(C, T), width: "100%" }} />
                   </div>
 
                   {/* Equations */}
                   <div>
-                    <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", marginBottom: 6 }}>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", marginBottom: 6 }}>
                       EQUATIONS — each expression = 0
                     </div>
                     {sysEqs.map((eq, i) => (
                       <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted, minWidth: 24 }}>f{i + 1}</span>
+                        <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, minWidth: 24 }}>f{i + 1}</span>
                         <input value={eq} onChange={e => { const next = [...sysEqs]; next[i] = e.target.value; setSysEqs(next); setSysResult(null); }}
-                          placeholder={`expression = 0`} style={{ ...fieldStyle(C), flex: 1 }} />
+                          placeholder={`expression = 0`} style={{ ...fieldStyle(C, T), flex: 1 }} />
                         <button onClick={() => { setSysEqs(sysEqs.filter((_, j) => j !== i)); setSysResult(null); }}
                           disabled={sysEqs.length <= 1}
-                          style={{ background: "transparent", border: "none", color: C.textMuted, cursor: sysEqs.length <= 1 ? "default" : "pointer", fontFamily: mono, fontSize: 14, opacity: sysEqs.length <= 1 ? 0.3 : 1 }}
+                          style={{ background: "transparent", border: "none", color: C.textMuted, cursor: sysEqs.length <= 1 ? "default" : "pointer", fontFamily: T.code.fontFamily, fontSize: T.h2.fontSize, opacity: sysEqs.length <= 1 ? 0.3 : 1 }}
                           onMouseEnter={e => { if (sysEqs.length > 1) e.currentTarget.style.color = C.red; }}
                           onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
                       </div>
                     ))}
                     <button onClick={() => setSysEqs([...sysEqs, ""])}
-                      style={{ padding: "0.22rem 0.7rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+                      style={{ padding: "0.22rem 0.7rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                       + Add equation</button>
                   </div>
 
                   {/* Auto-detected parameters */}
                   {detectedParams.length > 0 && (
                     <div style={{ background: `${C.gold}0a`, border: `1px solid ${C.gold}30`, borderRadius: 3, padding: "0.65rem 0.85rem" }}>
-                      <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.14em", marginBottom: 8 }}>PARAMETERS — set values to solve numerically</div>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.14em", marginBottom: 8 }}>PARAMETERS — set values to solve numerically</div>
                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                         {detectedParams.map(p => (
                           <div key={p} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                            <span style={{ fontSize: 9, color: C.gold, fontFamily: mono }}>{p}</span>
+                            <span style={{ fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily }}>{p}</span>
                             <input type="number" step="any" placeholder="value"
                               value={sysParamVals[p] ?? ""}
                               onChange={e => { setSysParamVals(prev => ({ ...prev, [p]: e.target.value })); setSysResult(null); }}
-                              style={{ ...fieldStyle(C), width: 80 }} />
+                              style={{ ...fieldStyle(C, T), width: 80 }} />
                           </div>
                         ))}
                       </div>
@@ -1734,24 +1732,24 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                   {/* Initial guesses — collapsible */}
                   <div>
                     <button onClick={() => setSysShowGuesses(v => !v)}
-                      style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, letterSpacing: "0.12em", padding: 0, display: "flex", alignItems: "center", gap: 5 }}>
+                      style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.12em", padding: 0, display: "flex", alignItems: "center", gap: 5 }}>
                       <span>{sysShowGuesses ? "▾" : "▸"}</span> STARTING GUESSES (default: 1)
                     </button>
                     {sysShowGuesses && varNames.length > 0 && (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                         {varNames.map(n => (
                           <div key={n} style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 80 }}>
-                            <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>{n}₀</span>
+                            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{n}₀</span>
                             <input type="number" step="any" value={sysGuesses[n] ?? "1"}
                               onChange={e => setSysGuesses(prev => ({ ...prev, [n]: e.target.value }))}
-                              style={{ ...fieldStyle(C), width: "100%" }} />
+                              style={{ ...fieldStyle(C, T), width: "100%" }} />
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
 
-                  <div style={{ fontSize: 9, color: C.textMuted }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
                     Newton-Raphson · {varNames.length} × {sysEqs.length} system
                     {Object.keys(scope).filter(k => typeof scope[k] !== "function").length > 0 &&
                       ` · User vars in scope: ${Object.keys(scope).filter(k => typeof scope[k] !== "function").join(", ")}`}
@@ -1765,28 +1763,28 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                     <button
                       onClick={() => setSysLive(v => !v)}
                       title="Live mode: re-solves automatically when sliders or parameters change"
-                      style={{ padding: "0.28rem 0.65rem", background: sysLive ? `${C.teal}20` : "transparent", border: `1px solid ${sysLive ? C.teal : C.border2}`, borderRadius: 3, color: sysLive ? C.teal : C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, transition: "all 0.13s" }}>
+                      style={{ padding: "0.28rem 0.65rem", background: sysLive ? `${C.teal}20` : "transparent", border: `1px solid ${sysLive ? C.teal : C.border2}`, borderRadius: 3, color: sysLive ? C.teal : C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.13s" }}>
                       {sysLive ? "◉ Live" : "○ Live"}
                     </button>
                   </div>
 
                   {detectedParams.length > 0 && detectedParams.some(p => !sysParamVals[p]?.trim()) && (
-                    <div style={{ fontSize: 9, color: C.gold }}>Set all parameter values above to solve.</div>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.gold }}>Set all parameter values above to solve.</div>
                   )}
 
                   {sysResult && (sysResult.error ? <ErrBox msg={sysResult.error} />
                     : <ResultBox color={C.gold}>
-                        <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, letterSpacing: "0.14em" }}>
+                        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 8, letterSpacing: "0.14em" }}>
                           SOLUTION · {sysResult.iter} iter · {sysResult.converged ? <span style={{ color: C.teal }}>converged</span> : <span style={{ color: C.red }}>may not have converged</span>}
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "auto auto auto", columnGap: 24, rowGap: 4, alignItems: "baseline" }}>
                           {(sysResult.varNames ?? []).map((n, i) => (<>
-                            <span key={`n${i}`} style={{ color: C.gold, fontFamily: mono }}>{n}*</span>
-                            <span key={`v${i}`} style={{ color: C.text, fontFamily: mono }}>{fmt(sysResult.solution?.[i], 8)}</span>
-                            <span key={`r${i}`} style={{ fontSize: 9, color: C.textMuted }}>residual: {fmt(sysResult.fVals?.[i], 4)}</span>
+                            <span key={`n${i}`} style={{ color: C.gold, fontFamily: T.code.fontFamily }}>{n}*</span>
+                            <span key={`v${i}`} style={{ color: C.text, fontFamily: T.code.fontFamily }}>{fmt(sysResult.solution?.[i], 8)}</span>
+                            <span key={`r${i}`} style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>residual: {fmt(sysResult.fVals?.[i], 4)}</span>
                           </>))}
                         </div>
-                        {!sysResult.converged && <div style={{ color: C.red, fontSize: 10, marginTop: 8 }}>Did not fully converge — try different starting guesses.</div>}
+                        {!sysResult.converged && <div style={{ color: C.red, fontSize: T.caption.fontSize, marginTop: 8 }}>Did not fully converge — try different starting guesses.</div>}
                       </ResultBox>
                   )}
                 </div>
@@ -1805,7 +1803,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                   style={{ flex: 1, padding: "0.4rem 0.7rem", background: "transparent", border: "none",
                     borderBottom: deriveMode === id ? `2px solid ${C.teal}` : "2px solid transparent",
                     color: deriveMode === id ? C.teal : C.textMuted,
-                    cursor: "pointer", fontFamily: mono, fontSize: 10, letterSpacing: "0.06em", transition: "all 0.12s" }}>
+                    cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.06em", transition: "all 0.12s" }}>
                   {label}
                 </button>
               ))}
@@ -1815,24 +1813,24 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
             {deriveMode === "single" && (
               <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted, whiteSpace: "nowrap" }}>f( </span>
-                  <input value={dVar} onChange={e => setDVar(e.target.value)} placeholder="x" style={{ ...fieldStyle(C), width: 60 }} />
-                  <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted, whiteSpace: "nowrap" }}> ) =</span>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted, whiteSpace: "nowrap" }}>f( </span>
+                  <input value={dVar} onChange={e => setDVar(e.target.value)} placeholder="x" style={{ ...fieldStyle(C, T), width: 60 }} />
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted, whiteSpace: "nowrap" }}> ) =</span>
                   <input value={dExpr} onChange={e => setDExpr(e.target.value)} placeholder="x**3 + 2*x"
                     onFocus={() => focusField(setDExpr)}
-                    style={{ ...fieldStyle(C), flex: 1, minWidth: 180 }} />
+                    style={{ ...fieldStyle(C, T), flex: 1, minWidth: 180 }} />
                   <EquationPicker savedEqs={savedEqs} onLoad={setDExpr} />
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>evaluate at</span>
-                  <input value={dPoint} onChange={e => setDPoint(e.target.value)} placeholder="point" style={{ ...fieldStyle(C), width: 90 }} />
-                  <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>order</span>
-                  <select value={dOrder} onChange={e => setDOrder(e.target.value)} style={{ ...fieldStyle(C) }}>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>evaluate at</span>
+                  <input value={dPoint} onChange={e => setDPoint(e.target.value)} placeholder="point" style={{ ...fieldStyle(C, T), width: 90 }} />
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>order</span>
+                  <select value={dOrder} onChange={e => setDOrder(e.target.value)} style={{ ...fieldStyle(C, T) }}>
                     {["1","2","3","4"].map(n => <option key={n}>{n}</option>)}
                   </select>
                   <Btn ch="Compute" v="solid" color={C.teal} sm onClick={runDerivative} />
                 </div>
-                <div style={{ fontSize: 9, color: C.textMuted }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
                   Other variables in scope: {Object.keys(scope).filter(k => k !== dVar.trim()).join(", ") || "none"}
                 </div>
                 {dResult && (dResult.error ? <ErrBox msg={dResult.error} />
@@ -1840,7 +1838,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                       <div><span style={{ color: C.textMuted }}>f({dResult.varName} = {dResult.x0}) </span><span style={{ color: C.text }}>{fmt(dResult.val, 8)}</span></div>
                       {dResult.d1 != null && <div><span style={{ color: C.textMuted }}>f′({dResult.x0}) </span><span style={{ color: C.teal }}>{fmt(dResult.d1, 8)}</span></div>}
                       {dResult.n > 1 && dResult.dn != null && <div><span style={{ color: C.textMuted }}>f<sup>({dResult.n})</sup>({dResult.x0}) </span><span style={{ color: C.gold }}>{fmt(dResult.dn, 8)}</span></div>}
-                      <div style={{ fontSize: 9, color: C.textMuted, marginTop: 4 }}>Numerical (central difference, h = 1e-6)</div>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 4 }}>Numerical (central difference, h = 1e-6)</div>
                     </ResultBox>
                 )}
               </div>
@@ -1851,23 +1849,23 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
               <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: 12 }}>
                 {/* Expression row */}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted, whiteSpace: "nowrap" }}>L =</span>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted, whiteSpace: "nowrap" }}>L =</span>
                   <input value={focExpr} onChange={e => { setFocExpr(e.target.value); setFocResults(null); }}
                     placeholder="sqrt(x_1) + x_2 - lambda*(p_1*x_1 + p_2*x_2 - m)"
                     onFocus={() => focusField(setFocExpr)}
-                    style={{ ...fieldStyle(C), flex: 1, minWidth: 220 }} />
+                    style={{ ...fieldStyle(C, T), flex: 1, minWidth: 220 }} />
                   <EquationPicker savedEqs={savedEqs} onLoad={v => { setFocExpr(v); setFocResults(null); }} />
                 </div>
 
                 {/* Variable chips */}
                 <div>
-                  <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", marginBottom: 6 }}>DIFFERENTIATE W.R.T.</div>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", marginBottom: 6 }}>DIFFERENTIATE W.R.T.</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                     {focVars.map(v => (
                       <div key={v} style={{ display: "flex", alignItems: "center", gap: 4, padding: "0.18rem 0.5rem 0.18rem 0.6rem", background: `${C.teal}14`, border: `1px solid ${C.teal}40`, borderRadius: 3 }}>
-                        <span style={{ fontFamily: mono, fontSize: 10, color: C.teal }}>∂/{v}</span>
+                        <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal }}>∂/{v}</span>
                         <button onClick={() => { setFocVars(prev => prev.filter(x => x !== v)); setFocResults(null); }}
-                          style={{ background: "transparent", border: "none", color: C.teal, cursor: "pointer", fontFamily: mono, fontSize: 13, lineHeight: 1, padding: "0 0 0 2px", opacity: 0.7 }}
+                          style={{ background: "transparent", border: "none", color: C.teal, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.body.fontSize, lineHeight: 1, padding: "0 0 0 2px", opacity: 0.7 }}
                           onMouseEnter={e => e.currentTarget.style.opacity = "1"}
                           onMouseLeave={e => e.currentTarget.style.opacity = "0.7"}>×</button>
                       </div>
@@ -1881,7 +1879,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                           }
                         }}
                         placeholder="variable"
-                        style={{ ...fieldStyle(C), width: 80 }} />
+                        style={{ ...fieldStyle(C, T), width: 80 }} />
                       <Btn ch="+ Add" sm v="out"
                         dis={!focVarInput.trim() || focVars.includes(focVarInput.trim())}
                         onClick={() => {
@@ -1897,7 +1895,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                   <Btn ch="Compute FOCs" v="solid" color={C.teal}
                     dis={!focExpr.trim() || focVars.length === 0}
                     onClick={() => setFocResults(focVars.map(v => ({ varName: v, ...symbolicDiff(focExpr, v) })))} />
-                  {focVars.length === 0 && <span style={{ fontSize: 9, color: C.textMuted }}>Add at least one variable</span>}
+                  {focVars.length === 0 && <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>Add at least one variable</span>}
                 </div>
 
                 {/* Result cards */}
@@ -1907,14 +1905,14 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                       <div key={r.varName} style={{ background: r.error ? `${C.red}08` : `${C.teal}08`, border: `1px solid ${r.error ? C.red : C.teal}25`, borderRadius: 3, padding: "0.6rem 0.85rem" }}>
                         {r.error
                           ? <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }}>∂L/∂{r.varName} =</span>
-                              <span style={{ color: C.red, fontFamily: mono, fontSize: 10 }}>{r.error}</span>
+                              <span style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>∂L/∂{r.varName} =</span>
+                              <span style={{ color: C.red, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>{r.error}</span>
                             </div>
                           : <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-                              <div style={{ fontFamily: mono, fontSize: 11, lineHeight: 1.6 }}>
-                                <span style={{ color: C.textMuted, fontSize: 10 }}>∂L/∂{r.varName} = </span>
+                              <div style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, lineHeight: 1.6 }}>
+                                <span style={{ color: C.textMuted, fontSize: T.caption.fontSize }}>∂L/∂{r.varName} = </span>
                                 <span style={{ color: C.teal }}>{r.expr}</span>
-                                <span style={{ color: C.textMuted, fontSize: 10 }}> = 0</span>
+                                <span style={{ color: C.textMuted, fontSize: T.caption.fontSize }}> = 0</span>
                               </div>
                               <button
                                 onClick={() => {
@@ -1923,7 +1921,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                                   setActiveTool("solver");
                                   setSolverMode("system");
                                 }}
-                                style={{ padding: "0.15rem 0.55rem", background: "transparent", border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: mono, fontSize: 9, whiteSpace: "nowrap", flexShrink: 0 }}
+                                style={{ padding: "0.15rem 0.55rem", background: "transparent", border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, whiteSpace: "nowrap", flexShrink: 0 }}
                                 onMouseEnter={e => e.currentTarget.style.background = `${C.gold}18`}
                                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                                 → Solve
@@ -1948,7 +1946,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                           setActiveTool("solver");
                           setSolverMode("system");
                         }}
-                        style={{ padding: "0.3rem 0.75rem", background: C.teal, border: `1px solid ${C.teal}`, borderRadius: 3, color: C.bg, cursor: "pointer", fontFamily: mono, fontSize: 10, fontWeight: 700, opacity: focResults.every(r => r.error) ? 0.4 : 1 }}
+                        style={{ padding: "0.3rem 0.75rem", background: C.teal, border: `1px solid ${C.teal}`, borderRadius: 3, color: C.bg, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight: 700, opacity: focResults.every(r => r.error) ? 0.4 : 1 }}
                         onMouseEnter={e => { if (!focResults.every(r => r.error)) e.currentTarget.style.opacity = "0.82"; }}
                         onMouseLeave={e => { if (!focResults.every(r => r.error)) e.currentTarget.style.opacity = "1"; }}>
                         Send all FOCs to Solve
@@ -1962,13 +1960,13 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                             setFocCopied(true); setTimeout(() => setFocCopied(false), 1500);
                           });
                         }}
-                        style={{ padding: "0.3rem 0.75rem", background: "transparent", border: `1px solid ${focCopied ? C.teal : C.border2}`, borderRadius: 3, color: focCopied ? C.teal : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, opacity: focResults.every(r => r.error) ? 0.4 : 1 }}
+                        style={{ padding: "0.3rem 0.75rem", background: "transparent", border: `1px solid ${focCopied ? C.teal : C.border2}`, borderRadius: 3, color: focCopied ? C.teal : C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, opacity: focResults.every(r => r.error) ? 0.4 : 1 }}
                         onMouseEnter={e => { if (!focResults.every(r => r.error)) { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}}
                         onMouseLeave={e => { if (!focCopied) { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}}>
                         {focCopied ? "✓ Copied!" : "Copy LaTeX"}
                       </button>
                     </div>
-                    <div style={{ fontSize: 9, color: C.textMuted, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5 }}>
                       Symbolic · rules applied: linearity, product, chain, power · parameters in scope treated as constants
                     </div>
                   </div>
@@ -1981,19 +1979,19 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
         {/* ── SYMBOLIC ── */}
         {activeTool === "symbolic" && (
           <div style={{ padding: "0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 9, color: C.textMuted, lineHeight: 1.7 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
               Enter an expression with unknown functions like <span style={{ color: C.teal }}>c(q)</span> or <span style={{ color: C.teal }}>p(q)</span>.
               Their derivatives are written as <span style={{ color: C.gold }}>c'(q)</span>, <span style={{ color: C.gold }}>p'(q)</span>.
               Applies the product, quotient, and chain rules symbolically.
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted, whiteSpace: "nowrap" }}>f( </span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted, whiteSpace: "nowrap" }}>f( </span>
               <input value={symbVar} onChange={e => { setSymbVar(e.target.value); setSymbResult(null); }}
-                placeholder="q" style={{ ...fieldStyle(C), width: 52 }} />
-              <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted }}> ) =</span>
+                placeholder="q" style={{ ...fieldStyle(C, T), width: 52 }} />
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted }}> ) =</span>
               <input value={symbExpr} onChange={e => { setSymbExpr(e.target.value); setSymbResult(null); }}
                 placeholder="p(q)*q - c(q)" onFocus={() => focusField(setSymbExpr)}
-                style={{ ...fieldStyle(C), flex: 1, minWidth: 200 }} />
+                style={{ ...fieldStyle(C, T), flex: 1, minWidth: 200 }} />
               <EquationPicker savedEqs={savedEqs} onLoad={expr => { setSymbExpr(expr); setSymbResult(null); }} />
               <Btn ch="Differentiate" v="solid" color={C.teal} sm onClick={() => setSymbResult(symbolicDiff(symbExpr, symbVar))} />
             </div>
@@ -2001,26 +1999,26 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
               : <div>
                   <ResultBox color={C.teal}>
                     <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                      <span style={{ color: C.textMuted, fontFamily: mono, fontSize: 11 }}>d/d{symbVar.trim() || "x"} =</span>
-                      <span style={{ color: C.teal, fontFamily: mono, fontSize: 12, letterSpacing: "0.01em" }}>{symbResult.expr}</span>
+                      <span style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>d/d{symbVar.trim() || "x"} =</span>
+                      <span style={{ color: C.teal, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, letterSpacing: "0.01em" }}>{symbResult.expr}</span>
                     </div>
                     {symbResult.symbolicFns.length > 0 && (
-                      <div style={{ marginTop: 8, fontSize: 9, color: C.textMuted }}>
+                      <div style={{ marginTop: 8, fontSize: T.caption.fontSize, color: C.textMuted }}>
                         Symbolic functions: {symbResult.symbolicFns.map(fn => (
                           <span key={fn} style={{ color: C.gold, marginRight: 8 }}>{fn}(·) → {fn}'(·)</span>
                         ))}
                       </div>
                     )}
                   </ResultBox>
-                  <div style={{ marginTop: 6, fontSize: 9, color: C.textMuted }}>Rules applied: linearity, product rule, chain rule, power rule</div>
+                  <div style={{ marginTop: 6, fontSize: T.caption.fontSize, color: C.textMuted }}>Rules applied: linearity, product rule, chain rule, power rule</div>
                 </div>
             )}
             <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
-              <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 6, letterSpacing: "0.14em" }}>EXAMPLES</div>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 6, letterSpacing: "0.14em" }}>EXAMPLES</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {[["p(q)*q - c(q)","q","Revenue − Cost"],["a*x^2 + b*x + c(x)","x","Quadratic + unknown"],["ln(1 + r)^n","r","Compound growth"],["p(q)*q","q","Total Revenue"]].map(([ex,vr,label]) => (
                   <button key={ex} onClick={() => { setSymbExpr(ex); setSymbVar(vr); setSymbResult(null); }}
-                    style={{ padding: "0.22rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+                    style={{ padding: "0.22rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>{label}</button>
                 ))}
@@ -2033,35 +2031,35 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
         {activeTool === "algebra" && (
           <div style={{ background: C.surface }}>
             <div style={{ padding: "0.65rem 0.85rem", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>Differentiate w.r.t.</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>Differentiate w.r.t.</span>
               <input value={algVar} onChange={e => { setAlgVar(e.target.value); setAlgDeriv({}); }}
-                placeholder="q" style={{ ...fieldStyle(C), width: 60 }} />
-              <span style={{ fontSize: 9, color: C.textMuted, marginLeft: "auto" }}>Define symbolic relationships — click ∂ to differentiate</span>
+                placeholder="q" style={{ ...fieldStyle(C, T), width: 60 }} />
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: "auto" }}>Define symbolic relationships — click ∂ to differentiate</span>
             </div>
             <table style={{ borderCollapse: "collapse", width: "100%" }}>
-              <thead><tr>{["Label","Expression","Derivative",""].map(h => <th key={h} style={thStyle(C)}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Label","Expression","Derivative",""].map(h => <th key={h} style={thStyle(C, T)}>{h}</th>)}</tr></thead>
               <tbody>
                 {algEqs.map(eq => (
                   <tr key={eq.id}>
-                    <td style={{ ...tdStyle(C), width: 80 }}><span style={{ fontFamily: mono, fontSize: 11, color: C.gold }}>{eq.name}</span></td>
+                    <td style={{ ...tdStyle(C), width: 80 }}><span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.gold }}>{eq.name}</span></td>
                     <td style={tdStyle(C)}>
                       <input value={eq.expr}
                         onChange={e => { setAlgEqs(prev => prev.map(x => x.id === eq.id ? { ...x, expr: e.target.value } : x)); setAlgDeriv(prev => { const n = { ...prev }; delete n[eq.id]; return n; }); }}
                         onFocus={() => focusField(v => setAlgEqs(prev => prev.map(x => x.id === eq.id ? { ...x, expr: v } : x)))}
-                        style={{ ...fieldStyle(C), width: "100%", minWidth: 180 }} />
+                        style={{ ...fieldStyle(C, T), width: "100%", minWidth: 180 }} />
                     </td>
-                    <td style={{ ...tdStyle(C), fontFamily: mono, fontSize: 11 }}>
-                      {algDeriv[eq.id] == null ? <span style={{ color: C.textMuted, fontSize: 9 }}>—</span>
-                        : algDeriv[eq.id].error ? <span style={{ color: C.red, fontSize: 10 }}>{algDeriv[eq.id].error}</span>
+                    <td style={{ ...tdStyle(C), fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
+                      {algDeriv[eq.id] == null ? <span style={{ color: C.textMuted, fontSize: T.caption.fontSize }}>—</span>
+                        : algDeriv[eq.id].error ? <span style={{ color: C.red, fontSize: T.caption.fontSize }}>{algDeriv[eq.id].error}</span>
                         : <span style={{ color: C.teal }}>d{eq.name}/d{algVar.trim() || "x"} = {algDeriv[eq.id].expr}</span>}
                     </td>
                     <td style={{ ...tdStyle(C), textAlign: "right", whiteSpace: "nowrap" }}>
                       <button onClick={() => setAlgDeriv(prev => ({ ...prev, [eq.id]: symbolicDiff(eq.expr, algVar) }))} title="Differentiate symbolically"
-                        style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.teal, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0.15rem 0.45rem", marginRight: 4 }}
+                        style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.teal, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0.15rem 0.45rem", marginRight: 4 }}
                         onMouseEnter={e => e.currentTarget.style.borderColor = C.teal}
                         onMouseLeave={e => e.currentTarget.style.borderColor = C.border2}>∂</button>
                       <button onClick={() => { setAlgEqs(prev => prev.filter(x => x.id !== eq.id)); setAlgDeriv(prev => { const n={...prev}; delete n[eq.id]; return n; }); }}
-                        style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 14 }}
+                        style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.h2.fontSize }}
                         onMouseEnter={e => e.currentTarget.style.color = C.red}
                         onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
                     </td>
@@ -2070,19 +2068,19 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
               </tbody>
             </table>
             <div style={{ padding: "0.65rem 0.85rem", borderTop: `1px solid ${C.border}`, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              <input placeholder="Label (e.g. π)" value={algNewName} onChange={e => setAlgNewName(e.target.value)} style={{ ...fieldStyle(C), width: 90 }} />
-              <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted }}>=</span>
+              <input placeholder="Label (e.g. π)" value={algNewName} onChange={e => setAlgNewName(e.target.value)} style={{ ...fieldStyle(C, T), width: 90 }} />
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted }}>=</span>
               <input placeholder="Expression (e.g. p(q)*q - c(q))" value={algNewExpr} onChange={e => setAlgNewExpr(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && algNewName.trim() && algNewExpr.trim()) { setAlgEqs(prev => [...prev, { id: Date.now(), name: algNewName.trim(), expr: algNewExpr.trim() }]); setAlgNewName(""); setAlgNewExpr(""); } }}
                 onFocus={() => focusField(setAlgNewExpr)}
-                style={{ ...fieldStyle(C), flex: 1, minWidth: 200 }} />
+                style={{ ...fieldStyle(C, T), flex: 1, minWidth: 200 }} />
               <EquationPicker savedEqs={savedEqs} onLoad={setAlgNewExpr} />
               <Btn ch="Add" v="solid" color={C.gold} sm dis={!algNewName.trim() || !algNewExpr.trim()}
                 onClick={() => { setAlgEqs(prev => [...prev, { id: Date.now(), name: algNewName.trim(), expr: algNewExpr.trim() }]); setAlgNewName(""); setAlgNewExpr(""); }} />
               <Btn ch="∂ All" sm color={C.teal} dis={algEqs.length === 0}
                 onClick={() => { const results = {}; algEqs.forEach(eq => { results[eq.id] = symbolicDiff(eq.expr, algVar); }); setAlgDeriv(results); }} />
             </div>
-            <div style={{ padding: "0.3rem 0.85rem 0.6rem", fontSize: 9, color: C.textMuted }}>
+            <div style={{ padding: "0.3rem 0.85rem 0.6rem", fontSize: T.caption.fontSize, color: C.textMuted }}>
               Use unknown functions like <span style={{ color: C.teal }}>p(q)</span>, <span style={{ color: C.teal }}>c(q)</span>, <span style={{ color: C.teal }}>U(x)</span> — they stay symbolic in derivatives.
             </div>
           </div>
@@ -2092,37 +2090,37 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
         {activeTool === "integral" && (
           <div style={{ padding: "0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted, whiteSpace: "nowrap" }}>∫ f(</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted, whiteSpace: "nowrap" }}>∫ f(</span>
               <input value={intVar} onChange={e => setIntVar(e.target.value)} placeholder="x"
-                style={{ ...fieldStyle(C), width: 50 }} />
-              <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted, whiteSpace: "nowrap" }}>)</span>
-              <span style={{ fontFamily: mono, fontSize: 11, color: C.textMuted }}>d{intVar.trim() || "x"} =</span>
+                style={{ ...fieldStyle(C, T), width: 50 }} />
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted, whiteSpace: "nowrap" }}>)</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted }}>d{intVar.trim() || "x"} =</span>
               <input value={intExpr} onChange={e => { setIntExpr(e.target.value); setIntResult(null); }}
                 placeholder="x**2" onFocus={() => focusField(setIntExpr)}
-                style={{ ...fieldStyle(C), flex: 1, minWidth: 180 }} />
+                style={{ ...fieldStyle(C, T), flex: 1, minWidth: 180 }} />
               <EquationPicker savedEqs={savedEqs} onLoad={setIntExpr} />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>from</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>from</span>
               <input value={intA} onChange={e => { setIntA(e.target.value); setIntResult(null); }} placeholder="a"
-                style={{ ...fieldStyle(C), width: 90 }} />
-              <span style={{ fontFamily: mono, fontSize: 10, color: C.textMuted }}>to</span>
+                style={{ ...fieldStyle(C, T), width: 90 }} />
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>to</span>
               <input value={intB} onChange={e => { setIntB(e.target.value); setIntResult(null); }} placeholder="b"
-                style={{ ...fieldStyle(C), width: 90 }} />
+                style={{ ...fieldStyle(C, T), width: 90 }} />
               <Btn ch="Integrate" v="solid" color={C.blue} sm onClick={runIntegral} />
             </div>
-            <div style={{ fontSize: 9, color: C.textMuted }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
               Composite Simpson's rule · 1000 intervals · Scope: {Object.keys(scope).filter(k => typeof scope[k] !== "function").join(", ") || "none"}
             </div>
             {intResult && (intResult.error ? <ErrBox msg={intResult.error} />
               : <ResultBox color={C.blue}>
                   <div>
                     <span style={{ color: C.textMuted }}>∫</span>
-                    <span style={{ color: C.textMuted, fontSize: 9 }}>{intA}</span>
+                    <span style={{ color: C.textMuted, fontSize: T.caption.fontSize }}>{intA}</span>
                     <span style={{ color: C.textMuted }}> → </span>
-                    <span style={{ color: C.textMuted, fontSize: 9 }}>{intB}</span>
+                    <span style={{ color: C.textMuted, fontSize: T.caption.fontSize }}>{intB}</span>
                     <span style={{ color: C.textMuted }}> f({intVar.trim() || "x"}) d{intVar.trim() || "x"} = </span>
-                    <span style={{ color: C.blue, fontSize: 13 }}>{fmt(intResult.value, 8)}</span>
+                    <span style={{ color: C.blue, fontSize: T.body.fontSize }}>{fmt(intResult.value, 8)}</span>
                   </div>
                 </ResultBox>
             )}

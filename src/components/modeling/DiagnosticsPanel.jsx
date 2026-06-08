@@ -22,8 +22,6 @@ import { jarqueBera, shapiroWilk }      from "../../core/diagnostics/normality.j
 import { computeVIF, conditionNumber }  from "../../core/diagnostics/multicollinearity.js";
 import { hausmanTest }                  from "../../math/LinearEngine.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sevColor(C, reject, inconclusive) {
   if (inconclusive) return C.yellow;
@@ -40,12 +38,12 @@ function fmtP(p) {
 
 // ── Section header ────────────────────────────────────────────────────────────
 function SectionHdr({ children }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{
       padding: "0.28rem 0.85rem",
-      fontSize: 9, color: C.textMuted, letterSpacing: "0.16em",
-      textTransform: "uppercase", fontFamily: mono,
+      fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em",
+      textTransform: "uppercase", fontFamily: T.code.fontFamily,
       background: C.surface2, borderBottom: `1px solid ${C.border}`,
     }}>
       {children}
@@ -55,7 +53,7 @@ function SectionHdr({ children }) {
 
 // ── Single test result card ───────────────────────────────────────────────────
 function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusive, note }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const color = sevColor(C, reject, inconclusive);
   return (
     <div style={{
@@ -66,20 +64,20 @@ function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusi
       display: "flex", flexDirection: "column", gap: 3,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 9, color, letterSpacing: "0.14em",
-          textTransform: "uppercase", fontFamily: mono }}>{name}</span>
-        <span style={{ fontSize: 9, padding: "1px 5px",
-          border: `1px solid ${color}40`, color, borderRadius: 2, fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color, letterSpacing: "0.14em",
+          textTransform: "uppercase", fontFamily: T.code.fontFamily }}>{name}</span>
+        <span style={{ fontSize: T.caption.fontSize, padding: "1px 5px",
+          border: `1px solid ${color}40`, color, borderRadius: 2, fontFamily: T.code.fontFamily }}>
           {inconclusive ? "Inconclusive" : reject ? "Reject H₀" : "Fail to reject H₀"}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: C.text, fontFamily: mono }}>
+      <div style={{ fontSize: T.code.fontSize, color: C.text, fontFamily: T.code.fontFamily }}>
         {statLabel} = {stat != null ? stat : "—"}
         {df != null && <span style={{ color: C.textMuted }}> · df = {df}</span>}
         {pVal != null && <span style={{ color: C.textDim }}> · p = {fmtP(pVal)}</span>}
       </div>
       {note && (
-        <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>{note}</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>{note}</div>
       )}
     </div>
   );
@@ -87,7 +85,7 @@ function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusi
 
 // ── VIF cards ─────────────────────────────────────────────────────────────────
 function VIFCards({ vifResults }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!vifResults?.length) return null;
   return (
     <div style={{ padding: "0.6rem 0.85rem" }}>
@@ -98,15 +96,15 @@ function VIFCards({ vifResults }) {
             <div key={col} style={{
               padding: "0.3rem 0.6rem",
               background: C.surface2, border: `1px solid ${color}40`,
-              borderRadius: 3, fontFamily: mono,
+              borderRadius: 3, fontFamily: T.code.fontFamily,
             }}>
-              <div style={{ fontSize: 9, color: C.textMuted }}>{col}</div>
-              <div style={{ fontSize: 13, color }}>{isFinite(v) ? v.toFixed(2) : "∞"}</div>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{col}</div>
+              <div style={{ fontSize: T.body.fontSize, color }}>{isFinite(v) ? v.toFixed(2) : "∞"}</div>
             </div>
           );
         })}
       </div>
-      <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
         VIF &gt; 5 → moderate · VIF &gt; 10 → severe multicollinearity
       </div>
     </div>
@@ -169,7 +167,7 @@ function buildAlerts(bp, white, dw, bg, vif, hausman) {
 
 // ── Alert card ────────────────────────────────────────────────────────────────
 function DiagAlertCard({ alert, onCoachQuery }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const sevColor = { high: C.red, medium: C.yellow, low: C.textDim };
   const color = sevColor[alert.severity] ?? C.textDim;
   return (
@@ -181,10 +179,10 @@ function DiagAlertCard({ alert, onCoachQuery }) {
       border: `1px solid ${color}25`,
     }}>
       <div style={{ flex: 1 }}>
-        <span style={{ fontSize: 9, color, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
           {alert.severity === "high" ? "⚠ " : "△ "}
         </span>
-        <span style={{ fontSize: 11, color: C.text, fontFamily: mono }}>{alert.message}</span>
+        <span style={{ fontSize: T.code.fontSize, color: C.text, fontFamily: T.code.fontFamily }}>{alert.message}</span>
       </div>
       {onCoachQuery && (
         <button
@@ -193,7 +191,7 @@ function DiagAlertCard({ alert, onCoachQuery }) {
             flexShrink: 0, padding: "0.22rem 0.6rem",
             background: "transparent", border: `1px solid ${color}50`,
             borderRadius: 3, color, cursor: "pointer",
-            fontFamily: mono, fontSize: 9, whiteSpace: "nowrap",
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, whiteSpace: "nowrap",
             transition: "all 0.12s",
           }}
           onMouseEnter={e => { e.currentTarget.style.background = `${color}18`; }}
@@ -212,7 +210,7 @@ export default function DiagnosticsPanel({
   model = "OLS", panelFE, panelFD, panel,
   onCoachQuery,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(true);
 
   // Build design matrix X from rows + xCols (needed for BP and White)
@@ -260,8 +258,8 @@ export default function DiagnosticsPanel({
           width: "100%", display: "flex", alignItems: "center", gap: 10,
           background: C.surface2, padding: "0.5rem 1rem",
           border: "none", borderBottom: open ? `1px solid ${C.border}` : "none",
-          cursor: "pointer", fontFamily: mono, color: C.textMuted,
-          fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase",
+          cursor: "pointer", fontFamily: T.code.fontFamily, color: C.textMuted,
+          fontSize: T.caption.fontSize, letterSpacing: "0.18em", textTransform: "uppercase",
         }}
       >
         <span style={{ flex: 1, textAlign: "left" }}>◈ Post-Estimation Diagnostics · {model}</span>
@@ -351,11 +349,11 @@ export default function DiagnosticsPanel({
               <SectionHdr>Multicollinearity</SectionHdr>
               {vif && <VIFCards vifResults={vif} />}
               {cond && (
-                <div style={{ padding: "0.4rem 0.85rem 0.6rem", fontFamily: mono, fontSize: 10, color: C.textDim, display: "flex", gap: 12, alignItems: "center" }}>
+                <div style={{ padding: "0.4rem 0.85rem 0.6rem", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim, display: "flex", gap: 12, alignItems: "center" }}>
                   <span>Condition number</span>
-                  <span style={{ color: vifColor(C, cond.severity), fontSize: 13 }}>κ = {cond.kappa}</span>
+                  <span style={{ color: vifColor(C, cond.severity), fontSize: T.body.fontSize }}>κ = {cond.kappa}</span>
                   <span style={{
-                    fontSize: 9, padding: "1px 5px",
+                    fontSize: T.caption.fontSize, padding: "1px 5px",
                     border: `1px solid ${vifColor(C, cond.severity)}40`,
                     color: vifColor(C, cond.severity), borderRadius: 2,
                   }}>
@@ -385,8 +383,8 @@ export default function DiagnosticsPanel({
           )}
 
           {/* Footer */}
-          <div style={{ padding: "0.35rem 0.85rem", fontSize: 9, color: C.textMuted,
-            fontFamily: mono, background: C.surface2, borderTop: `1px solid ${C.border}` }}>
+          <div style={{ padding: "0.35rem 0.85rem", fontSize: T.caption.fontSize, color: C.textMuted,
+            fontFamily: T.code.fontFamily, background: C.surface2, borderTop: `1px solid ${C.border}` }}>
             Significance at 5% · BP/White/BG: LM ~ χ² · DW: consult tables for exact bounds · SW: Royston (1992)
           </div>
         </div>

@@ -19,7 +19,7 @@
 //   setMaxLag    {fn}
 
 import { useState } from "react";
-import { useTheme, mono, Chip } from "./shared.jsx";
+import { useTheme, Chip } from "./shared.jsx";
 
 // ─── SE type definitions ──────────────────────────────────────────────────────
 const SE_TYPES = [
@@ -37,7 +37,7 @@ const HAC_COMPATIBLE = new Set(["FE", "FD", "TWFE", "DiD", "TWFEDiD", "EventStud
 
 // ─── Small styled select ──────────────────────────────────────────────────────
 function ColSelect({ value, onChange, options, placeholder }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <select
       value={value ?? ""}
@@ -48,8 +48,8 @@ function ColSelect({ value, onChange, options, placeholder }) {
         border: `1px solid ${C.border2}`,
         color: value ? C.text : C.textMuted,
         padding: "0.38rem 0.6rem",
-        fontFamily: mono,
-        fontSize: 11,
+        fontFamily: T.code.fontFamily,
+        fontSize: T.code.fontSize,
         borderRadius: 3,
         outline: "none",
         cursor: "pointer",
@@ -80,7 +80,7 @@ export default function InferenceOptions({
   maxLag,
   setMaxLag,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
 
   const hacDisabled = !HAC_COMPATIBLE.has(modelType);
@@ -115,25 +115,25 @@ export default function InferenceOptions({
           background: open ? C.surface2 : C.surface,
           border: "none",
           cursor: "pointer",
-          fontFamily: mono,
+          fontFamily: T.code.fontFamily,
           transition: "background 0.12s",
         }}
       >
-        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase" }}>
           Standard Errors
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {!open && badgeLabel && (
             <span style={{
-              fontSize: 9, padding: "1px 6px",
+              fontSize: T.caption.fontSize, padding: "1px 6px",
               border: `1px solid ${C.gold}`,
               color: C.gold, borderRadius: 2,
-              letterSpacing: "0.08em", fontFamily: mono,
+              letterSpacing: "0.08em", fontFamily: T.code.fontFamily,
             }}>
               {badgeLabel}
             </span>
           )}
-          <span style={{ fontSize: 10, color: C.textMuted }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
             {open ? "▲" : "▼"}
           </span>
         </span>
@@ -144,7 +144,7 @@ export default function InferenceOptions({
         <div style={{ padding: "0.75rem", background: C.surface, borderTop: `1px solid ${C.border}` }}>
 
           {/* SE type chips */}
-          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
             SE Type
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
@@ -167,7 +167,7 @@ export default function InferenceOptions({
           {/* Cluster variable */}
           {showCluster && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase" }}>
                 Cluster Variable
               </div>
               <ColSelect
@@ -182,7 +182,7 @@ export default function InferenceOptions({
           {/* Second cluster (two-way) */}
           {showCluster2 && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase" }}>
                 Second Cluster Variable
               </div>
               <ColSelect
@@ -197,7 +197,7 @@ export default function InferenceOptions({
           {/* Time variable for HAC */}
           {showHac && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase" }}>
                 Time Variable
               </div>
               <ColSelect
@@ -206,7 +206,7 @@ export default function InferenceOptions({
                 options={headers}
                 placeholder={panelTimeCol ? `— default: ${panelTimeCol} —` : "— select column —"}
               />
-              <div style={{ fontSize: 9, color: C.textMuted, marginTop: 4, fontFamily: mono }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 4, fontFamily: T.code.fontFamily }}>
                 Column used to ORDER residuals for LAG. {panelTimeCol ? "Falls back to declared panel time column." : "Required when no panel is declared."}
               </div>
             </div>
@@ -215,7 +215,7 @@ export default function InferenceOptions({
           {/* Max lag for HAC */}
           {showHac && (
             <div style={{ marginBottom: 4 }}>
-              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 5 }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 5 }}>
                 Max Lag
               </div>
               <input
@@ -231,21 +231,21 @@ export default function InferenceOptions({
                   border: `1px solid ${C.border2}`,
                   color: C.text,
                   padding: "0.38rem 0.6rem",
-                  fontFamily: mono,
-                  fontSize: 11,
+                  fontFamily: T.code.fontFamily,
+                  fontSize: T.code.fontSize,
                   borderRadius: 3,
                   outline: "none",
                   boxSizing: "border-box",
                 }}
               />
-              <div style={{ fontSize: 9, color: C.textMuted, marginTop: 4, fontFamily: mono }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 4, fontFamily: T.code.fontFamily }}>
                 Auto = 4(n/100)^(2/9) — leave blank for automatic selection
               </div>
             </div>
           )}
 
           {/* Active SE description */}
-          <div style={{ marginTop: 8, fontSize: 9, color: C.textMuted, fontFamily: mono, lineHeight: 1.6 }}>
+          <div style={{ marginTop: 8, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
             {SE_TYPES.find(s => s.id === seType)?.hint}
           </div>
         </div>
