@@ -218,7 +218,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           fontFamily: mono,
           transition: "color 0.12s",
         }}
-        onMouseEnter={e => { e.currentTarget.style.color = "#e07070"; }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
         onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
       >
         ⊘
@@ -243,7 +243,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           fontFamily: mono,
           transition: "color 0.12s",
         }}
-        onMouseEnter={e => { e.currentTarget.style.color = "#e07070"; }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
         onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
       >
         ⏻
