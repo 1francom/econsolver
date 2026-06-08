@@ -12,7 +12,7 @@ import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import ObservatorioFetcher from './components/wrangling/ObservatorioFetcher.jsx';
-import { SessionStateProvider } from './services/session/sessionState.jsx';
+import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { SessionLogProvider } from './services/session/sessionLog.jsx';
 import {
   listPipelines, deletePipeline, clearAllPipelines, loadPipeline,

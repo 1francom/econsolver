@@ -1,3 +1,4 @@
+/* global Buffer -- Node fallback only; browser path uses btoa/atob (feature-detected first) */
 const PBKDF2_ITERATIONS = 310000;
 const AES_GCM_IV_BYTES = 12;
 const AES_KEY_BITS = 256;
