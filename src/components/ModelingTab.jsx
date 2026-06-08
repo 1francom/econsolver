@@ -114,7 +114,7 @@ import { dispatchEstimation } from "./modeling/runners/estimationDispatch.js";
 
 // ─── B5: SESSION MODEL HISTORY ────────────────────────────────────────────────
 function ModelHistory({ history, onRestore, onClear }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   const fmt = ts => {
     const d = new Date(ts);
@@ -139,13 +139,13 @@ function ModelHistory({ history, onRestore, onClear }) {
       }}
         onClick={() => setOpen(v => !v)}
       >
-        <span style={{ fontFamily: mono, fontSize: 9, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+        <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase" }}>
           {open ? "▾" : "▸"} Session history ({history.length} models)
         </span>
         {history.length > 0 && (
           <button
             onClick={e => { e.stopPropagation(); onClear?.(); }}
-            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: mono, fontSize: 9, color: C.textMuted, padding: "0 2px" }}
+            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, padding: "0 2px" }}
           >
             Clear
           </button>
@@ -158,7 +158,7 @@ function ModelHistory({ history, onRestore, onClear }) {
           background: C.surface2,
         }}>
           {history.length === 0 ? (
-            <div style={{ padding: "0.6rem 0.75rem", fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+            <div style={{ padding: "0.6rem 0.75rem", fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
               No models estimated yet.
             </div>
           ) : (
@@ -177,16 +177,16 @@ function ModelHistory({ history, onRestore, onClear }) {
                     onMouseEnter={e => { e.currentTarget.style.background = C.teal + "12"; }}
                     onMouseLeave={e => { e.currentTarget.style.background = ""; }}
                   >
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.teal, flexShrink: 0, letterSpacing: "0.05em" }}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal, flexShrink: 0, letterSpacing: "0.05em" }}>
                       {entry.type ?? entry.label ?? "Model"}
                     </span>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textDim, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {fmtSpec(entry)}
                     </span>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, flexShrink: 0 }}>
                       n={entry.n ?? "—"}
                     </span>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, flexShrink: 0 }}>
                       {fmt(entry._histTs)}
                     </span>
                   </div>
@@ -1656,12 +1656,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
       {/* ══ Lab Header ══ */}
       <div style={{ borderBottom: `1px solid ${C.border}`, padding: "0.6rem 1.4rem", display: "flex", alignItems: "center", gap: 12, background: C.surface, flexShrink: 0 }}>
-        <button onClick={onBack} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 11 }}>
+        <button onClick={onBack} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
           ← Back
         </button>
         <span style={{ color: C.border2 }}>|</span>
-        <span style={{ fontSize: 9, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>◈ Modeling Lab</span>
-        <span style={{ marginLeft: "auto", fontSize: 9, color: C.textMuted, letterSpacing: "0.12em" }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>◈ Modeling Lab</span>
+        <span style={{ marginLeft: "auto", fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em" }}>
           {rows.length} obs · {numericCols.length} numeric cols
           {panel && <span style={{ color: C.blue }}> · Panel {panel.entityCol}×{panel.timeCol}</span>}
         </span>
@@ -1813,10 +1813,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   background: varOpen ? `${C.gold}0a` : C.surface,
                   border: `1px solid ${varOpen ? C.gold + "40" : C.border}`,
                   borderRadius: varOpen ? "4px 4px 0 0" : 4,
-                  cursor: "pointer", fontFamily: mono,
+                  cursor: "pointer", fontFamily: T.code.fontFamily,
                 }}
               >
-                <span style={{ fontSize: 9, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+                <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase" }}>
                   {varOpen ? "▾" : "▸"} Quick variation
                 </span>
               </button>
@@ -1828,22 +1828,22 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 }}>
                   <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 8, color: C.textMuted, fontFamily: mono, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP OUT</div>
+                      <div style={{ fontSize: 8, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP OUT</div>
                       <select
                         value={swapOut}
                         onChange={e => setSwapOut(e.target.value)}
-                        style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                        style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px" }}
                       >
                         <option value="">— current X —</option>
                         {xVars.map(v => <option key={v} value={v}>{v}</option>)}
                       </select>
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 8, color: C.textMuted, fontFamily: mono, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP IN</div>
+                      <div style={{ fontSize: 8, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP IN</div>
                       <select
                         value={swapIn}
                         onChange={e => setSwapIn(e.target.value)}
-                        style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                        style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px" }}
                       >
                         <option value="">— available —</option>
                         {headers.filter(h => !xVars.includes(h) && h !== yVar[0]).map(v => <option key={v} value={v}>{v}</option>)}
@@ -1863,7 +1863,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       background: swapOut && swapIn ? `${C.gold}18` : "none",
                       border: `1px solid ${swapOut && swapIn ? C.gold : C.border}`,
                       borderRadius: 3, cursor: swapOut && swapIn ? "pointer" : "not-allowed",
-                      fontFamily: mono, fontSize: 9, color: swapOut && swapIn ? C.gold : C.textMuted,
+                      fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: swapOut && swapIn ? C.gold : C.textMuted,
                       letterSpacing: "0.1em",
                     }}
                   >
@@ -1916,7 +1916,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 width: "100%", marginTop: 6, padding: "4px 0",
                 background: "none", border: `1px solid ${C.border2}`,
                 borderRadius: 3, cursor: "pointer",
-                fontFamily: mono, fontSize: 9, color: C.textMuted,
+                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted,
                 letterSpacing: "0.1em",
               }}
             >
@@ -1935,13 +1935,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   background: specOpen ? `${C.blue}0d` : C.surface,
                   border: `1px solid ${specOpen ? C.blue + "50" : C.border}`,
                   borderRadius: specOpen ? "4px 4px 0 0" : 4,
-                  cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+                  cursor: "pointer", fontFamily: T.code.fontFamily, transition: "all 0.13s",
                 }}
               >
-                <span style={{ fontSize: 9, color: C.blue, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+                <span style={{ fontSize: T.caption.fontSize, color: C.blue, letterSpacing: "0.22em", textTransform: "uppercase" }}>
                   ◈ Spec Curve {specRows.length > 0 ? `(${specRows.length} pts)` : ""}
                 </span>
-                <span style={{ fontSize: 9, color: C.textMuted }}>{specOpen ? "▲" : "▼"}</span>
+                <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{specOpen ? "▲" : "▼"}</span>
               </button>
 
               {specOpen && (
@@ -1950,7 +1950,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   borderRadius: "0 0 4px 4px", padding: "0.85rem 0.75rem",
                   background: C.surface,
                 }}>
-                  <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 8, lineHeight: 1.6 }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 8, lineHeight: 1.6 }}>
                     Vary a threshold and plot how the coefficient of interest changes.
                   </div>
                   {/* Threshold column + op */}
@@ -1958,7 +1958,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     <select
                       value={specConfig.col}
                       onChange={e => setSpecConfig(c => ({ ...c, col: e.target.value }))}
-                      style={{ flex: 3, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                      style={{ flex: 3, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px" }}
                     >
                       <option value="">— threshold column —</option>
                       {(headers ?? []).map(h => <option key={h} value={h}>{h}</option>)}
@@ -1966,7 +1966,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     <select
                       value={specConfig.op}
                       onChange={e => setSpecConfig(c => ({ ...c, op: e.target.value }))}
-                      style={{ flex: 1, background: C.bg, color: C.teal, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px" }}
+                      style={{ flex: 1, background: C.bg, color: C.teal, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px" }}
                     >
                       {[">=", "<=", ">", "<"].map(op => <option key={op} value={op}>{op}</option>)}
                     </select>
@@ -1980,7 +1980,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                         value={specConfig[k]}
                         onChange={e => setSpecConfig(c => ({ ...c, [k]: e.target.value }))}
                         placeholder={lbl}
-                        style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px", color: C.text, outline: "none" }}
+                        style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px", color: C.text, outline: "none" }}
                       />
                     ))}
                   </div>
@@ -1988,7 +1988,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <select
                     value={specConfig.coefVar}
                     onChange={e => setSpecConfig(c => ({ ...c, coefVar: e.target.value }))}
-                    style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px", marginBottom: 8 }}
+                    style={{ width: "100%", background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px", marginBottom: 8 }}
                   >
                     <option value="">— coefficient of interest —</option>
                     {(result?.varNames ?? []).filter(v => v !== "(Intercept)").map(v => <option key={v} value={v}>{v}</option>)}
@@ -2001,7 +2001,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       background: specRunning ? "transparent" : `${C.blue}15`,
                       border: `1px solid ${specRunning ? C.border : C.blue + "60"}`,
                       color: specRunning ? C.textMuted : C.blue,
-                      fontFamily: mono, fontSize: 9, cursor: "pointer", letterSpacing: "0.12em",
+                      fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer", letterSpacing: "0.12em",
                     }}
                   >
                     {specRunning ? "◌ running…" : "▶ Run spec curve"}
@@ -2023,7 +2023,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                         ]}
                         style={{ minHeight: 260 }}
                       />
-                      <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 4, textAlign: "center" }}>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4, textAlign: "center" }}>
                         {specConfig.col} {specConfig.op} threshold → coef({specConfig.coefVar}) · {specRows.length} pts
                       </div>
                     </div>
@@ -2042,7 +2042,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               border: `1px solid ${!running && yVar.length ? C.teal : C.border}`,
               color: !running && yVar.length ? C.teal : C.textMuted,
               borderRadius: 4, cursor: !running && yVar.length ? "pointer" : "not-allowed",
-              fontFamily: mono, fontSize: 13, letterSpacing: "0.12em",
+              fontFamily: T.code.fontFamily, fontSize: T.body.fontSize, letterSpacing: "0.12em",
               transition: "all 0.15s", marginTop: "0.5rem",
             }}
           >
@@ -2056,7 +2056,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               marginTop: "0.8rem", padding: "0.6rem 0.8rem",
               background: C.surface, border: `1px solid ${C.red}40`,
               borderLeft: `3px solid ${C.red}`, borderRadius: 4,
-              fontSize: 11, color: C.red, fontFamily: mono, lineHeight: 1.6,
+              fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily, lineHeight: 1.6,
             }}>
               {err}
             </div>
@@ -2081,10 +2081,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     background: peekOpen ? `${C.blue}0a` : C.surface,
                     border: `1px solid ${peekOpen ? C.blue + "40" : C.border}`,
                     borderRadius: peekOpen ? "4px 4px 0 0" : 4,
-                    cursor: "pointer", fontFamily: mono,
+                    cursor: "pointer", fontFamily: T.code.fontFamily,
                   }}
                 >
-                  <span style={{ fontSize: 9, color: C.blue, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.blue, letterSpacing: "0.18em", textTransform: "uppercase" }}>
                     {peekOpen ? "▾" : "▸"} Data ({rows.length} obs, {headers.length} cols)
                   </span>
                 </button>
@@ -2095,7 +2095,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     background: C.surface2,
                     maxHeight: 180, overflowY: "auto", overflowX: "auto",
                   }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: 9 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                       <thead>
                         <tr>
                           {peekCols.map(col => (
@@ -2127,7 +2127,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       </tbody>
                     </table>
                     {peekCols.length < headers.length && (
-                      <div style={{ padding: "3px 8px", fontSize: 8, color: C.textMuted, fontFamily: mono, borderTop: `1px solid ${C.border}` }}>
+                      <div style={{ padding: "3px 8px", fontSize: 8, color: C.textMuted, fontFamily: T.code.fontFamily, borderTop: `1px solid ${C.border}` }}>
                         Showing {peekCols.length} of {headers.length} cols · first 8 rows
                       </div>
                     )}
@@ -2140,10 +2140,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           {!result && !err && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60%", gap: "1rem" }}>
               <div style={{ fontSize: 32, opacity: 0.15 }}>◈</div>
-              <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase" }}>
+              <div style={{ fontSize: T.code.fontSize, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase" }}>
                 Configure your model specification and click Estimate
               </div>
-              <div style={{ fontSize: 10, color: C.textMuted, maxWidth: 420, textAlign: "center", lineHeight: 1.8 }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, maxWidth: 420, textAlign: "center", lineHeight: 1.8 }}>
                 Supported estimators: OLS · Fixed Effects · First Differences · 2SLS/IV · DiD 2×2 · TWFE · Sharp RDD · Logit · Probit
               </div>
             </div>
@@ -2158,7 +2158,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 }}
                 style={{
                   padding: "3px 12px", borderRadius: 3, cursor: "pointer",
-                  fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.1em",
                   border: `1px solid ${C.border2}`, background: "transparent",
                   color: C.textMuted, transition: "all 0.12s",
                 }}
@@ -2174,7 +2174,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 }}
                 style={{
                   padding: "3px 12px", borderRadius: 3, cursor: "pointer",
-                  fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.1em",
                   border: `1px solid ${C.border2}`, background: "transparent",
                   color: C.textDim, transition: "all 0.12s",
                 }}
@@ -2188,7 +2188,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           {/* ── Coach Insights ── */}
           {coachingSignals.length > 0 && (
             <div style={{ marginBottom: "1.2rem" }}>
-              <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 8 }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 8 }}>
                 Coach Insights
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -2198,8 +2198,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   return (
                     <button key={s.id} title={s.detail + "\n\n" + s.suggestion + (clickable ? "\n\nClick to ask the AI coach" : "")}
                       onClick={clickable ? () => onCoachQuestion(s.question) : undefined}
-                      style={{ fontSize: 10, color: clr, border: `1px solid ${clr}`, borderRadius: 3,
-                               padding: "3px 8px", cursor: clickable ? "pointer" : "default", fontFamily: mono,
+                      style={{ fontSize: T.caption.fontSize, color: clr, border: `1px solid ${clr}`, borderRadius: 3,
+                               padding: "3px 8px", cursor: clickable ? "pointer" : "default", fontFamily: T.code.fontFamily,
                                background: clr + "12", transition: "opacity 0.12s" }}
                       onMouseEnter={e => { if (clickable) e.currentTarget.style.opacity = "0.75"; }}
                       onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
@@ -2218,9 +2218,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1.2rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.label} Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.label} Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
-                  <span style={{ fontSize: 12, color: C.textMuted }}>{yVar[0]} ~ {[...xVars, ...wVars].join(" + ")}</span>
+                  <span style={{ fontSize: T.code.fontSize, color: C.textMuted }}>{yVar[0]} ~ {[...xVars, ...wVars].join(" + ")}</span>
                 </div>
                 <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <FitBar items={[
@@ -2266,7 +2266,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   ]}
                 />
                 <Lbl color={C.textMuted}>Note on Significance</Lbl>
-                <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
                 <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model={r.type} />
@@ -2284,7 +2284,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1.2rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.label} Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.label} Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.spatialParam && <Badge label={`${r.spatialParam} = ${paramValue?.toFixed?.(4) ?? "—"}`} color={C.gold} />}
                   {ws.links != null && <Badge label={`W links = ${ws.links}`} color={C.textDim} />}
@@ -2303,7 +2303,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
                 </div>
                 {r.warnings?.length > 0 && (
-                  <div style={{ fontSize: 10, color: C.gold, fontFamily: mono, marginBottom: "1rem", lineHeight: 1.6 }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily, marginBottom: "1rem", lineHeight: 1.6 }}>
                     {r.warnings.map((w, i) => <div key={i}>- {w}</div>)}
                   </div>
                 )}
@@ -2355,7 +2355,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>IV-Poisson Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>IV-Poisson Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.jDf > 0 && <Badge label={`J ${r.jStat?.toFixed(3)} (p=${r.jPval?.toFixed(3)})`} color={r.jPval < 0.05 ? C.gold : C.teal} />}
                 </div>
@@ -2395,13 +2395,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Event Study Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Event Study Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   <Badge label={`${r.units ?? "?"} units`} color={C.textDim} />
                 </div>
                 {r.preTestStat != null && (
                   <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
-                    <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
                       Pre-trend F-test: F = {r.preTestStat?.toFixed(3) ?? "—"} · p = {r.preTestPval < 0.001 ? "<0.001" : r.preTestPval?.toFixed(4) ?? "—"}
                       {r.preTestPval < 0.05
                         ? <span style={{ color: C.red }}> ⚠ Pre-trend detected</span>
@@ -2437,7 +2437,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Sun & Abraham Event Study</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Sun & Abraham Event Study</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.nCohorts != null && <Badge label={`${r.nCohorts} treated cohorts`} color={C.textDim} />}
                   {r.droppedAlwaysTreated?.length > 0 && <Badge label={`${r.droppedAlwaysTreated.length} always-treated dropped`} color={C.gold} />}
@@ -2448,7 +2448,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <div style={{ display: "flex", gap: 10, marginBottom: "1rem", flexWrap: "wrap" }}>
                     {r.preTestStat != null && (
                       <div style={{ flex: "1 1 220px", padding: "0.7rem 1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${r.preTestPval < 0.05 ? C.red : C.teal}`, borderRadius: 4 }}>
-                        <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                        <div style={{ fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
                           Pre-trend Wald: χ²({r.preTestDf}) = {r.preTestStat?.toFixed(3) ?? "—"} · p = {r.preTestPval < 0.001 ? "<0.001" : r.preTestPval?.toFixed(4) ?? "—"}
                           {r.preTestPval < 0.05
                             ? <span style={{ color: C.red }}> ⚠ Pre-trend detected</span>
@@ -2458,7 +2458,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     )}
                     {r.postTestStat != null && (
                       <div style={{ flex: "1 1 220px", padding: "0.7rem 1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
-                        <div style={{ fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                        <div style={{ fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
                           Post-treatment Wald: χ²({r.postTestDf}) = {r.postTestStat?.toFixed(3) ?? "—"} · p = {r.postTestPval < 0.001 ? "<0.001" : r.postTestPval?.toFixed(4) ?? "—"}
                         </div>
                       </div>
@@ -2495,14 +2495,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Callaway-Sant'Anna DiD</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Callaway-Sant'Anna DiD</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.csNGroups != null && <Badge label={`${r.csNGroups} cohorts`} color={C.textDim} />}
                   {r.units != null && <Badge label={`${r.units} units`} color={C.textDim} />}
                   <Badge label={r.csCompGroup === "nevertreated" ? "Never-treated control" : "Not-yet-treated control"} color={C.blue} />
                 </div>
                 {r.att != null && (
-                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4, fontSize: 11, fontFamily: mono }}>
+                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
                     <span style={{ color: C.textMuted }}>Overall ATT: </span>
                     <span style={{ color: r.att >= 0 ? C.teal : C.red }}>{r.att >= 0 ? "+" : ""}{r.att.toFixed(4)}</span>
                     <span style={{ color: C.textMuted }}> (SE = {r.attSE?.toFixed(4) ?? "—"})</span>
@@ -2535,7 +2535,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>Panel LSDV Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.blue, letterSpacing: "0.24em", textTransform: "uppercase" }}>Panel LSDV Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.units != null && <Badge label={`${r.units} units`} color={C.textDim} />}
                   {r.timeFE && <Badge label="Time FE included" color={C.blue} />}
@@ -2568,7 +2568,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson GLM Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson GLM Results</span>
                   {r.hasOffset && <Badge label="rate model (offset)" color={C.teal} />}
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
@@ -2588,7 +2588,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     <Lbl color={C.textMuted}>Incidence Rate Ratios (IRR = exp(β))</Lbl>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {r.varNames.map((v, i) => (
-                        <div key={v} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                        <div key={v} style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
                           {v}: <span style={{ color: C.text }}>{r.IRR[i]?.toFixed(4) ?? "—"}</span>
                         </div>
                       ))}
@@ -2609,7 +2609,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson FE Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson FE Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.nFE > 1 && <Badge label={`${r.nFE}-way FE`} color="#9e7ec8" />}
                   {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
@@ -2625,7 +2625,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "BIC",     value: r.BIC?.toFixed(1)         ?? "—", color: C.textDim },
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
-                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: "0.8rem" }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: "0.8rem" }}>
                   {r.nFE > 1
                     ? `AIC/BIC penalty includes all FE dims (k = ${r.k} regressors + ${(r.feDims ?? []).reduce((s, d) => s + d.nLevels, 0)} FE levels − ${r.nFE - 1} normalization${r.nFE - 1 > 1 ? "s" : ""} — comparable to R fixest::fepois AIC)`
                     : `AIC/BIC penalty includes entity FEs (k = ${r.k} regressors + ${r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)`}
@@ -2637,7 +2637,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     <Lbl color={C.textMuted}>Absorbed Fixed-Effect Dimensions</Lbl>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {r.feDims.map(d => (
-                        <div key={d.col} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                        <div key={d.col} style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
                           {d.col}: <span style={{ color: C.text }}>{d.nLevels} levels</span>
                         </div>
                       ))}
@@ -2646,12 +2646,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 )}
                 {r.alphas && Object.keys(r.alphas).length > 0 && (
                   <details style={{ marginTop: "1rem" }}>
-                    <summary style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", userSelect: "none" }}>
+                    <summary style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", userSelect: "none" }}>
                       Entity fixed effects — {Object.keys(r.alphas).length} units (log-scale α̂ᵢ)
                     </summary>
                     <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 4 }}>
                       {Object.entries(r.alphas).sort(([a], [b]) => String(a).localeCompare(String(b), undefined, { numeric: true })).map(([unit, alpha]) => (
-                        <div key={unit} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "3px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                        <div key={unit} style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, background: C.surface2, padding: "3px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
                           {unit}:&nbsp;<span style={{ color: C.text }}>{Number(alpha).toFixed(4)}</span>
                         </div>
                       ))}
@@ -2663,7 +2663,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     <Lbl color={C.textMuted}>Incidence Rate Ratios (IRR = exp(β))</Lbl>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {r.varNames.map((v, i) => (
-                        <div key={v} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                        <div key={v} style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
                           {v}: <span style={{ color: C.text }}>{r.IRR[i]?.toFixed(4) ?? "—"}</span>
                         </div>
                       ))}
@@ -2684,18 +2684,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>Synthetic Control Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>Synthetic Control Results</span>
                   <Badge label={`treated: ${r.scTreatedUnit}`} color={C.gold} />
                   <Badge label={`T* = ${r.scTreatTime}`} color={C.textDim} />
                 </div>
                 <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.gold}30`, borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
-                  <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Fit Quality & Inference</div>
-                  <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Fit Quality & Inference</div>
+                  <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
                     Pre-RMSPE: {r.scRmspePre?.toFixed(6) ?? "—"} · Post-RMSPE: {r.scRmspePost?.toFixed(6) ?? "—"}
                     {r.scPValue != null && <span> · Placebo p-value: {r.scPValue?.toFixed(3)}</span>}
                   </div>
                   {r.scAtt != null && (
-                    <div style={{ fontSize: 11, color: C.gold, fontFamily: mono, marginTop: 4 }}>
+                    <div style={{ fontSize: T.code.fontSize, color: C.gold, fontFamily: T.code.fontFamily, marginTop: 4 }}>
                       ATT (avg. post-treatment effect): <span style={{ fontWeight: 600 }}>{r.scAtt.toFixed(4)}</span>
                     </div>
                   )}
@@ -2706,7 +2706,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     .sort(([, a], [, b]) => b - a)
                     .filter(([, w]) => w > 0.001)
                     .map(([unit, w]) => (
-                      <div key={unit} style={{ fontSize: 10, fontFamily: mono, color: C.textDim, background: C.surface2, padding: "4px 10px", borderRadius: 3, border: `1px solid ${C.border}` }}>
+                      <div key={unit} style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, background: C.surface2, padding: "4px 10px", borderRadius: 3, border: `1px solid ${C.border}` }}>
                         {unit}: <span style={{ color: C.gold }}>{(w * 100).toFixed(1)}%</span>
                       </div>
                     ))}
@@ -2741,20 +2741,20 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>
                     {result.type === "DiD" ? "DiD 2×2 Results" : "TWFE DiD Results"}
                   </span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                 </div>
                 {isATT && (
                   <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4 }}>
-                    <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
                       Average Treatment Effect on the Treated (ATT)
                     </div>
-                    <div style={{ fontSize: 24, color: r.attP < 0.05 ? C.teal : C.textDim, fontFamily: mono }}>
+                    <div style={{ fontSize: 24, color: r.attP < 0.05 ? C.teal : C.textDim, fontFamily: T.code.fontFamily }}>
                       {r.att >= 0 ? "+" : ""}{r.att.toFixed(4)}{stars(r.attP)}
                     </div>
-                    <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+                    <div style={{ fontSize: T.code.fontSize, color: C.textDim, marginTop: 4 }}>
                       SE = {r.attSE.toFixed(4)} · t = {r.attT.toFixed(3)} · p = {r.attP < 0.001 ? "<0.001" : r.attP.toFixed(4)}
                     </div>
                   </div>
@@ -2811,7 +2811,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 {/* ── Header ── */}
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 10, color, letterSpacing: "0.24em", textTransform: "uppercase" }}>
+                  <span style={{ fontSize: T.caption.fontSize, color, letterSpacing: "0.24em", textTransform: "uppercase" }}>
                     {family === "logit" ? "Logistic Regression" : "Probit"} Results
                   </span>
                   <Badge label={`n = ${r.n}`}  color={C.textDim} />
@@ -2854,19 +2854,19 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <>
                     <Lbl color={C.textMuted}>Marginal Effects at the Mean (MEM) · dP(Y=1)/dx</Lbl>
                     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: T.code.fontFamily }}>
                         <div>Variable</div>
                         <div style={{ textAlign: "right" }}>dP/dx at x̄</div>
                       </div>
                       {r.marginalEffects.map(({ variable, dy_dx }, i) => (
-                        <div key={variable} style={{ display: "grid", gridTemplateColumns: "2fr 1fr", padding: "0.55rem 0.75rem", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: i % 2 === 0 ? C.surface : C.surface2, fontFamily: mono }}>
-                          <div style={{ fontSize: 12, color: C.text }}>{variable}</div>
-                          <div style={{ textAlign: "right", fontSize: 13, color: dy_dx >= 0 ? C.green : C.red, fontFamily: mono }}>
+                        <div key={variable} style={{ display: "grid", gridTemplateColumns: "2fr 1fr", padding: "0.55rem 0.75rem", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: i % 2 === 0 ? C.surface : C.surface2, fontFamily: T.code.fontFamily }}>
+                          <div style={{ fontSize: T.code.fontSize, color: C.text }}>{variable}</div>
+                          <div style={{ textAlign: "right", fontSize: T.body.fontSize, color: dy_dx >= 0 ? C.green : C.red, fontFamily: T.code.fontFamily }}>
                             {dy_dx >= 0 ? "+" : ""}{dy_dx.toFixed(4)}
                           </div>
                         </div>
                       ))}
-                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
                         Evaluated at sample means of all covariates
                       </div>
                     </div>
@@ -2878,7 +2878,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <>
                     <Lbl color={C.textMuted}>Odds Ratios · exp(β) with 95% CI</Lbl>
                     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", background: C.surface, padding: "0.45rem 0.75rem", fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.13em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: T.code.fontFamily }}>
                         <div>Variable</div>
                         <div style={{ textAlign: "right" }}>OR</div>
                         <div style={{ textAlign: "right" }}>2.5%</div>
@@ -2887,15 +2887,15 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       {r.oddsRatios.map(({ variable, or, ciLo, ciHi }, i) => {
                         const isRef = variable === "(Intercept)";
                         return (
-                          <div key={variable} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", padding: "0.55rem 0.75rem", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: i % 2 === 0 ? C.surface : C.surface2, fontFamily: mono }}>
-                            <div style={{ fontSize: 12, color: isRef ? C.textMuted : C.text }}>{variable}</div>
-                            <div style={{ textAlign: "right", fontSize: 13, color: or >= 1 ? C.green : C.red }}>{or.toFixed(4)}</div>
-                            <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{ciLo.toFixed(4)}</div>
-                            <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{ciHi.toFixed(4)}</div>
+                          <div key={variable} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", padding: "0.55rem 0.75rem", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: i % 2 === 0 ? C.surface : C.surface2, fontFamily: T.code.fontFamily }}>
+                            <div style={{ fontSize: T.code.fontSize, color: isRef ? C.textMuted : C.text }}>{variable}</div>
+                            <div style={{ textAlign: "right", fontSize: T.body.fontSize, color: or >= 1 ? C.green : C.red }}>{or.toFixed(4)}</div>
+                            <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: C.textDim }}>{ciLo.toFixed(4)}</div>
+                            <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: C.textDim }}>{ciHi.toFixed(4)}</div>
                           </div>
                         );
                       })}
-                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                      <div style={{ padding: "0.35rem 0.75rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
                         OR &gt; 1 = positive association · OR &lt; 1 = negative association · CI based on ±1.96 × SE
                       </div>
                     </div>
@@ -2918,7 +2918,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 />
 
                 {/* ── Significance note ── */}
-                <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "1.4rem" }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · z-statistics · SE from Fisher information matrix
                 </div>
 
@@ -2944,7 +2944,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>
                     {isSpatial ? "Spatial RD Results" : "Sharp RDD Results"}
                   </span>
                   <Badge label={`bw = ${rdd.h?.toFixed(3) ?? "—"}`} color={C.textDim} />
@@ -2954,7 +2954,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   )}
                 </div>
                 <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
-                  <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
                     {isSpatial
                       ? "Local Average Treatment Effect (LATE) at the boundary"
                       : `Local Average Treatment Effect (LATE) at cutoff = ${rdd.cutoff}`}
@@ -2962,7 +2962,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <div style={{ fontSize: 24, color: r.lateP != null && r.lateP < 0.05 ? C.orange : C.textDim }}>
                     {r.late != null && isFinite(r.late) ? (r.late >= 0 ? "+" : "") + r.late.toFixed(4) : "N/A"}{r.lateP != null ? stars(r.lateP) : ""}
                   </div>
-                  <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+                  <div style={{ fontSize: T.code.fontSize, color: C.textDim, marginTop: 4 }}>
                     SE = {r.lateSE != null && isFinite(r.lateSE) ? r.lateSE.toFixed(4) : "N/A"} · p = {r.lateP != null && isFinite(r.lateP) ? (r.lateP < 0.001 ? "<0.001" : r.lateP.toFixed(4)) : "N/A"} · Kernel: {rdd.kernelType}
                   </div>
                 </div>
@@ -3044,13 +3044,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               style={{
                 width: "100%", display: "flex", alignItems: "center", gap: 8,
                 padding: "0.55rem 1rem", background: "none", border: "none",
-                cursor: "pointer", fontFamily: mono, fontSize: 10, color: C.textMuted,
+                cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted,
                 textAlign: "left",
               }}
             >
-              <span style={{ color: C.teal, fontSize: 11 }}>◈</span>
+              <span style={{ color: C.teal, fontSize: T.code.fontSize }}>◈</span>
               <span>Plot Builder</span>
-              <span style={{ marginLeft: "auto", fontSize: 9 }}>{plotOpen ? "▲" : "▼"}</span>
+              <span style={{ marginLeft: "auto", fontSize: T.caption.fontSize }}>{plotOpen ? "▲" : "▼"}</span>
             </button>
 
             {plotOpen && (
@@ -3064,7 +3064,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                         key={mode}
                         onClick={() => { setPlotDataMode(mode); setPlotTemplateKey(k => k + 1); setPlotInitLayers([]); }}
                         style={{
-                          padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer", borderRadius: 3,
+                          padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer", borderRadius: 3,
                           background: plotDataMode === mode ? `${C.teal}18` : "none",
                           border: `1px solid ${plotDataMode === mode ? C.teal + "60" : C.border}`,
                           color: plotDataMode === mode ? C.teal : C.textMuted,
@@ -3078,7 +3078,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
                 {/* G10 — Estimator templates */}
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
-                  <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center", marginRight: 2 }}>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, alignSelf: "center", marginRight: 2 }}>
                     Templates:
                   </span>
                   {[
@@ -3134,7 +3134,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                         setPlotTemplateKey(k => k + 1);
                       }}
                       style={{
-                        padding: "3px 8px", fontFamily: mono, fontSize: 9,
+                        padding: "3px 8px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                         background: "none", border: `1px solid ${C.border2}`,
                         borderRadius: 3, color: C.textDim, cursor: "pointer",
                       }}
@@ -3178,18 +3178,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
               <div onClick={() => { setPredOpen(o => !o); setPredResult(null); }}
                 style={{ background: C.surface2, padding: "0.55rem 0.85rem", borderBottom: predOpen ? `1px solid ${C.border}` : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 9, color: C.textMuted }}>{predOpen ? "▾" : "▸"}</span>
-                <span style={{ fontSize: 9, color: C.textDim, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono }}>Predict from Model</span>
-                <span style={{ marginLeft: "auto", fontSize: 9, color: C.textMuted }}>{pinnedModels.length} pinned</span>
+                <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{predOpen ? "▾" : "▸"}</span>
+                <span style={{ fontSize: T.caption.fontSize, color: C.textDim, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>Predict from Model</span>
+                <span style={{ marginLeft: "auto", fontSize: T.caption.fontSize, color: C.textMuted }}>{pinnedModels.length} pinned</span>
               </div>
               {predOpen && (
                 <div style={{ padding: "0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 10 }}>
                   {/* Model selector */}
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, letterSpacing: "0.14em", textTransform: "uppercase" }}>Model</span>
+                    <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.14em", textTransform: "uppercase" }}>Model</span>
                     <select value={predModelId || predModel?.id || ""}
                       onChange={e => { setPredModelId(e.target.value); setPredResult(null); }}
-                      style={{ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" }}>
+                      style={{ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none" }}>
                       {pinnedModels.map(m => (
                         <option key={m.id} value={m.id}>{m.label ?? m.estimator ?? m.id}</option>
                       ))}
@@ -3200,23 +3200,23 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {predVarNames.map(v => (
                         <div key={v} style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 90 }}>
-                          <span style={{ fontSize: 9, color: C.gold, fontFamily: mono }}>{v}</span>
+                          <span style={{ fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily }}>{v}</span>
                           <input type="number" step="any" value={inputs[v]}
                             onChange={e => setPredInputs(prev => ({ ...prev, [v]: e.target.value }))}
-                            style={{ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none", width: 90 }} />
+                            style={{ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none", width: 90 }} />
                         </div>
                       ))}
                     </div>
                   )}
                   <div>
                     <button onClick={runPredict}
-                      style={{ padding: "0.45rem 0.9rem", borderRadius: 3, cursor: "pointer", fontFamily: mono, fontSize: 11, background: C.teal, color: C.bg, border: `1px solid ${C.teal}`, fontWeight: 700 }}>
+                      style={{ padding: "0.45rem 0.9rem", borderRadius: 3, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, background: C.teal, color: C.bg, border: `1px solid ${C.teal}`, fontWeight: 700 }}>
                       Predict ŷ
                     </button>
                   </div>
                   {predResult && (
-                    <div style={{ background: `${C.teal}0a`, border: `1px solid ${C.teal}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: mono, fontSize: 11, color: C.text, lineHeight: 1.9 }}>
-                      <div><span style={{ color: C.textMuted }}>ŷ = </span><span style={{ color: C.teal, fontSize: 13 }}>{predResult.yhat.toFixed(6)}</span></div>
+                    <div style={{ background: `${C.teal}0a`, border: `1px solid ${C.teal}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text, lineHeight: 1.9 }}>
+                      <div><span style={{ color: C.textMuted }}>ŷ = </span><span style={{ color: C.teal, fontSize: T.body.fontSize }}>{predResult.yhat.toFixed(6)}</span></div>
                       {predResult.se > 0 && <>
                         <div><span style={{ color: C.textMuted }}>SE </span>{predResult.se.toFixed(6)}</div>
                         <div><span style={{ color: C.textMuted }}>95% CI </span>

@@ -9,7 +9,7 @@
 // Strings → clean_strings (quick)         | ai_tr (manual/AI)
 
 import { useState, useMemo } from "react";
-import { useTheme, mono, Lbl, Btn } from "./shared.jsx";
+import { useTheme, Lbl, Btn } from "./shared.jsx";
 import { callAI } from "./utils.js";
 import { detectNumberLocale, parseSmartNumber } from "../../pipeline/runner.js";
 
@@ -83,7 +83,7 @@ function applyManualPreview(raw, strips, replaceFrom, replaceTo, castMode) {
 
 // ─── NUMBER FORMATTER ─────────────────────────────────────────────────────────
 function NumberFormatter({ col, rows, onAdd }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tier,         setTier]         = useState("preset");  // preset | manual | ai
   const [localeId,     setLocaleId]     = useState("smart");
   const [strips,       setStrips]       = useState([]);
@@ -170,14 +170,14 @@ function NumberFormatter({ col, rows, onAdd }) {
       border: `1px solid ${tier === id ? C.teal : C.border2}`,
       background: tier === id ? `${C.teal}18` : "transparent",
       color: tier === id ? C.teal : C.textDim,
-      borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: mono,
+      borderRadius: 3, cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
     }}>{label}</button>
   );
 
   const inS = {
     padding: "0.38rem 0.6rem", background: C.surface2,
     border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text,
-    fontFamily: mono, fontSize: 11, outline: "none",
+    fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline: "none",
   };
 
   return (
@@ -199,10 +199,10 @@ function NumberFormatter({ col, rows, onAdd }) {
                 border: `1px solid ${localeId === p.id ? C.teal : C.border2}`,
                 background: localeId === p.id ? `${C.teal}14` : C.surface2,
                 color: localeId === p.id ? C.teal : C.textDim,
-                borderRadius: 4, cursor: "pointer", fontSize: 11, fontFamily: mono,
+                borderRadius: 4, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily,
               }}>
                 <div style={{ fontWeight: 600 }}>{p.label}</div>
-                <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>{p.desc}</div>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 2 }}>{p.desc}</div>
               </button>
             ))}
           </div>
@@ -216,7 +216,7 @@ function NumberFormatter({ col, rows, onAdd }) {
                 borderRadius: 3, transition: "width 0.2s",
               }} />
             </div>
-            <span style={{ fontSize: 10, fontFamily: mono, color: C.textMuted, whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textMuted, whiteSpace: "nowrap" }}>
               {presetPreview.parsed}/{presetPreview.total} parsed
             </span>
           </div>
@@ -237,7 +237,7 @@ function NumberFormatter({ col, rows, onAdd }) {
                   border: `1px solid ${on ? C.gold : C.border2}`,
                   background: on ? `${C.gold}18` : "transparent",
                   color: on ? C.gold : C.textDim,
-                  borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono,
+                  borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily,
                 }}>{sc.label}</button>
               );
             })}
@@ -247,7 +247,7 @@ function NumberFormatter({ col, rows, onAdd }) {
             <input value={replaceFrom} onChange={e => setReplaceFrom(e.target.value)}
               placeholder='Find (e.g. ",")'
               style={{ ...inS, width: 120 }} />
-            <span style={{ color: C.textMuted, fontFamily: mono }}>→</span>
+            <span style={{ color: C.textMuted, fontFamily: T.code.fontFamily }}>→</span>
             <input value={replaceTo} onChange={e => setReplaceTo(e.target.value)}
               placeholder='Replace with'
               style={{ ...inS, width: 120 }} />
@@ -260,7 +260,7 @@ function NumberFormatter({ col, rows, onAdd }) {
       {tier === "ai" && (
         <div>
           <div style={{
-            fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.65,
+            fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.65,
             padding: "0.6rem 0.85rem", background: `${C.purple}08`,
             border: `1px solid ${C.purple}20`, borderRadius: 4, marginBottom: "1rem",
           }}>
@@ -273,7 +273,7 @@ function NumberFormatter({ col, rows, onAdd }) {
           <div style={{
             padding: "0.5rem 0.75rem", background: C.surface2, borderRadius: 3,
             border: `1px solid ${C.border}`, marginBottom: "1rem",
-            fontSize: 11, fontFamily: mono, color: C.textDim, lineHeight: 1.8,
+            fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, lineHeight: 1.8,
           }}>
             {samples.map((v, i) => <span key={i} style={{ marginRight: 12 }}>{String(v)}</span>)}
           </div>
@@ -282,16 +282,16 @@ function NumberFormatter({ col, rows, onAdd }) {
             ch={aiState === "loading" ? "Analyzing…" : "✦ Ask Claude"} />
           {aiState === "done" && aiResult && (
             <div style={{ marginTop: "0.9rem", padding: "0.6rem 0.85rem", background: `${C.purple}08`, border: `1px solid ${C.purple}30`, borderRadius: 4 }}>
-              <div style={{ fontSize: 11, color: C.purple, fontFamily: mono, marginBottom: 6 }}>
+              <div style={{ fontSize: T.code.fontSize, color: C.purple, fontFamily: T.code.fontFamily, marginBottom: 6 }}>
                 ✦ {aiResult.description}
               </div>
-              <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
                 Preview: {aiResult.preview?.slice(0, 5).join(" · ") || "—"}
               </div>
             </div>
           )}
           {aiState === "err" && (
-            <div style={{ fontSize: 11, color: C.red, fontFamily: mono, marginTop: 8 }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginTop: 8 }}>
               AI unavailable. Check connection or API key.
             </div>
           )}
@@ -302,7 +302,7 @@ function NumberFormatter({ col, rows, onAdd }) {
       {canApply && (
         <div style={{ marginTop: "1rem", display: "flex", gap: 8, alignItems: "center" }}>
           <Btn onClick={apply} color={C.teal} v="solid" ch={`Apply to '${col}'`} />
-          <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
             Writes result back to the same column
           </span>
         </div>
@@ -313,7 +313,7 @@ function NumberFormatter({ col, rows, onAdd }) {
 
 // ─── STRING FORMATTER ─────────────────────────────────────────────────────────
 function StringFormatter({ col, rows, onAdd }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tier,        setTier]        = useState("quick");
   const [opts,        setOpts]        = useState({ stripPunct: true, normSep: false, ocrNoise: false, midWordSep: false, case: "title" });
   const [replaceFrom, setReplaceFrom] = useState("");
@@ -404,14 +404,14 @@ function StringFormatter({ col, rows, onAdd }) {
       border: `1px solid ${tier === id ? C.gold : C.border2}`,
       background: tier === id ? `${C.gold}18` : "transparent",
       color: tier === id ? C.gold : C.textDim,
-      borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: mono,
+      borderRadius: 3, cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
     }}>{label}</button>
   );
 
   const inS = {
     padding: "0.38rem 0.6rem", background: C.surface2,
     border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text,
-    fontFamily: mono, fontSize: 11, outline: "none",
+    fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline: "none",
   };
 
   return (
@@ -431,7 +431,7 @@ function StringFormatter({ col, rows, onAdd }) {
               ["midWordSep", "Remove mid-word separators  (Cla.ude → Claude)"],
               ["ocrNoise",   "Fix OCR/leet noise  (3 → e, @ → a, 0 → o, 1 → i, | → l)"],
             ].map(([k, l]) => (
-              <label key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontFamily: mono, color: C.textDim, cursor: "pointer" }}>
+              <label key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, cursor: "pointer" }}>
                 <input type="checkbox" checked={!!opts[k]}
                   onChange={e => setOpts(o => ({ ...o, [k]: e.target.checked }))}
                   style={{ accentColor: C.gold }} />
@@ -439,7 +439,7 @@ function StringFormatter({ col, rows, onAdd }) {
               </label>
             ))}
             <select value={opts.case} onChange={e => setOpts(o => ({ ...o, case: e.target.value }))}
-              style={{ padding: "0.28rem 0.55rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, fontFamily: mono, fontSize: 11 }}>
+              style={{ padding: "0.28rem 0.55rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
               {[["keep","Keep case"],["lower","lowercase"],["upper","UPPERCASE"],["title","Title Case"]].map(([v,l]) => (
                 <option key={v} value={v}>{l}</option>
               ))}
@@ -457,7 +457,7 @@ function StringFormatter({ col, rows, onAdd }) {
             <input value={replaceFrom} onChange={e => setReplaceFrom(e.target.value)}
               placeholder='Pattern (e.g. "-")'
               style={{ ...inS, width: 140 }} />
-            <span style={{ color: C.textMuted, fontFamily: mono }}>→</span>
+            <span style={{ color: C.textMuted, fontFamily: T.code.fontFamily }}>→</span>
             <input value={replaceTo} onChange={e => setReplaceTo(e.target.value)}
               placeholder='Replacement (empty = delete)'
               style={{ ...inS, flex: 1 }} />
@@ -470,7 +470,7 @@ function StringFormatter({ col, rows, onAdd }) {
       {tier === "ai" && (
         <div>
           <div style={{
-            fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.65,
+            fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.65,
             padding: "0.6rem 0.85rem", background: `${C.purple}08`,
             border: `1px solid ${C.purple}20`, borderRadius: 4, marginBottom: "1rem",
           }}>
@@ -483,7 +483,7 @@ function StringFormatter({ col, rows, onAdd }) {
           <div style={{
             padding: "0.5rem 0.75rem", background: C.surface2, borderRadius: 3,
             border: `1px solid ${C.border}`, marginBottom: "1rem",
-            fontSize: 11, fontFamily: mono, color: C.textDim, lineHeight: 1.8,
+            fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, lineHeight: 1.8,
           }}>
             {samples.map((v, i) => <span key={i} style={{ marginRight: 12 }}>"{String(v)}"</span>)}
           </div>
@@ -492,16 +492,16 @@ function StringFormatter({ col, rows, onAdd }) {
             ch={aiState === "loading" ? "Analyzing…" : "✦ Ask Claude"} />
           {aiState === "done" && aiResult && (
             <div style={{ marginTop: "0.9rem", padding: "0.6rem 0.85rem", background: `${C.purple}08`, border: `1px solid ${C.purple}30`, borderRadius: 4 }}>
-              <div style={{ fontSize: 11, color: C.purple, fontFamily: mono, marginBottom: 6 }}>
+              <div style={{ fontSize: T.code.fontSize, color: C.purple, fontFamily: T.code.fontFamily, marginBottom: 6 }}>
                 ✦ {aiResult.description}
               </div>
-              <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
                 Preview: {aiResult.preview?.slice(0, 5).join(" · ") || "—"}
               </div>
             </div>
           )}
           {aiState === "err" && (
-            <div style={{ fontSize: 11, color: C.red, fontFamily: mono, marginTop: 8 }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginTop: 8 }}>
               AI unavailable. Check connection or API key.
             </div>
           )}
@@ -511,7 +511,7 @@ function StringFormatter({ col, rows, onAdd }) {
       {canApply && (
         <div style={{ marginTop: "1rem", display: "flex", gap: 8, alignItems: "center" }}>
           <Btn onClick={apply} color={C.gold} v="solid" ch={`Apply to '${col}'`} />
-          <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
             Modifies column in-place
           </span>
         </div>
@@ -522,9 +522,10 @@ function StringFormatter({ col, rows, onAdd }) {
 
 // ─── SHARED PREVIEW TABLE ────────────────────────────────────────────────────
 function PreviewTable({ rows, C }) {
+  const { T } = useTheme();
   if (!rows?.length) return null;
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: mono, marginBottom: "0.5rem" }}>
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, marginBottom: "0.5rem" }}>
       <thead>
         <tr>
           <th style={{ textAlign: "left", color: C.textMuted, padding: "0.22rem 0.5rem", borderBottom: `1px solid ${C.border}`, width: "50%" }}>Raw</th>
@@ -541,7 +542,7 @@ function PreviewTable({ rows, C }) {
               <td style={{ padding: "0.22rem 0.5rem",
                 color: isNull ? C.red : unchanged ? C.textMuted : C.teal }}>
                 {r.out}
-                {unchanged && !isNull && <span style={{ color: C.textMuted, marginLeft: 4, fontSize: 9 }}>(unchanged)</span>}
+                {unchanged && !isNull && <span style={{ color: C.textMuted, marginLeft: 4, fontSize: T.caption.fontSize }}>(unchanged)</span>}
               </td>
             </tr>
           );
@@ -554,7 +555,7 @@ function PreviewTable({ rows, C }) {
 // ─── FORMAT TAB ───────────────────────────────────────────────────────────────
 // mode prop — when passed from WranglingModule, locks to "numbers" or "strings" (no toggle shown)
 export default function FormatTab({ rows, headers, info, onAdd, mode: modeProp }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [mode,   setMode]   = useState(modeProp ?? "numbers");
   const [selCol, setSelCol] = useState("");
 
@@ -572,7 +573,7 @@ export default function FormatTab({ rows, headers, info, onAdd, mode: modeProp }
     border: `1px solid ${active ? C.teal : C.border2}`,
     background: active ? `${C.teal}14` : "transparent",
     color: active ? C.teal : C.textDim,
-    borderRadius: 3, cursor: "pointer", fontSize: 11, fontFamily: mono,
+    borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily,
     transition: "all 0.12s",
   });
 
@@ -592,10 +593,10 @@ export default function FormatTab({ rows, headers, info, onAdd, mode: modeProp }
               border: `1px solid ${mode === k ? C.teal : C.border2}`,
               background: mode === k ? `${C.teal}14` : "transparent",
               color: mode === k ? C.teal : C.textDim,
-              borderRadius: 4, cursor: "pointer", fontSize: 11, fontFamily: mono,
+              borderRadius: 4, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily,
             }}>
               {l}
-              <span style={{ fontSize: 9, color: mode === k ? C.teal : C.textMuted,
+              <span style={{ fontSize: T.caption.fontSize, color: mode === k ? C.teal : C.textMuted,
                 background: `${mode === k ? C.teal : C.border2}30`,
                 borderRadius: 10, padding: "0.1rem 0.45rem" }}>{n}</span>
             </button>
@@ -605,7 +606,7 @@ export default function FormatTab({ rows, headers, info, onAdd, mode: modeProp }
 
       {/* Column picker */}
       {activeCols.length === 0 ? (
-        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono, padding: "0.75rem" }}>
+        <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, padding: "0.75rem" }}>
           {mode === "numbers"
             ? "No columns found."
             : "No string columns detected."}
@@ -617,7 +618,7 @@ export default function FormatTab({ rows, headers, info, onAdd, mode: modeProp }
             {activeCols.map(h => (
               <button key={h} onClick={() => setSelCol(h)} style={chipStyle(selCol === h)}>
                 {selCol === h ? "✓ " : ""}{h}
-                <span style={{ fontSize: 9, color: C.textMuted, marginLeft: 4 }}>
+                <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 4 }}>
                   ({info[h]?.uCount ?? "?"})
                 </span>
               </button>
@@ -627,8 +628,8 @@ export default function FormatTab({ rows, headers, info, onAdd, mode: modeProp }
           {selCol && (
             <div style={{ border: `1px solid ${C.teal}25`, borderRadius: 4, padding: "1rem", background: C.surface }}>
               <div style={{
-                fontSize: 10, color: C.teal, letterSpacing: "0.15em", textTransform: "uppercase",
-                fontFamily: mono, marginBottom: "0.9rem",
+                fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.15em", textTransform: "uppercase",
+                fontFamily: T.code.fontFamily, marginBottom: "0.9rem",
               }}>
                 {mode === "numbers" ? "⬡ Format Numbers" : "◈ Format Strings"} — <span style={{ color: C.text }}>{selCol}</span>
               </div>

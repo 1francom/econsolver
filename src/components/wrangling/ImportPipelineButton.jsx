@@ -15,7 +15,7 @@
 //   onImport(steps)  — replace the current pipeline atomically.
 
 import { useRef, useState } from "react";
-import { useTheme, mono } from "./shared.jsx";
+import { useTheme } from "./shared.jsx";
 import { STEP_TYPES } from "../../pipeline/registry.js";
 import { isSafeExpr } from "../../pipeline/exprGuard.js";
 
@@ -31,7 +31,7 @@ function exprFieldsOf(s) {
 }
 
 function ImportPipelineButton({ currentLength = 0, onImport }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const fileRef = useRef(null);
   const [error, setError]     = useState("");
   const [pending, setPending] = useState(null); // { steps, source } awaiting confirm
@@ -103,7 +103,7 @@ function ImportPipelineButton({ currentLength = 0, onImport }) {
         onClick={pick}
         style={{
           padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
-          fontFamily:mono, fontSize:10,
+          fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
           background: "transparent", color: C.textDim,
           border:`1px solid ${C.border2}`, transition:"all 0.12s",
         }}
@@ -122,7 +122,7 @@ function ImportPipelineButton({ currentLength = 0, onImport }) {
           position:"absolute", right:0, top:"calc(100% + 4px)",
           padding:"0.5rem 0.75rem", background:C.surface2,
           border:`1px solid ${C.red}`, borderLeft:`3px solid ${C.red}`,
-          borderRadius:3, color:C.red, fontFamily:mono, fontSize:10,
+          borderRadius:3, color:C.red, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
           maxWidth:280, lineHeight:1.5, zIndex:100,
         }}>
           ⚠ {error}
@@ -130,7 +130,7 @@ function ImportPipelineButton({ currentLength = 0, onImport }) {
             <button onClick={()=>setError("")}
               style={{ padding:"0.18rem 0.55rem", background:"transparent",
                 border:`1px solid ${C.border2}`, color:C.textDim,
-                borderRadius:2, cursor:"pointer", fontSize:10, fontFamily:mono }}>
+                borderRadius:2, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily }}>
               Dismiss
             </button>
           </div>
@@ -148,15 +148,15 @@ function ImportPipelineButton({ currentLength = 0, onImport }) {
             borderRadius:6, padding:"1.2rem 1.4rem", minWidth:360, maxWidth:480,
             zIndex:201, boxShadow:"0 12px 40px #000c",
           }}>
-            <div style={{ fontSize:10, color:C.gold, letterSpacing:"0.18em",
-              textTransform:"uppercase", marginBottom:8, fontFamily:mono }}>
+            <div style={{ fontSize: T.caption.fontSize, color:C.gold, letterSpacing:"0.18em",
+              textTransform:"uppercase", marginBottom:8, fontFamily: T.code.fontFamily }}>
               Replace pipeline?
             </div>
-            <div style={{ fontSize:12, color:C.text, fontFamily:mono, lineHeight:1.6, marginBottom:14 }}>
+            <div style={{ fontSize: T.code.fontSize, color:C.text, fontFamily: T.code.fontFamily, lineHeight:1.6, marginBottom:14 }}>
               The current pipeline has <span style={{color:C.gold}}>{currentLength}</span>{" "}
               step{currentLength!==1?"s":""}. Importing{" "}
               <span style={{color:C.teal}}>{pending.source}</span> ({pending.steps.length} step{pending.steps.length!==1?"s":""}) will replace it.
-              <div style={{ fontSize:10, color:C.textMuted, marginTop:8 }}>
+              <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, marginTop:8 }}>
                 You can undo with the History panel.
               </div>
             </div>
@@ -164,13 +164,13 @@ function ImportPipelineButton({ currentLength = 0, onImport }) {
               <button onClick={()=>setPending(null)}
                 style={{ padding:"0.4rem 0.85rem", background:"transparent",
                   border:`1px solid ${C.border2}`, color:C.textDim,
-                  borderRadius:3, cursor:"pointer", fontSize:11, fontFamily:mono }}>
+                  borderRadius:3, cursor:"pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
                 Cancel
               </button>
               <button onClick={confirmReplace}
                 style={{ padding:"0.4rem 0.85rem", background:`${C.teal}18`,
                   border:`1px solid ${C.teal}`, color:C.teal,
-                  borderRadius:3, cursor:"pointer", fontSize:11, fontFamily:mono }}>
+                  borderRadius:3, cursor:"pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
                 Replace
               </button>
             </div>

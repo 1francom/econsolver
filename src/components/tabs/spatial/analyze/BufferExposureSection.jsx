@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
+
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessWktCol } from "../shared/guess.js";
 import { countBuffersIntersectingGrid, dissolveBuffers, gridExposureShare } from "../../../../math/SpatialEngine.js";
@@ -17,11 +18,12 @@ function datasetList(rows, headers, availableDatasets) {
 }
 
 function DatasetSelect({ label, value, onChange, datasets, C }) {
+  const { T } = useTheme();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>{label}</label>
+      <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>{label}</label>
       <select value={value} onChange={e => onChange(e.target.value)}
-        style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+        style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
         {datasets.map(ds => <option key={ds.id} value={ds.id}>{ds.name}</option>)}
       </select>
     </div>
@@ -33,6 +35,7 @@ function defaultWkt(headers) {
 }
 
 export function BufferExposureSection({ rows, headers, availableDatasets, C, onResult }) {
+  const { T } = useTheme();
   const datasets = useMemo(() => datasetList(rows, headers, availableDatasets), [rows, headers, availableDatasets]);
   const [bufferId, setBufferId] = useState("active");
   const [gridId, setGridId] = useState(availableDatasets[0]?.id ?? "active");
@@ -91,13 +94,13 @@ export function BufferExposureSection({ rows, headers, availableDatasets, C, onR
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Computes dissolved buffer exposure share per grid cell and/or the number of individual buffer polygons intersecting each cell.
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {[["both", "Share + count"], ["share", "Exposure share"], ["count", "Overlap count"]].map(([v, label]) => (
           <button key={v} onClick={() => setMode(v)}
-            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+            style={{ padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: mode === v ? `${C.teal}18` : "transparent",
               border: `1px solid ${mode === v ? C.teal : C.border2}`,
               borderRadius: 3, color: mode === v ? C.teal : C.textDim }}>
@@ -115,7 +118,7 @@ export function BufferExposureSection({ rows, headers, availableDatasets, C, onR
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Compute exposure" />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {result.rows.length} grid cells</span>}
+        {result && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>OK: {result.rows.length} grid cells</span>}
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={[effectiveGridId, ...result.cols]} C={C} />}

@@ -15,7 +15,7 @@
 //   onCancelDelete  — cancel pending delete
 
 import { useState } from "react";
-import { useTheme, mono, Lbl } from "./shared.jsx";
+import { useTheme, Lbl } from "./shared.jsx";
 
 // ── Step type → accent color ──────────────────────────────────────────────────
 const typeColor = C => ({
@@ -43,7 +43,7 @@ const TYPE_ICON = {
 
 // ── Undo / Redo button ────────────────────────────────────────────────────────
 function UndoBtn({ label, title, onClick, enabled }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <button
       onClick={onClick}
@@ -54,8 +54,8 @@ function UndoBtn({ label, title, onClick, enabled }) {
         border: "none",
         color: enabled ? C.textDim : C.textMuted,
         cursor: enabled ? "pointer" : "default",
-        fontFamily: mono,
-        fontSize: 13,
+        fontFamily: T.code.fontFamily,
+        fontSize: T.body.fontSize,
         padding: "1px 5px",
         borderRadius: 3,
         opacity: enabled ? 1 : 0.3,
@@ -69,7 +69,7 @@ function UndoBtn({ label, title, onClick, enabled }) {
 }
 
 function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [patchOpen, setPatchOpen] = useState(false);
   if (!pipeline.length && !canUndo && !canRedo) return null;
 
@@ -102,10 +102,10 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
           title="Clear all pipeline steps"
           style={{
             marginLeft: 2,
-            fontSize: 9, background: "transparent", border: "none",
+            fontSize: T.caption.fontSize, background: "transparent", border: "none",
             color: pipeline.length ? C.textMuted : C.border,
             cursor: pipeline.length ? "pointer" : "default",
-            fontFamily: mono, padding: "2px 4px",
+            fontFamily: T.code.fontFamily, padding: "2px 4px",
             opacity: pipeline.length ? 1 : 0.4,
           }}
         >
@@ -117,7 +117,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
       <div style={{ flex: 1, overflowY: "auto", padding: "0.6rem 1rem" }}>
         {branchPointIndex !== null && (
           <div style={{
-            fontSize: 9, color: C.gold, fontFamily: mono, lineHeight: 1.6,
+            fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily, lineHeight: 1.6,
             padding: "4px 6px", marginBottom: 4,
             background: `${C.gold}0d`, borderRadius: 3, border: `1px solid ${C.gold}30`,
           }}>
@@ -126,7 +126,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
           </div>
         )}
         {pipeline.length === 0 ? (
-          <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono,
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
             textAlign: "center", paddingTop: "1rem", lineHeight: 1.8 }}>
             No steps yet.<br/>
             Add transformations<br/>in any tab.
@@ -150,11 +150,11 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                     cursor: "pointer",
                     userSelect: "none",
                   }}>
-                  <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily, flexShrink: 0 }}>
                     {patchOpen ? "▾" : "▸"}
                   </span>
-                  <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>✎</span>
-                  <span style={{ flex: 1, fontSize: 10, color: C.textDim, fontFamily: mono }}>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily, flexShrink: 0 }}>✎</span>
+                  <span style={{ flex: 1, fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
                     Cell edits ({patches.length})
                   </span>
                   {onClearPatches && (
@@ -164,8 +164,8 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                       style={{
                         background: "transparent", border: "none",
                         color: C.textMuted, cursor: "pointer",
-                        fontSize: 9, padding: "0 2px", flexShrink: 0,
-                        fontFamily: mono,
+                        fontSize: T.caption.fontSize, padding: "0 2px", flexShrink: 0,
+                        fontFamily: T.code.fontFamily,
                       }}
                     >
                       clear
@@ -187,9 +187,9 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                         padding: "0.28rem 0.5rem",
                         borderBottom: `1px solid ${C.border}`,
                       }}>
-                        <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>✎</span>
+                        <span style={{ fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily, flexShrink: 0 }}>✎</span>
                         <span style={{
-                          flex: 1, fontSize: 9, color: C.textDim, fontFamily: mono,
+                          flex: 1, fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily,
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                         }}>
                           {s.desc || `row ${(s.ri ?? 0) + 1} · ${s.col}`}
@@ -200,7 +200,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                           style={{
                             background: "transparent", border: "none",
                             color: C.textMuted, cursor: "pointer",
-                            fontSize: 11, padding: "0 2px", flexShrink: 0,
+                            fontSize: T.code.fontSize, padding: "0 2px", flexShrink: 0,
                           }}
                         >
                           ×
@@ -237,20 +237,20 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                   }}>
                     <span style={{
                       fontSize: 8, color: isTarget ? C.red : isDownstream ? C.yellow : C.textMuted,
-                      fontFamily: mono, flexShrink: 0, minWidth: 12, textAlign: "right",
+                      fontFamily: T.code.fontFamily, flexShrink: 0, minWidth: 12, textAlign: "right",
                     }}>
                       {i + 1}
                     </span>
                     <span style={{
                       fontSize: 8, color: isTarget ? C.red : isDownstream ? C.yellow : col,
-                      fontFamily: mono, flexShrink: 0, minWidth: 14, textAlign: "center",
+                      fontFamily: T.code.fontFamily, flexShrink: 0, minWidth: 14, textAlign: "center",
                     }}>
                       {isDownstream ? "!" : ico}
                     </span>
                     <span style={{
-                      flex: 1, fontSize: 10,
+                      flex: 1, fontSize: T.caption.fontSize,
                       color: isTarget ? C.red : isDownstream ? C.yellow : C.textDim,
-                      fontFamily: mono,
+                      fontFamily: T.code.fontFamily,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       textDecoration: isTarget ? "line-through" : "none",
                     }}>
@@ -263,7 +263,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                         background: "transparent", border: "none",
                         color: isTarget ? C.red : C.textMuted,
                         cursor: isBlocked ? "not-allowed" : "pointer",
-                        fontSize: 11, padding: "0 2px", flexShrink: 0,
+                        fontSize: T.code.fontSize, padding: "0 2px", flexShrink: 0,
                         opacity: isBlocked && !isTarget ? 0.3 : 1,
                       }}
                     >
@@ -281,7 +281,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                       borderRadius: "0 0 3px 3px",
                       marginBottom: 2,
                     }}>
-                      <div style={{ fontSize: 9, color: C.red, fontFamily: mono, marginBottom: 6 }}>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginBottom: 6 }}>
                         {pendingDelete.downstreamCount} step{pendingDelete.downstreamCount > 1 ? "s" : ""} after this may be affected.
                       </div>
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -290,7 +290,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                           style={{
                             padding: "0.25rem 0.6rem", background: "transparent",
                             border: `1px solid ${C.red}70`, borderRadius: 3,
-                            color: C.red, cursor: "pointer", fontFamily: mono, fontSize: 9,
+                            color: C.red, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                           }}
                         >
                           Delete this step
@@ -300,7 +300,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                           style={{
                             padding: "0.25rem 0.6rem", background: `${C.red}30`,
                             border: `1px solid ${C.red}`, borderRadius: 3,
-                            color: C.red, cursor: "pointer", fontFamily: mono, fontSize: 9,
+                            color: C.red, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                             fontWeight: 700,
                           }}
                         >
@@ -311,7 +311,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                           style={{
                             padding: "0.25rem 0.6rem", background: "transparent",
                             border: `1px solid ${C.border2}`, borderRadius: 3,
-                            color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9,
+                            color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                           }}
                         >
                           Cancel
@@ -334,7 +334,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                     <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : "#555" }} />
                     <span style={{
                       fontSize: 8, color: isActiveBranch ? C.gold : "#888",
-                      fontFamily: mono, letterSpacing: "0.1em", flexShrink: 0,
+                      fontFamily: T.code.fontFamily, letterSpacing: "0.1em", flexShrink: 0,
                     }}>
                       {isActiveBranch ? "⊣ branch" : "⊣"}
                     </span>
@@ -351,7 +351,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
         <div style={{
           padding: "0.4rem 1rem",
           borderTop: `1px solid ${C.border}`,
-          fontSize: 9, color: C.textMuted, fontFamily: mono,
+          fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
           flexShrink: 0,
         }}>
           {branchPointIndex !== null

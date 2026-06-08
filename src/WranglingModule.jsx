@@ -25,7 +25,7 @@ import AuditTrail        from "./components/validation/AuditTrail.jsx";
 import { auditPipeline } from "./pipeline/auditor.js";
 
 // ── Shared atoms ───────────────────────────────────────────────────────────
-import { useTheme, mono, Tabs } from "./components/wrangling/shared.jsx";
+import { useTheme, Tabs } from "./components/wrangling/shared.jsx";
 
 // ── Persistence — IndexedDB (replaces localStorage 5MB cap) ───────────────
 import {
@@ -436,7 +436,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
               Data Studio · Wrangling
             </div>
             <div style={{ fontSize:19, letterSpacing:"-0.02em", marginBottom:3 }}>{filename}</div>
-            <div style={{ fontSize:11, color:C.textDim }}>
+            <div style={{ fontSize: T.code.fontSize, color:C.textDim }}>
               <span style={{ color:C.gold }}>
                 {rawData._duckdb ? rawData._duckdb.rowCount.toLocaleString() : rawData.rows.length}
               </span> raw ·{" "}
@@ -455,23 +455,23 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
           <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
             {rawData._duckdb && (
-              <span style={{ fontSize:9, padding:"2px 6px", border:`1px solid ${C.teal}`,
+              <span style={{ fontSize: T.caption.fontSize, padding:"2px 6px", border:`1px solid ${C.teal}`,
                 color:C.teal, borderRadius:2, letterSpacing:"0.1em",
-                fontFamily:mono, whiteSpace:"nowrap" }}>
+                fontFamily: T.code.fontFamily, whiteSpace:"nowrap" }}>
                 ⚡ DuckDB{rawData._duckdb.truncated ? ` · showing 2,000,000 of ${rawData._duckdb.rowCount.toLocaleString()}` : ""}
               </span>
             )}
             {panel && (
-              <span style={{ fontSize:9, padding:"2px 6px", border:`1px solid ${C.blue}`,
+              <span style={{ fontSize: T.caption.fontSize, padding:"2px 6px", border:`1px solid ${C.blue}`,
                 color:C.blue, borderRadius:2, letterSpacing:"0.1em",
-                fontFamily:mono, whiteSpace:"nowrap" }}>
+                fontFamily: T.code.fontFamily, whiteSpace:"nowrap" }}>
                 i={panel.entityCol}·t={panel.timeCol}
               </span>
             )}
             {dataDictionary && Object.values(dataDictionary).some(v => v) && (
-              <span style={{ fontSize:9, padding:"2px 6px", border:`1px solid ${C.violet}`,
+              <span style={{ fontSize: T.caption.fontSize, padding:"2px 6px", border:`1px solid ${C.violet}`,
                 color:C.violet, borderRadius:2, letterSpacing:"0.1em",
-                fontFamily:mono, whiteSpace:"nowrap" }}>
+                fontFamily: T.code.fontFamily, whiteSpace:"nowrap" }}>
                 ◈ dict
               </span>
             )}
@@ -481,7 +481,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                 onClick={() => setAiActionsOpen(o => !o)}
                 style={{
                   padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
-                  fontFamily:mono, fontSize:10, transition:"all 0.12s",
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.12s",
                   background: aiActionsOpen ? `${C.violet}18` : "transparent",
                   color: aiActionsOpen ? C.violet : C.textDim,
                   border:`1px solid ${aiActionsOpen ? C.violet : C.border2}`,
@@ -503,28 +503,28 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                       style={{
                         width:"100%", padding:"0.65rem 1rem", textAlign:"left",
                         background:"transparent", border:"none", borderBottom:`1px solid ${C.border}`,
-                        cursor:"pointer", fontFamily:mono, fontSize:11, color:C.text,
+                        cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color:C.text,
                         transition:"background 0.1s",
                       }}
                       onMouseEnter={e => e.currentTarget.style.background=`${C.violet}18`}
                       onMouseLeave={e => e.currentTarget.style.background="transparent"}
                     >
                       <div style={{ ...T.label, color:C.violet, marginBottom:2 }}>Suggest Cleaning</div>
-                      <div style={{ fontSize:9, color:C.textDim }}>AI-powered data quality recommendations</div>
+                      <div style={{ fontSize: T.caption.fontSize, color:C.textDim }}>AI-powered data quality recommendations</div>
                     </button>
                     <button
                       onClick={() => { setAiActionsOpen(false); setTab("dictionary"); }}
                       style={{
                         width:"100%", padding:"0.65rem 1rem", textAlign:"left",
                         background:"transparent", border:"none",
-                        cursor:"pointer", fontFamily:mono, fontSize:11, color:C.text,
+                        cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color:C.text,
                         transition:"background 0.1s",
                       }}
                       onMouseEnter={e => e.currentTarget.style.background=`${C.violet}18`}
                       onMouseLeave={e => e.currentTarget.style.background="transparent"}
                     >
                       <div style={{ ...T.label, color:C.violet, marginBottom:2 }}>Generate Data Dictionary</div>
-                      <div style={{ fontSize:9, color:C.textDim }}>Infer variable descriptions with AI</div>
+                      <div style={{ fontSize: T.caption.fontSize, color:C.textDim }}>Infer variable descriptions with AI</div>
                     </button>
                   </div>
                 </>
@@ -539,7 +539,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                 <button
                   onClick={() => { setShowSaveSubset(o => !o); setSubsetName(""); }}
                   style={{ padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
-                    fontFamily:mono, fontSize:10, transition:"all 0.12s",
+                    fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.12s",
                     background: showSaveSubset ? `${C.teal}18` : "transparent",
                     color: showSaveSubset ? C.teal : C.textDim,
                     border:`1px solid ${showSaveSubset ? C.teal : C.border2}` }}>
@@ -555,10 +555,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                       borderRadius:4, padding:"0.85rem", zIndex:99,
                       minWidth:280, boxShadow:"0 8px 24px #000c",
                     }}>
-                      <div style={{ ...T.label, color:C.teal, fontFamily:mono, marginBottom:6 }}>
+                      <div style={{ ...T.label, color:C.teal, fontFamily: T.code.fontFamily, marginBottom:6 }}>
                         Save current dataset
                       </div>
-                      <div style={{ fontSize:10, color:C.textDim, fontFamily:mono, marginBottom:8, lineHeight:1.5 }}>
+                      <div style={{ fontSize: T.caption.fontSize, color:C.textDim, fontFamily: T.code.fontFamily, marginBottom:8, lineHeight:1.5 }}>
                         {rows.length.toLocaleString()} rows · {headers.length} cols
                         {pipeline.length > 0 && ` · ${pipeline.length} pipeline step${pipeline.length !== 1 ? "s" : ""} applied`}
                       </div>
@@ -571,13 +571,13 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                         style={{ width:"100%", boxSizing:"border-box",
                           padding:"0.38rem 0.6rem", background:C.surface,
                           border:`1px solid ${C.border2}`, borderRadius:3,
-                          color:C.text, fontFamily:mono, fontSize:11,
+                          color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
                           outline:"none", marginBottom:8 }}/>
                       <button onClick={doSaveSubset} style={{
                         width:"100%", padding:"0.42rem",
                         background:C.teal, color:C.bg,
                         border:`1px solid ${C.teal}`, borderRadius:3,
-                        cursor:"pointer", fontFamily:mono, fontSize:11, fontWeight:700,
+                        cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, fontWeight:700,
                       }}>
                         Add to Dataset Manager →
                       </button>
@@ -593,14 +593,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                   setAuditTrail(trail);
                 }}
                 style={{ padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
-                  fontFamily:mono, fontSize:10, transition:"all 0.12s",
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.12s",
                   background:"transparent", color:C.teal,
                   border:`1px solid ${C.teal}` }}>
                 ◈ Audit
               </button>
             )}
             <button onClick={proceed} style={{ padding:"0.28rem 0.65rem", borderRadius:3,
-              cursor:"pointer", fontFamily:mono, fontSize:10,
+              cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
               background:C.gold, color:C.bg,
               border:`1px solid ${C.gold}`, fontWeight:700 }}>
               Proceed →
@@ -688,12 +688,12 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         )}
         {tab === "reshape" && (
           <div>
-            <div style={{marginBottom:"0.75rem",fontSize:10,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>
+            <div style={{marginBottom:"0.75rem",fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>
               Reshape
             </div>
             <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
             <div style={{margin:"1.2rem 0 0.75rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.2rem"}}>
-              <div style={{marginBottom:"0.75rem",fontSize:10,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>
+              <div style={{marginBottom:"0.75rem",fontSize: T.caption.fontSize,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>
                 Merge
               </div>
               <MergeTab rows={rows} headers={headers} filename={filename}
