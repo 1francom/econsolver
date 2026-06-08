@@ -239,7 +239,8 @@ function EquationPicker({ savedEqs, onLoad, label = "Load ▾" }) {
 }
 
 // ─── MATH PAD (LaTeX editor + KaTeX live preview + Overleaf export) ──────────
-function MathPad({ C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFieldRef }) {
+function MathPad({ C: _C, savedEqs, setSavedEqs, padJsExpr, setPadJsExpr, activeFieldRef }) {
+  const { C, T } = useTheme();
   const [latex, setLatex] = useState("Y = A K^{\\alpha} L^{1-\\alpha}");
   const [katexLoaded, setKatexLoaded] = useState(typeof window !== "undefined" && !!window.katex);
   const [eqName, setEqName] = useState("");
