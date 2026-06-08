@@ -2,7 +2,7 @@
 // NormalizePanel, StandardizeDialog, Auditor, ColCard,
 // FilterBuilder (ConditionRow, FilterPreview), FillNaSection, CleanTab.
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useTheme, mono, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.jsx";
+import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { detectNumberLocale, parseSmartNumber } from "../../pipeline/runner.js";
 import { computeColStats } from "../../services/data/duckdb.js";
@@ -10,7 +10,7 @@ import { computeColStats } from "../../services/data/duckdb.js";
 // ─── STANDARDIZE DIALOG (inline) ─────────────────────────────────────────────
 // NormalizePanel was removed; ColCard recode action covers that use case.
 function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [selCol, setSelCol]     = useState("");
   const [clusters, setClusters] = useState([]);
   const [rawVals, setRawVals]   = useState([]);
@@ -81,12 +81,12 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
         display: "flex", alignItems: "center", gap: 8,
       }}>
         <span style={{
-          fontSize: 10, color: C.teal, letterSpacing: "0.18em",
-          textTransform: "uppercase", fontFamily: mono, flex: 1,
+          fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.18em",
+          textTransform: "uppercase", fontFamily: T.code.fontFamily, flex: 1,
         }}>
           ⬡ Normalize Text Categories
         </span>
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
           fuzzy-match · Levenshtein
         </span>
       </div>
@@ -94,7 +94,7 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
       <div style={{ padding: "1rem" }}>
         {/* How it works */}
         <div style={{
-          fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.65,
+          fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.65,
           marginBottom: "1rem", padding: "0.6rem 0.8rem",
           background: C.surface2, borderRadius: 3,
           border: `1px solid ${C.border}`,
@@ -109,7 +109,7 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
 
         {/* Column selector */}
         {catCols.length === 0 ? (
-          <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>
+          <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
             No categorical columns detected in the current dataset.
           </div>
         ) : (
@@ -123,11 +123,11 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
                     border: `1px solid ${selCol === h ? C.teal : C.border2}`,
                     background: selCol === h ? `${C.teal}18` : "transparent",
                     color: selCol === h ? C.teal : C.textDim,
-                    borderRadius: 3, cursor: "pointer", fontSize: 11,
-                    fontFamily: mono, transition: "all 0.12s",
+                    borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize,
+                    fontFamily: T.code.fontFamily, transition: "all 0.12s",
                   }}>
                   {selCol === h ? "✓ " : ""}{h}
-                  <span style={{ fontSize: 9, color: C.textMuted, marginLeft: 4 }}>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 4 }}>
                     ({info[h]?.uCount})
                   </span>
                 </button>
@@ -137,7 +137,7 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
             {/* No clusters found */}
             {selCol && !hasClusters && (
               <div style={{
-                fontSize: 11, fontFamily: mono, lineHeight: 1.6,
+                fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, lineHeight: 1.6,
                 padding: "0.7rem 0.9rem",
                 background: `${C.green}0a`,
                 border: `1px solid ${C.green}30`,
@@ -161,7 +161,7 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
                   <Lbl mb={0} color={C.teal}>
                     {clusters.length} group{clusters.length !== 1 ? "s" : ""} detected
                   </Lbl>
-                  <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
                     · {totalAffected} variant{totalAffected !== 1 ? "s" : ""} will be unified
                   </span>
                 </div>
@@ -173,12 +173,12 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
                   gap: "0.5rem", marginBottom: 4,
                   padding: "0 0.5rem",
                 }}>
-                  <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono,
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
                                 letterSpacing: "0.12em", textTransform: "uppercase" }}>
                     Detected variants
                   </div>
                   <div />
-                  <div style={{ fontSize: 9, color: C.gold, fontFamily: mono,
+                  <div style={{ fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily,
                                 letterSpacing: "0.12em", textTransform: "uppercase" }}>
                     Canonical name
                   </div>
@@ -199,7 +199,7 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                         {cl.members.map(m => (
                           <span key={m} style={{
-                            fontSize: 10, fontFamily: mono,
+                            fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                             color: m === cl.canonical ? C.text : C.textDim,
                             padding: "2px 6px",
                             border: `1px solid ${m === cl.canonical ? C.border2 : C.border}`,
@@ -207,14 +207,14 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
                             background: m === cl.canonical ? C.surface3 : "transparent",
                           }}>
                             {m}
-                            <span style={{ fontSize: 8, color: C.textMuted, marginLeft: 3 }}>
+                            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 3 }}>
                               ({rowCounts[m] ?? 0})
                             </span>
                           </span>
                         ))}
                       </div>
                       {/* Arrow */}
-                      <div style={{ color: C.gold, fontSize: 14, padding: "0 4px" }}>→</div>
+                      <div style={{ color: C.gold, fontSize: T.body.fontSize, padding: "0 4px" }}>→</div>
                       {/* Editable canonical */}
                       <input
                         value={cl.canonical}
@@ -225,8 +225,8 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
                           border: `1px solid ${C.gold}40`,
                           borderRadius: 3,
                           color: C.gold,
-                          fontFamily: mono,
-                          fontSize: 11,
+                          fontFamily: T.code.fontFamily,
+                          fontSize: T.code.fontSize,
                           outline: "none",
                           width: "100%",
                           boxSizing: "border-box",
@@ -239,7 +239,7 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
                 {/* Apply / feedback */}
                 {applied ? (
                   <div style={{
-                    fontSize: 11, color: C.green, fontFamily: mono,
+                    fontSize: T.code.fontSize, color: C.green, fontFamily: T.code.fontFamily,
                     padding: "0.5rem 0.75rem",
                     background: `${C.green}0a`,
                     border: `1px solid ${C.green}30`,
@@ -257,8 +257,8 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
                       color: C.teal,
                       borderRadius: 3,
                       cursor: "pointer",
-                      fontFamily: mono,
-                      fontSize: 11,
+                      fontFamily: T.code.fontFamily,
+                      fontSize: T.code.fontSize,
                       fontWeight: 700,
                       transition: "all 0.12s",
                     }}
@@ -277,7 +277,7 @@ function _placeholder_NormalizePanel({headers, rows, info, onAdd}){
 
 // ─── STANDARDIZE DIALOG ───────────────────────────────────────────────────────
 function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [clusterState,setClusterState]=useState(()=>clusters.map(cl=>({...cl})));
   const [qcMode,setQcMode]=useState("");
   const currentMap=useMemo(()=>{
@@ -311,39 +311,39 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
     const summary=clusterState.map(cl=>`[${cl.members.join(", ")}] → ${cl.canonical}`).join(" · ");
     onConfirm({type:"recode",col,map:finalMap,desc:`Normalize '${col}': ${summary}`});
   }
-  const iS={width:"100%",boxSizing:"border-box",padding:"0.38rem 0.6rem",background:C.surface3,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"};
+  const iS={width:"100%",boxSizing:"border-box",padding:"0.38rem 0.6rem",background:C.surface3,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"};
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}
       onClick={e=>{if(e.target===e.currentTarget)onCancel();}}>
       <div style={{width:"100%",maxWidth:640,maxHeight:"90vh",overflowY:"auto",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:6,display:"flex",flexDirection:"column"}}>
         <div style={{padding:"1rem 1.2rem",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10,background:C.surface2,flexShrink:0}}>
           <div style={{flex:1}}>
-            <div style={{fontSize:9,color:C.teal,letterSpacing:"0.22em",textTransform:"uppercase",fontFamily:mono,marginBottom:3}}>Category Standardization</div>
-            <div style={{fontSize:15,color:C.text,fontFamily:mono}}><span style={{color:C.gold}}>{col}</span> — {clusters.length} group{clusters.length!==1?"s":""} detected</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.22em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:3}}>Category Standardization</div>
+            <div style={{fontSize:15,color:C.text,fontFamily: T.code.fontFamily}}><span style={{color:C.gold}}>{col}</span> — {clusters.length} group{clusters.length!==1?"s":""} detected</div>
           </div>
-          <button onClick={onCancel} style={{background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily:mono,fontSize:11,padding:"0.3rem 0.6rem"}}>✕ Close</button>
+          <button onClick={onCancel} style={{background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,padding:"0.3rem 0.6rem"}}>✕ Close</button>
         </div>
         <div style={{padding:"1.2rem",flex:1}}>
           {/* Quick Clean */}
           <div style={{marginBottom:"1.4rem",padding:"1rem",background:`${C.teal}08`,border:`1px solid ${C.teal}30`,borderRadius:4}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.7rem"}}>
-              <span style={{fontSize:10,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>⚡ Quick Clean</span>
-              <span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>— trim + case normalization</span>
+              <span style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>⚡ Quick Clean</span>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>— trim + case normalization</span>
             </div>
-            <div style={{fontSize:11,color:C.textDim,fontFamily:mono,marginBottom:"0.8rem",lineHeight:1.6}}>
+            <div style={{fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily,marginBottom:"0.8rem",lineHeight:1.6}}>
               Solves 90% of issues: strips whitespace and unifies casing. Affects <strong style={{color:C.text}}>all</strong> values in the column.
             </div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:"0.8rem"}}>
               {[["lower","lowercase  abc"],["upper","UPPERCASE  ABC"],["title","Title Case  Abc"]].map(([m,l])=>(
                 <button key={m} onClick={()=>setQcMode(qcMode===m?"":m)}
-                  style={{padding:"0.35rem 0.75rem",border:`1px solid ${qcMode===m?C.teal:C.border2}`,background:qcMode===m?`${C.teal}20`:"transparent",color:qcMode===m?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"}}>
+                  style={{padding:"0.35rem 0.75rem",border:`1px solid ${qcMode===m?C.teal:C.border2}`,background:qcMode===m?`${C.teal}20`:"transparent",color:qcMode===m?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
                   {qcMode===m?"✓ ":""}{l}
                 </button>
               ))}
             </div>
             {qcMode&&(
               <div style={{marginBottom:"0.8rem",padding:"0.5rem 0.75rem",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:3}}>
-                <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginBottom:4,letterSpacing:"0.1em",textTransform:"uppercase"}}>Preview (first 6 values)</div>
+                <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:4,letterSpacing:"0.1em",textTransform:"uppercase"}}>Preview (first 6 values)</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                   {rawVals.slice(0,6).map(v=>{
                     const t=v.trim();let out=t;
@@ -351,7 +351,7 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
                     else if(qcMode==="upper")out=t.toUpperCase();
                     else if(qcMode==="title")out=t.replace(/\b\w/g,c=>c.toUpperCase()).replace(/\B\w/g,c=>c.toLowerCase());
                     const changed=out!==v;
-                    return<span key={v} style={{fontSize:10,fontFamily:mono,color:changed?C.teal:C.textMuted}}>{changed?<><span style={{color:C.textMuted,textDecoration:"line-through"}}>{v}</span><span style={{margin:"0 3px",color:C.border2}}>→</span><span style={{color:C.teal}}>{out}</span></>:v}</span>;
+                    return<span key={v} style={{fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,color:changed?C.teal:C.textMuted}}>{changed?<><span style={{color:C.textMuted,textDecoration:"line-through"}}>{v}</span><span style={{margin:"0 3px",color:C.border2}}>→</span><span style={{color:C.teal}}>{out}</span></>:v}</span>;
                   })}
                 </div>
               </div>
@@ -361,34 +361,34 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
           {/* Manual Mapping */}
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.8rem"}}>
-              <span style={{fontSize:10,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>⊞ Manual Group Mapping</span>
-              <span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>— edit the canonical name for each cluster</span>
+              <span style={{fontSize: T.caption.fontSize,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>⊞ Manual Group Mapping</span>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>— edit the canonical name for each cluster</span>
             </div>
-            <div style={{fontSize:11,color:C.textDim,fontFamily:mono,marginBottom:"1rem",lineHeight:1.6}}>
+            <div style={{fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily,marginBottom:"1rem",lineHeight:1.6}}>
               Each row is a cluster of similar values detected by{" "}
               <span style={{color:C.teal}}>fuzzy matching</span>. The <span style={{color:C.gold}}>Canonical Name</span> is editable — all cluster members will be replaced by that value.
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 28px 1fr",gap:"0.5rem",marginBottom:6}}>
-              <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,letterSpacing:"0.12em",textTransform:"uppercase",padding:"0 0.5rem"}}>Detected variants</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.12em",textTransform:"uppercase",padding:"0 0.5rem"}}>Detected variants</div>
               <div/>
-              <div style={{fontSize:9,color:C.gold,fontFamily:mono,letterSpacing:"0.12em",textTransform:"uppercase",padding:"0 0.5rem"}}>Canonical name</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily,letterSpacing:"0.12em",textTransform:"uppercase",padding:"0 0.5rem"}}>Canonical name</div>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:"1.2rem"}}>
               {clusterState.map((cl,idx)=>(
                 <div key={idx} style={{display:"grid",gridTemplateColumns:"1fr 28px 1fr",gap:"0.5rem",alignItems:"center",padding:"0.6rem 0.75rem",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:3}}>
                   <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
                     {cl.members.map(m=>(
-                      <span key={m} style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,fontFamily:mono,color:m===cl.canonical?C.text:C.textDim,padding:"2px 6px",border:`1px solid ${m===cl.canonical?C.border2:C.border}`,borderRadius:2,background:m===cl.canonical?C.surface3:"transparent"}}>
-                        {m}<span style={{fontSize:8,color:C.textMuted}}>({rowCounts[m]||0})</span>
+                      <span key={m} style={{display:"inline-flex",alignItems:"center",gap:3,fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,color:m===cl.canonical?C.text:C.textDim,padding:"2px 6px",border:`1px solid ${m===cl.canonical?C.border2:C.border}`,borderRadius:2,background:m===cl.canonical?C.surface3:"transparent"}}>
+                        {m}<span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>({rowCounts[m]||0})</span>
                       </span>
                     ))}
                   </div>
-                  <div style={{textAlign:"center",color:C.gold,fontSize:14}}>→</div>
+                  <div style={{textAlign:"center",color:C.gold,fontSize: T.body.fontSize}}>→</div>
                   <input value={cl.canonical} onChange={e=>updateCanonical(idx,e.target.value)} style={{...iS,border:`1px solid ${C.gold}40`,background:`${C.gold}08`,color:C.gold}}/>
                 </div>
               ))}
             </div>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:"1rem"}}>
+            <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"1rem"}}>
               {Object.entries(currentMap).filter(([k,v])=>k!==v).length} values will be replaced
               · {rawVals.length - Object.keys(currentMap).length + Object.values(currentMap).filter((v,i,a)=>a.indexOf(v)===i).length} unique values resulting
             </div>
@@ -405,15 +405,15 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
 
 // ─── SMART AUDITOR ────────────────────────────────────────────────────────────
 function Auditor({sug,aiP,onApply,onNormalize,loading}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if(!sug.length&&!loading) return null;
   const sc={high:C.red,medium:C.yellow,low:C.blue},sb={high:`${C.red}20`,medium:`${C.yellow}15`,low:`${C.blue}15`};
   return(
     <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
       <div style={{padding:"0.5rem 1rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontSize:10,color:C.purple,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,flex:1}}>✦ Smart Auditor</span>
+        <span style={{fontSize: T.caption.fontSize,color:C.purple,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,flex:1}}>✦ Smart Auditor</span>
         {loading&&<Spin/>}
-        {!loading&&<span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>{sug.length} issue{sug.length!==1?"s":""}</span>}
+        {!loading&&<span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>{sug.length} issue{sug.length!==1?"s":""}</span>}
       </div>
       <div style={{maxHeight:300,overflowY:"auto"}}>
         {sug.map((s,i)=>{
@@ -422,21 +422,21 @@ function Auditor({sug,aiP,onApply,onNormalize,loading}){
             <div key={i} style={{padding:"0.65rem 1rem",borderBottom:`1px solid ${C.border}`,background:sb[s.sev]||C.surface,borderLeft:`3px solid ${sc[s.sev]||C.border}`}}>
               <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:12,color:sc[s.sev]||C.text,marginBottom:2,fontFamily:mono}}>{s.title}</div>
-                  <div style={{fontSize:11,color:C.textDim,lineHeight:1.6}}>{s.detail}</div>
+                  <div style={{fontSize: T.code.fontSize,color:sc[s.sev]||C.text,marginBottom:2,fontFamily: T.code.fontFamily}}>{s.title}</div>
+                  <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>{s.detail}</div>
                   {s.type==="variant"&&s.clusters&&(
                     <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
                       {s.clusters.slice(0,3).map((cl,ci)=>(
-                        <span key={ci} style={{fontSize:9,fontFamily:mono,color:C.textMuted,padding:"2px 6px",border:`1px solid ${C.border2}`,borderRadius:2}}>
+                        <span key={ci} style={{fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,color:C.textMuted,padding:"2px 6px",border:`1px solid ${C.border2}`,borderRadius:2}}>
                           {cl.members.join(" · ")} → <span style={{color:C.gold}}>{cl.canonical}</span>
                         </span>
                       ))}
-                      {s.clusters.length>3&&<span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>+{s.clusters.length-3} more…</span>}
+                      {s.clusters.length>3&&<span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>+{s.clusters.length-3} more…</span>}
                     </div>
                   )}
                   {aip&&s.type!=="variant"&&<div style={{marginTop:5,padding:"0.4rem 0.65rem",background:C.surface2,border:`1px solid ${C.purple}30`,borderRadius:3}}>
-                    <div style={{fontSize:10,color:C.purple,fontFamily:mono,marginBottom:2}}>✦ {aip.description}</div>
-                    <div style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>Preview: {aip.preview?.slice(0,3).join(" → ")||"—"}</div>
+                    <div style={{fontSize: T.caption.fontSize,color:C.purple,fontFamily: T.code.fontFamily,marginBottom:2}}>✦ {aip.description}</div>
+                    <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>Preview: {aip.preview?.slice(0,3).join(" → ")||"—"}</div>
                   </div>}
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
@@ -462,7 +462,7 @@ const CAST_LABEL = { number:"num", number_smart:"num", integer:"int", string:"st
 const CAST_COLOR = { num:"blue", int:"blue", str:"teal", cat:"purple", bool:"gold" };
 
 function ColCard({h, info, sug, castType, selected, onSel, onAct}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const c = info[h] || {};
   const [mo, setMo] = useState(false);
 
@@ -484,12 +484,12 @@ function ColCard({h, info, sug, castType, selected, onSel, onAct}){
         background:selected?`${C.teal}10`:hasIssue?`${highSev?C.red:C.yellow}06`:C.surface,
         cursor:"pointer",position:"relative",transition:"all 0.12s"}}>
       <div style={{display:"flex",alignItems:"flex-start",gap:4,marginBottom:3}}>
-        <span style={{fontFamily:mono,fontSize:11,
+        <span style={{fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,
           color:selected?C.teal:C.text,
           flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h}</span>
         <button onClick={e=>{e.stopPropagation();setMo(m=>!m);}}
           style={{background:"transparent",border:`1px solid ${C.border2}`,
-            borderRadius:2,color:C.textMuted,cursor:"pointer",fontSize:9,padding:"1px 4px",flexShrink:0}}>⋯</button>
+            borderRadius:2,color:C.textMuted,cursor:"pointer",fontSize: T.caption.fontSize,padding:"1px 4px",flexShrink:0}}>⋯</button>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
         {(()=>{
@@ -510,7 +510,7 @@ function ColCard({h, info, sug, castType, selected, onSel, onAct}){
         {[["rename","Rename"],["filter","Filter"],["cast","Change type"],["drop","Drop"]].map(([a,l])=>(
           <button key={a} onClick={()=>{onAct(h,a);setMo(false);}}
             style={{width:"100%",padding:"0.45rem 0.8rem",background:"transparent",border:"none",
-              color:a==="drop"?C.red:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,textAlign:"left"}}>{l}</button>
+              color:a==="drop"?C.red:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,textAlign:"left"}}>{l}</button>
         ))}
       </div>}
     </div>
@@ -521,7 +521,7 @@ function ColCard({h, info, sug, castType, selected, onSel, onAct}){
 // Shown below the grid when a column with issues is selected.
 // Read-only: describes the issue and suggests where to act. No action buttons.
 function ColIssuePanel({ col, issues }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!issues || !issues.length) return null;
 
   const TYPE_META = {
@@ -535,7 +535,7 @@ function ColIssuePanel({ col, issues }) {
   return (
     <div style={{marginBottom:"1rem",border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden"}}>
       <div style={{padding:"0.4rem 0.75rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,
-        fontSize:9,color:C.textMuted,letterSpacing:"0.15em",textTransform:"uppercase",fontFamily:mono}}>
+        fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.15em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>
         ⚑ Issues — <span style={{color:C.text}}>{col}</span>
       </div>
       {issues.map((s, i) => {
@@ -555,23 +555,23 @@ function ColIssuePanel({ col, issues }) {
           <div key={i} style={{padding:"0.6rem 0.85rem",
             borderBottom: i < issues.length-1 ? `1px solid ${C.border}` : "none",
             borderLeft:`3px solid ${color}`,background:`${color}06`}}>
-            <div style={{fontSize:11,color,fontFamily:mono,marginBottom:3,fontWeight:600}}>
+            <div style={{fontSize: T.code.fontSize,color,fontFamily: T.code.fontFamily,marginBottom:3,fontWeight:600}}>
               {meta.icon} {s.title}
             </div>
-            <div style={{fontSize:11,color:C.textDim,lineHeight:1.6,marginBottom:4}}>{s.detail}</div>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,fontStyle:"italic"}}>
+            <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6,marginBottom:4}}>{s.detail}</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,fontStyle:"italic"}}>
               → {recs[s.type] || ""}
             </div>
             {/* Variant clusters preview */}
             {s.type === "variant" && s.clusters && (
               <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
                 {s.clusters.slice(0,5).map((cl,ci)=>(
-                  <span key={ci} style={{fontSize:9,fontFamily:mono,color:C.textMuted,
+                  <span key={ci} style={{fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,color:C.textMuted,
                     padding:"2px 6px",border:`1px solid ${C.border2}`,borderRadius:2}}>
                     {cl.members.join(" · ")} → <span style={{color:C.gold}}>{cl.canonical}</span>
                   </span>
                 ))}
-                {s.clusters.length>5&&<span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>+{s.clusters.length-5} more</span>}
+                {s.clusters.length>5&&<span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>+{s.clusters.length-5} more</span>}
               </div>
             )}
           </div>
@@ -626,7 +626,7 @@ function opsFor(col, info) {
 
 // A single condition row
 function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const ops = opsFor(cond.col, info);
   const needsValue = !["notna","isna"].includes(cond.op);
   const isBetween  = cond.op === "between";
@@ -640,7 +640,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
 
   const inS = {
     padding:"0.3rem 0.55rem", background:C.surface3, border:`1px solid ${C.border2}`,
-    borderRadius:3, color:C.text, fontFamily:mono, fontSize:11, outline:"none",
+    borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline:"none",
   };
   const selS = { ...inS, cursor:"pointer" };
 
@@ -681,7 +681,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
         <>
           <input value={cond.lo} onChange={e => onChange(idx, { lo: e.target.value })}
             placeholder="lo" style={{ ...inS, width:70, flex:"0 0 70px" }}/>
-          <span style={{ color:C.textMuted, fontSize:11, alignSelf:"center", fontFamily:mono }}>to</span>
+          <span style={{ color:C.textMuted, fontSize: T.code.fontSize, alignSelf:"center", fontFamily: T.code.fontFamily }}>to</span>
           <input value={cond.hi} onChange={e => onChange(idx, { hi: e.target.value })}
             placeholder="hi" style={{ ...inS, width:70, flex:"0 0 70px" }}/>
         </>
@@ -705,7 +705,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
                     border:`1px solid ${sel ? C.yellow : C.border2}`,
                     background: sel ? `${C.yellow}18` : "transparent",
                     color: sel ? C.yellow : C.textDim,
-                    borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                    borderRadius:3, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                     transition:"all 0.1s",
                   }}>{sel?"✓ ":""}{v}</button>
                 );
@@ -723,7 +723,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
               style={{ ...inS, width:"100%" }}
             />
           )}
-          <div style={{ fontSize:9, color:C.textMuted, fontFamily:mono, marginTop:2 }}>
+          <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginTop:2 }}>
             {(cond.values || []).length} selected
           </div>
         </div>
@@ -734,7 +734,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
         <button onClick={() => onRemove(idx)} style={{
           background:"transparent", border:`1px solid ${C.border2}`,
           borderRadius:3, color:C.textMuted, cursor:"pointer",
-          fontSize:11, padding:"0.25rem 0.4rem", alignSelf:"center", flexShrink:0,
+          fontSize: T.code.fontSize, padding:"0.25rem 0.4rem", alignSelf:"center", flexShrink:0,
         }}>✕</button>
       )}
     </div>
@@ -743,7 +743,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
 
 // Preview: how many rows pass the predicate on a sample
 function FilterPreview({ rows, predicate, total }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const passing = useMemo(() => {
     if (!predicate) return null;
     try {
@@ -787,7 +787,7 @@ function FilterPreview({ rows, predicate, total }) {
     <div style={{
       padding:"0.55rem 0.85rem", background:C.surface, border:`1px solid ${C.border}`,
       borderRadius:4, marginBottom:"0.8rem",
-      display:"flex", alignItems:"center", gap:12, fontFamily:mono, fontSize:11,
+      display:"flex", alignItems:"center", gap:12, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
     }}>
       <div style={{ flex:1, height:4, background:C.border, borderRadius:2, overflow:"hidden" }}>
         <div style={{ width:`${pct}%`, height:"100%", background:color, borderRadius:2, transition:"width 0.2s" }}/>
@@ -805,7 +805,7 @@ function FilterPreview({ rows, predicate, total }) {
 
 // The builder itself
 function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const emptyCondition = () => ({ col:"", op:"notna", value:"", values:[], lo:"", hi:"", _id: Date.now()+Math.random() });
 
   const [filterMode, setFilterMode] = useState("simple"); // "simple" | "formula"
@@ -890,16 +890,16 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
 
   return (
     <div style={{ border:`1px solid ${C.yellow}30`, borderRadius:4, padding:"1rem", background:C.surface }}>
-      <div style={{ fontSize:10, color:C.yellow, letterSpacing:"0.18em", textTransform:"uppercase", fontFamily:mono, marginBottom:"0.9rem", display:"flex", alignItems:"center", gap:8 }}>
+      <div style={{ fontSize: T.caption.fontSize, color:C.yellow, letterSpacing:"0.18em", textTransform:"uppercase", fontFamily: T.code.fontFamily, marginBottom:"0.9rem", display:"flex", alignItems:"center", gap:8 }}>
         ⊧ Filter Builder
-        <span style={{ fontSize:9, color:C.textMuted, textTransform:"none", letterSpacing:0 }}>— keep rows where conditions are true</span>
+        <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, textTransform:"none", letterSpacing:0 }}>— keep rows where conditions are true</span>
         <div style={{ marginLeft:"auto", display:"flex", gap:5 }}>
           {["simple","formula"].map(m => (
             <button key={m} onClick={() => setFilterMode(m)} style={{
               padding:"2px 9px", border:`1px solid ${filterMode===m ? C.yellow : C.border2}`,
               background: filterMode===m ? `${C.yellow}18` : "transparent",
               color: filterMode===m ? C.yellow : C.textDim,
-              borderRadius:2, cursor:"pointer", fontSize:9, fontFamily:mono,
+              borderRadius:2, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
             }}>{m === "simple" ? "Simple" : "Formula"}</button>
           ))}
         </div>
@@ -908,7 +908,7 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
       {/* Formula mode */}
       {filterMode === "formula" && (
         <div style={{ marginBottom:"1rem" }}>
-          <div style={{ fontSize:10, color:C.textMuted, fontFamily:mono, marginBottom:6, lineHeight:1.6,
+          <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginBottom:6, lineHeight:1.6,
             padding:"0.4rem 0.75rem", background:C.surface2, border:`1px solid ${C.border}`,
             borderLeft:`3px solid ${C.yellow}`, borderRadius:4 }}>
             Enter a JS boolean expression. Column names are available as variables.{" "}
@@ -923,7 +923,7 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
             placeholder={'gdp > 1000 && year >= 2000\ncountry !== "USA" || region === "EU"'}
             style={{ width:"100%", boxSizing:"border-box", padding:"0.5rem 0.75rem",
               background:C.surface2, border:`1px solid ${formulaExpr.trim() ? C.yellow+"60" : C.border2}`,
-              borderRadius:3, color:C.text, fontFamily:mono, fontSize:11, outline:"none",
+              borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline:"none",
               resize:"vertical", lineHeight:1.6 }}
           />
         </div>
@@ -944,29 +944,29 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
             borderBottom:`1px solid ${C.border}`,
           }}>
             {groups.length > 1 && gIdx > 0 && (
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, marginRight:4 }}>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginRight:4 }}>
                 {topLogic.toUpperCase()}
               </span>
             )}
-            <span style={{ fontSize:9, color:groupColors[gIdx % groupColors.length], fontFamily:mono, letterSpacing:"0.12em", textTransform:"uppercase" }}>
+            <span style={{ fontSize: T.caption.fontSize, color:groupColors[gIdx % groupColors.length], fontFamily: T.code.fontFamily, letterSpacing:"0.12em", textTransform:"uppercase" }}>
               Group {gIdx + 1}
             </span>
             {group.conditions.length > 1 && (
               <>
-                <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>combine with:</span>
+                <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>combine with:</span>
                 {["and","or"].map(l => (
                   <button key={l} onClick={() => setGroups(prev => prev.map((g, i) => i === gIdx ? {...g, logic:l} : g))}
                     style={{
                       padding:"1px 7px", border:`1px solid ${group.logic===l ? groupColors[gIdx%groupColors.length] : C.border2}`,
                       background: group.logic===l ? `${groupColors[gIdx%groupColors.length]}18` : "transparent",
                       color: group.logic===l ? groupColors[gIdx%groupColors.length] : C.textDim,
-                      borderRadius:2, cursor:"pointer", fontSize:9, fontFamily:mono,
+                      borderRadius:2, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                     }}>{l.toUpperCase()}</button>
                 ))}
               </>
             )}
             {groups.length > 1 && (
-              <button onClick={() => removeGroup(gIdx)} style={{ marginLeft:"auto", background:"transparent", border:"none", color:C.textMuted, cursor:"pointer", fontSize:11, padding:"0 3px" }}>✕</button>
+              <button onClick={() => removeGroup(gIdx)} style={{ marginLeft:"auto", background:"transparent", border:"none", color:C.textMuted, cursor:"pointer", fontSize: T.code.fontSize, padding:"0 3px" }}>✕</button>
             )}
           </div>
 
@@ -975,7 +975,7 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
             {group.conditions.map((cond, cIdx) => (
               <div key={cond._id}>
                 {cIdx > 0 && (
-                  <div style={{ fontSize:9, color:C.textMuted, fontFamily:mono, padding:"3px 0 3px 4px" }}>
+                  <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, padding:"3px 0 3px 4px" }}>
                     {group.logic.toUpperCase()}
                   </div>
                 )}
@@ -991,7 +991,7 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
             <button onClick={() => addCond(gIdx)} style={{
               padding:"0.25rem 0.6rem", background:"transparent",
               border:`1px dashed ${C.border2}`, borderRadius:3,
-              color:C.textMuted, cursor:"pointer", fontSize:10, fontFamily:mono,
+              color:C.textMuted, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
               alignSelf:"flex-start", transition:"all 0.1s",
             }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = groupColors[gIdx%groupColors.length]; e.currentTarget.style.color = groupColors[gIdx%groupColors.length]; }}
@@ -1007,21 +1007,21 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
           <button onClick={addGroup} style={{
             padding:"0.3rem 0.75rem", background:"transparent",
             border:`1px dashed ${C.border2}`, borderRadius:3,
-            color:C.textMuted, cursor:"pointer", fontSize:10, fontFamily:mono,
+            color:C.textMuted, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
             transition:"all 0.1s",
           }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
           >+ OR group</button>
           {groups.length > 1 && (
-            <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:C.textMuted, fontFamily:mono }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>
               combine groups with:
               {["and","or"].map(l => (
                 <button key={l} onClick={() => setTopLogic(l)} style={{
                   padding:"2px 8px", border:`1px solid ${topLogic===l ? C.gold : C.border2}`,
                   background: topLogic===l ? `${C.gold}18` : "transparent",
                   color: topLogic===l ? C.gold : C.textDim,
-                  borderRadius:2, cursor:"pointer", fontSize:9, fontFamily:mono,
+                  borderRadius:2, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                 }}>{l.toUpperCase()}</button>
               ))}
             </div>
@@ -1047,7 +1047,7 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
 // Collapsible panel in CleanTab. Clamps extreme values to [p1, p99] bounds.
 // Moved from Features — conceptually data cleaning, not feature engineering.
 function WinsorizeSection({ headers, info, rows, onAdd, duckdbTableName }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open,       setOpen]    = useState(false);
   const [col,        setCol]     = useState("");
   const [mode,       setMode]    = useState("inplace"); // "inplace" | "newcol"
@@ -1101,14 +1101,14 @@ function WinsorizeSection({ headers, info, rows, onAdd, duckdbTableName }) {
         border:`1px solid ${open ? C.orange+"40" : C.border}`,
         borderRadius: open ? "4px 4px 0 0" : 4,
         color: open ? C.orange : C.textDim,
-        cursor:"pointer", fontFamily:mono, fontSize:10,
+        cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
         letterSpacing:"0.15em", textTransform:"uppercase", textAlign:"left",
         transition:"all 0.12s",
       }}>
         <span>{open ? "▾" : "▸"}</span>
         <span>Winsorize outliers</span>
         {!open && numCols.length > 0 && (
-          <span style={{ marginLeft:"auto", fontSize:9, color:C.textMuted, fontFamily:mono }}>
+          <span style={{ marginLeft:"auto", fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>
             clip extreme values to [p1, p99]
           </span>
         )}
@@ -1128,12 +1128,12 @@ function WinsorizeSection({ headers, info, rows, onAdd, duckdbTableName }) {
                 border:`1px solid ${col===h ? C.orange : C.border2}`,
                 background: col===h ? `${C.orange}18` : "transparent",
                 color: col===h ? C.orange : C.textDim,
-                borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                borderRadius:3, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                 transition:"all 0.1s",
               }}>
                 {col===h?"✓ ":""}{h}
                 {info[h]?.outliers > 0 && (
-                  <span style={{fontSize:8,color:C.orange,marginLeft:3}}>⚠{info[h].outliers}</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.orange,marginLeft:3}}>⚠{info[h].outliers}</span>
                 )}
               </button>
             ))}
@@ -1148,7 +1148,7 @@ function WinsorizeSection({ headers, info, rows, onAdd, duckdbTableName }) {
                     border:`1px solid ${mode===m ? C.orange : C.border2}`,
                     background: mode===m ? `${C.orange}18` : "transparent",
                     color: mode===m ? C.orange : C.textDim,
-                    borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                    borderRadius:3, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                   }}>{mode===m?"✓ ":""}{l}</button>
                 ))}
               </div>
@@ -1158,12 +1158,12 @@ function WinsorizeSection({ headers, info, rows, onAdd, duckdbTableName }) {
                   style={{ width:"100%", boxSizing:"border-box",
                     padding:"0.38rem 0.6rem", background:C.surface2,
                     border:`1px solid ${C.border2}`, borderRadius:3,
-                    color:C.text, fontFamily:mono, fontSize:11, outline:"none",
+                    color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline:"none",
                     marginBottom:8 }}/>
               )}
               <div style={{ padding:"0.5rem 0.75rem", background:C.surface2,
                 border:`1px solid ${C.border}`, borderRadius:3,
-                marginBottom:"0.8rem", fontSize:11, fontFamily:mono, color:C.textDim,
+                marginBottom:"0.8rem", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color:C.textDim,
                 lineHeight:1.8 }}>
                 <div>Clip <span style={{color:C.gold}}>{col}</span> to [p1={wLo?.toFixed(3)}, p99={wHi?.toFixed(3)}]</div>
                 <div style={{color:C.textMuted}}>
@@ -1185,7 +1185,7 @@ function WinsorizeSection({ headers, info, rows, onAdd, duckdbTableName }) {
 // ─── FILL MISSING SECTION ─────────────────────────────────────────────────────
 // Collapsible panel in CleanTab for all fill strategies including grouped imputation.
 function FillNaSection({ headers, info, rows, onAdd }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [col,     setCol]     = useState("");
   const [strat,   setStrat]   = useState("zero");
@@ -1246,16 +1246,16 @@ function FillNaSection({ headers, info, rows, onAdd }) {
         border:`1px solid ${open ? C.yellow+"40" : C.border}`,
         borderRadius: open ? "4px 4px 0 0" : 4,
         color: open ? C.yellow : C.textDim,
-        cursor:"pointer", fontFamily:mono, fontSize:10,
+        cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
         letterSpacing:"0.15em", textTransform:"uppercase", textAlign:"left",
         transition:"all 0.12s",
       }}>
         <span>{open ? "▾" : "▸"}</span>
         <span>Fill missing values</span>
         {!open && headers.some(h => (info[h]?.naPct||0) > 0) && (
-          <span style={{ marginLeft:"auto", fontSize:9, color:C.yellow,
+          <span style={{ marginLeft:"auto", fontSize: T.caption.fontSize, color:C.yellow,
             padding:"1px 6px", border:`1px solid ${C.yellow}40`,
-            borderRadius:2, fontFamily:mono }}>
+            borderRadius:2, fontFamily: T.code.fontFamily }}>
             {headers.filter(h=>(info[h]?.naPct||0)>0).length} cols with NAs
           </span>
         )}
@@ -1279,18 +1279,18 @@ function FillNaSection({ headers, info, rows, onAdd }) {
                   border:`1px solid ${col===h ? C.yellow : C.border2}`,
                   background: col===h ? `${C.yellow}18` : "transparent",
                   color: col===h ? C.yellow : C.textDim,
-                  borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                  borderRadius:3, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                   transition:"all 0.1s",
                 }}>
                   {col===h?"✓ ":""}{h}
-                  <span style={{ fontSize:8, color:C.red, marginLeft:4 }}>
+                  <span style={{ fontSize: T.caption.fontSize, color:C.red, marginLeft:4 }}>
                     {na} NA{na!==1?"s":""}
                   </span>
                 </button>
               );
             })}
             {headers.every(h => rows.filter(r=>r[h]===null||r[h]===undefined).length===0) && (
-              <div style={{ fontSize:11, color:C.green, fontFamily:mono, padding:"0.3rem 0" }}>
+              <div style={{ fontSize: T.code.fontSize, color:C.green, fontFamily: T.code.fontFamily, padding:"0.3rem 0" }}>
                 ✓ No missing values in current dataset.
               </div>
             )}
@@ -1312,11 +1312,11 @@ function FillNaSection({ headers, info, rows, onAdd }) {
                     border:`1px solid ${strat===k ? C.yellow : C.border2}`,
                     background: strat===k ? `${C.yellow}12` : "transparent",
                     color: strat===k ? C.yellow : C.textDim,
-                    borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                    borderRadius:3, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                     transition:"all 0.1s",
                   }}>
                     <div>{strat===k?"✓ ":""}{label}</div>
-                    <div style={{ fontSize:8, color:C.textMuted, marginTop:2 }}>{hint}</div>
+                    <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, marginTop:2 }}>{hint}</div>
                   </button>
                 ))}
               </div>
@@ -1330,7 +1330,7 @@ function FillNaSection({ headers, info, rows, onAdd }) {
                     style={{ width:"100%", boxSizing:"border-box",
                       padding:"0.38rem 0.6rem", background:C.surface2,
                       border:`1px solid ${C.border2}`, borderRadius:3,
-                      color:C.text, fontFamily:mono, fontSize:11, outline:"none" }}/>
+                      color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline:"none" }}/>
                 </div>
               )}
 
@@ -1345,7 +1345,7 @@ function FillNaSection({ headers, info, rows, onAdd }) {
                         border:`1px solid ${groupCol===h ? C.teal : C.border2}`,
                         background: groupCol===h ? `${C.teal}18` : "transparent",
                         color: groupCol===h ? C.teal : C.textDim,
-                        borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:mono,
+                        borderRadius:3, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
                       }}>
                         {groupCol===h?"✓ ":""}{h}
                       </button>
@@ -1357,7 +1357,7 @@ function FillNaSection({ headers, info, rows, onAdd }) {
               {/* Preview */}
               <div style={{ padding:"0.45rem 0.75rem", background:C.surface2,
                 border:`1px solid ${C.border}`, borderRadius:3,
-                marginBottom:"0.8rem", fontSize:11, fontFamily:mono, color:C.textDim }}>
+                marginBottom:"0.8rem", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color:C.textDim }}>
                 Fill <span style={{color:C.red}}>{naCount} null{naCount!==1?"s":""}</span> in{" "}
                 <span style={{color:C.yellow}}>{col}</span>
                 {strat==="zero"&&<> ← <span style={{color:C.text}}>0</span></>}
@@ -1385,7 +1385,7 @@ function FillNaSection({ headers, info, rows, onAdd }) {
 // Numbers: uses extract_regex with auto locale detection.
 // Strings:  uses clean_strings step (trim / punctuation / separators / case).
 function SmartCleanSection({ headers, rows, info, onAdd }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open,   setOpen]   = useState(false);
   const [tab,    setTab]    = useState("numbers"); // "numbers" | "strings"
   const [numCol, setNumCol] = useState("");
@@ -1445,7 +1445,7 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
     padding: "0.25rem 0.65rem", border: `1px solid ${active ? C.gold : C.border2}`,
     background: active ? `${C.gold}18` : "transparent",
     color: active ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer",
-    fontSize: 11, fontFamily: mono, transition: "all 0.12s",
+    fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, transition: "all 0.12s",
   });
 
   return (
@@ -1457,10 +1457,10 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
         borderBottom: open ? `1px solid ${C.gold}20` : "none",
         border: "none", cursor: "pointer", textAlign: "left",
       }}>
-        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono, flex: 1 }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily, flex: 1 }}>
           ⬡ Smart Clean — Numbers &amp; Strings
         </span>
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
           {dirtyNumCols.length} dirty num · {strCols.length} str {open ? "▾" : "▸"}
         </span>
       </button>
@@ -1474,7 +1474,7 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
                 padding: "0.28rem 0.8rem", border: `1px solid ${tab === k ? C.gold : C.border2}`,
                 background: tab === k ? `${C.gold}18` : "transparent",
                 color: tab === k ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer",
-                fontSize: 10, fontFamily: mono, letterSpacing: "0.1em",
+                fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, letterSpacing: "0.1em",
               }}>{l}</button>
             ))}
           </div>
@@ -1482,7 +1482,7 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
           {/* ── Numbers tab ── */}
           {tab === "numbers" && (
             <div>
-              <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.6, marginBottom: "0.9rem", padding: "0.5rem 0.75rem", background: C.surface2, borderRadius: 3, border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.6, marginBottom: "0.9rem", padding: "0.5rem 0.75rem", background: C.surface2, borderRadius: 3, border: `1px solid ${C.border}` }}>
                 Detects columns where values are stored as strings with mixed locale formatting
                 (EU: <span style={{ color: C.gold }}>2.792.046,00</span> · US: <span style={{ color: C.teal }}>1,580,025.00</span> · space: <span style={{ color: C.blue }}>4 253 525</span>).
                 Writes the cleaned float back to the same column via{" "}
@@ -1490,7 +1490,7 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
               </div>
 
               {dirtyNumCols.length === 0 ? (
-                <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>No dirty number columns detected.</div>
+                <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>No dirty number columns detected.</div>
               ) : (
                 <>
                   <Lbl color={C.gold} mb={6}>Select column</Lbl>
@@ -1504,10 +1504,10 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
 
                   {numPreview && (
                     <>
-                      <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: 6 }}>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 6 }}>
                         Detected locale: <span style={{ color: C.gold }}>{numPreview.locale === "EU" ? "EU (dot-thousands, comma-decimal)" : "US (comma-thousands, dot-decimal)"}</span>
                       </div>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: mono, marginBottom: "0.9rem" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, marginBottom: "0.9rem" }}>
                         <thead>
                           <tr>
                             <th style={{ textAlign: "left", color: C.textMuted, padding: "0.25rem 0.5rem", borderBottom: `1px solid ${C.border}` }}>Raw</th>
@@ -1536,12 +1536,12 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
           {/* ── Strings tab ── */}
           {tab === "strings" && (
             <div>
-              <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.6, marginBottom: "0.9rem", padding: "0.5rem 0.75rem", background: C.surface2, borderRadius: 3, border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.6, marginBottom: "0.9rem", padding: "0.5rem 0.75rem", background: C.surface2, borderRadius: 3, border: `1px solid ${C.border}` }}>
                 Normalizes string columns: trim whitespace, strip trailing punctuation, fix separators, normalize casing.
               </div>
 
               {strCols.length === 0 ? (
-                <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>No string columns detected.</div>
+                <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>No string columns detected.</div>
               ) : (
                 <>
                   <Lbl color={C.gold} mb={6}>Select column</Lbl>
@@ -1556,7 +1556,7 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
                   {/* Options */}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: "0.8rem", alignItems: "center" }}>
                     {[["stripPunct", "Strip trailing punct"], ["normSep", "Normalize separators"]].map(([k, l]) => (
-                      <label key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontFamily: mono, color: C.textDim, cursor: "pointer" }}>
+                      <label key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, cursor: "pointer" }}>
                         <input type="checkbox" checked={!!strOpts[k]}
                           onChange={e => setStrOpts(o => ({ ...o, [k]: e.target.checked }))}
                           style={{ accentColor: C.gold }} />
@@ -1565,7 +1565,7 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
                     ))}
                     <select value={strOpts.case}
                       onChange={e => setStrOpts(o => ({ ...o, case: e.target.value }))}
-                      style={{ padding: "0.22rem 0.5rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, fontFamily: mono, fontSize: 11 }}>
+                      style={{ padding: "0.22rem 0.5rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
                       {[["keep","Keep case"],["lower","lowercase"],["upper","UPPERCASE"],["title","Title Case"]].map(([v,l]) => (
                         <option key={v} value={v}>{l}</option>
                       ))}
@@ -1574,7 +1574,7 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
 
                   {strCol && strPreview && (
                     <>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: mono, marginBottom: "0.9rem" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, marginBottom: "0.9rem" }}>
                         <thead>
                           <tr>
                             <th style={{ textAlign: "left", color: C.textMuted, padding: "0.25rem 0.5rem", borderBottom: `1px solid ${C.border}` }}>Raw</th>
@@ -1613,7 +1613,7 @@ function DistinctSection({ headers, onAdd, C }) {
   return (
     <div style={{marginBottom:"1.2rem"}}>
       <Lbl color={C.teal}>Distinct - drop duplicate rows</Lbl>
-      <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:6}}>
+      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:6}}>
         Select columns to dedup on (none = entire row).
       </div>
       <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
@@ -1621,7 +1621,7 @@ function DistinctSection({ headers, onAdd, C }) {
           <button key={h} onClick={()=>toggle(h)}
             style={{padding:"0.2rem 0.5rem",border:`1px solid ${subset.includes(h)?C.teal:C.border2}`,
               background:subset.includes(h)?`${C.teal}18`:"transparent",color:subset.includes(h)?C.teal:C.textDim,
-              borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{h}</button>
+              borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{h}</button>
         ))}
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -1629,7 +1629,7 @@ function DistinctSection({ headers, onAdd, C }) {
           <button key={k} onClick={()=>setKeep(k)}
             style={{padding:"0.25rem 0.6rem",border:`1px solid ${keep===k?C.teal:C.border2}`,
               background:keep===k?`${C.teal}18`:"transparent",color:keep===k?C.teal:C.textDim,
-              borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{l}</button>
+              borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{l}</button>
         ))}
         <span style={{flex:1}}/>
         <Btn onClick={()=>onAdd({type:"distinct",subset,keep,desc:`distinct${subset.length?` on ${subset.join(", ")}`:""}`})}
@@ -1641,7 +1641,7 @@ function DistinctSection({ headers, onAdd, C }) {
 
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
 function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
   const [rv,setRv]=useState("");
   const [showFilter,setShowFilter]=useState(false);
@@ -1723,7 +1723,7 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
   function doCast(to){if(!sel)return;onAdd({type:"type_cast",col:sel,to,desc:`Cast '${sel}' → ${to}`});setAct(null);setSel(null);}
 
   const selIsCat=sel&&info[sel]&&!info[sel].isNum&&info[sel].isCat;
-  const inS={width:"100%",boxSizing:"border-box",padding:"0.48rem 0.75rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"};
+  const inS={width:"100%",boxSizing:"border-box",padding:"0.48rem 0.75rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"};
 
   return(
     <div>
@@ -1744,7 +1744,7 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
             border:`1px solid ${showFilter?C.yellow:C.border2}`,
             background:showFilter?`${C.yellow}12`:"transparent",
             color:showFilter?C.yellow:C.textDim,
-            borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+            borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,
             transition:"all 0.12s",
           }}>
           ⊧ Filter rows{showFilter?" ▾":" ▸"}
@@ -1768,7 +1768,7 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
       )}
       {sel&&(
         <div style={{border:`1px solid ${C.teal}30`,borderRadius:4,padding:"1rem",background:C.surface,marginBottom:"1.2rem"}}>
-          <div style={{fontSize:10,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:"0.8rem"}}>
+          <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:"0.8rem"}}>
             Selected: <span style={{color:C.text}}>{sel}</span>
             {info[sel]&&<span style={{color:C.textMuted,marginLeft:6}}>
               {info[sel].isNum?`μ=${info[sel].mean?.toFixed(3)} · σ=${info[sel].std?.toFixed(3)} · [${info[sel].min?.toFixed(2)}, ${info[sel].max?.toFixed(2)}]`:`${info[sel].uCount} unique vals`}
@@ -1778,10 +1778,10 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
             <div>
               {/* AI Assistant */}
               <div style={{marginBottom:"1rem",padding:"0.75rem",background:`${C.purple}08`,border:`1px solid ${C.purple}20`,borderRadius:4}}>
-                <div style={{fontSize:10,color:C.purple,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:"0.6rem"}}>✦ AI Assistant</div>
+                <div style={{fontSize: T.caption.fontSize,color:C.purple,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:"0.6rem"}}>✦ AI Assistant</div>
                 <div style={{display:"flex",gap:6,marginBottom:6}}>
                   {[["transform","Transform"],["query","Query"]].map(([m,l])=>(
-                    <button key={m} onClick={()=>setAMode(m)} style={{padding:"0.25rem 0.6rem",border:`1px solid ${aMode===m?C.purple:C.border2}`,background:aMode===m?`${C.purple}18`:"transparent",color:aMode===m?C.purple:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{l}</button>
+                    <button key={m} onClick={()=>setAMode(m)} style={{padding:"0.25rem 0.6rem",border:`1px solid ${aMode===m?C.purple:C.border2}`,background:aMode===m?`${C.purple}18`:"transparent",color:aMode===m?C.purple:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{l}</button>
                   ))}
                 </div>
                 <div style={{display:"flex",gap:6,marginBottom:6}}>
@@ -1794,17 +1794,17 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
                 {aSt==="done"&&aRes&&(
                   <div style={{padding:"0.6rem 0.75rem",background:C.surface2,border:`1px solid ${C.purple}30`,borderRadius:3}}>
                     {aMode==="transform"&&<>
-                      <div style={{fontSize:11,color:C.purple,fontFamily:mono,marginBottom:4}}>✦ {aRes.description}</div>
-                      <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:6}}>Preview: {aRes.preview?.slice(0,3).join(" → ")||"—"}</div>
+                      <div style={{fontSize: T.code.fontSize,color:C.purple,fontFamily: T.code.fontFamily,marginBottom:4}}>✦ {aRes.description}</div>
+                      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:6}}>Preview: {aRes.preview?.slice(0,3).join(" → ")||"—"}</div>
                       <Btn onClick={doApplyAI} color={C.purple} v="solid" sm ch="Apply transformation"/>
                     </>}
                     {aMode==="query"&&<>
-                      <div style={{fontSize:11,color:C.text,fontFamily:mono,lineHeight:1.6,marginBottom:4}}>{aRes.answer}</div>
-                      {aRes.stat&&<div style={{fontSize:10,color:C.purple,fontFamily:mono}}>{aRes.statLabel}: {aRes.stat}</div>}
+                      <div style={{fontSize: T.code.fontSize,color:C.text,fontFamily: T.code.fontFamily,lineHeight:1.6,marginBottom:4}}>{aRes.answer}</div>
+                      {aRes.stat&&<div style={{fontSize: T.caption.fontSize,color:C.purple,fontFamily: T.code.fontFamily}}>{aRes.statLabel}: {aRes.stat}</div>}
                     </>}
                   </div>
                 )}
-                {aSt==="err"&&<div style={{fontSize:11,color:C.red,fontFamily:mono}}>AI unavailable. Check connection.</div>}
+                {aSt==="err"&&<div style={{fontSize: T.code.fontSize,color:C.red,fontFamily: T.code.fontFamily}}>AI unavailable. Check connection.</div>}
               </div>
               {/* Normalize button for cat columns — still available inline for quick access */}
               {selIsCat&&<div style={{marginBottom:"0.8rem"}}>
@@ -1814,7 +1814,7 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
                   <div style={{display:"flex",gap:2,marginLeft:"auto"}}>
                     {[["levenshtein","Levenshtein"],["jaroWinkler","Jaro-Winkler"]].map(([m,label])=>(
                       <button key={m} onClick={()=>setNormMethod(m)}
-                        style={{padding:"0.22rem 0.55rem",border:`1px solid ${normMethod===m?C.gold:C.border2}`,background:normMethod===m?`${C.gold}14`:"transparent",color:normMethod===m?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.12s"}}>
+                        style={{padding:"0.22rem 0.55rem",border:`1px solid ${normMethod===m?C.gold:C.border2}`,background:normMethod===m?`${C.gold}14`:"transparent",color:normMethod===m?C.gold:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
                         {normMethod===m?"✓ ":""}{label}
                       </button>
                     ))}
@@ -1831,8 +1831,8 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
               onCancel={()=>setAct(null)}
             />
           )}
-          {act==="drop"&&<div><div style={{fontSize:12,color:C.red,marginBottom:"0.8rem",fontFamily:mono}}>Drop column '{sel}'?</div><div style={{display:"flex",gap:8}}><Btn onClick={doDrop} color={C.red} v="solid" ch="Confirm Drop"/><Btn onClick={()=>setAct(null)} ch="Cancel"/></div></div>}
-          {act==="cast"&&<div><div style={{fontSize:11,color:C.textDim,marginBottom:"0.7rem",fontFamily:mono}}>Change type of '<span style={{color:C.text}}>{sel}</span>' to:</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{[["number","number",C.blue],["integer","integer",C.blue],["string","string",C.teal],["categorical","categorical",C.purple],["boolean","boolean (0/1)",C.gold]].map(([to,label,color])=><Btn key={to} onClick={()=>doCast(to)} color={color} v="solid" sm ch={label}/>)}<Btn onClick={()=>setAct(null)} sm ch="Cancel"/></div></div>}
+          {act==="drop"&&<div><div style={{fontSize: T.code.fontSize,color:C.red,marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Drop column '{sel}'?</div><div style={{display:"flex",gap:8}}><Btn onClick={doDrop} color={C.red} v="solid" ch="Confirm Drop"/><Btn onClick={()=>setAct(null)} ch="Cancel"/></div></div>}
+          {act==="cast"&&<div><div style={{fontSize: T.code.fontSize,color:C.textDim,marginBottom:"0.7rem",fontFamily: T.code.fontFamily}}>Change type of '<span style={{color:C.text}}>{sel}</span>' to:</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{[["number","number",C.blue],["integer","integer",C.blue],["string","string",C.teal],["categorical","categorical",C.purple],["boolean","boolean (0/1)",C.gold]].map(([to,label,color])=><Btn key={to} onClick={()=>doCast(to)} color={color} v="solid" sm ch={label}/>)}<Btn onClick={()=>setAct(null)} sm ch="Cancel"/></div></div>}
         </div>
       )}
       {/* ── Fill Missing Values ── */}
