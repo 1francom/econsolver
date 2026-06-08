@@ -51,7 +51,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   // schema). Fall back to `pid` so single-dataset legacy paths still work —
   // they treat the project pid and the primary dataset id as the same value.
   const ownerPid = projectPid || pid;
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
   const sessionDispatch = useSessionDispatch();
 
@@ -432,22 +432,21 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {/* ── Header ── */}
         <div style={{ marginBottom:"1.2rem", display:"flex", alignItems:"flex-start", gap:12 }}>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:9, color:"#6ec8b4", letterSpacing:"0.26em",
-              textTransform:"uppercase", marginBottom:3 }}>
+            <div style={{ ...T.label, color:C.teal, marginBottom:3 }}>
               Data Studio · Wrangling
             </div>
             <div style={{ fontSize:19, letterSpacing:"-0.02em", marginBottom:3 }}>{filename}</div>
-            <div style={{ fontSize:11, color:"#888" }}>
-              <span style={{ color:"#c8a96e" }}>
+            <div style={{ fontSize:11, color:C.textDim }}>
+              <span style={{ color:C.gold }}>
                 {rawData._duckdb ? rawData._duckdb.rowCount.toLocaleString() : rawData.rows.length}
               </span> raw ·{" "}
               <span>{rows.length}</span> current ·{" "}
-              <span style={{ color: headers.length > rawData.headers.length ? "#7ab896" : "#444" }}>
+              <span style={{ color: headers.length > rawData.headers.length ? C.green : C.textMuted }}>
                 {headers.length}
               </span> cols
-              {naCount > 0 && <span style={{ color:"#c8b46e" }}> · {naCount} rows with NAs</span>}
+              {naCount > 0 && <span style={{ color:C.yellow }}> · {naCount} rows with NAs</span>}
               {isProcessing && (
-                <span style={{ color:"#6ec8b4", marginLeft:6 }}>
+                <span style={{ color:C.teal, marginLeft:6 }}>
                   {" "}· ⏳ {(elapsedMs / 1000).toFixed(1)}s
                 </span>
               )}
@@ -456,22 +455,22 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
           <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
             {rawData._duckdb && (
-              <span style={{ fontSize:9, padding:"2px 6px", border:"1px solid #6ec8b4",
-                color:"#6ec8b4", borderRadius:2, letterSpacing:"0.1em",
+              <span style={{ fontSize:9, padding:"2px 6px", border:`1px solid ${C.teal}`,
+                color:C.teal, borderRadius:2, letterSpacing:"0.1em",
                 fontFamily:mono, whiteSpace:"nowrap" }}>
                 ⚡ DuckDB{rawData._duckdb.truncated ? ` · showing 2,000,000 of ${rawData._duckdb.rowCount.toLocaleString()}` : ""}
               </span>
             )}
             {panel && (
-              <span style={{ fontSize:9, padding:"2px 6px", border:"1px solid #6e9ec8",
-                color:"#6e9ec8", borderRadius:2, letterSpacing:"0.1em",
+              <span style={{ fontSize:9, padding:"2px 6px", border:`1px solid ${C.blue}`,
+                color:C.blue, borderRadius:2, letterSpacing:"0.1em",
                 fontFamily:mono, whiteSpace:"nowrap" }}>
                 i={panel.entityCol}·t={panel.timeCol}
               </span>
             )}
             {dataDictionary && Object.values(dataDictionary).some(v => v) && (
-              <span style={{ fontSize:9, padding:"2px 6px", border:"1px solid #9e7ec8",
-                color:"#9e7ec8", borderRadius:2, letterSpacing:"0.1em",
+              <span style={{ fontSize:9, padding:"2px 6px", border:`1px solid ${C.violet}`,
+                color:C.violet, borderRadius:2, letterSpacing:"0.1em",
                 fontFamily:mono, whiteSpace:"nowrap" }}>
                 ◈ dict
               </span>
@@ -483,9 +482,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                 style={{
                   padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
                   fontFamily:mono, fontSize:10, transition:"all 0.12s",
-                  background: aiActionsOpen ? `${"#9e7ec8"}18` : "transparent",
-                  color: aiActionsOpen ? "#9e7ec8" : "#888",
-                  border:`1px solid ${aiActionsOpen ? "#9e7ec8" : "#252525"}`,
+                  background: aiActionsOpen ? `${C.violet}18` : "transparent",
+                  color: aiActionsOpen ? C.violet : C.textDim,
+                  border:`1px solid ${aiActionsOpen ? C.violet : C.border2}`,
                 }}>
                 ✦ AI Actions
               </button>
@@ -503,29 +502,29 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                       onClick={() => { setAiActionsOpen(false); setTab("quality"); }}
                       style={{
                         width:"100%", padding:"0.65rem 1rem", textAlign:"left",
-                        background:"transparent", border:"none", borderBottom:"1px solid #1c1c1c",
-                        cursor:"pointer", fontFamily:mono, fontSize:11, color:"#ddd8cc",
+                        background:"transparent", border:"none", borderBottom:`1px solid ${C.border}`,
+                        cursor:"pointer", fontFamily:mono, fontSize:11, color:C.text,
                         transition:"background 0.1s",
                       }}
-                      onMouseEnter={e => e.currentTarget.style.background="#9e7ec818"}
+                      onMouseEnter={e => e.currentTarget.style.background=`${C.violet}18`}
                       onMouseLeave={e => e.currentTarget.style.background="transparent"}
                     >
-                      <div style={{ fontSize:9, color:"#9e7ec8", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:2 }}>Suggest Cleaning</div>
-                      <div style={{ fontSize:9, color:"#888" }}>AI-powered data quality recommendations</div>
+                      <div style={{ ...T.label, color:C.violet, marginBottom:2 }}>Suggest Cleaning</div>
+                      <div style={{ fontSize:9, color:C.textDim }}>AI-powered data quality recommendations</div>
                     </button>
                     <button
                       onClick={() => { setAiActionsOpen(false); setTab("dictionary"); }}
                       style={{
                         width:"100%", padding:"0.65rem 1rem", textAlign:"left",
                         background:"transparent", border:"none",
-                        cursor:"pointer", fontFamily:mono, fontSize:11, color:"#ddd8cc",
+                        cursor:"pointer", fontFamily:mono, fontSize:11, color:C.text,
                         transition:"background 0.1s",
                       }}
-                      onMouseEnter={e => e.currentTarget.style.background="#9e7ec818"}
+                      onMouseEnter={e => e.currentTarget.style.background=`${C.violet}18`}
                       onMouseLeave={e => e.currentTarget.style.background="transparent"}
                     >
-                      <div style={{ fontSize:9, color:"#9e7ec8", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:2 }}>Generate Data Dictionary</div>
-                      <div style={{ fontSize:9, color:"#888" }}>Infer variable descriptions with AI</div>
+                      <div style={{ ...T.label, color:C.violet, marginBottom:2 }}>Generate Data Dictionary</div>
+                      <div style={{ fontSize:9, color:C.textDim }}>Infer variable descriptions with AI</div>
                     </button>
                   </div>
                 </>
@@ -541,9 +540,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                   onClick={() => { setShowSaveSubset(o => !o); setSubsetName(""); }}
                   style={{ padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
                     fontFamily:mono, fontSize:10, transition:"all 0.12s",
-                    background: showSaveSubset ? `${"#6ec8b4"}18` : "transparent",
-                    color: showSaveSubset ? "#6ec8b4" : "#888",
-                    border:`1px solid ${showSaveSubset ? "#6ec8b4" : "#252525"}` }}>
+                    background: showSaveSubset ? `${C.teal}18` : "transparent",
+                    color: showSaveSubset ? C.teal : C.textDim,
+                    border:`1px solid ${showSaveSubset ? C.teal : C.border2}` }}>
                   ⊕ Save as dataset
                 </button>
                 {showSaveSubset && (
@@ -556,11 +555,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                       borderRadius:4, padding:"0.85rem", zIndex:99,
                       minWidth:280, boxShadow:"0 8px 24px #000c",
                     }}>
-                      <div style={{ fontSize:9, color:"#6ec8b4", letterSpacing:"0.18em",
-                        textTransform:"uppercase", fontFamily:mono, marginBottom:6 }}>
+                      <div style={{ ...T.label, color:C.teal, fontFamily:mono, marginBottom:6 }}>
                         Save current dataset
                       </div>
-                      <div style={{ fontSize:10, color:"#888", fontFamily:mono, marginBottom:8, lineHeight:1.5 }}>
+                      <div style={{ fontSize:10, color:C.textDim, fontFamily:mono, marginBottom:8, lineHeight:1.5 }}>
                         {rows.length.toLocaleString()} rows · {headers.length} cols
                         {pipeline.length > 0 && ` · ${pipeline.length} pipeline step${pipeline.length !== 1 ? "s" : ""} applied`}
                       </div>
@@ -577,8 +575,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                           outline:"none", marginBottom:8 }}/>
                       <button onClick={doSaveSubset} style={{
                         width:"100%", padding:"0.42rem",
-                        background:"#6ec8b4", color:"#080808",
-                        border:"1px solid #6ec8b4", borderRadius:3,
+                        background:C.teal, color:C.bg,
+                        border:`1px solid ${C.teal}`, borderRadius:3,
                         cursor:"pointer", fontFamily:mono, fontSize:11, fontWeight:700,
                       }}>
                         Add to Dataset Manager →
@@ -596,21 +594,21 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                 }}
                 style={{ padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
                   fontFamily:mono, fontSize:10, transition:"all 0.12s",
-                  background:"transparent", color:"#6ec8b4",
-                  border:"1px solid #6ec8b4" }}>
+                  background:"transparent", color:C.teal,
+                  border:`1px solid ${C.teal}` }}>
                 ◈ Audit
               </button>
             )}
             <button onClick={proceed} style={{ padding:"0.28rem 0.65rem", borderRadius:3,
               cursor:"pointer", fontFamily:mono, fontSize:10,
-              background:"#c8a96e", color:"#080808",
-              border:"1px solid #c8a96e", fontWeight:700 }}>
+              background:C.gold, color:C.bg,
+              border:`1px solid ${C.gold}`, fontWeight:700 }}>
               Proceed →
             </button>
           </div>
         </div>
 
-        <HintBox color="#6ec8b4" title="How to wrangle" sections={[
+        <HintBox color={C.teal} title="How to wrangle" sections={[
           { heading: "Pipeline", items: [
             "Non-destructive: every step replays on raw data — nothing is permanently changed",
             "Undo any step from the History sidebar on the left",
