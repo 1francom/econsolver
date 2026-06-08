@@ -30,7 +30,8 @@ import {
 } from "./Prompts/index.js";
 import { serializeSnapshot, loadOptsToScriptHint } from "./sessionSnapshot.js";
 import { serializeAllowedSteps, serializeCapabilityMap } from "./appCapabilityMap.js";
-import { filterVariableNames } from "../Privacy/privacyFilter.js";
+import { filterVariableNames, filterSampleRows } from "../Privacy/privacyFilter.js";
+import { detectPII } from "../Privacy/piiDetector.js";
 import { getSession } from "../auth/authService.js";
 
 const API_URL       = "https://api.anthropic.com/v1/messages";
@@ -285,9 +286,24 @@ export async function inferVariableUnits(headers, sampleRows) {
   if (!headers?.length) return {};
 
   const sample = sampleRows.slice(0, 3);
+
+  // Privacy-first hard constraint: auto-detect PII and strip it through the
+  // sanctioned privacyFilter choke point before any network egress. HIGH columns
+  // (names, emails, SSNs…) are suppressed entirely; MEDIUM columns are aliased and
+  // their sample values masked/rounded. Non-PII columns pass through unchanged so
+  // unit inference quality is preserved.
+  const piiConfig = detectPII(headers, sample);
+  const { headers: safeHeaders, rows: safeRows, redacted } = filterSampleRows(headers, sample, piiConfig);
+  if (redacted.length) {
+    console.info(
+      `[AIService] inferVariableUnits: ${redacted.length} PII column(s) filtered before egress — ` +
+      redacted.map(r => `${r.col}→${r.action}`).join(", "),
+    );
+  }
+
   const sampleText = [
-    headers.join(" | "),
-    ...sample.map(r => headers.map(h => {
+    safeHeaders.join(" | "),
+    ...safeRows.map(r => safeHeaders.map(h => {
       const v = r[h];
       return v === null || v === undefined ? "NA" : String(v);
     }).join(" | ")),
@@ -308,11 +324,20 @@ export async function inferVariableUnits(headers, sampleRows) {
     return identity();
   }
 
+  // AI keys its response by the (possibly aliased) headers it was shown. Map any
+  // aliased keys back to the original column names before returning.
+  const aliasToOrig = {};
+  for (const r of redacted) {
+    if (r.action === "aliased" && r.alias) aliasToOrig[r.alias] = r.col;
+  }
+
   const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
   try {
     const parsed = JSON.parse(cleaned);
+    const remapped = {};
+    for (const [k, val] of Object.entries(parsed)) remapped[aliasToOrig[k] ?? k] = val;
     const result = {};
-    headers.forEach(h => { result[h] = parsed[h] ?? h; });
+    headers.forEach(h => { result[h] = remapped[h] ?? h; });
     return result;
   } catch {
     return identity();
