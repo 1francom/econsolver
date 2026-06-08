@@ -256,7 +256,7 @@ export function SpatialMapSection({ rows, headers, C, pid }) {
         </div>
       )}
 
-      {err && <div style={{ color: "#c47070", fontFamily: mono, fontSize: 10 }}>{err}</div>}
+      {err && <div style={{ color: C.red, fontFamily: mono, fontSize: 10 }}>{err}</div>}
       {!L   && <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }}>Loading Leaflet…</div>}
 
       {/* Map — fixed-height wrapper prevents ResizeObserver feedback loop */}
