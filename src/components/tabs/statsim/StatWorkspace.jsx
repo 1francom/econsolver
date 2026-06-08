@@ -27,34 +27,32 @@ import { useTheme } from "../../../ThemeContext.jsx";
 import SampleTestPanel from "./SampleTestPanel.jsx";
 import QTEPanel from "./QTEPanel.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
-  const { C } = useTheme();
-  return <div style={{ fontSize: 10, color: color ?? C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: mono }}>{children}</div>;
+  const { C, T } = useTheme();
+  return <div style={{ fontSize: T.caption.fontSize, color: color ?? C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: T.code.fontFamily }}>{children}</div>;
 }
 function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const btnColor = color ?? C.gold;
-  const b = { padding: sm ? "0.28rem 0.65rem" : "0.45rem 0.9rem", borderRadius: 3, cursor: dis ? "not-allowed" : "pointer", fontFamily: mono, fontSize: sm ? 10 : 11, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
+  const b = { padding: sm ? "0.28rem 0.65rem" : "0.45rem 0.9rem", borderRadius: 3, cursor: dis ? "not-allowed" : "pointer", fontFamily: T.code.fontFamily, fontSize: sm ? T.caption.fontSize : T.code.fontSize, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
   if (v === "solid") return <button onClick={onClick} disabled={dis} style={{ ...b, background: btnColor, color: C.bg, border: `1px solid ${btnColor}`, fontWeight: 700 }}>{ch}</button>;
   if (v === "ghost") return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: "none", color: dis ? C.textMuted : btnColor }}>{ch}</button>;
   return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: `1px solid ${C.border2}`, color: dis ? C.textMuted : C.textDim }}>{ch}</button>;
 }
 function SectionHeader({ label, open, onToggle, badge }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div onClick={onToggle} style={{ background: C.surface2, padding: "0.55rem 0.85rem", borderBottom: open ? `1px solid ${C.border}` : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▾" : "▸"}</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{open ? "▾" : "▸"}</span>
       <Lbl color={C.textDim} mb={0}>{label}</Lbl>
-      {badge && <span style={{ marginLeft: "auto", fontSize: 9, color: C.textMuted }}>{badge}</span>}
+      {badge && <span style={{ marginLeft: "auto", fontSize: T.caption.fontSize, color: C.textMuted }}>{badge}</span>}
     </div>
   );
 }
-const fieldStyle = C => ({ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" });
-const typeColor = C => ({ Integer: C.blue, Float: C.blue, Slider: C.teal, String: C.teal, Date: C.teal, Boolean: "#c88e6e", Vector: C.purple, Expression: C.gold, Computed: C.textMuted });
-const thStyle = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2 });
+const fieldStyle = (C, T) => ({ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none" });
+const typeColor = C => ({ Integer: C.blue, Float: C.blue, Slider: C.teal, String: C.teal, Date: C.teal, Boolean: C.orange, Vector: C.purple, Expression: C.gold, Computed: C.textMuted });
+const thStyle = (C, T) => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: T.code.fontFamily, fontWeight: 400, fontSize: T.caption.fontSize, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2 });
 const tdStyle = C => ({ padding: "0.35rem 0.75rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
 
 // ─── SCRIPT GENERATOR ────────────────────────────────────────────────────────
@@ -131,7 +129,7 @@ function fmt(n, d = 6) {
 
 // ─── REPLICATE HISTOGRAM ──────────────────────────────────────────────────────
 function ReplicateHistogram({ replicates, marker, ciLo, ciHi, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const col = color ?? C.teal;
   if (!replicates?.length) return null;
   const W = 360, H = 90, PAD = { l: 8, r: 8, t: 6, b: 14 };
@@ -163,44 +161,44 @@ function ReplicateHistogram({ replicates, marker, ciLo, ciHi, color }) {
           stroke={C.gold} strokeWidth={1.5}/>
       )}
       <line x1={PAD.l} x2={W - PAD.r} y1={H - PAD.b} y2={H - PAD.b} stroke={C.border} />
-      <text x={PAD.l} y={H - 2} fontSize={8} fontFamily={mono} fill={C.textMuted}>{lo.toFixed(3)}</text>
-      <text x={W - PAD.r} y={H - 2} textAnchor="end" fontSize={8} fontFamily={mono} fill={C.textMuted}>{hi.toFixed(3)}</text>
+      <text x={PAD.l} y={H - 2} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} fill={C.textMuted}>{lo.toFixed(3)}</text>
+      <text x={W - PAD.r} y={H - 2} textAnchor="end" fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} fill={C.textMuted}>{hi.toFixed(3)}</text>
     </svg>
   );
 }
 
 // ─── RESULT BOX ───────────────────────────────────────────────────────────────
 function ResultBox({ children, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const col = color ?? C.teal;
   return (
-    <div style={{ background: `${col}0a`, border: `1px solid ${col}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: mono, fontSize: 11, color: C.text, lineHeight: 1.9, marginTop: 8 }}>
+    <div style={{ background: `${col}0a`, border: `1px solid ${col}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text, lineHeight: 1.9, marginTop: 8 }}>
       {children}
     </div>
   );
 }
 function ErrBox({ msg }) {
-  const { C } = useTheme();
-  return <div style={{ color: C.red, fontFamily: mono, fontSize: 10, marginTop: 6 }}>{msg}</div>;
+  const { C, T } = useTheme();
+  return <div style={{ color: C.red, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, marginTop: 6 }}>{msg}</div>;
 }
 
 // ─── VALUE INPUT ──────────────────────────────────────────────────────────────
 function ValueInput({ type, value, onChange }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (type === "Boolean") return (
-    <select value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1 }}>
+    <select value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C, T), flex: 1 }}>
       <option>TRUE</option><option>FALSE</option>
     </select>
   );
-  if (type === "Date") return <input type="date" value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1 }} />;
+  if (type === "Date") return <input type="date" value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C, T), flex: 1 }} />;
   if (type === "Expression") return (
     <input type="text" placeholder="e.g. 2*alpha + sqrt(beta)" value={value}
-      onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1, minWidth: 160 }} />
+      onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C, T), flex: 1, minWidth: 160 }} />
   );
   const isNum = type === "Integer" || type === "Float";
   return <input type={isNum ? "number" : "text"} step={type === "Float" ? "any" : type === "Integer" ? "1" : undefined}
     placeholder={type === "Vector" ? "1.2, 0.8, -0.3" : isNum ? "0" : "…"}
-    value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C), flex: 1, minWidth: 80 }} />;
+    value={value} onChange={e => onChange(e.target.value)} style={{ ...fieldStyle(C, T), flex: 1, minWidth: 80 }} />;
 }
 
 // ─── PROBABILITY CALCULATOR ───────────────────────────────────────────────────
@@ -251,7 +249,7 @@ function _prange(dist, p) {
 }
 
 function ProbCalc() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [dist,   setDistId2] = useState("normal");
   const [params, setParams]  = useState({ μ:"0", σ:"1" });
   const [mode,   setMode]    = useState("cdf");
@@ -339,16 +337,16 @@ function ProbCalc() {
       {/* Distribution + params */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end", marginBottom:10 }}>
         <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-          <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
-          <select value={dist} onChange={e=>switchDist(e.target.value)} style={{...fieldStyle(C),width:122}}>
+          <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
+          <select value={dist} onChange={e=>switchDist(e.target.value)} style={{...fieldStyle(C, T),width:122}}>
             {PROB_DISTS.map(d=><option key={d.id} value={d.id}>{d.label}</option>)}
           </select>
         </label>
         {cfg?.params.map(({k})=>(
           <label key={k} style={{ display:"flex", flexDirection:"column", gap:3 }}>
-            <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
             <input value={params[k]??""} onChange={e=>setParams(p=>({...p,[k]:e.target.value}))}
-              style={{...fieldStyle(C),width:68}}/>
+              style={{...fieldStyle(C, T),width:68}}/>
           </label>
         ))}
       </div>
@@ -359,7 +357,7 @@ function ProbCalc() {
             style={{ padding:"0.28rem 0.6rem", background:"transparent", border:"none",
               borderBottom:mode===id?`2px solid ${C.teal}`:"2px solid transparent",
               color:mode===id?C.teal:C.textMuted,
-              cursor:"pointer", fontFamily:mono, fontSize:9, letterSpacing:"0.06em", transition:"all 0.1s" }}>
+              cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing:"0.06em", transition:"all 0.1s" }}>
             {label}
           </button>
         ))}
@@ -368,34 +366,34 @@ function ProbCalc() {
       <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:10, flexWrap:"wrap" }}>
         {(mode==="cdf"||mode==="pdf") && (
           <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>x =</span>
-            <input value={xVal} onChange={e=>setXVal(e.target.value)} style={{...fieldStyle(C),width:100}}/>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>x =</span>
+            <input value={xVal} onChange={e=>setXVal(e.target.value)} style={{...fieldStyle(C, T),width:100}}/>
           </label>
         )}
         {mode==="between" && <>
           <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>a =</span>
-            <input value={aVal} onChange={e=>setAVal(e.target.value)} style={{...fieldStyle(C),width:88}}/>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>a =</span>
+            <input value={aVal} onChange={e=>setAVal(e.target.value)} style={{...fieldStyle(C, T),width:88}}/>
           </label>
           <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>b =</span>
-            <input value={bVal} onChange={e=>setBVal(e.target.value)} style={{...fieldStyle(C),width:88}}/>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>b =</span>
+            <input value={bVal} onChange={e=>setBVal(e.target.value)} style={{...fieldStyle(C, T),width:88}}/>
           </label>
         </>}
         {mode==="quantile" && (
           <label style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:10, color:C.textMuted, fontFamily:mono }}>p =</span>
-            <input value={pVal} onChange={e=>setPVal(e.target.value)} style={{...fieldStyle(C),width:100}}/>
+            <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>p =</span>
+            <input value={pVal} onChange={e=>setPVal(e.target.value)} style={{...fieldStyle(C, T),width:100}}/>
           </label>
         )}
       </div>
       {/* Result */}
       {result && (
         <div style={{ marginBottom:10, display:"flex", alignItems:"baseline", gap:10 }}>
-          <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>{result.label} =</span>
+          <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>{result.label} =</span>
           {result.val!=null
-            ? <span style={{ fontSize:16, color:C.teal, fontFamily:mono }}>{result.val.toFixed(6)}</span>
-            : <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono }}>{result.label}</span>}
+            ? <span style={{ fontSize: T.h2.fontSize, color:C.teal, fontFamily: T.code.fontFamily }}>{result.val.toFixed(6)}</span>
+            : <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>{result.label}</span>}
         </div>
       )}
       {/* Mini curve */}
@@ -518,7 +516,7 @@ const DIST_CONFIGS = {
 
 // ─── MINI INLINE HISTOGRAM ────────────────────────────────────────────────────
 function MiniHist({ values, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const col = color ?? C.teal;
   if (!values?.length) return null;
   const W = 340, H = 72, PL = 6, PR = 6, PT = 6, PB = 14;
@@ -539,15 +537,15 @@ function MiniHist({ values, color }) {
           height={H - PB - yp(c)} fill={col} opacity={0.55}/>
       ))}
       <line x1={PL} x2={W - PR} y1={H - PB} y2={H - PB} stroke={C.border}/>
-      <text x={PL} y={H - 2} fontSize={8} fontFamily={mono} fill={C.textMuted}>{lo.toFixed(2)}</text>
-      <text x={W - PR} y={H - 2} textAnchor="end" fontSize={8} fontFamily={mono} fill={C.textMuted}>{hi.toFixed(2)}</text>
+      <text x={PL} y={H - 2} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} fill={C.textMuted}>{lo.toFixed(2)}</text>
+      <text x={W - PR} y={H - 2} textAnchor="end" fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} fill={C.textMuted}>{hi.toFixed(2)}</text>
     </svg>
   );
 }
 
 // ─── DISTRIBUTIONS SECTION ────────────────────────────────────────────────────
 function DistributionsSection({ onAddColumn, onCreateDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen]     = useState(false);
   const [dist, setDist]     = useState("normal");
   const [params, setParams] = useState({ mean:"0", sd:"1" });
@@ -596,36 +594,36 @@ function DistributionsSection({ onAddColumn, onCreateDataset }) {
         <div style={{ padding:"0.85rem", background:C.surface, display:"flex", flexDirection:"column", gap:10 }}>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
-              <select value={dist} onChange={e => switchDist(e.target.value)} style={{ ...fieldStyle(C), width:130 }}>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Distribution</span>
+              <select value={dist} onChange={e => switchDist(e.target.value)} style={{ ...fieldStyle(C, T), width:130 }}>
                 {Object.entries(DIST_CONFIGS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
             </label>
             {cfg.params.map(({ k }) => (
               <label key={k} style={{ display:"flex", flexDirection:"column", gap:3 }}>
-                <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
+                <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>{k}</span>
                 <input type="number" step="any" value={params[k] ?? ""}
                   onChange={e => setParams(p => ({ ...p, [k]: e.target.value }))}
-                  style={{ ...fieldStyle(C), width:72 }}/>
+                  style={{ ...fieldStyle(C, T), width:72 }}/>
               </label>
             ))}
           </div>
 
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>N samples</span>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>N samples</span>
               <input type="number" min={1} max={100000} step={1} value={nSamples}
-                onChange={e => setNSamples(e.target.value)} style={{ ...fieldStyle(C), width:90 }}/>
+                onChange={e => setNSamples(e.target.value)} style={{ ...fieldStyle(C, T), width:90 }}/>
             </label>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Seed (optional)</span>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Seed (optional)</span>
               <input type="number" step={1} value={seed} placeholder="random"
-                onChange={e => setSeed(e.target.value)} style={{ ...fieldStyle(C), width:100 }}/>
+                onChange={e => setSeed(e.target.value)} style={{ ...fieldStyle(C, T), width:100 }}/>
             </label>
             <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              <span style={{ fontSize:9, color:C.textMuted, fontFamily:mono, letterSpacing:"0.14em", textTransform:"uppercase" }}>Column name</span>
+              <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, letterSpacing:"0.14em", textTransform:"uppercase" }}>Column name</span>
               <input value={colName} onChange={e => setColName(e.target.value)}
-                style={{ ...fieldStyle(C), width:130 }}/>
+                style={{ ...fieldStyle(C, T), width:130 }}/>
             </label>
             <div style={{ alignSelf:"flex-end" }}>
               <Btn ch="Generate ▸" v="solid" color={C.teal} sm onClick={generate} dis={!colName.trim()}/>
@@ -636,11 +634,11 @@ function DistributionsSection({ onAddColumn, onCreateDataset }) {
 
           {generated?.values && (
             <ResultBox color={C.teal}>
-              <div style={{ fontSize:9, color:C.textMuted, marginBottom:4 }}>
+              <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, marginBottom:4 }}>
                 Preview (first 5 of {generated.values.length}):&nbsp;
                 <span style={{ color:C.teal }}>{generated.values.slice(0,5).map(v => Number(v).toFixed(4)).join(", ")}</span>
               </div>
-              <div style={{ fontSize:9, color:C.textMuted, marginBottom:2 }}>
+              <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, marginBottom:2 }}>
                 mean = {(generated.values.reduce((a,b)=>a+b,0)/generated.values.length).toFixed(4)}
                 {" · "}sd = {(() => { const m=generated.values.reduce((a,b)=>a+b,0)/generated.values.length; return Math.sqrt(generated.values.reduce((a,b)=>a+(b-m)**2,0)/generated.values.length).toFixed(4); })()}
               </div>
@@ -654,9 +652,9 @@ function DistributionsSection({ onAddColumn, onCreateDataset }) {
                 dis={!colName.trim() || !onAddColumn}/>
               <Btn ch="New dataset from this column" v="out" sm onClick={newDataset}
                 dis={!colName.trim()}/>
-              {addedMsg && <span style={{ fontFamily:mono, fontSize:10, color:C.teal }}>{addedMsg}</span>}
+              {addedMsg && <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color:C.teal }}>{addedMsg}</span>}
               {!onAddColumn && (
-                <span style={{ fontFamily:mono, fontSize:9, color:C.textMuted }}>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color:C.textMuted }}>
                   (onAddColumn not wired — TODO in parent)
                 </span>
               )}
@@ -670,7 +668,7 @@ function DistributionsSection({ onAddColumn, onCreateDataset }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function StatWorkspace({ rows = [], headers = [], onAddDataset, onAddColumn, onCreateDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { appendLog } = useSessionLog();
   // ── Variable workspace ─────────────────────────────────────────────────────
   const [variables,    setVariables]   = useState([]);
@@ -776,32 +774,32 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
       const step = parseFloat(v.sliderStep ?? "0.1");
       return (
         <tr>
-          <td style={tdStyle(C)}><span style={{ fontFamily: mono, fontSize: 11, color: C.text }}>{v.name}</span></td>
-          <td style={tdStyle(C)}><span style={{ fontSize: 9, padding: "2px 6px", border: `1px solid ${C.teal}`, color: C.teal, borderRadius: 2, fontFamily: mono }}>Slider</span></td>
+          <td style={tdStyle(C)}><span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text }}>{v.name}</span></td>
+          <td style={tdStyle(C)}><span style={{ fontSize: T.caption.fontSize, padding: "2px 6px", border: `1px solid ${C.teal}`, color: C.teal, borderRadius: 2, fontFamily: T.code.fontFamily }}>Slider</span></td>
           <td style={{ ...tdStyle(C), maxWidth: 340 }}>
             {editingBounds
               ? <span style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
                   {["min","max","step"].map(k => (
                     <span key={k} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ fontSize: 8, color: C.textMuted, fontFamily: mono }}>{k}</span>
+                      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{k}</span>
                       <input type="number" step="any" value={boundsForm[k]}
                         onChange={e => setBoundsForm(f => ({ ...f, [k]: e.target.value }))}
-                        style={{ ...fieldStyle(C), width: 60 }} />
+                        style={{ ...fieldStyle(C, T), width: 60 }} />
                     </span>
                   ))}
                   <Btn ch="✓" sm v="ghost" color={C.teal} onClick={saveBounds} />
                   <Btn ch="✕" sm v="ghost" color={C.textMuted} onClick={() => setEditingBounds(false)} />
                 </span>
               : <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, minWidth: 28 }}>{min}</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 28 }}>{min}</span>
                   <input type="range" min={min} max={max} step={step} value={val}
                     onChange={e => setVariables(vs => vs.map(x => x.id === v.id ? { ...x, rawValue: e.target.value } : x))}
                     style={{ flex: 1, accentColor: C.teal, cursor: "pointer" }} />
-                  <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, minWidth: 28, textAlign: "right" }}>{max}</span>
-                  <span style={{ fontFamily: mono, fontSize: 12, color: C.teal, minWidth: 44, textAlign: "right" }}>{val}</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 28, textAlign: "right" }}>{max}</span>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.teal, minWidth: 44, textAlign: "right" }}>{val}</span>
                   <button onClick={() => { setBoundsForm({ min: v.sliderMin ?? "0", max: v.sliderMax ?? "10", step: v.sliderStep ?? "0.1" }); setEditingBounds(true); }}
                     title="Edit range"
-                    style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "0 2px" }}
+                    style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0 2px" }}
                     onMouseEnter={e => e.currentTarget.style.color = C.teal}
                     onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>⚙</button>
                 </span>
@@ -809,7 +807,7 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
           </td>
           <td style={{ ...tdStyle(C), textAlign: "right" }}>
             <button onClick={() => setVariables(vs => vs.filter(x => x.id !== v.id))}
-              style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 14 }}
+                    style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.body.fontSize }}
               onMouseEnter={e => e.currentTarget.style.color = C.red}
               onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
           </td>
@@ -832,8 +830,8 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
 
     return (
       <tr>
-        <td style={tdStyle(C)}><span style={{ fontFamily: mono, fontSize: 11, color: C.text }}>{v.name}</span></td>
-        <td style={tdStyle(C)}><span style={{ fontSize: 9, padding: "2px 6px", border: `1px solid ${typeColor(C)[v.type]}`, color: typeColor(C)[v.type], borderRadius: 2, fontFamily: mono }}>{v.type}</span></td>
+        <td style={tdStyle(C)}><span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text }}>{v.name}</span></td>
+        <td style={tdStyle(C)}><span style={{ fontSize: T.caption.fontSize, padding: "2px 6px", border: `1px solid ${typeColor(C)[v.type]}`, color: typeColor(C)[v.type], borderRadius: 2, fontFamily: T.code.fontFamily }}>{v.type}</span></td>
         <td style={{ ...tdStyle(C), maxWidth: 300 }}>
           {editing
             ? <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -842,14 +840,14 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                 <Btn ch="✕" sm v="ghost" color={C.textMuted} onClick={() => setEditing(false)} />
               </span>
             : <span onClick={() => { setEditVal(v.rawValue); setEditing(true); }} title="Click to edit"
-                style={{ cursor: "text", fontFamily: mono, fontSize: 11 }}>
+                style={{ cursor: "text", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
                 {displayVal()}
               </span>
           }
         </td>
         <td style={{ ...tdStyle(C), textAlign: "right" }}>
           <button onClick={() => setVariables(vs => vs.filter(x => x.id !== v.id))}
-            style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 14 }}
+            style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.body.fontSize }}
             onMouseEnter={e => e.currentTarget.style.color = C.red}
             onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
         </td>
@@ -860,19 +858,19 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
   const vectorVars = variables.filter(v => v.type === "Vector");
 
   return (
-    <div style={{ fontFamily: mono, color: C.text }}>
+    <div style={{ fontFamily: T.code.fontFamily, color: C.text }}>
 
       {/* Header + export buttons */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: "1.4rem", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", marginBottom: 3 }}>Stat &amp; Simulation</div>
-          <div style={{ fontSize: 18, color: C.text, letterSpacing: "-0.01em" }}>Variable Workspace &amp; Statistics</div>
+          <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", marginBottom: 3 }}>Stat &amp; Simulation</div>
+          <div style={{ fontSize: T.h2.fontSize, color: C.text, letterSpacing: "-0.01em" }}>Variable Workspace &amp; Statistics</div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           {[["↓R","r",C.gold],["↓Stata","stata",C.teal],["↓py","python",C.blue]].map(([label,lang,color]) => (
             <button key={lang}
               onClick={() => download(generateCalcScript(lang, variables, computeds), `workspace.${lang === "r" ? "R" : lang === "stata" ? "do" : "py"}`)}
-              style={{ padding: "0.3rem 0.7rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, transition: "all 0.12s" }}
+              style={{ padding: "0.3rem 0.7rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = color; e.currentTarget.style.color = color; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
             >{label}</button>
@@ -887,36 +885,36 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
         </div>
         {variables.length > 0 && (
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
-            <thead><tr>{["Name","Type","Value",""].map(h => <th key={h} style={thStyle(C)}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Name","Type","Value",""].map(h => <th key={h} style={thStyle(C, T)}>{h}</th>)}</tr></thead>
             <tbody>{variables.map(v => <VarRow key={v.id} v={v} />)}</tbody>
           </table>
         )}
         <div style={{ padding: "0.7rem 0.85rem", background: C.surface, borderTop: variables.length ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
           <input placeholder="var_name" value={newName} onChange={e => { setNewName(e.target.value); setNameErr(""); }}
-            onKeyDown={e => e.key === "Enter" && addVariable()} style={{ ...fieldStyle(C), width: 130 }} />
-          <select value={newType} onChange={e => { setNewType(e.target.value); setNewValue(""); }} style={fieldStyle(C)}>
+            onKeyDown={e => e.key === "Enter" && addVariable()} style={{ ...fieldStyle(C, T), width: 130 }} />
+          <select value={newType} onChange={e => { setNewType(e.target.value); setNewValue(""); }} style={fieldStyle(C, T)}>
             {["Integer","Float","Slider","String","Date","Boolean","Vector","Expression"].map(t => <option key={t}>{t}</option>)}
           </select>
           {newType === "Slider"
             ? <>
-                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center" }}>default</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, alignSelf: "center" }}>default</span>
                 <input type="number" step="any" placeholder="1" value={newValue} onChange={e => setNewValue(e.target.value)}
-                  style={{ ...fieldStyle(C), width: 56 }} />
-                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center" }}>min</span>
+                  style={{ ...fieldStyle(C, T), width: 56 }} />
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, alignSelf: "center" }}>min</span>
                 <input type="number" step="any" value={newSliderMin} onChange={e => setNewSliderMin(e.target.value)}
-                  style={{ ...fieldStyle(C), width: 56 }} />
-                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center" }}>max</span>
+                  style={{ ...fieldStyle(C, T), width: 56 }} />
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, alignSelf: "center" }}>max</span>
                 <input type="number" step="any" value={newSliderMax} onChange={e => setNewSliderMax(e.target.value)}
-                  style={{ ...fieldStyle(C), width: 56 }} />
-                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, alignSelf: "center" }}>step</span>
+                  style={{ ...fieldStyle(C, T), width: 56 }} />
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, alignSelf: "center" }}>step</span>
                 <input type="number" step="any" value={newSliderStep} onChange={e => setNewSliderStep(e.target.value)}
-                  style={{ ...fieldStyle(C), width: 56 }} />
+                  style={{ ...fieldStyle(C, T), width: 56 }} />
               </>
             : <ValueInput type={newType} value={newValue} onChange={setNewValue} />
           }
           <Btn ch="Add" v="solid" color={C.gold} onClick={addVariable} sm />
         </div>
-        {nameErr && <div style={{ padding: "0 0.85rem 0.5rem", fontSize: 10, color: C.red }}>{nameErr}</div>}
+        {nameErr && <div style={{ padding: "0 0.85rem 0.5rem", fontSize: T.caption.fontSize, color: C.red }}>{nameErr}</div>}
       </div>
 
       {/* ── 2. Computed from dataset ────────────────────────────────────────── */}
@@ -926,17 +924,17 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
           <>
             {computeds.length > 0 && (
               <table style={{ borderCollapse: "collapse", width: "100%" }}>
-                <thead><tr>{["Name","Type","Expression","Value",""].map(h => <th key={h} style={thStyle(C)}>{h}</th>)}</tr></thead>
+                <thead><tr>{["Name","Type","Expression","Value",""].map(h => <th key={h} style={thStyle(C, T)}>{h}</th>)}</tr></thead>
                 <tbody>
                   {computeds.map(c => (
                     <tr key={c.id}>
-                      <td style={tdStyle(C)}><span style={{ fontFamily: mono, fontSize: 11, color: C.text }}>{c.name}</span></td>
-                      <td style={tdStyle(C)}><span style={{ fontSize: 9, padding: "2px 6px", border: `1px solid ${C.textMuted}`, color: C.textMuted, borderRadius: 2, fontFamily: mono }}>Computed</span></td>
-                      <td style={tdStyle(C)}><span style={{ fontFamily: mono, fontSize: 11, color: C.textDim }}>{c.fn}({c.col})</span></td>
-                      <td style={{ ...tdStyle(C), color: C.teal, fontFamily: mono, fontSize: 11 }}>{evalComputed(c.fn, c.col, rows)}</td>
+                      <td style={tdStyle(C)}><span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text }}>{c.name}</span></td>
+                      <td style={tdStyle(C)}><span style={{ fontSize: T.caption.fontSize, padding: "2px 6px", border: `1px solid ${C.textMuted}`, color: C.textMuted, borderRadius: 2, fontFamily: T.code.fontFamily }}>Computed</span></td>
+                      <td style={tdStyle(C)}><span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textDim }}>{c.fn}({c.col})</span></td>
+                      <td style={{ ...tdStyle(C), color: C.teal, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>{evalComputed(c.fn, c.col, rows)}</td>
                       <td style={{ ...tdStyle(C), textAlign: "right" }}>
                         <button onClick={() => setComputeds(cs => cs.filter(x => x.id !== c.id))}
-                          style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 14 }}
+                          style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.body.fontSize }}
                           onMouseEnter={e => e.currentTarget.style.color = C.red}
                           onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>×</button>
                       </td>
@@ -946,11 +944,11 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
               </table>
             )}
             <div style={{ padding: "0.7rem 0.85rem", background: C.surface, borderTop: computeds.length ? `1px solid ${C.border}` : "none", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-              <input placeholder="var_name" value={newCName} onChange={e => setNewCName(e.target.value)} onKeyDown={e => e.key === "Enter" && addComputed()} style={{ ...fieldStyle(C), width: 130 }} />
-              <select value={newCFn} onChange={e => setNewCFn(e.target.value)} style={fieldStyle(C)}>
+              <input placeholder="var_name" value={newCName} onChange={e => setNewCName(e.target.value)} onKeyDown={e => e.key === "Enter" && addComputed()} style={{ ...fieldStyle(C, T), width: 130 }} />
+              <select value={newCFn} onChange={e => setNewCFn(e.target.value)} style={fieldStyle(C, T)}>
                 {["mean","sum","count","min","max"].map(f => <option key={f}>{f}</option>)}
               </select>
-              <select value={newCCol || numericHeaders[0] || ""} onChange={e => setNewCCol(e.target.value)} style={{ ...fieldStyle(C), maxWidth: 200 }}>
+              <select value={newCCol || numericHeaders[0] || ""} onChange={e => setNewCCol(e.target.value)} style={{ ...fieldStyle(C, T), maxWidth: 200 }}>
                 {numericHeaders.length ? numericHeaders.map(h => <option key={h}>{h}</option>) : <option value="">— no numeric columns —</option>}
               </select>
               <Btn ch="Add" v="solid" color={C.blue} onClick={addComputed} sm dis={!numericHeaders.length} />
@@ -968,7 +966,7 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                 background: rsMode === id ? `${C.teal}18` : "transparent",
                 border: `1px solid ${rsMode === id ? C.teal : C.border2}`,
                 color: rsMode === id ? C.teal : C.textDim,
-                fontFamily: mono, fontSize: 10, letterSpacing: "0.08em",
+                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.08em",
                 padding: "0.3rem 0.7rem", borderRadius: 2, cursor: "pointer",
               }}>{label}</button>
           );
@@ -1057,16 +1055,16 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
               </div>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>variable</span>
-                <select value={rsCol} onChange={e => { setRsCol(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 220 }}>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>variable</span>
+                <select value={rsCol} onChange={e => { setRsCol(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 220 }}>
                   <option value="">— pick numeric column —</option>
                   {numericHeaders.map(h => <option key={h}>{h}</option>)}
                 </select>
 
                 {rsMode === "boot" && (
                   <>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>statistic</span>
-                    <select value={rsStat} onChange={e => { setRsStat(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 140 }}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>statistic</span>
+                    <select value={rsStat} onChange={e => { setRsStat(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 140 }}>
                       <option value="mean">mean</option>
                       <option value="median">median</option>
                       <option value="sd">sd</option>
@@ -1074,8 +1072,8 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                       <option value="trimmedMean10">trimmed mean 10%</option>
                       <option value="iqr">IQR</option>
                     </select>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>CI</span>
-                    <select value={rsCiType} onChange={e => { setRsCiType(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 130 }}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>CI</span>
+                    <select value={rsCiType} onChange={e => { setRsCiType(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 130 }}>
                       <option value="percentile">percentile</option>
                       <option value="basic">basic</option>
                       <option value="bca">BCa</option>
@@ -1085,29 +1083,29 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
 
                 {rsMode === "perm" && (
                   <>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>group</span>
-                    <select value={rsGroupCol} onChange={e => { setRsGroupCol(e.target.value); setRsLevelA(""); setRsLevelB(""); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 200 }}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>group</span>
+                    <select value={rsGroupCol} onChange={e => { setRsGroupCol(e.target.value); setRsLevelA(""); setRsLevelB(""); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 200 }}>
                       <option value="">— pick group column —</option>
                       {groupCandidates.map(h => <option key={h}>{h}</option>)}
                     </select>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>A</span>
-                    <select value={rsLevelA} onChange={e => { setRsLevelA(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 140 }} disabled={!levels.length}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>A</span>
+                    <select value={rsLevelA} onChange={e => { setRsLevelA(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 140 }} disabled={!levels.length}>
                       <option value="">—</option>
                       {levels.map(l => <option key={l}>{l}</option>)}
                     </select>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>B</span>
-                    <select value={rsLevelB} onChange={e => { setRsLevelB(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 140 }} disabled={!levels.length}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>B</span>
+                    <select value={rsLevelB} onChange={e => { setRsLevelB(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 140 }} disabled={!levels.length}>
                       <option value="">—</option>
                       {levels.map(l => <option key={l}>{l}</option>)}
                     </select>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>contrast</span>
-                    <select value={rsContrast} onChange={e => { setRsContrast(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C), maxWidth: 150 }}>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>contrast</span>
+                    <select value={rsContrast} onChange={e => { setRsContrast(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 150 }}>
                       <option value="diffMeans">diff of means</option>
                       <option value="diffMedians">diff of medians</option>
                       <option value="diffSd">diff of sd</option>
                       <option value="meanRatio">ratio of means</option>
                     </select>
-                    <select value={rsAlt} onChange={e => { setRsAlt(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C) }}>
+                    <select value={rsAlt} onChange={e => { setRsAlt(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T) }}>
                       <option value="two-sided">two-sided</option>
                       <option value="greater">greater</option>
                       <option value="less">less</option>
@@ -1117,29 +1115,29 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
 
                 {rsMode === "subsample" && (
                   <>
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>m</span>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>m</span>
                     <input type="number" min={2} step={1} value={rsM || ""} placeholder={n ? `${Math.max(2, Math.floor(n/2))}` : "auto"}
                       onChange={e => setRsM(Math.max(0, parseInt(e.target.value) || 0))}
-                      style={{ ...fieldStyle(C), width: 72 }} />
-                    <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>of n={n || "—"}</span>
+                      style={{ ...fieldStyle(C, T), width: 72 }} />
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>of n={n || "—"}</span>
                   </>
                 )}
 
-                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginLeft: 8 }}>replicates B</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 8 }}>replicates B</span>
                 <input type="number" min={50} step={100} value={rsB}
                   onChange={e => setRsB(Math.max(50, parseInt(e.target.value) || 50))}
-                  style={{ ...fieldStyle(C), width: 80 }} />
+                  style={{ ...fieldStyle(C, T), width: 80 }} />
 
-                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginLeft: 8 }}>seed</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 8 }}>seed</span>
                 <input type="number" step="1" value={rsSeed} placeholder="auto"
-                  onChange={e => setRsSeed(e.target.value)} style={{ ...fieldStyle(C), width: 80 }} />
+                  onChange={e => setRsSeed(e.target.value)} style={{ ...fieldStyle(C, T), width: 80 }} />
 
                 <Btn ch={rsBusy ? "Running…" : "Run"} v="solid" color={C.teal} onClick={runRS} sm
                   dis={rsBusy || !rsCol || (rsMode === "perm" && (!rsGroupCol || !rsLevelA || !rsLevelB || rsLevelA === rsLevelB))} />
               </div>
 
               {ratioWarn && (
-                <div style={{ fontFamily: mono, fontSize: 10, color: C.gold }}>
+                <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold }}>
                   ⚠ Subsample ratio m/n = {(mEffective/n).toFixed(2)} &gt; 0.5 — Politis–Romano SE assumes m/n → 0; rescaled SE may be biased.
                 </div>
               )}
@@ -1199,7 +1197,7 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
           </div>
           {datasetForm
             ? <div style={{ padding: "0.8rem 0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 10 }}>
-                <input placeholder="dataset name" value={datasetForm.name} onChange={e => setDatasetForm(f => ({ ...f, name: e.target.value }))} style={{ ...fieldStyle(C), width: 220 }} />
+                <input placeholder="dataset name" value={datasetForm.name} onChange={e => setDatasetForm(f => ({ ...f, name: e.target.value }))} style={{ ...fieldStyle(C, T), width: 220 }} />
                 <div>
                   <Lbl color={C.textMuted} mb={6}>Select Vector columns</Lbl>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -1207,7 +1205,7 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                       const sel = datasetForm.selectedVars.includes(v.name);
                       return <button key={v.name}
                         onClick={() => setDatasetForm(f => ({ ...f, selectedVars: sel ? f.selectedVars.filter(n => n !== v.name) : [...f.selectedVars, v.name] }))}
-                        style={{ padding: "0.25rem 0.6rem", fontFamily: mono, fontSize: 10, cursor: "pointer", borderRadius: 3, background: sel ? `${C.purple}20` : "transparent", border: `1px solid ${sel ? C.purple : C.border2}`, color: sel ? C.purple : C.textDim }}>
+                        style={{ padding: "0.25rem 0.6rem", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer", borderRadius: 3, background: sel ? `${C.purple}20` : "transparent", border: `1px solid ${sel ? C.purple : C.border2}`, color: sel ? C.purple : C.textDim }}>
                         {v.name}
                       </button>;
                     })}
@@ -1218,7 +1216,7 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                   <Btn ch="Cancel" sm onClick={() => setDatasetForm(null)} />
                 </div>
               </div>
-            : <div style={{ padding: "0.5rem 0.85rem", background: C.surface, fontSize: 10, color: C.textMuted }}>{vectorVars.map(v => v.name).join(", ")} · {vectorVars.length} vector{vectorVars.length > 1 ? "s" : ""} available</div>
+            : <div style={{ padding: "0.5rem 0.85rem", background: C.surface, fontSize: T.caption.fontSize, color: C.textMuted }}>{vectorVars.map(v => v.name).join(", ")} · {vectorVars.length} vector{vectorVars.length > 1 ? "s" : ""} available</div>
           }
         </div>
       )}

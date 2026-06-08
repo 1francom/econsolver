@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/plot/GeoLayerConfig.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useMemo, useState, useEffect } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { PALETTE_DEFS, paletteToCss } from "../shared/color.js";
 
 function PalettePicker({ value, onChange, C }) {
+  const { T } = useTheme();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>Scale</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>Scale</span>
       {Object.entries(PALETTE_DEFS).map(([key, pal]) => {
         const active = (value ?? "teal-gold") === key;
         return (
@@ -29,6 +30,7 @@ function PalettePicker({ value, onChange, C }) {
 // canvas recompute) on explicit confirm (✓ button or Enter). Prevents the grid
 // from recomputing on every keystroke, which froze on transient tiny cell sizes.
 function NumIn({ label, value, onChg, min, max, step, suffix, C }) {
+  const { T } = useTheme();
   const [draft, setDraft] = useState(String(value));
   useEffect(() => { setDraft(String(value)); }, [value]);
   const dirty = draft !== String(value);
@@ -41,18 +43,18 @@ function NumIn({ label, value, onChg, min, max, step, suffix, C }) {
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 92 }}>
-      <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>{label}</span>
       <div style={{ display: "flex", alignItems: "stretch", gap: 4 }}>
         <div style={{ display: "flex", alignItems: "stretch", flex: 1, background: C.surface, border: `1px solid ${dirty ? C.gold + "99" : C.border2}`, borderLeft: `2px solid ${C.teal}88`, borderRadius: 3, overflow: "hidden" }}>
           <input type="number" min={min} max={max} step={step} value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "Escape") setDraft(String(value)); }}
-            style={{ width: 58, padding: "3px 5px", background: "transparent", border: "none", fontFamily: mono, fontSize: 10, color: C.text, outline: "none" }} />
-          {suffix && <span style={{ fontFamily: mono, fontSize: 8, color: C.teal, padding: "0 6px", borderLeft: `1px solid ${C.border2}`, display: "flex", alignItems: "center" }}>{suffix}</span>}
+            style={{ width: 58, padding: "3px 5px", background: "transparent", border: "none", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, outline: "none" }} />
+          {suffix && <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal, padding: "0 6px", borderLeft: `1px solid ${C.border2}`, display: "flex", alignItems: "center" }}>{suffix}</span>}
         </div>
         {dirty && (
           <button onClick={commit} title="Apply (Enter)"
-            style={{ padding: "0 8px", background: `${C.teal}22`, border: `1px solid ${C.teal}99`, borderRadius: 3, color: C.teal, fontFamily: mono, fontSize: 11, cursor: "pointer", lineHeight: 1 }}>✓</button>
+            style={{ padding: "0 8px", background: `${C.teal}22`, border: `1px solid ${C.teal}99`, borderRadius: 3, color: C.teal, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, cursor: "pointer", lineHeight: 1 }}>✓</button>
         )}
       </div>
     </div>
@@ -64,21 +66,23 @@ function NumIn({ label, value, onChg, min, max, step, suffix, C }) {
 // on every pixel of drag. Defined outside GeoLayerConfig so React doesn't remount
 // it on every parent render (which would kill slider focus mid-drag).
 function StagedRng({ label, value, onChg, min, max, step, fmt, C }) {
+  const { T } = useTheme();
   const [draft, setDraft] = useState(value);
   useEffect(() => { setDraft(value); }, [value]);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-      <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, textTransform: "uppercase", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>{label}</span>
       <input type="range" min={min} max={max} step={step} value={draft}
         onChange={e => setDraft(parseFloat(e.target.value))}
         onPointerUp={e => onChg(parseFloat(e.target.value))}
         style={{ width: 60, accentColor: C.teal }} />
-      <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted, minWidth: 28 }}>{fmt ? fmt(draft) : draft}</span>
+      <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, minWidth: 28 }}>{fmt ? fmt(draft) : draft}</span>
     </div>
   );
 }
 
 export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availableDatasets, C }) {
+  const { T } = useTheme();
   const upd = patch => onChange({ ...ly, ...patch });
 
   // Resolve headers for the currently selected dataset
@@ -124,9 +128,9 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
 
   const Sel = ({ label, value, onChg, opts }) => (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 80 }}>
-      <div style={{ fontSize: 7, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.11em", fontFamily: mono }}>{label}</div>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.11em", fontFamily: T.code.fontFamily }}>{label}</div>
       <select value={value} onChange={e => onChg(e.target.value)}
-        style={{ padding: "2px 4px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: mono, fontSize: 9, color: C.text, outline: "none" }}>
+        style={{ padding: "2px 4px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, outline: "none" }}>
         <option value="">— none —</option>
         {opts.map(h => <option key={h} value={h}>{h}</option>)}
       </select>
@@ -137,9 +141,9 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* Dataset selector */}
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <div style={{ fontSize: 7, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.11em", fontFamily: mono }}>Dataset</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.11em", fontFamily: T.code.fontFamily }}>Dataset</div>
         <select value={ly.datasetId ?? "active"} onChange={e => upd({ datasetId: e.target.value, wktCol: "", boundaryCol: "", latCol: "", lonCol: "" })}
-          style={{ padding: "2px 4px", background: C.surface, border: `1px solid ${C.teal}55`, borderRadius: 3, fontFamily: mono, fontSize: 9, color: C.text, outline: "none" }}>
+          style={{ padding: "2px 4px", background: C.surface, border: `1px solid ${C.teal}55`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, outline: "none" }}>
           <option value="active">— active dataset —</option>
           {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
         </select>
@@ -149,7 +153,7 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
           {[["wkt", "Existing WKT"], ["boundary", "Boundary"], ["latlon", "Lat/Lon"]].map(([m, lbl]) => (
             <button key={m} onClick={() => upd({ mode: m })}
               style={{
-                flex: 1, padding: "2px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                flex: 1, padding: "2px 0", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: (ly.mode ?? "boundary") === m ? `${C.teal}18` : "transparent",
                 border: `1px solid ${(ly.mode ?? "boundary") === m ? C.teal + "55" : C.border2}`,
                 color: (ly.mode ?? "boundary") === m ? C.teal : C.textMuted,
@@ -185,7 +189,7 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "end" }}>
           <Sel label="Boundary WKT" value={ly.boundaryCol ?? ly.wktCol ?? ""} onChg={v => upd({ boundaryCol: v, wktCol: v })} opts={geomCols} />
           <NumIn label="Cell size" value={ly.cellsize ?? 500} onChg={v => upd({ cellsize: v })} min={50} max={20000} step={50} suffix="m" C={C} />
-          <label style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: mono, fontSize: 8, color: C.textMuted, marginBottom: 3 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 3 }}>
             <input type="checkbox" checked={ly.clipBorder !== false} onChange={e => upd({ clipBorder: e.target.checked })} style={{ accentColor: C.teal }} />
             clip
           </label>
@@ -215,7 +219,7 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
             {[["latlon", "Lat/Lon"], ["wkt", "WKT geometry"]].map(([m, lbl]) => (
               <button key={m} onClick={() => upd({ mode: m })}
                 style={{
-                  flex: 1, padding: "2px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                  flex: 1, padding: "2px 0", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                   background: (ly.mode ?? "latlon") === m ? `${C.teal}18` : "transparent",
                   border: `1px solid ${(ly.mode ?? "latlon") === m ? C.teal + "55" : C.border2}`,
                   color: (ly.mode ?? "latlon") === m ? C.teal : C.textMuted,
@@ -230,13 +234,13 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
                 <Sel label="Longitude" value={ly.lonCol} onChg={v => upd({ lonCol: v })} opts={dsHeaders} />
               </div>
               {ptDiagnostic && ptDiagnostic.valid === 0 && (
-                <div style={{ padding: "5px 8px", borderRadius: 3, background: `${C.gold}12`, border: `1px solid ${C.gold}50`, fontFamily: mono, fontSize: 8, color: C.gold, lineHeight: 1.5 }}>
+                <div style={{ padding: "5px 8px", borderRadius: 3, background: `${C.gold}12`, border: `1px solid ${C.gold}50`, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold, lineHeight: 1.5 }}>
                   ⚠ All sampled values outside WGS84 bounds (lat: −90…90, lon: −180…180).
                   If integer-encoded, use DataViewer → Position to insert the decimal point.
                 </div>
               )}
               {ptDiagnostic && ptDiagnostic.valid > 0 && ptDiagnostic.outOfBounds > 0 && (
-                <div style={{ padding: "4px 8px", borderRadius: 3, background: `${C.gold}0c`, border: `1px solid ${C.gold}30`, fontFamily: mono, fontSize: 8, color: C.gold }}>
+                <div style={{ padding: "4px 8px", borderRadius: 3, background: `${C.gold}0c`, border: `1px solid ${C.gold}30`, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold }}>
                   ⚠ {ptDiagnostic.outOfBounds} of {ptDiagnostic.checked} sampled rows have out-of-bounds coordinates
                 </div>
               )}
@@ -267,8 +271,8 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
       {(ly.type === "polygon" || ly.type === "point" || ly.type === "grid") && !(ly.type === "point" && ly.colorCol) && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em" }}>Fill</span>
-            <input type="color" value={ly.fill === "none" ? "#6e9ec8" : (ly.fill ?? "#6e9ec8")}
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, textTransform: "uppercase", letterSpacing: "0.1em" }}>Fill</span>
+            <input type="color" value={ly.fill === "none" ? C.blue : (ly.fill ?? C.blue)}
               onChange={e => upd({ fill: e.target.value })}
               style={{ width: 26, height: 18, cursor: "pointer", border: "none", padding: 0, background: "none" }} />
           </div>
@@ -281,8 +285,8 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
       {ly.type !== "point" && ly.type !== "heatmap" && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ fontSize: 7, color: C.textMuted, fontFamily: mono, textTransform: "uppercase", letterSpacing: "0.1em" }}>Stroke</span>
-            <input type="color" value={ly.stroke ?? "#333333"} onChange={e => upd({ stroke: e.target.value })}
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, textTransform: "uppercase", letterSpacing: "0.1em" }}>Stroke</span>
+            <input type="color" value={ly.stroke ?? C.textMuted} onChange={e => upd({ stroke: e.target.value })}
               style={{ width: 26, height: 18, cursor: "pointer", border: "none", padding: 0, background: "none" }} />
           </div>
           <Rng label="Width" value={ly.strokeWidth ?? 0.8} onChg={v => upd({ strokeWidth: v })} min={0.1} max={4} step={0.1} fmt={v => v.toFixed(1) + "px"} C={C} />

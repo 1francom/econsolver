@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/GeocodeSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessAddressCol } from "../shared/guess.js";
 import { GEOCODE_BBOX_PRESETS, geocodeAddress, parseBBox, readGeocodeCache } from "../../../../services/data/geocoding.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function GeocodeSection({ rows, headers, C, onResult }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [addressCol, setAddressCol] = useState(() => guessAddressCol(headers));
   const [latCol,     setLatCol]     = useState("lat");
@@ -91,7 +92,7 @@ export function GeocodeSection({ rows, headers, C, onResult }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Converts address strings to latitude/longitude with Photon/Komoot by default.
         Requests are rate-limited and cached in sessionStorage.
       </div>
@@ -106,7 +107,7 @@ export function GeocodeSection({ rows, headers, C, onResult }) {
         {[["photon", "Photon/Komoot"], ["custom", "Nominatim-compatible"]].map(([v, label]) => (
           <button key={v} onClick={() => setProvider(v)}
             style={{
-              padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+              padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: provider === v ? `${C.teal}18` : "transparent",
               border: `1px solid ${provider === v ? C.teal : C.border2}`,
               borderRadius: 3, color: provider === v ? C.teal : C.textDim,
@@ -117,11 +118,11 @@ export function GeocodeSection({ rows, headers, C, onResult }) {
 
       <div style={{ display: "grid", gridTemplateColumns: provider === "custom" ? "1fr 1fr" : "1fr", gap: 8 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+          <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
             Bounding box
           </label>
           <select value={bboxPreset} onChange={e => setBboxPreset(e.target.value)}
-            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}
+            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}
           >
             {Object.entries(GEOCODE_BBOX_PRESETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             <option value="custom">Custom bbox</option>
@@ -138,18 +139,18 @@ export function GeocodeSection({ rows, headers, C, onResult }) {
         )}
       </div>
 
-      <div style={{ fontSize: 9, color: C.gold, lineHeight: 1.6 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.gold, lineHeight: 1.6 }}>
         This sends selected address strings to the configured geocoder. Use cached results or a private endpoint for sensitive data.
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} label={running ? "Geocoding..." : "Geocode"} C={C} />
         {progress && (
-          <span style={{ fontSize: 9, color: running ? C.gold : C.teal }}>
+          <span style={{ fontSize: T.caption.fontSize, color: running ? C.gold : C.teal }}>
             {progress.done}/{progress.total} addresses · {progress.fetched} fetched · {progress.cached} cached
           </span>
         )}
-        {result && <span style={{ fontSize: 9, color: C.teal }}>{result.matched} / {rows.length} rows matched</span>}
+        {result && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>{result.matched} / {rows.length} rows matched</span>}
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={[addressCol, latCol, lonCol]} C={C} />}

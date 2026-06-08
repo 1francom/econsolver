@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/DistanceSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignDistance, assignDistanceMetric, addDistanceBins } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function DistanceSection({ rows, headers, onResult, C }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [latCol,   setLatCol]   = useState(() => guessLatCol(headers));
   const [lonCol,   setLonCol]   = useState(() => guessLonCol(headers));
@@ -41,10 +42,10 @@ export function DistanceSection({ rows, headers, onResult, C }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Computes distance from each observation to a fixed reference point. Metric mode uses EPSG:32721 and returns meters.
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
         <input type="checkbox" checked={metric} onChange={e => {
           setMetric(e.target.checked);
           setOutCol(e.target.checked ? "dist_m" : "dist_km");
@@ -61,7 +62,7 @@ export function DistanceSection({ rows, headers, onResult, C }) {
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>✓ {result.rows.length} rows processed</span>}
+        {result && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>✓ {result.rows.length} rows processed</span>}
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={[...result.cols, latCol, lonCol]} C={C} />}

@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/SpatialJoinSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, isGeometryHeader } from "../shared/guess.js";
 import { spatialJoin } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResult }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
@@ -49,7 +50,7 @@ export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResu
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Assigns polygon attributes to each point by testing containment (ray-casting).
         Requires a loaded polygon dataset with a WKT geometry column (e.g. from a .dbf/.shp upload).
         Geometry columns are excluded from joined attributes by default, matching an automatic st_drop_geometry() workflow.
@@ -62,11 +63,11 @@ export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResu
 
       {/* Polygon dataset picker */}
       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+        <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
           Polygon dataset
         </label>
         {availableDatasets.length <= 1 ? (
-          <div style={{ fontSize: 10, color: C.gold, padding: "6px 8px", border: `1px solid ${C.gold}40`, borderRadius: 3 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.gold, padding: "6px 8px", border: `1px solid ${C.gold}40`, borderRadius: 3 }}>
             Load a shapefile/polygon dataset first (Data tab → Load dataset).
           </div>
         ) : (
@@ -75,7 +76,7 @@ export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResu
             onChange={e => { setPolyDsId(e.target.value); setWktCol(""); setJoinCols([]); }}
             style={{
               padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`,
-              borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none",
+              borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none",
             }}
           >
             <option value="">— select polygon dataset —</option>
@@ -96,10 +97,10 @@ export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResu
             C={C}
           />
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
               Columns to join
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: mono, fontSize: 9, color: C.textMuted, marginBottom: 4 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 4 }}>
               <input type="checkbox" checked={includeGeomAttrs} onChange={e => {
                 setIncludeGeomAttrs(e.target.checked);
                 if (!e.target.checked) {
@@ -114,7 +115,7 @@ export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResu
                   key={h}
                   onClick={() => toggleJoinCol(h)}
                   style={{
-                    padding: "2px 8px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+                    padding: "2px 8px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                     background: joinCols.includes(h) ? `${C.teal}18` : "transparent",
                     border: `1px solid ${joinCols.includes(h) ? C.teal : C.border2}`,
                     borderRadius: 3, color: joinCols.includes(h) ? C.teal : C.textDim,
@@ -129,7 +130,7 @@ export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResu
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Join" />
         {result && (
-          <span style={{ fontSize: 9, color: C.teal }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>
             ✓ {result.matched} / {rows.length} matched
           </span>
         )}
