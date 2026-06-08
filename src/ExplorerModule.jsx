@@ -1555,7 +1555,7 @@ function matchCond(row, {col, op, val}) {
 }
 
 function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
-  const {C} = useTheme();
+  const {C, T} = useTheme();
   const [open, setOpen] = useState(false);
   const active = conds.length > 0;
   const isFiltered = filteredCount !== totalRows;
