@@ -502,15 +502,27 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
           })
         : rows;
 
+      // When xCatOrder is set, sort rows by the domain array so line/area marks
+      // connect points in the intended category sequence, not the raw data order.
+      const xCatArr = xCatOrder ? xCatOrder.split(",").map(s => s.trim()).filter(Boolean) : null;
+      const xColForSort = layers.find(ly => ly.visible && ly.aes?.x)?.aes.x;
+      const marksRows = xCatArr && xColForSort
+        ? [...plotRows].sort((a, b) => {
+            const ai = xCatArr.indexOf(String(a[xColForSort] ?? ""));
+            const bi = xCatArr.indexOf(String(b[xColForSort] ?? ""));
+            return (ai === -1 ? 1e9 : ai) - (bi === -1 ? 1e9 : bi);
+          })
+        : plotRows;
+
       // Build data marks first, then compose full mark stack
       const dataMarks = [];
       for (const ly of layers) {
         if (!ly.visible) continue;
-        dataMarks.push(...buildMarksForLayer(Plt, ly, plotRows, showSE));
+        dataMarks.push(...buildMarksForLayer(Plt, ly, marksRows, showSE));
       }
 
       // Compute actual data extents to decide whether zero rules are meaningful
-      const xCol = layers.find(ly => ly.visible && ly.aes?.x)?.aes.x;
+      const xCol = xColForSort;
       const yCol = layers.find(ly => ly.visible && ly.aes?.y)?.aes.y;
       const xVals = xCol
         ? (xIsDate
@@ -1665,10 +1677,10 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 {/* Side-by-side canvases */}
                 <div style={{ display: "flex", gap: 8, padding: "0.5rem 0.75rem", overflowX: "auto" }}>
                   <div style={{ flex: "1 1 0" }}>
-                    <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE xScale={entA.xScale||"linear"} yScale={entA.yScale||"linear"} xDomain={entA.xDomain||[null,null]} yDomain={entA.yDomain||[null,null]} xFmt={entA.xFmt||""} yFmt={entA.yFmt||""} canvasRef={compareRefA} />
+                    <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE xScale={entA.xScale||"linear"} yScale={entA.yScale||"linear"} xDomain={entA.xDomain||[null,null]} yDomain={entA.yDomain||[null,null]} xFmt={entA.xFmt||""} yFmt={entA.yFmt||""} xCatOrder={entA.xCatOrder||""} yCatOrder={entA.yCatOrder||""} canvasRef={compareRefA} />
                   </div>
                   <div style={{ flex: "1 1 0" }}>
-                    <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE xScale={entB.xScale||"linear"} yScale={entB.yScale||"linear"} xDomain={entB.xDomain||[null,null]} yDomain={entB.yDomain||[null,null]} xFmt={entB.xFmt||""} yFmt={entB.yFmt||""} canvasRef={compareRefB} />
+                    <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE xScale={entB.xScale||"linear"} yScale={entB.yScale||"linear"} xDomain={entB.xDomain||[null,null]} yDomain={entB.yDomain||[null,null]} xFmt={entB.xFmt||""} yFmt={entB.yFmt||""} xCatOrder={entB.xCatOrder||""} yCatOrder={entB.yCatOrder||""} canvasRef={compareRefB} />
                   </div>
                 </div>
                 {/* Single combined export bar */}
