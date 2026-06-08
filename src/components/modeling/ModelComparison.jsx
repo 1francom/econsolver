@@ -17,11 +17,14 @@ import { buildStargazer }                 from "../../services/export/latexTable
 
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
-const TYPE_COLOR = {
-  OLS:"#7ab896", WLS:"#7ab896", FE:"#6e9ec8", FD:"#6e9ec8",
-  "2SLS":"#a87ec8", DiD:"#c8a96e", TWFE:"#c8a96e",
-  RDD:"#c88e6e", Logit:"#9e7ec8", Probit:"#9e7ec8",
-};
+function getTypeColor(type, C) {
+  const map = {
+    OLS:C.green, WLS:C.green, FE:C.blue, FD:C.blue,
+    "2SLS":C.purple, DiD:C.gold, TWFE:C.gold,
+    RDD:C.orange, Logit:C.violet, Probit:C.violet,
+  };
+  return map[type] ?? C.teal;
+}
 
 function safeN(v, dp = 4) {
   return v != null && isFinite(v) ? v.toFixed(dp) : "N/A";
@@ -71,7 +74,7 @@ function StargazerTable({ models }) {
           <tr style={{ background: hdrBg }}>
             <th style={{ ...labelSt, color: C.textMuted, fontWeight: 400, minWidth: 140 }}>Variable</th>
             {models.map((m, i) => {
-              const clr = TYPE_COLOR[m.type] ?? C.teal;
+              const clr = getTypeColor(m.type, C);
               return (
                 <th key={m.id ?? i} style={{ ...cellSt, color: clr, fontWeight: 600, minWidth: colW }}>
                   {m.label ?? m.type ?? `M${i+1}`}
@@ -199,7 +202,7 @@ function StabilityHeatmap({ models }) {
 
         {/* Column headers */}
         {models.map((m, mi) => {
-          const clr = TYPE_COLOR[m.type] ?? C.teal;
+          const clr = getTypeColor(m.type, C);
           const x = labelW + mi * colW + colW / 2;
           return (
             <text key={mi} x={x} y={PAD.t - 8} textAnchor="middle"
@@ -292,7 +295,7 @@ function FitGrid({ models }) {
           <tr style={{ background: C.surface2 }}>
             <th style={{ ...st, textAlign: "left", color: C.textMuted, fontWeight: 400, width: 100 }}>Statistic</th>
             {models.map((m, i) => {
-              const clr = TYPE_COLOR[m.type] ?? C.teal;
+              const clr = getTypeColor(m.type, C);
               return (
                 <th key={i} style={{ ...st, textAlign: "right", color: clr, fontWeight: 600 }}>
                   {m.label ?? m.type ?? `M${i+1}`}
@@ -638,7 +641,7 @@ export default function ModelComparison({ models, dataDictionary, pipeline = [],
           {/* Model labels */}
           <div style={{ display: "flex", gap: 6, flex: 1, flexWrap: "wrap" }}>
             {models.map((m, i) => {
-              const clr = TYPE_COLOR[m.type] ?? C.teal;
+              const clr = getTypeColor(m.type, C);
               return (
                 <span key={i} style={{
                   fontSize: 9, color: clr, border: `1px solid ${clr}40`,
