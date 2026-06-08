@@ -3,7 +3,7 @@
 // All three share the firstStages structure and tabbed second-stage layout.
 
 import { useState } from "react";
-import { useTheme, mono } from "../shared.jsx";
+import { useTheme } from "../shared.jsx";
 import { Lbl, Badge, InfoBox, RegressionEquation, ForestPlot, CoeffTable, FitBar, ExportBar } from "../resultDisplay.jsx";
 import {
   PlotSelector, YFittedPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, FirstStagePlot,
@@ -12,7 +12,7 @@ import { ResidualVsFitted, QQPlot } from "../ResidualPlots.jsx";
 
 // ─── 2SLS RESULTS ─────────────────────────────────────────────────────────────
 export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}, openReport, baseReplicateConfig }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tab, setTab] = useState("second");
   // canonical: second-stage fields are at root; firstStages sub-array is engine-shaped
   const { firstStages } = result;
@@ -22,7 +22,7 @@ export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = 
   return (
     <div style={{ animation: "fadeUp 0.22s ease" }}>
       <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>2SLS / IV Results</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>2SLS / IV Results</span>
         <Badge label={`n = ${second.n}`} color={C.textDim} />
       </div>
       <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
@@ -35,7 +35,7 @@ export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = 
               flex: 1, padding: "0.6rem 0.8rem",
               background: tab === k ? C.goldFaint : C.surface,
               border: "none", color: tab === k ? C.gold : C.textDim,
-              cursor: "pointer", fontFamily: mono, fontSize: 11,
+              cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
               borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent",
               transition: "all 0.15s",
             }}>
@@ -71,19 +71,19 @@ export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = 
               "—";
             return (
               <div style={{ marginBottom: "1.2rem", padding: "0.7rem 0.9rem", border: `1px solid ${C.border}`, background: C.surface, borderRadius: 4 }}>
-                <div style={{ fontSize: 10, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6 }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6 }}>
                   Weak-IV robust CI (Anderson-Rubin, 95%)
                 </div>
-                <div style={{ fontSize: 12, color: C.text, fontFamily: mono }}>
+                <div style={{ fontSize: T.code.fontSize, color: C.text, fontFamily: T.code.fontFamily }}>
                   β<sub>{xVars[0]}</sub> ∈ {arText}
                 </div>
                 {wald && (
-                  <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono, marginTop: 4 }}>
+                  <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
                     Wald (asymptotic): [{fmt(wald[0])}, {fmt(wald[1])}]
                   </div>
                 )}
                 {ar.type !== "bounded" && (
-                  <div style={{ fontSize: 10, color: C.textDim, marginTop: 6, lineHeight: 1.5 }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textDim, marginTop: 6, lineHeight: 1.5 }}>
                     Non-convex / unbounded AR region signals weak identification — the Wald CI is unreliable here.
                   </div>
                 )}
@@ -172,7 +172,7 @@ export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = 
 
 // ─── GMM RESULTS ──────────────────────────────────────────────────────────────
 export function GMMResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}, openReport, baseReplicateConfig }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tab, setTab] = useState("second");
   const { firstStages } = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
@@ -182,13 +182,13 @@ export function GMMResults({ result, yVar, xVars, wVars, zVars, rows, dict = {},
   return (
     <div style={{ animation: "fadeUp 0.22s ease" }}>
       <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>Two-Step GMM Results</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>Two-Step GMM Results</span>
         <Badge label={`n = ${result.n}`} color={C.textDim} />
       </div>
       <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
         {[["second", "Structural Equation"], ...(firstStages ?? []).map((s, i) => [`fs_${i}`, `First Stage: ${s.endVar}`])].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)}
-            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? C.goldFaint : C.surface, border: "none", color: tab === k ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent", transition: "all 0.15s" }}>
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? C.goldFaint : C.surface, border: "none", color: tab === k ? C.gold : C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent", transition: "all 0.15s" }}>
             {l}
           </button>
         ))}
@@ -204,7 +204,7 @@ export function GMMResults({ result, yVar, xVars, wVars, zVars, rows, dict = {},
             { label: "df",  value: result.df, color: C.textDim },
           ]} />
           {jOk && (
-            <div style={{ padding: "0.55rem 0.8rem", background: result.jPval > 0.05 ? `${C.green}10` : `${C.red}10`, border: `1px solid ${result.jPval > 0.05 ? C.green : C.red}40`, borderRadius: 3, marginBottom: "1rem", fontFamily: mono, fontSize: 11, display: "flex", gap: 16 }}>
+            <div style={{ padding: "0.55rem 0.8rem", background: result.jPval > 0.05 ? `${C.green}10` : `${C.red}10`, border: `1px solid ${result.jPval > 0.05 ? C.green : C.red}40`, borderRadius: 3, marginBottom: "1rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, display: "flex", gap: 16 }}>
               <span style={{ color: C.textMuted }}>Hansen J-stat</span>
               <span style={{ color: C.text }}>{safeJ(result.jStat)}</span>
               <span style={{ color: C.textMuted }}>df = {result.jDf}</span>
@@ -247,7 +247,7 @@ export function GMMResults({ result, yVar, xVars, wVars, zVars, rows, dict = {},
 
 // ─── LIML RESULTS ─────────────────────────────────────────────────────────────
 export function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}, openReport, baseReplicateConfig }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tab, setTab] = useState("second");
   const { firstStages } = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
@@ -255,7 +255,7 @@ export function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}
   return (
     <div style={{ animation: "fadeUp 0.22s ease" }}>
       <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span style={{ fontSize: 10, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>LIML Results</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.24em", textTransform: "uppercase" }}>LIML Results</span>
         <Badge label={`n = ${result.n}`} color={C.textDim} />
         {result.kappa != null && (
           <Badge label={`κ = ${result.kappa.toFixed(4)}`} color={Math.abs(result.kappa - 1) < 0.01 ? C.textDim : C.gold} />
@@ -264,7 +264,7 @@ export function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}
       <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
         {[["second", "Structural Equation"], ...(firstStages ?? []).map((s, i) => [`fs_${i}`, `First Stage: ${s.endVar}`])].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)}
-            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? C.goldFaint : C.surface, border: "none", color: tab === k ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent", transition: "all 0.15s" }}>
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? C.goldFaint : C.surface, border: "none", color: tab === k ? C.gold : C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent", transition: "all 0.15s" }}>
             {l}
           </button>
         ))}
@@ -273,7 +273,7 @@ export function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}
       {tab === "second" && (
         <>
           {result.kappa != null && (
-            <div style={{ padding: "0.45rem 0.8rem", background: `${C.gold}10`, border: `1px solid ${C.gold}40`, borderRadius: 3, marginBottom: "1rem", fontFamily: mono, fontSize: 11, display: "flex", gap: 16 }}>
+            <div style={{ padding: "0.45rem 0.8rem", background: `${C.gold}10`, border: `1px solid ${C.gold}40`, borderRadius: 3, marginBottom: "1rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, display: "flex", gap: 16 }}>
               <span style={{ color: C.textMuted }}>k-class κ</span>
               <span style={{ color: C.gold }}>{result.kappa.toFixed(6)}</span>
               <span style={{ color: C.textMuted }}>{Math.abs(result.kappa - 1) < 1e-4 ? "(= 1 → exactly identified, same as 2SLS)" : "(> 1 → overidentified, LIML corrects finite-sample bias)"}</span>

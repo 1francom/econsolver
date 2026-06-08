@@ -3,7 +3,7 @@
 // Extracted from ModelingTab.jsx.
 
 import { useState, useMemo } from "react";
-import { useTheme, mono } from "../shared.jsx";
+import { useTheme } from "../shared.jsx";
 import { stars, runMcCrary, downloadText } from "../../../math/index.js";
 import { Lbl, Badge, RegressionEquation, ForestPlot, CoeffTable, FitBar, ExportBar } from "../resultDisplay.jsx";
 import { PlotSelector, RDDPlot, McCraryPlot } from "../ModelPlots.jsx";
@@ -60,7 +60,7 @@ ${rows}
 }
 
 function FuzzyLatexExport({ stage, result, yVar, fsVarNames, treatVarName }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   const latex = useMemo(
     () => buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName),
@@ -70,18 +70,18 @@ function FuzzyLatexExport({ stage, result, yVar, fsVarNames, treatVarName }) {
     <div style={{ marginBottom: "0.8rem" }}>
       <button
         onClick={() => setOpen(s => !s)}
-        style={{ padding: "0.4rem 0.9rem", background: open ? C.goldFaint : C.surface2, border: `1px solid ${C.border}`, color: open ? C.gold : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, borderRadius: 3, transition: "all 0.15s" }}
+        style={{ padding: "0.4rem 0.9rem", background: open ? C.goldFaint : C.surface2, border: `1px solid ${C.border}`, color: open ? C.gold : C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, borderRadius: 3, transition: "all 0.15s" }}
       >
         {open ? "▾" : "▸"} LaTeX table
       </button>
       {open && (
         <div style={{ position: "relative", marginTop: 4 }}>
-          <pre style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3, padding: "0.7rem 1rem", fontSize: 10, color: C.text, fontFamily: mono, overflowX: "auto", margin: 0 }}>
+          <pre style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3, padding: "0.7rem 1rem", fontSize: T.caption.fontSize, color: C.text, fontFamily: T.code.fontFamily, overflowX: "auto", margin: 0 }}>
             {latex}
           </pre>
           <button
             onClick={() => downloadText(latex, `fuzzyrdd_${stage}_stage_${yVar}.tex`)}
-            style={{ position: "absolute", top: 6, right: 8, padding: "0.25rem 0.6rem", background: C.surface, border: `1px solid ${C.border}`, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 9, borderRadius: 3 }}
+            style={{ position: "absolute", top: 6, right: 8, padding: "0.25rem 0.6rem", background: C.surface, border: `1px solid ${C.border}`, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, borderRadius: 3 }}
           >
             ↓ .tex
           </button>
@@ -93,7 +93,7 @@ function FuzzyLatexExport({ stage, result, yVar, fsVarNames, treatVarName }) {
 
 // ─── FUZZY RDD RESULTS ───────────────────────────────────────────────────────
 export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar, dict = {}, rows = [], openReport, baseReplicateConfig }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tab, setTab] = useState("second");
   const r  = result;
   const fs = r.firstStage;
@@ -102,21 +102,21 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
   return (
     <div style={{ animation: "fadeUp 0.22s ease" }}>
       <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span style={{ fontSize: 10, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Fuzzy RDD Results</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.orange, letterSpacing: "0.24em", textTransform: "uppercase" }}>Fuzzy RDD Results</span>
         <Badge label={`n = ${r.n}`} color={C.textDim} />
         {r.weak && <Badge label="⚠ Weak instrument (F < 10)" color={C.red} />}
       </div>
 
       {/* LATE highlight */}
       <div style={{ padding: "1rem 1.2rem", marginBottom: "1.2rem", background: C.surface2, border: `1px solid ${C.orange}30`, borderLeft: `3px solid ${C.orange}`, borderRadius: 4 }}>
-        <div style={{ fontSize: 9, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Local Average Treatment Effect (LATE)</div>
-        <div style={{ fontSize: 24, color: r.lateP < 0.05 ? C.orange : C.textDim, fontFamily: mono }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.orange, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>Local Average Treatment Effect (LATE)</div>
+        <div style={{ fontSize: T.h2.fontSize, color: r.lateP < 0.05 ? C.orange : C.textDim, fontFamily: T.code.fontFamily }}>
           {r.late >= 0 ? "+" : ""}{r.late?.toFixed(4) ?? "—"}{stars(r.lateP)}
         </div>
-        <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+        <div style={{ fontSize: T.code.fontSize, color: C.textDim, marginTop: 4 }}>
           SE = {r.lateSE?.toFixed(4) ?? "—"} · p = {r.lateP < 0.001 ? "<0.001" : r.lateP?.toFixed(4) ?? "—"}
         </div>
-        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 8 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 8 }}>
           Compliance (first-stage jump): {r.firstStageJumpD?.toFixed(4) ?? "—"} · F = {r.firstStageFstat?.toFixed(2) ?? "—"} · Wald ratio: {r.waldRatio?.toFixed(4) ?? "—"}
         </div>
       </div>
@@ -125,7 +125,7 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
       <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
         {[["second", "Second Stage (Structural)"], ["first", "First Stage (Instrument)"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)}
-            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? `${C.orange}20` : C.surface, border: "none", color: tab === k ? C.orange : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11, borderBottom: tab === k ? `2px solid ${C.orange}` : "2px solid transparent", transition: "all 0.15s" }}>
+            style={{ flex: 1, padding: "0.6rem 0.8rem", background: tab === k ? `${C.orange}20` : C.surface, border: "none", color: tab === k ? C.orange : C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, borderBottom: tab === k ? `2px solid ${C.orange}` : "2px solid transparent", transition: "all 0.15s" }}>
             {l}
           </button>
         ))}
@@ -167,7 +167,7 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
             { label: "df",     value: fs.df,                                      color: C.textDim },
           ]} />
           {r.weak && (
-            <div style={{ padding: "0.6rem 0.8rem", marginBottom: "0.8rem", background: C.surface2, border: `1px solid ${C.red}40`, borderLeft: `3px solid ${C.red}`, borderRadius: 4, fontSize: 10, color: C.red, fontFamily: mono }}>
+            <div style={{ padding: "0.6rem 0.8rem", marginBottom: "0.8rem", background: C.surface2, border: `1px solid ${C.red}40`, borderLeft: `3px solid ${C.red}`, borderRadius: 4, fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily }}>
               ⚠ F-stat = {r.firstStageFstat?.toFixed(2)} &lt; 10 — weak instrument. LATE estimate may be unreliable.
             </div>
           )}

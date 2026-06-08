@@ -13,10 +13,10 @@
 //   onExtract   {fn}      — (colName: string, values: number[]) => void
 
 import { useState } from "react";
-import { useTheme, mono } from "./shared.jsx";
+import { useTheme } from "./shared.jsx";
 
 export default function ExtractPanel({ result, nRows, yVar, xVars, onExtract }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
 
   if (!result || !nRows) return null;
@@ -44,37 +44,37 @@ export default function ExtractPanel({ result, nRows, yVar, xVars, onExtract }) 
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "7px 12px", background: "transparent", border: "none",
-          cursor: "pointer", fontFamily: mono,
+          cursor: "pointer", fontFamily: T.code.fontFamily,
         }}
       >
-        <span style={{ fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: C.textMuted }}>
+        <span style={{ fontSize: T.caption.fontSize, letterSpacing: "0.18em", textTransform: "uppercase", color: C.textMuted }}>
           Extract to dataset
         </span>
-        <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
       </button>
 
       {open && (
         <div style={{ padding: "0 12px 12px" }}>
           {!aligned && (
-            <div style={{ fontSize: 10, color: C.orange, marginBottom: 8 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.orange, marginBottom: 8 }}>
               ⚠ Row count mismatch — re-run estimation before extracting.
             </div>
           )}
-          <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8, lineHeight: 1.6 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 8, lineHeight: 1.6 }}>
             Saves a column to the current dataset as a pipeline step.
             Use extracted columns as inputs to a second estimator.
           </div>
           {columns.map(col => (
             <div key={col.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <div>
-                <span style={{ fontFamily: mono, fontSize: 11, color: C.teal }}>{col.name}</span>
-                <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 8 }}>{col.label}</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.teal }}>{col.name}</span>
+                <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 8 }}>{col.label}</span>
               </div>
               <button
                 disabled={!aligned}
                 onClick={() => aligned && onExtract(col.name, col.values)}
                 style={{
-                  fontSize: 9, fontFamily: mono, letterSpacing: "0.08em",
+                  fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, letterSpacing: "0.08em",
                   padding: "2px 10px", borderRadius: 3, cursor: aligned ? "pointer" : "not-allowed",
                   border: `1px solid ${C.teal}`, background: "transparent", color: C.teal,
                   opacity: aligned ? 1 : 0.35,

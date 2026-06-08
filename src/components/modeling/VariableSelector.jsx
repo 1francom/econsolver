@@ -13,7 +13,7 @@
 //   wVars        {string[]}  – selected controls
 //   setWVars     {fn}
 
-import { VarPanel, useTheme, mono } from "./shared.jsx";
+import { VarPanel, useTheme } from "./shared.jsx";
 
 // Models that expose an X (Features) selector
 const SHOW_X = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit", "Poisson", "GMM", "LIML", "PoissonFE", "LSDV"]);
@@ -34,7 +34,7 @@ export default function VariableSelector({
   factorVars,
   onToggleFactor,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   // X/W pickers show all columns (numeric + categorical); Y picker is numeric-only
   const xwCols = allCols ?? numericCols;
   const availForX = xwCols.filter(h => !yVar.includes(h));

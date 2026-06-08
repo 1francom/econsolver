@@ -15,17 +15,15 @@ import { generateCleanScript } from "./pipeline/exporter.js";
 import { callClaude } from "./services/AI/AIService.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
-function Lbl({children,color,mb=6}){const{C,T}=useTheme();color=color??C.textMuted;return<div style={{fontSize:10,color,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:mb,fontFamily:T.label.fontFamily}}>{children}</div>;}
+function Lbl({children,color,mb=6}){const{C,T}=useTheme();color=color??C.textMuted;return<div style={{fontSize: T.caption.fontSize,color,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:mb,fontFamily:T.label.fontFamily}}>{children}</div>;}
 function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
-  const{C}=useTheme();color=color??C.gold;
-  const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily:mono,fontSize:sm?10:11,transition:"all 0.13s",opacity:dis?0.4:1};
+  const{C,T}=useTheme();color=color??C.gold;
+  const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily: T.code.fontFamily,fontSize: sm ? T.caption.fontSize : T.code.fontSize,transition:"all 0.13s",opacity:dis?0.4:1};
   if(v==="solid")return<button onClick={onClick} disabled={dis} style={{...b,background:color,color:C.bg,border:`1px solid ${color}`,fontWeight:700}}>{ch}</button>;
   return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:`1px solid ${C.border2}`,color:dis?C.textMuted:C.textDim}}>{ch}</button>;
 }
-function Spin(){const{C}=useTheme();return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
+function Spin(){const{C,T}=useTheme();return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
 
 // ─── MINI MATH ────────────────────────────────────────────────────────────────
 function olsSimple(xs,ys){
@@ -47,7 +45,7 @@ function pearson(xs,ys){
 
 // ─── SVG CHARTS ───────────────────────────────────────────────────────────────
 function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
-  const{C}=useTheme();color=color??C.gold;
+  const{C,T}=useTheme();color=color??C.gold;
   const W=480,H=160,PAD={l:44,r:16,t:8,b:36};
   const iW=W-PAD.l-PAD.r,iH=H-PAD.t-PAD.b;
   if(!data.length)return null;
@@ -60,14 +58,14 @@ function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
   const barW=iW/nBins;
   const yTicks=[0,0.25,0.5,0.75,1].map(f=>Math.round(f*maxC));
   return(
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily:mono}}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily: T.code.fontFamily}}>
       <rect width={W} height={H} fill="transparent"/>
       {/* y grid + ticks */}
       {yTicks.map((t,i)=>{
         const y=PAD.t+iH-(t/maxC)*iH;
         return<g key={i}>
           <line x1={PAD.l} x2={PAD.l+iW} y1={y} y2={y} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4}/>
-          <text x={PAD.l-4} y={y+3} textAnchor="end" fill={C.textMuted} fontSize={7} fontFamily={mono}>{t}</text>
+          <text x={PAD.l-4} y={y+3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{t}</text>
         </g>;
       })}
       {/* bars */}
@@ -82,11 +80,11 @@ function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
       {/* x labels at 0, 25, 50, 75, 100% */}
       {[0,0.25,0.5,0.75,1].map((f,i)=>{
         const v=min+f*range;
-        return<text key={i} x={PAD.l+f*iW} y={PAD.t+iH+12} textAnchor="middle" fill={C.textMuted} fontSize={7} fontFamily={mono}>
+        return<text key={i} x={PAD.l+f*iW} y={PAD.t+iH+12} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           {Math.abs(v)>=1000?v.toExponential(1):v.toFixed(2)}
         </text>;
       })}
-      {label&&<text x={PAD.l+iW/2} y={H-2} fill={C.textDim} fontSize={8} fontFamily={mono} textAnchor="middle">{label}</text>}
+      {label&&<text x={PAD.l+iW/2} y={H-2} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} textAnchor="middle">{label}</text>}
     </svg>
   );
 }
@@ -94,24 +92,24 @@ function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
 // ─── CATEGORICAL BAR CHART ────────────────────────────────────────────────────
 function SvgBarChart({items,color,fillMode="filled"}){
   // items: [{label, count}] already sorted
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   if(!items?.length)return null;
   const W=480,barH=22,PAD={l:120,r:48,t:8,b:16};
   const H=PAD.t+items.length*barH+PAD.b;
   const maxV=Math.max(...items.map(d=>d.count),1);
   const iW=W-PAD.l-PAD.r;
   return(
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily:mono}}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily: T.code.fontFamily}}>
       <rect width={W} height={H} fill="transparent"/>
       {items.map((d,i)=>{
         const y=PAD.t+i*barH;
         const bw=Math.max(2,(d.count/maxV)*iW);
         return<g key={i}>
-          <text x={PAD.l-6} y={y+barH/2+4} textAnchor="end" fill={C.textDim} fontSize={9} fontFamily={mono}>{String(d.label).slice(0,18)}</text>
+          <text x={PAD.l-6} y={y+barH/2+4} textAnchor="end" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{String(d.label).slice(0,18)}</text>
           {fillMode==="outline"
             ?<rect x={PAD.l} y={y+3} width={bw} height={barH-6} fill="none" stroke={color} strokeWidth={1.5} rx={2}/>
             :<rect x={PAD.l} y={y+3} width={bw} height={barH-6} fill={color} opacity={0.75} rx={2}/>}
-          <text x={PAD.l+bw+4} y={y+barH/2+4} fill={C.textMuted} fontSize={8} fontFamily={mono}>{d.count}</text>
+          <text x={PAD.l+bw+4} y={y+barH/2+4} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{d.count}</text>
         </g>;
       })}
       <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t+items.length*barH} stroke={C.border2} strokeWidth={1}/>
@@ -121,13 +119,13 @@ function SvgBarChart({items,color,fillMode="filled"}){
 
 
 function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   const W=380,H=200,PAD=36;
   const entities=[...new Set(rows.map(r=>r[entityCol]))];
   const seed=entities.length;
   const sampled=entities.slice().sort(()=>Math.sin(seed)*0.5).slice(0,sampleN);
   const times=[...new Set(rows.map(r=>r[timeCol]))].sort((a,b)=>a-b);
-  if(times.length<2||sampled.length<2)return<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Need ≥2 periods and ≥2 units.</div>;
+  if(times.length<2||sampled.length<2)return<div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>Need ≥2 periods and ≥2 units.</div>;
   const allVals=rows.filter(r=>sampled.includes(r[entityCol])&&typeof r[col]==="number").map(r=>r[col]);
   if(!allVals.length)return null;
   const minV=arrMin(allVals),maxV=arrMax(allVals);
@@ -136,7 +134,7 @@ function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
   const toY=v=>(H-PAD)-(v-minV)/rV*(H-PAD*2);
   const palette=[C.teal,C.gold,C.blue,C.purple,C.orange,C.green,C.red,C.violet,C.yellow,"#8ecac8","#c8b46e","#9eb896"];
   return(
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",fontFamily:mono}}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",fontFamily: T.code.fontFamily}}>
       <line x1={PAD} y1={PAD} x2={PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
       <line x1={PAD} y1={H-PAD} x2={W-PAD} y2={H-PAD} stroke={C.border2} strokeWidth={1}/>
       {times.map(t=><line key={t} x1={toX(t)} y1={PAD} x2={toX(t)} y2={H-PAD} stroke={C.border} strokeWidth={1} strokeDasharray="2,4"/>)}
@@ -146,17 +144,17 @@ function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
         const d=pts.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
         return<path key={e} d={d} fill="none" stroke={palette[ei%palette.length]} strokeWidth={1.4} opacity={0.75}/>;
       })}
-      {times.map(t=><text key={t} x={toX(t)} y={H-PAD+12} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="middle">{t}</text>)}
-      <text x={PAD-4} y={PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{maxV.toFixed(1)}</text>
-      <text x={PAD-4} y={H-PAD} fill={C.textMuted} fontSize={8} fontFamily={mono} textAnchor="end">{minV.toFixed(1)}</text>
+      {times.map(t=><text key={t} x={toX(t)} y={H-PAD+12} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} textAnchor="middle">{t}</text>)}
+      <text x={PAD-4} y={PAD} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} textAnchor="end">{maxV.toFixed(1)}</text>
+      <text x={PAD-4} y={H-PAD} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} textAnchor="end">{minV.toFixed(1)}</text>
     </svg>
   );
 }
 
 function CorrHeatmap({headers,rows,info}){
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
-  if(numH.length<2)return<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Need ≥2 numeric columns.</div>;
+  if(numH.length<2)return<div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>Need ≥2 numeric columns.</div>;
   const mat=numH.map(h1=>numH.map(h2=>{
     const pairs=rows.filter(r=>typeof r[h1]==="number"&&typeof r[h2]==="number");
     return pearson(pairs.map(r=>r[h1]),pairs.map(r=>r[h2]));
@@ -171,24 +169,24 @@ function CorrHeatmap({headers,rows,info}){
   };
   return(
     <div style={{overflowX:"auto"}}>
-      <svg viewBox={`0 0 ${W+8} ${H_total+8}`} style={{width:"100%",maxWidth:W+8,display:"block",fontFamily:mono}}>
+      <svg viewBox={`0 0 ${W+8} ${H_total+8}`} style={{width:"100%",maxWidth:W+8,display:"block",fontFamily: T.code.fontFamily}}>
         {numH.map((h,i)=>(
-          <text key={h} x={lblH+i*cellSz+cellSz/2} y={lblH-4} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={mono} textAnchor="middle" transform={`rotate(-35,${lblH+i*cellSz+cellSz/2},${lblH-4})`}>{h.slice(0,8)}</text>
+          <text key={h} x={lblH+i*cellSz+cellSz/2} y={lblH-4} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={T.data.fontFamily} textAnchor="middle" transform={`rotate(-35,${lblH+i*cellSz+cellSz/2},${lblH-4})`}>{h.slice(0,8)}</text>
         ))}
         {numH.map((h,i)=>(
-          <text key={h} x={lblH-4} y={lblH+i*cellSz+cellSz/2+3} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={mono} textAnchor="end">{h.slice(0,8)}</text>
+          <text key={h} x={lblH-4} y={lblH+i*cellSz+cellSz/2+3} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={T.data.fontFamily} textAnchor="end">{h.slice(0,8)}</text>
         ))}
         {mat.map((row,ri)=>row.map((v,ci)=>(
           <g key={`${ri}-${ci}`}>
             <rect x={lblH+ci*cellSz} y={lblH+ri*cellSz} width={cellSz-1} height={cellSz-1} fill={corToColor(v)} rx={2}/>
-            {cellSz>28&&<text x={lblH+ci*cellSz+cellSz/2} y={lblH+ri*cellSz+cellSz/2+4} fill={C.text} fontSize={Math.max(6,Math.min(9,cellSz/5))} fontFamily={mono} textAnchor="middle" opacity={0.9}>{v.toFixed(2)}</text>}
+            {cellSz>28&&<text x={lblH+ci*cellSz+cellSz/2} y={lblH+ri*cellSz+cellSz/2+4} fill={C.text} fontSize={Math.max(6,Math.min(9,cellSz/5))} fontFamily={T.data.fontFamily} textAnchor="middle" opacity={0.9}>{v.toFixed(2)}</text>}
           </g>
         )))}
       </svg>
       <div style={{display:"flex",gap:12,marginTop:8,alignItems:"center"}}>
-        <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>← negative (red)</span>
+        <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>← negative (red)</span>
         <div style={{flex:1,height:6,borderRadius:3,background:`linear-gradient(to right,${C.red},${C.surface3},${C.teal})`}}/>
-        <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>positive (teal) →</span>
+        <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>positive (teal) →</span>
       </div>
     </div>
   );
@@ -196,7 +194,7 @@ function CorrHeatmap({headers,rows,info}){
 
 // ─── SUMMARY TABLE (Table 1) ──────────────────────────────────────────────────
 function SummaryTable({rows,headers,info,panel}){
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   const catH=headers.filter(h=>info[h]?.isCat&&!info[h]?.isNum);
   const [groupBy,  setGroupBy]  = useState("");
@@ -233,10 +231,10 @@ function SummaryTable({rows,headers,info,panel}){
   const allCols=[...baseCols,...extraCols];
   const nCols=allCols.length;
 
-  const thS={padding:"0.35rem 0.6rem",fontFamily:mono,fontSize:9,color:C.textMuted,fontWeight:400,letterSpacing:"0.1em",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,background:C.surface2,textAlign:"right",whiteSpace:"nowrap"};
-  const tdS={padding:"0.32rem 0.6rem",fontFamily:mono,fontSize:10,color:C.text,borderBottom:`1px solid ${C.border}`,textAlign:"right",whiteSpace:"nowrap"};
+  const thS={padding:"0.35rem 0.6rem",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,color:C.textMuted,fontWeight:400,letterSpacing:"0.1em",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,background:C.surface2,textAlign:"right",whiteSpace:"nowrap"};
+  const tdS={padding:"0.32rem 0.6rem",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,color:C.text,borderBottom:`1px solid ${C.border}`,textAlign:"right",whiteSpace:"nowrap"};
   const chipBtn=(active,color,onClick,label)=>(
-    <button onClick={onClick} style={{padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{label}</button>
+    <button onClick={onClick} style={{padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{label}</button>
   );
 
   const previewRows=view==="head"?rows.slice(0,viewN):view==="tail"?rows.slice(-viewN):[];
@@ -261,7 +259,7 @@ function SummaryTable({rows,headers,info,panel}){
           <div style={{display:"flex",gap:4,alignItems:"center"}}>
             {[["stats","Stats"],["head","head(n)"],["tail","tail(n)"]].map(([k,l])=>chipBtn(view===k,C.teal,()=>setView(k),l))}
             {view!=="stats"&&<input type="number" min={1} max={500} value={viewN} onChange={e=>setViewN(Math.max(1,parseInt(e.target.value)||6))}
-              style={{width:44,padding:"0.2rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>}
+              style={{width:44,padding:"0.2rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,outline:"none"}}/>}
           </div>
         </div>
         {/* Custom quantiles — only in stats view */}
@@ -270,14 +268,14 @@ function SummaryTable({rows,headers,info,panel}){
           <Lbl mb={0}>Quantiles</Lbl>
           <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
             {extraQs.map(p=>(
-              <span key={p} style={{display:"flex",alignItems:"center",gap:2,padding:"0.18rem 0.5rem",border:`1px solid ${C.teal}60`,borderRadius:3,fontSize:10,fontFamily:mono,color:C.teal}}>
-                P{p}<button onClick={()=>setExtraQs(q=>q.filter(x=>x!==p))} style={{background:"none",border:"none",cursor:"pointer",color:C.textMuted,fontSize:12,lineHeight:1,padding:"0 0 0 3px"}}>×</button>
+              <span key={p} style={{display:"flex",alignItems:"center",gap:2,padding:"0.18rem 0.5rem",border:`1px solid ${C.teal}60`,borderRadius:3,fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,color:C.teal}}>
+                P{p}<button onClick={()=>setExtraQs(q=>q.filter(x=>x!==p))} style={{background:"none",border:"none",cursor:"pointer",color:C.textMuted,fontSize: T.code.fontSize,lineHeight:1,padding:"0 0 0 3px"}}>×</button>
               </span>
             ))}
             <input type="number" min={1} max={99} value={qInput} onChange={e=>setQInput(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&addQ()} placeholder="%"
-              style={{width:40,padding:"0.2rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>
-            <button onClick={addQ} style={{padding:"0.2rem 0.5rem",border:`1px solid ${C.border2}`,borderRadius:3,background:"transparent",color:C.textDim,fontFamily:mono,fontSize:10,cursor:"pointer"}}>+P</button>
+              style={{width:40,padding:"0.2rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,outline:"none"}}/>
+            <button onClick={addQ} style={{padding:"0.2rem 0.5rem",border:`1px solid ${C.border2}`,borderRadius:3,background:"transparent",color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,cursor:"pointer"}}>+P</button>
           </div>
         </div></>}
       </div>
@@ -285,7 +283,7 @@ function SummaryTable({rows,headers,info,panel}){
       {/* ── Stats table ── */}
       {view==="stats"&&(
         <div style={{overflowX:"auto",borderRadius:4,border:`1px solid ${C.border}`}}>
-          <table style={{borderCollapse:"collapse",width:"100%",fontSize:11}}>
+          <table style={{borderCollapse:"collapse",width:"100%",fontSize: T.code.fontSize}}>
             <thead>
               <tr>
                 <th style={{...thS,textAlign:"left",minWidth:80}}>Variable</th>
@@ -317,7 +315,7 @@ function SummaryTable({rows,headers,info,panel}){
       {/* ── head / tail preview ── */}
       {view!=="stats"&&(
         <div style={{overflowX:"auto",borderRadius:4,border:`1px solid ${C.border}`}}>
-          <table style={{borderCollapse:"collapse",width:"100%",fontSize:11}}>
+          <table style={{borderCollapse:"collapse",width:"100%",fontSize: T.code.fontSize}}>
             <thead>
               <tr>
                 <th style={{...thS,textAlign:"right",minWidth:32}}>#</th>
@@ -341,7 +339,7 @@ function SummaryTable({rows,headers,info,panel}){
         </div>
       )}
 
-      <div style={{marginTop:8,fontSize:10,color:C.textMuted,fontFamily:mono}}>
+      <div style={{marginTop:8,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
         {view==="stats"?`N=${rows.length} total observations · ${numH.length} numeric variables`:`Showing ${view}(${viewN}) of ${rows.length} rows`}
       </div>
     </div>
@@ -349,26 +347,25 @@ function SummaryTable({rows,headers,info,panel}){
 }
 
 // ─── DISTRIBUTION TAB ─────────────────────────────────────────────────────────
-const PALETTE = [
-  { label:"teal",  val:"#6ec8b4" },
-  { label:"gold",  val:"#c8a96e" },
-  { label:"blue",  val:"#6e9ec8" },
-  { label:"violet",val:"#a06ec8" },
-  { label:"red",   val:"#c86e6e" },
-  { label:"green", val:"#7ec86e" },
-  { label:"slate", val:"#8899aa" },
-  { label:"white", val:"#ddd8cc" },
-];
-
 function DistributionTab({rows,headers,info,panel}){
-  const{C}=useTheme();
+  const{C,T}=useTheme();
+  const palette = [
+    { label:"teal",  val:C.teal },
+    { label:"gold",  val:C.gold },
+    { label:"blue",  val:C.blue },
+    { label:"violet",val:C.violet },
+    { label:"red",   val:C.red },
+    { label:"green", val:C.green },
+    { label:"slate", val:C.textDim },
+    { label:"white", val:C.text },
+  ];
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   const catH=headers.filter(h=>info[h]?.isCat&&!info[h]?.isNum);
   const [histCol,setHistCol]=useState(numH[0]||"");
   const [catCol,setCatCol]=useState(catH[0]||"");
   const [spagCol,setSpagCol]=useState(numH[0]||"");
   const [sub,setSub]=useState("hist");
-  const [barColor,setBarColor]=useState("#6ec8b4");
+  const [barColor,setBarColor]=useState(C.teal);
   const [fillMode,setFillMode]=useState("filled");   // "filled" | "outline"
   const [transform,setTransform]=useState("none");   // "none" | "log" | "log10" | "sqrt"
   const [nBins,setNBins]=useState(20);
@@ -394,14 +391,14 @@ function DistributionTab({rows,headers,info,panel}){
   const chip=(active,color)=>({
     padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,
     background:active?`${color}18`:"transparent",color:active?color:C.textDim,
-    borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+    borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,
   });
 
   return(
     <div>
       {/* sub-tab bar */}
       <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
-        {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
+        {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
       </div>
 
       {/* ── HISTOGRAM ── */}
@@ -417,17 +414,17 @@ function DistributionTab({rows,headers,info,panel}){
           <div style={{display:"flex",flexWrap:"wrap",gap:"1rem",alignItems:"flex-end",marginBottom:"1rem"}}>
             {/* color palette */}
             <div>
-              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Color</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Color</div>
               <div style={{display:"flex",gap:3}}>
-                {PALETTE.map(p=>(
+                {palette.map(p=>(
                   <button key={p.val} onClick={()=>setBarColor(p.val)}
-                    style={{width:18,height:18,borderRadius:3,background:p.val,border:`2px solid ${barColor===p.val?"#fff":"transparent"}`,cursor:"pointer",padding:0,opacity:barColor===p.val?1:0.6}}/>
+                    style={{width:18,height:18,borderRadius:3,background:p.val,border:`2px solid ${barColor===p.val?C.text:"transparent"}`,cursor:"pointer",padding:0,opacity:barColor===p.val?1:0.6}}/>
                 ))}
               </div>
             </div>
             {/* fill vs outline */}
             <div>
-              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Fill</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Fill</div>
               <div style={{display:"flex",gap:2}}>
                 {[["filled","Filled"],["outline","Outline"]].map(([k,l])=>(
                   <button key={k} onClick={()=>setFillMode(k)} style={chip(fillMode===k,C.teal)}>{l}</button>
@@ -436,7 +433,7 @@ function DistributionTab({rows,headers,info,panel}){
             </div>
             {/* transform */}
             <div>
-              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_data</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_data</div>
               <div style={{display:"flex",gap:2}}>
                 {[["none","None"],["log","ln"],["log10","log₁₀"],["sqrt","√"]].map(([k,l])=>(
                   <button key={k} onClick={()=>setTransform(k)} style={chip(transform===k,C.gold)}>{l}</button>
@@ -445,12 +442,12 @@ function DistributionTab({rows,headers,info,panel}){
             </div>
             {/* bins */}
             <div>
-              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_break (bins)</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_break (bins)</div>
               <div style={{display:"flex",alignItems:"center",gap:4}}>
                 <input type="range" min={5} max={60} step={1} value={nBins}
                   onChange={e=>setNBins(Number(e.target.value))}
                   style={{width:80,accentColor:C.gold}}/>
-                <span style={{fontSize:10,color:C.gold,fontFamily:mono,minWidth:20}}>{nBins}</span>
+                <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily,minWidth:20}}>{nBins}</span>
               </div>
             </div>
           </div>
@@ -485,8 +482,8 @@ function DistributionTab({rows,headers,info,panel}){
                 <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1rem"}}>
                   {[["mean",mean],["std",std],["median",median],["min",min],["max",max]].map(([l,v])=>(
                     <div key={l} style={{background:C.surface,padding:"0.5rem 0.6rem"}}>
-                      <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:2}}>{l}</div>
-                      <div style={{fontSize:14,color:C.gold,fontFamily:mono}}>{v!=null?v.toFixed(3):"—"}</div>
+                      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:2}}>{l}</div>
+                      <div style={{fontSize: T.h2.fontSize,color:C.gold,fontFamily: T.code.fontFamily}}>{v!=null?v.toFixed(3):"—"}</div>
                     </div>
                   ))}
                 </div>
@@ -496,15 +493,15 @@ function DistributionTab({rows,headers,info,panel}){
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6,padding:"0.3rem 0.65rem",borderTop:`1px solid ${C.border}`,background:C.bg}}>
                     <PlotExportBar getEl={()=>histRef.current?.querySelector("svg")} filename={`histogram_${histCol}`} style={{flex:1,padding:0,background:"transparent",border:"none"}}/>
-                    <button onClick={downloadHistLatex} title="Download pgfplots LaTeX" style={{padding:"0.2rem 0.6rem",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:9,flexShrink:0,transition:"all 0.12s"}}
+                    <button onClick={downloadHistLatex} title="Download pgfplots LaTeX" style={{padding:"0.2rem 0.6rem",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,flexShrink:0,transition:"all 0.12s"}}
                       onMouseEnter={e=>{e.currentTarget.style.borderColor=C.gold;e.currentTarget.style.color=C.gold;}}
                       onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}>
                       ↓ LaTeX
                     </button>
                   </div>
                 </div>
-                {outlierCount>0&&<div style={{marginTop:8,fontSize:11,color:C.orange,fontFamily:mono}}>⚠ {outlierCount} IQR-outlier{outlierCount>1?"s":""} detected. Consider winsorizing.</div>}
-                {vals.length<rawVals.length&&<div style={{marginTop:6,fontSize:10,color:C.textMuted,fontFamily:mono}}>ℹ {rawVals.length-vals.length} row(s) dropped (non-positive values not valid for {transform} transform).</div>}
+                {outlierCount>0&&<div style={{marginTop:8,fontSize: T.code.fontSize,color:C.orange,fontFamily: T.code.fontFamily}}>⚠ {outlierCount} IQR-outlier{outlierCount>1?"s":""} detected. Consider winsorizing.</div>}
+                {vals.length<rawVals.length&&<div style={{marginTop:6,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>ℹ {rawVals.length-vals.length} row(s) dropped (non-positive values not valid for {transform} transform).</div>}
               </div>
             );
           })()}
@@ -522,16 +519,16 @@ function DistributionTab({rows,headers,info,panel}){
           {/* controls */}
           <div style={{display:"flex",flexWrap:"wrap",gap:"1rem",alignItems:"flex-end",marginBottom:"1rem"}}>
             <div>
-              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Color</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Color</div>
               <div style={{display:"flex",gap:3}}>
-                {PALETTE.map(p=>(
+                {palette.map(p=>(
                   <button key={p.val} onClick={()=>setBarColor(p.val)}
-                    style={{width:18,height:18,borderRadius:3,background:p.val,border:`2px solid ${barColor===p.val?"#fff":"transparent"}`,cursor:"pointer",padding:0,opacity:barColor===p.val?1:0.6}}/>
+                    style={{width:18,height:18,borderRadius:3,background:p.val,border:`2px solid ${barColor===p.val?C.text:"transparent"}`,cursor:"pointer",padding:0,opacity:barColor===p.val?1:0.6}}/>
                 ))}
               </div>
             </div>
             <div>
-              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Fill</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Fill</div>
               <div style={{display:"flex",gap:2}}>
                 {[["filled","Filled"],["outline","Outline"]].map(([k,l])=>(
                   <button key={k} onClick={()=>setFillMode(k)} style={chip(fillMode===k,C.teal)}>{l}</button>
@@ -539,7 +536,7 @@ function DistributionTab({rows,headers,info,panel}){
               </div>
             </div>
             <div>
-              <div style={{fontSize:8,color:C.textMuted,fontFamily:mono,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>levels = c()</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>levels = c()</div>
               <div style={{display:"flex",gap:2}}>
                 {[["count","By count"],["alpha","A → Z"],["rev","Z → A"]].map(([k,l])=>(
                   <button key={k} onClick={()=>setCatOrder(k)} style={chip(catOrder===k,C.violet)}>{l}</button>
@@ -561,7 +558,7 @@ function DistributionTab({rows,headers,info,panel}){
             else if(catOrder==="rev")   items=items.sort((a,b)=>String(b.label).localeCompare(String(a.label)));
             return(
               <div>
-                <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:8}}>
+                <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:8}}>
                   {items.length} categories · n = {rows.filter(r=>r[catCol]!=null).length}
                 </div>
                 <SvgBarChart items={items} color={barColor} fillMode={fillMode}/>
@@ -579,7 +576,7 @@ function DistributionTab({rows,headers,info,panel}){
             {numH.map(h=><button key={h} onClick={()=>setSpagCol(h)} style={chip(spagCol===h,C.orange)}>{spagCol===h?"✓ ":""}{h}</button>)}
           </div>
           {spagCol&&<div>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:8}}>i={panel.entityCol} · t={panel.timeCol} · showing ≤15 random units</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:8}}>i={panel.entityCol} · t={panel.timeCol} · showing ≤15 random units</div>
             <SvgSpaghetti rows={rows} entityCol={panel.entityCol} timeCol={panel.timeCol} col={spagCol} sampleN={15}/>
           </div>}
         </div>
@@ -594,7 +591,7 @@ function DistributionTab({rows,headers,info,panel}){
 // No dependency on group_summarize pipeline step — computes in-component.
 // ─── ACF / PACF BAR CHART ─────────────────────────────────────────────────────
 function SvgACF({ acf, pacf, n }) {
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   const maxLag = acf.length - 1;
   const W = 620, H = 260;
   const PAD = { l: 48, r: 16, t: 20, b: 36 };
@@ -613,7 +610,7 @@ function SvgACF({ acf, pacf, n }) {
     return (
       <g>
         {/* label */}
-        <text x={PAD.l + 2} y={offsetY + 10} fill={color} fontSize={8} fontFamily="'IBM Plex Mono',monospace" letterSpacing="0.1em">{label}</text>
+        <text x={PAD.l + 2} y={offsetY + 10} fill={color} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} letterSpacing="0.1em">{label}</text>
         {/* zero line */}
         <line x1={PAD.l} x2={PAD.l + iW} y1={yMid} y2={yMid} stroke={axisColor} strokeWidth={1} />
         {/* confidence bands */}
@@ -632,7 +629,7 @@ function SvgACF({ acf, pacf, n }) {
               <rect x={x - barW / 2} y={Math.min(y0, y1)} width={barW} height={Math.max(1, ht)}
                 fill={sig ? color : `${color}55`} />
               {lag % 5 === 0 && (
-                <text x={x} y={offsetY + iH + 14} textAnchor="middle" fill={tickColor} fontSize={7} fontFamily="'IBM Plex Mono',monospace">{lag}</text>
+                <text x={x} y={offsetY + iH + 14} textAnchor="middle" fill={tickColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{lag}</text>
               )}
             </g>
           );
@@ -641,7 +638,7 @@ function SvgACF({ acf, pacf, n }) {
         {[-1, -0.5, 0, 0.5, 1].map(v => (
           <g key={v}>
             <line x1={PAD.l - 3} x2={PAD.l} y1={scaleY(v)} y2={scaleY(v)} stroke={axisColor} strokeWidth={1} />
-            <text x={PAD.l - 5} y={scaleY(v) + 3} textAnchor="end" fill={tickColor} fontSize={7} fontFamily="'IBM Plex Mono',monospace">{v}</text>
+            <text x={PAD.l - 5} y={scaleY(v) + 3} textAnchor="end" fill={tickColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{v}</text>
           </g>
         ))}
       </g>
@@ -652,49 +649,48 @@ function SvgACF({ acf, pacf, n }) {
   const pacfOffsetY = PAD.t + iH + 24;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, height: "auto", display: "block", fontFamily: "'IBM Plex Mono',monospace" }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, height: "auto", display: "block", fontFamily: T.data.fontFamily }}>
       <rect width={W} height={H} fill={C.bg} />
       {renderBars(acf,  acfOffsetY,  C.teal, "ACF")}
       {renderBars(pacf, pacfOffsetY, C.gold, "PACF")}
       {/* conf band legend */}
       <line x1={PAD.l + iW - 80} x2={PAD.l + iW - 60} y1={H - 10} y2={H - 10} stroke={bandColor} strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
-      <text x={PAD.l + iW - 56} y={H - 7} fill={tickColor} fontSize={7} fontFamily="'IBM Plex Mono',monospace">95% CI (±1.96/√n)</text>
+      <text x={PAD.l + iW - 56} y={H - 7} fill={tickColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>95% CI (±1.96/√n)</text>
       {/* lag axis label */}
-      <text x={PAD.l + iW / 2} y={H - 1} textAnchor="middle" fill={mutedColor} fontSize={7} fontFamily="'IBM Plex Mono',monospace">Lag</text>
+      <text x={PAD.l + iW / 2} y={H - 1} textAnchor="middle" fill={mutedColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Lag</text>
     </svg>
   );
 }
 
 // ─── ADF RESULTS PANEL ────────────────────────────────────────────────────────
 function AdfPanel({ results }) {
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   if (!results?.length) return null;
-  const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-  return (
+    return (
     <div style={{ padding: "0.8rem 0.9rem", display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>
         Augmented Dickey-Fuller · H₀: unit root (non-stationary) · constant, no trend
       </div>
       {/* header row */}
-      <div style={{ display: "grid", gridTemplateColumns: "3rem 6rem 5rem 6rem 1fr", gap: 8, fontSize: 9, color: "#444", fontFamily: mono, paddingBottom: 4, borderBottom: "1px solid #1c1c1c" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "3rem 6rem 5rem 6rem 1fr", gap: 8, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, paddingBottom: 4, borderBottom: `1px solid ${C.border}` }}>
         <span>Lags</span><span>τ statistic</span><span>p-value</span><span>CV (5%)</span><span>Verdict</span>
       </div>
       {results.map(r => {
-        const color = r.stationary ? "#6ec8b4" : "#c47070";
+        const color = r.stationary ? C.teal : C.red;
         const label = r.stationary ? "✓ Stationary" : "✗ Unit root";
         return (
           <div key={r.lag} style={{ display: "grid", gridTemplateColumns: "3rem 6rem 5rem 6rem 1fr", gap: 8, alignItems: "center", padding: "0.4rem 0.5rem", background: r.stationary ? `${C.green}20` : `${C.red}20`, border: `1px solid ${color}20`, borderLeft: `3px solid ${color}`, borderRadius: 3 }}>
-            <span style={{ fontSize: 12, color: "#888", fontFamily: mono }}>{r.lag}</span>
-            <span style={{ fontSize: 12, color: "#ddd8cc", fontFamily: mono }}>{isFinite(r.stat) ? r.stat.toFixed(4) : "—"}</span>
-            <span style={{ fontSize: 12, color: isFinite(r.pVal) && r.pVal < 0.05 ? "#6ec8b4" : "#888", fontFamily: mono }}>
+            <span style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>{r.lag}</span>
+            <span style={{ fontSize: T.code.fontSize, color: C.text, fontFamily: T.code.fontFamily }}>{isFinite(r.stat) ? r.stat.toFixed(4) : "—"}</span>
+            <span style={{ fontSize: T.code.fontSize, color: isFinite(r.pVal) && r.pVal < 0.05 ? C.teal : C.textDim, fontFamily: T.code.fontFamily }}>
               {isFinite(r.pVal) ? (r.pVal <= 0.01 ? "<0.01" : r.pVal.toFixed(3)) : "—"}
             </span>
-            <span style={{ fontSize: 12, color: "#888", fontFamily: mono }}>{isFinite(r.cv5pct) ? r.cv5pct.toFixed(3) : "—"}</span>
-            <span style={{ fontSize: 10, color, fontFamily: mono, letterSpacing: "0.08em" }}>{label}</span>
+            <span style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>{isFinite(r.cv5pct) ? r.cv5pct.toFixed(3) : "—"}</span>
+            <span style={{ fontSize: T.caption.fontSize, color, fontFamily: T.code.fontFamily, letterSpacing: "0.08em" }}>{label}</span>
           </div>
         );
       })}
-      <div style={{ fontSize: 9, color: "#444", fontFamily: mono, marginTop: 4 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
         Reject H₀ when τ &lt; CV(5%). MacKinnon (1994) response-surface critical values.
       </div>
     </div>
@@ -703,7 +699,7 @@ function AdfPanel({ results }) {
 
 // ─── TIME SERIES TAB ──────────────────────────────────────────────────────────
 function TimeSeriesTab({ rows, headers, info, panel }) {
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   const numH = headers.filter(h => info[h]?.isNum);
   const catH = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && headers.includes(h)));
 
@@ -839,7 +835,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
       {/* Sub-tab toggle */}
       <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 3, overflow: "hidden", marginBottom: "1rem", width: "fit-content" }}>
         {[["line","⬡ Line chart"],["acf","⬡ ACF / PACF"],["adf","⬡ ADF test"]].map(([k, l]) => (
-          <button key={k} onClick={() => setTsView(k)} style={{ padding: "0.3rem 0.9rem", background: tsView === k ? C.surface3 : C.surface, border: "none", borderBottom: tsView === k ? `2px solid ${C.teal}` : "2px solid transparent", color: tsView === k ? C.teal : C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, transition: "all 0.12s" }}>{l}</button>
+          <button key={k} onClick={() => setTsView(k)} style={{ padding: "0.3rem 0.9rem", background: tsView === k ? C.surface3 : C.surface, border: "none", borderBottom: tsView === k ? `2px solid ${C.teal}` : "2px solid transparent", color: tsView === k ? C.teal : C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}>{l}</button>
         ))}
       </div>
 
@@ -849,7 +845,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
         <div>
           <Lbl>Time axis</Lbl>
           <select value={tCol} onChange={e => setTCol(e.target.value)}
-            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
             {timeCandidates.map(h => <option key={h} value={h}>{h}</option>)}
           </select>
         </div>
@@ -857,7 +853,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
         <div>
           <Lbl>Variable (Y)</Lbl>
           <select value={yCol} onChange={e => setYCol(e.target.value)}
-            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
             {numH.map(h => <option key={h} value={h}>{h}</option>)}
           </select>
         </div>
@@ -865,7 +861,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
         <div>
           <Lbl>Aggregation</Lbl>
           <select value={agg} onChange={e => setAgg(e.target.value)}
-            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
             {[["mean","Mean"],["sum","Sum"],["median","Median"],["count","Count"]].map(([v,l]) =>
               <option key={v} value={v}>{l}</option>)}
           </select>
@@ -874,7 +870,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
         <div>
           <Lbl>Group by (optional)</Lbl>
           <select value={grpCol} onChange={e => setGrpCol(e.target.value)}
-            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+            style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
             <option value="">— none —</option>
             {headers.map(h => <option key={h} value={h}>{h}</option>)}
           </select>
@@ -884,7 +880,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
       {/* ACF / PACF panel */}
       {tsView === "acf" && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
-          <div style={{ padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          <div style={{ padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
             ACF &amp; PACF · {yCol} · n = {flatY.length} time points · max lag = {maxLag}
           </div>
           {acfVals.length > 1 ? (
@@ -892,7 +888,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
               <SvgACF acf={acfVals} pacf={pacfVals} n={flatY.length} />
             </div>
           ) : (
-            <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: 11, fontFamily: mono }}>
+            <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
               Need at least 5 time points for ACF.
             </div>
           )}
@@ -902,13 +898,13 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
       {/* ADF panel */}
       {tsView === "adf" && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
-          <div style={{ padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          <div style={{ padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
             Augmented Dickey-Fuller · {yCol} · n = {flatY.length} time points
           </div>
           {adfRes.length > 0 ? (
             <AdfPanel results={adfRes} />
           ) : (
-            <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: 11, fontFamily: mono }}>
+            <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
               Need at least 9 time points for ADF test.
             </div>
           )}
@@ -920,19 +916,19 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
           {/* header */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
-            <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
               {agg.charAt(0).toUpperCase()+agg.slice(1)} of {yCol} by {tCol}
               {grpCol ? ` · grouped by ${grpCol}` : ""}
             </span>
             <button onClick={handleExport}
-              style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+              style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
             >↓ SVG</button>
           </div>
           <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center" }}>
             <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-              style={{ width: "100%", maxWidth: 700, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+              style={{ width: "100%", maxWidth: 700, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
               <rect width={W} height={H} fill={C.bg} />
 
               {/* grid */}
@@ -972,7 +968,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
               {chart.xTicks.map((t, i) => (
                 <g key={i}>
                   <line x1={chart.sx(t)} x2={chart.sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1} />
-                  <text x={chart.sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+                  <text x={chart.sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                     {Number.isInteger(t) ? t : t.toFixed(1)}
                   </text>
                 </g>
@@ -980,7 +976,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
               {chart.yTicks.map((t, i) => (
                 <g key={i}>
                   <line x1={PAD.l-4} x2={PAD.l} y1={chart.sy(t)} y2={chart.sy(t)} stroke={C.border2} strokeWidth={1} />
-                  <text x={PAD.l-8} y={chart.sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+                  <text x={PAD.l-8} y={chart.sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                     {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
                   </text>
                 </g>
@@ -989,10 +985,10 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
               <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
 
               {/* axis labels */}
-              <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+              <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {tCol}
               </text>
-              <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+              <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {agg}({yCol})
               </text>
 
@@ -1002,7 +998,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
                   {series.map((s, si) => (
                     <g key={s.grp} transform={`translate(0, ${si * 14})`}>
                       <line x1={0} x2={14} y1={5} y2={5} stroke={COLORS[si % COLORS.length]} strokeWidth={2} />
-                      <text x={18} y={9} fill={C.textDim} fontSize={8} fontFamily={mono}>
+                      <text x={18} y={9} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                         {String(s.grp).length > 16 ? String(s.grp).slice(0,15)+"…" : String(s.grp)}
                       </text>
                     </g>
@@ -1013,14 +1009,14 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
           </div>
 
           {/* footer stats */}
-          <div style={{ padding: "0.35rem 0.9rem", background: C.surface2, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", gap: 16 }}>
+          <div style={{ padding: "0.35rem 0.9rem", background: C.surface2, borderTop: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, display: "flex", gap: 16 }}>
             <span>{series.length} serie{series.length !== 1 ? "s" : ""}</span>
             <span>{series[0]?.pts.length} time points</span>
             <span>n = {rows.length} observations</span>
           </div>
         </div>
       ) : (
-        <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: 11, fontFamily: mono }}>
+        <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
           {!tCol || !yCol ? "Select a time column and a variable." : "No valid data for selected columns."}
         </div>
       )}
@@ -1028,7 +1024,7 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
   );
 }
 function AIInsights({rows,headers,info,panel}){
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   const [text,setText]=useState(""),[loading,setLoading]=useState(false),[done,setDone]=useState(false);
   const ran = { current: false };
 
@@ -1050,12 +1046,12 @@ function AIInsights({rows,headers,info,panel}){
   return(
     <div style={{padding:"1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.purple}`,borderRadius:4,marginBottom:"1.4rem"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <span style={{fontSize:10,color:C.purple,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono}}>✦ AI Insights</span>
+        <span style={{fontSize: T.caption.fontSize,color:C.purple,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>✦ AI Insights</span>
         {loading&&<Spin/>}
-        {done&&<button onClick={()=>{setDone(false);setText("");ran.current=false;setTimeout(runInsights,50);}} style={{marginLeft:"auto",fontSize:9,background:"transparent",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textMuted,cursor:"pointer",fontFamily:mono,padding:"2px 6px"}}>↻ refresh</button>}
+        {done&&<button onClick={()=>{setDone(false);setText("");ran.current=false;setTimeout(runInsights,50);}} style={{marginLeft:"auto",fontSize: T.caption.fontSize,background:"transparent",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textMuted,cursor:"pointer",fontFamily: T.code.fontFamily,padding:"2px 6px"}}>↻ refresh</button>}
       </div>
-      {loading&&!text&&<div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Analyzing dataset…</div>}
-      {text&&<div style={{fontSize:12,color:C.text,lineHeight:1.75,fontFamily:mono}}>{text}</div>}
+      {loading&&!text&&<div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>Analyzing dataset…</div>}
+      {text&&<div style={{fontSize: T.code.fontSize,color:C.text,lineHeight:1.75,fontFamily: T.code.fontFamily}}>{text}</div>}
       {!loading&&!text&&!done&&<Btn onClick={runInsights} color={C.purple} sm ch="✦ Generate AI insights"/>}
     </div>
   );
@@ -1157,7 +1153,7 @@ function generateExploreScript(language, { headers, info, filename }) {
 // ─── GROUP & SUMMARIZE EXPLORER ───────────────────────────────────────────────
 // Non-destructive descriptive stats panel with as.factor() override and LaTeX export.
 function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [byCols,    setByCols]    = useState([]);
   const [factorOverrides, setFactorOverrides] = useState(new Set()); // numeric cols forced as categorical
   const [aggs,      setAggs]      = useState([]);
@@ -1175,7 +1171,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
   ];
   const inS = { padding:"0.38rem 0.6rem", background:C.surface2,
     border:`1px solid ${C.border2}`, borderRadius:3, color:C.text,
-    fontFamily:mono, fontSize:11, outline:"none" };
+    fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline:"none" };
 
   function toggleFactor(h) {
     setFactorOverrides(prev => {
@@ -1276,15 +1272,15 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
     <div>
       <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,
         borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.2rem",
-        fontSize:11,color:C.textDim,lineHeight:1.6}}>
+        fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
         Group by any column (including numeric — use{" "}
-        <span style={{color:C.gold,fontFamily:mono}}>as.factor()</span> to treat a number as a category)
+        <span style={{color:C.gold,fontFamily: T.code.fontFamily}}>as.factor()</span> to treat a number as a category)
         and compute summary statistics. Results are read-only — use the LaTeX button to export.
       </div>
 
       {/* ── Group by ── */}
-      <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",
-        marginBottom:6,fontFamily:mono}}>Group by</div>
+      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",
+        marginBottom:6,fontFamily: T.code.fontFamily}}>Group by</div>
       <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"0.5rem"}}>
         {headers.map(h => {
           const isNum  = info[h]?.isNum;
@@ -1304,13 +1300,13 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
                   background: sel ? `${C.gold}18` : "transparent",
                   color: sel ? C.gold : groupable ? C.textDim : C.textMuted,
                   borderRadius:3, cursor: groupable ? "pointer" : "default",
-                  fontSize:10, fontFamily:mono, opacity: groupable ? 1 : 0.5,
+                  fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, opacity: groupable ? 1 : 0.5,
                   transition:"all 0.1s",
                 }}>
                 {sel ? "✓ " : ""}{h}
-                {isNum && !isFact && <span style={{fontSize:8,marginLeft:3,color:C.textMuted}}>num</span>}
-                {isFact && <span style={{fontSize:8,marginLeft:3,color:C.gold}}>factor</span>}
-                {!isNum && <span style={{fontSize:8,color:C.textMuted,marginLeft:3}}>({info[h]?.uCount})</span>}
+                {isNum && !isFact && <span style={{fontSize: T.caption.fontSize,marginLeft:3,color:C.textMuted}}>num</span>}
+                {isFact && <span style={{fontSize: T.caption.fontSize,marginLeft:3,color:C.gold}}>factor</span>}
+                {!isNum && <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:3}}>({info[h]?.uCount})</span>}
               </button>
               {/* as.factor() toggle — shown for numeric columns */}
               {isNum && (
@@ -1323,7 +1319,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
                     background: isFact ? `${C.gold}18` : "transparent",
                     color: isFact ? C.gold : C.textMuted,
                     borderRadius:2, cursor:"pointer",
-                    fontSize:8, fontFamily:mono, transition:"all 0.1s",
+                    fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, transition:"all 0.1s",
                     whiteSpace:"nowrap",
                   }}>
                   {isFact ? "✓ f" : "f"}
@@ -1334,17 +1330,17 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
                   background:C.surface2,border:`1px solid ${C.border2}`,
                   borderRadius:4,padding:"0.5rem 0.65rem",zIndex:50,
                   minWidth:120,maxWidth:220,boxShadow:"0 6px 20px #000a",
-                  fontSize:10,fontFamily:mono,color:C.textDim,pointerEvents:"none"}}>
-                  <div style={{fontSize:9,color:C.gold,letterSpacing:"0.12em",
+                  fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,color:C.textDim,pointerEvents:"none"}}>
+                  <div style={{fontSize: T.caption.fontSize,color:C.gold,letterSpacing:"0.12em",
                     textTransform:"uppercase",marginBottom:4}}>
                     {info[h]?.uCount} unique values
                   </div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
                     {uVals.slice(0,12).map(v=>(
                       <span key={v} style={{padding:"1px 5px",border:`1px solid ${C.border2}`,
-                        borderRadius:2,color:C.text,background:C.surface3,fontSize:10}}>{v}</span>
+                        borderRadius:2,color:C.text,background:C.surface3,fontSize: T.caption.fontSize}}>{v}</span>
                     ))}
-                    {uVals.length>12 && <span style={{color:C.textMuted,fontSize:9}}>+{uVals.length-12} more</span>}
+                    {uVals.length>12 && <span style={{color:C.textMuted,fontSize: T.caption.fontSize}}>+{uVals.length-12} more</span>}
                   </div>
                 </div>
               )}
@@ -1352,26 +1348,26 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
           );
         })}
       </div>
-      <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginBottom:"1.2rem"}}>
+      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"1.2rem"}}>
         Hover a column to preview its unique values · click <span style={{color:C.gold}}>f</span> next to a numeric column to use as.factor()
       </div>
 
       {/* ── Aggregations ── */}
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.6rem"}}>
-        <div style={{fontSize:10,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",fontFamily:mono}}>Aggregations</div>
+        <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>Aggregations</div>
         <button onClick={()=>addAgg()} style={{
           padding:"0.2rem 0.55rem",border:`1px solid ${C.blue}`,
           background:`${C.blue}10`,color:C.blue,borderRadius:2,
-          cursor:"pointer",fontSize:9,fontFamily:mono}}>+ add row</button>
+          cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>+ add row</button>
       </div>
       {numC.length > 0 && (
         <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:"0.8rem"}}>
-          <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,alignSelf:"center",marginRight:2}}>quick add:</span>
+          <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,alignSelf:"center",marginRight:2}}>quick add:</span>
           {numC.map(h => (
             <button key={h} onClick={()=>addAgg(h,"mean")}
               style={{padding:"0.18rem 0.5rem",border:`1px solid ${C.border2}`,
                 background:"transparent",color:C.textDim,borderRadius:2,
-                cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.1s"}}
+                cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}
               onMouseEnter={e=>{e.currentTarget.style.borderColor=C.blue;e.currentTarget.style.color=C.blue;}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
               title={`Add mean(${h})`}>+ {h}</button>
@@ -1380,7 +1376,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
       )}
       {aggs.length === 0 && (
         <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px dashed ${C.border2}`,
-          borderRadius:4,fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"1.2rem"}}>
+          borderRadius:4,fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"1.2rem"}}>
           Add aggregations above.
         </div>
       )}
@@ -1403,14 +1399,14 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
             <button onClick={()=>rmAgg(i)} style={{
               background:"transparent",border:`1px solid ${C.border2}`,
               borderRadius:2,color:C.textMuted,cursor:"pointer",
-              fontSize:11,padding:"0.2rem 0.4rem"}}>✕</button>
+              fontSize: T.code.fontSize,padding:"0.2rem 0.4rem"}}>✕</button>
           </div>
         ))}
       </div>
 
       <button onClick={doSummarize} disabled={!canSummarize} style={{
         padding:"0.42rem 0.9rem",borderRadius:3,cursor:canSummarize?"pointer":"not-allowed",
-        fontFamily:mono,fontSize:11,fontWeight:700,
+        fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,fontWeight:700,
         background:canSummarize?C.gold:"transparent",
         color:canSummarize?C.bg:C.textMuted,
         border:`1px solid ${canSummarize?C.gold:C.border2}`,
@@ -1422,14 +1418,14 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
         <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
           <div style={{padding:"0.55rem 0.9rem",background:C.surface2,
             display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <span style={{fontSize:10,color:C.gold,fontFamily:mono,flex:1}}>
+            <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily,flex:1}}>
               {sumResult.rows.length} groups · grouped by [{sumResult.by.join(", ")}]
             </span>
             {/* LaTeX toggle */}
             <button onClick={()=>{setLatexOpen(o=>!o);setCopied(false);}} style={{
               padding:"0.22rem 0.6rem",background:latexOpen?`${C.gold}18`:"transparent",
               border:`1px solid ${latexOpen?C.gold:C.border2}`,borderRadius:2,
-              color:latexOpen?C.gold:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono}}>
+              color:latexOpen?C.gold:C.textDim,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>
               LaTeX {latexOpen?"▾":"▸"}
             </button>
             {/* CSV download */}
@@ -1442,7 +1438,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
             }} style={{
               padding:"0.22rem 0.6rem",background:"transparent",
               border:`1px solid ${C.border2}`,borderRadius:2,
-              color:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono}}
+              color:C.textDim,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}
               onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;e.currentTarget.style.color=C.teal;}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}>
               ↓ CSV
@@ -1455,7 +1451,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
                   onChange={e=>{setSaveName(e.target.value);setSaved(false);}}
                   placeholder={`summary_${sumResult.by.join("_")}`}
                   style={{padding:"0.2rem 0.45rem",background:C.surface,border:`1px solid ${C.border2}`,
-                    borderRadius:2,color:C.text,fontSize:9,fontFamily:mono,width:140,outline:"none"}}
+                    borderRadius:2,color:C.text,fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,width:140,outline:"none"}}
                 />
                 <button onClick={()=>{
                   const name=(saveName.trim()||`summary_${sumResult.by.join("_")}`);
@@ -1464,7 +1460,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
                 }} style={{
                   padding:"0.22rem 0.6rem",background:saved?`${C.teal}18`:`${C.teal}12`,
                   border:`1px solid ${saved?C.teal:C.border2}`,borderRadius:2,
-                  color:saved?C.teal:C.textDim,cursor:"pointer",fontSize:9,fontFamily:mono,whiteSpace:"nowrap"}}>
+                  color:saved?C.teal:C.textDim,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,whiteSpace:"nowrap"}}>
                   {saved?"✓ Saved":"⊕ Save as Dataset"}
                 </button>
               </div>
@@ -1476,25 +1472,25 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
             return (
               <div style={{padding:"0.75rem 0.9rem",background:C.surface2,borderBottom:`1px solid ${C.border}`}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                  <span style={{fontSize:9,color:C.gold,letterSpacing:"0.15em",
-                    textTransform:"uppercase",fontFamily:mono,flex:1}}>LaTeX — tabular</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.gold,letterSpacing:"0.15em",
+                    textTransform:"uppercase",fontFamily: T.code.fontFamily,flex:1}}>LaTeX — tabular</span>
                   <button onClick={()=>{navigator.clipboard.writeText(tex).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1800);});}} style={{
                     padding:"0.22rem 0.75rem",
                     background:copied?`${C.teal}18`:`${C.gold}10`,
                     border:`1px solid ${copied?C.teal:C.gold}`,
                     borderRadius:3,color:copied?C.teal:C.gold,
-                    cursor:"pointer",fontSize:10,fontFamily:mono,fontWeight:600}}>
+                    cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,fontWeight:600}}>
                     {copied ? "✓ Copied" : "⎘ Copy"}
                   </button>
                 </div>
-                <pre style={{margin:0,fontSize:10,color:C.textDim,fontFamily:mono,
+                <pre style={{margin:0,fontSize: T.caption.fontSize,color:C.textDim,fontFamily: T.code.fontFamily,
                   overflowX:"auto",lineHeight:1.6,whiteSpace:"pre"}}>{tex}</pre>
               </div>
             );
           })()}
           {/* Data table */}
           <div style={{overflowX:"auto",maxHeight:400,overflowY:"auto"}}>
-            <table style={{borderCollapse:"collapse",fontSize:11,width:"100%",fontFamily:mono}}>
+            <table style={{borderCollapse:"collapse",fontSize: T.code.fontSize,width:"100%",fontFamily: T.code.fontFamily}}>
               <thead>
                 <tr style={{background:C.surface2,position:"sticky",top:0}}>
                   {sumResult.headers.map(h => {
@@ -1502,10 +1498,10 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
                     const aggDef = sumResult.aggs.find(a=>a.nn===h);
                     return (
                       <th key={h} style={{padding:"0.4rem 0.75rem",
-                        textAlign:isBy?"left":"right",fontWeight:400,fontSize:10,
+                        textAlign:isBy?"left":"right",fontWeight:400,fontSize: T.caption.fontSize,
                         color:isBy?C.gold:C.blue,whiteSpace:"nowrap",
                         borderBottom:`1px solid ${C.border}`}}>
-                        {h}<span style={{fontSize:8,color:C.textMuted,marginLeft:4}}>{isBy?"group":aggDef?.fn}</span>
+                        {h}<span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:4}}>{isBy?"group":aggDef?.fn}</span>
                       </th>
                     );
                   })}
@@ -1563,17 +1559,17 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
   const [open, setOpen] = useState(false);
   const active = conds.length > 0;
   const isFiltered = filteredCount !== totalRows;
-  const selStyle = {fontFamily:mono,fontSize:10,background:C.surface2,border:`1px solid ${C.border}`,color:C.text,borderRadius:3,padding:"0.2rem 0.3rem"};
+  const selStyle = {fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,background:C.surface2,border:`1px solid ${C.border}`,color:C.text,borderRadius:3,padding:"0.2rem 0.3rem"};
   const upd = (i, patch) => setConds(cs => cs.map((c,j) => j===i ? {...c,...patch} : c));
 
   return (
     <div style={{marginBottom:"0.8rem"}}>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
-        <button onClick={()=>setOpen(s=>!s)} style={{padding:"0.22rem 0.7rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:active?`${C.teal}18`:"transparent",border:`1px solid ${active?C.teal:C.border2}`,color:active?C.teal:C.textDim,transition:"all 0.12s"}}>
+        <button onClick={()=>setOpen(s=>!s)} style={{padding:"0.22rem 0.7rem",borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,background:active?`${C.teal}18`:"transparent",border:`1px solid ${active?C.teal:C.border2}`,color:active?C.teal:C.textDim,transition:"all 0.12s"}}>
           ⊘ Filter{active?` (${conds.length})`:""}
         </button>
-        {isFiltered&&<span style={{fontSize:10,color:C.teal,fontFamily:mono}}>{filteredCount.toLocaleString()} / {totalRows.toLocaleString()} rows</span>}
-        {active&&<button onClick={()=>{setConds([]);}} style={{fontSize:10,color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontFamily:mono,padding:0}}>× clear</button>}
+        {isFiltered&&<span style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>{filteredCount.toLocaleString()} / {totalRows.toLocaleString()} rows</span>}
+        {active&&<button onClick={()=>{setConds([]);}} style={{fontSize: T.caption.fontSize,color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontFamily: T.code.fontFamily,padding:0}}>× clear</button>}
       </div>
       {open&&(
         <div style={{marginTop:6,padding:"0.7rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:4}}>
@@ -1588,11 +1584,11 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
               <input value={cond.val} onChange={e=>upd(i,{val:e.target.value})}
                 style={{...selStyle,width:100}} placeholder="value" />
               <button onClick={()=>setConds(cs=>cs.filter((_,j)=>j!==i))}
-                style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:14,lineHeight:1,padding:"0 2px"}}>×</button>
+                style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize: T.h2.fontSize,lineHeight:1,padding:"0 2px"}}>×</button>
             </div>
           ))}
           <button onClick={()=>setConds(cs=>[...cs,{col:headers[0]??"",op:">",val:""}])}
-            style={{fontSize:10,color:C.teal,background:"none",border:`1px solid ${C.teal}40`,borderRadius:3,cursor:"pointer",fontFamily:mono,padding:"0.2rem 0.5rem",marginTop:2}}>
+            style={{fontSize: T.caption.fontSize,color:C.teal,background:"none",border:`1px solid ${C.teal}40`,borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,padding:"0.2rem 0.5rem",marginTop:2}}>
             + condition
           </button>
         </div>
@@ -1654,9 +1650,9 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         {/* Header */}
         <div style={{marginBottom:"1.2rem",display:"flex",alignItems:"flex-start",gap:12}}>
           <div style={{flex:1}}>
-            <div style={{fontSize:9,color:C.violet,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>Evidence Explorer</div>
-            <div style={{fontSize:18,color:C.text,letterSpacing:"-0.02em",marginBottom:3}}>Exploratory Analysis</div>
-            <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
+            <div style={{fontSize: T.caption.fontSize,color:C.violet,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>Evidence Explorer</div>
+            <div style={{fontSize: T.h2.fontSize,color:C.text,letterSpacing:"-0.02em",marginBottom:3}}>Exploratory Analysis</div>
+            <div style={{fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
               <span style={{color:C.gold}}>{filteredRows.length !== rows.length ? `${filteredRows.length.toLocaleString()} of ${rows.length.toLocaleString()}` : rows.length}</span> obs ·{" "}
               <span style={{color:C.teal}}>{headers.filter(h=>info[h]?.isNum).length}</span> numeric ·{" "}
               <span style={{color:C.purple}}>{headers.filter(h=>info[h]?.isCat).length}</span> categorical
@@ -1666,7 +1662,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
             <button onClick={downloadCSV} style={{
               padding:"0.28rem 0.55rem", borderRadius:3, cursor:"pointer",
-              fontFamily:mono, fontSize:10, background:"transparent",
+              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background:"transparent",
               border:`1px solid ${C.border2}`, color:C.textDim, transition:"all 0.12s",
             }}
               title={`Download current view as CSV (${filteredRows.length} rows)`}
@@ -1678,7 +1674,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
               return (
                 <button key={lang} onClick={() => downloadExploreScript(lang)} style={{
                   padding:"0.28rem 0.55rem", borderRadius:3, cursor:"pointer",
-                  fontFamily:mono, fontSize:10, background:"transparent",
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background:"transparent",
                   border:`1px solid ${C.border2}`, color:C.textDim,
                   transition:"all 0.12s",
                 }}
@@ -1688,8 +1684,8 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
                 >↓{lbl}</button>
               );
             })}
-            <button onClick={onBack} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:"transparent",border:`1px solid ${C.border2}`,color:C.textDim}}>← Wrangling</button>
-            <button onClick={onProceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily:mono,fontSize:10,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>→ Modeling</button>
+            <button onClick={onBack} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,background:"transparent",border:`1px solid ${C.border2}`,color:C.textDim}}>← Wrangling</button>
+            <button onClick={onProceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>→ Modeling</button>
           </div>
         </div>
         {/* AI Insights */}
@@ -1727,14 +1723,14 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
           {[["summary","⊞ Summary"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"]].map(([k,l])=>(
-            <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"0.6rem 0.7rem",background:tab===k?C.goldFaint:C.surface,border:"none",color:tab===k?C.gold:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:11,borderBottom:tab===k?`2px solid ${C.gold}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>
+            <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"0.6rem 0.7rem",background:tab===k?C.goldFaint:C.surface,border:"none",color:tab===k?C.gold:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,borderBottom:tab===k?`2px solid ${C.gold}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>
           ))}
         </div>
         {tab==="summary"&&(
           <>
             <SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel}/>
             <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
-              <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily:mono}}>Group Summarize</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
               <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset}/>
             </div>
           </>
@@ -1742,7 +1738,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
         {tab==="corr"&&(
           <div>
-            <div style={{fontSize:11,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
+            <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
               Pearson correlation between all numeric variables. Red = negative, Teal = positive.
             </div>
             <div ref={corrRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>

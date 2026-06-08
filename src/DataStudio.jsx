@@ -29,8 +29,6 @@ import { deleteCacheEntry } from "./services/data/parquetCache.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-
 // ─── UTILITIES ────────────────────────────────────────────────────────────────
 function genId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -460,7 +458,7 @@ async function parseFile(file) {
 
 // ─── DATASET SIDEBAR ──────────────────────────────────────────────────────────
 function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, onFetchWorldBank, onFetchOECD, loadErr, loading }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
 
@@ -491,10 +489,10 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         borderBottom: `1px solid ${C.border}`,
         flexShrink: 0,
       }}>
-        <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>
           Dataset Manager
         </div>
-        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
           {datasets.length} dataset{datasets.length !== 1 ? "s" : ""} loaded
         </div>
       </div>
@@ -522,26 +520,26 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
                 {/* Index badge + status */}
                 <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
                   <span style={{
-                    fontSize: 8, padding: "1px 5px",
+                    fontSize: T.caption.fontSize, padding: "1px 5px",
                     border: `1px solid ${isActive ? C.teal : C.border2}`,
                     color: isActive ? C.teal : C.textMuted,
-                    borderRadius: 2, fontFamily: mono, flexShrink: 0,
+                    borderRadius: 2, fontFamily: T.code.fontFamily, flexShrink: 0,
                     letterSpacing: "0.08em",
                   }}>
                     D{idx + 1}
                   </span>
                   {isActive && (
-                    <span style={{ fontSize: 8, color: C.teal, fontFamily: mono }}>● active</span>
+                    <span style={{ fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily }}>● active</span>
                   )}
                   {idx === 0 && !isActive && (
-                    <span style={{ fontSize: 8, color: C.textMuted, fontFamily: mono }}>primary</span>
+                    <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>primary</span>
                   )}
                 </div>
 
                 {/* Filename — truncated */}
                 <div style={{
-                  fontSize: 11, color: isActive ? C.text : C.textDim,
-                  fontFamily: mono, overflow: "hidden",
+                  fontSize: T.code.fontSize, color: isActive ? C.text : C.textDim,
+                  fontFamily: T.code.fontFamily, overflow: "hidden",
                   textOverflow: "ellipsis", whiteSpace: "nowrap",
                   lineHeight: 1.4, marginBottom: 2,
                 }}>
@@ -549,7 +547,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
                 </div>
 
                 {/* Dimensions */}
-                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
                   {(ds.rawData._duckdb?.rowCount ?? ds.rawData.rows.length).toLocaleString()} rows ×{" "}
                   {ds.rawData.headers.length} cols
                   {ds.rawData._duckdb && (
@@ -562,9 +560,9 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
                   <div
                     style={{
                       marginTop: 3,
-                      fontSize: 8,
+                      fontSize: T.caption.fontSize,
                       color: crs.reprojected ? C.gold : (crs.warning ? C.textMuted : C.teal),
-                      fontFamily: mono,
+                      fontFamily: T.code.fontFamily,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -584,7 +582,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
                   style={{
                     background: "transparent", border: "none",
                     color: C.textMuted, cursor: "pointer",
-                    fontSize: 14, padding: "0 2px", lineHeight: 1,
+                    fontSize: T.h2.fontSize, padding: "0 2px", lineHeight: 1,
                     flexShrink: 0, marginTop: 1,
                     transition: "color 0.1s",
                   }}
@@ -626,7 +624,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
             borderRadius: 3,
             color: loading ? C.textMuted : dragOver ? C.teal : C.textDim,
             cursor: loading ? "not-allowed" : "pointer",
-            fontFamily: mono, fontSize: 10,
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
             transition: "all 0.12s",
           }}
           onMouseEnter={e => { if (!loading) { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; } }}
@@ -637,7 +635,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
 
         {/* Error/info message */}
         {loadErr && (
-          <div style={{ fontSize: 9, color: loadErr.startsWith("Large file") ? C.gold : C.red, fontFamily: mono, marginTop: 6, lineHeight: 1.5 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: loadErr.startsWith("Large file") ? C.gold : C.red, fontFamily: T.code.fontFamily, marginTop: 6, lineHeight: 1.5 }}>
             {loadErr}
           </div>
         )}
@@ -645,7 +643,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         {/* World Bank fetcher button */}
         <button
           onClick={onFetchWorldBank}
-          style={{ width:"100%", marginTop:6, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:10, transition:"all 0.12s" }}
+          style={{ width:"100%", marginTop:6, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.12s" }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
         >↓ World Bank data</button>
@@ -653,13 +651,13 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
         {/* OECD fetcher button */}
         <button
           onClick={onFetchOECD}
-          style={{ width:"100%", marginTop:4, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:10, transition:"all 0.12s" }}
+          style={{ width:"100%", marginTop:4, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.12s" }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.color = C.blue; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
         >↓ OECD data</button>
 
         {/* Format hint */}
-        <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 6, lineHeight: 1.6 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 6, lineHeight: 1.6 }}>
           CSV · TSV · XLSX · DTA · RDS · DBF · Parquet · drag & drop supported
           <br/>
           Loaded datasets available for JOIN / APPEND in the Merge tab.
@@ -677,7 +675,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
 const ensureRowIds = ensureRowIdentity;
 
 const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets, onComplete, onOutputReady, onDatasetsChange, onActiveDatasetChange, activeDatasetId }, ref) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const dispatch = useSessionDispatch();
 
   // Ref exposed to WranglingModule so DataViewer can dispatch patch steps
@@ -1083,7 +1081,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       ) : (
         <div style={{
           flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-          color: C.textMuted, fontFamily: mono, fontSize: 12, textAlign: "center", padding: "2rem",
+          color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, textAlign: "center", padding: "2rem",
         }}>
           No datasets in this project yet.<br/>
           Go to the <span style={{ color: C.teal }}>Data</span> tab to load one.

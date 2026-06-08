@@ -23,8 +23,6 @@ import { generateStataScript } from "./services/export/stataScript.js";
 import { buildStargazer }      from "./services/export/latexTable.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-
 // ─── SAFE NUMBER FORMATTER ────────────────────────────────────────────────────
 // Central utility: returns val.toFixed(dp) for valid finite numbers, 'N/A' for
 // anything else (null, undefined, NaN, Infinity). Used everywhere a number is
@@ -62,21 +60,21 @@ function normaliseResult(raw) {
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.textMuted;
   return (
-    <div style={{ fontSize: 10, color, letterSpacing: "0.2em", textTransform: "uppercase",
-                  marginBottom: mb, fontFamily: mono }}>
+    <div style={{ fontSize: T.caption.fontSize, color, letterSpacing: "0.2em", textTransform: "uppercase",
+                  marginBottom: mb, fontFamily: T.code.fontFamily }}>
       {children}
     </div>
   );
 }
 function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.gold;
   const b = { padding: sm ? "0.28rem 0.65rem" : "0.48rem 0.95rem", borderRadius: 3,
-               cursor: dis ? "not-allowed" : "pointer", fontFamily: mono,
-               fontSize: sm ? 10 : 11, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
+               cursor: dis ? "not-allowed" : "pointer", fontFamily: T.code.fontFamily,
+               fontSize: sm ? T.caption.fontSize : T.code.fontSize, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
   if (v === "solid") return (
     <button onClick={onClick} disabled={dis}
       style={{ ...b, background: color, color: C.bg, border: `1px solid ${color}`, fontWeight: 700 }}>
@@ -98,7 +96,7 @@ function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
   );
 }
 function Spin() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{ width: 14, height: 14, border: `2px solid ${C.border2}`,
                   borderTopColor: C.gold, borderRadius: "50%",
@@ -106,7 +104,7 @@ function Spin() {
   );
 }
 function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.teal;
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -118,7 +116,7 @@ function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color }) {
   return (
     <button onClick={copy}
       style={{ padding: "0.28rem 0.75rem", borderRadius: 3, cursor: "pointer",
-               fontFamily: mono, fontSize: 10, border: `1px solid ${copied ? color : C.border2}`,
+               fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, border: `1px solid ${copied ? color : C.border2}`,
                background: copied ? `${color}18` : "transparent",
                color: copied ? color : C.textDim, transition: "all 0.15s" }}>
       {copied ? successLabel : label}
@@ -130,7 +128,7 @@ function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color }) {
 // Teal diamond = significant (p < 0.05), grey = not significant.
 // Each row: label | CI whisker + point | β value
 function ForestPlot({ varNames, beta, se, pVals }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const items = useMemo(() =>
     varNames
       .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
@@ -138,7 +136,7 @@ function ForestPlot({ varNames, beta, se, pVals }) {
   [varNames, beta, se, pVals]);
 
   if (!items.length) return (
-    <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono, padding: "1rem" }}>
+    <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, padding: "1rem" }}>
       No coefficients to plot (intercept-only or empty result).
     </div>
   );
@@ -163,7 +161,7 @@ function ForestPlot({ varNames, beta, se, pVals }) {
   return (
     <div style={{ overflowX: "auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`}
-           style={{ width: "100%", minWidth: 400, display: "block", fontFamily: mono }}>
+           style={{ width: "100%", minWidth: 400, display: "block", fontFamily: T.code.fontFamily }}>
         {/* Background */}
         <rect width={W} height={H} fill={C.bg} />
 
@@ -220,17 +218,17 @@ function ForestPlot({ varNames, beta, se, pVals }) {
                     transform={`rotate(45,${cx},${cy})`} />
               {/* Variable label */}
               <text x={PAD.l - 10} y={cy + 4} textAnchor="end"
-                    fill={lblC} fontSize={10.5}>
+                    fill={lblC} fontSize={T.caption.fontSize}>
                 {d.v.length > 18 ? d.v.slice(0, 17) + "…" : d.v}
               </text>
               {/* β value + stars */}
               <text x={PAD.l + iW + 8} y={cy + 4} textAnchor="start"
-                    fill={dotC} fontSize={9.5} fontFamily={mono}>
+                    fill={dotC} fontSize={9.5} fontFamily={T.data.fontFamily}>
                 {isFinite(d.b) && d.b > 0 ? "+" : ""}{safeNum(d.b, 3)}{stars(d.p)}
               </text>
               {/* p-value hint */}
               <text x={PAD.l + iW + 8} y={cy + 15} textAnchor="start"
-                    fill={C.textMuted} fontSize={8} fontFamily={mono}>
+                    fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 p={!isFinite(d.p) ? "N/A" : d.p < 0.001 ? "<.001" : safeNum(d.p, 3)}
               </text>
             </g>
@@ -242,12 +240,12 @@ function ForestPlot({ varNames, beta, se, pVals }) {
               stroke={C.border2} strokeWidth={1} />
         {ticks.map((t, i) => (
           <text key={i} x={sx(t)} y={H - PAD.b + 12}
-                textAnchor="middle" fill={C.textMuted} fontSize={8}>
+                textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>
             {t === 0 ? "0" : safeNum(t, 2)}
           </text>
         ))}
         <text x={PAD.l + iW / 2} y={H - 3}
-              textAnchor="middle" fill={C.textMuted} fontSize={8}>
+              textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>
           Coefficient estimate with 95% CI  ·  ◆ p&lt;0.05  ◇ n.s.
         </text>
       </svg>
@@ -259,7 +257,7 @@ function ForestPlot({ varNames, beta, se, pVals }) {
 // buildStargazer is imported from services/export/latexTable.js (shared with ModelComparison).
 
 function LatexPanel({ result, modelLabel, yVar }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [customLabel,    setCustomLabel]    = useState(modelLabel);
   const [showFirstStage, setShowFirstStage] = useState(false);
 
@@ -279,26 +277,26 @@ function LatexPanel({ result, modelLabel, yVar }) {
 
   const inputStyle = {
     background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3,
-    color: C.text, fontFamily: mono, fontSize: 10, padding: "3px 7px",
+    color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 7px",
     outline: "none", width: 180,
   };
 
   return (
     <div>
-      <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.7,
+      <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.7,
                     marginBottom: "0.75rem", padding: "0.65rem 1rem",
                     background: C.surface, border: `1px solid ${C.border}`,
                     borderLeft: `3px solid ${C.gold}`, borderRadius: 4 }}>
         Stargazer-style table. Paste directly into your{" "}
         <span style={{ color: C.gold }}>LaTeX</span> document.
-        Add <code style={{ color: C.teal, fontSize: 10 }}>{"\\usepackage{booktabs}"}</code>{" "}
-        to your preamble if you use <code style={{ color: C.teal, fontSize: 10 }}>\\toprule</code>.
+        Add <code style={{ color: C.teal, fontSize: T.caption.fontSize }}>{"\\usepackage{booktabs}"}</code>{" "}
+        to your preamble if you use <code style={{ color: C.teal, fontSize: T.caption.fontSize }}>\\toprule</code>.
       </div>
 
       {/* Controls row */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>Column label</span>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>Column label</span>
           <input
             value={customLabel}
             onChange={e => setCustomLabel(e.target.value)}
@@ -308,7 +306,7 @@ function LatexPanel({ result, modelLabel, yVar }) {
         </div>
         {canShowFS && (
           <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
-                          fontSize: 9, color: C.textDim, fontFamily: mono }}>
+                          fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
             <input
               type="checkbox"
               checked={showFirstStage}
@@ -323,8 +321,8 @@ function LatexPanel({ result, modelLabel, yVar }) {
       <div style={{ position: "relative" }}>
         <pre style={{
           background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4,
-          padding: "1rem", fontSize: 10.5, color: C.text,
-          fontFamily: mono, overflowX: "auto", lineHeight: 1.65,
+          padding: "1rem", fontSize: T.caption.fontSize, color: C.text,
+          fontFamily: T.code.fontFamily, overflowX: "auto", lineHeight: 1.65,
           maxHeight: 440, overflowY: "auto", margin: 0,
         }}>
           {latex}
@@ -342,11 +340,11 @@ function LatexPanel({ result, modelLabel, yVar }) {
 // Bins raw data (~20 bins per side) for performance, draws two fitted lines
 // (local linear from engine) that meet/jump at the cutoff threshold.
 function RDDScatterPlot({ rddResult }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { valid, xc, D, Y, leftFit, rightFit, cutoff, h, kernelType } = rddResult ?? {};
 
   if (!valid || valid.length < 4) return (
-    <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono, padding: "1rem" }}>
+    <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, padding: "1rem" }}>
       Not enough observations within bandwidth to render scatter.
     </div>
   );
@@ -400,7 +398,7 @@ function RDDScatterPlot({ rddResult }) {
   return (
     <div style={{ overflowX: "auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`}
-           style={{ width: "100%", minWidth: 400, display: "block", fontFamily: mono }}>
+           style={{ width: "100%", minWidth: 400, display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* Horizontal grid */}
@@ -429,7 +427,7 @@ function RDDScatterPlot({ rddResult }) {
           <>
             <line x1={cx0} x2={cx0} y1={PAD.t} y2={PAD.t + iH}
                   stroke={C.gold} strokeWidth={1.5} strokeDasharray="6 3" opacity={0.85} />
-            <text x={cx0 + 5} y={PAD.t + 13} fill={C.gold} fontSize={9} fontFamily={mono}>
+            <text x={cx0 + 5} y={PAD.t + 13} fill={C.gold} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
               c = {cutoff}
             </text>
           </>
@@ -441,24 +439,24 @@ function RDDScatterPlot({ rddResult }) {
 
         {/* Y-axis labels */}
         {yTicks.map((t, i) => (
-          <text key={i} x={PAD.l - 5} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8}>
+          <text key={i} x={PAD.l - 5} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize}>
             {safeNum(t, 2)}
           </text>
         ))}
 
         {/* X-axis label */}
-        <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textMuted} fontSize={8}>
+        <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>
           Running variable · h = {safeNum(h, 3)} · kernel: {kernelType ?? "—"}
         </text>
 
         {/* Legend */}
         <circle cx={PAD.l + 10} cy={PAD.t + 10} r={4} fill={C.blue}   opacity={0.7} />
-        <text x={PAD.l + 18} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Control side</text>
+        <text x={PAD.l + 18} y={PAD.t + 14} fill={C.textDim} fontSize={T.caption.fontSize}>Control side</text>
         <circle cx={PAD.l + 88} cy={PAD.t + 10} r={4} fill={C.orange} opacity={0.7} />
-        <text x={PAD.l + 96} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Treatment side</text>
+        <text x={PAD.l + 96} y={PAD.t + 14} fill={C.textDim} fontSize={T.caption.fontSize}>Treatment side</text>
         <line  x1={PAD.l + 168} x2={PAD.l + 186} y1={PAD.t + 10} y2={PAD.t + 10}
                stroke={C.gold} strokeWidth={1.5} strokeDasharray="4 2" />
-        <text x={PAD.l + 190} y={PAD.t + 14} fill={C.textDim} fontSize={9}>Cutoff</text>
+        <text x={PAD.l + 190} y={PAD.t + 14} fill={C.textDim} fontSize={T.caption.fontSize}>Cutoff</text>
       </svg>
     </div>
   );
@@ -473,7 +471,7 @@ function RDDScatterPlot({ rddResult }) {
 
 // Loading skeleton — shown while API is generating
 function NarrativeSkeleton() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: "1rem" }}>
       {[0, 1].map(i => (
@@ -485,9 +483,9 @@ function NarrativeSkeleton() {
           borderRadius: 4,
         }}>
           <div style={{
-            fontSize: 9, color: i === 0 ? C.teal : C.purple,
+            fontSize: T.caption.fontSize, color: i === 0 ? C.teal : C.purple,
             letterSpacing: "0.18em", textTransform: "uppercase",
-            fontFamily: mono, marginBottom: 10,
+            fontFamily: T.code.fontFamily, marginBottom: 10,
           }}>
             {i === 0 ? "¶1 · Statistical Findings" : "¶2 · Model Reliability"}
           </div>
@@ -509,7 +507,7 @@ function NarrativeSkeleton() {
 }
 
 function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
@@ -557,13 +555,13 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
     <div>
       {/* Context banner */}
       <div style={{
-        fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.7,
+        fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.7,
         marginBottom: "1.2rem", padding: "0.65rem 1rem",
         background: C.surface, border: `1px solid ${C.border}`,
         borderLeft: `3px solid ${C.purple}`, borderRadius: 4,
         display: "flex", alignItems: "flex-start", gap: 10,
       }}>
-        <span style={{ color: C.purple, fontSize: 13, lineHeight: 1 }}>✦</span>
+        <span style={{ color: C.purple, fontSize: T.body.fontSize, lineHeight: 1 }}>✦</span>
         <div>
           <div style={{ color: C.text, marginBottom: 2 }}>
             AI-generated executive summary for{" "}
@@ -579,7 +577,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
               : <>. No Data Dictionary detected — add one in Data Studio for richer narrative.</>
             }
           </div>
-          <div style={{ marginTop: 4, fontSize: 10, color: C.textMuted }}>
+          <div style={{ marginTop: 4, fontSize: T.caption.fontSize, color: C.textMuted }}>
             Verify before submitting — AI can err on economic plausibility.
           </div>
         </div>
@@ -590,12 +588,12 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
         <>
           <div style={{
             display: "flex", alignItems: "center", gap: 8,
-            color: C.purple, fontSize: 11, fontFamily: mono,
+            color: C.purple, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily,
             marginBottom: "0.8rem",
           }}>
             <Spin />
             <span>Generating insight…</span>
-            <span style={{ color: C.textMuted, fontSize: 10 }}>
+            <span style={{ color: C.textMuted, fontSize: T.caption.fontSize }}>
               ({result.varNames?.filter(v => v !== "(Intercept)").length ?? 0} regressors
               {hasDictionary ? " · dictionary-aware" : ""})
             </span>
@@ -607,7 +605,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
       {/* Error state */}
       {error && !loading && (
         <div style={{
-          fontSize: 11, color: C.red, fontFamily: mono, lineHeight: 1.6,
+          fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily, lineHeight: 1.6,
           padding: "0.75rem 1rem", border: `1px solid ${C.red}40`,
           borderLeft: `3px solid ${C.red}`, borderRadius: 4, marginBottom: "1rem",
         }}>
@@ -633,9 +631,9 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
                 animation: "fadeUp 0.22s ease",
               }}>
                 <div style={{
-                  fontSize: 9, color: accents[i] ?? C.gold,
+                  fontSize: T.caption.fontSize, color: accents[i] ?? C.gold,
                   letterSpacing: "0.2em", textTransform: "uppercase",
-                  fontFamily: mono, marginBottom: 8,
+                  fontFamily: T.code.fontFamily, marginBottom: 8,
                 }}>
                   {labels[i] ?? `¶${i + 1}`}
                 </div>
@@ -659,7 +657,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
           ch={loading ? "Generating…" : hasRun ? "↻ Regenerate narrative" : "✦ Generate narrative"}
         />
         {hasRun && !loading && !error && (
-          <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
             Results are non-deterministic — regeneration may vary.
           </span>
         )}
@@ -670,7 +668,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
 
 // ─── FIT STATS SUMMARY BAR ────────────────────────────────────────────────────
 function FitBar({ result }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { R2, adjR2, n, df, Fstat, Fpval, modelLabel } = result;
   const items = [
     { l: "Model",    v: modelLabel ?? "—",               c: C.gold },
@@ -692,11 +690,11 @@ function FitBar({ result }) {
                   overflow: "hidden", marginBottom: "1.4rem" }}>
       {items.map(s => (
         <div key={s.l} style={{ background: C.surface, padding: "0.6rem 0.85rem" }}>
-          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.1em",
-                        textTransform: "uppercase", marginBottom: 3, fontFamily: mono }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.1em",
+                        textTransform: "uppercase", marginBottom: 3, fontFamily: T.code.fontFamily }}>
             {s.l}
           </div>
-          <div style={{ fontSize: 15, color: s.c, fontFamily: mono }}>{s.v}</div>
+          <div style={{ fontSize: T.h2.fontSize, color: s.c, fontFamily: T.code.fontFamily }}>{s.v}</div>
         </div>
       ))}
     </div>
@@ -705,14 +703,14 @@ function FitBar({ result }) {
 
 // ─── SIGNIFICANT COEFFICIENTS CALLOUT ────────────────────────────────────────
 function SigCallout({ result }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { varNames, beta, se, pVals } = result;
   const sig = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
     .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s) && d.p < 0.05);
 
   if (!sig.length) return (
-    <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono,
+    <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
                   padding: "0.65rem 1rem", border: `1px solid ${C.border}`,
                   borderRadius: 4, marginBottom: "1.2rem" }}>
       No regressors are significant at the 5% level.
@@ -725,14 +723,14 @@ function SigCallout({ result }) {
         <div key={d.v} style={{
           padding: "0.45rem 0.85rem",
           background: `${C.teal}10`, border: `1px solid ${C.teal}40`,
-          borderRadius: 4, fontFamily: mono,
+          borderRadius: 4, fontFamily: T.code.fontFamily,
         }}>
-          <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 2 }}>{d.v}</div>
-          <div style={{ fontSize: 13, color: d.b >= 0 ? C.teal : C.red }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 2 }}>{d.v}</div>
+          <div style={{ fontSize: T.body.fontSize, color: d.b >= 0 ? C.teal : C.red }}>
             {d.b >= 0 ? "+" : ""}{safeNum(d.b)}
-            <span style={{ fontSize: 9, color: C.gold, marginLeft: 4 }}>{stars(d.p)}</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.gold, marginLeft: 4 }}>{stars(d.p)}</span>
           </div>
-          <div style={{ fontSize: 9, color: C.textMuted }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
             95% CI [{safeNum(d.b - 1.96 * d.s, 3)}, {safeNum(d.b + 1.96 * d.s, 3)}]
           </div>
         </div>
@@ -747,7 +745,7 @@ function SigCallout({ result }) {
 //   result       — normalised EstimationResult (for model section)
 //   cleanedData  — { cleanRows, headers, pipeline, dataDictionary, filename }
 function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = [] }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open,     setOpen]     = useState(false);
   const [lang,     setLang]     = useState("r");
   const [loading,  setLoading]  = useState(false);
@@ -841,13 +839,13 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           background: open ? `${C.gold}0d` : C.surface,
           border: `1px solid ${open ? C.gold + "50" : C.border}`,
           borderRadius: open ? "4px 4px 0 0" : 4,
-          cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+          cursor: "pointer", fontFamily: T.code.fontFamily, transition: "all 0.13s",
         }}
       >
-        <span style={{ fontSize: 9, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase" }}>
           ✦ AI Unified Script Export
         </span>
-        <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
       </button>
 
       {open && (
@@ -856,7 +854,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           borderRadius: "0 0 4px 4px", padding: "1.2rem",
           background: C.surface, animation: "fadeUp 0.15s ease",
         }}>
-          <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono, lineHeight: 1.6, marginBottom: "1rem" }}>
+          <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.6, marginBottom: "1rem" }}>
             Generates one complete, documented replication script combining your
             pipeline + model. Claude restructures, comments, and deduplicates the
             auto-generated code.
@@ -868,7 +866,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
               <button key={l.id} onClick={() => setLang(l.id)}
                 style={{
                   padding: "0.3rem 0.8rem", borderRadius: 3, cursor: "pointer",
-                  fontFamily: mono, fontSize: 11, transition: "all 0.12s",
+                  fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, transition: "all 0.12s",
                   background:  lang === l.id ? `${C.gold}18` : "transparent",
                   border:      `1px solid ${lang === l.id ? C.gold : C.border2}`,
                   color:       lang === l.id ? C.gold : C.textDim,
@@ -880,7 +878,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             <button onClick={generate} disabled={loading}
               style={{
                 padding: "0.3rem 0.9rem", borderRadius: 3, cursor: loading ? "not-allowed" : "pointer",
-                fontFamily: mono, fontSize: 11, opacity: loading ? 0.5 : 1,
+                fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, opacity: loading ? 0.5 : 1,
                 background: `${C.gold}18`, border: `1px solid ${C.gold}`,
                 color: C.gold, fontWeight: 700,
               }}>
@@ -890,7 +888,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
 
           {/* Error */}
           {error && (
-            <div style={{ fontSize: 11, color: C.red, fontFamily: mono, marginBottom: "0.8rem",
+            <div style={{ fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginBottom: "0.8rem",
                           padding: "0.5rem 0.8rem", border: `1px solid ${C.red}40`, borderRadius: 3 }}>
               ⚠ {error}
             </div>
@@ -899,7 +897,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           {/* Loading skeleton */}
           {loading && (
             <div style={{ display: "flex", alignItems: "center", gap: 8,
-                          color: C.gold, fontSize: 11, fontFamily: mono, marginBottom: "0.8rem" }}>
+                          color: C.gold, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, marginBottom: "0.8rem" }}>
               <div style={{ width: 12, height: 12, border: `2px solid ${C.border2}`,
                             borderTopColor: C.gold, borderRadius: "50%",
                             animation: "spin 0.7s linear infinite" }} />
@@ -911,7 +909,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           {script && !loading && (
             <>
               <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, flex: 1 }}>
+                <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, flex: 1 }}>
                   {script.split("\n").length} lines
                 </span>
                 <button onClick={() => {
@@ -920,7 +918,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
                   });
                 }}
                   style={{ padding: "0.22rem 0.6rem", borderRadius: 3, cursor: "pointer",
-                           fontFamily: mono, fontSize: 10,
+                           fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                            border: `1px solid ${copied ? C.teal : C.border2}`,
                            background: copied ? `${C.teal}18` : "transparent",
                            color: copied ? C.teal : C.textDim }}>
@@ -928,7 +926,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
                 </button>
                 <button onClick={download}
                   style={{ padding: "0.22rem 0.6rem", borderRadius: 3, cursor: "pointer",
-                           fontFamily: mono, fontSize: 10,
+                           fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                            border: `1px solid ${C.border2}`, background: "transparent", color: C.textDim }}>
                   ↓ Download
                 </button>
@@ -939,7 +937,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
                 style={{
                   width: "100%", minHeight: 280, padding: "0.8rem",
                   background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
-                  fontFamily: mono, fontSize: 10.5, color: C.text, lineHeight: 1.55,
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, lineHeight: 1.55,
                   resize: "vertical", boxSizing: "border-box",
                 }}
               />
@@ -953,7 +951,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function ReportingModule({ result: rawResult, cleanedData, availableDatasets = [], onClose }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tab, setTab] = useState("forest");
 
   // ── Debug: log raw result so any NaN/undefined shows in console ──────────────
@@ -976,14 +974,14 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
   const [narrativeOpen, setNarrativeOpen] = useState(false);
 
   if (!result) return (
-    <div style={{ padding: "2rem", color: C.textMuted, fontFamily: mono, fontSize: 12 }}>
+    <div style={{ padding: "2rem", color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
       No regression result to display. Run a model first.
     </div>
   );
 
   // ── Safety guard: engine returned an error instead of valid results ───────────
   if (result.__error) return (
-    <div style={{ padding: "2rem", fontFamily: mono }}>
+    <div style={{ padding: "2rem", fontFamily: T.code.fontFamily }}>
       <div style={{
         padding: "1.2rem 1.4rem",
         background: `${C.red}15`,
@@ -991,14 +989,14 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
         borderLeft: `3px solid ${C.red}`,
         borderRadius: 4,
       }}>
-        <div style={{ fontSize: 9, color: C.red, letterSpacing: "0.22em",
+        <div style={{ fontSize: T.caption.fontSize, color: C.red, letterSpacing: "0.22em",
                       textTransform: "uppercase", marginBottom: 8 }}>
           Estimation Error
         </div>
-        <div style={{ fontSize: 13, color: C.text, marginBottom: 6 }}>
+        <div style={{ fontSize: T.body.fontSize, color: C.text, marginBottom: 6 }}>
           {result.__error}
         </div>
-        <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.7 }}>
+        <div style={{ fontSize: T.code.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
           Common causes: perfect multicollinearity, fewer observations than parameters,
           or a degenerate panel structure. Return to the Modeling Lab and verify your
           variable selection and data coverage.
@@ -1007,7 +1005,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
       {onClose && (
         <button onClick={onClose}
           style={{ marginTop: "1rem", padding: "0.4rem 0.9rem", borderRadius: 3,
-                   cursor: "pointer", fontFamily: mono, fontSize: 10,
+                   cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                    background: "transparent", border: `1px solid ${C.border2}`,
                    color: C.textMuted }}>
           ✕ Close
@@ -1024,7 +1022,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
   ];
 
   return (
-    <div style={{ background: C.bg, color: C.text, fontFamily: mono,
+    <div style={{ background: C.bg, color: C.text, fontFamily: T.code.fontFamily,
                   height: "100%", display: "flex", flexDirection: "column",
                   overflow: "hidden" }}>
       <style>{`
@@ -1039,11 +1037,11 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
                     display: "flex", alignItems: "center", gap: 12,
                     background: C.surface }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em",
+          <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.26em",
                         textTransform: "uppercase", marginBottom: 2 }}>
             Reporting Module
           </div>
-          <div style={{ fontSize: 16, color: C.text, letterSpacing: "-0.01em" }}>
+          <div style={{ fontSize: T.h2.fontSize, color: C.text, letterSpacing: "-0.01em" }}>
             <span style={{ color: C.gold }}>{modelLabel}</span>
             {" · "}
             <span style={{ color: C.textDim }}>dep. var.: </span>
@@ -1054,7 +1052,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
           <button onClick={onClose}
             style={{ background: "transparent", border: `1px solid ${C.border2}`,
                      borderRadius: 3, color: C.textMuted, cursor: "pointer",
-                     fontFamily: mono, fontSize: 10, padding: "0.3rem 0.7rem" }}>
+                     fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0.3rem 0.7rem" }}>
             ✕ Close
           </button>
         )}
@@ -1097,7 +1095,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
               style={{ flex: 1, padding: "0.6rem 0.7rem",
                        background: tab === k ? C.goldFaint : C.surface,
                        border: "none", color: tab === k ? C.gold : C.textDim,
-                       cursor: "pointer", fontFamily: mono, fontSize: 11,
+                       cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
                        borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent",
                        transition: "all 0.12s" }}>
               {l}
@@ -1117,8 +1115,8 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
                 color={C.gold}
               />
             </div>
-            <div style={{ marginBottom: "0.8rem", fontSize: 11, color: C.textDim,
-                          fontFamily: mono, lineHeight: 1.6 }}>
+            <div style={{ marginBottom: "0.8rem", fontSize: T.code.fontSize, color: C.textDim,
+                          fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
               <span style={{ color: C.teal }}>◆ Teal</span> = significant at 5% ·{" "}
               <span style={{ color: C.textMuted }}>◇ Grey</span> = not significant ·{" "}
               Intercept excluded from plot.
@@ -1135,8 +1133,8 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
         {tab === "rdd" && isRDD && (
           <div style={{ animation: "fadeUp 0.18s ease" }}>
             <Lbl color={C.orange}>Sharp RDD · Binned Scatter + Fitted Lines</Lbl>
-            <div style={{ marginBottom: "0.8rem", fontSize: 11, color: C.textDim,
-                          fontFamily: mono, lineHeight: 1.6 }}>
+            <div style={{ marginBottom: "0.8rem", fontSize: T.code.fontSize, color: C.textDim,
+                          fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
               <span style={{ color: C.blue }}>● Blue</span> = control side (running var &lt; cutoff) ·{" "}
               <span style={{ color: C.orange }}>● Orange</span> = treatment side ·{" "}
               Lines are local linear fits (kernel-weighted).{" "}
@@ -1160,13 +1158,13 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
               background: narrativeOpen ? `${C.purple}0d` : C.surface,
               border: `1px solid ${narrativeOpen ? C.purple + "50" : C.border}`,
               borderRadius: narrativeOpen ? "4px 4px 0 0" : 4,
-              cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+              cursor: "pointer", fontFamily: T.code.fontFamily, transition: "all 0.13s",
             }}
           >
-            <span style={{ fontSize: 9, color: C.purple, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.purple, letterSpacing: "0.22em", textTransform: "uppercase" }}>
               ✦ AI Narrative
             </span>
-            <span style={{ fontSize: 9, color: C.textMuted }}>{narrativeOpen ? "▲" : "▼"}</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{narrativeOpen ? "▲" : "▼"}</span>
           </button>
           {narrativeOpen && (
             <div style={{

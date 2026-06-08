@@ -11,9 +11,9 @@
 //   resid  — array of residuals
 //   Yhat   — array of fitted values
 //
-// Depends on: C, mono from ./shared.jsx
+// Depends on: theme tokens from ./shared.jsx
 
-import { useTheme, mono } from "./shared.jsx";
+import { useTheme } from "./shared.jsx";
 
 const arrMin = (a, fallback = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fallback;
 const arrMax = (a, fallback = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fallback;
@@ -36,7 +36,7 @@ function exportSVG(svgId, filename) {
 
 // ─── INLINE PLOT SHELL ────────────────────────────────────────────────────────
 function InlinePlotShell({ title, svgId, filename, children }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
       <div style={{
@@ -44,12 +44,12 @@ function InlinePlotShell({ title, svgId, filename, children }) {
         padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
-        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
           {title}
         </span>
         <button
           onClick={() => exportSVG(svgId, filename)}
-          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
         >↓ SVG</button>
@@ -74,7 +74,7 @@ function niceTicks(lo, hi, n = 5) {
 }
 
 function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <g>
       <line x1={sx(ticks[0])} x2={sx(ticks[ticks.length - 1])}
@@ -84,7 +84,7 @@ function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
           <line x1={sx(t)} x2={sx(t)} y1={y} y2={y + 4}
             stroke={C.border2} strokeWidth={1} />
           <text x={sx(t)} y={y + 14} textAnchor="middle"
-            fill={C.textMuted} fontSize={8} fontFamily={mono}>{fmt(t)}</text>
+            fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{fmt(t)}</text>
         </g>
       ))}
     </g>
@@ -92,7 +92,7 @@ function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
 }
 
 function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <g>
       <line x1={x} x2={x} y1={sy(ticks[0])} y2={sy(ticks[ticks.length - 1])}
@@ -102,7 +102,7 @@ function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
           <line x1={x - 4} x2={x} y1={sy(t)} y2={sy(t)}
             stroke={C.border2} strokeWidth={1} />
           <text x={x - 8} y={sy(t) + 3} textAnchor="end"
-            fill={C.textMuted} fontSize={8} fontFamily={mono}>{fmt(t)}</text>
+            fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{fmt(t)}</text>
         </g>
       ))}
     </g>
@@ -187,7 +187,7 @@ function normalQuantile(p) {
 // - LOWESS smoother to detect non-linearity / heteroskedasticity patterns
 // - Outlier labels for |standardized residual| > 2.5
 export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!resid?.length || !Yhat?.length) return null;
 
   const W = 560, H = 320;
@@ -241,7 +241,7 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
     <InlinePlotShell title="Residuals vs Fitted" svgId={svgId} filename={`residuals_fitted${svgIdSuffix}.svg`}>
     <div style={{ background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+        style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* grid */}
@@ -279,7 +279,7 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
         {/* outlier index labels */}
         {outliers.map((p, i) => (
           <text key={i} x={sx(p.x) + 5} y={sy(p.y) - 5}
-            fill={C.red} fontSize={7.5} fontFamily={mono} opacity={0.8}>
+            fill={C.red} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} opacity={0.8}>
             {p.i}
           </text>
         ))}
@@ -291,9 +291,9 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
 
         {/* axis labels */}
         <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle"
-          fill={C.textDim} fontSize={9} fontFamily={mono}>Fitted values (ŷ)</text>
+          fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Fitted values (ŷ)</text>
         <text transform={`translate(11, ${PAD.t + iH / 2}) rotate(-90)`}
-          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           Residuals (ê)
         </text>
 
@@ -301,7 +301,7 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
         <line x1={PAD.l + iW - 80} x2={PAD.l + iW - 60} y1={PAD.t + 12} y2={PAD.t + 12}
           stroke={C.gold} strokeWidth={1.8} />
         <text x={PAD.l + iW - 56} y={PAD.t + 16}
-          fill={C.textDim} fontSize={8} fontFamily={mono}>LOWESS</text>
+          fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>LOWESS</text>
       </svg>
     </div>
     </InlinePlotShell>
@@ -314,7 +314,7 @@ export function ResidualVsFitted({ resid, Yhat, svgIdSuffix = "" }) {
 // - 95% pointwise confidence band (approximate: ±1.36/√n)
 // - Outlier labels for extreme quantiles
 export function QQPlot({ resid, svgIdSuffix = "" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!resid?.length) return null;
 
   const W = 560, H = 320;
@@ -375,7 +375,7 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
     <InlinePlotShell title="Normal Q-Q Plot" svgId={svgId} filename={`qq_plot${svgIdSuffix}.svg`}>
     <div style={{ background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+        style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* grid */}
@@ -416,18 +416,18 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
 
         {/* axis labels */}
         <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle"
-          fill={C.textDim} fontSize={9} fontFamily={mono}>
+          fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           Theoretical quantiles (Normal)
         </text>
         <text transform={`translate(11, ${PAD.t + iH / 2}) rotate(-90)`}
-          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           Standardized residuals
         </text>
 
         {/* outside count annotation */}
         {outside.length > 0 && (
           <text x={PAD.l + iW - 4} y={PAD.t + 14} textAnchor="end"
-            fill={C.red} fontSize={8} fontFamily={mono} opacity={0.8}>
+            fill={C.red} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} opacity={0.8}>
             {outside.length} pt{outside.length > 1 ? "s" : ""} outside 95% band
           </text>
         )}
@@ -436,7 +436,7 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
         <rect x={PAD.l + 8} y={PAD.t + 8} width={10} height={8}
           fill={C.teal} opacity={0.2} />
         <text x={PAD.l + 22} y={PAD.t + 16}
-          fill={C.textDim} fontSize={8} fontFamily={mono}>95% CI band</text>
+          fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>95% CI band</text>
       </svg>
     </div>
     </InlinePlotShell>
@@ -448,7 +448,7 @@ export function QQPlot({ resid, svgIdSuffix = "" }) {
 // Accepts the raw engine result object — pulls resid and Yhat automatically.
 // modelLabel: shown in the header (e.g. "OLS", "FE", "FD")
 export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const resid = result?.resid;
   const Yhat  = result?.Yhat;
   if (!resid?.length || !Yhat?.length) return null;
@@ -482,13 +482,13 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{
-            fontSize: 9, color: C.textMuted, letterSpacing: "0.18em",
-            textTransform: "uppercase", fontFamily: mono,
+            fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em",
+            textTransform: "uppercase", fontFamily: T.code.fontFamily,
           }}>
             ◈ Residual Diagnostics · {modelLabel}
           </span>
           <span style={{
-            fontSize: 9, fontFamily: mono, padding: "1px 6px",
+            fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, padding: "1px 6px",
             border: `1px solid ${normalOk ? C.green + "50" : C.yellow + "50"}`,
             borderRadius: 2,
             color: normalOk ? C.green : C.yellow,
@@ -502,7 +502,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
           style={{
             padding: "0.2rem 0.6rem", background: "transparent",
             border: `1px solid ${C.border2}`, borderRadius: 3,
-            color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9,
+            color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
             transition: "all 0.12s",
           }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
@@ -520,8 +520,8 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
         <div style={{ background: C.bg }}>
           <div style={{
             padding: "0.35rem 0.7rem", borderBottom: `1px solid ${C.border}`,
-            fontSize: 8, color: C.textMuted, letterSpacing: "0.14em",
-            textTransform: "uppercase", fontFamily: mono, background: C.surface,
+            fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em",
+            textTransform: "uppercase", fontFamily: T.code.fontFamily, background: C.surface,
           }}>
             Residuals vs Fitted
           </div>
@@ -532,8 +532,8 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
         <div style={{ background: C.bg }}>
           <div style={{
             padding: "0.35rem 0.7rem", borderBottom: `1px solid ${C.border}`,
-            fontSize: 8, color: C.textMuted, letterSpacing: "0.14em",
-            textTransform: "uppercase", fontFamily: mono, background: C.surface,
+            fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em",
+            textTransform: "uppercase", fontFamily: T.code.fontFamily, background: C.surface,
           }}>
             Normal Q-Q
           </div>
@@ -547,7 +547,7 @@ export function ResidualPlots({ result, modelLabel = "OLS", svgIdSuffix = "" }) 
       <div style={{
         padding: "0.4rem 0.9rem", background: C.surface,
         borderTop: `1px solid ${C.border}`,
-        fontSize: 9, color: C.textMuted, fontFamily: mono,
+        fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
         display: "flex", justifyContent: "space-between",
       }}>
         <span>n = {n} residuals · LOWESS smoother (f = 0.30) · red = |z| &gt; 2.5</span>

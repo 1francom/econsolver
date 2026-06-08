@@ -13,11 +13,11 @@
 //   RDDBandwidthPlot     — LATE(h) sensitivity across bandwidth range
 //   RDDCovariateBalance  — covariate means left/right of cutoff (balance check)
 //
-// Depends on: C, mono from ./shared.jsx
+// Depends on: theme tokens from ./shared.jsx
 // No React state except PlotSelector (activeId only).
 
 import { useState, useRef } from "react";
-import { useTheme, mono } from "./shared.jsx";
+import { useTheme } from "./shared.jsx";
 import PlotExportBar from "../shared/PlotExportBar.jsx";
 
 // Safe min/max for large arrays — Math.min(...bigArray) blows the call stack
@@ -29,7 +29,7 @@ const arrMax = (a, fallback = 1) => a.length ? a.reduce((m, v) => v > m ? v : m,
 // plots: [{ id, label, node }]  — node is a pre-built React element
 // accentColor: border color for the active tab
 export function PlotSelector({ plots, defaultId, accentColor }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   accentColor = accentColor ?? C.teal;
   const [activeId, setActiveId] = useState(defaultId ?? plots[0]?.id);
   if (!plots?.length) return null;
@@ -52,7 +52,7 @@ export function PlotSelector({ plots, defaultId, accentColor }) {
                 border: "none",
                 borderBottom: isActive ? `2px solid ${accentColor}` : "2px solid transparent",
                 color: isActive ? accentColor : C.textMuted,
-                cursor: "pointer", fontFamily: mono, fontSize: 10,
+                cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 letterSpacing: "0.08em", transition: "all 0.12s",
                 whiteSpace: "nowrap",
               }}
@@ -77,7 +77,7 @@ export function PlotSelector({ plots, defaultId, accentColor }) {
 // Points colored by |standardized residual| — darker = larger deviation.
 // Props: resid, Yhat (both from engine output), yLabel
 export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!resid?.length || !Yhat?.length) return null;
 
   const W = 480, H = 320;
@@ -108,7 +108,7 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
     <InlinePlotShell title="Y vs Ŷ — Observed vs Fitted" svgId={svgId} filename={`y_fitted${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+        style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* grid */}
@@ -140,11 +140,11 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
         {ticks.map((t, i) => (
           <g key={i}>
             <line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1} />
-            <text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+            <text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
               {Math.abs(t)>=1000 ? t.toExponential(1) : t.toFixed(2)}
             </text>
             <line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
-            <text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+            <text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
               {Math.abs(t)>=1000 ? t.toExponential(1) : t.toFixed(2)}
             </text>
           </g>
@@ -153,21 +153,21 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
         <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
 
         {/* axis labels */}
-        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           Fitted values (ŷ)
         </text>
         <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`}
-          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           Observed ({yLabel})
         </text>
 
         {/* legend */}
         <circle cx={PAD.l+10} cy={PAD.t+12} r={3.5} fill={C.green} opacity={0.6} />
-        <text x={PAD.l+18} y={PAD.t+16} fill={C.textDim} fontSize={8} fontFamily={mono}>|z| ≤ 2</text>
+        <text x={PAD.l+18} y={PAD.t+16} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>|z| ≤ 2</text>
         <circle cx={PAD.l+70} cy={PAD.t+12} r={3.5} fill={C.red} opacity={0.8} />
-        <text x={PAD.l+78} y={PAD.t+16} fill={C.textDim} fontSize={8} fontFamily={mono}>|z| &gt; 2</text>
+        <text x={PAD.l+78} y={PAD.t+16} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>|z| &gt; 2</text>
         <line x1={PAD.l+130} x2={PAD.l+148} y1={PAD.t+12} y2={PAD.t+12} stroke={C.border2} strokeWidth={1.5} strokeDasharray="4 2" />
-        <text x={PAD.l+152} y={PAD.t+16} fill={C.textDim} fontSize={8} fontFamily={mono}>perfect fit</text>
+        <text x={PAD.l+152} y={PAD.t+16} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>perfect fit</text>
       </svg>
     </div>
     </InlinePlotShell>
@@ -187,7 +187,7 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
 //   pVal_i   — p-value of xCol (for significance color)
 //   runOLS   — engine function passed in to avoid circular import
 export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, svgIdSuffix = "" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [showSE, setShowSE] = useState(false);
   if (!rows?.length || !yCol || !xCol || !runOLS) return null;
 
@@ -279,15 +279,15 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
       <button
         onClick={() => setShowSE(v => !v)}
-        style={{ alignSelf: "flex-end", padding: "0.2rem 0.6rem", fontFamily: mono, fontSize: 9, cursor: "pointer", background: showSE ? `${lColor}22` : C.surface, border: `1px solid ${showSE ? lColor : C.border}`, color: showSE ? lColor : C.textMuted, borderRadius: 3 }}>
+        style={{ alignSelf: "flex-end", padding: "0.2rem 0.6rem", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer", background: showSE ? `${lColor}22` : C.surface, border: `1px solid ${showSE ? lColor : C.border}`, color: showSE ? lColor : C.textMuted, borderRadius: 3 }}>
         SE {showSE ? "TRUE" : "FALSE"}
       </button>
       <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+        style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* title */}
-        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           Partial: {yCol} ~ {xCol} | others
         </text>
 
@@ -323,12 +323,12 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
 
         {/* β annotation */}
         <text x={PAD.l+iW-4} y={PAD.t+14} textAnchor="end"
-          fill={lColor} fontSize={9} fontFamily={mono}>
+          fill={lColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           β = {slope>=0?"+":""}{slope.toFixed(4)}{pVal_i!=null ? (pVal_i<0.01?"***":pVal_i<0.05?"**":pVal_i<0.1?"*":"") : ""}
         </text>
         {pVal_i!=null&&(
           <text x={PAD.l+iW-4} y={PAD.t+25} textAnchor="end"
-            fill={C.textMuted} fontSize={8} fontFamily={mono}>
+            fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             p = {pVal_i<0.001?"<0.001":pVal_i.toFixed(4)}
           </text>
         )}
@@ -337,7 +337,7 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
         {xTicks.map((t,i) => (
           <g key={i}>
             <line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1} />
-            <text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+            <text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
               {Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}
             </text>
           </g>
@@ -345,7 +345,7 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
         {yTicks.map((t,i) => (
           <g key={i}>
             <line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
-            <text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+            <text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
               {Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}
             </text>
           </g>
@@ -353,11 +353,11 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
         <line x1={PAD.l} x2={PAD.l+iW} y1={PAD.t+iH} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
         <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
 
-        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           e({xCol} | others)
         </text>
         <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`}
-          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           e({yCol} | others)
         </text>
       </svg>
@@ -369,7 +369,7 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
 // ─── SHARED SVG HELPERS ──────────────────────────────────────────────────────
 
 function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <g>
       <line x1={sx(ticks[0])} x2={sx(ticks[ticks.length - 1])} y1={y} y2={y}
@@ -377,7 +377,7 @@ function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
       {ticks.map((t, i) => (
         <g key={i}>
           <line x1={sx(t)} x2={sx(t)} y1={y} y2={y + 4} stroke={C.border2} strokeWidth={1} />
-          <text x={sx(t)} y={y + 14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+          <text x={sx(t)} y={y + 14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             {fmt(t)}
           </text>
         </g>
@@ -387,7 +387,7 @@ function AxisBottom({ sx, ticks, y, fmt = v => v.toFixed(2) }) {
 }
 
 function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <g>
       <line x1={x} x2={x} y1={sy(ticks[0])} y2={sy(ticks[ticks.length - 1])}
@@ -395,7 +395,7 @@ function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
       {ticks.map((t, i) => (
         <g key={i}>
           <line x1={x - 4} x2={x} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
-          <text x={x - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+          <text x={x - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             {fmt(t)}
           </text>
         </g>
@@ -405,7 +405,7 @@ function AxisLeft({ sy, ticks, x, fmt = v => v.toFixed(2) }) {
 }
 
 function GridLines({ sx, sy, xTicks, yTicks, x0, x1, y0, y1 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <g opacity={0.4}>
       {xTicks.map((t, i) => (
@@ -456,7 +456,7 @@ function exportSVG(svgId, filename) {
 // Lightweight wrapper for inline plots (no W/H needed — SVG is self-sizing).
 // Adds a thin header with label + PlotExportBar (preset + SVG + PNG).
 function InlinePlotShell({ title, svgId, filename, children }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const wrapRef = useRef(null);
   // Derive a clean base filename from the passed filename (strip extension)
   const baseName = filename ? filename.replace(/\.(svg|png)$/i, "") : (svgId || "plot");
@@ -467,7 +467,7 @@ function InlinePlotShell({ title, svgId, filename, children }) {
         padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
-        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
           {title}
         </span>
       </div>
@@ -482,7 +482,7 @@ function InlinePlotShell({ title, svgId, filename, children }) {
 
 // ─── PLOT WRAPPER ─────────────────────────────────────────────────────────────
 function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const wrapRef = useRef(null);
   const baseName = filename ? filename.replace(/\.(svg|png)$/i, "") : (svgId || "plot");
   return (
@@ -493,11 +493,11 @@ function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div>
-          <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
             {title}
           </span>
           {subtitle && (
-            <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginLeft: 10 }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginLeft: 10 }}>
               {subtitle}
             </span>
           )}
@@ -505,7 +505,7 @@ function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
       </div>
       <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
         <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", maxWidth: 700, minWidth: Math.min(W, 340), height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+          style={{ width: "100%", maxWidth: 700, minWidth: Math.min(W, 340), height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
           <rect width={W} height={H} fill={C.bg} />
           {children}
         </svg>
@@ -524,7 +524,7 @@ function PlotShell({ title, subtitle, svgId, filename, children, W, H }) {
 // yLabel, xLabel: axis labels
 
 export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!result?.valid?.length) return null;
 
   const W = 620, H = 380;
@@ -639,7 +639,7 @@ export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
       {/* cutoff line */}
       <line x1={cx} x2={cx} y1={PAD.t} y2={PAD.t + iH}
         stroke={C.gold} strokeWidth={1.5} strokeDasharray="5 3" />
-      <text x={cx + 5} y={PAD.t + 12} fill={C.gold} fontSize={9} fontFamily={mono}>
+      <text x={cx + 5} y={PAD.t + 12} fill={C.gold} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
         c = {cutoff}
       </text>
 
@@ -653,7 +653,7 @@ export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
             x={cx + 8}
             y={(leftY + rightY) / 2 + 4}
             fill={lateP < 0.05 ? C.teal : C.textDim}
-            fontSize={9} fontFamily={mono}
+            fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}
           >
             {lateStr}
           </text>
@@ -673,18 +673,18 @@ export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
 
       {/* axis labels */}
       <text x={PAD.l + iW / 2} y={H - 6} textAnchor="middle"
-        fill={C.textDim} fontSize={9} fontFamily={mono}>{xLabel}</text>
+        fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{xLabel}</text>
       <text
         transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
-        textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}
+        textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}
       >{yLabel}</text>
 
       {/* legend */}
       <g transform={`translate(${PAD.l + 10}, ${PAD.t + 10})`}>
         <circle cx={5} cy={5} r={4} fill={C.blue} opacity={0.8} />
-        <text x={13} y={9} fill={C.textDim} fontSize={8} fontFamily={mono}>Control</text>
+        <text x={13} y={9} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Control</text>
         <circle cx={5} cy={20} r={4} fill={C.orange} opacity={0.8} />
-        <text x={13} y={24} fill={C.textDim} fontSize={8} fontFamily={mono}>Treated</text>
+        <text x={13} y={24} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Treated</text>
       </g>
     </PlotShell>
   );
@@ -696,7 +696,7 @@ export function RDDPlot({ result, yLabel = "Y", xLabel = "Running variable" }) {
 // yLabel: axis label
 
 export function DiDPlot({ result, yLabel = "Y" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!result?.means) return null;
 
   const { ctrl_pre, ctrl_post, trt_pre, trt_post, att, attP } = {
@@ -759,7 +759,7 @@ export function DiDPlot({ result, yLabel = "Y" }) {
       {/* pre/post divider */}
       <line x1={sx(0.5)} x2={sx(0.5)} y1={PAD.t} y2={PAD.t + iH}
         stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />
-      <text x={sx(0.5) + 5} y={PAD.t + 12} fill={C.textMuted} fontSize={8} fontFamily={mono}>
+      <text x={sx(0.5) + 5} y={PAD.t + 12} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
         Treatment
       </text>
 
@@ -770,7 +770,7 @@ export function DiDPlot({ result, yLabel = "Y" }) {
         stroke={C.gold} strokeWidth={1.5} strokeDasharray="6 4" opacity={0.7}
       />
       <text x={pts.trt_cf.x + 5} y={pts.trt_cf.y + 3}
-        fill={C.gold} fontSize={8} fontFamily={mono} opacity={0.8}>
+        fill={C.gold} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} opacity={0.8}>
         counterfactual
       </text>
 
@@ -796,7 +796,7 @@ export function DiDPlot({ result, yLabel = "Y" }) {
       <text
         x={pts.trt_post.x + 22}
         y={(pts.trt_cf.y + pts.trt_post.y) / 2 + 4}
-        fill={attColor} fontSize={9} fontFamily={mono}
+        fill={attColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}
       >
         ATT
       </text>
@@ -811,7 +811,7 @@ export function DiDPlot({ result, yLabel = "Y" }) {
         <g key={i}>
           <circle cx={pt.x} cy={pt.y} r={5} fill={c} opacity={0.9} />
           <text x={pt.x} y={pt.y - 9} textAnchor="middle"
-            fill={c} fontSize={8.5} fontFamily={mono}>{label}</text>
+            fill={c} fontSize={8.5} fontFamily={T.data.fontFamily}>{label}</text>
         </g>
       ))}
 
@@ -824,25 +824,25 @@ export function DiDPlot({ result, yLabel = "Y" }) {
         stroke={C.border2} strokeWidth={1} />
       {[0, 1].map(v => (
         <text key={v} x={sx(v)} y={PAD.t + iH + 16} textAnchor="middle"
-          fill={C.textDim} fontSize={9} fontFamily={mono}>
+          fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           {v === 0 ? "Pre" : "Post"}
         </text>
       ))}
 
       {/* y label */}
       <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
-        textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+        textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
         {yLabel}
       </text>
 
       {/* legend */}
       <g transform={`translate(${PAD.l + 10}, ${PAD.t + 10})`}>
         <line x1={0} x2={18} y1={5} y2={5} stroke={C.blue}   strokeWidth={2} />
-        <text x={22} y={9}  fill={C.textDim} fontSize={8} fontFamily={mono}>Control</text>
+        <text x={22} y={9}  fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Control</text>
         <line x1={0} x2={18} y1={20} y2={20} stroke={C.orange} strokeWidth={2} />
-        <text x={22} y={24} fill={C.textDim} fontSize={8} fontFamily={mono}>Treated</text>
+        <text x={22} y={24} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Treated</text>
         <line x1={0} x2={18} y1={35} y2={35} stroke={C.gold} strokeWidth={1.5} strokeDasharray="5 3" />
-        <text x={22} y={39} fill={C.textDim} fontSize={8} fontFamily={mono}>Counterfactual</text>
+        <text x={22} y={39} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Counterfactual</text>
       </g>
     </PlotShell>
   );
@@ -855,7 +855,7 @@ export function DiDPlot({ result, yLabel = "Y" }) {
 // yLabel: axis label
 
 export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!result?.eventMeans?.length) return null;
 
   const { eventMeans, att, attP } = result;
@@ -961,7 +961,7 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
             stroke={C.teal} strokeWidth={1.5} strokeDasharray="5 3"
           />
           <text x={sx(inferredTreat) + 4} y={PAD.t + 12}
-            fill={C.teal} fontSize={8} fontFamily={mono}>
+            fill={C.teal} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             Treatment
           </text>
         </g>
@@ -1011,7 +1011,7 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
             <line x1={x + 12} y1={refY} x2={x + 12} y2={trtY} stroke={color} strokeWidth={1.5} />
             <line x1={x + 8} y1={refY} x2={x + 16} y2={refY} stroke={color} strokeWidth={1} />
             <line x1={x + 8} y1={trtY} x2={x + 16} y2={trtY} stroke={color} strokeWidth={1} />
-            <text x={x + 18} y={(refY + trtY) / 2 + 4} fill={color} fontSize={8} fontFamily={mono}>ATT</text>
+            <text x={x + 18} y={(refY + trtY) / 2 + 4} fill={color} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>ATT</text>
           </g>
         );
       })()}
@@ -1023,9 +1023,9 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
 
       {/* axis labels */}
       <text x={PAD.l + iW / 2} y={H - 6} textAnchor="middle"
-        fill={C.textDim} fontSize={9} fontFamily={mono}>Time period</text>
+        fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Time period</text>
       <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
-        textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+        textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
         {yLabel}
       </text>
 
@@ -1034,16 +1034,16 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
         {hasCtrl ? (
           <>
             <line x1={0} x2={18} y1={5}  y2={5}  stroke={C.blue}   strokeWidth={2} />
-            <text x={22} y={9}  fill={C.textDim} fontSize={8} fontFamily={mono}>Control</text>
+            <text x={22} y={9}  fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Control</text>
           </>
         ) : cfPath ? (
           <>
             <line x1={0} x2={18} y1={5} y2={5} stroke={C.blue} strokeWidth={1.8} strokeDasharray="5 3" />
-            <text x={22} y={9} fill={C.textDim} fontSize={8} fontFamily={mono}>Counterfactual (−ATT)</text>
+            <text x={22} y={9} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Counterfactual (−ATT)</text>
           </>
         ) : null}
         <line x1={0} x2={18} y1={hasCtrl || cfPath ? 20 : 5} y2={hasCtrl || cfPath ? 20 : 5} stroke={C.orange} strokeWidth={2} />
-        <text x={22} y={hasCtrl || cfPath ? 24 : 9} fill={C.textDim} fontSize={8} fontFamily={mono}>Treated</text>
+        <text x={22} y={hasCtrl || cfPath ? 24 : 9} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Treated</text>
       </g>
     </PlotShell>
   );
@@ -1060,7 +1060,7 @@ export function EventStudyPlot({ result, treatPeriod = null, yLabel = "Y" }) {
 //   endogVars   — endogenous column names (xVars from ModelingTab)
 
 export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const svgRef = useRef(null);
   if (!firstStages?.length || !rows?.length) return null;
 
@@ -1120,13 +1120,13 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
         padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
-        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
           First Stage — Instrument Relevance
         </span>
       </div>
       <div style={{ background: C.bg, overflowX: "auto", padding: "0.5rem", display: "flex", justifyContent: "center" }}>
         <svg ref={svgRef} id={svgId} viewBox={`0 0 ${totalW} ${totalH}`}
-          style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+          style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
           <rect width={totalW} height={totalH} fill={C.bg} />
           {panels.map((p, pi) => {
             const col = pi % cols;
@@ -1156,7 +1156,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
 
                 {/* title */}
                 <text x={ox + PAD.l + iW / 2} y={oy + 14} textAnchor="middle"
-                  fill={C.textDim} fontSize={9} fontFamily={mono}>
+                  fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                   {p.z} → {p.endVar}
                 </text>
 
@@ -1187,11 +1187,11 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
                   fill={C.surface}
                   stroke={fColor + "40"} rx={3} />
                 <text x={ox + PAD.l + iW - 47} y={oy + PAD.t + 14} textAnchor="middle"
-                  fill={fColor} fontSize={8} fontFamily={mono}>
+                  fill={fColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                   F = {p.Fstat != null && isFinite(p.Fstat) ? p.Fstat.toFixed(2) : "—"}
                 </text>
                 <text x={ox + PAD.l + iW - 47} y={oy + PAD.t + 23} textAnchor="middle"
-                  fill={p.weak ? C.red : C.textMuted} fontSize={7} fontFamily={mono}>
+                  fill={p.weak ? C.red : C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                   {p.weak ? "⚠ weak (F<10)" : "✓ relevant"}
                 </text>
 
@@ -1199,7 +1199,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
                 {xTicks.map((t, i) => (
                   <g key={i}>
                     <line x1={sx(t)} x2={sx(t)} y1={oy + PAD.t + iH} y2={oy + PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
-                    <text x={sx(t)} y={oy + PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={7.5} fontFamily={mono}>
+                    <text x={sx(t)} y={oy + PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                       {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(1)}
                     </text>
                   </g>
@@ -1207,7 +1207,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
                 {yTicks.map((t, i) => (
                   <g key={i}>
                     <line x1={ox + PAD.l - 4} x2={ox + PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
-                    <text x={ox + PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={7.5} fontFamily={mono}>
+                    <text x={ox + PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                       {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(1)}
                     </text>
                   </g>
@@ -1216,11 +1216,11 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
                 <line x1={ox + PAD.l} x2={ox + PAD.l} y1={oy + PAD.t} y2={oy + PAD.t + iH} stroke={C.border2} strokeWidth={1} />
 
                 {/* axis labels */}
-                <text x={ox + PAD.l + iW / 2} y={oy + H - 4} textAnchor="middle" fill={C.textDim} fontSize={8} fontFamily={mono}>
+                <text x={ox + PAD.l + iW / 2} y={oy + H - 4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                   {p.z}
                 </text>
                 <text transform={`translate(${ox + 11}, ${oy + PAD.t + iH / 2}) rotate(-90)`}
-                  textAnchor="middle" fill={C.textDim} fontSize={8} fontFamily={mono}>
+                  textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                   {p.endVar}
                 </text>
               </g>
@@ -1228,7 +1228,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
           })}
         </svg>
       </div>
-      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
         Stock-Yogo weak instrument threshold: F &gt; 10 · gold line = OLS fit · each panel = one instrument
       </div>
       <PlotExportBar getEl={() => svgRef.current} filename="first_stage" />
@@ -1246,7 +1246,7 @@ export function FirstStagePlot({ firstStages, rows, instrVars, endogVars }) {
 //   runSharpRDD — the engine function (passed in to avoid circular imports)
 
 export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "triangular", controls = [], runSharpRDD }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const svgRef = useRef(null);
   if (!rows?.length || !optH || !runSharpRDD) return null;
 
@@ -1293,13 +1293,13 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
         padding: "0.45rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
-        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
           RDD Bandwidth Sensitivity · LATE(h) ± 1.96 SE
         </span>
       </div>
       <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
         <svg ref={svgRef} id={svgId} viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+          style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
           <rect width={W} height={H} fill={C.bg} />
 
           {/* grid */}
@@ -1335,7 +1335,7 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
           {/* optimal h line */}
           <line x1={sx(optH)} x2={sx(optH)} y1={PAD.t} y2={PAD.t + iH}
             stroke={C.gold} strokeWidth={1.5} strokeDasharray="5 3" />
-          <text x={sx(optH) + 4} y={PAD.t + 12} fill={C.gold} fontSize={8} fontFamily={mono}>
+          <text x={sx(optH) + 4} y={PAD.t + 12} fill={C.gold} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             IK h = {optH.toFixed(3)}
           </text>
 
@@ -1343,7 +1343,7 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
           {hTicks.map((t, i) => (
             <g key={i}>
               <line x1={sx(t)} x2={sx(t)} y1={PAD.t + iH} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
-              <text x={sx(t)} y={PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              <text x={sx(t)} y={PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {t.toFixed(3)}
               </text>
             </g>
@@ -1351,7 +1351,7 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
           {yTicks.map((t, i) => (
             <g key={i}>
               <line x1={PAD.l - 4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
-              <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {Math.abs(t) >= 100 ? t.toFixed(1) : t.toFixed(3)}
               </text>
             </g>
@@ -1360,16 +1360,16 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
           <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
 
           {/* axis labels */}
-          <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             Bandwidth (h)
           </text>
           <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
-            textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+            textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             LATE estimate
           </text>
         </svg>
       </div>
-      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
         15 bandwidths from 0.4h to 1.8h · filled = p&lt;0.05 · band = ±1.96 SE · gold = IK-optimal
       </div>
       <PlotExportBar getEl={() => svgRef.current} filename="rdd_bandwidth_sensitivity" />
@@ -1387,7 +1387,7 @@ export function RDDBandwidthPlot({ rows, yCol, runCol, cutoff, optH, kernel = "t
 //   rows     — original data rows (needed to read covariate values)
 
 export function RDDCovariateBalance({ result, controls, rows }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!result?.valid?.length || !controls?.length || !rows?.length) return null;
 
   const { valid, D, xc, h, cutoff } = result;
@@ -1442,16 +1442,16 @@ export function RDDCovariateBalance({ result, controls, rows }) {
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
             RDD Covariate Balance
           </span>
           {stats.some(s => s.imbal) && (
-            <span style={{ fontSize: 9, color: C.red, fontFamily: mono, padding: "1px 6px", border: `1px solid ${C.red}40`, borderRadius: 2 }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily, padding: "1px 6px", border: `1px solid ${C.red}40`, borderRadius: 2 }}>
               ⚠ {stats.filter(s => s.imbal).length} imbalanced
             </span>
           )}
           {!stats.some(s => s.imbal) && (
-            <span style={{ fontSize: 9, color: C.green, fontFamily: mono, padding: "1px 6px", border: `1px solid ${C.green}40`, borderRadius: 2 }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.green, fontFamily: T.code.fontFamily, padding: "1px 6px", border: `1px solid ${C.green}40`, borderRadius: 2 }}>
               ✓ all balanced
             </span>
           )}
@@ -1466,14 +1466,14 @@ export function RDDCovariateBalance({ result, controls, rows }) {
             a.download = "rdd_covariate_balance.svg"; a.click();
             URL.revokeObjectURL(a.href);
           }}
-          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
         >↓ SVG</button>
       </div>
       <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
         <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+          style={{ width: "100%", maxWidth: 700, minWidth: 320, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
           <rect width={W} height={H} fill={C.bg} />
 
           {/* header ticks */}
@@ -1481,7 +1481,7 @@ export function RDDCovariateBalance({ result, controls, rows }) {
             <g key={i}>
               <line x1={sx(t)} x2={sx(t)} y1={PAD.t - 4} y2={PAD.t + stats.length * rowH}
                 stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
-              <text x={sx(t)} y={PAD.t - 6} textAnchor="middle" fill={C.textMuted} fontSize={7.5} fontFamily={mono}>
+              <text x={sx(t)} y={PAD.t - 6} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {Math.abs(t) >= 100 ? t.toFixed(0) : t.toFixed(2)}
               </text>
             </g>
@@ -1500,7 +1500,7 @@ export function RDDCovariateBalance({ result, controls, rows }) {
                 <rect x={0} y={PAD.t + i * rowH} width={W} height={rowH} fill={rowBg} opacity={0.5} />
 
                 {/* covariate label */}
-                <text x={PAD.l - 10} y={cy + 4} textAnchor="end" fill={s.imbal ? C.red : C.text} fontSize={10} fontFamily={mono}>
+                <text x={PAD.l - 10} y={cy + 4} textAnchor="end" fill={s.imbal ? C.red : C.text} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                   {s.col.length > 16 ? s.col.slice(0, 15) + "…" : s.col}
                 </text>
 
@@ -1513,7 +1513,7 @@ export function RDDCovariateBalance({ result, controls, rows }) {
                 <circle cx={rx} cy={cy + 3} r={3.5} fill={C.orange} opacity={0.9} />
 
                 {/* t-stat */}
-                <text x={W - PAD.r + 2} y={cy + 4} textAnchor="start" fill={dotColor} fontSize={8} fontFamily={mono}>
+                <text x={W - PAD.r + 2} y={cy + 4} textAnchor="start" fill={dotColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                   t={s.tStat.toFixed(2)}
                 </text>
               </g>
@@ -1523,12 +1523,12 @@ export function RDDCovariateBalance({ result, controls, rows }) {
           {/* bottom axis */}
           <line x1={PAD.l} x2={PAD.l + iW} y1={PAD.t + stats.length * rowH + 6} y2={PAD.t + stats.length * rowH + 6}
             stroke={C.border2} strokeWidth={1} />
-          <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             Covariate mean within bandwidth
           </text>
         </svg>
       </div>
-      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", justifyContent: "space-between" }}>
+      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, display: "flex", justifyContent: "space-between" }}>
         <span>● blue = left of cutoff · ● orange = right · bars = 95% CI</span>
         <span>imbalanced if |t| &gt; 1.96</span>
       </div>
@@ -1544,12 +1544,12 @@ export function RDDCovariateBalance({ result, controls, rows }) {
 // Props: result from runMcCrary — { bins, leftFit, rightFit, fhatLeft, fhatRight,
 //   theta, thetaSE, zStat, pVal, manipulation, cutoff, h, bw, n }
 export function McCraryPlot({ result, xLabel = "Running variable" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const svgRef = useRef(null);
   if (!result?.bins?.length) return (
-    <div style={{ padding: "2rem 1.5rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontFamily: mono, fontSize: 11, lineHeight: 1.6 }}>
+    <div style={{ padding: "2rem 1.5rem", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, lineHeight: 1.6 }}>
       McCrary density test could not be computed.<br />
-      <span style={{ color: C.textDim, fontSize: 10 }}>Possible reasons: fewer than 20 observations, cutoff outside data range, or insufficient bins on one side. Try adjusting the cutoff or collecting more data near the threshold.</span>
+      <span style={{ color: C.textDim, fontSize: T.caption.fontSize }}>Possible reasons: fewer than 20 observations, cutoff outside data range, or insufficient bins on one side. Try adjusting the cutoff or collecting more data near the threshold.</span>
     </div>
   );
 
@@ -1606,16 +1606,16 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
             McCrary Density Test
           </span>
           <span style={{
-            fontSize: 9, fontFamily: mono, padding: "1px 7px",
+            fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, padding: "1px 7px",
             border: `1px solid ${accentColor}50`, borderRadius: 2, color: accentColor,
           }}>
             {manipulation ? "⚠ manipulation detected" : "✓ no manipulation"}
           </span>
-          <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
             θ = {theta.toFixed(3)} · SE = {thetaSE.toFixed(3)} · z = {zStat.toFixed(3)} · p = {pVal < 0.001 ? "<0.001" : pVal.toFixed(4)}
           </span>
         </div>
@@ -1623,7 +1623,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
 
       <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
         <svg ref={svgRef} id={svgId} viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", maxWidth: 700, minWidth: 340, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+          style={{ width: "100%", maxWidth: 700, minWidth: 340, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
           <rect width={W} height={H} fill={C.bg} />
 
           {/* grid */}
@@ -1656,7 +1656,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
           <line x1={sx(cutoff)} x2={sx(cutoff)} y1={PAD.t} y2={PAD.t + iH}
             stroke={C.gold} strokeWidth={1.5} strokeDasharray="5 3" />
           <text x={sx(cutoff) + 5} y={PAD.t + 12}
-            fill={C.gold} fontSize={9} fontFamily={mono}>c = {cutoff}</text>
+            fill={C.gold} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>c = {cutoff}</text>
 
           {/* density jump annotation */}
           {isFinite(fhatLeft) && isFinite(fhatRight) && fhatLeft > 0 && fhatRight > 0 && (
@@ -1675,7 +1675,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
           {xTicks.map((t, i) => (
             <g key={i}>
               <line x1={sx(t)} x2={sx(t)} y1={PAD.t + iH} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
-              <text x={sx(t)} y={PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              <text x={sx(t)} y={PAD.t + iH + 14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {Math.abs(t) >= 1000 ? t.toExponential(1) : t.toFixed(2)}
               </text>
             </g>
@@ -1683,7 +1683,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
           {yTicks.map((t, i) => (
             <g key={i}>
               <line x1={PAD.l - 4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
-              <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>
+              <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {t.toFixed(3)}
               </text>
             </g>
@@ -1693,24 +1693,24 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
 
           {/* axis labels */}
           <text x={PAD.l + iW / 2} y={H - 4} textAnchor="middle"
-            fill={C.textDim} fontSize={9} fontFamily={mono}>{xLabel}</text>
+            fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{xLabel}</text>
           <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
-            textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+            textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
             Density
           </text>
 
           {/* legend */}
           <g transform={`translate(${PAD.l + 10}, ${PAD.t + 10})`}>
             <rect x={0} y={0} width={10} height={8} fill={C.blue}   opacity={0.5} />
-            <text x={14} y={8}  fill={C.textDim} fontSize={8} fontFamily={mono}>Left of c</text>
+            <text x={14} y={8}  fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Left of c</text>
             <rect x={0} y={14} width={10} height={8} fill={C.orange} opacity={0.5} />
-            <text x={14} y={22} fill={C.textDim} fontSize={8} fontFamily={mono}>Right of c</text>
+            <text x={14} y={22} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Right of c</text>
           </g>
         </svg>
       </div>
 
       {/* footer */}
-      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: 9, color: C.textMuted, fontFamily: mono, display: "flex", justifyContent: "space-between" }}>
+      <div style={{ padding: "0.4rem 0.9rem", background: C.surface, borderTop: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, display: "flex", justifyContent: "space-between" }}>
         <span>n = {n} · bins = {result.nBins} · bw = {bw.toFixed(4)} · fit bandwidth = {h.toFixed(4)}</span>
         <span>H₀: density continuous at cutoff · McCrary (2008, JOE)</span>
       </div>
@@ -1722,7 +1722,7 @@ export function McCraryPlot({ result, xLabel = "Running variable" }) {
 // ─── Y vs X̂ PLOT (2SLS) ──────────────────────────────────────────────────────
 // Y vs instrumented endogenous X̂. Slope = β_IV.
 export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂", resid2, svgIdSuffix = "" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!Y?.length || !Xhat?.length) return null;
   const pts = Y.map((y, i) => ({ y, x: Xhat[i], e: resid2?.[i] ?? 0 }))
     .filter(p => isFinite(p.y) && isFinite(p.x));
@@ -1755,21 +1755,21 @@ export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂"
   return (
     <InlinePlotShell title={`${yLabel} vs ${xLabel} — IV exogenous variation`} svgId={svgId} filename={`y_xhat${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
-      <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+      <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
-        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>{yLabel} vs {xLabel} — IV exogenous variation</text>
+        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{yLabel} vs {xLabel} — IV exogenous variation</text>
         {xTicks.map((t,i) => <line key={`gx${i}`} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />)}
         {yTicks.map((t,i) => <line key={`gy${i}`} x1={PAD.l} x2={PAD.l+iW} y1={sy(t)} y2={sy(t)} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />)}
         {pts.map((p, i) => { const z = esd>0?Math.abs(p.e/esd):0; const big = z>2; return <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={big?3.5:2.5} fill={big?C.red:C.violet} opacity={big?0.8:0.4} />; })}
         <line x1={sx(xLo)} y1={sy(slope*xLo+intercept)} x2={sx(xHi)} y2={sy(slope*xHi+intercept)} stroke={lColor} strokeWidth={2} opacity={0.9} />
-        <text x={PAD.l+iW-4} y={PAD.t+14} textAnchor="end" fill={lColor} fontSize={9} fontFamily={mono}>β_IV = {slope>=0?"+":""}{slope.toFixed(4)}{pVal!=null?(pVal<0.01?"***":pVal<0.05?"**":pVal<0.1?"*":""):""}</text>
-        {pVal!=null&&<text x={PAD.l+iW-4} y={PAD.t+25} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>p = {pVal<0.001?"<0.001":pVal.toFixed(4)}</text>}
-        {xTicks.map((t,i)=><g key={i}><line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1}/><text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
-        {yTicks.map((t,i)=><g key={i}><line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1}/><text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
+        <text x={PAD.l+iW-4} y={PAD.t+14} textAnchor="end" fill={lColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>β_IV = {slope>=0?"+":""}{slope.toFixed(4)}{pVal!=null?(pVal<0.01?"***":pVal<0.05?"**":pVal<0.1?"*":""):""}</text>
+        {pVal!=null&&<text x={PAD.l+iW-4} y={PAD.t+25} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>p = {pVal<0.001?"<0.001":pVal.toFixed(4)}</text>}
+        {xTicks.map((t,i)=><g key={i}><line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1}/><text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
+        {yTicks.map((t,i)=><g key={i}><line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1}/><text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
         <line x1={PAD.l} x2={PAD.l+iW} y1={PAD.t+iH} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1}/>
         <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1}/>
-        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>{xLabel} (instrumented)</text>
-        <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>{yLabel}</text>
+        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{xLabel} (instrumented)</text>
+        <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{yLabel}</text>
       </svg>
     </div>
     </InlinePlotShell>
@@ -1779,7 +1779,7 @@ export function YXhatPlot({ Y, Xhat, beta_iv, pVal, yLabel = "Y", xLabel = "X̂"
 // ─── X vs X̂ PLOT (2SLS first stage) ─────────────────────────────────────────
 // Original endogenous X vs instrumented X̂. Tight diagonal = strong instrument.
 export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!rows?.length || !endVar || !Xhat?.length) return null;
   const xVals = rows.map(r => r[endVar]).filter(v => typeof v === "number" && isFinite(v));
   if (xVals.length !== Xhat.length) return null;
@@ -1801,20 +1801,20 @@ export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" 
   return (
     <InlinePlotShell title={`${endVar} vs X̂ — instrument relevance`} svgId={svgId} filename={`x_xhat_${endVar}${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
-      <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 280, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+      <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 280, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
-        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>{endVar} vs {endVar} instrumented (X̂)</text>
+        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{endVar} vs {endVar} instrumented (X̂)</text>
         {ticks.map((t,i)=><g key={i}><line x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4}/><line x1={PAD.l} x2={PAD.l+iW} y1={sy(t)} y2={sy(t)} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4}/></g>)}
         <line x1={sx(vLo)} y1={sy(vLo)} x2={sx(vHi)} y2={sy(vHi)} stroke={C.border2} strokeWidth={1.5} strokeDasharray="5 3"/>
         {pts.map((p,i)=><circle key={i} cx={sx(p.xh)} cy={sy(p.x)} r={2.5} fill={C.teal} opacity={0.4}/>)}
-        <rect x={PAD.l+iW-92} y={PAD.t+4} width={88} height={22} fill={weak?"#100505":"#050f08"} stroke={fColor+"40"} rx={3}/>
-        <text x={PAD.l+iW-48} y={PAD.t+14} textAnchor="middle" fill={fColor} fontSize={8} fontFamily={mono}>F = {Fstat!=null&&isFinite(Fstat)?Fstat.toFixed(2):"—"}</text>
-        <text x={PAD.l+iW-48} y={PAD.t+23} textAnchor="middle" fill={weak?C.red:C.textMuted} fontSize={7} fontFamily={mono}>{weak?"⚠ weak (F<10)":"✓ relevant"}</text>
-        {ticks.map((t,i)=><g key={i}><line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1}/><text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text><line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1}/><text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
+        <rect x={PAD.l+iW-92} y={PAD.t+4} width={88} height={22} fill={weak ? `${C.red}12` : `${C.green}12`} stroke={fColor+"40"} rx={3}/>
+        <text x={PAD.l+iW-48} y={PAD.t+14} textAnchor="middle" fill={fColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>F = {Fstat!=null&&isFinite(Fstat)?Fstat.toFixed(2):"—"}</text>
+        <text x={PAD.l+iW-48} y={PAD.t+23} textAnchor="middle" fill={weak?C.red:C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{weak?"⚠ weak (F<10)":"✓ relevant"}</text>
+        {ticks.map((t,i)=><g key={i}><line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1}/><text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text><line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1}/><text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
         <line x1={PAD.l} x2={PAD.l+iW} y1={PAD.t+iH} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1}/>
         <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1}/>
-        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>X̂ (instrumented)</text>
-        <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>{endVar} (observed)</text>
+        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>X̂ (instrumented)</text>
+        <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{endVar} (observed)</text>
       </svg>
     </div>
     </InlinePlotShell>
@@ -1825,7 +1825,7 @@ export function XvsXhatPlot({ rows, endVar, Xhat, Fstat, weak, svgIdSuffix = "" 
 // First-stage residuals vs second-stage residuals.
 // Correlation confirms endogeneity was real. Flat = OLS would have been fine.
 export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", svgIdSuffix = "" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!residFirst?.length || !residSecond?.length) return null;
   const n = Math.min(residFirst.length, residSecond.length);
   const pts = Array.from({ length: n }, (_, i) => ({ x: residFirst[i], y: residSecond[i] }))
@@ -1852,9 +1852,9 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
   return (
     <InlinePlotShell title={`Endogeneity check — ${endVar}`} svgId={svgId} filename={`endogeneity_${endVar}${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", justifyContent: "center" }}>
-      <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+      <svg id={svgId} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 700, minWidth: 300, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
-        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>Endogeneity check — first vs second stage residuals</text>
+        <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Endogeneity check — first vs second stage residuals</text>
         {xTicks.map((t,i)=><line key={`gx${i}`} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4}/>)}
         {yTicks.map((t,i)=><line key={`gy${i}`} x1={PAD.l} x2={PAD.l+iW} y1={sy(t)} y2={sy(t)} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4}/>)}
         {xLo<0&&xHi>0&&<line x1={sx(0)} x2={sx(0)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3"/>}
@@ -1862,14 +1862,14 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
         {pts.map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={2.2} fill={hasCorr?C.red:C.blue} opacity={0.4}/>)}
         <line x1={sx(xLo)} y1={sy(slope*xLo+intcp)} x2={sx(xHi)} y2={sy(slope*xHi+intcp)} stroke={lColor} strokeWidth={1.8} opacity={0.85}/>
         <rect x={PAD.l+6} y={PAD.t+4} width={110} height={22} fill={C.surface} stroke={lColor+"40"} rx={3}/>
-        <text x={PAD.l+61} y={PAD.t+14} textAnchor="middle" fill={lColor} fontSize={8} fontFamily={mono}>r = {corr.toFixed(3)}</text>
-        <text x={PAD.l+61} y={PAD.t+23} textAnchor="middle" fill={lColor} fontSize={7} fontFamily={mono}>{hasCorr?"⚠ endogeneity confirmed":"✓ residuals uncorrelated"}</text>
-        {xTicks.map((t,i)=><g key={i}><line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1}/><text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={8} fontFamily={mono}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
-        {yTicks.map((t,i)=><g key={i}><line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1}/><text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={8} fontFamily={mono}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
+        <text x={PAD.l+61} y={PAD.t+14} textAnchor="middle" fill={lColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>r = {corr.toFixed(3)}</text>
+        <text x={PAD.l+61} y={PAD.t+23} textAnchor="middle" fill={lColor} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{hasCorr?"⚠ endogeneity confirmed":"✓ residuals uncorrelated"}</text>
+        {xTicks.map((t,i)=><g key={i}><line x1={sx(t)} x2={sx(t)} y1={PAD.t+iH} y2={PAD.t+iH+4} stroke={C.border2} strokeWidth={1}/><text x={sx(t)} y={PAD.t+iH+14} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
+        {yTicks.map((t,i)=><g key={i}><line x1={PAD.l-4} x2={PAD.l} y1={sy(t)} y2={sy(t)} stroke={C.border2} strokeWidth={1}/><text x={PAD.l-8} y={sy(t)+3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{Math.abs(t)>=1000?t.toExponential(1):t.toFixed(2)}</text></g>)}
         <line x1={PAD.l} x2={PAD.l+iW} y1={PAD.t+iH} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1}/>
         <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1}/>
-        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>ν̂ (first-stage residuals — {endVar})</text>
-        <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>ê (second-stage residuals)</text>
+        <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>ν̂ (first-stage residuals — {endVar})</text>
+        <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>ê (second-stage residuals)</text>
       </svg>
     </div>
     </InlinePlotShell>
@@ -1881,7 +1881,7 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
 // Props: fitted {number[]} — P̂(Y=1), Y {number[]} — actual 0/1 labels
 // Returns an SVG with the ROC curve, diagonal reference, and AUC annotation.
 export function ROCCurve({ fitted, Y }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!fitted?.length || !Y?.length || fitted.length !== Y.length) return null;
   const nPos = Y.reduce((s, y) => s + y, 0);
   const nNeg = fitted.length - nPos;
@@ -1924,7 +1924,7 @@ export function ROCCurve({ fitted, Y }) {
 
   return (
     <div style={{ background: C.bg, padding: "0.5rem 0.5rem 0", display: "flex", justifyContent: "center" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 480, height: "auto", display: "block", fontFamily: mono }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 480, height: "auto", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
         {/* grid */}
         {ticks.map(v => (
@@ -1939,10 +1939,10 @@ export function ROCCurve({ fitted, Y }) {
         {/* ROC curve */}
         <path d={pathD} fill="none" stroke={aucColor} strokeWidth={2.2} opacity={0.92} />
         {/* AUC annotation */}
-        <text x={sx(0.55)} y={sy(0.22)} fill={aucColor} fontSize={14} fontFamily={mono} fontWeight="bold">
+        <text x={sx(0.55)} y={sy(0.22)} fill={aucColor} fontSize={T.h2.fontSize} fontFamily={T.data.fontFamily} fontWeight="bold">
           AUC = {auc.toFixed(4)}
         </text>
-        <text x={sx(0.55)} y={sy(0.22) + 16} fill={C.textMuted} fontSize={9} fontFamily={mono}>
+        <text x={sx(0.55)} y={sy(0.22) + 16} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           {auc >= 0.9 ? "Excellent" : auc >= 0.8 ? "Good" : auc >= 0.7 ? "Fair" : "Poor"} discrimination
         </text>
         {/* axes */}
@@ -1952,16 +1952,16 @@ export function ROCCurve({ fitted, Y }) {
         {ticks.map(v => (
           <g key={v}>
             <line x1={sx(v)} y1={PAD.t + iH} x2={sx(v)} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
-            <text x={sx(v)} y={PAD.t + iH + 15} textAnchor="middle" fill={C.textMuted} fontSize={8}>{v.toFixed(1)}</text>
+            <text x={sx(v)} y={PAD.t + iH + 15} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>{v.toFixed(1)}</text>
             <line x1={PAD.l - 4} y1={sy(v)} x2={PAD.l} y2={sy(v)} stroke={C.border2} strokeWidth={1} />
-            <text x={PAD.l - 8} y={sy(v) + 3} textAnchor="end" fill={C.textMuted} fontSize={8}>{v.toFixed(1)}</text>
+            <text x={PAD.l - 8} y={sy(v) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize}>{v.toFixed(1)}</text>
           </g>
         ))}
-        <text x={PAD.l + iW / 2} y={H - 6} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+        <text x={PAD.l + iW / 2} y={H - 6} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           False Positive Rate (1 − Specificity)
         </text>
         <text transform={`translate(12, ${PAD.t + iH / 2}) rotate(-90)`}
-          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+          textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           True Positive Rate (Sensitivity)
         </text>
       </svg>
@@ -1974,7 +1974,7 @@ export function ROCCurve({ fitted, Y }) {
 // Red bars = Y=0, teal bars = Y=1.
 // Props: fitted {number[]} — P̂(Y=1), Y {number[]} — actual 0/1 labels
 export function PredProbHistogram({ fitted, Y }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!fitted?.length || !Y?.length || fitted.length !== Y.length) return null;
 
   const nBins = 20;
@@ -2001,7 +2001,7 @@ export function PredProbHistogram({ fitted, Y }) {
 
   return (
     <div style={{ background: C.bg, padding: "0.5rem 0.5rem 0", display: "flex", justifyContent: "center" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 520, height: "auto", display: "block", fontFamily: mono }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 520, height: "auto", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
         {/* grid */}
         {yTicks.map(t => (
@@ -2028,27 +2028,27 @@ export function PredProbHistogram({ fitted, Y }) {
         {[0, 0.2, 0.4, 0.6, 0.8, 1.0].map(v => (
           <g key={v}>
             <line x1={sx(v)} y1={PAD.t + iH} x2={sx(v)} y2={PAD.t + iH + 4} stroke={C.border2} strokeWidth={1} />
-            <text x={sx(v)} y={PAD.t + iH + 15} textAnchor="middle" fill={C.textMuted} fontSize={8}>{v.toFixed(1)}</text>
+            <text x={sx(v)} y={PAD.t + iH + 15} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>{v.toFixed(1)}</text>
           </g>
         ))}
         {/* y-axis ticks */}
         {yTicks.map(t => (
           <g key={t}>
             <line x1={PAD.l - 4} y1={sy(t)} x2={PAD.l} y2={sy(t)} stroke={C.border2} strokeWidth={1} />
-            <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={8}>{t}</text>
+            <text x={PAD.l - 8} y={sy(t) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize}>{t}</text>
           </g>
         ))}
         {/* legend */}
         <rect x={PAD.l + iW - 90} y={PAD.t + 6} width={9} height={9} fill={C.red}  opacity={0.7} />
-        <text x={PAD.l + iW - 78} y={PAD.t + 14} fill={C.textMuted} fontSize={9} fontFamily={mono}>Y = 0</text>
+        <text x={PAD.l + iW - 78} y={PAD.t + 14} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Y = 0</text>
         <rect x={PAD.l + iW - 40} y={PAD.t + 6} width={9} height={9} fill={C.teal} opacity={0.7} />
-        <text x={PAD.l + iW - 28} y={PAD.t + 14} fill={C.textMuted} fontSize={9} fontFamily={mono}>Y = 1</text>
+        <text x={PAD.l + iW - 28} y={PAD.t + 14} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Y = 1</text>
         {/* axis labels */}
-        <text x={PAD.l + iW / 2} y={H - 6} textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>
+        <text x={PAD.l + iW / 2} y={H - 6} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
           P̂(Y = 1)
         </text>
         <text transform={`translate(10, ${PAD.t + iH / 2}) rotate(-90)`}
-          textAnchor="middle" fill={C.textDim} fontSize={9} fontFamily={mono}>Count</text>
+          textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Count</text>
       </svg>
     </div>
   );
@@ -2057,7 +2057,7 @@ export function PredProbHistogram({ fitted, Y }) {
 // ─── EVENT STUDY COEFFICIENT PLOT ────────────────────────────────────────────
 // eventCoeffs: [{ k, beta, se, t, p, isRef? }] — from runEventStudy
 export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!eventCoeffs?.length) return null;
 
   const sorted = [...eventCoeffs].sort((a, b) => a.k - b.k);
@@ -2081,7 +2081,7 @@ export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
   const y0 = yScale(0);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: T.code.fontFamily, background: C.bg }}>
       <rect width={W} height={H} fill={C.bg} />
       {/* Zero line */}
       <line x1={PAD.l} x2={W - PAD.r} y1={y0} y2={y0} stroke={C.textMuted} strokeWidth={1} strokeDasharray="4 3" />
@@ -2108,12 +2108,12 @@ export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
       })}
       {/* X axis labels */}
       {sorted.map((e, i) => (
-        <text key={`xl-${i}`} x={xScale(i)} y={H - PAD.b + 14} textAnchor="middle" fill={C.textDim} fontSize={9}>
+        <text key={`xl-${i}`} x={xScale(i)} y={H - PAD.b + 14} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize}>
           {e.k === -1 ? "−1" : e.k >= 0 ? `+${e.k}` : `${e.k}`}
         </text>
       ))}
-      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Event time (periods relative to treatment)</text>
-      <text x={PAD.l - 6} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>Event time (periods relative to treatment)</text>
+      <text x={PAD.l - 6} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}
             transform={`rotate(-90, ${PAD.l - 6}, ${PAD.t + ph / 2})`}>
         {yLabel}
       </text>
@@ -2130,7 +2130,7 @@ export function EventCoeffsPlot({ eventCoeffs = [], yLabel = "Y" }) {
 // preFit:  [{ t, actual, synthetic }]
 // postGap: [{ t, actual, synthetic, gap }]
 export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel = "Y", treatedUnit = "Treated unit" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const allPoints = [
     ...preFit.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
     ...postGap.map(d => ({ t: d.t, actual: d.actual, synthetic: d.synthetic })),
@@ -2156,7 +2156,7 @@ export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel 
   const syntheticPath = allPoints.map((d, i) => `${i === 0 ? "M" : "L"}${xS(d.t)},${yS(d.synthetic)}`).join(" ");
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: T.code.fontFamily, background: C.bg }}>
       <rect width={W} height={H} fill={C.bg} />
       {/* Treatment line */}
       {treatTime != null && (
@@ -2172,21 +2172,21 @@ export function SyntheticGapPlot({ preFit = [], postGap = [], treatTime, yLabel 
         <circle key={i} cx={xS(d.t)} cy={yS(d.actual)} r={3} fill={C.gold} opacity={0.7} />
       ))}
       {/* Axis labels */}
-      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Time</text>
-      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>Time</text>
+      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}
             transform={`rotate(-90, ${PAD.l - 8}, ${PAD.t + ph / 2})`}>{yLabel}</text>
       {/* Legend */}
       <line x1={W - 150} x2={W - 130} y1={PAD.t + 10} y2={PAD.t + 10} stroke={C.gold} strokeWidth={2} />
-      <text x={W - 126} y={PAD.t + 14} fill={C.textDim} fontSize={9}>{treatedUnit}</text>
+      <text x={W - 126} y={PAD.t + 14} fill={C.textDim} fontSize={T.caption.fontSize}>{treatedUnit}</text>
       <line x1={W - 150} x2={W - 130} y1={PAD.t + 24} y2={PAD.t + 24} stroke={C.teal} strokeWidth={1.5} strokeDasharray="5 4" />
-      <text x={W - 126} y={PAD.t + 28} fill={C.textDim} fontSize={9}>Synthetic {treatedUnit}</text>
+      <text x={W - 126} y={PAD.t + 28} fill={C.textDim} fontSize={T.caption.fontSize}>Synthetic {treatedUnit}</text>
     </svg>
   );
 }
 
 // Gap = treated − synthetic over full time span (plot_differences)
 export function SyntheticDiffPlot({ preFit = [], postGap = [], treatTime, yLabel = "Y" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const allRows = [
     ...preFit.map(d  => ({ t: d.t,  gap: d.actual - d.synthetic })),
     ...postGap.map(d => ({ t: d.t,  gap: d.gap ?? (d.actual - d.synthetic) })),
@@ -2212,7 +2212,7 @@ export function SyntheticDiffPlot({ preFit = [], postGap = [], treatTime, yLabel
   const fillPath = `${linePath} L${xS(tMax)},${y0} L${xS(tMin)},${y0} Z`;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: T.code.fontFamily, background: C.bg }}>
       <rect width={W} height={H} fill={C.bg} />
       <line x1={PAD.l} x2={W - PAD.r} y1={y0} y2={y0} stroke={C.textMuted} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />
       {treatTime != null && (
@@ -2221,17 +2221,17 @@ export function SyntheticDiffPlot({ preFit = [], postGap = [], treatTime, yLabel
       )}
       <path d={fillPath} fill={C.gold} opacity={0.18} />
       <path d={linePath} stroke={C.gold} strokeWidth={2} fill="none" />
-      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Time</text>
-      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>Time</text>
+      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}
             transform={`rotate(-90, ${PAD.l - 8}, ${PAD.t + ph / 2})`}>Treated − Synthetic</text>
-      <text x={W - 20} y={PAD.t + 14} textAnchor="end" fill={C.textDim} fontSize={8}>Gap ({yLabel})</text>
+      <text x={W - 20} y={PAD.t + 14} textAnchor="end" fill={C.textDim} fontSize={T.caption.fontSize}>Gap ({yLabel})</text>
     </svg>
   );
 }
 
 // Placebo gaps (grey) + treated gap (gold) — Abadie filter applied (plot_placebos)
 export function SyntheticPlaceboPlot({ preFit = [], postGap = [], placebos = [], treatTime, rmspePre = 0 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
 
   // Treated gap series
   const treatedRows = [
@@ -2266,7 +2266,7 @@ export function SyntheticPlaceboPlot({ preFit = [], postGap = [], placebos = [],
   const treatedPath = makePath([...treatedRows]);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: T.code.fontFamily, background: C.bg }}>
       <rect width={W} height={H} fill={C.bg} />
       <line x1={PAD.l} x2={W - PAD.r} y1={y0} y2={y0} stroke={C.textMuted} strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
       {filtered.map((p, i) => {
@@ -2278,20 +2278,20 @@ export function SyntheticPlaceboPlot({ preFit = [], postGap = [], placebos = [],
               stroke={C.gold} strokeWidth={1.5} strokeDasharray="4 3" opacity={0.8} />
       )}
       <path d={treatedPath} stroke={C.gold} strokeWidth={2.5} fill="none" />
-      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Time</text>
-      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={9}
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>Time</text>
+      <text x={PAD.l - 8} y={PAD.t + ph / 2} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}
             transform={`rotate(-90, ${PAD.l - 8}, ${PAD.t + ph / 2})`}>Gap</text>
       <line x1={W - 130} x2={W - 110} y1={PAD.t + 10} y2={PAD.t + 10} stroke={C.gold} strokeWidth={2.5} />
-      <text x={W - 106} y={PAD.t + 14} fill={C.textDim} fontSize={8}>Treated</text>
+      <text x={W - 106} y={PAD.t + 14} fill={C.textDim} fontSize={T.caption.fontSize}>Treated</text>
       <line x1={W - 130} x2={W - 110} y1={PAD.t + 24} y2={PAD.t + 24} stroke={C.textMuted} strokeWidth={1} opacity={0.6} />
-      <text x={W - 106} y={PAD.t + 28} fill={C.textDim} fontSize={8}>Placebos (n={filtered.length})</text>
+      <text x={W - 106} y={PAD.t + 28} fill={C.textDim} fontSize={T.caption.fontSize}>Placebos (n={filtered.length})</text>
     </svg>
   );
 }
 
 // Post/pre RMSPE ratio bar chart, ranked descending (plot_mspe_ratio)
 export function SyntheticMSPEPlot({ preFit = [], postGap = [], placebos = [], treatTime, treatedUnit = "Treated" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
 
   const rmspe = (rows) => {
     const gaps = rows.map(d => d.gap ?? (d.actual - d.synthetic)).filter(isFinite);
@@ -2323,26 +2323,26 @@ export function SyntheticMSPEPlot({ preFit = [], postGap = [], placebos = [], tr
   const xS = v => PAD.l + (v / maxRatio) * pw;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: mono, background: C.bg }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block", fontFamily: T.code.fontFamily, background: C.bg }}>
       <rect width={W} height={H} fill={C.bg} />
       {bars.map((b, i) => {
         const y = PAD.t + i * (barH + gap);
         return (
           <g key={i}>
             <text x={PAD.l - 6} y={y + barH / 2 + 4} textAnchor="end"
-                  fill={b.treated ? C.gold : C.textMuted} fontSize={8}
+                  fill={b.treated ? C.gold : C.textMuted} fontSize={T.caption.fontSize}
                   fontWeight={b.treated ? 600 : 400}>
               {String(b.label).length > 10 ? String(b.label).slice(0, 10) + "…" : b.label}
             </text>
             <rect x={PAD.l} y={y} width={Math.max(xS(b.ratio) - PAD.l, 2)} height={barH}
                   fill={b.treated ? C.gold : C.textMuted} opacity={b.treated ? 0.85 : 0.3} rx={2} />
-            <text x={xS(b.ratio) + 4} y={y + barH / 2 + 4} fill={b.treated ? C.gold : C.textDim} fontSize={8}>
+            <text x={xS(b.ratio) + 4} y={y + barH / 2 + 4} fill={b.treated ? C.gold : C.textDim} fontSize={T.caption.fontSize}>
               {b.ratio.toFixed(2)}
             </text>
           </g>
         );
       })}
-      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={9}>Post/Pre RMSPE Ratio</text>
+      <text x={W / 2} y={H - 6} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>Post/Pre RMSPE Ratio</text>
     </svg>
   );
 }

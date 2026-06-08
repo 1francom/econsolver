@@ -7,7 +7,7 @@
 //   result  {object}  — active model result (same shape as other modeling components)
 
 import { useState, useCallback, useMemo } from "react";
-import { useTheme, mono }                   from "./shared.jsx";
+import { useTheme }                         from "./shared.jsx";
 import { generateRScript }                  from "../../services/export/rScript.js";
 import { generatePythonScript }             from "../../services/export/pythonScript.js";
 import { generateStataScript }              from "../../services/export/stataScript.js";
@@ -70,7 +70,7 @@ function buildScript(tab, result, allDatasets = {}) {
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export default function CodeEditor({ result, allDatasets = {} }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [tab,     setTab]     = useState("r");
   const [copied,  setCopied]  = useState(false);
@@ -130,12 +130,12 @@ export default function CodeEditor({ result, allDatasets = {} }) {
           background: open ? C.surface2 : C.surface,
           border: "none",
           cursor: "pointer",
-          fontFamily: mono,
+          fontFamily: T.code.fontFamily,
           transition: "background 0.12s",
         }}
       >
         <span style={{
-          fontSize: 9,
+          fontSize: T.caption.fontSize,
           color: C.textMuted,
           letterSpacing: "0.22em",
           textTransform: "uppercase",
@@ -145,18 +145,18 @@ export default function CodeEditor({ result, allDatasets = {} }) {
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {!open && (
             <span style={{
-              fontSize: 9,
+              fontSize: T.caption.fontSize,
               padding: "1px 6px",
               border: `1px solid ${C.blue}`,
               color: C.blue,
               borderRadius: 2,
               letterSpacing: "0.08em",
-              fontFamily: mono,
+              fontFamily: T.code.fontFamily,
             }}>
               {tab.toUpperCase()}
             </span>
           )}
-          <span style={{ fontSize: 10, color: C.textMuted }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
             {open ? "▲" : "▼"}
           </span>
         </span>
@@ -186,8 +186,8 @@ export default function CodeEditor({ result, allDatasets = {} }) {
                   onClick={() => setTab(id)}
                   style={{
                     padding: "2px 10px",
-                    fontFamily: mono,
-                    fontSize: 10,
+                    fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize,
                     letterSpacing: "0.1em",
                     border: `1px solid ${tab === id ? C.blue : C.border2}`,
                     borderRadius: 2,
@@ -208,8 +208,8 @@ export default function CodeEditor({ result, allDatasets = {} }) {
                 onClick={handleCopy}
                 style={{
                   padding: "2px 10px",
-                  fontFamily: mono,
-                  fontSize: 10,
+                  fontFamily: T.code.fontFamily,
+                  fontSize: T.caption.fontSize,
                   letterSpacing: "0.08em",
                   border: `1px solid ${copied ? C.teal : C.border2}`,
                   borderRadius: 2,
@@ -225,8 +225,8 @@ export default function CodeEditor({ result, allDatasets = {} }) {
                 onClick={resetCode}
                 style={{
                   padding: "2px 10px",
-                  fontFamily: mono,
-                  fontSize: 10,
+                  fontFamily: T.code.fontFamily,
+                  fontSize: T.caption.fontSize,
                   letterSpacing: "0.08em",
                   border: `1px solid ${C.border2}`,
                   borderRadius: 2,
@@ -253,8 +253,8 @@ export default function CodeEditor({ result, allDatasets = {} }) {
               border: `1px solid ${C.border}`,
               borderRadius: 3,
               color: C.text,
-              fontFamily: mono,
-              fontSize: 10.5,
+              fontFamily: T.code.fontFamily,
+              fontSize: T.caption.fontSize,
               lineHeight: 1.55,
               padding: "0.6rem 0.75rem",
               resize: "vertical",
@@ -269,9 +269,9 @@ export default function CodeEditor({ result, allDatasets = {} }) {
           {/* Hint */}
           <div style={{
             marginTop: 5,
-            fontSize: 9,
+            fontSize: T.caption.fontSize,
             color: C.textMuted,
-            fontFamily: mono,
+            fontFamily: T.code.fontFamily,
             lineHeight: 1.5,
           }}>
             Script is editable — tweak then copy. Hit Reset to regenerate from current model.
