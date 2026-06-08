@@ -2224,7 +2224,7 @@ function Dashboard({onNew, onLoad}) {
                   )}
                 </div>
                 {unlockErr && (
-                  <div style={{fontSize:10,color:"#e07070"}}>{unlockErr}</div>
+                  <div style={{fontSize:10,color:C.red}}>{unlockErr}</div>
                 )}
               </div>
             )}
@@ -2233,7 +2233,7 @@ function Dashboard({onNew, onLoad}) {
             {user && unlocked && (
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {pullErr && (
-                  <div style={{fontSize:10,color:"#e07070",marginBottom:2}}>{pullErr}</div>
+                  <div style={{fontSize:10,color:C.red,marginBottom:2}}>{pullErr}</div>
                 )}
                 {cloudProjects.length === 0 && !cloudLoading && (
                   <div style={{fontSize:10,color:C.textMuted}}>
@@ -2321,7 +2321,7 @@ function Dashboard({onNew, onLoad}) {
           }}>
             <div style={{fontSize:11,color:C.blue}}>↓ Incoming shared project</div>
             <div style={{fontSize:10,color:C.textMuted}}>Someone shared a project with you via link. Import it to your dashboard?</div>
-            {shareErr && <div style={{fontSize:10,color:"#e07070"}}>{shareErr}</div>}
+            {shareErr && <div style={{fontSize:10,color:C.red}}>{shareErr}</div>}
             <div style={{display:"flex",gap:8}}>
               <button
                 onClick={() => handlePullShare(incomingToken)}
@@ -2346,7 +2346,7 @@ function Dashboard({onNew, onLoad}) {
               <span style={{fontSize:12,color:C.text}}>Shared with me</span>
             </div>
             <div style={{padding:"0.7rem 1rem",display:"flex",flexDirection:"column",gap:6}}>
-              {shareErr && <div style={{fontSize:10,color:"#e07070",marginBottom:2}}>{shareErr}</div>}
+              {shareErr && <div style={{fontSize:10,color:C.red,marginBottom:2}}>{shareErr}</div>}
               {sharedWithMe.map(s => {
                 const isLocal = projects.some(p => p.pid === s.pid);
                 const isBusy  = pullingShare.has(s.token);
@@ -2736,9 +2736,9 @@ export default function App() {
               onClick={()=>setSidebarOpen(o=>!o)}
               style={{
                 marginLeft:"auto", padding:"0.22rem 0.65rem",
-                background: sidebarOpen ? "#9e7ec818" : "transparent",
-                border:`1px solid ${sidebarOpen ? "#9e7ec8" : C.border2}`,
-                borderRadius:3, color: sidebarOpen ? "#9e7ec8" : C.textMuted,
+                background: sidebarOpen ? `${C.violet}18` : "transparent",
+                border:`1px solid ${sidebarOpen ? C.violet : C.border2}`,
+                borderRadius:3, color: sidebarOpen ? C.violet : C.textMuted,
                 cursor:"pointer", fontFamily:mono, fontSize:9,
                 letterSpacing:"0.12em", transition:"all 0.13s",
               }}
