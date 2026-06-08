@@ -1,11 +1,10 @@
 import { useState, useRef } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono', monospace";
 
 // Top bar: switch / add / rename (double-click) / close sessions.
 export default function SessionTabs({ sessions, activeId, onSelect, onAdd, onRename, onClose }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState("");
   const committedRef = useRef(false);
@@ -32,7 +31,7 @@ export default function SessionTabs({ sessions, activeId, onSelect, onAdd, onRen
             onDoubleClick={() => startRename(s)}
             style={{
               display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-              padding: "5px 10px", borderRadius: 6, fontFamily: mono, fontSize: 12,
+              padding: "5px 10px", borderRadius: 6, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
               background: active ? C.teal + "22" : "transparent",
               border: `1px solid ${active ? C.teal : C.border2}`,
               color: active ? C.teal : C.textDim,
@@ -42,19 +41,19 @@ export default function SessionTabs({ sessions, activeId, onSelect, onAdd, onRen
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={commitRename}
                 onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") cancelRename(); }}
-                style={{ background: C.bg, color: C.text, border: `1px solid ${C.teal}`, fontFamily: mono, fontSize: 12, width: 90, padding: "2px 4px" }} />
+                style={{ background: C.bg, color: C.text, border: `1px solid ${C.teal}`, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, width: 90, padding: "2px 4px" }} />
             ) : (
               <span>{s.name}</span>
             )}
             {sessions.length > 1 && (
               <span onClick={(e) => { e.stopPropagation(); onClose(s.id); }}
-                style={{ color: C.red || "#c86e6e", fontSize: 13, lineHeight: 1 }}>×</span>
+                style={{ color: C.red || "#c86e6e", fontSize: T.body.fontSize, lineHeight: 1 }}>×</span>
             )}
           </div>
         );
       })}
       <button onClick={onAdd}
-        style={{ padding: "5px 10px", borderRadius: 6, fontFamily: mono, fontSize: 12,
+        style={{ padding: "5px 10px", borderRadius: 6, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
           background: "transparent", border: `1px dashed ${C.gold}`, color: C.gold, cursor: "pointer" }}>
         + Session
       </button>

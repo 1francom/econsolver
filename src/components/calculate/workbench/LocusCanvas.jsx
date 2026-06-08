@@ -2,7 +2,6 @@ import { useRef, useEffect } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 import { axisTicks } from "./canvasAxes.js";
 
-const mono = "'IBM Plex Mono', monospace";
 
 // Comparative-statics chart: x-axis is the swept parameter, y-axis is the
 // optimum — x* (argmax/argmin) or f(x*) (optimal value) per locus.mode. The line
@@ -10,7 +9,7 @@ const mono = "'IBM Plex Mono', monospace";
 // no interior optimum shows a gap rather than a misleading locus.
 // Props: locus { param, mode, from, to, series:[{eqId, points:[{p,xStar,value,interior}]}] }
 export default function LocusCanvas({ locus, height = 180 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
 
@@ -101,8 +100,8 @@ export default function LocusCanvas({ locus, height = 180 }) {
 
   if (!locus?.series?.length) return null;
   return (
-    <div ref={wrapRef} style={{ width: "100%", fontFamily: mono, marginTop: 8 }}>
-      <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 4 }}>
+    <div ref={wrapRef} style={{ width: "100%", fontFamily: T.code.fontFamily, marginTop: 8 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 4 }}>
         Optimum locus · {locus.mode === "value" ? "f(x*)" : "x*"} vs {locus.param}
       </div>
       <canvas ref={canvasRef} style={{ display: "block", borderRadius: 6, background: C.bg }} />

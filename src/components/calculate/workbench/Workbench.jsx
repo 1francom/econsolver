@@ -14,10 +14,9 @@ import LocusCanvas from "./LocusCanvas.jsx";
 import ViewControls from "./ViewControls.jsx";
 import { buildWorkbenchScript } from "./exportScript.js";
 
-const mono = "'IBM Plex Mono', monospace";
 
 export default function Workbench({ pid }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const storeKey = pid || "scratch";
   const [sessions, setSessions] = useState([newSession()]);
   const [activeId, setActiveId] = useState(null);
@@ -212,19 +211,19 @@ export default function Workbench({ pid }) {
   if (!active) return null;
 
   return (
-    <div style={{ fontFamily: mono, color: C.text, border: `1px solid ${C.border2}`,
+    <div style={{ fontFamily: T.code.fontFamily, color: C.text, border: `1px solid ${C.border2}`,
       borderRadius: 10, padding: "1.2rem 1.4rem", marginBottom: "2rem",
       background: "linear-gradient(180deg, " + C.surface + ", " + C.bg + ")" }}>
 
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
-        <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase" }}>Equation Workbench</div>
-        <div style={{ fontSize: 11, color: C.textDim || "#888" }}>symbolic-first · solve · plot · differentiate · optimize</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase" }}>Equation Workbench</div>
+        <div style={{ fontSize: T.code.fontSize, color: C.textDim || "#888" }}>symbolic-first · solve · plot · differentiate · optimize</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           {[["↓R", "r", C.gold], ["↓Stata", "stata", C.teal], ["↓py", "python", C.blue]].map(([label, lang, color]) => (
             <button key={lang} onClick={() => exportScript(lang)}
               title={`Export equations as ${label.replace("↓", "")} script`}
-              style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, cursor: "pointer",
-                background: "transparent", color, border: `1px solid ${color}`, fontFamily: mono }}>
+              style={{ fontSize: T.caption.fontSize, padding: "3px 8px", borderRadius: 4, cursor: "pointer",
+                background: "transparent", color, border: `1px solid ${color}`, fontFamily: T.code.fontFamily }}>
               {label}
             </button>
           ))}

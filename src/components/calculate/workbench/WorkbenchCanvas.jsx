@@ -2,7 +2,6 @@ import { useRef, useEffect } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 import { axisTicks } from "./canvasAxes.js";
 
-const mono = "'IBM Plex Mono', monospace";
 
 // Linear interpolation between two #rrggbb colors (t in [0,1]) → "rgb(r,g,b)".
 // Used to ramp the comparative-statics family across the swept parameter.
@@ -17,7 +16,7 @@ function mixHex(a, b, t) {
 // Draws plot curves + f′ overlays + integral shading + markers for a session.
 // Props: equations[], results { [eqId]: { [op]: contract } }, family, conditions, view, height
 export default function WorkbenchCanvas({ equations, results, family, conditions, view, height = 460 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
 
@@ -341,17 +340,17 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
 
   const hasObjective = equations.some((e) => e.kind !== "constraint");
   return (
-    <div ref={wrapRef} style={{ width: "100%", fontFamily: mono, position: "relative" }}>
+    <div ref={wrapRef} style={{ width: "100%", fontFamily: T.code.fontFamily, position: "relative" }}>
       {!hasObjective && (
-        <div style={{ fontSize: 11, color: C.textDim || "#888", padding: "6px 0" }}>
+        <div style={{ fontSize: T.code.fontSize, color: C.textDim || "#888", padding: "6px 0" }}>
           Add an objective equation with an axis to plot.
         </div>
       )}
       {hasObjective && (
         <button onClick={exportPng} title="Export plot as PNG"
-          style={{ position: "absolute", top: 6, right: 8, zIndex: 1, fontSize: 10,
+          style={{ position: "absolute", top: 6, right: 8, zIndex: 1, fontSize: T.caption.fontSize,
             padding: "3px 8px", borderRadius: 4, cursor: "pointer", background: C.surface2,
-            color: C.text, border: `1px solid ${C.border2}`, fontFamily: mono, fontWeight: 600 }}>
+            color: C.text, border: `1px solid ${C.border2}`, fontFamily: T.code.fontFamily, fontWeight: 600 }}>
           ↓ PNG
         </button>
       )}

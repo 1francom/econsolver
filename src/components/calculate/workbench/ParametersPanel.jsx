@@ -1,6 +1,5 @@
 import { useTheme } from "../../../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono', monospace";
 
 // Shared slider pool for one session. Each detected symbol is either a
 // Parameter (slider, fixed value) or a Choice variable (optimized over).
@@ -11,20 +10,20 @@ const mono = "'IBM Plex Mono', monospace";
 //   onParamChange   : (name, patch) => void
 //   onToggleRole    : (name) => void   // Parameter <-> Choice var
 export default function ParametersPanel({ detectedSymbols, params, choiceVars, onParamChange, onToggleRole }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const paramMap = Object.fromEntries(params.map((p) => [p.name, p]));
 
   if (!detectedSymbols.length) {
     return (
-      <div style={{ fontFamily: mono, fontSize: 11, color: C.textDim || "#888", padding: "8px 0" }}>
+      <div style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textDim || "#888", padding: "8px 0" }}>
         Parameters appear here once an equation has free symbols.
       </div>
     );
   }
 
   return (
-    <div style={{ fontFamily: mono, marginTop: 12 }}>
-      <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8 }}>
+    <div style={{ fontFamily: T.code.fontFamily, marginTop: 12 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8 }}>
         Parameters
       </div>
       {detectedSymbols.map((sym) => {
@@ -33,16 +32,16 @@ export default function ParametersPanel({ detectedSymbols, params, choiceVars, o
         return (
           <div key={sym} style={{ marginBottom: 10, opacity: isChoice ? 0.6 : 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-              <span style={{ fontSize: 12, color: C.teal, minWidth: 34 }}>{sym}</span>
+              <span style={{ fontSize: T.code.fontSize, color: C.teal, minWidth: 34 }}>{sym}</span>
               <button onClick={() => onToggleRole(sym)}
                 title="Toggle Parameter / Choice variable"
-                style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, cursor: "pointer",
+                style={{ fontSize: T.caption.fontSize, padding: "2px 6px", borderRadius: 4, cursor: "pointer",
                   background: "transparent", color: isChoice ? C.gold : C.blue,
                   border: `1px solid ${isChoice ? C.gold : C.blue}` }}>
                 {isChoice ? "choice var" : "parameter"}
               </button>
               {!isChoice && (
-                <span style={{ fontSize: 12, color: C.text, marginLeft: "auto" }}>
+                <span style={{ fontSize: T.code.fontSize, color: C.text, marginLeft: "auto" }}>
                   {Number(p.value).toFixed(2)}
                 </span>
               )}
@@ -73,13 +72,13 @@ export default function ParametersPanel({ detectedSymbols, params, choiceVars, o
 // blank or non-finite input so a half-typed value never corrupts the slider.
 function Bound({ C, label, value, onCommit }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, color: C.textDim }}>
+    <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: T.caption.fontSize, color: C.textDim }}>
       {label}
       <input type="number" defaultValue={value} key={value}
         onBlur={(e) => { const v = Number(e.target.value); if (e.target.value !== "" && Number.isFinite(v)) onCommit(v); }}
         onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
         style={{ width: 52, background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
-          fontFamily: mono, fontSize: 10, padding: "2px 4px" }} />
+          fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px" }} />
     </label>
   );
 }
