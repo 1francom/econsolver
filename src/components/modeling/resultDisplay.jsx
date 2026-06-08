@@ -755,7 +755,7 @@ export function ExportBar({ yVar, results, model, onReport, replicateConfig, lat
               {copied ? "✓ Copied!" : "Copy"}
             </button>
           </div>
-          <pre style={{ margin: 0, fontFamily: mono, fontSize: 10, color: "#8ab878", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre" }}>
+          <pre style={{ margin: 0, fontFamily: mono, fontSize: 10, color: C.green, lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre" }}>
             {latex}
           </pre>
         </div>
