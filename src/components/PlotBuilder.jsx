@@ -17,8 +17,8 @@
 //   initialLayers array      — optional pre-seeded layers (G10 template mode)
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useTheme, mono } from "./modeling/shared.jsx";
-import { PLOT_PALETTES } from "../theme.js";
+import { useTheme } from "./modeling/shared.jsx";
+import { PLOT_PALETTES, MONO_STACK } from "../theme.js";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
@@ -383,7 +383,7 @@ function patchDarkTheme(el) {
     f.style.margin = "0";
   });
   el.querySelectorAll("figure h2").forEach(h => {
-    h.style.fontFamily = "IBM Plex Mono, monospace";
+    h.style.fontFamily = MONO_STACK;
     h.style.fontSize = "9px";
     h.style.letterSpacing = "0.15em";
     h.style.textTransform = "uppercase";
@@ -405,7 +405,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
   xCatOrder = "", yCatOrder = "",
   onRenderError,
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const ownRef = useRef(null);
   const ref    = canvasRef ?? ownRef;
   const [Plt, setPlt] = useState(null);
@@ -517,7 +517,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
         style: {
           background: "transparent",
           color:      C.text,
-          fontFamily: mono,
+          fontFamily: T.code.fontFamily,
           fontSize:   "10px",
           overflow:   "visible",
         },
@@ -572,13 +572,13 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
     return () => { if (ref.current) ref.current.replaceChildren(); };
   }, [Plt, layers, rows, xLabel, yLabel, width, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder]);
 
-  if (err) return <div style={{ color: C.red, fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
-  if (!Plt) return <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Observable Plot…</div>;
+  if (err) return <div style={{ color: C.red, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "1.5rem" }}>{err}</div>;
+  if (!Plt) return <div style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1.5rem" }}>Loading Observable Plot…</div>;
   return (
     <div style={{ width: "100%", overflow: "visible" }}>
       {title && (
         <div style={{
-          textAlign: "center", fontFamily: mono, fontSize: 12,
+          textAlign: "center", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
           color: C.text, paddingBottom: 4, fontWeight: 600,
         }}>{title}</div>
       )}
@@ -592,7 +592,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
 // avoid the feedback loop: Leaflet fills container → parent ResizeObserver fires
 // → canvasH grows → Leaflet grows → repeat.
 function MapCanvas({ layer, rows }) {
-  const { C, theme } = useTheme();
+  const { C, T, theme } = useTheme();
   const wrapRef     = useRef(null);  // fixed-size wrapper — ResizeObserver target
   const mapDivRef   = useRef(null);  // inner div Leaflet mounts into
   const leafMapRef  = useRef(null);
@@ -692,11 +692,11 @@ function MapCanvas({ layer, rows }) {
     return () => { if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; } };
   }, [L, layer, rows, theme]);
 
-  if (err) return <div style={{ color: "#c47070", fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
-  if (!L)  return <div style={{ color: "#666", fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Leaflet…</div>;
+  if (err) return <div style={{ color: "#c47070", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "1.5rem" }}>{err}</div>;
+  if (!L)  return <div style={{ color: "#666", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1.5rem" }}>Loading Leaflet…</div>;
   const { aes } = layer;
   if (!aes.x || !aes.y) return (
-    <div style={{ fontFamily: mono, fontSize: 10, color: "#666", padding: "2rem", textAlign: "center" }}>
+    <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: "#666", padding: "2rem", textAlign: "center" }}>
       Set <b>lon</b> (x) and <b>lat</b> (y) columns to render the map.
     </div>
   );
@@ -711,7 +711,7 @@ function MapCanvas({ layer, rows }) {
 
 // ─── LAYER TAB (compact horizontal pill) ─────────────────────────────────────
 function LayerTab({ layer, isActive, onSelect, onToggle, onRemove }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div
       onClick={onSelect}
@@ -724,18 +724,18 @@ function LayerTab({ layer, isActive, onSelect, onToggle, onRemove }) {
       }}
     >
       <div style={{ width: 7, height: 7, borderRadius: "50%", background: layer.fill, flexShrink: 0 }} />
-      <span style={{ fontFamily: mono, fontSize: 10, color: isActive ? C.teal : C.textDim, whiteSpace: "nowrap" }}>
+      <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: isActive ? C.teal : C.textDim, whiteSpace: "nowrap" }}>
         {layer.geom}{layer.aes?.x ? ` · ${layer.aes.x}` : ""}
         {layer.opacity < 0.99 ? ` ${Math.round(layer.opacity*100)}%` : ""}
       </span>
       <button onClick={e => { e.stopPropagation(); onToggle(); }}
         title={layer.visible ? "Hide" : "Show"}
-        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, padding: "0 1px", color: layer.visible ? C.textDim : C.textMuted, lineHeight: 1 }}>
+        style={{ background: "none", border: "none", cursor: "pointer", fontSize: T.caption.fontSize, padding: "0 1px", color: layer.visible ? C.textDim : C.textMuted, lineHeight: 1 }}>
         {layer.visible ? "●" : "○"}
       </button>
       <button onClick={e => { e.stopPropagation(); onRemove(); }}
         title="Remove"
-        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, padding: "0 1px", color: C.textMuted, lineHeight: 1 }}>×</button>
+        style={{ background: "none", border: "none", cursor: "pointer", fontSize: T.body.fontSize, padding: "0 1px", color: C.textMuted, lineHeight: 1 }}>×</button>
     </div>
   );
 }
@@ -744,13 +744,13 @@ function LayerTab({ layer, isActive, onSelect, onToggle, onRemove }) {
 // Renders per-geom ui-basic params (ggplot2-plot-design skill classification).
 // Variable mapping: aes.sizeCol / aes.alphaCol → ggplot aes(size=col, alpha=col)
 function GeomOptsRow({ layer, onChange, headers = [] }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { geom, opts = {}, aes = {} } = layer;
   const set    = (key, val) => onChange({ ...layer, opts: { ...opts, [key]: val } });
   const setAes = (key, val) => onChange({ ...layer, aes: { ...aes, [key]: val } });
 
   const chip = (active) => ({
-    padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+    padding: "2px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
     border: `1px solid ${active ? C.teal + "65" : C.border}`,
     background: active ? `${C.teal}18` : "transparent",
     color: active ? C.teal : C.textMuted,
@@ -761,9 +761,9 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
     background: active ? `${C.gold}18` : "transparent",
     color: active ? C.gold : C.textMuted,
   });
-  const lbl  = (t) => <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>{t}</span>;
+  const lbl  = (t) => <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{t}</span>;
   const sep  = <div style={{ width: 1, height: 14, background: C.border, flexShrink: 0, alignSelf: "center" }} />;
-  const numW = { width: 26, fontFamily: mono, fontSize: 9, color: C.textDim, flexShrink: 0 };
+  const numW = { width: 26, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim, flexShrink: 0 };
   const slider = (key, min, max, step, def) => (
     <input type="range" min={min} max={max} step={step} value={opts[key] ?? def}
       onChange={e => set(key, +e.target.value)}
@@ -773,12 +773,12 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
   // shared col select style
   const colSel = (active) => ({
     background: C.bg, border: `1px solid ${active ? C.teal + "65" : C.border}`,
-    borderRadius: 3, fontFamily: mono, fontSize: 9, padding: "2px 5px",
+    borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 5px",
     color: active ? C.text : C.textMuted, minWidth: 80, maxWidth: 120,
   });
   // small "var" toggle button
   const varBtn = (isVar) => ({
-    padding: "2px 5px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer",
+    padding: "2px 5px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
     border: `1px solid ${isVar ? C.gold + "65" : C.border}`,
     background: isVar ? `${C.gold}18` : "transparent",
     color: isVar ? C.gold : C.textMuted,
@@ -825,7 +825,7 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
       <input type="range" min={0.1} max={1} step={0.05} value={opts.span ?? 0.75}
         onChange={e => set("span", +e.target.value)}
         style={{ width: 64, accentColor: "#c8a96e", verticalAlign: "middle" }}/>
-      <span style={{ fontSize: 9, color: "#c8a96e", fontFamily: mono }}>{(opts.span ?? 0.75).toFixed(2)}</span>
+      <span style={{ fontSize: T.caption.fontSize, color: "#c8a96e", fontFamily: T.code.fontFamily }}>{(opts.span ?? 0.75).toFixed(2)}</span>
     </>}
     {(opts.method ?? "lm") === "lm" && <>
       {lbl("SE")}
@@ -864,7 +864,7 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
     {lbl("bins")}
     <input type="number" min={3} max={200} value={opts.bins ?? 20}
       onChange={e => set("bins", Math.max(3, +e.target.value))}
-      style={{ width: 52, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: mono, fontSize: 9, padding: "2px 4px", color: C.text, outline: "none" }} />
+      style={{ width: 52, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
   </>;
 
   if (geom === "density") return <>
@@ -890,7 +890,7 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
 
 // ─── INLINE LAYER EDITOR (horizontal compact row) ─────────────────────────────
 function LayerEditorInline({ layer, onChange, headers }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const isMap        = layer.geom === "map";
   const isRefLine    = ["hline", "vline"].includes(layer.geom);
   const needsYMinMax = ["errorbar", "ribbon"].includes(layer.geom);
@@ -899,7 +899,7 @@ function LayerEditorInline({ layer, onChange, headers }) {
 
   const selStyle = active => ({
     background: C.bg, border: `1px solid ${active ? C.border2 : C.border}`,
-    borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px",
+    borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px",
     color: active ? C.text : C.textMuted, minWidth: 90, maxWidth: 140,
   });
   const sep = <div style={{ width: 1, height: 18, background: C.border, flexShrink: 0, alignSelf: "center" }} />;
@@ -912,39 +912,39 @@ function LayerEditorInline({ layer, onChange, headers }) {
     }}>
       {/* Aesthetics */}
       {isRefLine && <>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>value</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>value</span>
         <input type="number" value={layer.value ?? ""} placeholder="0"
           onChange={e => onChange({ ...layer, value: e.target.value })}
           style={{ ...selStyle(!!layer.value), width: 60 }} />
       </>}
       {!noX && <>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>{isMap ? "lon" : "x"}</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{isMap ? "lon" : "x"}</span>
         <select value={layer.aes.x} onChange={e => onChange({ ...layer, aes: { ...layer.aes, x: e.target.value } })} style={selStyle(!!layer.aes.x)}>
           <option value="">— col —</option>
           {headers.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
       </>}
       {!noY && <>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>{isMap ? "lat" : "y"}</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{isMap ? "lat" : "y"}</span>
         <select value={layer.aes.y} onChange={e => onChange({ ...layer, aes: { ...layer.aes, y: e.target.value } })} style={selStyle(!!layer.aes.y)}>
           <option value="">— col —</option>
           {headers.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
       </>}
       {needsYMinMax && <>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>yMin</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>yMin</span>
         <select value={layer.aes.yMin ?? ""} onChange={e => onChange({ ...layer, aes: { ...layer.aes, yMin: e.target.value } })} style={selStyle(!!layer.aes.yMin)}>
           <option value="">— col —</option>
           {headers.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>yMax</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>yMax</span>
         <select value={layer.aes.yMax ?? ""} onChange={e => onChange({ ...layer, aes: { ...layer.aes, yMax: e.target.value } })} style={selStyle(!!layer.aes.yMax)}>
           <option value="">— col —</option>
           {headers.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
       </>}
       {!isRefLine && <>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>color</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>color</span>
         <select value={layer.aes.color} onChange={e => onChange({ ...layer, aes: { ...layer.aes, color: e.target.value } })} style={selStyle(!!layer.aes.color)}>
           <option value="">— none —</option>
           {headers.map(h => <option key={h} value={h}>{h}</option>)}
@@ -955,7 +955,7 @@ function LayerEditorInline({ layer, onChange, headers }) {
 
       {/* Fill color */}
       {!layer.aes?.color && <>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>fill</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>fill</span>
         <input type="color" value={layer.fill} onChange={e => onChange({ ...layer, fill: e.target.value })}
           style={{ width: 24, height: 20, border: "none", background: "none", cursor: "pointer", padding: 0 }} />
       </>}
@@ -963,11 +963,11 @@ function LayerEditorInline({ layer, onChange, headers }) {
       {/* Position */}
       {POSITION_OPTIONS[layer.geom] && <>
         {sep}
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>pos</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>pos</span>
         {POSITION_OPTIONS[layer.geom].map(pos => (
           <button key={pos} onClick={() => onChange({ ...layer, position: pos })}
             style={{
-              padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+              padding: "2px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: layer.position === pos ? `${C.gold}18` : "transparent",
               border: `1px solid ${layer.position === pos ? C.gold + "65" : C.border}`,
               color: layer.position === pos ? C.gold : C.textMuted,
@@ -983,11 +983,11 @@ function LayerEditorInline({ layer, onChange, headers }) {
 
       {/* Opacity — right-aligned */}
       <div style={{ display: "flex", alignItems: "center", gap: 5, marginLeft: "auto" }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>α</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>α</span>
         <input type="range" min={0} max={1} step={0.05} value={layer.opacity ?? 1}
           onChange={e => onChange({ ...layer, opacity: +e.target.value })}
           style={{ width: 64, accentColor: C.teal, cursor: "pointer" }} />
-        <span style={{ fontFamily: mono, fontSize: 9, color: C.textDim, width: 26, textAlign: "right", flexShrink: 0 }}>
+        <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim, width: 26, textAlign: "right", flexShrink: 0 }}>
           {Math.round((layer.opacity ?? 1) * 100)}%
         </span>
       </div>
@@ -1016,11 +1016,11 @@ function PlotHistoryCard({ entry, isCompared, onLoad, onDelete, onCompare, C: Cp
         ))}
       </div>
       {/* Geom names */}
-      <div style={{ fontFamily: mono, fontSize: 8, color: Cp.textMuted, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+      <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.textMuted, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
         {geomNames || "empty"}
       </div>
       {/* Title */}
-      <div style={{ fontFamily: mono, fontSize: 9, color: Cp.text, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 }}>
+      <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.text, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 }}>
         {entry.name}
       </div>
       {/* Compare checkbox + delete */}
@@ -1028,13 +1028,13 @@ function PlotHistoryCard({ entry, isCompared, onLoad, onDelete, onCompare, C: Cp
         <label onClick={e => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }}>
           <input type="checkbox" checked={isCompared} onChange={onCompare}
             style={{ accentColor: Cp.teal, cursor: "pointer", width: 10, height: 10 }} />
-          <span style={{ fontFamily: mono, fontSize: 7, color: Cp.textMuted }}>compare</span>
+          <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.textMuted }}>compare</span>
         </label>
         <button
           onClick={e => { e.stopPropagation(); onDelete(); }}
           style={{
             marginLeft: "auto", background: "none", border: "none", color: Cp.textMuted,
-            cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px", lineHeight: 1,
+            cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0 2px", lineHeight: 1,
           }}>×</button>
       </div>
     </div>
@@ -1044,7 +1044,7 @@ function PlotHistoryCard({ entry, isCompared, onLoad, onDelete, onCompare, C: Cp
 // ─── COMBINED EXPORT BAR ──────────────────────────────────────────────────────
 // Single export row for compare mode — exports both plots as one PNG.
 function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [preset, setPreset] = useState("default");
   const [busy, setBusy] = useState(false);
 
@@ -1055,8 +1055,8 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
     borderRadius: 3,
     color: C.textDim,
     cursor: "pointer",
-    fontFamily: mono,
-    fontSize: 9,
+    fontFamily: T.code.fontFamily,
+    fontSize: T.caption.fontSize,
     transition: "all 0.12s",
     flexShrink: 0,
   };
@@ -1078,13 +1078,13 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
       borderTop: `1px solid ${C.border}`,
       background: C.bg,
     }}>
-      <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>Style</span>
+      <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, flexShrink: 0 }}>Style</span>
       <select
         value={preset}
         onChange={e => setPreset(e.target.value)}
         style={{
           background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 3,
-          fontFamily: mono, fontSize: 9, padding: "2px 5px", color: C.text, cursor: "pointer",
+          fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 5px", color: C.text, cursor: "pointer",
         }}
       >
         {Object.entries(PRESETS).map(([key, { label }]) => (
@@ -1108,7 +1108,7 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid }) {
-  const { C, prefs } = useTheme();
+  const { C, T, prefs } = useTheme();
   const [layers,      setLayers]      = useState(initialLayers);
   const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
   const [title,       setTitle]       = useState("");
@@ -1315,7 +1315,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
           background: C.surface,
         }}>
           {layers.length === 0 && (
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginRight: 4 }}>No layers —</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, marginRight: 4 }}>No layers —</span>
           )}
           {layers.map(ly => (
             <LayerTab
@@ -1336,7 +1336,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             <button key={g.id} onClick={() => addLayer(g.id)}
               title={`Add ${g.label} layer`}
               style={{
-                padding: "3px 7px", borderRadius: 3, fontFamily: mono, fontSize: 9,
+                padding: "3px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 background: "none", border: `1px dashed ${C.border2}`,
                 color: C.textMuted, cursor: "pointer", flexShrink: 0,
               }}>+{g.label}</button>
@@ -1359,21 +1359,21 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             { lbl: "Y axis", val: yLabel, set: setYLabel, w: 80  },
           ].map(({ lbl, val, set, w }) => (
             <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>{lbl}</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>{lbl}</span>
               <input value={val} onChange={e => set(e.target.value)} placeholder={lbl.toLowerCase()}
                 style={{
                   width: w, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
-                  fontFamily: mono, fontSize: 9, padding: "3px 5px", color: C.text, outline: "none",
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px", color: C.text, outline: "none",
                 }} />
             </div>
           ))}
 
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Style</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>Style</span>
             <select value={scheme} onChange={e => setScheme(e.target.value)}
               style={{
                 background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
-                fontFamily: mono, fontSize: 9, padding: "3px 5px",
+                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px",
                 color: scheme ? C.text : C.textMuted,
               }}>
               {PALETTE_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
@@ -1385,7 +1385,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
           {/* Axis options toggle */}
           <button onClick={() => setShowAxisOpts(o => !o)} title="Axis scale options"
             style={{
-              padding: "3px 7px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+              padding: "3px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: showAxisOpts ? "rgba(110,200,180,0.12)" : "none",
               color: showAxisOpts ? C.teal : C.textMuted,
               border: `1px solid ${showAxisOpts ? C.teal : C.border}`,
@@ -1396,23 +1396,23 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             {plotHistory.length > 0 && (<>
               <button onClick={navPrev} title="Previous saved plot (Alt+←)"
                 disabled={plotHistory.length === 0}
-                style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "2px 6px", lineHeight: 1 }}>←</button>
-              <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, minWidth: 38, textAlign: "center" }}>
+                style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 6px", lineHeight: 1 }}>←</button>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, minWidth: 38, textAlign: "center" }}>
                 {histIdx !== null ? `${histIdx + 1}/${plotHistory.length}` : `—/${plotHistory.length}`}
               </span>
               <button onClick={navNext} title="Next saved plot (Alt+→)"
                 disabled={histIdx === null}
-                style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: histIdx !== null ? C.textMuted : C.border, cursor: histIdx !== null ? "pointer" : "default", fontFamily: mono, fontSize: 10, padding: "2px 6px", lineHeight: 1 }}>→</button>
+                style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: histIdx !== null ? C.textMuted : C.border, cursor: histIdx !== null ? "pointer" : "default", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 6px", lineHeight: 1 }}>→</button>
             </>)}
             <button onClick={savePlot} disabled={layers.length === 0} title="Save current plot to history"
               style={{
-                padding: "3px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: layers.length > 0 ? "pointer" : "not-allowed",
+                padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: layers.length > 0 ? "pointer" : "not-allowed",
                 background: layers.length > 0 ? C.teal : "none", color: layers.length > 0 ? C.bg : C.border,
                 border: `1px solid ${layers.length > 0 ? C.teal : C.border}`,
               }}>Save</button>
             <button onClick={newPlot} title="Clear builder to start a new plot"
               style={{
-                padding: "3px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: "none", color: C.textMuted, border: `1px solid ${C.border}`,
               }}>New</button>
           </div>
@@ -1439,19 +1439,19 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
               { axis: "Y", scale: yScale, setScale: setYScale, domain: yDomain, setDomain: setYDomain, fmt: yFmt, setFmt: setYFmt, catOrder: yCatOrder, setCatOrder: setYCatOrder },
             ].map(({ axis, scale, setScale, domain, setDomain, fmt, setFmt, catOrder, setCatOrder }) => (
               <div key={axis} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, width: 8 }}>{axis}</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, width: 8 }}>{axis}</span>
                 {/* Scale type */}
                 {["linear", "log", "sqrt"].map(s => (
                   <button key={s} onClick={() => setScale(s)}
                     style={{
-                      padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer",
+                      padding: "2px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                       background: scale === s ? C.teal : "none",
                       color: scale === s ? C.bg : C.textMuted,
                       border: `1px solid ${scale === s ? C.teal : C.border}`,
                     }}>{s}</button>
                 ))}
                 {/* Limits */}
-                <span style={{ fontFamily: mono, fontSize: 8, color: C.border }}>|</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.border }}>|</span>
                 {["min", "max"].map((which, wi) => (
                   <input key={which} type="number" placeholder={which}
                     value={domain[wi] ?? ""}
@@ -1461,15 +1461,15 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                     }}
                     style={{
                       width: 52, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
-                      fontFamily: mono, fontSize: 8, padding: "2px 4px", color: C.text, outline: "none",
+                      fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none",
                     }} />
                 ))}
                 {/* Tick format */}
-                <span style={{ fontFamily: mono, fontSize: 8, color: C.border }}>|</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.border }}>|</span>
                 <select value={fmt} onChange={e => setFmt(e.target.value)}
                   style={{
                     background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
-                    fontFamily: mono, fontSize: 8, padding: "2px 4px", color: fmt ? C.text : C.textMuted,
+                    fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: fmt ? C.text : C.textMuted,
                   }}>
                   <option value="">auto</option>
                   <option value=",">,000</option>
@@ -1479,8 +1479,8 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                   <option value=".3f">.3f</option>
                 </select>
                 {/* Category order — like ggplot scale_x_discrete(limits=c(...)) */}
-                <span style={{ fontFamily: mono, fontSize: 8, color: C.border }}>|</span>
-                <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted }}>order</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.border }}>|</span>
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>order</span>
                 <input
                   value={catOrder}
                   onChange={e => setCatOrder(e.target.value)}
@@ -1488,14 +1488,14 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                   title={`Comma-separated category order for ${axis} axis (like scale_${axis.toLowerCase()}_discrete(limits=...))`}
                   style={{
                     width: 110, background: C.bg, border: `1px solid ${catOrder ? C.teal : C.border}`,
-                    borderRadius: 3, fontFamily: mono, fontSize: 8, padding: "2px 4px",
+                    borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px",
                     color: catOrder ? C.text : C.textMuted, outline: "none",
                   }} />
               </div>
             ))}
             {/* Reset all */}
             <button onClick={() => { setXScale("linear"); setYScale("linear"); setXDomain([null,null]); setYDomain([null,null]); setXFmt(""); setYFmt(""); setXCatOrder(""); setYCatOrder(""); }}
-              style={{ padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer", background: "none", color: C.textMuted, border: `1px solid ${C.border}`, marginLeft: "auto" }}>
+              style={{ padding: "2px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer", background: "none", color: C.textMuted, border: `1px solid ${C.border}`, marginLeft: "auto" }}>
               reset
             </button>
           </div>
@@ -1513,14 +1513,14 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
               style={{
                 background: `${C.gold}22`, border: `1px solid ${C.gold}66`,
                 borderRadius: 3, padding: "2px 6px", cursor: "pointer",
-                fontFamily: mono, fontSize: 9, color: C.gold, lineHeight: 1.4,
+                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold, lineHeight: 1.4,
               }}>⚠ error</button>
             {showPlotError && (
               <div style={{
                 position: "absolute", right: 0, top: 24, zIndex: 30,
                 background: C.surface, border: `1px solid ${C.gold}55`,
                 borderRadius: 4, padding: "0.5rem 0.75rem",
-                fontFamily: mono, fontSize: 9, color: C.text,
+                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text,
                 maxWidth: 300, whiteSpace: "pre-wrap", wordBreak: "break-word",
                 boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
               }}>{plotRenderError}</div>
@@ -1531,7 +1531,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
           <div style={{
             height: "100%", minHeight: 180, display: "flex", alignItems: "center",
             justifyContent: "center", flexDirection: "column", gap: 8,
-            color: C.textMuted, fontFamily: mono, fontSize: 10, textAlign: "center",
+            color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, textAlign: "center",
           }}>
             Add a layer above, then pick x / y columns — all visible layers compose on one canvas.
           </div>
@@ -1576,11 +1576,11 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
               padding: "0.28rem 0.75rem", cursor: "pointer", userSelect: "none",
               background: C.surface,
             }}>
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
               ◈ Plot History ({plotHistory.length})
               {compareIds.size === 2 && <span style={{ color: C.teal, marginLeft: 8 }}>▸ compare</span>}
             </span>
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.border }}>{histOpen ? "▲" : "▼"}</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.border }}>{histOpen ? "▲" : "▼"}</span>
           </div>
 
           {/* Cards */}

@@ -11,10 +11,9 @@ import { useState } from "react";
 import { PRESETS, downloadSVG, downloadPNG } from "../../services/export/plotExporter.js";
 import { useTheme } from "../../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 export default function PlotExportBar({ getEl, filename = "plot", style }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [preset, setPreset] = useState("default");
 
   const btnBase = {
@@ -24,8 +23,8 @@ export default function PlotExportBar({ getEl, filename = "plot", style }) {
     borderRadius: 3,
     color: C.textDim,
     cursor: "pointer",
-    fontFamily: mono,
-    fontSize: 9,
+    fontFamily: T.code.fontFamily,
+    fontSize: T.caption.fontSize,
     transition: "all 0.12s",
     flexShrink: 0,
   };
@@ -50,7 +49,7 @@ export default function PlotExportBar({ getEl, filename = "plot", style }) {
       ...style,
     }}>
       {/* Preset label */}
-      <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, flexShrink: 0 }}>
+      <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, flexShrink: 0 }}>
         Style
       </span>
 
@@ -62,8 +61,8 @@ export default function PlotExportBar({ getEl, filename = "plot", style }) {
           background: C.bg,
           border: `1px solid ${C.border2}`,
           borderRadius: 3,
-          fontFamily: mono,
-          fontSize: 9,
+          fontFamily: T.code.fontFamily,
+          fontSize: T.caption.fontSize,
           padding: "2px 5px",
           color: C.text,
           cursor: "pointer",

@@ -2,6 +2,7 @@
 // Theme hook + micro-UI atoms shared across all Modeling sub-components.
 
 import { useTheme } from "../../ThemeContext.jsx";
+import { MONO_STACK } from "../../theme.js";
 
 // Re-export so consumers can import from one place.
 export { useTheme };
@@ -9,7 +10,8 @@ export { useTheme };
 // Static fallback for non-React contexts.
 export { DARK as C } from "../../theme.js";
 
-export const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
+const tokenMono = MONO_STACK;
+export { tokenMono as mono };
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 
@@ -17,7 +19,7 @@ export function Lbl({ children, color }) {
   const { C, T } = useTheme();
   return (
     <div style={{
-      fontSize: 9, color: color ?? C.textMuted,
+      fontSize: T.caption.fontSize, color: color ?? C.textMuted,
       letterSpacing: "0.22em", textTransform: "uppercase",
       marginBottom: 8, fontFamily: T.label.fontFamily,
     }}>
@@ -30,7 +32,7 @@ export function Badge({ label, color }) {
   const { T } = useTheme();
   return (
     <span style={{
-      fontSize: 9, padding: "2px 7px",
+      fontSize: T.caption.fontSize, padding: "2px 7px",
       border: `1px solid ${color}`, color,
       borderRadius: 2, letterSpacing: "0.1em", fontFamily: T.label.fontFamily,
     }}>
@@ -53,7 +55,7 @@ export function Chip({ label, selected, color, onClick, disabled, title, factore
         background: selected ? `${color}1a` : "transparent",
         color: selected ? color : disabled ? C.textMuted : C.textDim,
         borderRadius: 3, cursor: disabled ? "not-allowed" : "pointer",
-        fontSize: 11, fontFamily: T.body.fontFamily, transition: "all 0.12s",
+        fontSize: T.code.fontSize, fontFamily: T.body.fontFamily, transition: "all 0.12s",
         opacity: disabled ? 0.45 : 1,
         display: "inline-flex", alignItems: "center", gap: 0,
       }}
@@ -68,7 +70,7 @@ export function Chip({ label, selected, color, onClick, disabled, title, factore
             paddingLeft: 5,
             borderLeft: `1px solid ${selected ? `${color}50` : C.border2}`,
             color: factored ? C.gold : C.textMuted,
-            fontSize: 9,
+            fontSize: T.caption.fontSize,
             fontWeight: factored ? "bold" : "normal",
             cursor: "pointer",
             lineHeight: 1,
@@ -94,12 +96,12 @@ export function ModelBtn({ model, selected, disabled, onClick, color, hint }) {
         background: selected ? `${color}12` : C.surface,
         color: selected ? color : disabled ? C.textMuted : C.textDim,
         borderRadius: 4, cursor: disabled ? "not-allowed" : "pointer",
-        fontSize: 12, fontFamily: T.body.fontFamily, opacity: disabled ? 0.4 : 1,
+        fontSize: T.code.fontSize, fontFamily: T.body.fontFamily, opacity: disabled ? 0.4 : 1,
         transition: "all 0.13s", textAlign: "left",
         display: "flex", alignItems: "center", gap: 8,
       }}
     >
-      {disabled && <span style={{ fontSize: 10 }}>🔒</span>}
+      {disabled && <span style={{ fontSize: T.caption.fontSize }}>🔒</span>}
       {selected && <span style={{ color }}>●</span>}
       {model}
     </button>
@@ -107,7 +109,7 @@ export function ModelBtn({ model, selected, disabled, onClick, color, hint }) {
 }
 
 export function Section({ title, children, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{ marginBottom: "1.4rem" }}>
       <Lbl color={color ?? C.textMuted}>{title}</Lbl>
@@ -125,7 +127,7 @@ export function InfoBox({ children, color, bg }) {
       background: bg || `${col}08`,
       border: `1px solid ${col}30`,
       borderLeft: `3px solid ${col}`,
-      borderRadius: 4, fontSize: 11,
+      borderRadius: 4, fontSize: T.code.fontSize,
       color: C.textDim, lineHeight: 1.7,
       fontFamily: T.body.fontFamily, marginBottom: "1rem",
     }}>
@@ -140,7 +142,7 @@ export function VarPanel({ title, color, vars, selected, onToggle, multi = true,
   return (
     <Section title={`${title} — ${selected.length > 0 ? selected.join(", ") : "none"}`} color={color}>
       {info && (
-        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: T.body.fontFamily, marginBottom: 6 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.body.fontFamily, marginBottom: 6 }}>
           {info}
         </div>
       )}

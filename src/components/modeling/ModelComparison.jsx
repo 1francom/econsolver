@@ -15,7 +15,6 @@ import { generateMultiModelPythonScript } from "../../services/export/pythonScri
 import { generateMultiModelStataScript }  from "../../services/export/stataScript.js";
 import { buildStargazer }                 from "../../services/export/latexTable.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 function getTypeColor(type, C) {
   const map = {
@@ -31,13 +30,13 @@ function safeN(v, dp = 4) {
 }
 
 function CopyBtn({ text, label = "Copy" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [ok, setOk] = useState(false);
   return (
     <button
       onClick={() => { navigator.clipboard.writeText(text).then(() => { setOk(true); setTimeout(() => setOk(false), 1800); }); }}
-      style={{ padding: "3px 10px", borderRadius: 3, cursor: "pointer", fontFamily: mono,
-               fontSize: 10, border: `1px solid ${ok ? C.teal : C.border2}`,
+      style={{ padding: "3px 10px", borderRadius: 3, cursor: "pointer", fontFamily: T.code.fontFamily,
+               fontSize: T.caption.fontSize, border: `1px solid ${ok ? C.teal : C.border2}`,
                background: ok ? `${C.teal}18` : "transparent",
                color: ok ? C.teal : C.textDim, transition: "all 0.15s" }}
     >
@@ -49,7 +48,7 @@ function CopyBtn({ text, label = "Copy" }) {
 // ─── STARGAZER TABLE ──────────────────────────────────────────────────────────
 // HTML coefficient table: variables in rows, models in columns.
 function StargazerTable({ models }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   // Collect all variable names (union), intercept last
   const allVars = useMemo(() => {
     const set = new Set();
@@ -64,12 +63,12 @@ function StargazerTable({ models }) {
   const colW = Math.max(90, Math.floor(360 / models.length));
 
   const hdrBg  = C.surface2;
-  const cellSt = { padding: "5px 8px", fontFamily: mono, fontSize: 10, textAlign: "right", borderBottom: `1px solid ${C.border}` };
+  const cellSt = { padding: "5px 8px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, textAlign: "right", borderBottom: `1px solid ${C.border}` };
   const labelSt = { ...cellSt, textAlign: "left", color: C.textDim };
 
   return (
     <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", borderSpacing: 0, fontFamily: mono, fontSize: 10 }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", borderSpacing: 0, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
         <thead>
           <tr style={{ background: hdrBg }}>
             <th style={{ ...labelSt, color: C.textMuted, fontWeight: 400, minWidth: 140 }}>Variable</th>
@@ -84,9 +83,9 @@ function StargazerTable({ models }) {
           </tr>
           {/* Model number row */}
           <tr style={{ background: C.surface }}>
-            <td style={{ ...labelSt, fontSize: 9, color: C.textMuted }}></td>
+            <td style={{ ...labelSt, fontSize: T.caption.fontSize, color: C.textMuted }}></td>
             {models.map((_, i) => (
-              <td key={i} style={{ ...cellSt, fontSize: 9, color: C.textMuted }}>({i+1})</td>
+              <td key={i} style={{ ...cellSt, fontSize: T.caption.fontSize, color: C.textMuted }}>({i+1})</td>
             ))}
           </tr>
         </thead>
@@ -113,7 +112,7 @@ function StargazerTable({ models }) {
                   return (
                     <td key={mi} style={{ ...cellSt }}>
                       <div style={{ color: clr }}>{safeN(b, 4)}{sig}</div>
-                      <div style={{ color: C.textMuted, fontSize: 9 }}>({safeN(se, 4)})</div>
+                      <div style={{ color: C.textMuted, fontSize: T.caption.fontSize }}>({safeN(se, 4)})</div>
                     </td>
                   );
                 })}
@@ -156,7 +155,7 @@ function StargazerTable({ models }) {
             })}
           </tr>
           <tr>
-            <td style={{ ...labelSt, fontSize: 8, color: C.textMuted, paddingTop: 4 }}>
+            <td style={{ ...labelSt, fontSize: T.caption.fontSize, color: C.textMuted, paddingTop: 4 }}>
               * p&lt;0.1 · ** p&lt;0.05 · *** p&lt;0.01 · SE in parentheses
             </td>
             {models.map((_, i) => <td key={i} style={{ ...cellSt, paddingTop: 4 }} />)}
@@ -170,7 +169,7 @@ function StargazerTable({ models }) {
 // ─── COEFFICIENT STABILITY HEATMAP ───────────────────────────────────────────
 // Per variable, shows β across models + color-codes by sign change / significance.
 function StabilityHeatmap({ models }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const allVars = useMemo(() => {
     const set = new Set();
     models.forEach(m => (m.varNames ?? []).forEach(v => { if (v !== "(Intercept)") set.add(v); }));
@@ -197,7 +196,7 @@ function StabilityHeatmap({ models }) {
   return (
     <div style={{ overflowX: "auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`}
-           style={{ width: "100%", minWidth: 400, display: "block", fontFamily: mono }}>
+           style={{ width: "100%", minWidth: 400, display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* Column headers */}
@@ -206,7 +205,7 @@ function StabilityHeatmap({ models }) {
           const x = labelW + mi * colW + colW / 2;
           return (
             <text key={mi} x={x} y={PAD.t - 8} textAnchor="middle"
-                  fill={clr} fontSize={9} fontFamily={mono}>
+                  fill={clr} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
               {(m.label ?? m.type ?? `M${mi+1}`).slice(0, 10)}
             </text>
           );
@@ -230,7 +229,7 @@ function StabilityHeatmap({ models }) {
             <g key={v}>
               {/* Variable label */}
               <text x={labelW - 8} y={cy + 4} textAnchor="end"
-                    fill={hasSgChange ? C.yellow : C.textDim} fontSize={9.5}>
+                    fill={hasSgChange ? C.yellow : C.textDim} fontSize={T.caption.fontSize}>
                 {v.length > 19 ? v.slice(0, 18) + "…" : v}
               </text>
 
@@ -248,13 +247,13 @@ function StabilityHeatmap({ models }) {
                           fill={fill} rx={2} />
                     {b != null && isFinite(b) && (
                       <text x={x0 + colW / 2} y={cy + 3} textAnchor="middle"
-                            fill={b > 0 ? C.green : C.red} fontSize={9} fontFamily={mono}>
+                            fill={b > 0 ? C.green : C.red} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                         {b > 0 ? "+" : ""}{safeN(b, 3)}{stars(p)}
                       </text>
                     )}
                     {(b == null || !isFinite(b)) && (
                       <text x={x0 + colW / 2} y={cy + 3} textAnchor="middle"
-                            fill={C.textMuted} fontSize={9}>—</text>
+                            fill={C.textMuted} fontSize={T.caption.fontSize}>—</text>
                     )}
                   </g>
                 );
@@ -263,7 +262,7 @@ function StabilityHeatmap({ models }) {
           );
         })}
       </svg>
-      <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 4 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
         Green cells = positive β · Red cells = negative β · Bright fill = p &lt; 0.05 · Yellow label = sign change across models
       </div>
     </div>
@@ -272,7 +271,7 @@ function StabilityHeatmap({ models }) {
 
 // ─── FIT STATS GRID ───────────────────────────────────────────────────────────
 function FitGrid({ models }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const rows = [
     { label: "R²",      fn: m => m.R2     != null && isFinite(m.R2)     ? m.R2.toFixed(4)     : "—" },
     { label: "Adj. R²", fn: m => m.adjR2  != null && isFinite(m.adjR2)  ? m.adjR2.toFixed(4)  : "—" },
@@ -286,7 +285,7 @@ function FitGrid({ models }) {
     { label: "McF. R²", fn: m => m.mcFaddenR2 != null && isFinite(m.mcFaddenR2) ? m.mcFaddenR2.toFixed(4) : "—" },
   ];
 
-  const st  = { padding: "4px 10px", fontFamily: mono, fontSize: 10, borderBottom: `1px solid ${C.border}` };
+  const st  = { padding: "4px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, borderBottom: `1px solid ${C.border}` };
 
   return (
     <div style={{ overflowX: "auto" }}>
@@ -325,7 +324,7 @@ function FitGrid({ models }) {
 
 // ─── MULTI-MODEL EXPORT ───────────────────────────────────────────────────────
 function ExportBlock({ models, dataDictionary, pipeline = [], filename = "dataset.csv" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [lang,           setLang]           = useState("r");
   const [customLabels,   setCustomLabels]   = useState(() => models.map((m, i) => m.label ?? m.type ?? `M${i + 1}`));
   const [showFirstStage, setShowFirstStage] = useState(false);
@@ -399,7 +398,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
       <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
         {LANGS.map(({ id, label }) => (
           <button key={id} onClick={() => setLang(id)}
-            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10,
+            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                      border: `1px solid ${lang === id ? C.teal : C.border2}`,
                      background: lang === id ? `${C.teal}14` : "transparent",
                      color: lang === id ? C.teal : C.textDim, cursor: "pointer" }}>
@@ -415,7 +414,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
             a.download = `comparison_script${ext}`;
             a.click();
           }}
-          style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10,
+          style={{ padding: "3px 10px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                    border: `1px solid ${C.border2}`, background: "transparent",
                    color: C.textDim, cursor: "pointer" }}
         >
@@ -424,14 +423,14 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
       </div>
       {lang === "latex" && (
         <>
-          <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 8, fontFamily: mono }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 8, fontFamily: T.code.fontFamily }}>
             Add <span style={{ color: C.gold }}>{"\\usepackage{booktabs}"}</span> to your preamble if needed.
             Paste into your <span style={{ color: C.gold }}>\\begin{"{document}"}</span> body.
           </div>
 
           {/* Editable column labels */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, flexShrink: 0 }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, flexShrink: 0 }}>
               Labels:
             </span>
             {models.map((m, i) => (
@@ -445,7 +444,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
                 })}
                 style={{
                   background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3,
-                  color: C.text, fontFamily: mono, fontSize: 9, padding: "2px 6px",
+                  color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 6px",
                   outline: "none", width: 130,
                 }}
                 placeholder={`Col ${i + 1}`}
@@ -454,7 +453,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
             ))}
             {hasIV && (
               <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
-                              fontSize: 9, color: C.textDim, fontFamily: mono, marginLeft: 8 }}>
+                              fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, marginLeft: 8 }}>
                 <input
                   type="checkbox"
                   checked={showFirstStage}
@@ -469,19 +468,19 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
           {/* Editable row labels */}
           {allVarNames.length > 0 && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 4 }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 4 }}>
                 Row labels — edit to rename variables in the table:
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                 {allVarNames.map(v => (
                   <div key={v} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, minWidth: 160,
+                    <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 160,
                                    maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis",
                                    whiteSpace: "nowrap", flexShrink: 0 }}
                           title={v}>
                       {v}
                     </span>
-                    <span style={{ fontSize: 9, color: C.border2, fontFamily: mono }}>→</span>
+                    <span style={{ fontSize: T.caption.fontSize, color: C.border2, fontFamily: T.code.fontFamily }}>→</span>
                     <input
                       value={varLabels[v] ?? ""}
                       onChange={e => setVarLabels(prev => ({ ...prev, [v]: e.target.value }))}
@@ -489,7 +488,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
                       spellCheck={false}
                       style={{
                         flex: 1, background: C.surface2, border: `1px solid ${C.border2}`,
-                        borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 9,
+                        borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                         padding: "2px 6px", outline: "none",
                       }}
                     />
@@ -497,7 +496,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
                       <button
                         onClick={() => setVarLabels(prev => { const n = { ...prev }; delete n[v]; return n; })}
                         style={{ background: "none", border: "none", cursor: "pointer",
-                                 color: C.textMuted, fontSize: 11, padding: "0 2px", lineHeight: 1 }}
+                                 color: C.textMuted, fontSize: T.code.fontSize, padding: "0 2px", lineHeight: 1 }}
                         title="Reset to original"
                       >×</button>
                     )}
@@ -510,8 +509,8 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
       )}
       <pre style={{
         background: C.surface2, border: `1px solid ${C.border}`,
-        borderRadius: 4, padding: "0.8rem", fontSize: 9, color: C.textDim,
-        fontFamily: mono, overflowX: "auto", maxHeight: 240, lineHeight: 1.6,
+        borderRadius: 4, padding: "0.8rem", fontSize: T.caption.fontSize, color: C.textDim,
+        fontFamily: T.code.fontFamily, overflowX: "auto", maxHeight: 240, lineHeight: 1.6,
         margin: 0,
       }}>
         {script}
@@ -522,7 +521,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
 
 // ─── AI NARRATIVE ─────────────────────────────────────────────────────────────
 function AICompareNarrative({ models, dataDictionary }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
@@ -543,25 +542,25 @@ function AICompareNarrative({ models, dataDictionary }) {
     <div>
       {!text && !loading && (
         <button onClick={run}
-          style={{ padding: "5px 14px", borderRadius: 3, fontFamily: mono, fontSize: 10,
+          style={{ padding: "5px 14px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                    border: `1px solid ${C.teal}`, background: `${C.teal}14`,
                    color: C.teal, cursor: "pointer" }}>
           ◈ Generate AI Comparison
         </button>
       )}
       {loading && (
-        <div style={{ fontSize: 11, color: C.textDim, fontFamily: mono }}>
+        <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
           <span style={{ display: "inline-block", animation: "spin 0.8s linear infinite", marginRight: 8 }}>◌</span>
           Generating comparison…
         </div>
       )}
       {error && (
-        <div style={{ fontSize: 10, color: C.red, fontFamily: mono }}>{error}</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily }}>{error}</div>
       )}
       {text && (
         <div>
           <div style={{
-            fontSize: 12, color: C.textDim, lineHeight: 1.9,
+            fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.9,
             fontFamily: "'IBM Plex Sans', sans-serif",
             background: C.surface2, padding: "1rem", borderRadius: 4,
             border: `1px solid ${C.border}`, whiteSpace: "pre-wrap",
@@ -570,7 +569,7 @@ function AICompareNarrative({ models, dataDictionary }) {
           </div>
           <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
             <CopyBtn text={text} label="Copy narrative" />
-            <button onClick={run} style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10,
+            <button onClick={run} style={{ padding: "3px 10px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                                            border: `1px solid ${C.border2}`, background: "transparent",
                                            color: C.textDim, cursor: "pointer" }}>
               Regenerate
@@ -584,13 +583,13 @@ function AICompareNarrative({ models, dataDictionary }) {
 
 // ─── SECTION HEADER ───────────────────────────────────────────────────────────
 function SectionHdr({ children }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{
-      fontSize: 9, color: C.textMuted, letterSpacing: "0.22em",
+      fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.22em",
       textTransform: "uppercase", marginBottom: 10, marginTop: 24,
       borderBottom: `1px solid ${C.border}`, paddingBottom: 6,
-      fontFamily: mono,
+      fontFamily: T.code.fontFamily,
     }}>
       {children}
     </div>
@@ -599,7 +598,7 @@ function SectionHdr({ children }) {
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 export default function ModelComparison({ models, dataDictionary, pipeline = [], filename = "dataset.csv", onClose }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [tab, setTab] = useState("table");
 
   if (!models?.length) return null;
@@ -632,10 +631,10 @@ export default function ModelComparison({ models, dataDictionary, pipeline = [],
           background: C.surface,
           flexShrink: 0,
         }}>
-          <div style={{ fontSize: 10, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase" }}>
             Model Comparison
           </div>
-          <div style={{ fontSize: 10, color: C.textMuted }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
             {models.length} model{models.length > 1 ? "s" : ""} pinned
           </div>
           {/* Model labels */}
@@ -644,8 +643,8 @@ export default function ModelComparison({ models, dataDictionary, pipeline = [],
               const clr = getTypeColor(m.type, C);
               return (
                 <span key={i} style={{
-                  fontSize: 9, color: clr, border: `1px solid ${clr}40`,
-                  borderRadius: 2, padding: "1px 6px", fontFamily: mono,
+                  fontSize: T.caption.fontSize, color: clr, border: `1px solid ${clr}40`,
+                  borderRadius: 2, padding: "1px 6px", fontFamily: T.code.fontFamily,
                 }}>
                   ({i+1}) {m.label ?? m.type}
                 </span>
@@ -672,7 +671,7 @@ export default function ModelComparison({ models, dataDictionary, pipeline = [],
                 border: "none",
                 borderBottom: tab === t.id ? `2px solid ${C.teal}` : "2px solid transparent",
                 color: tab === t.id ? C.teal : C.textDim,
-                fontFamily: mono, fontSize: 10, cursor: "pointer",
+                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 letterSpacing: "0.1em",
                 transition: "color 0.12s",
               }}>

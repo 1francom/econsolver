@@ -1,7 +1,10 @@
 // ─── ECON STUDIO · spatial/shared/constants.js ───────────────────────────────
 // Shared constants and tiny helpers for the Spatial module. Pure JS, no deps.
 
-export const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
+import { MONO_STACK } from "../../../../theme.js";
+
+const tokenMono = MONO_STACK;
+export { tokenMono as mono };
 
 export const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 export const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
