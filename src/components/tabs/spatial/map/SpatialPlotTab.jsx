@@ -515,7 +515,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                 }}
               >{crsLoading ? "…" : "Apply"}</button>
             </div>
-            {crsErr && <div style={{ fontSize: 7, color: "#c47070", fontFamily: mono, marginTop: 3 }}>{crsErr}</div>}
+            {crsErr && <div style={{ fontSize: 7, color: C.red, fontFamily: mono, marginTop: 3 }}>{crsErr}</div>}
           </div>
         )}
 
@@ -644,7 +644,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         {generatedGrid && (
           <div style={{ padding: "0.65rem", borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
             {generatedGrid.error ? (
-              <div style={{ fontSize: 9, color: "#c47070", fontFamily: mono, lineHeight: 1.5 }}>{generatedGrid.error}</div>
+              <div style={{ fontSize: 9, color: C.red, fontFamily: mono, lineHeight: 1.5 }}>{generatedGrid.error}</div>
             ) : (
               <>
                 <div style={{ fontSize: 9, color: C.teal, fontFamily: mono, marginBottom: 6 }}>
@@ -668,7 +668,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           </div>
         )}
 
-        {mapErr && <div style={{ padding: "0.5rem", fontSize: 9, color: "#c47070", fontFamily: mono }}>{mapErr}</div>}
+        {mapErr && <div style={{ padding: "0.5rem", fontSize: 9, color: C.red, fontFamily: mono }}>{mapErr}</div>}
       </div>
 
       {/* ── MAP ─────────────────────────────────────────────────────────────── */}
@@ -679,7 +679,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         </div>
         {layers.length === 0 && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 500 }}>
-            <div style={{ background: "rgba(8,8,8,0.75)", border: `1px solid ${C.border2}`, borderRadius: 4, padding: "1.2rem 2rem", fontFamily: mono, fontSize: 10, color: C.textMuted, textAlign: "center" }}>
+            <div style={{ background: `${C.bg}bf`, border: `1px solid ${C.border2}`, borderRadius: 4, padding: "1.2rem 2rem", fontFamily: mono, fontSize: 10, color: C.textMuted, textAlign: "center" }}>
               Add a Boundary, Grid, Points, or Line layer<br />
               <span style={{ fontSize: 9 }}>to build your spatial plot.</span>
             </div>

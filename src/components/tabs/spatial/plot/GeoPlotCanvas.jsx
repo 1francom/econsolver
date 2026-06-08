@@ -339,7 +339,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       el.appendChild(svg);
     } catch (e) {
       const errDiv = document.createElement("div");
-      errDiv.style.cssText = "color:#c47070;font-family:monospace;font-size:10px;padding:8px";
+      errDiv.style.cssText = `color:${C?.red ?? "#c47070"};font-family:monospace;font-size:10px;padding:8px`;
       errDiv.textContent = e.message;
       el.appendChild(errDiv);
     }

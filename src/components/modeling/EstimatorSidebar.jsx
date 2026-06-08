@@ -256,7 +256,7 @@ export default function EstimatorSidebar({
                       onClick={() => !isPlanned && onFamilySelect?.(f.id)}
                       title={isPlanned ? "Planned — not yet implemented" : undefined}
                       style={{
-                        border: `1px solid ${isActive ? chipColor : "#2a2a2a"}`,
+                        border: `1px solid ${isActive ? chipColor : C.border2}`,
                         borderRadius: 3,
                         padding: "3px 9px",
                         fontSize: 10,

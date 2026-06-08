@@ -202,7 +202,7 @@ function ModelHistory({ history, onRestore, onClear }) {
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onSessionStateChange, onCoachQuestion, onExtract, pid }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const rows    = cleanedData?.cleanRows ?? [];
   const dict    = cleanedData?.dataDictionary ?? {};
   const headers = cleanedData?.headers   ?? [];
@@ -1630,7 +1630,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ background: C.bg, color: C.text, fontFamily: mono, height: "100%", display: "flex", flexDirection: "column", position: "relative" }}>
+    <div style={{ background: C.bg, color: C.text, fontFamily: T.body.fontFamily, height: "100%", display: "flex", flexDirection: "column", position: "relative" }}>
       <style>{`
         @keyframes fadeUp  { from { opacity:0; transform:translateY(6px);  } to { opacity:1; transform:translateY(0); } }
         @keyframes spin    { to   { transform:rotate(360deg); } }

@@ -18,6 +18,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme, mono } from "./modeling/shared.jsx";
+import { PLOT_PALETTES } from "../theme.js";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
@@ -92,6 +93,7 @@ const GEOMS = [
 
 const PALETTE_PRESETS = [
   { id: "",             label: "Manual"      },
+  { id: "teal-gold",    label: "Teal-Gold"   },
   { id: "tableau10",    label: "Tableau"     },
   { id: "observable10", label: "Observable"  },
   { id: "dark2",        label: "Dark2"       },
@@ -100,6 +102,9 @@ const PALETTE_PRESETS = [
   { id: "paired",       label: "Paired"      },
   { id: "accent",       label: "Accent"      },
 ];
+
+// Maps appearance prefs plotPalette → PALETTE_PRESETS id
+const PREF_TO_PRESET = { "teal-gold": "teal-gold", observable: "observable10", tableau: "tableau10" };
 
 
 
@@ -464,6 +469,8 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
   xScale = "linear", yScale = "linear",
   xDomain = [null, null], yDomain = [null, null],
   xFmt = "", yFmt = "",
+  xCatOrder = "", yCatOrder = "",
+  onRenderError,
 }) {
   const { C } = useTheme();
   const ownRef = useRef(null);
@@ -520,9 +527,10 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       const yRange = yMax - yMin;
       // Boxplot builds string category keys for x — adding a numeric ruleX([0]) creates a
       // duplicate "0" entry (number vs string) in Observable Plot's categorical domain.
+      // Also skip ruleX when x is categorical (xVals empty because all values are strings).
       const hasBoxplot = layers.some(ly => ly.visible && ly.geom === "boxplot");
-      const showRuleX = !xIsDate && !hasBoxplot && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
-      const showRuleY = 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
+      const showRuleX = !xIsDate && !hasBoxplot && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
+      const showRuleY = yVals.length > 0 && 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
 
       const zeroStyle = { stroke: "#888", strokeWidth: 1.4, strokeOpacity: 0.55 };
       const marks = [
@@ -545,9 +553,14 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       ];
 
       const hasColorChannel = layers.some(ly => ly.visible && ly.aes?.color);
+      const tealGoldRange = PLOT_PALETTES["teal-gold"];
       const colorOpts = hasColorChannel
-        ? { scheme: scheme || "observable10", legend: true }
-        : scheme ? { scheme } : {};
+        ? (scheme === "teal-gold"
+            ? { range: tealGoldRange, legend: true }
+            : { scheme: scheme || "observable10", legend: true })
+        : scheme === "teal-gold"
+            ? { range: tealGoldRange }
+            : scheme ? { scheme } : {};
       const el = Plt.plot({
         width:        width || 580,
         height:       height || 310,
@@ -569,8 +582,12 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
           ...(xIsDate ? { type: "utc" }
             : { type: xScale !== "linear" ? xScale : undefined,
                 ticks: Math.min(10, Math.floor((width || 580) / 70)) }),
-          ...(xDomain[0] != null || xDomain[1] != null
-            ? { domain: [xDomain[0] ?? xMin, xDomain[1] ?? xMax] } : {}),
+          // xCatOrder: explicit category sequence (like ggplot scale_x_discrete(limits=c(...)))
+          ...(xCatOrder
+            ? { domain: xCatOrder.split(",").map(s => s.trim()).filter(Boolean) }
+            : xDomain[0] != null || xDomain[1] != null
+              ? { domain: [xDomain[0] ?? xMin, xDomain[1] ?? xMax] }
+              : {}),
           ...(xFmt ? { tickFormat: xFmt } : {}),
         },
         y: {
@@ -578,9 +595,18 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
           labelOffset: 40,
           nice:        yScale === "linear",
           inset:       8,
+          // Limit tick density so labels don't pile up on narrow-range axes
+          ticks:       Math.min(8, Math.floor((height || 310) / 40)),
           ...(yScale !== "linear" ? { type: yScale } : {}),
-          ...(yDomain[0] != null || yDomain[1] != null
-            ? { domain: [yDomain[0] ?? yMin, yDomain[1] ?? yMax] } : {}),
+          // Always set an explicit ascending domain when data is present — prevents Observable
+          // Plot from inferring a reversed domain from y1/y2-only marks (e.g. boxplot).
+          ...(yCatOrder
+            ? { domain: yCatOrder.split(",").map(s => s.trim()).filter(Boolean) }
+            : yDomain[0] != null || yDomain[1] != null
+              ? { domain: [yDomain[0] ?? yMin, yDomain[1] ?? yMax] }
+              : yVals.length > 0
+                ? { domain: [yMin, yMax] }
+                : {}),
           ...(yFmt ? { tickFormat: yFmt } : {}),
         },
         color: colorOpts,
@@ -590,13 +616,11 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       container.replaceChildren(el);
     } catch (e) {
       container.replaceChildren();
-      const errDiv = document.createElement("div");
-      errDiv.style.cssText = `color:${C.red};font-family:${mono};font-size:11px;padding:1rem`;
-      errDiv.textContent = "Plot error: " + e.message;
-      container.appendChild(errDiv);
+      // Surface error via callback so it renders OUTSIDE the canvas div (excluded from PNG export)
+      if (onRenderError) onRenderError(e.message);
     }
     return () => { if (ref.current) ref.current.replaceChildren(); };
-  }, [Plt, layers, rows, xLabel, yLabel, width, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt]);
+  }, [Plt, layers, rows, xLabel, yLabel, width, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder]);
 
   if (err) return <div style={{ color: C.red, fontFamily: mono, fontSize: 11, padding: "1.5rem" }}>{err}</div>;
   if (!Plt) return <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10, padding: "1.5rem" }}>Loading Observable Plot…</div>;
@@ -1134,7 +1158,7 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid }) {
-  const { C } = useTheme();
+  const { C, prefs } = useTheme();
   const [layers,      setLayers]      = useState(initialLayers);
   const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
   const [title,       setTitle]       = useState("");
@@ -1153,7 +1177,11 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   const [yDomain,       setYDomain]       = useState([null, null]);
   const [xFmt,          setXFmt]          = useState(""); // "" | "%" | ","
   const [yFmt,          setYFmt]          = useState("");
+  const [xCatOrder,     setXCatOrder]     = useState(""); // comma-separated category order
+  const [yCatOrder,     setYCatOrder]     = useState("");
   const [showAxisOpts,  setShowAxisOpts]  = useState(false);
+  const [plotRenderError,  setPlotRenderError]  = useState(null);
+  const [showPlotError,    setShowPlotError]    = useState(false);
   const canvasRef   = useRef(null);
   const plotRef     = useRef(null);
   const compareRefA = useRef(null);
@@ -1173,6 +1201,14 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Clear render error when layers or data changes
+  useEffect(() => { setPlotRenderError(null); setShowPlotError(false); }, [layers, rows]);
+
+  // Initialise palette from appearance prefs on first mount
+  useEffect(() => {
+    setScheme(PREF_TO_PRESET[prefs?.plotPalette] || "");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load plot history from IndexedDB on mount / pid change
   useEffect(() => {
@@ -1204,11 +1240,13 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setYDomain(entry.yDomain || [null, null]);
     setXFmt(entry.xFmt || "");
     setYFmt(entry.yFmt || "");
+    setXCatOrder(entry.xCatOrder || "");
+    setYCatOrder(entry.yCatOrder || "");
   }, []);
 
   const savePlot = useCallback(() => {
     if (layers.length === 0) return;
-    const scaleState = { xScale, yScale, xDomain, yDomain, xFmt, yFmt };
+    const scaleState = { xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder };
     let next;
     if (histIdx !== null && plotHistory[histIdx]) {
       const updated = {
@@ -1230,7 +1268,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     }
     setPlotHistory(next);
     if (pid) savePlotHistory(pid, next).catch(() => {});
-  }, [plotHistory, histIdx, layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, pid]);
+  }, [plotHistory, histIdx, layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder, pid]);
 
   const newPlot = useCallback(() => {
     setLayers([]);
@@ -1245,6 +1283,8 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setYDomain([null, null]);
     setXFmt("");
     setYFmt("");
+    setXCatOrder("");
+    setYCatOrder("");
     setHistIdx(null);
   }, []);
 
@@ -1445,9 +1485,9 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             padding: "0.35rem 0.75rem", background: C.bg, borderTop: `1px solid ${C.border}`,
           }}>
             {[
-              { axis: "X", scale: xScale, setScale: setXScale, domain: xDomain, setDomain: setXDomain, fmt: xFmt, setFmt: setXFmt },
-              { axis: "Y", scale: yScale, setScale: setYScale, domain: yDomain, setDomain: setYDomain, fmt: yFmt, setFmt: setYFmt },
-            ].map(({ axis, scale, setScale, domain, setDomain, fmt, setFmt }) => (
+              { axis: "X", scale: xScale, setScale: setXScale, domain: xDomain, setDomain: setXDomain, fmt: xFmt, setFmt: setXFmt, catOrder: xCatOrder, setCatOrder: setXCatOrder },
+              { axis: "Y", scale: yScale, setScale: setYScale, domain: yDomain, setDomain: setYDomain, fmt: yFmt, setFmt: setYFmt, catOrder: yCatOrder, setCatOrder: setYCatOrder },
+            ].map(({ axis, scale, setScale, domain, setDomain, fmt, setFmt, catOrder, setCatOrder }) => (
               <div key={axis} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, width: 8 }}>{axis}</span>
                 {/* Scale type */}
@@ -1488,10 +1528,23 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                   <option value=".2f">.2f</option>
                   <option value=".3f">.3f</option>
                 </select>
+                {/* Category order — like ggplot scale_x_discrete(limits=c(...)) */}
+                <span style={{ fontFamily: mono, fontSize: 8, color: C.border }}>|</span>
+                <span style={{ fontFamily: mono, fontSize: 8, color: C.textMuted }}>order</span>
+                <input
+                  value={catOrder}
+                  onChange={e => setCatOrder(e.target.value)}
+                  placeholder="cat1, cat2, …"
+                  title={`Comma-separated category order for ${axis} axis (like scale_${axis.toLowerCase()}_discrete(limits=...))`}
+                  style={{
+                    width: 110, background: C.bg, border: `1px solid ${catOrder ? C.teal : C.border}`,
+                    borderRadius: 3, fontFamily: mono, fontSize: 8, padding: "2px 4px",
+                    color: catOrder ? C.text : C.textMuted, outline: "none",
+                  }} />
               </div>
             ))}
             {/* Reset all */}
-            <button onClick={() => { setXScale("linear"); setYScale("linear"); setXDomain([null,null]); setYDomain([null,null]); setXFmt(""); setYFmt(""); }}
+            <button onClick={() => { setXScale("linear"); setYScale("linear"); setXDomain([null,null]); setYDomain([null,null]); setXFmt(""); setYFmt(""); setXCatOrder(""); setYCatOrder(""); }}
               style={{ padding: "2px 6px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer", background: "none", color: C.textMuted, border: `1px solid ${C.border}`, marginLeft: "auto" }}>
               reset
             </button>
@@ -1500,7 +1553,30 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
       </div>
 
       {/* ── BOTTOM: plot — all visible layers composited ────────────────────── */}
-      <div ref={plotRef} style={{ flex: 1, padding: "0.65rem", overflow: "hidden", minHeight: 220 }}>
+      <div ref={plotRef} style={{ flex: 1, padding: "0.65rem", overflow: "hidden", minHeight: 220, position: "relative" }}>
+        {/* Error badge — outside canvasRef so it is NOT captured in PNG export */}
+        {plotRenderError && (
+          <div style={{ position: "absolute", top: 10, right: 10, zIndex: 20 }}>
+            <button
+              onClick={() => setShowPlotError(s => !s)}
+              title="Plot render error — click for details"
+              style={{
+                background: `${C.gold}22`, border: `1px solid ${C.gold}66`,
+                borderRadius: 3, padding: "2px 6px", cursor: "pointer",
+                fontFamily: mono, fontSize: 9, color: C.gold, lineHeight: 1.4,
+              }}>⚠ error</button>
+            {showPlotError && (
+              <div style={{
+                position: "absolute", right: 0, top: 24, zIndex: 30,
+                background: C.surface, border: `1px solid ${C.gold}55`,
+                borderRadius: 4, padding: "0.5rem 0.75rem",
+                fontFamily: mono, fontSize: 9, color: C.text,
+                maxWidth: 300, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+              }}>{plotRenderError}</div>
+            )}
+          </div>
+        )}
         {visibleLayers.length === 0 ? (
           <div style={{
             height: "100%", minHeight: 180, display: "flex", alignItems: "center",
@@ -1531,6 +1607,9 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
               yDomain={yDomain}
               xFmt={xFmt}
               yFmt={yFmt}
+              xCatOrder={xCatOrder}
+              yCatOrder={yCatOrder}
+              onRenderError={setPlotRenderError}
             />
           </div>
         )}
