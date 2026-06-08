@@ -4,10 +4,9 @@ import { useAuth } from "../../services/auth/AuthContext.jsx";
 import LoginForm from "./LoginForm.jsx";
 import { useTheme } from "../../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 function LoadingScreen() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{
       minHeight: "100vh",
@@ -15,7 +14,7 @@ function LoadingScreen() {
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      fontFamily: mono,
+      fontFamily: T.code.fontFamily,
     }}>
       <div style={{ textAlign: "center" }}>
         <div style={{
@@ -27,7 +26,7 @@ function LoadingScreen() {
           animation: "spin 0.7s linear infinite",
           margin: "0 auto 1rem",
         }} />
-        <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase" }}>
           Loading
         </div>
       </div>

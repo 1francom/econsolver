@@ -30,7 +30,6 @@ import SpatialTab       from './components/tabs/SpatialTab.jsx';
 import ReportingModule  from './ReportingModule.jsx';
 import { TourOverlay, TOUR_STEPS } from "./components/HelpSystem.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 const LS_KEY = "econ_wrangle_v2";
 
 // ─── DEMO CSV ─────────────────────────────────────────────────────────────────
@@ -128,32 +127,32 @@ function lsSet(d){try{localStorage.setItem(LS_KEY,JSON.stringify(d));}catch{}}
 
 // ─── SHARED ATOMS ─────────────────────────────────────────────────────────────
 function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.gold;
-  const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily:mono,fontSize:sm?10:11,transition:"all 0.13s",opacity:dis?0.4:1};
+  const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily: T.code.fontFamily,fontSize:sm?10:11,transition:"all 0.13s",opacity:dis?0.4:1};
   if(v==="solid")return<button onClick={onClick} disabled={dis} style={{...b,background:color,color:C.bg,border:`1px solid ${color}`,fontWeight:700}}>{ch}</button>;
   if(v==="ghost")return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:"none",color:dis?C.textMuted:color}}>{ch}</button>;
   return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:`1px solid ${C.border2}`,color:dis?C.textMuted:C.textDim}}>{ch}</button>;
 }
-function Badge({ch,color}){const { C } = useTheme(); color = color ?? C.textMuted; return<span style={{fontSize:9,padding:"2px 6px",border:`1px solid ${color}`,color,borderRadius:2,letterSpacing:"0.1em",fontFamily:mono,whiteSpace:"nowrap"}}>{ch}</span>;}
-function Spin(){const { C } = useTheme(); return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
+function Badge({ch,color}){const { C, T } = useTheme(); color = color ?? C.textMuted; return<span style={{fontSize: T.caption.fontSize,padding:"2px 6px",border:`1px solid ${color}`,color,borderRadius:2,letterSpacing:"0.1em",fontFamily: T.code.fontFamily,whiteSpace:"nowrap"}}>{ch}</span>;}
+function Spin(){const { C, T } = useTheme(); return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
 
 // ─── DATA GRID (shared preview) ───────────────────────────────────────────────
 function Grid({headers,rows,hi,max=20,types,onType}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const vis=rows.slice(0,max);
   if(!headers.length)return null;
   const tc={numeric:C.blue,binary:C.purple,categorical:C.purple,string:C.textMuted,date:C.teal};
   return(
     <div style={{overflowX:"auto",borderRadius:4,border:`1px solid ${C.border}`}}>
-      <table style={{borderCollapse:"collapse",fontSize:11,width:"100%",minWidth:300}}>
+      <table style={{borderCollapse:"collapse",fontSize: T.code.fontSize,width:"100%",minWidth:300}}>
         <thead>
           <tr style={{background:C.surface2}}>
             {headers.map(h=>(
-              <th key={h} style={{padding:"0.45rem 0.75rem",textAlign:"left",fontFamily:mono,fontWeight:400,fontSize:10,color:h===hi?C.teal:C.textDim,whiteSpace:"nowrap",borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,background:C.surface2}}>
+              <th key={h} style={{padding:"0.45rem 0.75rem",textAlign:"left",fontFamily: T.code.fontFamily,fontWeight:400,fontSize: T.caption.fontSize,color:h===hi?C.teal:C.textDim,whiteSpace:"nowrap",borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,background:C.surface2}}>
                 <div style={{display:"flex",flexDirection:"column",gap:2}}>
                   <span>{h}</span>
-                  {onType&&types&&<select value={types[h]||""} onChange={e=>onType(h,e.target.value)} onClick={e=>e.stopPropagation()} style={{fontSize:9,padding:"1px 3px",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:2,color:tc[types[h]]||C.textMuted,fontFamily:mono,cursor:"pointer",outline:"none"}}>
+                  {onType&&types&&<select value={types[h]||""} onChange={e=>onType(h,e.target.value)} onClick={e=>e.stopPropagation()} style={{fontSize: T.caption.fontSize,padding:"1px 3px",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:2,color:tc[types[h]]||C.textMuted,fontFamily: T.code.fontFamily,cursor:"pointer",outline:"none"}}>
                     {["numeric","categorical","binary","string","date"].map(t=><option key={t} value={t}>{t}</option>)}
                   </select>}
                 </div>
@@ -165,7 +164,7 @@ function Grid({headers,rows,hi,max=20,types,onType}){
           {vis.map((row,i)=>(
             <tr key={i} style={{background:i%2?C.surface2:C.surface}}>
               {headers.map(h=>{const v=row[h];const isNull=v===null||v===undefined;return(
-                <td key={h} style={{padding:"0.35rem 0.75rem",fontFamily:mono,fontSize:11,color:isNull?C.textMuted:h===hi?C.teal:C.text,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis"}}>
+                <td key={h} style={{padding:"0.35rem 0.75rem",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,color:isNull?C.textMuted:h===hi?C.teal:C.text,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis"}}>
                   {isNull?"·":typeof v==="number"?v.toFixed(3).replace(/\.?0+$/,""):String(v)}
                 </td>
               );})}
@@ -173,14 +172,14 @@ function Grid({headers,rows,hi,max=20,types,onType}){
           ))}
         </tbody>
       </table>
-      {rows.length>max&&<div style={{padding:"0.35rem 0.75rem",fontSize:10,color:C.textMuted,fontFamily:mono,background:C.surface2,borderTop:`1px solid ${C.border}`}}>… {rows.length-max} more rows</div>}
+      {rows.length>max&&<div style={{padding:"0.35rem 0.75rem",fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,background:C.surface2,borderTop:`1px solid ${C.border}`}}>… {rows.length-max} more rows</div>}
     </div>
   );
 }
 
 // ─── UPLOADER ────────────────────────────────────────────────────────────────
 function Uploader({onReady}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [drag,setDrag]=useState(false),[loading,setLoading]=useState(false),[err,setErr]=useState(""),[pf,setPf]=useState(null);
   const ref=useRef();
   function processParsed({headers,rows},fname){
@@ -250,9 +249,9 @@ function Uploader({onReady}){
     onReady({headers:pf.headers,rows:recoerced},ov,pf.fname);
   }
   if(pf)return(
-    <div style={{maxWidth:900,margin:"0 auto",padding:"2rem",fontFamily:mono}}>
-      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:5}}>Preview — {pf.fname}</div>
-      <div style={{fontSize:11,color:C.textDim,marginBottom:"1.2rem"}}>{pf.rows.length} rows · {pf.headers.length} cols · Click type badges to override</div>
+    <div style={{maxWidth:900,margin:"0 auto",padding:"2rem",fontFamily: T.code.fontFamily}}>
+      <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:5}}>Preview — {pf.fname}</div>
+      <div style={{fontSize: T.code.fontSize,color:C.textDim,marginBottom:"1.2rem"}}>{pf.rows.length} rows · {pf.headers.length} cols · Click type badges to override</div>
       <Grid headers={pf.headers} rows={pf.rows} max={10} types={{...pf.dt,...ov}} onType={(h,t)=>setOv(p=>({...p,[h]:t}))}/>
       <div style={{marginTop:"1.5rem",display:"flex",gap:10}}>
         <Btn onClick={confirm} color={C.gold} v="solid" ch="Confirm & Enter Data Studio →"/>
@@ -263,7 +262,7 @@ function Uploader({onReady}){
   return(
     <div style={{maxWidth:560,margin:"0 auto",padding:"3rem 2rem",display:"flex",flexDirection:"column",alignItems:"center",gap:"1.5rem"}}>
       <div style={{textAlign:"center"}}>
-        <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:5,fontFamily:mono}}>Data Ingestion</div>
+        <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:5,fontFamily: T.code.fontFamily}}>Data Ingestion</div>
         <div style={{fontSize:22,color:C.text,letterSpacing:"-0.02em"}}>Load your dataset</div>
       </div>
       <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
@@ -272,13 +271,13 @@ function Uploader({onReady}){
         style={{width:"100%",border:`2px dashed ${drag?C.gold:C.border2}`,borderRadius:6,padding:"2.5rem 1.5rem",textAlign:"center",cursor:"pointer",background:drag?C.goldFaint:C.surface,transition:"all 0.15s"}}>
         <input ref={ref} type="file" accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.parquet,.zip" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
         <div style={{fontSize:26,marginBottom:8}}>⬆</div>
-        <div style={{fontSize:13,color:C.text,marginBottom:4}}>Drop file or click to browse</div>
-        <div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
+        <div style={{fontSize: T.body.fontSize,color:C.text,marginBottom:4}}>Drop file or click to browse</div>
+        <div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
       </div>
-      {loading&&<div style={{display:"flex",alignItems:"center",gap:10,color:C.textDim,fontSize:12}}><Spin/> Parsing…</div>}
-      {err&&<div style={{color:C.red,fontSize:11,fontFamily:mono,padding:"0.65rem 1rem",border:`1px solid ${C.red}40`,borderRadius:4,width:"100%"}}>{err}</div>}
+      {loading&&<div style={{display:"flex",alignItems:"center",gap:10,color:C.textDim,fontSize: T.code.fontSize}}><Spin/> Parsing…</div>}
+      {err&&<div style={{color:C.red,fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,padding:"0.65rem 1rem",border:`1px solid ${C.red}40`,borderRadius:4,width:"100%"}}>{err}</div>}
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <div style={{height:1,width:50,background:C.border}}/><span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>or</span><div style={{height:1,width:50,background:C.border}}/>
+        <div style={{height:1,width:50,background:C.border}}/><span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>or</span><div style={{height:1,width:50,background:C.border}}/>
       </div>
       <Btn onClick={()=>process(DEMO_CSV,"wages_panel_demo.csv")} color={C.teal} v="solid" ch="Load wages panel demo"/>
     </div>
@@ -288,13 +287,13 @@ function Uploader({onReady}){
 // ─── WORKSPACE HELPERS ────────────────────────────────────────────────────────
 // Shown when no dataset is loaded yet — directs user to Data tab.
 function NeedsData({ onGoToData }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-                 height:"100%",gap:12,fontFamily:mono}}>
+                 height:"100%",gap:12,fontFamily: T.code.fontFamily}}>
       <div style={{fontSize:28,color:C.border2}}>⊕</div>
-      <div style={{fontSize:12,color:C.textDim}}>No dataset loaded yet.</div>
-      <div style={{fontSize:10,color:C.textMuted,marginBottom:4}}>
+      <div style={{fontSize: T.code.fontSize,color:C.textDim}}>No dataset loaded yet.</div>
+      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginBottom:4}}>
         Load a file, fetch from World Bank, or simulate data from the Data tab.
       </div>
       <Btn onClick={onGoToData} v="solid" color={C.teal} ch="→ Go to Data"/>
@@ -304,12 +303,12 @@ function NeedsData({ onGoToData }) {
 
 // Shown in Explore / Model / Report tabs when no pipeline output exists yet.
 function NeedsOutput({ onGoToClean }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:12,fontFamily:mono}}>
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:12,fontFamily: T.code.fontFamily}}>
       <div style={{fontSize:28,color:C.border2}}>⌾</div>
-      <div style={{fontSize:12,color:C.textDim}}>Apply your pipeline first.</div>
-      <div style={{fontSize:10,color:C.textMuted,marginBottom:4}}>Go to Clean → run your steps → click "→ Analyze"</div>
+      <div style={{fontSize: T.code.fontSize,color:C.textDim}}>Apply your pipeline first.</div>
+      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginBottom:4}}>Go to Clean → run your steps → click "→ Analyze"</div>
       <Btn onClick={onGoToClean} v="solid" color={C.teal} ch="← Go to Clean"/>
     </div>
   );
@@ -340,7 +339,7 @@ function colStats(col, rows) {
 }
 
 function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColumn, onAddRow, onSetWhere, onReplace, onStrSplice, duckdbMeta }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [page,         setPage]        = useState(0);
   const [selCol,       setSelCol]      = useState(null);
   const [colFilter,    setColFilter]   = useState("");
@@ -446,10 +445,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const canBulkEdit = !!filterCol && hasFilterValue && !!targetCol && !!onSetWhere;
   const controlStyle = {
     padding:"2px 6px", background:C.surface, border:`1px solid ${C.border2}`,
-    borderRadius:3, color:C.text, fontFamily:mono, fontSize:9, outline:"none",
+    borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline:"none",
   };
   const chipStyle = active => ({
-    padding:"2px 7px", borderRadius:3, fontFamily:mono, fontSize:9, cursor:"pointer",
+    padding:"2px 7px", borderRadius:3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor:"pointer",
     background: active ? `${C.teal}33` : "transparent",
     border:`1px solid ${active ? C.teal : C.border2}`,
     color: active ? C.teal : C.textMuted, transition:"all 0.1s",
@@ -497,14 +496,14 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
       {/* Toolbar */}
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"0.5rem 0.9rem",borderBottom:`1px solid ${C.border}`,flexShrink:0,background:C.surface2}}>
-        <span style={{fontSize:10,color:C.text,fontFamily:mono}}>{filename}</span>
-        <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{totalCount.toLocaleString()} × {headers.length}</span>
+        <span style={{fontSize: T.caption.fontSize,color:C.text,fontFamily: T.code.fontFamily}}>{filename}</span>
+        <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>{totalCount.toLocaleString()} × {headers.length}</span>
         {onPatch && (
           <button
             onClick={() => { setEditMode(m => { if (m) { setEditingCell(null); setFillText(""); } return !m; }); }}
             title={editMode ? "Exit cell editing mode" : "Enable cell editing (double-click to edit cells)"}
             style={{
-              padding:"2px 8px", borderRadius:3, fontFamily:mono, fontSize:9,
+              padding:"2px 8px", borderRadius:3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
               cursor:"pointer",
               background: editMode ? `${C.teal}22` : "transparent",
               border: `1px solid ${editMode ? C.teal : C.border2}`,
@@ -520,11 +519,11 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
           onChange={e => { setColFilter(e.target.value); setSelCol(null); }}
           placeholder="Filter columns…"
           style={{padding:"3px 8px",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,
-                  color:C.text,fontFamily:mono,fontSize:10,width:140,outline:"none"}}
+                  color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,width:140,outline:"none"}}
         />
         {/* Decimal rounding control */}
         <div style={{display:"flex",alignItems:"center",gap:4}}>
-          <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,whiteSpace:"nowrap"}}>dec:</span>
+          <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,whiteSpace:"nowrap"}}>dec:</span>
           <input
             type="number"
             min="0"
@@ -536,7 +535,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
             style={{
               width:52, padding:"3px 5px", background:C.surface, border:`1px solid ${C.border2}`,
               borderRadius:3, color: roundDec !== "" ? C.teal : C.textMuted,
-              fontFamily:mono, fontSize:9, outline:"none",
+              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline:"none",
             }}
           />
           {roundDec !== "" && (
@@ -544,22 +543,22 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
               onClick={() => setRoundDec("")}
               title="Clear rounding — show full precision"
               style={{padding:"1px 5px",background:"transparent",border:`1px solid ${C.border2}`,
-                      borderRadius:3,color:C.textMuted,fontFamily:mono,fontSize:9,cursor:"pointer"}}>
+                      borderRadius:3,color:C.textMuted,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,cursor:"pointer"}}>
               ×
             </button>
           )}
         </div>
         {totalPages > 1 && (
           <div style={{display:"flex",alignItems:"center",gap:4}}>
-            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>rows {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, totalCount)}</span>
+            <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>rows {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, totalCount)}</span>
             <button onClick={() => setPage(p => Math.max(0, p-1))} disabled={page===0}
               title="Previous 100 rows"
               style={{padding:"2px 6px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
-                      color: page===0 ? C.textMuted : C.textDim,cursor: page===0 ? "default":"pointer",fontFamily:mono,fontSize:10}}>↑</button>
+                      color: page===0 ? C.textMuted : C.textDim,cursor: page===0 ? "default":"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>↑</button>
             <button onClick={() => setPage(p => Math.min(totalPages-1, p+1))} disabled={page===totalPages-1}
               title="Next 100 rows"
               style={{padding:"2px 6px",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,
-                      color: page===totalPages-1 ? C.textMuted : C.textDim,cursor: page===totalPages-1 ? "default":"pointer",fontFamily:mono,fontSize:10}}>↓</button>
+                      color: page===totalPages-1 ? C.textMuted : C.textDim,cursor: page===totalPages-1 ? "default":"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>↓</button>
           </div>
         )}
       </div>
@@ -568,12 +567,12 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
       {editMode && onFillColumn && (
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"0.4rem 0.9rem",
                      borderBottom:`1px solid ${C.border}`,flexShrink:0,background:`${C.teal}0d`,flexWrap:"wrap"}}>
-          <span style={{fontSize:9,color:C.teal,fontFamily:mono,whiteSpace:"nowrap"}}>Fill column:</span>
+          <span style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily,whiteSpace:"nowrap"}}>Fill column:</span>
           <select
             value={fillCol || headers[0] || ""}
             onChange={e => setFillCol(e.target.value)}
             style={{padding:"2px 6px",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,
-                    color:C.text,fontFamily:mono,fontSize:9,maxWidth:160}}>
+                    color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,maxWidth:160}}>
             {headers.filter(h => !h.startsWith("__")).map(h => (
               <option key={h} value={h}>{h}</option>
             ))}
@@ -581,7 +580,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
           {/* Op chips */}
           {[["set","Set"],["append","Append"],["prepend","Prepend"]].map(([op, label]) => (
             <button key={op} onClick={() => setFillOp(op)}
-              style={{padding:"2px 7px",borderRadius:3,fontFamily:mono,fontSize:9,cursor:"pointer",
+              style={{padding:"2px 7px",borderRadius:3,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,cursor:"pointer",
                       background: fillOp === op ? `${C.teal}33` : "transparent",
                       border:`1px solid ${fillOp === op ? C.teal : C.border2}`,
                       color: fillOp === op ? C.teal : C.textMuted,transition:"all 0.1s"}}>
@@ -594,7 +593,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
             placeholder="value to fill…"
             style={{flex:1,minWidth:160,padding:"3px 8px",background:C.surface,
                     border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,
-                    fontFamily:mono,fontSize:10,outline:"none"}}
+                    fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,outline:"none"}}
           />
           <button
             disabled={!fillText && fillOp === "set"}
@@ -603,7 +602,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
               if (!col) return;
               onFillColumn(col, fillOp, fillText);
             }}
-            style={{padding:"3px 10px",borderRadius:3,fontFamily:mono,fontSize:9,cursor:"pointer",
+            style={{padding:"3px 10px",borderRadius:3,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,cursor:"pointer",
                     background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,
                     opacity:(!fillText && fillOp==="set") ? 0.4 : 1}}>
             Apply to all
@@ -620,14 +619,14 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                 {label}
               </button>
             ))}
-            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginLeft:"auto"}}>
+            <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginLeft:"auto"}}>
               showing {pageRows.length ? (page * PAGE_SIZE + 1).toLocaleString() : 0}-{Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString()} of {totalCount.toLocaleString()}
             </span>
           </div>
 
           {editPanel === "filter" && (
             <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
-              <span style={{fontSize:9,color:C.teal,fontFamily:mono}}>Rows</span>
+              <span style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>Rows</span>
               <select value={filterCol} onChange={e => setFilterCol(e.target.value)} style={{...controlStyle,maxWidth:150}}>
                 {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
               </select>
@@ -641,13 +640,13 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                 <input value={filterVal} onChange={e => setFilterVal(e.target.value)}
                   placeholder="value" style={{...controlStyle,width:130}}/>
               )}
-              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
                 {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()}
               </span>
               {onSetWhere && (
                 <>
-                  <span style={{fontSize:9,color:C.border2,fontFamily:mono}}>|</span>
-                  <span style={{fontSize:9,color:C.teal,fontFamily:mono}}>Set</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.border2,fontFamily: T.code.fontFamily}}>|</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>Set</span>
                   <select value={targetCol} onChange={e => setTargetCol(e.target.value)} style={{...controlStyle,maxWidth:150}}>
                     {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
@@ -661,7 +660,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                     style={{...chipStyle(false),opacity:canBulkEdit ? 1 : 0.4,cursor:canBulkEdit ? "pointer" : "not-allowed"}}>
                     Clear
                   </button>
-                  <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+                  <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
                     affects {filteredRows.length.toLocaleString()}
                   </span>
                 </>
@@ -673,7 +672,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
             <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
               {onAddColumn && (
                 <>
-                  <span style={{fontSize:9,color:C.teal,fontFamily:mono}}>+ Column</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>+ Column</span>
                   <input value={newColName} onChange={e => setNewColName(e.target.value)}
                     placeholder="name" style={{...controlStyle,width:130}}/>
                   <select value={newColType} onChange={e => setNewColType(e.target.value)} style={controlStyle}>
@@ -690,8 +689,8 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
               )}
               {onAddRow && (
                 <>
-                  <span style={{fontSize:9,color:C.border2,fontFamily:mono}}>|</span>
-                  <span style={{fontSize:9,color:C.teal,fontFamily:mono}}>+ Row</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.border2,fontFamily: T.code.fontFamily}}>|</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>+ Row</span>
                   <input type="number" min="1" value={rowCount} onChange={e => setRowCount(e.target.value)}
                     style={{...controlStyle,width:58}}/>
                   <button onClick={() => onAddRow({}, Math.max(1, Number(rowCount) || 1))} style={chipStyle(true)}>
@@ -743,7 +742,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                 style={{...controlStyle,width:68}}/>
               <input value={spliceNewCol} onChange={e => setSpliceNewCol(e.target.value)}
                 placeholder="new column" style={{...controlStyle,width:130}}/>
-              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>1-based; -1=end</span>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>1-based; -1=end</span>
               <button disabled={!spliceCol} onClick={() => onStrSplice(spliceCol, Number(splicePos), spliceMode, spliceText, Number(spliceCount) || 0, spliceNewCol)}
                 style={{...chipStyle(true),opacity:spliceCol ? 1 : 0.4,cursor:spliceCol ? "pointer" : "not-allowed"}}>
                 Apply
@@ -756,7 +755,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
       <div style={{display:"flex",flex:1,minHeight:0}}>
         {/* Grid */}
         <div style={{flex:1,overflow:"auto",minHeight:0}}>
-          <table style={{borderCollapse:"collapse",fontFamily:mono,fontSize:10,minWidth:"100%"}}>
+          <table style={{borderCollapse:"collapse",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,minWidth:"100%"}}>
             <thead style={{position:"sticky",top:0,zIndex:2}}>
               <tr>
                 {/* Row number header */}
@@ -780,7 +779,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                       }}>
                       <div style={{display:"flex",alignItems:"center",gap:5}}>
                         {h}
-                        <span style={{fontSize:8,color: selCol===h ? C.teal : C.textMuted,
+                        <span style={{fontSize: T.caption.fontSize,color: selCol===h ? C.teal : C.textMuted,
                                       border:`1px solid ${selCol===h ? C.teal+"60" : C.border2}`,
                                       borderRadius:2,padding:"1px 4px",fontWeight:400}}>
                           {isNum ? "num" : "str"}
@@ -869,7 +868,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                                 background: "transparent",
                                 border: "none", outline: "none",
                                 color: C.teal,
-                                fontFamily: mono, fontSize: 10,
+                                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                                 padding: "2px 6px",
                               }}
                             />
@@ -887,8 +886,8 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
         {/* Column stats panel */}
         {selCol && stats && (
           <div style={{width:200,flexShrink:0,borderLeft:`1px solid ${C.border2}`,
-                       background:C.surface,padding:"0.8rem",overflowY:"auto",fontFamily:mono}}>
-            <div style={{fontSize:9,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>{selCol}</div>
+                       background:C.surface,padding:"0.8rem",overflowY:"auto",fontFamily: T.code.fontFamily}}>
+            <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>{selCol}</div>
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
               {stats.type === "numeric" ? (
                 <>
@@ -902,8 +901,8 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                     ["Max",   stats.max],
                   ].map(([l,v]) => (
                     <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                      <span style={{fontSize:9,color:C.textMuted}}>{l}</span>
-                      <span style={{fontSize:10,color:C.text}}>{v}</span>
+                      <span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>{l}</span>
+                      <span style={{fontSize: T.caption.fontSize,color:C.text}}>{v}</span>
                     </div>
                   ))}
                 </>
@@ -916,16 +915,16 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                     ["Unique", stats.unique],
                   ].map(([l,v]) => (
                     <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                      <span style={{fontSize:9,color:C.textMuted}}>{l}</span>
-                      <span style={{fontSize:10,color:C.text}}>{v}</span>
+                      <span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>{l}</span>
+                      <span style={{fontSize: T.caption.fontSize,color:C.text}}>{v}</span>
                     </div>
                   ))}
                   <div style={{marginTop:6}}>
-                    <div style={{fontSize:9,color:C.textMuted,marginBottom:4}}>Top values</div>
+                    <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginBottom:4}}>Top values</div>
                     {stats.top.map(([val, cnt]) => (
                       <div key={val} style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                        <span style={{fontSize:9,color:C.textDim,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{val}</span>
-                        <span style={{fontSize:9,color:C.textMuted}}>{cnt}</span>
+                        <span style={{fontSize: T.caption.fontSize,color:C.textDim,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{val}</span>
+                        <span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>{cnt}</span>
                       </div>
                     ))}
                   </div>
@@ -933,8 +932,8 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
               )}
             </div>
             <button onClick={() => setSelCol(null)}
-              style={{marginTop:14,fontSize:9,color:C.textMuted,background:"none",border:"none",
-                      cursor:"pointer",fontFamily:mono,padding:0}}>✕ close</button>
+              style={{marginTop:14,fontSize: T.caption.fontSize,color:C.textMuted,background:"none",border:"none",
+                      cursor:"pointer",fontFamily: T.code.fontFamily,padding:0}}>✕ close</button>
           </div>
         )}
       </div>
@@ -945,7 +944,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
 // ─── COLUMN META TABLE ────────────────────────────────────────────────────────
 // Renders a compact column-by-column info table: name, type, non-null %, range/top.
 function ColumnMetaTable({ rows, headers, colInfo }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [expandedCol, setExpandedCol] = useState(null);
 
   const meta = useMemo(() => headers.map(h => {
@@ -972,12 +971,12 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
   const typeColor = t => t==="num" ? C.blue : t==="date" ? C.teal : C.gold;
 
   return (
-    <table style={{width:"100%",borderCollapse:"collapse",fontFamily:mono,fontSize:10}}>
+    <table style={{width:"100%",borderCollapse:"collapse",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
       <thead>
         <tr style={{background:C.surface2}}>
           {["Column","Type","Non-null","Summary"].map(h=>(
             <th key={h} style={{padding:"5px 10px",textAlign:"left",fontWeight:500,
-                                color:C.textMuted,fontSize:9,letterSpacing:"0.1em",
+                                color:C.textMuted,fontSize: T.caption.fontSize,letterSpacing:"0.1em",
                                 textTransform:"uppercase",borderBottom:`1px solid ${C.border2}`}}>
               {h}
             </th>
@@ -995,14 +994,14 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
                 {expandedCol===m.h ? "▾ " : "▸ "}{m.h}
               </td>
               <td style={{padding:"5px 10px"}}>
-                <span style={{fontSize:9,color:typeColor(m.type),border:`1px solid ${typeColor(m.type)}40`,
+                <span style={{fontSize: T.caption.fontSize,color:typeColor(m.type),border:`1px solid ${typeColor(m.type)}40`,
                               borderRadius:2,padding:"1px 5px"}}>{m.type}</span>
               </td>
               <td style={{padding:"5px 10px",color: m.nullPct>0 ? C.gold : C.textDim}}>
                 {100-m.nullPct}%
-                {m.nullPct>0 && <span style={{fontSize:9,color:C.gold,marginLeft:4}}>({m.nullPct}% NA)</span>}
+                {m.nullPct>0 && <span style={{fontSize: T.caption.fontSize,color:C.gold,marginLeft:4}}>({m.nullPct}% NA)</span>}
               </td>
-              <td style={{padding:"5px 10px",color:C.textMuted,fontSize:9}}>
+              <td style={{padding:"5px 10px",color:C.textMuted,fontSize: T.caption.fontSize}}>
                 {m.type==="num"
                   ? `${m.min} – ${m.max}  ·  μ ${m.mean.toFixed(2)}`
                   : `${m.unique} unique · "${m.top[0]?.[0] ?? ""}"`
@@ -1017,17 +1016,17 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
                       {[["Mean",m.mean.toFixed(4)],["Std Dev",m.sd.toFixed(4)],
                         ["Min",m.min],["Max",m.max],["Unique",m.unique]].map(([l,v])=>(
                         <div key={l}>
-                          <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:2}}>{l}</div>
-                          <div style={{fontSize:11,color:C.text}}>{v}</div>
+                          <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:2}}>{l}</div>
+                          <div style={{fontSize: T.code.fontSize,color:C.text}}>{v}</div>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <div>
-                      <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6}}>Top values</div>
+                      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6}}>Top values</div>
                       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                         {m.top.map(([val,cnt])=>(
-                          <span key={val} style={{fontSize:9,padding:"2px 8px",border:`1px solid ${C.border2}`,
+                          <span key={val} style={{fontSize: T.caption.fontSize,padding:"2px 8px",border:`1px solid ${C.border2}`,
                                                   borderRadius:2,color:C.textDim}}>
                             {val} <span style={{color:C.textMuted}}>×{cnt}</span>
                           </span>
@@ -1047,7 +1046,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
 
 // Dataset overview + load controls (file upload, World Bank, OECD).
 function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","JSON","DTA","RDS","DBF","SHP","ZIP"];
   const fileRef  = useRef();
   const [loading,   setLoading]   = useState(false);
@@ -1144,7 +1143,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
   }
 
   return (
-    <div style={{display:"flex",flexDirection:"column",height:"100%",fontFamily:mono,color:C.text}}>
+    <div style={{display:"flex",flexDirection:"column",height:"100%",fontFamily: T.code.fontFamily,color:C.text}}>
       {/* Sub-tab bar */}
       <div style={{display:"flex",gap:0,borderBottom:`1px solid ${C.border}`,background:C.surface2,flexShrink:0}}>
         {[["overview","Overview"],["grid","Data Viewer"]].map(([id,label]) => (
@@ -1152,11 +1151,11 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             padding:"0.5rem 1rem", background:"transparent", border:"none",
             borderBottom: view===id ? `2px solid ${C.teal}` : "2px solid transparent",
             color: view===id ? C.teal : C.textDim,
-            fontFamily:mono, fontSize:10, cursor:"pointer", letterSpacing:"0.1em",
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor:"pointer", letterSpacing:"0.1em",
           }}>{label}</button>
         ))}
         {view==="grid" && isPipelined && (
-          <span style={{marginLeft:8,alignSelf:"center",fontSize:9,color:C.teal,
+          <span style={{marginLeft:8,alignSelf:"center",fontSize: T.caption.fontSize,color:C.teal,
                         border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 6px"}}>
             pipeline applied
           </span>
@@ -1169,11 +1168,11 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
         <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem"}}>
           <div style={{maxWidth:460,width:"100%",display:"flex",flexDirection:"column",gap:20}}>
             <div>
-              <div style={{fontSize:9,color:C.teal,letterSpacing:"0.22em",textTransform:"uppercase",marginBottom:8}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.22em",textTransform:"uppercase",marginBottom:8}}>
                 Data · Load dataset
               </div>
               <div style={{fontSize:16,color:C.text,marginBottom:6}}>Load your first dataset</div>
-              <div style={{fontSize:10,color:C.textMuted,lineHeight:1.7}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,lineHeight:1.7}}>
                 Drop a file below, fetch from World Bank / OECD, or use the Simulate tab to generate synthetic data.
               </div>
             </div>
@@ -1194,34 +1193,34 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                 accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
                 onChange={e=>handleFile(e.target.files)} style={{display:"none"}}/>
               {loading
-                ? <div style={{fontSize:11,color:C.textDim}}>Parsing…</div>
+                ? <div style={{fontSize: T.code.fontSize,color:C.textDim}}>Parsing…</div>
                 : <>
                     <div style={{fontSize:22,color:C.teal,marginBottom:8,opacity:0.6}}>↑</div>
-                    <div style={{fontSize:12,color:C.textDim,marginBottom:4}}>Drop file(s) or click to browse</div>
-                    <div style={{fontSize:9,color:C.textMuted}}>CSV · TSV · XLSX · JSON · Stata · R .rds · Shapefile (.shp+.dbf+.prj or .zip)</div>
+                    <div style={{fontSize: T.code.fontSize,color:C.textDim,marginBottom:4}}>Drop file(s) or click to browse</div>
+                    <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>CSV · TSV · XLSX · JSON · Stata · R .rds · Shapefile (.shp+.dbf+.prj or .zip)</div>
                   </>
               }
             </div>
-            {err && <div style={{fontSize:10,color:C.red,fontFamily:mono}}>{err}</div>}
-            {success && <div style={{fontSize:10,color:C.teal,fontFamily:mono}}>{success}</div>}
+            {err && <div style={{fontSize: T.caption.fontSize,color:C.red,fontFamily: T.code.fontFamily}}>{err}</div>}
+            {success && <div style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>{success}</div>}
 
             {/* Or: World Bank / OECD */}
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>setWbOpen(true)}
                 style={{flex:1,padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
-                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily:mono,fontSize:10}}>
+                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
                 World Bank ↗
               </button>
               <button onClick={()=>setOecdOpen(true)}
                 style={{flex:1,padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
-                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily:mono,fontSize:10}}>
+                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
                 OECD ↗
               </button>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:5}}>
               <button onClick={()=>setPreloadedOpen(o=>!o)}
                 style={{padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
-                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily:mono,fontSize:10,
+                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,
                         textAlign:"left"}}>
                 {preloadedOpen ? "v" : ">"} Preloaded datasets
               </button>
@@ -1231,9 +1230,9 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                     <button key={ds.id} onClick={()=>handlePreloaded(ds)} disabled={loading}
                       style={{padding:"0.45rem 0.6rem",borderRadius:3,cursor:loading?"not-allowed":"pointer",
                               background:C.surface,border:`1px solid ${C.border2}`,color:C.textDim,
-                              fontFamily:mono,fontSize:10,textAlign:"left"}}>
+                              fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,textAlign:"left"}}>
                       <div style={{color:C.text}}>{ds.label}</div>
-                      <div style={{fontSize:8,color:C.textMuted,marginTop:2}}>{ds.hint}</div>
+                      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:2}}>{ds.hint}</div>
                     </button>
                   ))}
                 </div>
@@ -1252,7 +1251,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             {/* Dataset selector — shown when multiple datasets are loaded */}
             {availableDatasets.length > 1 && (
               <div style={{marginBottom:"1.4rem"}}>
-                <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>Session datasets</div>
+                <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>Session datasets</div>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   {availableDatasets.map((ds) => {
                     const isActive = ds.id === activeDatasetId;
@@ -1263,17 +1262,17 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                                   flex:1,minWidth:0,
                                   background: isActive ? `${C.teal}12` : C.surface,
                                   border:`1px solid ${isActive ? C.teal+"60" : C.border2}`,
-                                  borderRadius:3,cursor:"pointer",textAlign:"left",fontFamily:mono,
+                                  borderRadius:3,cursor:"pointer",textAlign:"left",fontFamily: T.code.fontFamily,
                                   transition:"all 0.12s"}}>
-                          <span style={{fontSize:9,color: isActive ? C.teal : C.textMuted}}>
+                          <span style={{fontSize: T.caption.fontSize,color: isActive ? C.teal : C.textMuted}}>
                             {isActive ? "●" : "○"}
                           </span>
-                          <span style={{fontSize:10,color: isActive ? C.text : C.textDim,flex:1,
+                          <span style={{fontSize: T.caption.fontSize,color: isActive ? C.text : C.textDim,flex:1,
                                         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                             {ds.filename ?? ds.id}
                           </span>
                           {ds.rowCount && (
-                            <span style={{fontSize:9,color:C.textMuted,flexShrink:0}}>
+                            <span style={{fontSize: T.caption.fontSize,color:C.textMuted,flexShrink:0}}>
                               {ds.rowCount.toLocaleString()} × {ds.colCount ?? "?"}
                             </span>
                           )}
@@ -1283,7 +1282,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                           title="Remove dataset"
                           style={{flexShrink:0,width:20,height:20,display:"flex",alignItems:"center",
                                   justifyContent:"center",background:"transparent",border:"none",
-                                  cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,
+                                  cursor:"pointer",color:C.textMuted,fontSize: T.body.fontSize,lineHeight:1,
                                   borderRadius:2,transition:"color 0.1s"}}
                           onMouseEnter={e => e.currentTarget.style.color = C.text}
                           onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
@@ -1300,10 +1299,10 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
               <div style={{border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden",marginBottom:"1.6rem"}}>
                 {/* Header */}
                 <div style={{background:C.surface2,padding:"0.6rem 0.9rem",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${C.border}`}}>
-                  <span style={{fontSize:9,color:C.teal}}>●</span>
-                  <span style={{fontSize:12,color:C.text}}>{viewFile}</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.teal}}>●</span>
+                  <span style={{fontSize: T.code.fontSize,color:C.text}}>{viewFile}</span>
                   {isPipelined && (
-                    <span style={{fontSize:9,color:C.teal,border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 5px"}}>pipeline applied</span>
+                    <span style={{fontSize: T.caption.fontSize,color:C.teal,border:`1px solid ${C.teal}40`,borderRadius:2,padding:"1px 5px"}}>pipeline applied</span>
                   )}
                 </div>
 
@@ -1317,8 +1316,8 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                     {l:"Est. size", v: memEstKB >= 1024 ? `${(memEstKB/1024).toFixed(1)} MB` : `${memEstKB} KB`, c: C.textMuted},
                   ].map(s=>(
                     <div key={s.l} style={{background:C.surface,padding:"0.5rem 0.75rem"}}>
-                      <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:2}}>{s.l}</div>
-                      <div style={{fontSize:13,color:s.c}}>{s.v}</div>
+                      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:2}}>{s.l}</div>
+                      <div style={{fontSize: T.body.fontSize,color:s.c}}>{s.v}</div>
                     </div>
                   ))}
                 </div>
@@ -1327,11 +1326,11 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                 {cleanedData?.panelIndex && (
                   <div style={{padding:"0.45rem 0.9rem",background:C.surface,borderTop:`1px solid ${C.border}`,
                                display:"flex",gap:16,alignItems:"center"}}>
-                    <span style={{fontSize:9,color:C.blue,border:`1px solid ${C.blue}40`,borderRadius:2,padding:"1px 5px"}}>Panel</span>
-                    <span style={{fontSize:9,color:C.textMuted}}>Entity: <span style={{color:C.textDim}}>{cleanedData.panelIndex.entityCol}</span></span>
-                    <span style={{fontSize:9,color:C.textMuted}}>Time: <span style={{color:C.textDim}}>{cleanedData.panelIndex.timeCol}</span></span>
+                    <span style={{fontSize: T.caption.fontSize,color:C.blue,border:`1px solid ${C.blue}40`,borderRadius:2,padding:"1px 5px"}}>Panel</span>
+                    <span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>Entity: <span style={{color:C.textDim}}>{cleanedData.panelIndex.entityCol}</span></span>
+                    <span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>Time: <span style={{color:C.textDim}}>{cleanedData.panelIndex.timeCol}</span></span>
                     {cleanedData.panelIndex.balance && (
-                      <span style={{fontSize:9,color:C.textMuted}}>Balance: <span style={{color:C.textDim}}>{cleanedData.panelIndex.balance}</span></span>
+                      <span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>Balance: <span style={{color:C.textDim}}>{cleanedData.panelIndex.balance}</span></span>
                     )}
                   </div>
                 )}
@@ -1340,7 +1339,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                 <div style={{padding:"0.4rem 0.9rem",background:C.surface,borderTop:`1px solid ${C.border}`,display:"flex",gap:8}}>
                   <button onClick={() => setView("grid")}
                     style={{padding:"3px 12px",background:`${C.teal}14`,border:`1px solid ${C.teal}60`,
-                            borderRadius:3,color:C.teal,cursor:"pointer",fontFamily:mono,fontSize:9}}>
+                            borderRadius:3,color:C.teal,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
                     View data ›
                   </button>
                 </div>
@@ -1350,7 +1349,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             {/* Column metadata table */}
             {viewHeaders.length > 0 && (
               <div style={{marginBottom:"1.6rem"}}>
-                <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:10}}>
+                <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:10}}>
                   Column details <span style={{color:C.textMuted,fontWeight:400,letterSpacing:0,textTransform:"none"}}>— click row to expand</span>
                 </div>
                 <div style={{border:`1px solid ${C.border2}`,borderRadius:4,overflow:"hidden"}}>
@@ -1363,7 +1362,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           {/* ── Right column: load controls ── */}
           <div style={{width:260,flexShrink:0,borderLeft:`1px solid ${C.border}`,padding:"1.6rem 1.4rem",
                        overflowY:"auto",background:C.surface}}>
-            <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:12}}>Load data</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:12}}>Load data</div>
 
             {/* Drop zone */}
             <div
@@ -1380,10 +1379,10 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                 onChange={e=>handleFile(e.target.files)}
                 style={{display:"none"}}/>
               {loading
-                ? <div style={{fontSize:10,color:C.textDim,fontFamily:mono}}>Parsing…</div>
+                ? <div style={{fontSize: T.caption.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>Parsing…</div>
                 : <>
-                    <div style={{fontSize:10,color:C.text,marginBottom:2}}>+ Load dataset(s)</div>
-                    <div style={{fontSize:9,color:C.textMuted}}>Drop file(s) or click — supports .shp+.dbf+.prj</div>
+                    <div style={{fontSize: T.caption.fontSize,color:C.text,marginBottom:2}}>+ Load dataset(s)</div>
+                    <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>Drop file(s) or click — supports .shp+.dbf+.prj</div>
                   </>
               }
             </div>
@@ -1398,7 +1397,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                 <button key={label} onClick={action} style={{
                   padding:"0.4rem 0.65rem",background:"transparent",
                   border:`1px solid ${C.border2}`,borderRadius:3,
-                  color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,
+                  color:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,
                   textAlign:"left",transition:"all 0.12s",
                 }}
                   onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.color=color;}}
@@ -1408,7 +1407,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
               <button onClick={()=>setPreloadedOpen(o=>!o)} style={{
                 padding:"0.4rem 0.65rem",background:"transparent",
                 border:`1px solid ${C.border2}`,borderRadius:3,
-                color:C.textDim,cursor:"pointer",fontFamily:mono,fontSize:10,
+                color:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,
                 textAlign:"left",transition:"all 0.12s",
               }}>
                 {preloadedOpen ? "v" : ">"} Preloaded datasets
@@ -1420,9 +1419,9 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                       style={{padding:"0.38rem 0.55rem",background:C.surface2,
                               border:`1px solid ${C.border2}`,borderRadius:3,
                               color:C.textDim,cursor:loading?"not-allowed":"pointer",
-                              fontFamily:mono,fontSize:9,textAlign:"left"}}>
+                              fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,textAlign:"left"}}>
                       <div style={{color:C.text}}>{ds.label}</div>
-                      <div style={{fontSize:8,color:C.textMuted,marginTop:2,lineHeight:1.4}}>{ds.hint}</div>
+                      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:2,lineHeight:1.4}}>{ds.hint}</div>
                     </button>
                   ))}
                 </div>
@@ -1430,24 +1429,24 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             </div>
 
             {/* Accepted formats */}
-            <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>Formats</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>Formats</div>
             <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:10}}>
               {formats.map(f=>(
-                <span key={f} style={{fontSize:9,padding:"2px 6px",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textMuted}}>{f}</span>
+                <span key={f} style={{fontSize: T.caption.fontSize,padding:"2px 6px",border:`1px solid ${C.border2}`,borderRadius:2,color:C.textMuted}}>{f}</span>
               ))}
             </div>
-            <div style={{fontSize:9,color:C.textMuted,lineHeight:1.7}}>
+            <div style={{fontSize: T.caption.fontSize,color:C.textMuted,lineHeight:1.7}}>
               Auto-delimiter detection (CSV / TSV / pipe).<br/>
               Additional datasets can be joined in Clean.
             </div>
 
             {/* Status */}
             {success && (
-              <div style={{marginTop:10,fontSize:9,color:C.green,fontFamily:mono,padding:"0.4rem 0.6rem",
+              <div style={{marginTop:10,fontSize: T.caption.fontSize,color:C.green,fontFamily: T.code.fontFamily,padding:"0.4rem 0.6rem",
                            border:`1px solid ${C.green}40`,borderRadius:3}}>✓ {success}</div>
             )}
             {err && (
-              <div style={{marginTop:10,fontSize:9,color:C.red,fontFamily:mono,padding:"0.4rem 0.6rem",
+              <div style={{marginTop:10,fontSize: T.caption.fontSize,color:C.red,fontFamily: T.code.fontFamily,padding:"0.4rem 0.6rem",
                            border:`1px solid ${C.red}40`,borderRadius:3}}>{err}</div>
             )}
           </div>
@@ -1471,7 +1470,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
         />
       )}
       {view === "grid" && viewRows.length === 0 && (
-        <div style={{padding:"3rem",color:C.textMuted,fontSize:11,textAlign:"center",fontFamily:mono}}>
+        <div style={{padding:"3rem",color:C.textMuted,fontSize: T.code.fontSize,textAlign:"center",fontFamily: T.code.fontFamily}}>
           No data loaded yet. Use Overview to load a file.
         </div>
       )}
@@ -1513,7 +1512,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
 
 // Placeholder for tabs not yet implemented (Simulate, Calculate, Report).
 function ComingSoon({ tab }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const labels = { simulate:"Simulate", calculate:"Calculate", report:"Report" };
   const descs  = {
     simulate:  "Build data generating processes, run Monte Carlo simulations, power analysis.",
@@ -1521,10 +1520,10 @@ function ComingSoon({ tab }) {
     report:    "Publication-ready output: LaTeX tables, AI narratives, and unified script export.",
   };
   return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:10,fontFamily:mono}}>
-      <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase"}}>{labels[tab] || tab}</div>
-      <div style={{fontSize:11,color:C.textDim,maxWidth:360,textAlign:"center",lineHeight:1.7}}>{descs[tab] || "Coming soon."}</div>
-      <div style={{fontSize:9,color:C.textMuted,marginTop:4}}>Phase 9 — in development</div>
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:10,fontFamily: T.code.fontFamily}}>
+      <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase"}}>{labels[tab] || tab}</div>
+      <div style={{fontSize: T.code.fontSize,color:C.textDim,maxWidth:360,textAlign:"center",lineHeight:1.7}}>{descs[tab] || "Coming soon."}</div>
+      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:4}}>Phase 9 — in development</div>
     </div>
   );
 }
@@ -1554,7 +1553,7 @@ function WorkspaceRegistrar({ filename, rawData }) {
 // Mirrors R/Gretl workspace model — projects are first-class, datasets are children.
 
 function Dashboard({onNew, onLoad}) {
-  const { C, theme, setTheme } = useTheme();
+  const { C, T, theme, setTheme } = useTheme();
   const { user } = useAuth();
   const [projects,    setProjects]    = useState([]);
   const [loading,     setLoading]     = useState(true);
@@ -1764,7 +1763,7 @@ function Dashboard({onNew, onLoad}) {
   return (
     <div style={{
       display: "flex", height: "100%", minHeight: 0,
-      background: C.bg, fontFamily: mono, overflow: "hidden",
+      background: C.bg, fontFamily: T.code.fontFamily, overflow: "hidden",
     }}>
 
       {/* ── LEFT: Project list ── */}
@@ -1782,13 +1781,13 @@ function Dashboard({onNew, onLoad}) {
         }}>
           <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
             <div>
-              <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
                 Litux
               </div>
               <div style={{fontSize:15,color:C.text,letterSpacing:"-0.01em",marginBottom:1}}>
                 Projects
               </div>
-              <div style={{fontSize:10,color:C.textMuted}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>
                 {loading ? "Loading…" : `${projects.length} saved`}
               </div>
             </div>
@@ -1797,7 +1796,7 @@ function Dashboard({onNew, onLoad}) {
               title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
               style={{
                 background:"transparent", border:"none", cursor:"pointer",
-                fontSize:14, color:C.textMuted, padding:"2px 4px",
+                fontSize: T.body.fontSize, color:C.textMuted, padding:"2px 4px",
                 transition:"color 0.15s",
               }}
               onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
@@ -1813,7 +1812,7 @@ function Dashboard({onNew, onLoad}) {
           {!loading && projects.length === 0 && (
             <div style={{
               padding: "2rem 1rem", textAlign:"center",
-              fontSize:11, color:C.textMuted, lineHeight:1.8,
+              fontSize: T.code.fontSize, color:C.textMuted, lineHeight:1.8,
             }}>
               No saved projects.<br/>
               <span style={{color:C.gold}}>Create one →</span>
@@ -1853,7 +1852,7 @@ function Dashboard({onNew, onLoad}) {
                       onBlur={() => handleRename(p.pid)}
                       onClick={e => e.stopPropagation()}
                       style={{
-                        fontSize:12, fontFamily:mono, background:C.surface,
+                        fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, background:C.surface,
                         border:`1px solid ${C.teal}`, borderRadius:2,
                         color:C.text, padding:"1px 4px", width:"100%",
                         outline:"none",
@@ -1869,7 +1868,7 @@ function Dashboard({onNew, onLoad}) {
                         }}
                         title="Double-click to rename"
                         style={{
-                          fontSize:12, color: isSel ? C.text : C.textDim,
+                          fontSize: T.code.fontSize, color: isSel ? C.text : C.textDim,
                           fontWeight: isSel ? 600 : 400,
                           overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
                           flex:1, minWidth:0,
@@ -1885,24 +1884,24 @@ function Dashboard({onNew, onLoad}) {
                         }}
                         title="Rename"
                         style={{
-                          fontSize:10, color:C.border2, cursor:"pointer", flexShrink:0,
+                          fontSize: T.caption.fontSize, color:C.border2, cursor:"pointer", flexShrink:0,
                           lineHeight:1, userSelect:"none",
                         }}
                       >✎</span>
                     </div>
                   )}
-                  <div style={{fontSize:9, color:C.textMuted, marginTop:2, display:"flex", gap:8, flexWrap:"wrap"}}>
+                  <div style={{fontSize: T.caption.fontSize, color:C.textMuted, marginTop:2, display:"flex", gap:8, flexWrap:"wrap"}}>
                     <span style={{color:C.teal}}>{p.datasetCount ?? 1} dataset{(p.datasetCount ?? 1) !== 1 ? "s" : ""}</span>
                     {(p.pipelineLength ?? 0) > 0 && (
                       <span style={{color:C.gold}}>{p.pipelineLength} steps</span>
                     )}
                   </div>
                   {p.description && (
-                    <div style={{fontSize:9, color:C.textMuted, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:220}}>
+                    <div style={{fontSize: T.caption.fontSize, color:C.textMuted, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:220}}>
                       {p.description}
                     </div>
                   )}
-                  <div style={{fontSize:9, color:C.border2, marginTop:2}}>{fmt(p.updatedAt ?? p.ts)}</div>
+                  <div style={{fontSize: T.caption.fontSize, color:C.border2, marginTop:2}}>{fmt(p.updatedAt ?? p.ts)}</div>
                 </div>
 
                 {/* Delete */}
@@ -1912,7 +1911,7 @@ function Dashboard({onNew, onLoad}) {
                   style={{
                     background:"transparent", border:"none",
                     color:C.textMuted, cursor:"pointer",
-                    fontSize:13, padding:"0 2px", flexShrink:0, marginTop:1,
+                    fontSize: T.body.fontSize, padding:"0 2px", flexShrink:0, marginTop:1,
                     transition:"color 0.1s",
                   }}
                   onMouseEnter={e => e.currentTarget.style.color = C.red}
@@ -1937,7 +1936,7 @@ function Dashboard({onNew, onLoad}) {
               style={{
                 background:"transparent", border:"none",
                 color:C.textMuted, cursor:"pointer",
-                fontFamily:mono, fontSize:9,
+                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 transition:"color 0.1s",
               }}
               onMouseEnter={e=>e.currentTarget.style.color=C.red}
@@ -1958,13 +1957,13 @@ function Dashboard({onNew, onLoad}) {
 
         {/* Brand */}
         <div>
-          <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
+          <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
             LMU Munich · Econometrics
           </div>
           <div style={{fontSize:22,color:C.text,letterSpacing:"-0.02em",marginBottom:4}}>
             Litux
           </div>
-          <div style={{fontSize:11,color:C.textMuted}}>
+          <div style={{fontSize: T.code.fontSize,color:C.textMuted}}>
             Non-destructive pipeline · OLS · 2SLS · Panel FE/FD · RDD · DiD
           </div>
         </div>
@@ -1984,8 +1983,8 @@ function Dashboard({onNew, onLoad}) {
         >
           <span style={{fontSize:22, color:C.gold, flexShrink:0}}>⊕</span>
           <div>
-            <div style={{fontSize:13,color:C.gold,marginBottom:3}}>New Project</div>
-            <div style={{fontSize:10,color:C.goldDim}}>
+            <div style={{fontSize: T.body.fontSize,color:C.gold,marginBottom:3}}>New Project</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.goldDim}}>
               Upload CSV · XLSX · Stata .dta · or load demo dataset
             </div>
           </div>
@@ -2006,10 +2005,10 @@ function Dashboard({onNew, onLoad}) {
               display:"flex", alignItems:"center", gap:10,
             }}>
               <div style={{flex:1}}>
-                <div style={{fontSize:13,color:C.text,marginBottom:2}}>
+                <div style={{fontSize: T.body.fontSize,color:C.text,marginBottom:2}}>
                   {selProject.name || selProject.filename || "Unnamed"}
                 </div>
-                <div style={{fontSize:10,color:C.textMuted}}>
+                <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>
                   Last modified {fmt(selProject.updatedAt ?? selProject.ts)}
                 </div>
               </div>
@@ -2031,15 +2030,15 @@ function Dashboard({onNew, onLoad}) {
                 {l:"Pipeline", v:`${(selPipeline?.steps || selPipeline?.pipeline || []).length} steps`, c:((selPipeline?.steps || selPipeline?.pipeline || []).length)?C.gold:C.textMuted},
               ].map(s=>(
                 <div key={s.l} style={{background:C.surface,padding:"0.6rem 0.8rem"}}>
-                  <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:3}}>{s.l}</div>
-                  <div style={{fontSize:14,color:s.c,fontFamily:mono}}>{s.v}</div>
+                  <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:3}}>{s.l}</div>
+                  <div style={{fontSize: T.body.fontSize,color:s.c,fontFamily: T.code.fontFamily}}>{s.v}</div>
                 </div>
               ))}
             </div>
 
             {/* Description */}
             <div style={{padding:"0.7rem 1rem", borderTop:`1px solid ${C.border}`, background:C.surface}}>
-              <div style={{fontSize:8,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:5}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:5}}>
                 Description
               </div>
               {editingDesc === selProject.pid ? (
@@ -2052,7 +2051,7 @@ function Dashboard({onNew, onLoad}) {
                     rows={3}
                     placeholder="Brief project description…"
                     style={{
-                      width:"100%", fontFamily:mono, fontSize:10,
+                      width:"100%", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                       background:C.surface2, border:`1px solid ${C.teal}`,
                       borderRadius:3, color:C.text, padding:"0.4rem 0.5rem",
                       resize:"vertical", outline:"none", boxSizing:"border-box",
@@ -2062,12 +2061,12 @@ function Dashboard({onNew, onLoad}) {
                     <button
                       onClick={() => handleDescriptionSave(selProject.pid)}
                       style={{padding:"0.22rem 0.6rem",background:C.teal,border:"none",borderRadius:3,
-                              color:C.bg,cursor:"pointer",fontFamily:mono,fontSize:9,fontWeight:700}}
+                              color:C.bg,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,fontWeight:700}}
                     >Save</button>
                     <button
                       onClick={() => setEditingDesc(null)}
                       style={{padding:"0.22rem 0.6rem",background:"transparent",border:`1px solid ${C.border2}`,
-                              borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily:mono,fontSize:9}}
+                              borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}
                     >Cancel</button>
                   </div>
                 </div>
@@ -2076,7 +2075,7 @@ function Dashboard({onNew, onLoad}) {
                   onClick={() => { setEditingDesc(selProject.pid); setDescVal(selProject.description || ""); }}
                   title="Click to edit description"
                   style={{
-                    fontSize:10, color: selProject.description ? C.textDim : C.border2,
+                    fontSize: T.caption.fontSize, color: selProject.description ? C.textDim : C.border2,
                     cursor:"pointer", lineHeight:1.6, minHeight:18,
                     fontStyle: selProject.description ? "normal" : "italic",
                   }}
@@ -2091,12 +2090,12 @@ function Dashboard({onNew, onLoad}) {
               const _previewSteps = selPipeline?.steps || selPipeline?.pipeline || [];
               return _previewSteps.length > 0 && (
               <div style={{padding:"0.7rem 1rem", borderTop:`1px solid ${C.border}`, background:C.surface}}>
-                <div style={{fontSize:9,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>
+                <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>
                   Pipeline steps
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:2}}>
                   {_previewSteps.slice(0,5).map((s,i)=>(
-                    <div key={i} style={{fontSize:10,color:C.textDim,display:"flex",gap:6}}>
+                    <div key={i} style={{fontSize: T.caption.fontSize,color:C.textDim,display:"flex",gap:6}}>
                       <span style={{color:C.border2,flexShrink:0}}>{i+1}.</span>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         [{s.type}] {s.desc||""}
@@ -2104,7 +2103,7 @@ function Dashboard({onNew, onLoad}) {
                     </div>
                   ))}
                   {_previewSteps.length > 5 && (
-                    <div style={{fontSize:10,color:C.textMuted}}>
+                    <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>
                       … {_previewSteps.length - 5} more steps
                     </div>
                   )}
@@ -2128,7 +2127,7 @@ function Dashboard({onNew, onLoad}) {
                   padding:"0.42rem 1.1rem",
                   background:C.teal, color:C.bg,
                   border:`1px solid ${C.teal}`, borderRadius:3,
-                  cursor:"pointer", fontFamily:mono, fontSize:11, fontWeight:700,
+                  cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, fontWeight:700,
                 }}
               >
                 Open project →
@@ -2137,7 +2136,7 @@ function Dashboard({onNew, onLoad}) {
           </div>
         ) : (
           <div style={{
-            fontSize:11, color:C.textMuted,
+            fontSize: T.code.fontSize, color:C.textMuted,
             padding:"1rem 0", lineHeight:1.8,
           }}>
             {projects.length > 0
@@ -2158,11 +2157,11 @@ function Dashboard({onNew, onLoad}) {
             borderBottom:`1px solid ${C.border}`,
             display:"flex", alignItems:"center", gap:8,
           }}>
-            <span style={{fontSize:13, color:C.teal}}>☁</span>
-            <span style={{fontSize:12, color:C.text}}>Cloud projects</span>
-            {cloudLoading && <span style={{fontSize:9,color:C.textMuted,marginLeft:"auto"}}>loading…</span>}
+            <span style={{fontSize: T.body.fontSize, color:C.teal}}>☁</span>
+            <span style={{fontSize: T.code.fontSize, color:C.text}}>Cloud projects</span>
+            {cloudLoading && <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:"auto"}}>loading…</span>}
             {user && !cloudLoading && (
-              <span style={{fontSize:9,color:C.textMuted,marginLeft:"auto"}}>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:"auto"}}>
                 {user.email}
               </span>
             )}
@@ -2172,7 +2171,7 @@ function Dashboard({onNew, onLoad}) {
 
             {/* Not signed in */}
             {!user && (
-              <div style={{fontSize:10,color:C.textMuted,lineHeight:1.7}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,lineHeight:1.7}}>
                 Sign in to access your cloud-synced projects on this device.
               </div>
             )}
@@ -2180,7 +2179,7 @@ function Dashboard({onNew, onLoad}) {
             {/* Signed in but locked */}
             {user && !unlocked && (
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                <div style={{fontSize:10,color:C.textMuted}}>
+                <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>
                   Enter your sync passphrase to access cloud projects.
                 </div>
                 <input
@@ -2191,7 +2190,7 @@ function Dashboard({onNew, onLoad}) {
                   placeholder="Sync passphrase…"
                   disabled={unlockBusy}
                   style={{
-                    padding:"0.42rem 0.6rem", fontFamily:mono, fontSize:11,
+                    padding:"0.42rem 0.6rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
                     background:C.surface, border:`1px solid ${C.border2}`,
                     borderRadius:3, color:C.text, outline:"none", width:"100%",
                     boxSizing:"border-box",
@@ -2206,25 +2205,25 @@ function Dashboard({onNew, onLoad}) {
                     style={{
                       padding:"0.32rem 0.8rem", background:C.teal, border:"none",
                       borderRadius:3, color:C.bg, cursor:"pointer",
-                      fontFamily:mono, fontSize:10, fontWeight:700,
+                      fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight:700,
                       opacity: (unlockBusy || (!unlockPass && !unlockFile)) ? 0.5 : 1,
                     }}
                   >
                     {unlockBusy ? "Unlocking…" : "Unlock"}
                   </button>
                   <label style={{
-                    fontSize:9, color:C.textMuted, cursor:"pointer",
+                    fontSize: T.caption.fontSize, color:C.textMuted, cursor:"pointer",
                     textDecoration:"underline", textDecorationStyle:"dotted",
                   }}>
                     Use recovery key
                     <input type="file" accept=".json" onChange={handleReadRecoveryFile} style={{display:"none"}} />
                   </label>
                   {unlockFile && (
-                    <span style={{fontSize:9,color:C.teal}}>✓ recovery key loaded</span>
+                    <span style={{fontSize: T.caption.fontSize,color:C.teal}}>✓ recovery key loaded</span>
                   )}
                 </div>
                 {unlockErr && (
-                  <div style={{fontSize:10,color:C.red}}>{unlockErr}</div>
+                  <div style={{fontSize: T.caption.fontSize,color:C.red}}>{unlockErr}</div>
                 )}
               </div>
             )}
@@ -2233,10 +2232,10 @@ function Dashboard({onNew, onLoad}) {
             {user && unlocked && (
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {pullErr && (
-                  <div style={{fontSize:10,color:C.red,marginBottom:2}}>{pullErr}</div>
+                  <div style={{fontSize: T.caption.fontSize,color:C.red,marginBottom:2}}>{pullErr}</div>
                 )}
                 {cloudProjects.length === 0 && !cloudLoading && (
-                  <div style={{fontSize:10,color:C.textMuted}}>
+                  <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>
                     No cloud projects yet. Publish a project from inside the workspace.
                   </div>
                 )}
@@ -2264,7 +2263,7 @@ function Dashboard({onNew, onLoad}) {
                             }}
                             onBlur={() => handleCloudRename(cp.pid)}
                             style={{
-                              fontSize:11, fontFamily:mono, background:C.surface2,
+                              fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, background:C.surface2,
                               border:`1px solid ${C.teal}`, borderRadius:2,
                               color:C.text, padding:"1px 5px", width:"100%",
                               outline:"none", boxSizing:"border-box",
@@ -2272,22 +2271,22 @@ function Dashboard({onNew, onLoad}) {
                           />
                         ) : (
                           <div style={{display:"flex",alignItems:"center",gap:4,minWidth:0}}>
-                            <div style={{fontSize:11,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>
+                            <div style={{fontSize: T.code.fontSize,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>
                               {cp.name || cp.pid}
                             </div>
                             <span
                               onClick={() => { setCloudRenaming(cp.pid); setCloudRenameVal(cp.name || ""); }}
                               title="Rename"
-                              style={{fontSize:10,color:C.border2,cursor:"pointer",flexShrink:0,lineHeight:1,userSelect:"none"}}
+                              style={{fontSize: T.caption.fontSize,color:C.border2,cursor:"pointer",flexShrink:0,lineHeight:1,userSelect:"none"}}
                             >✎</span>
                           </div>
                         )}
-                        <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>
+                        <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:1}}>
                           v{cp.version} · {cp.updated_at ? new Date(cp.updated_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : ""}
                         </div>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                        {isLocal && <span style={{fontSize:9,color:C.teal}}>✓ local</span>}
+                        {isLocal && <span style={{fontSize: T.caption.fontSize,color:C.teal}}>✓ local</span>}
                         <button
                           onClick={() => handlePull(cp.pid)}
                           disabled={isPulling}
@@ -2296,7 +2295,7 @@ function Dashboard({onNew, onLoad}) {
                             padding:"0.26rem 0.65rem", background:`${C.teal}18`,
                             border:`1px solid ${C.teal}`, borderRadius:3,
                             color:C.teal, cursor:"pointer",
-                            fontFamily:mono, fontSize:9,
+                            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                             opacity: isPulling ? 0.5 : 1,
                           }}
                         >
@@ -2319,20 +2318,20 @@ function Dashboard({onNew, onLoad}) {
             background:`${C.blue}0d`,
             display:"flex", flexDirection:"column", gap:8,
           }}>
-            <div style={{fontSize:11,color:C.blue}}>↓ Incoming shared project</div>
-            <div style={{fontSize:10,color:C.textMuted}}>Someone shared a project with you via link. Import it to your dashboard?</div>
-            {shareErr && <div style={{fontSize:10,color:C.red}}>{shareErr}</div>}
+            <div style={{fontSize: T.code.fontSize,color:C.blue}}>↓ Incoming shared project</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>Someone shared a project with you via link. Import it to your dashboard?</div>
+            {shareErr && <div style={{fontSize: T.caption.fontSize,color:C.red}}>{shareErr}</div>}
             <div style={{display:"flex",gap:8}}>
               <button
                 onClick={() => handlePullShare(incomingToken)}
                 disabled={pullingShare.has(incomingToken)}
-                style={{padding:"0.35rem 0.9rem",background:C.blue,border:"none",borderRadius:3,color:"#fff",cursor:"pointer",fontFamily:mono,fontSize:10,fontWeight:700}}
+                style={{padding:"0.35rem 0.9rem",background:C.blue,border:"none",borderRadius:3,color:"#fff",cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,fontWeight:700}}
               >
                 {pullingShare.has(incomingToken) ? "Importing…" : "Import project"}
               </button>
               <button
                 onClick={() => { setIncomingToken(""); window.history.replaceState({}, "", window.location.pathname); }}
-                style={{padding:"0.35rem 0.7rem",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily:mono,fontSize:10}}
+                style={{padding:"0.35rem 0.7rem",background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}
               >Dismiss</button>
             </div>
           </div>
@@ -2342,31 +2341,31 @@ function Dashboard({onNew, onLoad}) {
         {user && sharedWithMe.length > 0 && (
           <div style={{border:`1px solid ${C.border}`,borderRadius:5,overflow:"hidden"}}>
             <div style={{padding:"0.7rem 1rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:13,color:C.blue}}>⇄</span>
-              <span style={{fontSize:12,color:C.text}}>Shared with me</span>
+              <span style={{fontSize: T.body.fontSize,color:C.blue}}>⇄</span>
+              <span style={{fontSize: T.code.fontSize,color:C.text}}>Shared with me</span>
             </div>
             <div style={{padding:"0.7rem 1rem",display:"flex",flexDirection:"column",gap:6}}>
-              {shareErr && <div style={{fontSize:10,color:C.red,marginBottom:2}}>{shareErr}</div>}
+              {shareErr && <div style={{fontSize: T.caption.fontSize,color:C.red,marginBottom:2}}>{shareErr}</div>}
               {sharedWithMe.map(s => {
                 const isLocal = projects.some(p => p.pid === s.pid);
                 const isBusy  = pullingShare.has(s.token);
                 return (
                   <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"0.42rem 0.6rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3}}>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:11,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      <div style={{fontSize: T.code.fontSize,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         {s.name || s.pid}
                       </div>
-                      <div style={{fontSize:9,color:C.textMuted,marginTop:1}}>
+                      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:1}}>
                         {s.can_edit ? "can edit" : "view only"} · shared {s.created_at ? new Date(s.created_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : ""}
                       </div>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                      {isLocal && <span style={{fontSize:9,color:C.teal}}>✓ local</span>}
+                      {isLocal && <span style={{fontSize: T.caption.fontSize,color:C.teal}}>✓ local</span>}
                       <button
                         onClick={() => handlePullShare(s.token)}
                         disabled={isBusy}
                         title={isLocal ? "Re-import from share" : "Import to this device"}
-                        style={{padding:"0.26rem 0.65rem",background:`${C.blue}18`,border:`1px solid ${C.blue}`,borderRadius:3,color:C.blue,cursor:"pointer",fontFamily:mono,fontSize:9,opacity:isBusy?0.5:1}}
+                        style={{padding:"0.26rem 0.65rem",background:`${C.blue}18`,border:`1px solid ${C.blue}`,borderRadius:3,color:C.blue,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,opacity:isBusy?0.5:1}}
                       >
                         {isBusy ? "Importing…" : isLocal ? "↻ Restore" : "Import →"}
                       </button>
@@ -2385,7 +2384,7 @@ function Dashboard({onNew, onLoad}) {
           background:C.surface,
           border:`1px solid ${C.border}`,
           borderRadius:4,
-          fontSize:10, color:C.textMuted,
+          fontSize: T.caption.fontSize, color:C.textMuted,
           display:"flex", gap:8, alignItems:"center", flexWrap:"wrap",
         }}>
           {["Upload","Wrangling","Evidence Explorer","Modeling"].map((s,i,arr)=>(
@@ -2404,7 +2403,7 @@ function Dashboard({onNew, onLoad}) {
 // Shown when the user clicks "New Project" on the dashboard.
 // Just a name input — no file required. Data is loaded from inside the workspace.
 function ProjectNamingScreen({ onConfirm, onBack }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [name, setName] = useState("");
   const inputRef = useRef(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -2417,7 +2416,7 @@ function ProjectNamingScreen({ onConfirm, onBack }) {
   return (
     <div style={{
       height:"100%", display:"flex", alignItems:"center", justifyContent:"center",
-      background:C.bg, fontFamily:mono,
+      background:C.bg, fontFamily: T.code.fontFamily,
     }}>
       <div style={{
         width:440, display:"flex", flexDirection:"column", gap:24,
@@ -2425,17 +2424,17 @@ function ProjectNamingScreen({ onConfirm, onBack }) {
         background:C.surface, border:`1px solid ${C.border}`, borderRadius:6,
       }}>
         <div>
-          <div style={{fontSize:9,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:8}}>
+          <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:8}}>
             Litux · New project
           </div>
           <div style={{fontSize:18,color:C.text,marginBottom:6}}>Name your project</div>
-          <div style={{fontSize:10,color:C.textMuted,lineHeight:1.6}}>
+          <div style={{fontSize: T.caption.fontSize,color:C.textMuted,lineHeight:1.6}}>
             You can load datasets, simulate data, or fetch from World Bank inside the workspace.
           </div>
         </div>
 
         <div>
-          <label style={{fontSize:10,color:C.textMuted,display:"block",marginBottom:6,
+          <label style={{fontSize: T.caption.fontSize,color:C.textMuted,display:"block",marginBottom:6,
                          letterSpacing:"0.1em",textTransform:"uppercase"}}>
             Project name
           </label>
@@ -2448,7 +2447,7 @@ function ProjectNamingScreen({ onConfirm, onBack }) {
             style={{
               width:"100%", padding:"0.6rem 0.8rem",
               background:C.bg, border:`1px solid ${C.border}`,
-              borderRadius:3, color:C.text, fontFamily:mono, fontSize:13,
+              borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.body.fontSize,
               outline:"none", transition:"border-color 0.12s",
             }}
             onFocus={e => e.target.style.borderColor = C.teal}
@@ -2462,7 +2461,7 @@ function ProjectNamingScreen({ onConfirm, onBack }) {
             style={{
               padding:"0.45rem 1rem", borderRadius:3, cursor:"pointer",
               background:"transparent", border:`1px solid ${C.border2}`,
-              color:C.textMuted, fontFamily:mono, fontSize:11,
+              color:C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
             }}
           >
             ← Back
@@ -2472,7 +2471,7 @@ function ProjectNamingScreen({ onConfirm, onBack }) {
             style={{
               padding:"0.45rem 1.3rem", borderRadius:3, cursor:"pointer",
               background:C.teal, border:`1px solid ${C.teal}`,
-              color:C.bg, fontFamily:mono, fontSize:11, fontWeight:700,
+              color:C.bg, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, fontWeight:700,
             }}
           >
             Create →
@@ -2485,7 +2484,7 @@ function ProjectNamingScreen({ onConfirm, onBack }) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [screen,             setScreen]            = useState("dashboard");
   const [tourStep,           setTourStep]          = useState(-1);
   const [filename,           setFilename]          = useState("");
@@ -2698,7 +2697,7 @@ export default function App() {
             onClick={goBack}
             title="Go back"
             style={{background:"transparent",border:"none",color:C.textMuted,cursor:"pointer",
-                    fontFamily:mono,fontSize:16,lineHeight:1,padding:"0 4px",
+                    fontFamily: T.code.fontFamily,fontSize:16,lineHeight:1,padding:"0 4px",
                     display:"flex",alignItems:"center",transition:"color 0.12s"}}
             onMouseEnter={e=>{ e.currentTarget.style.color=C.teal; }}
             onMouseLeave={e=>{ e.currentTarget.style.color=C.textMuted; }}
@@ -2708,7 +2707,7 @@ export default function App() {
         <button
           onClick={()=>navigateToScreen("dashboard")}
           title="Go to dashboard"
-          style={{background:"transparent",border:"none",color:C.gold,cursor:"pointer",fontFamily:mono,fontSize:11,letterSpacing:"0.12em"}}
+          style={{background:"transparent",border:"none",color:C.gold,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,letterSpacing:"0.12em"}}
         >
           ⬡ LITUX
         </button>
@@ -2716,9 +2715,9 @@ export default function App() {
         {inWorkspace && (projectName || filename) && (
           <>
             <span style={{color:C.border2}}>|</span>
-            <span style={{fontSize:11,color:C.textDim,fontFamily:mono}}>{projectName || filename}</span>
+            <span style={{fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>{projectName || filename}</span>
             {availableDatasets.length > 0 && (
-              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
                 · {availableDatasets.length} dataset{availableDatasets.length !== 1 ? "s" : ""}
               </span>
             )}
@@ -2728,7 +2727,7 @@ export default function App() {
         {inWorkspace && (
           <>
             {!tabOutput(activeTab) && (
-              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginLeft:4}}>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginLeft:4}}>
                 autosaved ✓
               </span>
             )}
@@ -2739,7 +2738,7 @@ export default function App() {
                 background: sidebarOpen ? `${C.violet}18` : "transparent",
                 border:`1px solid ${sidebarOpen ? C.violet : C.border2}`,
                 borderRadius:3, color: sidebarOpen ? C.violet : C.textMuted,
-                cursor:"pointer", fontFamily:mono, fontSize:9,
+                cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 letterSpacing:"0.12em", transition:"all 0.13s",
               }}
             >✦ AI Coach</button>

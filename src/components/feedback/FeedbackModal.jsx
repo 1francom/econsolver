@@ -5,7 +5,6 @@ import { useState, useEffect } from "react";
 import { submitFeedback } from "../../services/feedback/feedbackService.js";
 import { useTheme } from "../../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 const MODULES = [
   "Data", "Clean", "Explore", "Model",
@@ -27,7 +26,7 @@ const TAB_TO_MODULE = {
 };
 
 export default function FeedbackModal({ activeTab, onClose }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
 
   const [module,      setModule]      = useState(TAB_TO_MODULE[activeTab] ?? "General");
   const [type,        setType]        = useState("bug");
@@ -60,11 +59,11 @@ export default function FeedbackModal({ activeTab, onClose }) {
   }
 
   const labelStyle = {
-    fontSize: 9,
+    fontSize: T.caption.fontSize,
     color: C.textMuted,
     letterSpacing: "0.22em",
     textTransform: "uppercase",
-    fontFamily: mono,
+    fontFamily: T.code.fontFamily,
     marginBottom: 6,
     display: "block",
   };
@@ -93,17 +92,17 @@ export default function FeedbackModal({ activeTab, onClose }) {
         border: `1px solid ${C.border}`,
         borderRadius: 6,
         padding: "1.6rem",
-        fontFamily: mono,
+        fontFamily: T.code.fontFamily,
       }}>
 
         {/* ── Header ── */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.4rem" }}>
-          <div style={{ fontSize: 11, color: C.teal, letterSpacing: "0.14em", fontWeight: 700 }}>
+          <div style={{ fontSize: T.code.fontSize, color: C.teal, letterSpacing: "0.14em", fontWeight: 700 }}>
             ⚑ Send feedback
           </div>
           <button
             onClick={onClose}
-            style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}
+            style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", fontSize: T.body.fontSize, lineHeight: 1, padding: 0 }}
             onMouseEnter={e => { e.currentTarget.style.color = C.text; }}
             onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
           >
@@ -112,7 +111,7 @@ export default function FeedbackModal({ activeTab, onClose }) {
         </div>
 
         {done ? (
-          <div style={{ textAlign: "center", padding: "1.5rem 0", fontSize: 11, color: C.teal, letterSpacing: "0.1em" }}>
+          <div style={{ textAlign: "center", padding: "1.5rem 0", fontSize: T.code.fontSize, color: C.teal, letterSpacing: "0.1em" }}>
             ✓ Feedback received — thank you!
           </div>
         ) : (
@@ -131,8 +130,8 @@ export default function FeedbackModal({ activeTab, onClose }) {
                   border: `1px solid ${C.border2}`,
                   borderRadius: 3,
                   color: C.text,
-                  fontFamily: mono,
-                  fontSize: 11,
+                  fontFamily: T.code.fontFamily,
+                  fontSize: T.code.fontSize,
                   outline: "none",
                   cursor: "pointer",
                 }}
@@ -160,8 +159,8 @@ export default function FeedbackModal({ activeTab, onClose }) {
                         border: `1px solid ${active ? C.teal : C.border2}`,
                         background: active ? `${C.teal}20` : "transparent",
                         color: active ? C.teal : C.textMuted,
-                        fontFamily: mono,
-                        fontSize: 10,
+                        fontFamily: T.code.fontFamily,
+                        fontSize: T.caption.fontSize,
                         letterSpacing: "0.06em",
                         cursor: "pointer",
                         transition: "all 0.12s",
@@ -190,8 +189,8 @@ export default function FeedbackModal({ activeTab, onClose }) {
                   border: `1px solid ${C.border2}`,
                   borderRadius: 3,
                   color: C.text,
-                  fontFamily: mono,
-                  fontSize: 11,
+                  fontFamily: T.code.fontFamily,
+                  fontSize: T.code.fontSize,
                   outline: "none",
                   resize: "vertical",
                   boxSizing: "border-box",
@@ -205,7 +204,7 @@ export default function FeedbackModal({ activeTab, onClose }) {
 
             {error && (
               <div style={{
-                fontSize: 10, color: "#e07070",
+                fontSize: T.caption.fontSize, color: "#e07070",
                 background: "#e0707015", border: "1px solid #e0707040",
                 borderRadius: 3, padding: "0.5rem 0.75rem",
               }}>
@@ -221,7 +220,7 @@ export default function FeedbackModal({ activeTab, onClose }) {
                 background: (loading || !description.trim()) ? C.surface2 : C.teal,
                 color: (loading || !description.trim()) ? C.textMuted : C.bg,
                 border: "none", borderRadius: 3,
-                fontFamily: mono, fontSize: 11, fontWeight: 700,
+                fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, fontWeight: 700,
                 letterSpacing: "0.1em",
                 cursor: (loading || !description.trim()) ? "not-allowed" : "pointer",
                 transition: "all 0.15s",

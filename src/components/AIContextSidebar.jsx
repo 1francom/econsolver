@@ -18,7 +18,6 @@ import { buildSessionSnapshot } from "../services/AI/sessionSnapshot.js";
 import { useAuth } from "../services/auth/AuthContext.jsx";
 import { useTheme } from "../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // Module-aware starters — Litux how-to + methodology, tailored to the active tab.
 const SCREEN_STARTERS = {
@@ -191,7 +190,7 @@ function buildContext(screen, cleanedData, modelResult, sessionDatasets) {
 }
 
 function Bubble({ role, text, images }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const isUser = role === "user";
   return (
     <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 8 }}>
@@ -200,7 +199,7 @@ function Bubble({ role, text, images }) {
           width: 16, height: 16, borderRadius: "50%", marginRight: 6, marginTop: 3, flexShrink: 0,
           background: `${C.violet}30`, border: `1px solid ${C.violet}60`,
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 8, color: C.violet,
+          fontSize: T.caption.fontSize, color: C.violet,
         }}>AI</div>
       )}
       <div style={{
@@ -208,7 +207,7 @@ function Bubble({ role, text, images }) {
         background: isUser ? `${C.violet}18` : C.surface2,
         border: `1px solid ${isUser ? C.violet + "40" : C.border}`,
         borderRadius: isUser ? "8px 8px 2px 8px" : "8px 8px 8px 2px",
-        fontSize: 11, color: C.text, fontFamily: mono, lineHeight: 1.7,
+        fontSize: T.code.fontSize, color: C.text, fontFamily: T.code.fontFamily, lineHeight: 1.7,
       }}>
         {images?.length > 0 && (
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: text ? 6 : 0 }}>
@@ -225,14 +224,14 @@ function Bubble({ role, text, images }) {
 }
 
 function ThinkingBubble() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
       <div style={{
         width: 16, height: 16, borderRadius: "50%",
         background: `${C.violet}30`, border: `1px solid ${C.violet}60`,
         display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 8, color: C.violet, flexShrink: 0,
+        fontSize: T.caption.fontSize, color: C.violet, flexShrink: 0,
       }}>AI</div>
       <div style={{
         padding: "0.5rem 0.75rem", background: C.surface2,
@@ -244,7 +243,7 @@ function ThinkingBubble() {
           borderTopColor: C.violet, borderRadius: "50%",
           animation: "sidebar-spin 0.7s linear infinite",
         }} />
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>Thinking…</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>Thinking…</span>
       </div>
     </div>
   );
@@ -284,7 +283,7 @@ function stripForStorage(conversations) {
 }
 
 export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null, pid = null, pinnedModels = [], subsets = null, inferenceOpts = null }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { tier, session } = useAuth();
   const isPremium = !import.meta.env.VITE_AI_PROXY_ENABLED || import.meta.env.VITE_AI_PROXY_ENABLED !== "true" || PREMIUM_TIERS.has(tier);
   const sessionState = useSessionState();
@@ -537,14 +536,14 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         gap: 16, padding: "2rem", boxShadow: "-8px 0 32px rgba(0,0,0,0.6)",
       }}>
         <div style={{ fontSize: 28 }}>✦</div>
-        <div style={{ fontSize: 13, fontFamily: mono, color: C.gold, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+        <div style={{ fontSize: T.body.fontSize, fontFamily: T.code.fontFamily, color: C.gold, letterSpacing: "0.1em", textTransform: "uppercase" }}>
           Premium Feature
         </div>
-        <div style={{ fontSize: 11, fontFamily: mono, color: C.textMuted, textAlign: "center", lineHeight: 1.7, maxWidth: 280 }}>
+        <div style={{ fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textMuted, textAlign: "center", lineHeight: 1.7, maxWidth: 280 }}>
           The AI Research Coach is available on the Premium plan.{!session && " Sign in to access your account."}
         </div>
         <button onClick={onClose}
-          style={{ marginTop: 8, padding: "0.45rem 1rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, fontFamily: mono, fontSize: 10, cursor: "pointer" }}>
+          style={{ marginTop: 8, padding: "0.45rem 1rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer" }}>
           Close
         </button>
       </div>
@@ -576,10 +575,10 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
           background: C.surface, flexShrink: 0,
         }}>
           <div>
-            <div style={{ fontSize: 9, color: C.violet, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono, marginBottom: 2 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.violet, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 2 }}>
               AI Research Coach
             </div>
-            <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
               {screenLabel}
               {modelResult && <span style={{ color: C.teal }}> · {(modelResult.second ?? modelResult).modelLabel ?? "Model"}</span>}
               {Object.keys(sessionState?.datasets ?? {}).length > 1 && (
@@ -588,11 +587,11 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
             </div>
           </div>
           <button onClick={() => setShowChats(s => !s)}
-            style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, padding: "0.25rem 0.5rem", marginLeft: "auto", marginRight: 8 }}>
+            style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0.25rem 0.5rem", marginLeft: "auto", marginRight: 8 }}>
             ☰ Chats ({conversations.length})
           </button>
           <button onClick={onClose}
-            style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0.25rem 0.55rem" }}>
+            style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0.25rem 0.55rem" }}>
             ✕
           </button>
         </div>
@@ -600,7 +599,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         {showChats && (
           <div style={{ borderBottom: `1px solid ${C.border}`, background: C.surface, maxHeight: 240, overflowY: "auto", flexShrink: 0 }}>
             <button onClick={newChat}
-              style={{ width: "100%", textAlign: "left", padding: "0.5rem 1rem", background: "transparent", border: "none", borderBottom: `1px solid ${C.border}`, color: C.violet, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+              style={{ width: "100%", textAlign: "left", padding: "0.5rem 1rem", background: "transparent", border: "none", borderBottom: `1px solid ${C.border}`, color: C.violet, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
               + New chat
             </button>
             {conversations.map(c => (
@@ -611,19 +610,19 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
                     onChange={e => setRenameVal(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter") commitRename(c.id); if (e.key === "Escape") { setRenameId(null); setRenameVal(""); } }}
                     onBlur={() => commitRename(c.id)}
-                    style={{ flex: 1, background: C.bg, border: `1px solid ${C.violet}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, padding: "0.2rem 0.35rem", outline: "none" }} />
+                    style={{ flex: 1, background: C.bg, border: `1px solid ${C.violet}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0.2rem 0.35rem", outline: "none" }} />
                 ) : (
                   <button onClick={() => selectChat(c.id)}
-                    style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", color: c.id === activeId ? C.teal : C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", color: c.id === activeId ? C.teal : C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {c.title}
                   </button>
                 )}
                 <button onClick={() => { setRenameId(c.id); setRenameVal(c.title); }}
                   title="Rename"
-                  style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px" }}>✎</button>
+                  style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0 2px" }}>✎</button>
                 <button onClick={() => deleteChat(c.id)}
                   title="Delete"
-                  style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px" }}
+                  style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0 2px" }}
                   onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
                   onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}>✕</button>
               </div>
@@ -635,7 +634,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         <div style={{ flex: 1, overflowY: "auto", padding: "0.85rem 1rem 0.5rem" }}>
           {history.length === 0 && !loading && (
             <>
-              <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: "0.75rem", lineHeight: 1.6 }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: "0.75rem", lineHeight: 1.6 }}>
                 {snapshot?.pipeline?.length || snapshot?.activeResult
                   ? <>I have full context of your session — {screenLabel} state{Object.keys(sessionState?.datasets ?? {}).length > 1 ? `, ${Object.keys(sessionState.datasets).length} loaded datasets` : ""}, pipeline, and model. Ask anything.</>
                   : <>I can see your current {screenLabel} state. Ask anything.</>}
@@ -646,8 +645,8 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
                     style={{
                       padding: "0.35rem 0.65rem", textAlign: "left",
                       background: "transparent", border: `1px solid ${C.border2}`,
-                      borderRadius: 3, cursor: "pointer", fontFamily: mono,
-                      fontSize: 10, color: C.textDim, transition: "all 0.12s",
+                      borderRadius: 3, cursor: "pointer", fontFamily: T.code.fontFamily,
+                      fontSize: T.caption.fontSize, color: C.textDim, transition: "all 0.12s",
                     }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = C.violet; e.currentTarget.style.color = C.violet; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
@@ -675,7 +674,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
                 <div key={i} style={{ position: "relative" }}>
                   <img src={img.dataUrl} alt="" style={{ height: 56, borderRadius: 3, border: `1px solid ${C.border2}`, objectFit: "contain", maxWidth: 100 }} />
                   <button onClick={() => setPendingImages(prev => prev.filter((_, j) => j !== i))}
-                    style={{ position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: "50%", background: C.surface, border: `1px solid ${C.border2}`, cursor: "pointer", fontSize: 8, color: C.textMuted, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
+                    style={{ position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: "50%", background: C.surface, border: `1px solid ${C.border2}`, cursor: "pointer", fontSize: T.caption.fontSize, color: C.textMuted, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
                     ✕
                   </button>
                 </div>
@@ -686,7 +685,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           {history.length > 0 && (
             <button onClick={() => { updateActive(() => []); setInput(""); setPendingImages([]); }}
-              style={{ padding: "0.45rem 0.55rem", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, flexShrink: 0, transition: "all 0.12s" }}
+              style={{ padding: "0.45rem 0.55rem", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, flexShrink: 0, transition: "all 0.12s" }}
               onMouseEnter={e => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = C.red; }}
               onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; e.currentTarget.style.borderColor = C.border; }}
             >✕</button>
@@ -704,7 +703,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
               flex: 1, resize: "none", overflow: "hidden",
               background: C.surface2, border: `1px solid ${C.border2}`,
               borderRadius: 3, padding: "0.45rem 0.65rem",
-              fontFamily: mono, fontSize: 11, color: C.text,
+              fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text,
               outline: "none", lineHeight: 1.5,
             }}
             onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }}
@@ -719,7 +718,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
               background: loading ? C.red : ((input.trim() || pendingImages.length > 0) ? C.violet : "transparent"),
               border: `1px solid ${loading ? C.red : ((input.trim() || pendingImages.length > 0) ? C.violet : C.border2)}`,
               color: loading ? C.bg : ((input.trim() || pendingImages.length > 0) ? C.bg : C.textMuted),
-              fontFamily: mono, fontSize: 10, fontWeight: 700,
+              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight: 700,
               cursor: loading || input.trim() ? "pointer" : "not-allowed",
               transition: "all 0.13s",
             }}

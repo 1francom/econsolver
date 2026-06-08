@@ -5,7 +5,6 @@
 import { useState, useEffect } from "react";
 import { useTheme } from "../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── TOUR STEPS ───────────────────────────────────────────────────────────────
 // Add entries here when adding new tabs, modules, or estimators.
@@ -76,7 +75,7 @@ export const TOUR_STEPS = [
 //   sections     – {heading: string, items: string[]}[] richer format
 //   overlayLeft  – px offset from left edge where the overlay starts (default 280)
 export function HintBox({ tips = [], title = "How to use", color, sections = null, overlayLeft = 280 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const accent = color ?? C.teal;
   const [open, setOpen] = useState(false);
 
@@ -105,8 +104,8 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
           borderRadius: 3,
           padding: "0.45rem 0.75rem",
           cursor: "pointer",
-          fontFamily: mono,
-          fontSize: 10,
+          fontFamily: T.code.fontFamily,
+          fontSize: T.caption.fontSize,
           color: C.textDim,
           textAlign: "left",
           letterSpacing: "0.06em",
@@ -116,8 +115,8 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
         onMouseEnter={e => { e.currentTarget.style.color = accent; e.currentTarget.style.borderColor = `${accent}60`; }}
         onMouseLeave={e => { e.currentTarget.style.color = C.textDim; e.currentTarget.style.borderColor = C.border; }}
       >
-        <span style={{ color: accent, fontSize: 9 }}>▸</span>
-        <span style={{ color: accent, letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 9 }}>
+        <span style={{ color: accent, fontSize: T.caption.fontSize }}>▸</span>
+        <span style={{ color: accent, letterSpacing: "0.12em", textTransform: "uppercase", fontSize: T.caption.fontSize }}>
           {title}
         </span>
       </button>
@@ -142,7 +141,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
             background: C.bg,
             borderLeft: `3px solid ${accent}`,
             overflowY: "auto",
-            fontFamily: mono,
+            fontFamily: T.code.fontFamily,
             boxShadow: "-8px 0 32px rgba(0,0,0,0.5)",
           }}>
             {/* Inner padding wrapper */}
@@ -158,7 +157,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
                 borderBottom: `1px solid ${C.border}`,
               }}>
                 <div>
-                  <div style={{ fontSize: 8, color: accent, letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: 6 }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: accent, letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: 6 }}>
                     User Guide
                   </div>
                   <div style={{ fontSize: 22, color: C.text, letterSpacing: "-0.02em" }}>
@@ -166,7 +165,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
-                  <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>ESC to close</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>ESC to close</span>
                   <button
                     onClick={() => setOpen(false)}
                     style={{
@@ -175,8 +174,8 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
                       borderRadius: 3,
                       color: C.textDim,
                       cursor: "pointer",
-                      fontFamily: mono,
-                      fontSize: 14,
+                      fontFamily: T.code.fontFamily,
+                      fontSize: T.body.fontSize,
                       width: 30,
                       height: 30,
                       display: "flex",
@@ -201,7 +200,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
                   {sections.map((sec, si) => (
                     <div key={si}>
                       <div style={{
-                        fontSize: 8,
+                        fontSize: T.caption.fontSize,
                         color: accent,
                         letterSpacing: "0.22em",
                         textTransform: "uppercase",
@@ -216,7 +215,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
                           <li key={ii} style={{
                             display: "flex",
                             gap: 8,
-                            fontSize: 11,
+                            fontSize: T.code.fontSize,
                             lineHeight: 1.75,
                             color: C.textDim,
                             marginBottom: "0.15rem",
@@ -235,7 +234,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
                     <li key={i} style={{
                       display: "flex",
                       gap: 8,
-                      fontSize: 11,
+                      fontSize: T.code.fontSize,
                       lineHeight: 1.75,
                       color: C.textDim,
                       marginBottom: "0.5rem",
@@ -258,7 +257,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
 // Floating step card — fixed bottom-right.
 // Props: step (number), onNext, onPrev, onClose, onTabChange
 export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
 
   if (step < 0 || step >= TOUR_STEPS.length) return null;
 
@@ -289,7 +288,7 @@ export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
       border: `1px solid ${C.border}`,
       borderLeft: `3px solid ${C.teal}`,
       borderRadius: 4,
-      fontFamily: mono,
+      fontFamily: T.code.fontFamily,
       boxShadow: "0 4px 24px rgba(0,0,0,0.55)",
     }}>
       {/* ── Header ── */}
@@ -301,12 +300,12 @@ export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
         borderBottom: `1px solid ${C.border}`,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.1em" }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.1em" }}>
             {step + 1} / {TOUR_STEPS.length}
           </span>
           {current.tab && (
             <span style={{
-              fontSize: 8,
+              fontSize: T.caption.fontSize,
               color: C.teal,
               border: `1px solid ${C.teal}40`,
               borderRadius: 2,
@@ -325,8 +324,8 @@ export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
             border: "none",
             color: C.textMuted,
             cursor: "pointer",
-            fontFamily: mono,
-            fontSize: 12,
+            fontFamily: T.code.fontFamily,
+            fontSize: T.code.fontSize,
             padding: "0 2px",
             lineHeight: 1,
           }}
@@ -340,7 +339,7 @@ export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
       {/* ── Body ── */}
       <div style={{ padding: "0.85rem 0.75rem 0.7rem" }}>
         <div style={{
-          fontSize: 13,
+          fontSize: T.body.fontSize,
           color: C.text,
           marginBottom: "0.5rem",
           letterSpacing: "-0.01em",
@@ -348,7 +347,7 @@ export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
           {current.title}
         </div>
         <div style={{
-          fontSize: 11,
+          fontSize: T.code.fontSize,
           color: C.textDim,
           lineHeight: 1.7,
         }}>
@@ -373,8 +372,8 @@ export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
             borderRadius: 3,
             color: isFirst ? C.textMuted : C.textDim,
             cursor: isFirst ? "not-allowed" : "pointer",
-            fontFamily: mono,
-            fontSize: 10,
+            fontFamily: T.code.fontFamily,
+            fontSize: T.caption.fontSize,
             padding: "0.28rem 0.65rem",
             opacity: isFirst ? 0.4 : 1,
             transition: "color 0.12s",
@@ -390,8 +389,8 @@ export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
             border: "none",
             color: C.textMuted,
             cursor: "pointer",
-            fontFamily: mono,
-            fontSize: 10,
+            fontFamily: T.code.fontFamily,
+            fontSize: T.caption.fontSize,
             padding: "0.28rem 0.5rem",
             transition: "color 0.12s",
           }}
@@ -409,8 +408,8 @@ export function TourOverlay({ step, onNext, onPrev, onClose, onTabChange }) {
             borderRadius: 3,
             color: C.teal,
             cursor: "pointer",
-            fontFamily: mono,
-            fontSize: 10,
+            fontFamily: T.code.fontFamily,
+            fontSize: T.caption.fontSize,
             padding: "0.28rem 0.65rem",
             transition: "all 0.12s",
           }}
