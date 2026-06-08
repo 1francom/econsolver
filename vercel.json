@@ -8,11 +8,11 @@
       "source": "/(.*)",
       "headers": [
         { "key": "Cross-Origin-Opener-Policy",   "value": "same-origin" },
-        { "key": "Cross-Origin-Embedder-Policy",  "value": "require-corp" },
+        { "key": "Cross-Origin-Embedder-Policy",  "value": "credentialless" },
         { "key": "X-Content-Type-Options",        "value": "nosniff" },
         { "key": "X-Frame-Options",               "value": "DENY" },
         { "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdn.sheetjs.com; connect-src 'self' https://api.anthropic.com https://*.supabase.co https://photon.komoot.io https://api.worldbank.org https://nominatim.openstreetmap.org; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; font-src 'self' https://cdn.jsdelivr.net; worker-src 'self' blob:; frame-ancestors 'none';" }
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdn.sheetjs.com; connect-src 'self' https://api.anthropic.com https://*.supabase.co https://photon.komoot.io https://api.worldbank.org https://nominatim.openstreetmap.org; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; worker-src 'self' blob:; frame-ancestors 'none';" }
       ]
     }
   ],
