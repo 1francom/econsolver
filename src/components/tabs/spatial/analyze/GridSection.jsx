@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/GridSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, isGeometryHeader } from "../shared/guess.js";
 import { assignRectGrid, assignH3Grid, assignPointsToGrid } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
@@ -84,7 +85,7 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Assigns each point to a stable grid ID from an existing grid, or to quick exploratory rectangular/hex bins.
         Use existing generated grids for schools, crimes, bus stops, and police station point workflows.
       </div>
@@ -96,7 +97,7 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
               setOutCol(v === "existing" ? "grid_id" : "grid_cell");
             }}
             style={{
-              padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+              padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: gridType === v ? `${C.teal}18` : "transparent",
               border: `1px solid ${gridType === v ? C.teal : C.border2}`,
               borderRadius: 3, color: gridType === v ? C.teal : C.textDim,
@@ -116,9 +117,9 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
       {gridType === "existing" && (
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
+            <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
             <select value={gridDsId} onChange={e => { setGridDsId(e.target.value); setWktCol(""); setGridIdCol(""); setExtraCols([]); }}
-              style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+              style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
               <option value="">select grid dataset</option>
               {availableDatasets.map(ds => <option key={ds.id} value={ds.id}>{ds.filename ?? ds.name ?? ds.id}</option>)}
             </select>
@@ -130,11 +131,11 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
                 <ColSelect label="Grid ID column" value={effectiveGridId} onChange={setGridIdCol} headers={gridHeaders} C={C} />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Optional grid attributes</label>
+                <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Optional grid attributes</label>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                   {gridExtraHeaders.map(h => (
                     <button key={h} onClick={() => toggleExtraCol(h)}
-                      style={{ padding: "2px 8px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+                      style={{ padding: "2px 8px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                         background: extraCols.includes(h) ? `${C.teal}18` : "transparent",
                         border: `1px solid ${extraCols.includes(h) ? C.teal : C.border2}`,
                         borderRadius: 3, color: extraCols.includes(h) ? C.teal : C.textDim }}
@@ -149,7 +150,7 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Assign grid" />
         {result && (
-          <span style={{ fontSize: 9, color: C.teal }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>
             {gridType === "existing" ? `OK: ${result.matched} / ${rows.length} matched, ${result.distinct} grid cells` : `OK: ${result.distinct} distinct cells across ${rows.length} rows`}
           </span>
         )}

@@ -16,8 +16,6 @@ import { useTheme } from "../../../ThemeContext.jsx";
 import { useSessionLog } from "../../../services/session/sessionLog.jsx";
 import { quantileTreatmentEffect } from "../../../math/QTE.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-
 function fmt(n, d = 4) {
   return (typeof n === "number" && isFinite(n)) ? n.toFixed(d) : "—";
 }
@@ -36,6 +34,7 @@ function parseTaus(preset, custom) {
 
 // ── QTE-vs-τ plot ─────────────────────────────────────────────────────────────
 function QTEPlot({ res, C }) {
+  const { T } = useTheme();
   const W = 470, H = 230, m = { t: 16, r: 16, b: 34, l: 46 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
   const { taus, qte, ate, ci } = res;
@@ -63,20 +62,20 @@ function QTEPlot({ res, C }) {
         return (
           <g key={i}>
             <line x1={m.l} y1={y} x2={W - m.r} y2={y} stroke={C.border} strokeWidth="0.5" />
-            <text x={m.l - 6} y={y + 3} textAnchor="end" fontFamily={mono} fontSize="8" fill={C.textMuted}>{v.toFixed(2)}</text>
+            <text x={m.l - 6} y={y + 3} textAnchor="end" fontFamily={T.data.fontFamily} fontSize={T.caption.fontSize} fill={C.textMuted}>{v.toFixed(2)}</text>
           </g>
         );
       })}
       {/* x labels */}
       {taus.map((t, i) => (
-        <text key={i} x={sx(t)} y={H - m.b + 14} textAnchor="middle" fontFamily={mono} fontSize="8" fill={C.textMuted}>{t}</text>
+        <text key={i} x={sx(t)} y={H - m.b + 14} textAnchor="middle" fontFamily={T.data.fontFamily} fontSize={T.caption.fontSize} fill={C.textMuted}>{t}</text>
       ))}
-      <text x={m.l + iw / 2} y={H - 4} textAnchor="middle" fontFamily={mono} fontSize="8" fill={C.textDim}>τ (quantile)</text>
+      <text x={m.l + iw / 2} y={H - 4} textAnchor="middle" fontFamily={T.data.fontFamily} fontSize={T.caption.fontSize} fill={C.textDim}>τ (quantile)</text>
       {/* zero line */}
       {yMin < 0 && yMax > 0 && <line x1={m.l} y1={sy(0)} x2={W - m.r} y2={sy(0)} stroke={C.border2} strokeWidth="0.7" />}
       {/* ATE dashed reference */}
       <line x1={m.l} y1={sy(ate)} x2={W - m.r} y2={sy(ate)} stroke={C.blue} strokeWidth="1" strokeDasharray="5 3" />
-      <text x={W - m.r} y={sy(ate) - 4} textAnchor="end" fontFamily={mono} fontSize="8" fill={C.blue}>OLS (ATE) = {fmt(ate, 3)}</text>
+      <text x={W - m.r} y={sy(ate) - 4} textAnchor="end" fontFamily={T.data.fontFamily} fontSize={T.caption.fontSize} fill={C.blue}>OLS (ATE) = {fmt(ate, 3)}</text>
       {/* CI ribbon */}
       {ribbon && <polygon points={ribbon} fill={`${C.gold}1e`} stroke="none" />}
       {/* QTE line + points */}
@@ -88,6 +87,7 @@ function QTEPlot({ res, C }) {
 
 // ── Overlaid empirical CDFs with QTE arrow at selected τ ──────────────────────
 function CDFPlot({ res, selTau, C }) {
+  const { T } = useTheme();
   const W = 470, H = 230, m = { t: 16, r: 16, b: 34, l: 40 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
   const { ecdf0, ecdf1, taus, q0, q1 } = res;
@@ -121,10 +121,10 @@ function CDFPlot({ res, selTau, C }) {
       {[0, 0.25, 0.5, 0.75, 1].map((f, i) => (
         <g key={i}>
           <line x1={m.l} y1={sy(f)} x2={W - m.r} y2={sy(f)} stroke={C.border} strokeWidth="0.5" />
-          <text x={m.l - 5} y={sy(f) + 3} textAnchor="end" fontFamily={mono} fontSize="8" fill={C.textMuted}>{f}</text>
+          <text x={m.l - 5} y={sy(f) + 3} textAnchor="end" fontFamily={T.data.fontFamily} fontSize={T.caption.fontSize} fill={C.textMuted}>{f}</text>
         </g>
       ))}
-      <text x={m.l + iw / 2} y={H - 4} textAnchor="middle" fontFamily={mono} fontSize="8" fill={C.textDim}>outcome{res.transform === "log" ? " (log)" : ""}</text>
+      <text x={m.l + iw / 2} y={H - 4} textAnchor="middle" fontFamily={T.data.fontFamily} fontSize={T.caption.fontSize} fill={C.textDim}>outcome{res.transform === "log" ? " (log)" : ""}</text>
       {/* CDF curves */}
       <path d={stepPath(ecdf0)} fill="none" stroke={C.teal} strokeWidth="1.4" />
       <path d={stepPath(ecdf1)} fill="none" stroke={C.gold} strokeWidth="1.4" />
@@ -132,15 +132,15 @@ function CDFPlot({ res, selTau, C }) {
       {a0 != null && a1 != null && (
         <g>
           <line x1={m.l} y1={sy(selTau)} x2={W - m.r} y2={sy(selTau)} stroke={C.textMuted} strokeWidth="0.5" strokeDasharray="2 2" />
-          <line x1={sx(a0)} y1={sy(selTau)} x2={sx(a1)} y2={sy(selTau)} stroke={C.red ?? "#c87e7e"} strokeWidth="1.6" />
+          <line x1={sx(a0)} y1={sy(selTau)} x2={sx(a1)} y2={sy(selTau)} stroke={C.red} strokeWidth="1.6" />
           {[a0, a1].map((q, i) => <circle key={i} cx={sx(q)} cy={sy(selTau)} r="2.6" fill={i === 0 ? C.teal : C.gold} />)}
-          <text x={(sx(a0) + sx(a1)) / 2} y={sy(selTau) - 5} textAnchor="middle" fontFamily={mono} fontSize="8" fill={C.red ?? "#c87e7e"}>
+          <text x={(sx(a0) + sx(a1)) / 2} y={sy(selTau) - 5} textAnchor="middle" fontFamily={T.data.fontFamily} fontSize={T.caption.fontSize} fill={C.red}>
             QTE(τ={selTau}) = {fmt(a1 - a0, 3)}
           </text>
         </g>
       )}
       {/* legend */}
-      <g fontFamily={mono} fontSize="8">
+      <g fontFamily={T.data.fontFamily} fontSize={T.caption.fontSize}>
         <rect x={W - m.r - 96} y={m.t + 2} width="9" height="3" fill={C.teal} />
         <text x={W - m.r - 84} y={m.t + 7} fill={C.textDim}>control</text>
         <rect x={W - m.r - 96} y={m.t + 14} width="9" height="3" fill={C.gold} />
@@ -151,7 +151,7 @@ function CDFPlot({ res, selTau, C }) {
 }
 
 export default function QTEPanel({ columns = [], title = "Quantile Treatment Effects", defaultOpen = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { appendLog } = useSessionLog();
   const [open, setOpen] = useState(defaultOpen);
   const [yCol, setYCol] = useState("");
@@ -165,7 +165,7 @@ export default function QTEPanel({ columns = [], title = "Quantile Treatment Eff
   const [res, setRes] = useState(null);
   const [selTau, setSelTau] = useState(0.5);
 
-  const field = { background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" };
+  const field = { background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none" };
 
   const effY = columns.some(c => c.name === yCol) ? yCol : (columns[0]?.name ?? "");
   const effD = columns.some(c => c.name === dCol) ? dCol : (columns[1]?.name ?? columns[0]?.name ?? "");
@@ -196,7 +196,7 @@ export default function QTEPanel({ columns = [], title = "Quantile Treatment Eff
         background: cur === id ? `${C.gold}18` : "transparent",
         border: `1px solid ${cur === id ? C.gold : C.border2}`,
         color: cur === id ? C.gold : C.textDim,
-        fontFamily: mono, fontSize: 10, letterSpacing: "0.06em",
+        fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.06em",
         padding: "0.3rem 0.65rem", borderRadius: 2, cursor: "pointer",
       }}>{label}</button>
   );
@@ -205,21 +205,21 @@ export default function QTEPanel({ columns = [], title = "Quantile Treatment Eff
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", marginBottom: "1.4rem" }}>
       <div onClick={() => setOpen(o => !o)}
         style={{ background: C.surface2, padding: "0.55rem 0.85rem", borderBottom: open ? `1px solid ${C.border}` : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▾" : "▸"}</span>
-        <span style={{ fontSize: 10, color: C.textDim, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono }}>{title}</span>
-        {noData && <span style={{ marginLeft: "auto", fontSize: 9, color: C.textMuted }}>no numeric data</span>}
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textDim, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>{title}</span>
+        {noData && <span style={{ marginLeft: "auto", fontSize: T.caption.fontSize, color: C.textMuted }}>no numeric data</span>}
       </div>
 
       {open && (
         <div style={{ padding: "0.8rem 0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 10 }}>
           {/* outcome + treatment */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>outcome Y</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>outcome Y</span>
             <select value={effY} onChange={e => setYCol(e.target.value)} style={{ ...field, maxWidth: 200 }} disabled={!columns.length}>
               {!columns.length && <option value="">— none —</option>}
               {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>treatment D (binary)</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>treatment D (binary)</span>
             <select value={effD} onChange={e => setDCol(e.target.value)} style={{ ...field, maxWidth: 200 }} disabled={!columns.length}>
               {!columns.length && <option value="">— none —</option>}
               {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -228,7 +228,7 @@ export default function QTEPanel({ columns = [], title = "Quantile Treatment Eff
 
           {/* τ grid */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>τ grid</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>τ grid</span>
             {modeBtn(tauPreset, setTauPreset, "5-point", "0.1·0.25·0.5·0.75·0.9")}
             {modeBtn(tauPreset, setTauPreset, "deciles", "deciles")}
             {modeBtn(tauPreset, setTauPreset, "fine", "seq .1–.9 ×.05")}
@@ -240,10 +240,10 @@ export default function QTEPanel({ columns = [], title = "Quantile Treatment Eff
 
           {/* transform + CI + B + seed */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>transform</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>transform</span>
             {modeBtn(transform, setTransform, "none", "none")}
             {modeBtn(transform, setTransform, "log", "log(Y)")}
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted, marginLeft: 8 }}>CI</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 8 }}>CI</span>
             <select value={ci} onChange={e => setCi(e.target.value)} style={field}>
               <option value="none">none</option>
               <option value="percentile">percentile</option>
@@ -252,33 +252,33 @@ export default function QTEPanel({ columns = [], title = "Quantile Treatment Eff
             </select>
             {ci !== "none" && (
               <>
-                <label style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
                   B <input type="number" step="100" value={B} onChange={e => setB(e.target.value)} style={{ ...field, width: 80 }} />
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
                   seed <input type="number" step="1" value={seed} onChange={e => setSeed(e.target.value)} style={{ ...field, width: 80 }} />
                 </label>
               </>
             )}
             <button onClick={run} disabled={noData}
-              style={{ marginLeft: "auto", background: C.teal, border: "none", color: C.bg, fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", padding: "0.35rem 1rem", borderRadius: 3, cursor: noData ? "not-allowed" : "pointer", opacity: noData ? 0.5 : 1 }}>
+              style={{ marginLeft: "auto", background: C.teal, border: "none", color: C.bg, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight: 600, letterSpacing: "0.08em", padding: "0.35rem 1rem", borderRadius: 3, cursor: noData ? "not-allowed" : "pointer", opacity: noData ? 0.5 : 1 }}>
               RUN QTE
             </button>
           </div>
 
-          {res?.error && <div style={{ fontFamily: mono, fontSize: 10, color: C.red ?? "#c87e7e" }}>{res.error}</div>}
+          {res?.error && <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.red }}>{res.error}</div>}
 
           {res && !res.error && (
             <>
-              <div style={{ fontFamily: mono, fontSize: 10, color: C.textDim }}>
+              <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim }}>
                 control = {String(res.controlLevel)} (n={res.n0}) · treated = {String(res.treatedLevel)} (n={res.n1}) · ATE = <span style={{ color: C.blue }}>{fmt(res.ate, 4)}</span>
-                {res.transform === "log" && res.droppedLog > 0 && <span style={{ color: C.red ?? "#c87e7e" }}> · {res.droppedLog} non-positive dropped (log)</span>}
+                {res.transform === "log" && res.droppedLog > 0 && <span style={{ color: C.red }}> · {res.droppedLog} non-positive dropped (log)</span>}
                 {res.ci && <span> · {res.ci.type} band, B={res.ci.B}, seed={res.seed}</span>}
               </div>
 
               {/* QTE table */}
               <div style={{ overflowX: "auto" }}>
-                <table style={{ borderCollapse: "collapse", fontFamily: mono, fontSize: 10.5, color: C.text }}>
+                <table style={{ borderCollapse: "collapse", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text }}>
                   <thead>
                     <tr style={{ color: C.textMuted }}>
                       <th style={{ textAlign: "right", padding: "2px 10px" }}>τ</th>
@@ -312,7 +312,7 @@ export default function QTEPanel({ columns = [], title = "Quantile Treatment Eff
               {/* Overlaid CDFs with arrow */}
               <div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
-                  <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>read QTE at τ</span>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>read QTE at τ</span>
                   {res.taus.map(t => modeBtn(selTau, setSelTau, t, String(t)))}
                 </div>
                 <div style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3, padding: "0.4rem" }}>

@@ -1,14 +1,15 @@
 // ─── ECON STUDIO · spatial/map/SpatialLayerEditor.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useMemo } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, NumInput } from "../shared/atoms.jsx";
 import { ColorRow } from "./ColorRow.jsx";
 import { PALETTE_DEFS, paletteToCss } from "../shared/color.js";
 
 function PalettePicker({ value, onChange, C }) {
+  const { T } = useTheme();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>Color scale</label>
+      <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>Color scale</label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
         {Object.entries(PALETTE_DEFS).map(([key, pal]) => {
           const active = (value ?? "teal-gold") === key;
@@ -30,6 +31,7 @@ function PalettePicker({ value, onChange, C }) {
 }
 
 export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders, availableDatasets, C }) {
+  const { T } = useTheme();
   const lyDs      = (layer.datasetId && layer.datasetId !== "active")
     ? availableDatasets.find(d => d.id === layer.datasetId) : null;
   const lyRows    = lyDs?.rows    ?? activeRows;
@@ -50,18 +52,18 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {/* Dataset selector */}
       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>Dataset</label>
+        <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>Dataset</label>
         <select
           value={layer.datasetId ?? "active"}
           onChange={e => onDsChange(e.target.value)}
-          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none", cursor: "pointer" }}
+          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none", cursor: "pointer" }}
         >
           <option value="active">Active dataset</option>
           {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
         </select>
       </div>
 
-      <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
         {layer.type} layer
       </div>
 
@@ -84,7 +86,7 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
           {[["latlon", "Lat/Lon extent"], ["generate", "Boundary WKT"], ["wkt", "From WKT col"]].map(([m, lbl]) => (
             <button key={m} onClick={() => onChange({ ...layer, mode: m })}
               style={{
-                flex: 1, padding: "3px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                flex: 1, padding: "3px 0", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: layer.mode === m ? `${C.teal}18` : "transparent",
                 border: `1px solid ${layer.mode === m ? C.teal + "60" : C.border}`,
                 color: layer.mode === m ? C.teal : C.textMuted,
@@ -104,7 +106,7 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
             <input type="checkbox" checked={layer.clipBorder !== false}
               onChange={e => onChange({ ...layer, clipBorder: e.target.checked })}
               style={{ accentColor: C.teal, cursor: "pointer" }} />
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Clip border cells to extent</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>Clip border cells to extent</span>
           </label>
         </>)}
 
@@ -117,7 +119,7 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
             <input type="checkbox" checked={layer.clipBorder !== false}
               onChange={e => onChange({ ...layer, clipBorder: e.target.checked })}
               style={{ accentColor: C.teal, cursor: "pointer" }} />
-            <span style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Clip border cells to boundary</span>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>Clip border cells to boundary</span>
           </label>
         </>)}
 
@@ -146,7 +148,7 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
       {layer.type === "line" && (<>
         <ColSelect label="WKT geometry column" value={layer.wktCol}
           onChange={v => onChange({ ...layer, wktCol: v })} headers={geomCols} C={C} allowNone />
-        <ColorRow label="Line color" color={layer.lineColor ?? "#6e9ec8"} opacity={layer.lineWeight ?? 1.5}
+        <ColorRow label="Line color" color={layer.lineColor ?? C.blue} opacity={layer.lineWeight ?? 1.5}
           opacityLabel="width" opacityMin={0.5} opacityMax={6} opacityStep={0.25}
           onColor={v => onChange({ ...layer, lineColor: v })}
           onOpacity={v => onChange({ ...layer, lineWeight: v })} C={C} />
@@ -161,7 +163,7 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
           {[["latlon", "Lat/Lon"], ["wkt", "WKT geometry"]].map(([m, lbl]) => (
             <button key={m} onClick={() => onChange({ ...layer, mode: m })}
               style={{
-                flex: 1, padding: "3px 0", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                flex: 1, padding: "3px 0", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: layer.mode === m ? `${C.teal}18` : "transparent",
                 border: `1px solid ${layer.mode === m ? C.teal + "60" : C.border}`,
                 color: layer.mode === m ? C.teal : C.textMuted,
@@ -194,7 +196,7 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
         </div>
         {!layer.colorCol && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
-            <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>Color</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>Color</span>
             <input type="color" value={layer.fillColor}
               onChange={e => onChange({ ...layer, fillColor: e.target.value })}
               style={{ width: 28, height: 22, border: "none", background: "none", cursor: "pointer", padding: 0 }} />

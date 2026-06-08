@@ -6,7 +6,6 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import { HintBox } from "../HelpSystem.jsx";
-import { mono } from "./spatial/shared/constants.js";
 import { loadLeaflet } from "./spatial/shared/leaflet.js";
 import { Section } from "./spatial/shared/atoms.jsx";
 import { SpatialPlotTab } from "./spatial/map/SpatialPlotTab.jsx";
@@ -28,7 +27,7 @@ import { SpatialGeoPlot } from "./spatial/plot/SpatialGeoPlot.jsx";
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
 export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset, pid }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [mainTab,     setMainTab]     = useState("analyze");
   const [pendingRows, setPendingRows] = useState(null);
   const [pendingCols, setPendingCols] = useState([]);
@@ -77,7 +76,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
   return (
     <div style={{
       display: "flex", flexDirection: "column", height: "100%",
-      fontFamily: mono, color: C.text, overflow: "hidden",
+      fontFamily: T.code.fontFamily, color: C.text, overflow: "hidden",
     }}>
       <div style={{ padding: "0.75rem 1.2rem 0", flexShrink: 0 }}>
         <HintBox tips={[
@@ -95,11 +94,11 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
         background: C.surface2, flexShrink: 0,
         display: "flex", alignItems: "center", gap: 12,
       }}>
-        <span style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase" }}>
           Spatial Analytics
         </span>
         {hasData && (
-          <span style={{ fontSize: 9, color: C.textMuted }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
             {rows.length.toLocaleString()} rows · {numericHeaders.length} numeric cols
           </span>
         )}
@@ -108,7 +107,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
           {[["analyze", "Analyze"], ["map", "Map"], ["plot", "Plot"]].map(([tab, lbl]) => (
             <button key={tab} onClick={() => setMainTab(tab)}
               style={{
-                padding: "3px 12px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                padding: "3px 12px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: mainTab === tab ? `${C.teal}18` : "transparent",
                 border: `1px solid ${mainTab === tab ? C.teal + "60" : C.border}`,
                 color: mainTab === tab ? C.teal : C.textMuted,
@@ -124,9 +123,9 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
           flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
           justifyContent: "center", gap: 10,
         }}>
-          <div style={{ fontSize: 22, color: C.border2 }}>⊙</div>
-          <div style={{ fontSize: 12, color: C.textDim }}>No dataset active.</div>
-          <div style={{ fontSize: 10, color: C.textMuted }}>
+          <div style={{ fontSize: T.h2.fontSize, color: C.border2 }}>⊙</div>
+          <div style={{ fontSize: T.code.fontSize, color: C.textDim }}>No dataset active.</div>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
             Run your pipeline in Clean → or load data in the Data tab.
           </div>
         </div>

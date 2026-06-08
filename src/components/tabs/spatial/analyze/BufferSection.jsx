@@ -1,11 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/BufferSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState } from "react";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignBuffer } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function BufferSection({ rows, headers, onResult, C }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [latCol,   setLatCol]   = useState(() => guessLatCol(headers));
   const [lonCol,   setLonCol]   = useState(() => guessLonCol(headers));
@@ -33,7 +35,7 @@ export function BufferSection({ rows, headers, onResult, C }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Creates a binary treatment indicator (0/1) — 1 if the observation is within the specified radius of a reference point.
         Useful as an instrumental variable or treatment assignment variable.
       </div>
@@ -48,7 +50,7 @@ export function BufferSection({ rows, headers, onResult, C }) {
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} />
         {result && (
-          <span style={{ fontSize: 9, color: C.teal }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>
             ✓ {result.treated} treated / {rows.length - result.treated} control
           </span>
         )}

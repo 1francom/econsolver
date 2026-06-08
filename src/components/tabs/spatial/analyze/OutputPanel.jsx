@@ -1,9 +1,10 @@
 // ─── ECON STUDIO · spatial/analyze/OutputPanel.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { SaveBtn } from "../shared/atoms.jsx";
 
 export function OutputPanel({ pendingRows, pendingCols, onSave, C }) {
+  const { T } = useTheme();
   const [name, setName] = useState("spatial_result");
 
   if (!pendingRows) return null;
@@ -15,7 +16,7 @@ export function OutputPanel({ pendingRows, pendingCols, onSave, C }) {
       background: `${C.teal}08`,
       display: "flex", flexDirection: "column", gap: 8,
     }}>
-      <span style={{ fontSize: 10, color: C.teal }}>
+      <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>
         Ready — {pendingRows.length} rows · new col{pendingCols.length > 1 ? "s" : ""}: <strong>{pendingCols.join(", ")}</strong>
       </span>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -24,7 +25,7 @@ export function OutputPanel({ pendingRows, pendingCols, onSave, C }) {
           placeholder="dataset name"
           style={{
             padding: "3px 8px", background: C.surface, border: `1px solid ${C.border2}`,
-            borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none", width: 160,
+            borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none", width: 160,
           }}
         />
         <SaveBtn onClick={() => onSave(name, pendingRows)} disabled={!name} C={C} />

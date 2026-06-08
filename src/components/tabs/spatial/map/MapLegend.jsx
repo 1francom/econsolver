@@ -1,14 +1,15 @@
 // ─── ECON STUDIO · spatial/map/MapLegend.jsx ─ (moved verbatim from SpatialTab.jsx)
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { paletteToCss } from "../shared/color.js";
 
 export function MapLegend({ legend, C }) {
+  const { T } = useTheme();
   if (!legend) return null;
   return (
     <div style={{
       position: "absolute", bottom: 24, right: 8, zIndex: 999,
       background: C.surface, border: `1px solid ${C.border2}`,
-      borderRadius: 4, padding: "6px 10px", fontFamily: mono, fontSize: 9, minWidth: 100,
+      borderRadius: 4, padding: "6px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, minWidth: 100,
       backdropFilter: "blur(4px)",
     }}>
       <div style={{ color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 5 }}>

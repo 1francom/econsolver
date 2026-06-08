@@ -3,7 +3,7 @@
 // Props: onAddDataset(name, rows, headers)
 
 import { useState } from "react";
-import { useTheme, mono } from "../modeling/shared.jsx";
+import { useTheme } from "../modeling/shared.jsx";
 import { HintBox } from "../HelpSystem.jsx";
 import { assertSafeExpr } from "../../pipeline/exprGuard.js";
 import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.js";
@@ -16,19 +16,19 @@ import QTEPanel from "./statsim/QTEPanel.jsx";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
-  const { C } = useTheme();
-  return <div style={{ fontSize: 9, color: color ?? C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: mono }}>{children}</div>;
+  const { C, T } = useTheme();
+  return <div style={{ fontSize: T.caption.fontSize, color: color ?? C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: mb, fontFamily: T.code.fontFamily }}>{children}</div>;
 }
 function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const c = color ?? C.gold;
-  const b = { padding: sm ? "0.28rem 0.65rem" : "0.45rem 0.9rem", borderRadius: 3, cursor: dis ? "not-allowed" : "pointer", fontFamily: mono, fontSize: sm ? 10 : 11, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
+  const b = { padding: sm ? "0.28rem 0.65rem" : "0.45rem 0.9rem", borderRadius: 3, cursor: dis ? "not-allowed" : "pointer", fontFamily: T.code.fontFamily, fontSize: sm ? T.caption.fontSize : T.code.fontSize, transition: "all 0.13s", opacity: dis ? 0.4 : 1 };
   if (v === "solid") return <button onClick={onClick} disabled={dis} style={{ ...b, background: c, color: C.bg, border: `1px solid ${c}`, fontWeight: 700 }}>{ch}</button>;
   if (v === "ghost") return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: "none", color: dis ? C.textMuted : c }}>{ch}</button>;
   return <button onClick={onClick} disabled={dis} style={{ ...b, background: "transparent", border: `1px solid ${C.border2}`, color: dis ? C.textMuted : C.textDim }}>{ch}</button>;
 }
-const fieldStyle = C => ({ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, padding: "0.28rem 0.55rem", outline: "none" });
-const thStyle    = C => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: mono, fontWeight: 400, fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2, whiteSpace: "nowrap" });
+const fieldStyle = (C, T) => ({ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none" });
+const thStyle = (C, T) => ({ padding: "0.4rem 0.75rem", textAlign: "left", fontFamily: T.code.fontFamily, fontWeight: 400, fontSize: T.caption.fontSize, letterSpacing: "0.16em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, color: C.textMuted, background: C.surface2, whiteSpace: "nowrap" });
 const tdStyle    = C => ({ padding: "0.32rem 0.65rem", borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" });
 
 // ─── SEEDED PRNG ──────────────────────────────────────────────────────────────
@@ -150,25 +150,25 @@ const DIST_OPTIONS = ["Normal","Uniform","Bernoulli","Poisson","Exponential","t"
 function distColor(C) {
   return {
     Normal: C.blue, Uniform: C.teal, Bernoulli: C.purple,
-    Poisson: C.gold, Exponential: "#c88e6e", t: C.green,
-    "Chi-squared": "#c87e9e", Constant: C.textMuted, Sequence: C.teal, Expression: C.textDim,
-    Categorical: C.purple, GroupID: C.gold, CycleID: "#9ec8c8",
-    ForLoop: "#9ec87e", WhileLoop: "#c87e6e",
+    Poisson: C.gold, Exponential: C.orange, t: C.green,
+    "Chi-squared": C.violet, Constant: C.textMuted, Sequence: C.teal, Expression: C.textDim,
+    Categorical: C.purple, GroupID: C.gold, CycleID: C.blue,
+    ForLoop: C.green, WhileLoop: C.orange,
   };
 }
 
 // ─── PARAM EDITOR ─────────────────────────────────────────────────────────────
 function ParamEditor({ dist, params, onChange }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   function field(key, label, placeholder) {
     return (
       <label key={key} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 18 }}>{label}</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 18 }}>{label}</span>
         <input
           value={params[key] ?? ""}
           onChange={e => onChange({ ...params, [key]: e.target.value })}
           placeholder={placeholder}
-          style={{ ...fieldStyle(C), width: 68 }}
+          style={{ ...fieldStyle(C, T), width: 68 }}
         />
       </label>
     );
@@ -182,65 +182,65 @@ function ParamEditor({ dist, params, onChange }) {
   if (dist === "Sequence")    return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 24 }}>from</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 24 }}>from</span>
         <input value={params.from ?? "1"} onChange={e => onChange({ ...params, from: e.target.value })}
-          placeholder="1" style={{ ...fieldStyle(C), width: 68 }} />
+          placeholder="1" style={{ ...fieldStyle(C, T), width: 68 }} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 18 }}>by</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 18 }}>by</span>
         <input value={params.by ?? "1"} onChange={e => onChange({ ...params, by: e.target.value })}
-          placeholder="1" style={{ ...fieldStyle(C), width: 68 }} />
+          placeholder="1" style={{ ...fieldStyle(C, T), width: 68 }} />
       </label>
-      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>→ 1, 2, 3, …, n</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>→ 1, 2, 3, …, n</span>
     </div>
   );
   if (dist === "Categorical") return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>levels</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>levels</span>
         <input value={params.levels ?? ""} onChange={e => onChange({ ...params, levels: e.target.value })}
-          placeholder="Control,Treatment" style={{ ...fieldStyle(C), width: 150 }} />
+          placeholder="Control,Treatment" style={{ ...fieldStyle(C, T), width: 150 }} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>probs</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>probs</span>
         <input value={params.probs ?? ""} onChange={e => onChange({ ...params, probs: e.target.value })}
-          placeholder="0.5,0.5 (blank=equal)" style={{ ...fieldStyle(C), width: 130 }} />
+          placeholder="0.5,0.5 (blank=equal)" style={{ ...fieldStyle(C, T), width: 130 }} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Emit integer codes 0..k-1 instead of labels">
         <input type="checkbox" checked={params.asCode === true || params.asCode === "true"}
           onChange={e => onChange({ ...params, asCode: e.target.checked })} />
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>as code</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>as code</span>
       </label>
     </div>
   );
   if (dist === "GroupID")     return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 38 }}>groups</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 38 }}>groups</span>
         <input value={params.groups ?? "10"} onChange={e => onChange({ ...params, groups: e.target.value })}
-          placeholder="10" style={{ ...fieldStyle(C), width: 68 }} />
+          placeholder="10" style={{ ...fieldStyle(C, T), width: 68 }} />
       </label>
-      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>→ 1,1,…,2,2,… (rep each)</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>→ 1,1,…,2,2,… (rep each)</span>
     </div>
   );
   if (dist === "CycleID")     return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
-        <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 38 }}>period</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 38 }}>period</span>
         <input value={params.period ?? "5"} onChange={e => onChange({ ...params, period: e.target.value })}
-          placeholder="5" style={{ ...fieldStyle(C), width: 68 }} />
+          placeholder="5" style={{ ...fieldStyle(C, T), width: 68 }} />
       </label>
-      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>→ 1,2,…,T,1,2,… (rep times)</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>→ 1,2,…,T,1,2,… (rep times)</span>
     </div>
   );
   if (dist === "Constant")    return (
     <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
-      <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, minWidth: 28 }}>value</span>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, minWidth: 28 }}>value</span>
       <input
         value={params.value ?? "0"}
         onChange={e => onChange({ ...params, value: e.target.value })}
         placeholder="e.g. 0.5 or 1000"
-        style={{ ...fieldStyle(C), width: 120 }}
+        style={{ ...fieldStyle(C, T), width: 120 }}
       />
     </label>
   );
@@ -249,44 +249,44 @@ function ParamEditor({ dist, params, onChange }) {
       value={params.expr ?? ""}
       onChange={e => onChange({ ...params, expr: e.target.value })}
       placeholder="e.g. 1 + 2*X1 + eps"
-      style={{ ...fieldStyle(C), width: 240 }}
+      style={{ ...fieldStyle(C, T), width: 240 }}
     />
   );
   if (dist === "ForLoop") return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>init</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>init</span>
         <input value={params.init ?? "0"} onChange={e => onChange({ ...params, init: e.target.value })}
-          placeholder="0" style={{ ...fieldStyle(C), width: 70 }} />
+          placeholder="0" style={{ ...fieldStyle(C, T), width: 70 }} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>update(prev,i)</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>update(prev,i)</span>
         <input value={params.update ?? ""} onChange={e => onChange({ ...params, update: e.target.value })}
-          placeholder="prev * 0.9 + eps[i]" style={{ ...fieldStyle(C), width: 180 }} />
+          placeholder="prev * 0.9 + eps[i]" style={{ ...fieldStyle(C, T), width: 180 }} />
       </label>
     </div>
   );
   if (dist === "WhileLoop") return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>init</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>init</span>
         <input value={params.init ?? "1"} onChange={e => onChange({ ...params, init: e.target.value })}
-          placeholder="1" style={{ ...fieldStyle(C), width: 60 }} />
+          placeholder="1" style={{ ...fieldStyle(C, T), width: 60 }} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>update(prev)</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>update(prev)</span>
         <input value={params.update ?? ""} onChange={e => onChange({ ...params, update: e.target.value })}
-          placeholder="prev * 0.95" style={{ ...fieldStyle(C), width: 130 }} />
+          placeholder="prev * 0.95" style={{ ...fieldStyle(C, T), width: 130 }} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>while</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>while</span>
         <input value={params.condition ?? ""} onChange={e => onChange({ ...params, condition: e.target.value })}
-          placeholder="Math.abs(prev) > 0.001" style={{ ...fieldStyle(C), width: 170 }} />
+          placeholder="Math.abs(prev) > 0.001" style={{ ...fieldStyle(C, T), width: 170 }} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>maxIter</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>maxIter</span>
         <input value={params.maxIter ?? "1000"} onChange={e => onChange({ ...params, maxIter: e.target.value })}
-          placeholder="1000" style={{ ...fieldStyle(C), width: 60 }} />
+          placeholder="1000" style={{ ...fieldStyle(C, T), width: 60 }} />
       </label>
     </div>
   );
@@ -295,7 +295,7 @@ function ParamEditor({ dist, params, onChange }) {
 
 // ─── MC HISTOGRAM ─────────────────────────────────────────────────────────────
 function MCHistogram({ betas, trueVal, meanVal }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const W=400, H=110, BINS=24, pad={l:4,r:4,t:14,b:22};
   const mn=Math.min(...betas), mx=Math.max(...betas);
   const range=mx-mn||1, binW=range/BINS;
@@ -305,16 +305,16 @@ function MCHistogram({ betas, trueVal, meanVal }) {
   const bW=(W-pad.l-pad.r)/BINS, cH=H-pad.t-pad.b;
   const xp=v=>pad.l+(v-mn)/range*(W-pad.l-pad.r);
   return (
-    <svg width={W} height={H} style={{display:"block",overflow:"visible",fontFamily:mono}}>
+    <svg width={W} height={H} style={{display:"block",overflow:"visible",fontFamily: T.code.fontFamily}}>
       {counts.map((c,i)=>{
         const bh=c/maxC*cH;
         return <rect key={i} x={pad.l+i*bW+0.5} y={pad.t+cH-bh} width={Math.max(0,bW-1)} height={bh} fill={C.teal} opacity={0.65} rx={1}/>;
       })}
       <line x1={xp(meanVal)} x2={xp(meanVal)} y1={pad.t} y2={pad.t+cH+4} stroke={C.gold} strokeWidth={1.5} strokeDasharray="3,2"/>
-      <text x={xp(meanVal)} y={pad.t+cH+14} fill={C.gold} fontSize={8} textAnchor="middle">x̄={meanVal.toFixed(3)}</text>
+      <text x={xp(meanVal)} y={pad.t+cH+14} fill={C.gold} fontSize={T.caption.fontSize} textAnchor="middle">x̄={meanVal.toFixed(3)}</text>
       {trueVal!=null && xp(trueVal)>=0 && xp(trueVal)<=W && <>
-        <line x1={xp(trueVal)} x2={xp(trueVal)} y1={pad.t} y2={pad.t+cH+4} stroke="#c86e6e" strokeWidth={1.5}/>
-        <text x={xp(trueVal)} y={pad.t-3} fill="#c86e6e" fontSize={8} textAnchor="middle">β={trueVal}</text>
+        <line x1={xp(trueVal)} x2={xp(trueVal)} y1={pad.t} y2={pad.t+cH+4} stroke={C.red} strokeWidth={1.5}/>
+        <text x={xp(trueVal)} y={pad.t-3} fill={C.red} fontSize={T.caption.fontSize} textAnchor="middle">β={trueVal}</text>
       </>}
     </svg>
   );
@@ -525,7 +525,7 @@ export function generateSimScript(language, n, seed, variables) {
 let _nextId = 4;
 
 export default function SimulateTab({ onAddDataset, rows = [], headers = [], onAddColumn, onCreateDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { appendLog } = useSessionLog();
   const [n,          setN]          = useState(500);
   const [seed,       setSeed]       = useState(42);
@@ -677,7 +677,7 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
   const previewRows = generated?.rows.slice(0, 5) ?? [];
 
   return (
-    <div style={{ height: "100%", overflowY: "auto", padding: "1.8rem 2.2rem", fontFamily: mono, color: C.text, maxWidth: 900 }}>
+    <div style={{ height: "100%", overflowY: "auto", padding: "1.8rem 2.2rem", fontFamily: T.code.fontFamily, color: C.text, maxWidth: 900 }}>
       <HintBox title="How to simulate" sections={[
         { heading: "DGP Variables", items: [
           "Define variables with distributions: normal, uniform, Bernoulli, Poisson",
@@ -697,8 +697,8 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
         ]},
       ]} />
       <Lbl color={C.teal} mb={4}>Simulate</Lbl>
-      <div style={{ fontSize: 17, color: C.text, marginBottom: "0.3rem", letterSpacing: "-0.01em" }}>DGP Builder</div>
-      <div style={{ fontSize: 10, color: C.textMuted, marginBottom: "1.8rem" }}>
+      <div style={{ fontSize: T.h2.fontSize, color: C.text, marginBottom: "0.3rem", letterSpacing: "-0.01em" }}>DGP Builder</div>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: "1.8rem" }}>
         Define a data generating process — draw synthetic samples, evaluate expressions, save to session.
       </div>
 
@@ -707,12 +707,12 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <Lbl mb={2}>Observations (n)</Lbl>
           <input type="number" min={1} max={100000} value={n} onChange={e => setN(e.target.value)}
-            style={{ ...fieldStyle(C), width: 100 }} />
+            style={{ ...fieldStyle(C, T), width: 100 }} />
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <Lbl mb={2}>Seed</Lbl>
           <input type="number" value={seed} onChange={e => setSeed(e.target.value)}
-            style={{ ...fieldStyle(C), width: 80 }} />
+            style={{ ...fieldStyle(C, T), width: 80 }} />
         </label>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           <Btn onClick={generate} v="solid" color={C.teal} ch="Generate" />
@@ -727,29 +727,29 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
           <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 560 }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle(C), width: 24 }}>#</th>
-                <th style={thStyle(C)}>Name</th>
-                <th style={thStyle(C)}>Distribution</th>
-                <th style={thStyle(C)}>Parameters</th>
-                <th style={{ ...thStyle(C), textAlign: "right" }}>Actions</th>
+                <th style={{ ...thStyle(C, T), width: 24 }}>#</th>
+                <th style={thStyle(C, T)}>Name</th>
+                <th style={thStyle(C, T)}>Distribution</th>
+                <th style={thStyle(C, T)}>Parameters</th>
+                <th style={{ ...thStyle(C, T), textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {variables.map((v, idx) => (
                 <tr key={v.id} style={{ background: idx % 2 ? C.surface2 : C.surface }}>
-                  <td style={{ ...tdStyle(C), color: C.textMuted, fontSize: 9, textAlign: "center" }}>{idx + 1}</td>
+                  <td style={{ ...tdStyle(C), color: C.textMuted, fontSize: T.caption.fontSize, textAlign: "center" }}>{idx + 1}</td>
                   <td style={tdStyle(C)}>
                     <input
                       value={v.name}
                       onChange={e => updateVar(v.id, { name: e.target.value })}
-                      style={{ ...fieldStyle(C), width: 80 }}
+                      style={{ ...fieldStyle(C, T), width: 80 }}
                     />
                   </td>
                   <td style={tdStyle(C)}>
                     <select
                       value={v.dist}
                       onChange={e => updateDist(v.id, e.target.value)}
-                      style={{ ...fieldStyle(C), width: 118 }}
+                      style={{ ...fieldStyle(C, T), width: 118 }}
                     >
                       {DIST_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
@@ -765,17 +765,17 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
                     <span style={{ display: "inline-flex", gap: 2 }}>
                       <button onClick={() => moveVar(v.id, -1)} disabled={idx === 0}
                         title="Move up"
-                        style={{ background: "transparent", border: "none", color: idx === 0 ? C.border2 : C.textMuted, cursor: idx === 0 ? "default" : "pointer", fontSize: 11, padding: "0 3px" }}>
+                        style={{ background: "transparent", border: "none", color: idx === 0 ? C.border2 : C.textMuted, cursor: idx === 0 ? "default" : "pointer", fontSize: T.code.fontSize, padding: "0 3px" }}>
                         ↑
                       </button>
                       <button onClick={() => moveVar(v.id, 1)} disabled={idx === variables.length - 1}
                         title="Move down"
-                        style={{ background: "transparent", border: "none", color: idx === variables.length - 1 ? C.border2 : C.textMuted, cursor: idx === variables.length - 1 ? "default" : "pointer", fontSize: 11, padding: "0 3px" }}>
+                        style={{ background: "transparent", border: "none", color: idx === variables.length - 1 ? C.border2 : C.textMuted, cursor: idx === variables.length - 1 ? "default" : "pointer", fontSize: T.code.fontSize, padding: "0 3px" }}>
                         ↓
                       </button>
                       <button onClick={() => removeVar(v.id)}
                         title="Remove"
-                        style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 13, padding: "0 4px", transition: "color 0.1s" }}
+                        style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: T.body.fontSize, padding: "0 4px", transition: "color 0.1s" }}
                         onMouseEnter={e => e.currentTarget.style.color = C.red}
                         onMouseLeave={e => e.currentTarget.style.color = C.textMuted}>
                         ×
@@ -787,24 +787,24 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
 
               {/* ── Add variable row ── */}
               <tr style={{ background: C.surface }}>
-                <td style={{ ...tdStyle(C), color: C.textMuted, fontSize: 9, textAlign: "center" }}>+</td>
+                <td style={{ ...tdStyle(C), color: C.textMuted, fontSize: T.caption.fontSize, textAlign: "center" }}>+</td>
                 <td style={tdStyle(C)}>
                   <input
                     value={newVarName}
                     onChange={e => setNewVarName(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && addVariable()}
                     placeholder="name"
-                    style={{ ...fieldStyle(C), width: 80 }}
+                    style={{ ...fieldStyle(C, T), width: 80 }}
                   />
                 </td>
                 <td style={tdStyle(C)}>
                   <select value={newDist} onChange={e => setNewDist(e.target.value)}
-                    style={{ ...fieldStyle(C), width: 118 }}>
+                    style={{ ...fieldStyle(C, T), width: 118 }}>
                     {DIST_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </td>
                 <td style={tdStyle(C)}>
-                  <span style={{ fontSize: 10, color: C.textMuted }}>params after adding</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>params after adding</span>
                 </td>
                 <td style={{ ...tdStyle(C), textAlign: "right" }}>
                   <Btn onClick={addVariable} dis={!newVarName.trim()} v="out" ch="+ Add" sm />
@@ -817,7 +817,7 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
 
       {/* ── Error ── */}
       {genErr && (
-        <div style={{ fontSize: 10, color: C.red, fontFamily: mono, padding: "0.5rem 0.75rem", border: `1px solid ${C.red}40`, borderRadius: 3, marginBottom: 12 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily, padding: "0.5rem 0.75rem", border: `1px solid ${C.red}40`, borderRadius: 3, marginBottom: 12 }}>
           {genErr}
         </div>
       )}
@@ -827,14 +827,14 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
         <div style={{ marginBottom: "1.6rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <Lbl mb={0}>Preview (first 5 rows)</Lbl>
-            <span style={{ fontSize: 9, color: C.textMuted }}>· {generated.rows.length.toLocaleString()} rows · {generated.headers.length} cols</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>· {generated.rows.length.toLocaleString()} rows · {generated.headers.length} cols</span>
           </div>
           <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 4 }}>
-            <table style={{ borderCollapse: "collapse", fontSize: 11, width: "100%" }}>
+            <table style={{ borderCollapse: "collapse", fontSize: T.code.fontSize, width: "100%" }}>
               <thead>
                 <tr style={{ background: C.surface2 }}>
                   {generated.headers.map(h => (
-                    <th key={h} style={{ ...thStyle(C), color: C.teal }}>{h}</th>
+                    <th key={h} style={{ ...thStyle(C, T), color: C.teal }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -844,7 +844,7 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
                     {generated.headers.map(h => {
                       const v = row[h];
                       return (
-                        <td key={h} style={{ ...tdStyle(C), fontFamily: mono, fontSize: 11, color: C.text, whiteSpace: "nowrap" }}>
+                        <td key={h} style={{ ...tdStyle(C), fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text, whiteSpace: "nowrap" }}>
                           {typeof v === "number" ? v.toFixed(4).replace(/\.?0+$/, "") : String(v ?? "·")}
                         </td>
                       );
@@ -861,11 +861,11 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
               value={dsName}
               onChange={e => { setDsName(e.target.value); setSaved(false); }}
               placeholder="dataset name"
-              style={{ ...fieldStyle(C), width: 200 }}
+              style={{ ...fieldStyle(C, T), width: 200 }}
             />
             <Btn onClick={saveToSession} v="solid" color={C.gold} ch="Save to session" />
             {saved && (
-              <span style={{ fontSize: 10, color: C.green, fontFamily: mono }}>✓ saved as "{dsName}.csv"</span>
+              <span style={{ fontSize: T.caption.fontSize, color: C.green, fontFamily: T.code.fontFamily }}>✓ saved as "{dsName}.csv"</span>
             )}
           </div>
         </div>
@@ -874,8 +874,8 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
       {/* ── Monte Carlo ── */}
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "1.2rem", marginBottom: "0.8rem" }}>
         <button onClick={() => setMcOpen(o=>!o)}
-          style={{ background:"transparent", border:"none", color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:10, padding:0, display:"flex", alignItems:"center", gap:6 }}>
-          <span style={{ fontSize:8 }}>{mcOpen?"▾":"▸"}</span>
+          style={{ background:"transparent", border:"none", color:C.textDim, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding:0, display:"flex", alignItems:"center", gap:6 }}>
+          <span style={{ fontSize: T.caption.fontSize }}>{mcOpen?"▾":"▸"}</span>
           Monte Carlo
         </button>
         {mcOpen && (
@@ -884,7 +884,7 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
             <div style={{ display:"flex", gap:6, marginBottom:12 }}>
               {[["ols","OLS (β̂)"],["single","Single variable"]].map(([k,label])=>(
                 <button key={k} onClick={()=>{ setMcMode(k); setMcResult(null); }}
-                  style={{ padding:"2px 10px", borderRadius:3, cursor:"pointer", fontFamily:mono, fontSize:9,
+                  style={{ padding:"2px 10px", borderRadius:3, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                     background: mcMode===k ? `${C.blue}20` : "transparent",
                     border: `1px solid ${mcMode===k ? C.blue+"60" : C.border}`,
                     color: mcMode===k ? C.blue : C.textMuted }}>
@@ -894,30 +894,30 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
             </div>
 
             {mcMode === "ols" && (variables.length < 2
-              ? <div style={{ fontSize:10, color:C.textMuted }}>Need at least 2 variables (Y and X) to run OLS Monte Carlo.</div>
+              ? <div style={{ fontSize: T.caption.fontSize, color:C.textMuted }}>Need at least 2 variables (Y and X) to run OLS Monte Carlo.</div>
               : <>
                 <div style={{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-end", marginBottom:12 }}>
                   <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
                     <Lbl mb={1}>Y variable</Lbl>
-                    <select value={mcY} onChange={e=>setMcY(e.target.value)} style={{...fieldStyle(C),width:110}}>
+                    <select value={mcY} onChange={e=>setMcY(e.target.value)} style={{...fieldStyle(C, T),width:110}}>
                       <option value="">— select —</option>
                       {variables.map(v=><option key={v.id} value={v.name}>{v.name}</option>)}
                     </select>
                   </label>
                   <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
                     <Lbl mb={1}>X variable</Lbl>
-                    <select value={mcX} onChange={e=>setMcX(e.target.value)} style={{...fieldStyle(C),width:110}}>
+                    <select value={mcX} onChange={e=>setMcX(e.target.value)} style={{...fieldStyle(C, T),width:110}}>
                       <option value="">— select —</option>
                       {variables.filter(v=>v.name!==mcY).map(v=><option key={v.id} value={v.name}>{v.name}</option>)}
                     </select>
                   </label>
                   <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
                     <Lbl mb={1}>True β (for bias)</Lbl>
-                    <input value={mcTrueBeta} onChange={e=>setMcTrueBeta(e.target.value)} placeholder="e.g. 2" style={{...fieldStyle(C),width:70}}/>
+                    <input value={mcTrueBeta} onChange={e=>setMcTrueBeta(e.target.value)} placeholder="e.g. 2" style={{...fieldStyle(C, T),width:70}}/>
                   </label>
                   <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
                     <Lbl mb={1}>Replications</Lbl>
-                    <input type="number" min={10} max={10000} value={mcReps} onChange={e=>setMcReps(e.target.value)} style={{...fieldStyle(C),width:80}}/>
+                    <input type="number" min={10} max={10000} value={mcReps} onChange={e=>setMcReps(e.target.value)} style={{...fieldStyle(C, T),width:80}}/>
                   </label>
                   <Btn onClick={runMonteCarlo} dis={!mcY||!mcX||mcRunning} v="solid" color={C.blue} ch={mcRunning?"Running…":"Run MC"}/>
                 </div>
@@ -925,19 +925,19 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
             )}
 
             {mcMode === "single" && (variables.length < 1
-              ? <div style={{ fontSize:10, color:C.textMuted }}>Add at least 1 variable to run Monte Carlo.</div>
+              ? <div style={{ fontSize: T.caption.fontSize, color:C.textMuted }}>Add at least 1 variable to run Monte Carlo.</div>
               : <>
                 <div style={{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-end", marginBottom:12 }}>
                   <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
                     <Lbl mb={1}>Variable</Lbl>
-                    <select value={mcVar} onChange={e=>setMcVar(e.target.value)} style={{...fieldStyle(C),width:110}}>
+                    <select value={mcVar} onChange={e=>setMcVar(e.target.value)} style={{...fieldStyle(C, T),width:110}}>
                       <option value="">— select —</option>
                       {variables.map(v=><option key={v.id} value={v.name}>{v.name}</option>)}
                     </select>
                   </label>
                   <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
                     <Lbl mb={1}>Statistic</Lbl>
-                    <select value={mcStat} onChange={e=>setMcStat(e.target.value)} style={{...fieldStyle(C),width:100}}>
+                    <select value={mcStat} onChange={e=>setMcStat(e.target.value)} style={{...fieldStyle(C, T),width:100}}>
                       {[["mean","Mean"],["sd","Std Dev"],["var","Variance"],["median","Median"],["min","Min"],["max","Max"]].map(([k,l])=>(
                         <option key={k} value={k}>{l}</option>
                       ))}
@@ -945,23 +945,23 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
                   </label>
                   <label style={{ display:"flex", flexDirection:"column", gap:3 }}>
                     <Lbl mb={1}>Replications</Lbl>
-                    <input type="number" min={10} max={10000} value={mcReps} onChange={e=>setMcReps(e.target.value)} style={{...fieldStyle(C),width:80}}/>
+                    <input type="number" min={10} max={10000} value={mcReps} onChange={e=>setMcReps(e.target.value)} style={{...fieldStyle(C, T),width:80}}/>
                   </label>
                   <Btn onClick={runMonteCarlo} dis={!mcVar||mcRunning} v="solid" color={C.blue} ch={mcRunning?"Running…":"Run MC"}/>
                 </div>
               </>
             )}
 
-            {mcRunning && <div style={{ fontSize:10, color:C.textMuted, fontFamily:mono, marginBottom:8 }}>Running {mcReps} replications…</div>}
+            {mcRunning && <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginBottom:8 }}>Running {mcReps} replications…</div>}
 
             {mcResult?.mode === "ols" && (
               <div>
                 <div style={{ overflowX:"auto", marginBottom:14 }}>
-                  <table style={{ borderCollapse:"collapse", fontSize:11 }}>
+                  <table style={{ borderCollapse:"collapse", fontSize: T.code.fontSize }}>
                     <thead>
                       <tr>
                         {["Reps","Mean β̂","Bias","SD","RMSE","Reject H₀ (5%)"].map(h=>(
-                          <th key={h} style={thStyle(C)}>{h}</th>
+                          <th key={h} style={thStyle(C, T)}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -989,11 +989,11 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
             {mcResult?.mode === "single" && (
               <div>
                 <div style={{ overflowX:"auto", marginBottom:14 }}>
-                  <table style={{ borderCollapse:"collapse", fontSize:11 }}>
+                  <table style={{ borderCollapse:"collapse", fontSize: T.code.fontSize }}>
                     <thead>
                       <tr>
                         {["Reps","Mean","SD"].map(h=>(
-                          <th key={h} style={thStyle(C)}>{h}</th>
+                          <th key={h} style={thStyle(C, T)}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1045,9 +1045,9 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "1.2rem" }}>
         <button
           onClick={() => setScriptOpen(o => !o)}
-          style={{ background: "transparent", border: "none", color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10, padding: 0, display: "flex", alignItems: "center", gap: 6 }}
+          style={{ background: "transparent", border: "none", color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: 0, display: "flex", alignItems: "center", gap: 6 }}
         >
-          <span style={{ fontSize: 8 }}>{scriptOpen ? "▾" : "▸"}</span>
+          <span style={{ fontSize: T.caption.fontSize }}>{scriptOpen ? "▾" : "▸"}</span>
           Replication script
         </button>
 
@@ -1056,12 +1056,12 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
             <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
               {[["r","R"],["python","Python"],["stata","Stata"]].map(([k,label]) => (
                 <button key={k} onClick={() => setScriptLang(k)}
-                  style={{ padding: "0.25rem 0.7rem", borderRadius: 3, cursor: "pointer", fontFamily: mono, fontSize: 10, background: scriptLang === k ? C.teal : "transparent", color: scriptLang === k ? C.bg : C.textDim, border: `1px solid ${scriptLang === k ? C.teal : C.border2}`, transition: "all 0.12s" }}>
+                  style={{ padding: "0.25rem 0.7rem", borderRadius: 3, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: scriptLang === k ? C.teal : "transparent", color: scriptLang === k ? C.bg : C.textDim, border: `1px solid ${scriptLang === k ? C.teal : C.border2}`, transition: "all 0.12s" }}>
                   {label}
                 </button>
               ))}
             </div>
-            <pre style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.9rem 1rem", fontSize: 10, color: C.text, overflowX: "auto", whiteSpace: "pre", margin: 0, lineHeight: 1.65 }}>
+            <pre style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.9rem 1rem", fontSize: T.caption.fontSize, color: C.text, overflowX: "auto", whiteSpace: "pre", margin: 0, lineHeight: 1.65 }}>
               {generateSimScript(scriptLang, +n || 500, +seed || 0, variables)}
             </pre>
           </div>

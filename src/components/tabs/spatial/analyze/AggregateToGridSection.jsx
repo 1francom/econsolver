@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/AggregateToGridSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol, guessPointCountCol } from "../shared/guess.js";
 import { aggregateToGrid, aggregateGridById } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function AggregateToGridSection({ rows, headers, availableDatasets, C, onResult }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [mode, setMode] = useState("grid_id");
   const [latCol, setLatCol] = useState(() => guessLatCol(headers));
@@ -53,7 +54,7 @@ export function AggregateToGridSection({ rows, headers, availableDatasets, C, on
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Aggregates active point rows into a grid dataset. If points already have grid_id, use the fast ID path; geometry mode remains available for raw lat/lon points.
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -62,7 +63,7 @@ export function AggregateToGridSection({ rows, headers, availableDatasets, C, on
           ["Points per grid", "n_points"],
         ].map(([label, col]) => (
           <button key={col} onClick={() => { setMode("grid_id"); setFn("count"); setOutCol(col); }}
-            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+            style={{ padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: outCol === col && fn === "count" ? `${C.gold}18` : "transparent",
               border: `1px solid ${outCol === col && fn === "count" ? C.gold : C.border2}`,
               borderRadius: 3, color: outCol === col && fn === "count" ? C.gold : C.textDim }}
@@ -72,7 +73,7 @@ export function AggregateToGridSection({ rows, headers, availableDatasets, C, on
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {[["grid_id", "Use assigned grid_id"], ["geometry", "Point-in-polygon"]].map(([v, label]) => (
           <button key={v} onClick={() => setMode(v)}
-            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+            style={{ padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: mode === v ? `${C.teal}18` : "transparent",
               border: `1px solid ${mode === v ? C.teal : C.border2}`,
               borderRadius: 3, color: mode === v ? C.teal : C.textDim }}
@@ -88,9 +89,9 @@ export function AggregateToGridSection({ rows, headers, availableDatasets, C, on
         <ColSelect label="Point grid ID column" value={pointGridCol} onChange={setPointGridCol} headers={headers} C={C} />
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
+        <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
         <select value={gridDsId} onChange={e => { setGridDsId(e.target.value); setWktCol(""); setGridIdCol(""); }}
-          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
           <option value="">select grid dataset</option>
           {availableDatasets.map(ds => <option key={ds.id} value={ds.id}>{ds.filename ?? ds.name ?? ds.id}</option>)}
         </select>
@@ -109,7 +110,7 @@ export function AggregateToGridSection({ rows, headers, availableDatasets, C, on
       )}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} label={outCol === "n_schools" ? "Sum schools per grid" : "Aggregate to grid"} />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {result.rows.length} grid cells</span>}
+        {result && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>OK: {result.rows.length} grid cells</span>}
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={mode === "geometry" ? [effectiveWkt, outCol] : [effectiveGridId, outCol]} C={C} />}

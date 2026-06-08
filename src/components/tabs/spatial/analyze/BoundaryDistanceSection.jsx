@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/BoundaryDistanceSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { assignBoundaryDistance } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function BoundaryDistanceSection({ rows, headers, availableDatasets, onResult, C }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
@@ -44,7 +45,7 @@ export function BoundaryDistanceSection({ rows, headers, availableDatasets, onRe
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Computes the minimum distance from each point to the nearest polygon boundary edge,
         plus a treatment indicator and signed running variable for Spatial RD.
       </div>
@@ -56,13 +57,13 @@ export function BoundaryDistanceSection({ rows, headers, availableDatasets, onRe
 
       {/* Polygon dataset picker */}
       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>
+        <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
           Boundary polygon dataset
         </label>
         <select
           value={polyDsId}
           onChange={e => { setPolyDsId(e.target.value); setWktCol(""); }}
-          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: polyDsId ? C.text : C.textMuted, fontFamily: mono, fontSize: 10, outline: "none" }}
+          style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: polyDsId ? C.text : C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}
         >
           <option value="">— select polygon dataset —</option>
           {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
@@ -77,7 +78,7 @@ export function BoundaryDistanceSection({ rows, headers, availableDatasets, onRe
       <TextInput label="Output column prefix" value={outPrefix} onChange={setOutPrefix} C={C} placeholder="boundary" />
 
       {outPrefix && (
-        <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, lineHeight: 1.7 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.7 }}>
           Outputs: <span style={{ color: C.teal }}>{outPrefix}_dist_km</span> · <span style={{ color: C.teal }}>{outPrefix}_treat</span> · <span style={{ color: C.teal }}>{outPrefix}_running</span> (signed, use as RD running variable)
         </div>
       )}
@@ -85,7 +86,7 @@ export function BoundaryDistanceSection({ rows, headers, availableDatasets, onRe
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} />
         {result && (
-          <span style={{ fontSize: 9, color: C.teal }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>
             ✓ {result.rows.length} rows · {result.treated} treated
           </span>
         )}

@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/CRSTransformSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol } from "../shared/guess.js";
 import { transformCoord, transformWKT } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function CRSTransformSection({ rows, headers, onResult, C }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [mode, setMode] = useState("point");
   const [source, setSource] = useState("EPSG:4326");
@@ -54,13 +55,13 @@ export function CRSTransformSection({ rows, headers, onResult, C }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Transforms point columns or WKT geometries between WGS84 and CABA metric coordinates.
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {[["point", "Point columns"], ["wkt", "WKT geometry"]].map(([v, label]) => (
           <button key={v} onClick={() => setMode(v)}
-            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+            style={{ padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: mode === v ? `${C.teal}18` : "transparent",
               border: `1px solid ${mode === v ? C.teal : C.border2}`,
               borderRadius: 3, color: mode === v ? C.teal : C.textDim }}
@@ -86,7 +87,7 @@ export function CRSTransformSection({ rows, headers, onResult, C }) {
       )}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Transform CRS" />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {rows.length} rows transformed</span>}
+        {result && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>OK: {rows.length} rows transformed</span>}
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={result.cols} C={C} />}

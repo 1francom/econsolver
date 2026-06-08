@@ -1,12 +1,14 @@
 // ─── ECON STUDIO · spatial/analyze/MetricBufferSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo } from "react";
-import { mono, BUFFER_RADIUS_PRESETS, formatRadiusLabel } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
+import { BUFFER_RADIUS_PRESETS, formatRadiusLabel } from "../shared/constants.js";
 import { ColSelect, NumInput, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol, guessWktCol } from "../shared/guess.js";
 import { createMetricPointBuffers, countPointsWithinGridCentroidBuffer } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function MetricBufferSection({ rows, headers, availableDatasets, onResult, C }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [mode, setMode] = useState("point_buffers");
   const [latCol, setLatCol] = useState(() => guessLatCol(headers));
@@ -78,13 +80,13 @@ export function MetricBufferSection({ rows, headers, availableDatasets, onResult
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Metric buffers use EPSG:32721, so preset radii are real meters. Create buffer polygons from point rows or count active points around grid centroids.
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {[["point_buffers", "Create buffers"], ["grid_centroids", "Count near grid centroids"]].map(([v, label]) => (
           <button key={v} onClick={() => setMode(v)}
-            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+            style={{ padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: mode === v ? `${C.teal}18` : "transparent",
               border: `1px solid ${mode === v ? C.teal : C.border2}`,
               borderRadius: 3, color: mode === v ? C.teal : C.textDim }}
@@ -95,11 +97,11 @@ export function MetricBufferSection({ rows, headers, availableDatasets, onResult
         <ColSelect label="Point latitude" value={latCol} onChange={setLatCol} headers={headers} C={C} />
         <ColSelect label="Point longitude" value={lonCol} onChange={setLonCol} headers={headers} C={C} />
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+          <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
             Buffer radius
           </label>
           <select value={radiusPreset} onChange={e => setRadiusPreset(e.target.value)}
-            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
             {BUFFER_RADIUS_PRESETS.map(([label, value]) => <option key={value} value={String(value)}>{label}</option>)}
             <option value="custom">custom</option>
           </select>
@@ -114,9 +116,9 @@ export function MetricBufferSection({ rows, headers, availableDatasets, onResult
       {mode === "grid_centroids" && (
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
+            <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Grid dataset</label>
             <select value={gridDsId} onChange={e => { setGridDsId(e.target.value); setWktCol(""); }}
-              style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+              style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
               <option value="">select grid dataset</option>
               {availableDatasets.map(ds => <option key={ds.id} value={ds.id}>{ds.filename ?? ds.name ?? ds.id}</option>)}
             </select>
@@ -132,7 +134,7 @@ export function MetricBufferSection({ rows, headers, availableDatasets, onResult
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} label={mode === "point_buffers" ? "Create buffers" : "Count points"} />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {result.message}</span>}
+        {result && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>OK: {result.message}</span>}
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={result.cols} C={C} />}

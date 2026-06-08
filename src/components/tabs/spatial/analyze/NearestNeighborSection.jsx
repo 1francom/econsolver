@@ -1,12 +1,13 @@
 // ─── ECON STUDIO · spatial/analyze/NearestNeighborSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { nearestNeighbor, nearestNeighborMetric, addDistanceBins } from "../../../../math/SpatialEngine.js";
 import { useSessionLog } from "../../../../services/session/sessionLog.jsx";
 
 export function NearestNeighborSection({ rows, headers, availableDatasets, C, onResult }) {
+  const { T } = useTheme();
   const { appendLog } = useSessionLog();
   const [latCol,    setLatCol]    = useState(() => guessLatCol(headers));
   const [lonCol,    setLonCol]    = useState(() => guessLonCol(headers));
@@ -58,12 +59,12 @@ export function NearestNeighborSection({ rows, headers, availableDatasets, C, on
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         For each observation, finds the nearest point in a reference dataset and returns distance plus the reference row index.
 
         Brute-force O(n×m) — suitable up to ~10 k × 1 k rows.
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: mono, fontSize: 9, color: C.textMuted }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
         <input type="checkbox" checked={metric} onChange={e => {
           setMetric(e.target.checked);
           setOutDist(e.target.checked ? "nn_dist_m" : "nn_dist_km");
@@ -76,7 +77,7 @@ export function NearestNeighborSection({ rows, headers, availableDatasets, C, on
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+        <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
           Reference dataset
         </label>
         <select
@@ -84,7 +85,7 @@ export function NearestNeighborSection({ rows, headers, availableDatasets, C, on
           onChange={e => { setRefDsId(e.target.value); setRefLatCol(""); setRefLonCol(""); }}
           style={{
             padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`,
-            borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none",
+            borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none",
           }}
         >
           <option value="self">Same dataset (self-join)</option>
@@ -109,7 +110,7 @@ export function NearestNeighborSection({ rows, headers, availableDatasets, C, on
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply || running} label={running ? "Computing…" : "Find neighbours"} C={C} />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>✓ {result.rows.length} rows processed</span>}
+        {result && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>✓ {result.rows.length} rows processed</span>}
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={[latCol, lonCol, ...result.cols]} C={C} />}
