@@ -564,7 +564,9 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
         Plt.frame({ stroke: "#333" }),
       ];
 
-      const hasColorChannel = layers.some(ly => ly.visible && ly.aes?.color);
+      // Boxplot manages its own grouped colors with hardcoded hex — exclude it from the
+      // color channel so Observable Plot doesn't create an "undefined" legend entry.
+      const hasColorChannel = layers.some(ly => ly.visible && ly.aes?.color && ly.geom !== "boxplot");
       const tealGoldRange = PLOT_PALETTES["teal-gold"];
       const colorOpts = hasColorChannel
         ? (scheme === "teal-gold"
@@ -605,13 +607,16 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
         y: {
           label:       yLabel || null,
           labelOffset: 40,
-          nice:        yScale === "linear",
+          // Disable nice when we supply an explicit domain — nice() can interact with
+          // the domain in ways that reverse the axis on some Observable Plot versions.
+          nice:        yScale === "linear" && yVals.length === 0 && yDomain[0] == null && yDomain[1] == null && !yCatOrder,
           inset:       8,
+          reverse:     false, // hard-guard: never auto-reverse the y-axis
           // Limit tick density so labels don't pile up on narrow-range axes
           ticks:       Math.min(8, Math.floor((height || 310) / 40)),
           ...(yScale !== "linear" ? { type: yScale } : {}),
-          // Always set an explicit ascending domain when data is present — prevents Observable
-          // Plot from inferring a reversed domain from y1/y2-only marks (e.g. boxplot).
+          // Explicit ascending domain prevents Observable Plot from inferring a reversed
+          // domain from y1/y2-only marks (e.g. boxplot barY / ruleX whiskers).
           ...(yCatOrder
             ? { domain: yCatOrder.split(",").map(s => s.trim()).filter(Boolean) }
             : yDomain[0] != null || yDomain[1] != null
