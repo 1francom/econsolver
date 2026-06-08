@@ -997,6 +997,7 @@ function LayerEditorInline({ layer, onChange, headers }) {
 
 // ─── PLOT HISTORY CARD ────────────────────────────────────────────────────────
 function PlotHistoryCard({ entry, isCompared, onLoad, onDelete, onCompare, C: Cp }) {
+  const { T } = useTheme();
   const geomNames = [...new Set(entry.layers.map(l => l.geom))].slice(0, 3).join(", ");
   return (
     <div

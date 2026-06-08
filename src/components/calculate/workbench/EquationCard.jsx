@@ -63,16 +63,16 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
           <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
             <input value={eq.relation.lhs} placeholder="p*x + q*y"
               onChange={(e) => onPatch({ relation: { ...eq.relation, lhs: e.target.value.slice(0, 256) } })}
-              style={inp(C)} />
+              style={inp(C, T)} />
             <span style={{ color: C.text }}>=</span>
             <input value={eq.relation.rhs} placeholder="m"
               onChange={(e) => onPatch({ relation: { ...eq.relation, rhs: e.target.value.slice(0, 256) } })}
-              style={inp(C)} />
+              style={inp(C, T)} />
           </div>
         ) : (
           <input value={eq.expr} placeholder="A*K^alpha*L^(1-alpha)"
             onChange={(e) => onPatch({ expr: e.target.value.slice(0, 512) })}
-            style={{ ...inp(C), flex: 1 }} />
+            style={{ ...inp(C, T), flex: 1 }} />
         )}
 
         <button onClick={onRemove} title="Remove card"
@@ -136,18 +136,18 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
             <input type="number" value={eq.integralRange?.[0] ?? ""}
               placeholder={String(view?.xRange?.[0] ?? "a")}
               onChange={(e) => setIntegralBound(eq, onPatch, 0, e.target.value)}
-              style={{ ...inp(C), width: 64, minWidth: 0 }} />
+              style={{ ...inp(C, T), width: 64, minWidth: 0 }} />
             <span style={{ fontSize: T.caption.fontSize, color: C.textDim }}>→</span>
             <input type="number" value={eq.integralRange?.[1] ?? ""}
               placeholder={String(view?.xRange?.[1] ?? "b")}
               onChange={(e) => setIntegralBound(eq, onPatch, 1, e.target.value)}
-              style={{ ...inp(C), width: 64, minWidth: 0 }} />
+              style={{ ...inp(C, T), width: 64, minWidth: 0 }} />
             <span style={{ fontSize: T.caption.fontSize, color: C.textDim, marginLeft: 8 }}
               title="Welfare reference y: splits the area into gain (above) and loss (below). Empty → plain area under the curve.">ref y</span>
             <input type="number" value={eq.integralRef ?? ""}
               placeholder="—"
               onChange={(e) => { const n = Number(e.target.value); onPatch({ integralRef: e.target.value === "" || Number.isNaN(n) ? null : n }); }}
-              style={{ ...inp(C), width: 64, minWidth: 0 }} />
+              style={{ ...inp(C, T), width: 64, minWidth: 0 }} />
           </div>
         )}
         </>
@@ -156,7 +156,7 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
   );
 }
 
-function inp(C) {
+function inp(C, T) {
   return { background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
     fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "3px 5px", minWidth: 60 };
 }

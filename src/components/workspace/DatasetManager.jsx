@@ -73,6 +73,7 @@ function computeDatasetCascade(dsId, allSteps) {
 // ─── CASCADE CONFIRM DIALOG ───────────────────────────────────────────────────
 // Inline panel shown below a G-step row or a dataset row when deletion is pending.
 function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapshot, onDeleteAll, onCancel, C }) {
+  const { T } = useTheme();
   const { gStepIds, datasetIds } = cascade;
 
   const affectedStepLabels = gStepIds.map(id => {
@@ -161,6 +162,7 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
 }
 
 function CloudModal({ children, C, onClose }) {
+  const { T } = useTheme();
   return (
     <>
       <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 500 }} onClick={onClose} />

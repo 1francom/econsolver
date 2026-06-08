@@ -56,23 +56,23 @@ export default function ViewControls({ view, onChange }) {
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.22em", textTransform: "uppercase" }}>View</span>
 
-        <label style={lbl(C)}>
-          x min<input type="number" value={x0} onChange={(e) => setX(0, e.target.value)} style={num(C)} />
+        <label style={lbl(C, T)}>
+          x min<input type="number" value={x0} onChange={(e) => setX(0, e.target.value)} style={num(C, T)} />
         </label>
-        <label style={lbl(C)}>
-          x max<input type="number" value={x1} onChange={(e) => setX(1, e.target.value)} style={num(C)} />
+        <label style={lbl(C, T)}>
+          x max<input type="number" value={x1} onChange={(e) => setX(1, e.target.value)} style={num(C, T)} />
         </label>
 
-        <label style={lbl(C)}>
+        <label style={lbl(C, T)}>
           y min<input type="number" value={yr[0] ?? ""} placeholder="auto"
-            onChange={(e) => setY(0, e.target.value)} style={num(C)} />
+            onChange={(e) => setY(0, e.target.value)} style={num(C, T)} />
         </label>
-        <label style={lbl(C)}>
+        <label style={lbl(C, T)}>
           y max<input type="number" value={yr[1] ?? ""} placeholder="auto"
-            onChange={(e) => setY(1, e.target.value)} style={num(C)} />
+            onChange={(e) => setY(1, e.target.value)} style={num(C, T)} />
         </label>
 
-        <label style={lbl(C)}>
+        <label style={lbl(C, T)}>
           height
           <input type="range" min={240} max={820} step={20} value={height}
             onChange={(e) => onChange({ height: Number(e.target.value) })} style={{ width: 90, accentColor: C.teal }} />
@@ -81,18 +81,18 @@ export default function ViewControls({ view, onChange }) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-        <label style={lbl(C)}>
+        <label style={lbl(C, T)}>
           x label<input type="text" value={view.xLabel ?? ""} placeholder="x axis"
-            onChange={(e) => onChange({ xLabel: e.target.value.slice(0, 48) })} style={{ ...num(C), width: 120 }} />
+            onChange={(e) => onChange({ xLabel: e.target.value.slice(0, 48) })} style={{ ...num(C, T), width: 120 }} />
         </label>
-        <label style={lbl(C)}>
+        <label style={lbl(C, T)}>
           y label<input type="text" value={view.yLabel ?? ""} placeholder="y axis"
-            onChange={(e) => onChange({ yLabel: e.target.value.slice(0, 48) })} style={{ ...num(C), width: 120 }} />
+            onChange={(e) => onChange({ yLabel: e.target.value.slice(0, 48) })} style={{ ...num(C, T), width: 120 }} />
         </label>
 
         <span style={{ fontSize: T.caption.fontSize, color: C.textDim || "#888" }}>lines</span>
-        <button onClick={() => addRef("v")} style={refBtn(C, C.blue)}>+ vertical</button>
-        <button onClick={() => addRef("h")} style={refBtn(C, C.gold)}>+ horizontal</button>
+        <button onClick={() => addRef("v")} style={refBtn(C, T, C.blue)}>+ vertical</button>
+        <button onClick={() => addRef("h")} style={refBtn(C, T, C.gold)}>+ horizontal</button>
 
         {refLines.map((l, i) => (
           <span key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: T.caption.fontSize,
@@ -100,31 +100,31 @@ export default function ViewControls({ view, onChange }) {
             <span style={{ color: l.kind === "v" ? C.blue : C.gold }}>{l.kind === "v" ? "x=" : "y="}</span>
             <input type="number" value={l.value}
               onChange={(e) => { const v = Number(e.target.value); if (e.target.value !== "" && Number.isFinite(v)) patchRef(i, { value: v }); }}
-              style={{ ...num(C), width: 56 }} />
+              style={{ ...num(C, T), width: 56 }} />
             <input type="text" value={l.label ?? ""} placeholder="label"
-              onChange={(e) => patchRef(i, { label: e.target.value.slice(0, 24) })} style={{ ...num(C), width: 64 }} />
+              onChange={(e) => patchRef(i, { label: e.target.value.slice(0, 24) })} style={{ ...num(C, T), width: 64 }} />
             <span onClick={() => removeRef(i)} style={{ color: C.red || "#c86e6e", cursor: "pointer", fontSize: T.code.fontSize }}>×</span>
           </span>
         ))}
 
         <span style={{ fontSize: T.caption.fontSize, color: C.textDim || "#888" }}>text</span>
-        <button onClick={addAnn} style={refBtn(C, C.teal)}>+ text</button>
+        <button onClick={addAnn} style={refBtn(C, T, C.teal)}>+ text</button>
 
         {annotations.map((a, i) => (
           <span key={a.id ?? i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: T.caption.fontSize,
             color: C.textDim || "#888", border: `1px solid ${C.border2}`, borderRadius: 4, padding: "1px 4px" }}>
             <input type="text" value={a.text ?? ""} placeholder="text"
-              onChange={(e) => patchAnn(i, { text: e.target.value.slice(0, 64) })} style={{ ...num(C), width: 90 }} />
+              onChange={(e) => patchAnn(i, { text: e.target.value.slice(0, 64) })} style={{ ...num(C, T), width: 90 }} />
             <input type="color" value={a.color || C.text} title="Text color"
               onChange={(e) => patchAnn(i, { color: e.target.value })}
               style={{ width: 20, height: 18, padding: 0, border: `1px solid ${C.border2}`, background: "transparent", cursor: "pointer" }} />
             <span style={{ color: C.teal }}>@</span>
             <input type="number" value={a.x} title="x"
               onChange={(e) => { const v = Number(e.target.value); if (e.target.value !== "" && Number.isFinite(v)) patchAnn(i, { x: v }); }}
-              style={{ ...num(C), width: 50 }} />
+              style={{ ...num(C, T), width: 50 }} />
             <input type="number" value={a.y} title="y"
               onChange={(e) => { const v = Number(e.target.value); if (e.target.value !== "" && Number.isFinite(v)) patchAnn(i, { y: v }); }}
-              style={{ ...num(C), width: 50 }} />
+              style={{ ...num(C, T), width: 50 }} />
             <span onClick={() => removeAnn(i)} style={{ color: C.red || "#c86e6e", cursor: "pointer", fontSize: T.code.fontSize }}>×</span>
           </span>
         ))}
@@ -134,16 +134,16 @@ export default function ViewControls({ view, onChange }) {
 }
 
 function round2(v) { return Math.round(v * 100) / 100; }
-function refBtn(C, color) {
+function refBtn(C, T, color) {
   return { fontSize: T.caption.fontSize, padding: "2px 7px", borderRadius: 4, cursor: "pointer",
     background: "transparent", color, border: `1px solid ${color}`, fontFamily: T.code.fontFamily };
 }
 
-function lbl(C) {
+function lbl(C, T) {
   return { display: "flex", alignItems: "center", gap: 6, fontSize: T.caption.fontSize,
     color: C.textDim || "#888" };
 }
-function num(C) {
+function num(C, T) {
   return { width: 64, background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
     fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 4px" };
 }

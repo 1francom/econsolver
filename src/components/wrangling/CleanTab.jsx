@@ -1607,6 +1607,7 @@ function SmartCleanSection({ headers, rows, info, onAdd }) {
 }
 
 function DistinctSection({ headers, onAdd, C }) {
+  const { T } = useTheme();
   const [subset, setSubset] = useState([]);
   const [keep, setKeep] = useState("first");
   const toggle = h => setSubset(s => s.includes(h) ? s.filter(x=>x!==h) : [...s, h]);
