@@ -83,7 +83,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
     // Gridlines + ticks at "nice" round values on both axes (Heckbert).
     const xt = axisTicks(x0, x1, 7);
     const yt = axisTicks(y0, y1, 6);
-    ctx.font = `10px ${mono}`;
+    ctx.font = `10px ${T.code.fontFamily}`;
 
     // Hairline grid behind everything.
     ctx.strokeStyle = C.border; ctx.lineWidth = 1;
@@ -127,7 +127,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
 
     // Axis titles.
     if (xLabel || yLabel) {
-      ctx.fillStyle = C.text; ctx.font = `11px ${mono}`;
+      ctx.fillStyle = C.text; ctx.font = `11px ${T.code.fontFamily}`;
       if (xLabel) {
         ctx.textAlign = "center"; ctx.textBaseline = "bottom";
         ctx.fillText(xLabel, pad.l + plotW / 2, H - 2);
@@ -146,7 +146,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
     // User reference lines (geom_vline / geom_hline). Drawn behind the curves so
     // they read as annotations. "v" → vertical at x=value, "h" → horizontal at y.
     const refLines = Array.isArray(view.refLines) ? view.refLines : [];
-    ctx.font = `10px ${mono}`;
+    ctx.font = `10px ${T.code.fontFamily}`;
     for (const l of refLines) {
       if (!Number.isFinite(l.value)) continue;
       const color = l.kind === "v" ? (C.blue || "#6e9ec8") : (C.gold || "#c8a96e");
@@ -263,7 +263,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
     // marker (readout only).
     if (Array.isArray(conditions) && conditions.length) {
       const blue = C.blue || "#6e9ec8";
-      ctx.font = `10px ${mono}`;
+      ctx.font = `10px ${T.code.fontFamily}`;
       for (const cond of conditions) {
         if (cond.error || !cond.markKind || !cond.points?.length) continue;
         for (const pt of cond.points) {
@@ -295,7 +295,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
         seen.set(c.p, mixHex(C.teal || "#6ec8b4", C.gold || "#c8a96e", t));
       }
       const entries = [...seen.entries()].sort((a, b) => a[0] - b[0]);
-      ctx.font = `10px ${mono}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.font = `10px ${T.code.fontFamily}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
       let ly = pad.t + 8;
       for (const [p, color] of entries) {
         ctx.strokeStyle = color; ctx.lineWidth = 2;
@@ -314,7 +314,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
     if (anns.length) {
       ctx.save();
       ctx.beginPath(); ctx.rect(pad.l, pad.t, plotW, plotH); ctx.clip();
-      ctx.font = `11px ${mono}`;
+      ctx.font = `11px ${T.code.fontFamily}`;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       for (const a of anns) {
         if (!Number.isFinite(a.x) || !Number.isFinite(a.y) || !a.text) continue;
