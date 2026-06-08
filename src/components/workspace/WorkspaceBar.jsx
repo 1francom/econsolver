@@ -3,7 +3,9 @@
 // Left side: DatasetManager button (always visible in every tab).
 // Right side: 7 tab buttons + theme toggle. Tabs requiring output are locked until pipeline runs.
 
+import { useState } from "react";
 import DatasetManager from "./DatasetManager.jsx";
+import AppearancePanel from "./AppearancePanel.jsx";
 import { useTheme } from "../../ThemeContext.jsx";
 import { signOut } from "../../services/auth/authService.js";
 import { clearAllLocalData } from "../../services/Persistence/indexedDB.js";
@@ -23,6 +25,7 @@ const TABS = [
 
 export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback }) {
   const { C, theme, setTheme } = useTheme();
+  const [showAppearance, setShowAppearance] = useState(false);
 
   return (
     <div style={{
@@ -164,6 +167,33 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
       >
         {theme === "dark" ? "☀" : "☾"}
       </button>
+
+      {/* ── Appearance settings ── */}
+      <div style={{ position: "relative" }}>
+        <button
+          aria-label="Appearance settings"
+          title="Appearance"
+          onClick={() => setShowAppearance((s) => !s)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 32,
+            flexShrink: 0,
+            background: "transparent",
+            border: "none",
+            borderLeft: `1px solid ${C.border}`,
+            color: C.textDim,
+            cursor: "pointer",
+            fontSize: 16,
+            lineHeight: 1,
+            height: "100%",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.color = C.textDim; }}
+        >⚙</button>
+        {showAppearance && <AppearancePanel onClose={() => setShowAppearance(false)} />}
+      </div>
 
       {/* ── Clear all local data ── */}
       <button
