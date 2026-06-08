@@ -289,105 +289,38 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
 
     case "boxplot": {
       if (!aes.y) break;
-      const {
-        outlierShow = true, outlierSize = 3,
-        outlierColor = "", iqrCoef = 1.5,
-      } = ly.opts || {};
-      const outCol = outlierColor || colorVal;
-
-      // Group rows by x category (or treat all as one group if no x)
-      const groupKey = aes.x || "__all__";
-      const groups = new Map();
-      for (const r of rows) {
-        const v = +r[aes.y];
-        if (!isFinite(v)) continue;
-        const k = aes.x ? String(r[aes.x] ?? "") : "__all__";
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k).push(v);
-      }
-
-      // Sub-groups for grouped boxplot (aes.color ≠ aes.x)
+      const { outlierShow = true, outlierSize = 3 } = ly.opts || {};
+      const outR = outlierShow ? Math.max(1, (outlierSize ?? 3) / 2) : 0;
       const isGrouped = aes.color && aes.x && aes.color !== aes.x;
-      const subKey = isGrouped ? aes.color : null;
-      const subGroups = new Map(); // "xVal::subVal" → values[]
+
       if (isGrouped) {
-        for (const r of rows) {
-          const v = +r[aes.y];
-          if (!isFinite(v)) continue;
-          const k = `${r[aes.x] ?? ""}::${r[aes.color] ?? ""}`;
-          if (!subGroups.has(k)) subGroups.set(k, []);
-          subGroups.get(k).push(v);
-        }
-      }
-
-      function quantile(sorted, q) {
-        const pos = q * (sorted.length - 1);
-        const lo = Math.floor(pos), hi = Math.ceil(pos);
-        return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
-      }
-
-      function buildBoxMarks(vals, xVal, fillC) {
-        if (vals.length < 2) return;
-        const s = [...vals].sort((a, b) => a - b);
-        const q1 = quantile(s, 0.25);
-        const med = quantile(s, 0.5);
-        const q3 = quantile(s, 0.75);
-        const iqr = q3 - q1;
-        const lo = q1 - iqrCoef * iqr;
-        const hi = q3 + iqrCoef * iqr;
-        const wMin = s.find(v => v >= lo) ?? q1;
-        const wMax = [...s].reverse().find(v => v <= hi) ?? q3;
-        const outliers = outlierShow ? s.filter(v => v < lo || v > hi) : [];
-        const x = xVal === "__all__" ? undefined : xVal;
-
-        // IQR box
-        marks.push(Plt.barY([{ x, y1: q1, y2: q3 }], {
-          x: "x", y1: "y1", y2: "y2",
-          fill: fillC, fillOpacity: 0.68 * op,
-          stroke: fillC, strokeOpacity: 0.55 * op, strokeWidth: 1,
-        }));
-        // Median line
-        marks.push(Plt.ruleX([{ x, y1: med, y2: med }], {
-          x: "x", y1: "y1", y2: "y2",
-          stroke: "#fff", strokeWidth: 2, strokeOpacity: 0.9 * op,
-        }));
-        // Whiskers
-        marks.push(Plt.ruleX([{ x, y1: wMin, y2: q1 }], {
-          x: "x", y1: "y1", y2: "y2",
-          stroke: fillC, strokeWidth: 1.4, strokeOpacity: 0.75 * op,
-          strokeDasharray: "3 2",
-        }));
-        marks.push(Plt.ruleX([{ x, y1: q3, y2: wMax }], {
-          x: "x", y1: "y1", y2: "y2",
-          stroke: fillC, strokeWidth: 1.4, strokeOpacity: 0.75 * op,
-          strokeDasharray: "3 2",
-        }));
-        // Whisker caps
-        marks.push(Plt.tickX([{ x, y: wMin }, { x, y: wMax }], {
-          x: "x", y: "y", stroke: fillC, strokeOpacity: 0.75 * op, strokeWidth: 1.4,
-        }));
-        // Outliers
-        if (outliers.length) {
-          marks.push(Plt.dot(outliers.map(v => ({ x, y: v })), {
-            x: "x", y: "y", fill: outCol, r: outlierSize / 2,
-            fillOpacity: 0.82 * op, stroke: "none",
+        const subVals = [...new Set(rows.map(r => String(r[aes.color] ?? "")))];
+        for (let si = 0; si < subVals.length; si++) {
+          const sv = subVals[si];
+          const subColor = DEFAULT_FILLS[si % DEFAULT_FILLS.length];
+          const subData = rows
+            .filter(r => isFinite(+r[aes.y]) && String(r[aes.color] ?? "") === sv)
+            .map(r => ({ __x: `${String(r[aes.x] ?? "")} · ${sv}`, __y: +r[aes.y] }));
+          if (subData.length < 2) continue;
+          marks.push(Plt.boxY(subData, {
+            x: "__x", y: "__y",
+            fill: subColor, stroke: subColor,
+            fillOpacity: 0.68 * op, strokeOpacity: 0.85 * op,
+            r: outR,
           }));
         }
-      }
-
-      if (isGrouped) {
-        const xVals = [...new Set(rows.map(r => String(r[aes.x] ?? "")))];
-        const subVals = [...new Set(rows.map(r => String(r[aes.color] ?? "")))];
-        // Use palette colors per subgroup
-        const subColors = subVals.map((_, i) => DEFAULT_FILLS[i % DEFAULT_FILLS.length]);
-        for (const xv of xVals) {
-          subVals.forEach((sv, si) => {
-            const vals = subGroups.get(`${xv}::${sv}`) ?? [];
-            buildBoxMarks(vals, `${xv} · ${sv}`, subColors[si]);
-          });
-        }
       } else {
-        for (const [k, vals] of groups) buildBoxMarks(vals, k, colorVal);
+        const plotData = rows
+          .filter(r => isFinite(+r[aes.y]))
+          .map(r => ({ __x: aes.x ? String(r[aes.x] ?? "") : null, __y: +r[aes.y] }));
+        if (plotData.length >= 2) {
+          marks.push(Plt.boxY(plotData, {
+            x: aes.x ? "__x" : null, y: "__y",
+            fill: colorVal, stroke: colorVal,
+            fillOpacity: 0.68 * op, strokeOpacity: 0.85 * op,
+            r: outR,
+          }));
+        }
       }
       break;
     }
