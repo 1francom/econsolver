@@ -322,3 +322,12 @@
 
 - [08:52] · Model
   Allow users to edit LaTeX table variable names — currently RDD always shows "D (treatment)", "running − c", "D x (running − c)" regardless of actual column names
+
+---
+
+## 2026-06-08 batch
+
+### Features
+
+- [14:03] · Simulate
+  Add studentization for permutation tests
