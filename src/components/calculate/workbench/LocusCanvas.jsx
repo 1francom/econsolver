@@ -57,7 +57,7 @@ export default function LocusCanvas({ locus, height = 180 }) {
 
     const xt = axisTicks(x0, x1, 6);
     const yt = axisTicks(y0, y1, 5);
-    ctx.font = `10px ${mono}`;
+    ctx.font = `10px ${T.code.fontFamily}`;
 
     // Grid.
     ctx.strokeStyle = C.border; ctx.lineWidth = 1;
@@ -76,7 +76,7 @@ export default function LocusCanvas({ locus, height = 180 }) {
     for (const tx of xt.ticks) { if (tx < x0 || tx > x1) continue; ctx.fillText(tx.toFixed(xt.decimals), sx(tx), pad.t + plotH + 6); }
 
     // Axis titles.
-    ctx.fillStyle = C.text; ctx.font = `11px ${mono}`;
+    ctx.fillStyle = C.text; ctx.font = `11px ${T.code.fontFamily}`;
     ctx.textAlign = "center"; ctx.textBaseline = "bottom";
     ctx.fillText(locus.param, pad.l + plotW / 2, H - 1);
     ctx.save(); ctx.translate(11, pad.t + plotH / 2); ctx.rotate(-Math.PI / 2);
