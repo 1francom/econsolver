@@ -14,7 +14,6 @@ import { useState, useMemo } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 function makeCatColor(C) {
   return {
@@ -32,7 +31,7 @@ const STATUS_ICON   = { ok: "✓", noop: "—", error: "✗" };
 const CAT_LABEL     = { cleaning: "Clean", features: "Feature", reshape: "Reshape", merge: "Merge", unknown: "?" };
 
 function StatPill({ label, value, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.textDim;
   return (
     <div style={{
@@ -41,19 +40,19 @@ function StatPill({ label, value, color }) {
       background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4,
       minWidth: 80,
     }}>
-      <div style={{ fontSize: 18, color, fontFamily: mono, fontWeight: 600 }}>{value}</div>
-      <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 3 }}>{label}</div>
+      <div style={{ fontSize: 18, color, fontFamily: T.code.fontFamily, fontWeight: 600 }}>{value}</div>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 3 }}>{label}</div>
     </div>
   );
 }
 
 function DeltaBadge({ value, positiveGood = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (value == null || value === 0) return null;
   const good  = positiveGood ? value > 0 : value < 0;
   const color = good ? C.green : (value === 0 ? C.textMuted : C.yellow);
   return (
-    <span style={{ fontSize: 9, color, fontFamily: mono, marginLeft: 4 }}>
+    <span style={{ fontSize: T.caption.fontSize, color, fontFamily: T.code.fontFamily, marginLeft: 4 }}>
       ({value > 0 ? "+" : ""}{value})
     </span>
   );
@@ -61,7 +60,7 @@ function DeltaBadge({ value, positiveGood = false }) {
 
 // ─── FILTER BAR ───────────────────────────────────────────────────────────────
 function FilterBar({ categories, filter, setFilter, statusFilter, setStatusFilter }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const CAT_COLOR = makeCatColor(C);
   const STATUS_COLOR = makeStatusColor(C);
   const allCats = ["all", ...categories];
@@ -75,7 +74,7 @@ function FilterBar({ categories, filter, setFilter, statusFilter, setStatusFilte
           return (
             <button key={c} onClick={() => setFilter(c)}
               style={{
-                padding: "3px 9px", borderRadius: 3, fontFamily: mono, fontSize: 9,
+                padding: "3px 9px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 border: `1px solid ${active ? clr : C.border2}`,
                 background: active ? `${clr}18` : "transparent",
                 color: active ? clr : C.textDim,
@@ -94,7 +93,7 @@ function FilterBar({ categories, filter, setFilter, statusFilter, setStatusFilte
           return (
             <button key={s} onClick={() => setStatusFilter(s)}
               style={{
-                padding: "3px 9px", borderRadius: 3, fontFamily: mono, fontSize: 9,
+                padding: "3px 9px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 border: `1px solid ${active ? clr : C.border2}`,
                 background: active ? `${clr}18` : "transparent",
                 color: active ? clr : C.textDim,
@@ -111,7 +110,7 @@ function FilterBar({ categories, filter, setFilter, statusFilter, setStatusFilte
 
 // ─── ENTRY CARD ───────────────────────────────────────────────────────────────
 function EntryCard({ entry }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const CAT_COLOR = makeCatColor(C);
   const STATUS_COLOR = makeStatusColor(C);
   const [expanded, setExpanded] = useState(false);
@@ -141,62 +140,62 @@ function EntryCard({ entry }) {
         }}
       >
         {/* Step number */}
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, flexShrink: 0, minWidth: 22 }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, flexShrink: 0, minWidth: 22 }}>
           {entry.index + 1}
         </span>
 
         {/* Status icon */}
-        <span style={{ fontSize: 11, color: statClr, flexShrink: 0, minWidth: 14 }}>
+        <span style={{ fontSize: T.code.fontSize, color: statClr, flexShrink: 0, minWidth: 14 }}>
           {STATUS_ICON[entry.status] ?? "?"}
         </span>
 
         {/* Category badge */}
         <span style={{
-          fontSize: 8, color: catClr, border: `1px solid ${catClr}40`,
-          borderRadius: 2, padding: "1px 5px", fontFamily: mono,
+          fontSize: T.caption.fontSize, color: catClr, border: `1px solid ${catClr}40`,
+          borderRadius: 2, padding: "1px 5px", fontFamily: T.code.fontFamily,
           letterSpacing: "0.1em", flexShrink: 0,
         }}>
           {CAT_LABEL[entry.category] ?? entry.category}
         </span>
 
         {/* Label */}
-        <span style={{ fontSize: 11, color: entry.status === "error" ? C.red : C.text, flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: T.code.fontSize, color: entry.status === "error" ? C.red : C.text, flex: 1, minWidth: 0 }}>
           {entry.label}
         </span>
 
         {/* Row delta */}
         {entry.rowsDelta !== 0 && (
-          <span style={{ fontSize: 9, color: entry.rowsDelta < 0 ? C.yellow : C.teal, fontFamily: mono, flexShrink: 0 }}>
+          <span style={{ fontSize: T.caption.fontSize, color: entry.rowsDelta < 0 ? C.yellow : C.teal, fontFamily: T.code.fontFamily, flexShrink: 0 }}>
             {entry.rowsDelta > 0 ? "+" : ""}{entry.rowsDelta} rows
           </span>
         )}
 
         {/* Col added/removed */}
         {entry.colsAdded.length > 0 && (
-          <span style={{ fontSize: 9, color: C.teal, fontFamily: mono, flexShrink: 0 }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily, flexShrink: 0 }}>
             +{entry.colsAdded.length} col{entry.colsAdded.length > 1 ? "s" : ""}
           </span>
         )}
         {entry.colsRemoved.length > 0 && (
-          <span style={{ fontSize: 9, color: C.yellow, fontFamily: mono, flexShrink: 0 }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.yellow, fontFamily: T.code.fontFamily, flexShrink: 0 }}>
             −{entry.colsRemoved.length} col{entry.colsRemoved.length > 1 ? "s" : ""}
           </span>
         )}
 
         {/* Duration */}
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, flexShrink: 0, minWidth: 40, textAlign: "right" }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, flexShrink: 0, minWidth: 40, textAlign: "right" }}>
           {entry.durationMs}ms
         </span>
 
         {/* Expand toggle */}
-        <span style={{ fontSize: 9, color: C.textMuted, flexShrink: 0 }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, flexShrink: 0 }}>
           {expanded ? "▲" : "▼"}
         </span>
       </div>
 
       {/* Decision text */}
       <div style={{ padding: "0 0.8rem 0.5rem 0.8rem", paddingLeft: "calc(0.8rem + 22px + 10px + 14px + 10px + 44px + 10px)" }}>
-        <div style={{ fontSize: 10, color: entry.status === "error" ? C.red : C.textDim, fontFamily: mono, lineHeight: 1.65 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: entry.status === "error" ? C.red : C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.65 }}>
           {entry.decision}
         </div>
       </div>
@@ -230,19 +229,19 @@ function EntryCard({ entry }) {
 }
 
 function Detail({ label, value, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.textDim;
   return (
     <div>
-      <div style={{ fontSize: 8, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 2, fontFamily: mono }}>{label}</div>
-      <div style={{ fontSize: 10, color, fontFamily: mono, wordBreak: "break-all" }}>{value}</div>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 2, fontFamily: T.code.fontFamily }}>{label}</div>
+      <div style={{ fontSize: T.caption.fontSize, color, fontFamily: T.code.fontFamily, wordBreak: "break-all" }}>{value}</div>
     </div>
   );
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function AuditTrail({ trail, filename = "analysis", onClose }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [filter,       setFilter]       = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [markdownCopied, setMarkdownCopied] = useState(false);
@@ -294,22 +293,22 @@ export default function AuditTrail({ trail, filename = "analysis", onClose }) {
           padding: "0.85rem 1.2rem", background: C.surface,
           borderBottom: `1px solid ${C.border}`, flexShrink: 0,
         }}>
-          <div style={{ fontSize: 10, color: C.teal, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.22em", textTransform: "uppercase" }}>
             Pipeline Audit Trail
           </div>
-          <div style={{ fontSize: 10, color: C.textMuted }}>{filename}</div>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{filename}</div>
           <div style={{ flex: 1 }} />
 
           {/* Export buttons */}
           <button onClick={copyMarkdown}
-            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10,
+            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                      border: `1px solid ${markdownCopied ? C.teal : C.border2}`,
                      background: markdownCopied ? `${C.teal}18` : "transparent",
                      color: markdownCopied ? C.teal : C.textDim, cursor: "pointer" }}>
             {markdownCopied ? "Copied ✓" : "Copy .md"}
           </button>
           <button onClick={downloadMarkdown}
-            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 10,
+            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                      border: `1px solid ${C.border2}`, background: "transparent",
                      color: C.textDim, cursor: "pointer" }}>
             ↓ audit_trail.md
@@ -351,7 +350,7 @@ export default function AuditTrail({ trail, filename = "analysis", onClose }) {
         {/* ── Entry list ── */}
         <div style={{ flex: 1, overflowY: "auto", padding: "0.85rem 1.2rem" }}>
           {filtered.length === 0 && (
-            <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono, textAlign: "center", marginTop: "3rem" }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, textAlign: "center", marginTop: "3rem" }}>
               No steps match the current filter.
             </div>
           )}
@@ -361,7 +360,7 @@ export default function AuditTrail({ trail, filename = "analysis", onClose }) {
 
           {/* Empty pipeline state */}
           {entries.length === 0 && (
-            <div style={{ fontSize: 11, color: C.textMuted, fontFamily: mono, textAlign: "center", marginTop: "3rem" }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, textAlign: "center", marginTop: "3rem" }}>
               No pipeline steps — apply at least one step in Wrangling to generate an audit trail.
             </div>
           )}

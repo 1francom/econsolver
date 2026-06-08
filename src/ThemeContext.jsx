@@ -35,6 +35,7 @@ function ensureFont(key) {
   if (document.getElementById(id)) return;
   const link = document.createElement("link");
   link.id = id; link.rel = "stylesheet"; link.href = FONT_HREFS[key];
+  link.crossOrigin = "anonymous";
   document.head.appendChild(link);
 }
 

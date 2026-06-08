@@ -10,7 +10,6 @@ import { useTheme } from "../../ThemeContext.jsx";
 import { signOut } from "../../services/auth/authService.js";
 import { clearAllLocalData } from "../../services/Persistence/indexedDB.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 const TABS = [
   { id: "data",      label: "Data",      icon: "⬡", requiresOutput: false },
@@ -24,7 +23,7 @@ const TABS = [
 ];
 
 export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback }) {
-  const { C, theme, setTheme } = useTheme();
+  const { C, T, theme, setTheme } = useTheme();
   const [showAppearance, setShowAppearance] = useState(false);
 
   return (
@@ -69,8 +68,8 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
                 borderTop: "2px solid transparent",
                 color: isActive ? C.teal : isLocked ? C.textMuted : C.textDim,
                 cursor: isLocked ? "not-allowed" : "pointer",
-                fontFamily: mono,
-                fontSize: 11,
+                fontFamily: T.code.fontFamily,
+                fontSize: T.code.fontSize,
                 letterSpacing: "0.04em",
                 transition: "color 0.12s, border-color 0.12s, background 0.12s",
                 opacity: isLocked ? 0.42 : 1,
@@ -84,10 +83,10 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
                 if (!isActive) e.currentTarget.style.color = isLocked ? C.textMuted : C.textDim;
               }}
             >
-              <span style={{ fontSize: 10 }}>{tab.icon}</span>
+              <span style={{ fontSize: T.caption.fontSize }}>{tab.icon}</span>
               <span>{tab.label}</span>
               {isLocked && (
-                <span style={{ fontSize: 8, color: C.textMuted, marginLeft: 1 }}>🔒</span>
+                <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 1 }}>🔒</span>
               )}
             </button>
           );
@@ -109,8 +108,8 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           borderLeft: `1px solid ${C.border}`,
           color: C.textMuted,
           cursor: "pointer",
-          fontSize: 13,
-          fontFamily: mono,
+          fontSize: T.body.fontSize,
+          fontFamily: T.code.fontFamily,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.teal; }}
@@ -134,8 +133,8 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           borderLeft: `1px solid ${C.border}`,
           color: C.textMuted,
           cursor: "pointer",
-          fontSize: 13,
-          fontFamily: mono,
+          fontSize: T.body.fontSize,
+          fontFamily: T.code.fontFamily,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
@@ -159,7 +158,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           borderLeft: `1px solid ${C.border}`,
           color: C.textMuted,
           cursor: "pointer",
-          fontSize: 13,
+          fontSize: T.body.fontSize,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
@@ -214,8 +213,8 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           borderLeft: `1px solid ${C.border}`,
           color: C.textMuted,
           cursor: "pointer",
-          fontSize: 13,
-          fontFamily: mono,
+          fontSize: T.body.fontSize,
+          fontFamily: T.code.fontFamily,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
@@ -239,8 +238,8 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
           borderLeft: `1px solid ${C.border}`,
           color: C.textMuted,
           cursor: "pointer",
-          fontSize: 12,
-          fontFamily: mono,
+          fontSize: T.code.fontSize,
+          fontFamily: T.code.fontFamily,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.red; }}

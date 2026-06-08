@@ -4,10 +4,9 @@ import { useState } from "react";
 import { signIn, signUp } from "../../services/auth/authService.js";
 import { useTheme } from "../../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 export default function LoginForm() {
-  const { C, theme, setTheme } = useTheme();
+  const { C, T, theme, setTheme } = useTheme();
   const [mode,     setMode]     = useState("login"); // "login" | "signup"
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
@@ -56,19 +55,19 @@ export default function LoginForm() {
     border: `1px solid ${C.border2}`,
     borderRadius: 3,
     color: C.text,
-    fontFamily: mono,
-    fontSize: 12,
+    fontFamily: T.code.fontFamily,
+    fontSize: T.code.fontSize,
     outline: "none",
     boxSizing: "border-box",
     transition: "border-color 0.15s",
   };
 
   const labelStyle = {
-    fontSize: 9,
+    fontSize: T.caption.fontSize,
     color: C.textMuted,
     letterSpacing: "0.22em",
     textTransform: "uppercase",
-    fontFamily: mono,
+    fontFamily: T.code.fontFamily,
     marginBottom: 5,
     display: "block",
   };
@@ -81,7 +80,7 @@ export default function LoginForm() {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      fontFamily: mono,
+      fontFamily: T.code.fontFamily,
       padding: "2rem",
       position: "relative",
     }}>
@@ -120,7 +119,7 @@ export default function LoginForm() {
           Litux
         </div>
         <div style={{
-          fontSize: 11,
+          fontSize: T.code.fontSize,
           color: C.textMuted,
           letterSpacing: "0.08em",
           lineHeight: 1.7,
@@ -161,8 +160,8 @@ export default function LoginForm() {
                 background: mode === m ? C.teal : "transparent",
                 color: mode === m ? C.bg : C.textMuted,
                 border: "none",
-                fontFamily: mono,
-                fontSize: 9,
+                fontFamily: T.code.fontFamily,
+                fontSize: T.caption.fontSize,
                 fontWeight: 700,
                 letterSpacing: "0.18em",
                 textTransform: "uppercase",
@@ -226,7 +225,7 @@ export default function LoginForm() {
 
           {error && (
             <div style={{
-              fontSize: 10,
+              fontSize: T.caption.fontSize,
               color: "#e07070",
               background: "#e0707015",
               border: "1px solid #e0707040",
@@ -247,8 +246,8 @@ export default function LoginForm() {
               color: loading ? C.textMuted : C.bg,
               border: "none",
               borderRadius: 3,
-              fontFamily: mono,
-              fontSize: 11,
+              fontFamily: T.code.fontFamily,
+              fontSize: T.code.fontSize,
               fontWeight: 700,
               letterSpacing: "0.1em",
               cursor: loading ? "not-allowed" : "pointer",
@@ -266,7 +265,7 @@ export default function LoginForm() {
       {/* ── Footer note ── */}
       <div style={{
         marginTop: "2rem",
-        fontSize: 9,
+        fontSize: T.caption.fontSize,
         color: C.textMuted,
         letterSpacing: "0.1em",
         opacity: 0.5,

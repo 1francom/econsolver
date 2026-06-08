@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 import { cas } from "../../../math/cas/casAdapter.js";
 
-const mono = "'IBM Plex Mono', monospace";
 const swatch = { width: 22, height: 20, padding: 0, border: "1px solid #444", background: "transparent", cursor: "pointer", flexShrink: 0 };
 const OPS = [
   { key: "plot", glyph: "▦", title: "Plot curve" },
@@ -15,7 +14,7 @@ const OPS = [
 // One equation/constraint card. Props:
 //   eq, index, view, onPatch(patch), onRemove()
 export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [copied, setCopied] = useState(false);
   const paletteColor = [C.teal, C.gold, C.blue][index % 3];
   const accent = eq.color || paletteColor;
@@ -48,17 +47,17 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
 
   return (
     <div style={{ border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`,
-      borderRadius: 8, padding: "10px 12px", marginBottom: 10, fontFamily: mono }}>
+      borderRadius: 8, padding: "10px 12px", marginBottom: 10, fontFamily: T.code.fontFamily }}>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <input value={eq.label} onChange={(e) => onPatch({ label: e.target.value.slice(0, 24) })}
           style={{ width: 54, background: C.bg, color: accent, border: `1px solid ${C.border2}`,
-            fontFamily: mono, fontSize: 12, padding: "3px 5px" }} />
+            fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "3px 5px" }} />
         {!isConstraint && (
           <input type="color" value={accent} title="Curve color"
             onChange={(e) => onPatch({ color: e.target.value })} style={swatch} />
         )}
-        <span style={{ fontSize: 11, color: C.textDim }}>{isConstraint ? "s.t." : "="}</span>
+        <span style={{ fontSize: T.code.fontSize, color: C.textDim }}>{isConstraint ? "s.t." : "="}</span>
 
         {isConstraint ? (
           <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
@@ -77,15 +76,15 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
         )}
 
         <button onClick={onRemove} title="Remove card"
-          style={{ color: C.red || "#c86e6e", background: "transparent", border: "none", cursor: "pointer", fontSize: 14 }}>×</button>
+          style={{ color: C.red || "#c86e6e", background: "transparent", border: "none", cursor: "pointer", fontSize: T.body.fontSize }}>×</button>
       </div>
 
       {!isConstraint && (
         <>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <label style={{ fontSize: 10, color: C.textDim }}>axis</label>
+          <label style={{ fontSize: T.caption.fontSize, color: C.textDim }}>axis</label>
           <select value={eq.axis} onChange={(e) => onPatch({ axis: e.target.value })}
-            style={{ background: C.bg, color: C.text, border: `1px solid ${C.border2}`, fontFamily: mono, fontSize: 11, padding: "2px 4px" }}>
+            style={{ background: C.bg, color: C.text, border: `1px solid ${C.border2}`, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 4px" }}>
             <option value="">—</option>
             {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -102,7 +101,7 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
                     patch.integralRange = [view.xRange[0], view.xRange[1]];
                   onPatch(patch);
                 }}
-                style={{ fontSize: 11, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
+                style={{ fontSize: T.code.fontSize, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
                   background: on ? accent + "22" : "transparent", color: on ? accent : C.textDim,
                   border: `1px solid ${on ? accent : C.border2}` }}>
                 {op.glyph}
@@ -113,7 +112,7 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
           {eq.ops.optimize && (
             <>
               <button onClick={() => onPatch({ sense: eq.sense === "max" ? "min" : "max" })}
-                style={{ fontSize: 10, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
+                style={{ fontSize: T.caption.fontSize, padding: "3px 7px", borderRadius: 4, cursor: "pointer",
                   background: "transparent", color: C.gold, border: `1px solid ${C.gold}` }}>
                 {eq.sense}
               </button>
@@ -123,7 +122,7 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
           )}
 
           <button onClick={copyLatex} title="Copy LaTeX"
-            style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, marginLeft: "auto", cursor: "pointer",
+            style={{ fontSize: T.caption.fontSize, padding: "3px 8px", borderRadius: 4, marginLeft: "auto", cursor: "pointer",
               background: copied ? "transparent" : C.surface2, color: copied ? C.teal : C.text,
               border: `1px solid ${copied ? C.teal : C.border2}`, fontWeight: 600 }}>
             {copied ? "copied" : "LaTeX"}
@@ -133,17 +132,17 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
         {eq.ops.integral && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 8 }}
             title="Integration interval and optional welfare reference">
-            <span style={{ fontSize: 11, color: C.gold }}>∫</span>
+            <span style={{ fontSize: T.code.fontSize, color: C.gold }}>∫</span>
             <input type="number" value={eq.integralRange?.[0] ?? ""}
               placeholder={String(view?.xRange?.[0] ?? "a")}
               onChange={(e) => setIntegralBound(eq, onPatch, 0, e.target.value)}
               style={{ ...inp(C), width: 64, minWidth: 0 }} />
-            <span style={{ fontSize: 10, color: C.textDim }}>→</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textDim }}>→</span>
             <input type="number" value={eq.integralRange?.[1] ?? ""}
               placeholder={String(view?.xRange?.[1] ?? "b")}
               onChange={(e) => setIntegralBound(eq, onPatch, 1, e.target.value)}
               style={{ ...inp(C), width: 64, minWidth: 0 }} />
-            <span style={{ fontSize: 10, color: C.textDim, marginLeft: 8 }}
+            <span style={{ fontSize: T.caption.fontSize, color: C.textDim, marginLeft: 8 }}
               title="Welfare reference y: splits the area into gain (above) and loss (below). Empty → plain area under the curve.">ref y</span>
             <input type="number" value={eq.integralRef ?? ""}
               placeholder="—"
@@ -159,7 +158,7 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
 
 function inp(C) {
   return { background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
-    fontFamily: mono, fontSize: 12, padding: "3px 5px", minWidth: 60 };
+    fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "3px 5px", minWidth: 60 };
 }
 
 // Patch one endpoint of the integration interval. Empty input clears that

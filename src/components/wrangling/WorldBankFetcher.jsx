@@ -14,8 +14,6 @@ import {
   fetchMultipleIndicators,
 } from "../../services/data/fetchers/worldBank.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
-
 // ─── QUICK-SELECT REGIONS ─────────────────────────────────────────────────────
 const REGIONS = [
   { label: "All countries",   codes: [] },
@@ -31,24 +29,24 @@ const REGIONS = [
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Tag({ label, onRemove, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.teal;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", background: `${color}18`, border: `1px solid ${color}40`, borderRadius: 3, fontSize: 10, color, fontFamily: mono }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", background: `${color}18`, border: `1px solid ${color}40`, borderRadius: 3, fontSize: T.caption.fontSize, color, fontFamily: T.code.fontFamily }}>
       {label}
-      <button onClick={onRemove} style={{ background: "none", border: "none", color, cursor: "pointer", fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
+      <button onClick={onRemove} style={{ background: "none", border: "none", color, cursor: "pointer", fontSize: T.code.fontSize, lineHeight: 1, padding: 0 }}>×</button>
     </span>
   );
 }
 
 function Spinner() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return <div style={{ width: 14, height: 14, border: `2px solid ${C.border2}`, borderTopColor: C.gold, borderRadius: "50%", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />;
 }
 
 // ─── MAIN MODAL ───────────────────────────────────────────────────────────────
 export default function WorldBankFetcher({ onLoad, onClose }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   // ── Step state: "indicators" | "options" | "fetching" | "done" | "error"
   const [step,       setStep]       = useState("indicators");
 
@@ -143,10 +141,10 @@ export default function WorldBankFetcher({ onLoad, onClose }) {
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "0.75rem 1.1rem", background: C.bg, borderBottom: `1px solid ${C.border}` }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono, marginBottom: 2 }}>World Bank Open Data</div>
-            <div style={{ fontSize: 15, color: C.text, fontFamily: mono }}>Import Indicators</div>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 2 }}>World Bank Open Data</div>
+            <div style={{ fontSize: T.body.fontSize, color: C.text, fontFamily: T.code.fontFamily }}>Import Indicators</div>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 11, padding: "0.25rem 0.6rem" }}>✕ Close</button>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.25rem 0.6rem" }}>✕ Close</button>
         </div>
 
         {/* Body */}
@@ -154,7 +152,7 @@ export default function WorldBankFetcher({ onLoad, onClose }) {
 
           {/* ── STEP 1: Select indicators ── */}
           <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono, marginBottom: 8 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 8 }}>
               1 · Select indicators <span style={{ color: C.textMuted }}>(up to 8)</span>
             </div>
 
@@ -164,7 +162,7 @@ export default function WorldBankFetcher({ onLoad, onClose }) {
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 placeholder="Search indicators (e.g. GDP, poverty, education)…"
-                style={{ width: "100%", boxSizing: "border-box", padding: "0.42rem 0.75rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, outline: "none" }}
+                style={{ width: "100%", boxSizing: "border-box", padding: "0.42rem 0.75rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline: "none" }}
               />
               {searching && <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}><Spinner /></span>}
             </div>
@@ -172,7 +170,7 @@ export default function WorldBankFetcher({ onLoad, onClose }) {
             {/* Results list */}
             <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 3 }}>
               {results.length === 0 && (
-                <div style={{ padding: "0.7rem 0.9rem", fontSize: 11, color: C.textMuted, fontFamily: mono }}>No indicators found.</div>
+                <div style={{ padding: "0.7rem 0.9rem", fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>No indicators found.</div>
               )}
               {results.map(ind => {
                 const active = !!selected.find(s => s.id === ind.id);
@@ -185,11 +183,11 @@ export default function WorldBankFetcher({ onLoad, onClose }) {
                     onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
                   >
                     <div style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, border: `1px solid ${active ? C.teal : C.border2}`, borderRadius: 2, background: active ? C.teal : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {active && <span style={{ color: C.bg, fontSize: 9, lineHeight: 1 }}>✓</span>}
+                      {active && <span style={{ color: C.bg, fontSize: T.caption.fontSize, lineHeight: 1 }}>✓</span>}
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, color: C.text, fontFamily: mono }}>{ind.name}</div>
-                      <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 1 }}>{ind.id}</div>
+                      <div style={{ fontSize: T.code.fontSize, color: C.text, fontFamily: T.code.fontFamily }}>{ind.name}</div>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 1 }}>{ind.id}</div>
                     </div>
                   </div>
                 );
@@ -209,40 +207,40 @@ export default function WorldBankFetcher({ onLoad, onClose }) {
 
           {/* ── STEP 2: Options ── */}
           <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono, marginBottom: 10 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 10 }}>
               2 · Options
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               {/* Country / region */}
               <div>
-                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 4 }}>Countries</div>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 4 }}>Countries</div>
                 <select value={region} onChange={e => setRegion(Number(e.target.value))}
-                  style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11 }}>
+                  style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
                   {REGIONS.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
                 </select>
-                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 3 }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 3 }}>
                   {region === 0 ? "~180 countries" : `${REGIONS[region].codes.length} countries`}
                 </div>
               </div>
               {/* Start year */}
               <div>
-                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 4 }}>Start year</div>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 4 }}>Start year</div>
                 <input type="number" min={1960} max={endYear} value={startYear}
                   onChange={e => setStartYear(Math.max(1960, Math.min(endYear, Number(e.target.value))))}
-                  style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, boxSizing: "border-box" }} />
+                  style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, boxSizing: "border-box" }} />
               </div>
               {/* End year */}
               <div>
-                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 4 }}>End year</div>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 4 }}>End year</div>
                 <input type="number" min={startYear} max={2024} value={endYear}
                   onChange={e => setEndYear(Math.min(2024, Math.max(startYear, Number(e.target.value))))}
-                  style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, boxSizing: "border-box" }} />
+                  style={{ width: "100%", padding: "0.38rem 0.6rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, boxSizing: "border-box" }} />
               </div>
             </div>
 
             {/* Expected output summary */}
             {selected.length > 0 && (
-              <div style={{ marginTop: 10, padding: "0.55rem 0.75rem", background: C.surface3, border: `1px solid ${C.border}`, borderRadius: 3, fontSize: 10, color: C.textDim, fontFamily: mono }}>
+              <div style={{ marginTop: 10, padding: "0.55rem 0.75rem", background: C.surface3, border: `1px solid ${C.border}`, borderRadius: 3, fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
                 Output: <span style={{ color: C.gold }}>wide panel</span> with columns:
                 {" "}country, iso3, year
                 {selected.map(s => <span key={s.id} style={{ color: C.teal }}>{", "}{s.id.replace(/\./g, "_")}</span>)}
@@ -254,32 +252,32 @@ export default function WorldBankFetcher({ onLoad, onClose }) {
 
           {/* ── Fetch status / error ── */}
           {step === "fetching" && (
-            <div style={{ padding: "0.8rem 1.1rem", display: "flex", alignItems: "center", gap: 10, color: C.textDim, fontSize: 11, fontFamily: mono }}>
+            <div style={{ padding: "0.8rem 1.1rem", display: "flex", alignItems: "center", gap: 10, color: C.textDim, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
               <Spinner />
               <span>{progress || "Fetching from World Bank API…"}</span>
             </div>
           )}
           {step === "error" && (
-            <div style={{ padding: "0.8rem 1.1rem", display: "flex", alignItems: "flex-start", gap: 8, background: `${C.red}15`, borderLeft: `3px solid ${C.red}`, fontSize: 11, color: C.red, fontFamily: mono }}>
+            <div style={{ padding: "0.8rem 1.1rem", display: "flex", alignItems: "flex-start", gap: 8, background: `${C.red}15`, borderLeft: `3px solid ${C.red}`, fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily }}>
               <span>⚠ {error}</span>
-              <button onClick={() => setStep("indicators")} style={{ marginLeft: "auto", background: "none", border: `1px solid ${C.red}40`, borderRadius: 2, color: C.red, cursor: "pointer", fontFamily: mono, fontSize: 9, padding: "2px 8px" }}>Retry</button>
+              <button onClick={() => setStep("indicators")} style={{ marginLeft: "auto", background: "none", border: `1px solid ${C.red}40`, borderRadius: 2, color: C.red, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 8px" }}>Retry</button>
             </div>
           )}
         </div>
 
         {/* Footer */}
         <div style={{ padding: "0.65rem 1.1rem", background: C.bg, borderTop: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ flex: 1, fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+          <div style={{ flex: 1, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
             Data from <span style={{ color: C.textDim }}>World Bank Open Data</span> · Public domain · No API key required
           </div>
           <button onClick={onClose}
-            style={{ padding: "0.38rem 0.9rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 11 }}>
+            style={{ padding: "0.38rem 0.9rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
             Cancel
           </button>
           <button
             onClick={handleFetch}
             disabled={selected.length === 0 || step === "fetching"}
-            style={{ padding: "0.38rem 1.1rem", background: selected.length > 0 ? C.teal : C.border2, border: "none", borderRadius: 3, color: C.bg, cursor: selected.length > 0 ? "pointer" : "not-allowed", fontFamily: mono, fontSize: 11, fontWeight: 700, opacity: step === "fetching" ? 0.6 : 1, transition: "all 0.12s" }}>
+            style={{ padding: "0.38rem 1.1rem", background: selected.length > 0 ? C.teal : C.border2, border: "none", borderRadius: 3, color: C.bg, cursor: selected.length > 0 ? "pointer" : "not-allowed", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, fontWeight: 700, opacity: step === "fetching" ? 0.6 : 1, transition: "all 0.12s" }}>
             ↓ Fetch {selected.length > 0 ? `${selected.length} indicator${selected.length > 1 ? "s" : ""}` : ""}
           </button>
         </div>

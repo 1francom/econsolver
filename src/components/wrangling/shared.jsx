@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
+import { MONO_STACK } from "../../theme.js";
 
 // Re-export useTheme so consumers can import from one place.
 export { useTheme };
@@ -11,14 +12,15 @@ export { useTheme };
 // Static fallback for non-React contexts (module-level utils, tests, etc.)
 export { DARK as C } from "../../theme.js";
 
-export const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
+const tokenMono = MONO_STACK;
+export { tokenMono as mono };
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 export function Lbl({ children, color, mb = 6 }) {
   const { C, T } = useTheme();
   return (
     <div style={{
-      fontSize: 10, color: color ?? C.textMuted,
+      fontSize: T.caption.fontSize, color: color ?? C.textMuted,
       letterSpacing: "0.2em", textTransform: "uppercase",
       marginBottom: mb, fontFamily: T.label.fontFamily,
     }}>
@@ -68,7 +70,7 @@ export function Badge({ ch, color }) {
   const col = color ?? C.textMuted;
   return (
     <span style={{
-      fontSize: 9, padding: "2px 6px", border: `1px solid ${col}`,
+      fontSize: T.caption.fontSize, padding: "2px 6px", border: `1px solid ${col}`,
       color: col, borderRadius: 2, letterSpacing: "0.1em",
       fontFamily: T.label.fontFamily, whiteSpace: "nowrap",
     }}>
@@ -85,13 +87,13 @@ export function NA({ pct }) {
       <span style={{ display: "inline-block", width: 24, height: 3, background: C.border, borderRadius: 2, overflow: "hidden" }}>
         <span style={{ display: "block", width: `${Math.min(pct * 100, 100)}%`, height: "100%", background: c }} />
       </span>
-      {pct > 0 && <span style={{ fontSize: 9, color: c, fontFamily: T.data.fontFamily }}>{(pct * 100).toFixed(0)}%</span>}
+      {pct > 0 && <span style={{ fontSize: T.caption.fontSize, color: c, fontFamily: T.data.fontFamily }}>{(pct * 100).toFixed(0)}%</span>}
     </span>
   );
 }
 
 export function Spin() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{
       width: 14, height: 14, border: `2px solid ${C.border2}`,
@@ -108,13 +110,13 @@ export function Grid({ headers, rows, hi, max = 20, types, onType }) {
   const tc = { numeric: C.blue, binary: C.purple, categorical: C.purple, string: C.textMuted, date: C.teal };
   return (
     <div style={{ overflowX: "auto", borderRadius: 4, border: `1px solid ${C.border}` }}>
-      <table style={{ borderCollapse: "collapse", fontSize: 11, width: "100%", minWidth: 300 }}>
+      <table style={{ borderCollapse: "collapse", fontSize: T.code.fontSize, width: "100%", minWidth: 300 }}>
         <thead>
           <tr style={{ background: C.surface2 }}>
             {headers.map(h => (
               <th key={h} style={{
                 padding: "0.45rem 0.75rem", textAlign: "left", fontFamily: T.label.fontFamily,
-                fontWeight: 400, fontSize: 10, color: h === hi ? C.teal : C.textDim,
+                fontWeight: 400, fontSize: T.caption.fontSize, color: h === hi ? C.teal : C.textDim,
                 whiteSpace: "nowrap", borderBottom: `1px solid ${C.border}`,
                 position: "sticky", top: 0, background: C.surface2,
               }}>
@@ -125,7 +127,7 @@ export function Grid({ headers, rows, hi, max = 20, types, onType }) {
                       value={types[h] || ""} onChange={e => onType(h, e.target.value)}
                       onClick={e => e.stopPropagation()}
                       style={{
-                        fontSize: 9, padding: "1px 3px", background: C.surface,
+                        fontSize: T.caption.fontSize, padding: "1px 3px", background: C.surface,
                         border: `1px solid ${C.border2}`, borderRadius: 2,
                         color: tc[types[h]] || C.textMuted, fontFamily: T.label.fontFamily,
                         cursor: "pointer", outline: "none",
@@ -149,7 +151,7 @@ export function Grid({ headers, rows, hi, max = 20, types, onType }) {
                 const isNull = v === null || v === undefined;
                 return (
                   <td key={h} style={{
-                    padding: "0.35rem 0.75rem", fontFamily: T.data.fontFamily, fontSize: 11,
+                    padding: "0.35rem 0.75rem", fontFamily: T.data.fontFamily, fontSize: T.code.fontSize,
                     color: isNull ? C.textMuted : h === hi ? C.teal : C.text,
                     borderBottom: `1px solid ${C.border}`,
                     whiteSpace: "nowrap", maxWidth: 180,
@@ -165,7 +167,7 @@ export function Grid({ headers, rows, hi, max = 20, types, onType }) {
       </table>
       {rows.length > max && (
         <div style={{
-          padding: "0.35rem 0.75rem", fontSize: 10, color: C.textMuted,
+          padding: "0.35rem 0.75rem", fontSize: T.caption.fontSize, color: C.textMuted,
           fontFamily: T.caption.fontFamily, background: C.surface2, borderTop: `1px solid ${C.border}`,
         }}>
           … {rows.length - max} more rows

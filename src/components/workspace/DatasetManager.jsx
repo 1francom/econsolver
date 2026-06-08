@@ -22,7 +22,6 @@ import {
 import { createShare, listMyShares, revokeShare } from "../../services/sync/shareEngine.js";
 import { getSyncMeta, listProjects } from "../../services/Persistence/indexedDB.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── CASCADE HELPERS ──────────────────────────────────────────────────────────
 // Given a root G-step, BFS to find all downstream G-steps and derived datasets.
@@ -89,30 +88,30 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
       padding: "0.5rem 0.85rem",
       background: `${C.red}15`,
       borderBottom: `1px solid ${C.border}`,
-      fontFamily: mono,
+      fontFamily: T.code.fontFamily,
     }}>
-      <div style={{ fontSize: 9, color: C.red, fontWeight: 700, marginBottom: 4 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.red, fontWeight: 700, marginBottom: 4 }}>
         {label}
       </div>
 
       {affectedStepLabels.length > 0 && (
         <div style={{ marginBottom: 4 }}>
-          <div style={{ fontSize: 8, color: C.textMuted, letterSpacing: "0.1em", marginBottom: 2 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.1em", marginBottom: 2 }}>
             INTERACTIONS REMOVED
           </div>
           {affectedStepLabels.map(l => (
-            <div key={l} style={{ fontSize: 9, color: "#c47070", paddingLeft: 4 }}>— {l}</div>
+            <div key={l} style={{ fontSize: T.caption.fontSize, color: "#c47070", paddingLeft: 4 }}>— {l}</div>
           ))}
         </div>
       )}
 
       {affectedDsNames.length > 0 && (
         <div style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 8, color: C.textMuted, letterSpacing: "0.1em", marginBottom: 2 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.1em", marginBottom: 2 }}>
             DERIVED DATASETS REMOVED
           </div>
           {affectedDsNames.map(n => (
-            <div key={n} style={{ fontSize: 9, color: "#c47070", paddingLeft: 4 }}>— {n}</div>
+            <div key={n} style={{ fontSize: T.caption.fontSize, color: "#c47070", paddingLeft: 4 }}>— {n}</div>
           ))}
         </div>
       )}
@@ -128,7 +127,7 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
               borderRadius: 3,
               color: C.teal,
               cursor: "pointer",
-              fontFamily: mono, fontSize: 9, fontWeight: 700,
+              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight: 700,
             }}
           >Save snapshot first</button>
         )}
@@ -141,7 +140,7 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
             borderRadius: 3,
             color: C.red,
             cursor: "pointer",
-            fontFamily: mono, fontSize: 9, fontWeight: 700,
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight: 700,
           }}
         >Delete cascade</button>
         <button
@@ -153,7 +152,7 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
             borderRadius: 3,
             color: C.textMuted,
             cursor: "pointer",
-            fontFamily: mono, fontSize: 9,
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
           }}
         >Cancel</button>
       </div>
@@ -179,7 +178,7 @@ function CloudModal({ children, C, onClose }) {
         borderRadius: 6,
         boxShadow: "0 16px 48px #000c",
         zIndex: 501,
-        fontFamily: mono,
+        fontFamily: T.code.fontFamily,
       }}>
         {children}
       </div>
@@ -189,7 +188,7 @@ function CloudModal({ children, C, onClose }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, onRemoveDataset }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const { user } = useAuth();
   const { datasets, primaryDatasetId, globalPipeline } = useSessionState();
   const dispatch = useSessionDispatch();
@@ -475,8 +474,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
           borderTop: "2px solid transparent",
           color: open ? C.gold : C.textDim,
           cursor: "pointer",
-          fontFamily: mono,
-          fontSize: 10,
+          fontFamily: T.code.fontFamily,
+          fontSize: T.caption.fontSize,
           letterSpacing: "0.06em",
           transition: "color 0.12s, background 0.12s",
           whiteSpace: "nowrap",
@@ -485,7 +484,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
         onMouseLeave={e => { if (!open) e.currentTarget.style.color = C.textDim; }}
       >
         <span style={{
-          fontSize: 9,
+          fontSize: T.caption.fontSize,
           padding: "2px 7px",
           background: open ? `${C.gold}28` : `${C.teal}22`,
           border: `1px solid ${open ? C.gold : C.teal + "80"}`,
@@ -503,13 +502,13 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
             overflow: "hidden",
             textOverflow: "ellipsis",
             color: open ? C.gold : C.textDim,
-            fontSize: 10,
+            fontSize: T.caption.fontSize,
           }}>
             {primary.name}
           </span>
         )}
 
-        <span style={{ fontSize: 8, color: open ? C.gold : C.textMuted }}>
+        <span style={{ fontSize: T.caption.fontSize, color: open ? C.gold : C.textMuted }}>
           {open ? "▲" : "▼"}
         </span>
       </button>
@@ -527,7 +526,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
           borderTop: `2px solid ${C.gold}`,
           borderRadius: "0 0 4px 4px",
           boxShadow: "0 8px 24px #00000080",
-          fontFamily: mono,
+          fontFamily: T.code.fontFamily,
           overflow: "hidden",
         }}>
 
@@ -539,16 +538,16 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
             justifyContent: "space-between",
             alignItems: "center",
           }}>
-            <span style={{ fontSize: 9, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.2em", textTransform: "uppercase" }}>
               Dataset Manager
             </span>
-            <span style={{ fontSize: 9, color: C.textMuted }}>{count} loaded</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{count} loaded</span>
           </div>
 
           <div style={{ padding: "0.55rem 0.85rem", borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
               <span style={{
-                fontSize: 8,
+                fontSize: T.caption.fontSize,
                 padding: "2px 7px",
                 border: `1px solid ${syncColor()}80`,
                 borderRadius: 3,
@@ -570,8 +569,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                     borderRadius: 3,
                     color: user && pid ? C.teal : C.textMuted,
                     cursor: user && pid ? "pointer" : "not-allowed",
-                    fontFamily: mono,
-                    fontSize: 9,
+                    fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize,
                   }}
                 >
                   Publish to cloud
@@ -588,8 +587,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                       borderRadius: 3,
                       color: unlocked ? C.textDim : C.textMuted,
                       cursor: unlocked ? "pointer" : "not-allowed",
-                      fontFamily: mono,
-                      fontSize: 9,
+                      fontFamily: T.code.fontFamily,
+                      fontSize: T.caption.fontSize,
                     }}
                   >
                     Sync now
@@ -604,8 +603,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                         borderRadius: 3,
                         color: C.gold,
                         cursor: "pointer",
-                        fontFamily: mono,
-                        fontSize: 9,
+                        fontFamily: T.code.fontFamily,
+                        fontSize: T.caption.fontSize,
                       }}
                     >
                       Resolve
@@ -621,8 +620,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                       borderRadius: 3,
                       color: C.blue,
                       cursor: "pointer",
-                      fontFamily: mono,
-                      fontSize: 9,
+                      fontFamily: T.code.fontFamily,
+                      fontSize: T.caption.fontSize,
                     }}
                   >
                     Share →
@@ -637,8 +636,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                       borderRadius: 3,
                       color: C.textMuted,
                       cursor: syncBusy ? "wait" : "pointer",
-                      fontFamily: mono,
-                      fontSize: 9,
+                      fontFamily: T.code.fontFamily,
+                      fontSize: T.caption.fontSize,
                     }}
                   >
                     Unpublish
@@ -647,7 +646,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
               )}
             </div>
             {syncError && (
-              <div style={{ marginTop: 6, fontSize: 9, color: C.red, lineHeight: 1.45 }}>
+              <div style={{ marginTop: 6, fontSize: T.caption.fontSize, color: C.red, lineHeight: 1.45 }}>
                 {syncError}
               </div>
             )}
@@ -656,7 +655,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
           {/* Dataset list */}
           <div style={{ maxHeight: 280, overflowY: "auto" }}>
             {count === 0 && (
-              <div style={{ padding: "1rem 0.85rem", fontSize: 10, color: C.textMuted }}>
+              <div style={{ padding: "1rem 0.85rem", fontSize: T.caption.fontSize, color: C.textMuted }}>
                 No datasets in session.
               </div>
             )}
@@ -683,13 +682,13 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                     onMouseEnter={e => { if (!isActive && !isDelPending) e.currentTarget.style.background = C.surface2; }}
                     onMouseLeave={e => { if (!isActive && !isDelPending) e.currentTarget.style.background = "transparent"; }}
                   >
-                    <span style={{ fontSize: 10, color: isDerived ? C.violet : C.teal, flexShrink: 0 }}>
+                    <span style={{ fontSize: T.caption.fontSize, color: isDerived ? C.violet : C.teal, flexShrink: 0 }}>
                       {isDerived ? "◎" : "●"}
                     </span>
 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
-                        fontSize: 11,
+                        fontSize: T.code.fontSize,
                         color: isActive ? C.teal : C.textDim,
                         fontWeight: isActive ? 600 : 400,
                         overflow: "hidden",
@@ -698,7 +697,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                       }}>
                         {ds.name}
                       </div>
-                      <div style={{ fontSize: 9, color: C.textMuted, marginTop: 1 }}>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 1 }}>
                         {ds.rowCount?.toLocaleString()} × {ds.colCount}
                         {ds.source && ds.source !== "loaded" && (
                           <span style={{ color: C.violet, marginLeft: 6 }}>{ds.source}</span>
@@ -706,7 +705,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                       </div>
                       {ds.crs?.label && (
                         <div
-                          style={{ fontSize: 9, color: ds.crs.reprojected ? C.gold : C.teal, marginTop: 2, opacity: 0.85 }}
+                          style={{ fontSize: T.caption.fontSize, color: ds.crs.reprojected ? C.gold : C.teal, marginTop: 2, opacity: 0.85 }}
                           title={ds.crs.reprojected
                             ? `Reprojected from ${ds.crs.label} → ${ds.crs.target}`
                             : `CRS: ${ds.crs.label}${ds.crs.unit ? ` | unit: ${ds.crs.unit}` : ""}${ds.crs.source ? ` | source: ${ds.crs.source}` : ""}${ds.crs.warning ? ` | ${ds.crs.warning}` : ""}`}
@@ -718,7 +717,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
 
                     {isActive && (
                       <span style={{
-                        fontSize: 8,
+                        fontSize: T.caption.fontSize,
                         padding: "1px 5px",
                         border: `1px solid ${C.teal}50`,
                         borderRadius: 2,
@@ -737,8 +736,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                         background: "transparent", border: "none",
                         color: isDelPending ? "#c47070" : C.textMuted,
                         cursor: "pointer",
-                        fontSize: 13, padding: "0 2px", flexShrink: 0,
-                        fontFamily: mono, lineHeight: 1,
+                        fontSize: T.body.fontSize, padding: "0 2px", flexShrink: 0,
+                        fontFamily: T.code.fontFamily, lineHeight: 1,
                       }}
                       onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.color = "#c47070"; }}
                       onMouseLeave={e => {
@@ -799,13 +798,13 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                 background: "transparent",
                 border: "none",
                 cursor: "pointer",
-                fontFamily: mono,
+                fontFamily: T.code.fontFamily,
               }}
             >
-              <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase" }}>
                 Interactions
               </span>
-              <span style={{ fontSize: 8, color: C.textMuted }}>
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
                 {globalPipeline.length > 0
                   ? `${globalPipeline.length} step${globalPipeline.length > 1 ? "s" : ""}`
                   : "none"}
@@ -816,7 +815,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
             {interactionsOpen && (
               <div style={{ maxHeight: 200, overflowY: "auto" }}>
                 {globalPipeline.length === 0 && (
-                  <div style={{ padding: "0.35rem 0.85rem 0.55rem", fontSize: 9, color: C.border2, fontFamily: mono }}>
+                  <div style={{ padding: "0.35rem 0.85rem 0.55rem", fontSize: T.caption.fontSize, color: C.border2, fontFamily: T.code.fontFamily }}>
                     No cross-dataset operations yet.
                   </div>
                 )}
@@ -834,11 +833,11 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                         gap: 6,
                         padding: "0.3rem 0.85rem",
                         borderTop: `1px solid ${C.border}`,
-                        fontFamily: mono,
+                        fontFamily: T.code.fontFamily,
                         background: isDelPending ? `${C.red}15` : "transparent",
                       }}>
                         <span style={{
-                          fontSize: 8, padding: "1px 4px",
+                          fontSize: T.caption.fontSize, padding: "1px 4px",
                           border: `1px solid ${C.border2}`,
                           borderRadius: 2, color: C.textMuted,
                           flexShrink: 0,
@@ -847,7 +846,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                         </span>
 
                         <span style={{
-                          fontSize: 9, color: C.textDim, flex: 1, minWidth: 0,
+                          fontSize: T.caption.fontSize, color: C.textDim, flex: 1, minWidth: 0,
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                         }}>
                           <span style={{ color: C.teal }}>{g.opType}</span>
@@ -865,8 +864,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                             background: "transparent", border: "none",
                             color: isDelPending ? "#c47070" : C.textMuted,
                             cursor: "pointer",
-                            fontSize: 11, padding: "0 2px", flexShrink: 0,
-                            fontFamily: mono, lineHeight: 1,
+                            fontSize: T.code.fontSize, padding: "0 2px", flexShrink: 0,
+                            fontFamily: T.code.fontFamily, lineHeight: 1,
                           }}
                           onMouseEnter={e => e.currentTarget.style.color = "#c47070"}
                           onMouseLeave={e => {
@@ -906,10 +905,10 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       {publishOpen && (
         <CloudModal C={C} onClose={() => setPublishOpen(false)}>
           <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
               Publish encrypted cloud copy
             </div>
-            <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.55 }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.55 }}>
               Choose a separate sync passphrase. Plaintext stays in this browser; the server receives only AES-GCM encrypted blobs and cannot recover this passphrase.
             </div>
           </div>
@@ -919,26 +918,26 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
               value={publishPass}
               onChange={e => setPublishPass(e.target.value)}
               placeholder="Sync passphrase"
-              style={{ width: "100%", boxSizing: "border-box", padding: "0.55rem 0.7rem", background: C.bg, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: mono }}
+              style={{ width: "100%", boxSizing: "border-box", padding: "0.55rem 0.7rem", background: C.bg, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: T.code.fontFamily }}
             />
-            <div style={{ marginTop: 7, fontSize: 9, color: publishPass.length >= 16 ? C.teal : C.gold }}>
+            <div style={{ marginTop: 7, fontSize: T.caption.fontSize, color: publishPass.length >= 16 ? C.teal : C.gold }}>
               {publishPass.length >= 16 ? "Strength: good" : "Use at least 16 characters for a stronger key."}
             </div>
             {recoveryKey && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 10, color: C.gold, marginBottom: 8 }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.gold, marginBottom: 8 }}>
                   Save this recovery key once. Anyone with it can unlock your cloud copy.
                 </div>
-                <button onClick={downloadRecoveryKey} style={{ padding: "0.4rem 0.75rem", background: `${C.gold}14`, border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+                <button onClick={downloadRecoveryKey} style={{ padding: "0.4rem 0.75rem", background: `${C.gold}14`, border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                   Download recovery key
                 </button>
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button onClick={() => setPublishOpen(false)} style={{ padding: "0.4rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+              <button onClick={() => setPublishOpen(false)} style={{ padding: "0.4rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                 Close
               </button>
-              <button onClick={publishCurrentProject} disabled={syncBusy || publishPass.length < 10} style={{ padding: "0.4rem 0.75rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: publishPass.length >= 10 ? C.teal : C.textMuted, cursor: publishPass.length >= 10 ? "pointer" : "not-allowed", fontFamily: mono, fontSize: 10 }}>
+              <button onClick={publishCurrentProject} disabled={syncBusy || publishPass.length < 10} style={{ padding: "0.4rem 0.75rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: publishPass.length >= 10 ? C.teal : C.textMuted, cursor: publishPass.length >= 10 ? "pointer" : "not-allowed", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                 {syncBusy ? "Publishing..." : "Publish"}
               </button>
             </div>
@@ -949,24 +948,24 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       {unlockOpen && (
         <CloudModal C={C} onClose={() => setUnlockOpen(false)}>
           <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
               Unlock cloud sync
             </div>
-            <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.55 }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.55 }}>
               Enter your sync passphrase or import the recovery key. Neither leaves this browser.
             </div>
           </div>
           <div style={{ padding: "1rem 1.1rem" }}>
-            <input type="password" value={unlockPass} onChange={e => setUnlockPass(e.target.value)} placeholder="Sync passphrase" style={{ width: "100%", boxSizing: "border-box", padding: "0.55rem 0.7rem", background: C.bg, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: mono }} />
+            <input type="password" value={unlockPass} onChange={e => setUnlockPass(e.target.value)} placeholder="Sync passphrase" style={{ width: "100%", boxSizing: "border-box", padding: "0.55rem 0.7rem", background: C.bg, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: T.code.fontFamily }} />
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-              <input type="file" accept="application/json,.json,.txt" onChange={readRecoveryFile} style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }} />
-              {unlockRecovery && <span style={{ fontSize: 9, color: C.teal }}>recovery key loaded</span>}
+              <input type="file" accept="application/json,.json,.txt" onChange={readRecoveryFile} style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }} />
+              {unlockRecovery && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>recovery key loaded</span>}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button onClick={() => setUnlockOpen(false)} style={{ padding: "0.4rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>
+              <button onClick={() => setUnlockOpen(false)} style={{ padding: "0.4rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                 Later
               </button>
-              <button onClick={unlockCloud} disabled={syncBusy || (!unlockPass && !unlockRecovery)} style={{ padding: "0.4rem 0.75rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: unlockPass || unlockRecovery ? C.teal : C.textMuted, cursor: unlockPass || unlockRecovery ? "pointer" : "not-allowed", fontFamily: mono, fontSize: 10 }}>
+              <button onClick={unlockCloud} disabled={syncBusy || (!unlockPass && !unlockRecovery)} style={{ padding: "0.4rem 0.75rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: unlockPass || unlockRecovery ? C.teal : C.textMuted, cursor: unlockPass || unlockRecovery ? "pointer" : "not-allowed", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                 Unlock
               </button>
             </div>
@@ -977,7 +976,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       {restoreOpen && cloudMissingLocally.length > 0 && (
         <CloudModal C={C} onClose={() => setRestoreOpen(false)}>
           <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.18em", textTransform: "uppercase" }}>
               Restore cloud projects
             </div>
           </div>
@@ -985,10 +984,10 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
             {cloudMissingLocally.map(cp => (
               <div key={cp.pid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0.55rem 0", borderBottom: `1px solid ${C.border}` }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: C.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cp.name ?? cp.pid}</div>
-                  <div style={{ fontSize: 9, color: C.textMuted }}>version {cp.version} | {cp.updated_at ? new Date(cp.updated_at).toLocaleString() : "cloud"}</div>
+                  <div style={{ fontSize: T.code.fontSize, color: C.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cp.name ?? cp.pid}</div>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>version {cp.version} | {cp.updated_at ? new Date(cp.updated_at).toLocaleString() : "cloud"}</div>
                 </div>
-                <button onClick={() => runSyncAction(() => pullProject(cp.pid))} disabled={!unlocked || syncBusy} style={{ padding: "0.35rem 0.7rem", background: `${C.teal}14`, border: `1px solid ${C.teal}`, borderRadius: 3, color: unlocked ? C.teal : C.textMuted, cursor: unlocked ? "pointer" : "not-allowed", fontFamily: mono, fontSize: 10 }}>
+                <button onClick={() => runSyncAction(() => pullProject(cp.pid))} disabled={!unlocked || syncBusy} style={{ padding: "0.35rem 0.7rem", background: `${C.teal}14`, border: `1px solid ${C.teal}`, borderRadius: 3, color: unlocked ? C.teal : C.textMuted, cursor: unlocked ? "pointer" : "not-allowed", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                   Restore
                 </button>
               </div>
@@ -1000,17 +999,17 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       {conflictOpen && (
         <CloudModal C={C} onClose={() => setConflictOpen(false)}>
           <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>
               Choose sync version
             </div>
-            <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.55 }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.55 }}>
               This device has {count} dataset{count === 1 ? "" : "s"} and local version {syncMeta.lastSyncedVersion}. Cloud has version {cloudProjects.find(cp => cp.pid === pid)?.version ?? "?"}.
             </div>
           </div>
           <div style={{ padding: "1rem 1.1rem", display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-            <button onClick={() => chooseConflict("keep-local")} style={{ padding: "0.42rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>Keep this device</button>
-            <button onClick={() => chooseConflict("keep-cloud")} style={{ padding: "0.42rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>Keep cloud</button>
-            <button onClick={() => chooseConflict("fork")} style={{ padding: "0.42rem 0.75rem", background: `${C.gold}16`, border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: mono, fontSize: 10 }}>Keep both</button>
+            <button onClick={() => chooseConflict("keep-local")} style={{ padding: "0.42rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>Keep this device</button>
+            <button onClick={() => chooseConflict("keep-cloud")} style={{ padding: "0.42rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>Keep cloud</button>
+            <button onClick={() => chooseConflict("fork")} style={{ padding: "0.42rem 0.75rem", background: `${C.gold}16`, border: `1px solid ${C.gold}`, borderRadius: 3, color: C.gold, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>Keep both</button>
           </div>
         </CloudModal>
       )}
@@ -1019,10 +1018,10 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       {shareOpen && (
         <CloudModal C={C} onClose={() => { setShareOpen(false); setShareResult(null); setShareErr(""); setShareEmail(""); }}>
           <div style={{ padding: "1rem 1.1rem", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.blue, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 4 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.blue, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 4 }}>
               Share project
             </div>
-            <div style={{ fontSize: 10, color: C.textMuted }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
               An encrypted copy is created. The recipient imports it on their device.
             </div>
           </div>
@@ -1030,19 +1029,19 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
           {!shareResult ? (
             <div style={{ padding: "1rem 1.1rem", display: "flex", flexDirection: "column", gap: 10 }}>
               <div>
-                <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Recipient email</div>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 5 }}>Recipient email</div>
                 <input
                   type="email"
                   value={shareEmail}
                   onChange={e => setShareEmail(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter") handleCreateShare(); }}
                   placeholder="colleague@university.edu"
-                  style={{ width: "100%", padding: "0.45rem 0.6rem", fontFamily: mono, fontSize: 11, background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, outline: "none", boxSizing: "border-box" }}
+                  style={{ width: "100%", padding: "0.45rem 0.6rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, outline: "none", boxSizing: "border-box" }}
                   onFocus={e => e.target.style.borderColor = C.blue}
                   onBlur={e => e.target.style.borderColor = C.border2}
                 />
               </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 10, color: C.textDim }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: T.caption.fontSize, color: C.textDim }}>
                 <input
                   type="checkbox"
                   checked={shareCanEdit}
@@ -1051,12 +1050,12 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                 />
                 Allow recipient to edit
               </label>
-              {shareErr && <div style={{ fontSize: 10, color: "#e07070" }}>{shareErr}</div>}
+              {shareErr && <div style={{ fontSize: T.caption.fontSize, color: "#e07070" }}>{shareErr}</div>}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button
                   onClick={handleCreateShare}
                   disabled={shareBusy || !shareEmail.trim()}
-                  style={{ padding: "0.42rem 1rem", background: shareBusy || !shareEmail.trim() ? C.surface2 : C.blue, border: "none", borderRadius: 3, color: shareBusy || !shareEmail.trim() ? C.textMuted : "#fff", cursor: "pointer", fontFamily: mono, fontSize: 10, fontWeight: 700 }}
+                  style={{ padding: "0.42rem 1rem", background: shareBusy || !shareEmail.trim() ? C.surface2 : C.blue, border: "none", borderRadius: 3, color: shareBusy || !shareEmail.trim() ? C.textMuted : "#fff", cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight: 700 }}
                 >
                   {shareBusy ? "Creating share…" : "Create share link"}
                 </button>
@@ -1065,17 +1064,17 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
               {/* Existing shares */}
               {myShares.length > 0 && (
                 <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
-                  <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>Active shares</div>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>Active shares</div>
                   {myShares.map(s => (
                     <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.3rem 0", borderBottom: `1px solid ${C.border}` }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 10, color: C.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.recipient_email}</div>
-                        <div style={{ fontSize: 9, color: C.textMuted }}>{s.can_edit ? "can edit" : "view only"}</div>
+                        <div style={{ fontSize: T.caption.fontSize, color: C.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.recipient_email}</div>
+                        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{s.can_edit ? "can edit" : "view only"}</div>
                       </div>
                       <button
                         onClick={() => handleRevokeShare(s.id)}
                         title="Revoke share"
-                        style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "0 2px" }}
+                        style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: T.code.fontSize, padding: "0 2px" }}
                         onMouseEnter={e => e.currentTarget.style.color = "#e07070"}
                         onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
                       >×</button>
@@ -1086,31 +1085,31 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
             </div>
           ) : (
             <div style={{ padding: "1rem 1.1rem", display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: 10, color: C.teal }}>✓ Share created for {shareEmail}</div>
+              <div style={{ fontSize: T.caption.fontSize, color: C.teal }}>✓ Share created for {shareEmail}</div>
               <div>
-                <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 5 }}>Share link — send this to the recipient:</div>
+                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 5 }}>Share link — send this to the recipient:</div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <input
                     readOnly
                     value={shareResult.shareUrl}
-                    style={{ flex: 1, padding: "0.4rem 0.55rem", fontFamily: mono, fontSize: 10, background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, outline: "none" }}
+                    style={{ flex: 1, padding: "0.4rem 0.55rem", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, outline: "none" }}
                     onFocus={e => e.target.select()}
                   />
                   <button
                     onClick={() => navigator.clipboard?.writeText(shareResult.shareUrl)}
-                    style={{ padding: "0.4rem 0.7rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: C.teal, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+                    style={{ padding: "0.4rem 0.7rem", background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 3, color: C.teal, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}
                   >Copy</button>
                 </div>
               </div>
               <a
                 href={`mailto:${shareEmail}?subject=Litux project shared with you&body=I shared a research project with you on Litux.%0D%0AOpen this link to import it:%0D%0A%0D%0A${encodeURIComponent(shareResult.shareUrl)}%0D%0A%0D%0AYou will need to sign in (or create a free account) to access it.`}
-                style={{ fontSize: 10, color: C.blue, textDecoration: "none" }}
+                style={{ fontSize: T.caption.fontSize, color: C.blue, textDecoration: "none" }}
               >
                 ✉ Open in email client →
               </a>
               <button
                 onClick={() => { setShareResult(null); setShareEmail(""); setShareCanEdit(false); }}
-                style={{ alignSelf: "flex-end", padding: "0.32rem 0.8rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9 }}
+                style={{ alignSelf: "flex-end", padding: "0.32rem 0.8rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}
               >Share another</button>
             </div>
           )}

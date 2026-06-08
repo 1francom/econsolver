@@ -15,12 +15,12 @@
 // This component is display-only — all logic lives in services/privacy/.
 
 import { useMemo } from "react";
+import { MONO_STACK } from "../../theme.js";
 import { PII_SENSITIVITY }  from "../services/privacy/piiDetector.js";
 import { buildEgressReport } from "../services/privacy/privacyFilter.js";
 import { maskStringValue }   from "../services/privacy/anonymizer.js";
 
 // ─── THEME (mirrors WranglingModule shared constants) ─────────────────────────
-const mono = "'IBM Plex Mono', 'Fira Mono', monospace";
 const C = {
   bg:       "#0b0b0f",
   surface:  "#111118",
@@ -61,7 +61,7 @@ function Btn({ onClick, disabled, color, solid, children, sm }) {
     padding:     sm ? "0.22rem 0.55rem" : "0.32rem 0.75rem",
     borderRadius: 3,
     cursor:      disabled ? "not-allowed" : "pointer",
-    fontFamily:  mono,
+    fontFamily: MONO_STACK,
     fontSize:    sm ? 10 : 11,
     border:      `1px solid ${color ?? C.border2}`,
     background:  solid ? (color ?? C.teal) : "transparent",
@@ -78,7 +78,7 @@ function Badge({ sensitivity }) {
     <span style={{
       fontSize: 8, letterSpacing: "0.15em", textTransform: "uppercase",
       padding: "2px 6px", border: `1px solid ${color}`, borderRadius: 2,
-      color, fontFamily: mono,
+      color, fontFamily: MONO_STACK,
     }}>
       {SENS_LABEL[sensitivity] ?? "UNKNOWN"}
     </span>
@@ -89,7 +89,7 @@ function SectionHead({ children }) {
   return (
     <div style={{
       fontSize: 9, color: C.teal, letterSpacing: "0.24em",
-      textTransform: "uppercase", fontFamily: mono,
+      textTransform: "uppercase", fontFamily: MONO_STACK,
       padding: "0.5rem 1rem", background: C.surface,
       borderBottom: `1px solid ${C.border}`,
     }}>
@@ -116,7 +116,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
       background: suppress ? `${C.red}15` : C.bg,
     }}>
       {/* Column name */}
-      <div style={{ fontFamily: mono, fontSize: 11, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ fontFamily: MONO_STACK, fontSize: 11, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {col}
         {reasons.length > 0 && (
           <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>
@@ -137,7 +137,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
             onChange={e => onChange(col, { suppress: e.target.checked })}
             style={{ accentColor: C.red }}
           />
-          <span style={{ fontFamily: mono, fontSize: 10, color: suppress ? C.red : C.textDim }}>
+          <span style={{ fontFamily: MONO_STACK, fontSize: 10, color: suppress ? C.red : C.textDim }}>
             Suppress
           </span>
         </label>
@@ -154,7 +154,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
               width: "100%", boxSizing: "border-box",
               padding: "0.25rem 0.45rem",
               background: C.surface2, border: `1px solid ${C.border2}`,
-              borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10,
+              borderRadius: 3, color: C.text, fontFamily: MONO_STACK, fontSize: 10,
               outline: "none",
             }}
           />
@@ -171,7 +171,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
                : String(v ?? "—"));
           return (
             <span key={i} style={{
-              fontSize: 9, fontFamily: mono, color: C.textMuted,
+              fontSize: 9, fontFamily: MONO_STACK, color: C.textMuted,
               padding: "1px 5px", border: `1px solid ${C.border}`,
               borderRadius: 2, whiteSpace: "nowrap",
             }}>
@@ -193,21 +193,21 @@ function EgressBar({ report }) {
       borderBottom: `1px solid ${C.border}`,
       display: "flex", gap: 16, alignItems: "center",
     }}>
-      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: MONO_STACK, letterSpacing: "0.1em", textTransform: "uppercase" }}>
         Egress preview
       </span>
       {report.safe.length > 0 && (
-        <span style={{ fontSize: 10, fontFamily: mono, color: C.green }}>
+        <span style={{ fontSize: 10, fontFamily: MONO_STACK, color: C.green }}>
           ✓ {report.safe.length} safe
         </span>
       )}
       {report.aliased.length > 0 && (
-        <span style={{ fontSize: 10, fontFamily: mono, color: C.yellow }}>
+        <span style={{ fontSize: 10, fontFamily: MONO_STACK, color: C.yellow }}>
           ◈ {report.aliased.length} aliased
         </span>
       )}
       {report.suppressed.length > 0 && (
-        <span style={{ fontSize: 10, fontFamily: mono, color: C.red }}>
+        <span style={{ fontSize: 10, fontFamily: MONO_STACK, color: C.red }}>
           ✕ {report.suppressed.length} suppressed
         </span>
       )}
@@ -244,7 +244,7 @@ export default function PrivacyConfigPanel({
 
   return (
     <div style={{
-      background: C.bg, color: C.text, fontFamily: mono,
+      background: C.bg, color: C.text, fontFamily: MONO_STACK,
       border: `1px solid ${C.border}`, borderRadius: 4,
       overflow: "hidden", display: "flex", flexDirection: "column",
       maxHeight: "80vh",

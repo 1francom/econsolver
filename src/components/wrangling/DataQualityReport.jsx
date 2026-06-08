@@ -16,7 +16,6 @@ import {
   detectOCRContamination,
 } from "../../core/validation/dataQuality.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── SEVERITY PALETTE ─────────────────────────────────────────────────────────
 function makeSEV(C) {
@@ -30,14 +29,14 @@ function makeSEV(C) {
 }
 
 function SevBadge({ sev, sm = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const SEV = makeSEV(C);
   const s = SEV[sev] || SEV.ok;
   return (
     <span style={{
       fontSize: sm ? 8 : 9, padding: sm ? "1px 4px" : "2px 6px",
       border: `1px solid ${s.color}`, color: s.color,
-      borderRadius: 2, letterSpacing: "0.08em", fontFamily: mono,
+      borderRadius: 2, letterSpacing: "0.08em", fontFamily: T.code.fontFamily,
       whiteSpace: "nowrap", background: s.bg,
     }}>
       {s.icon} {sev}
@@ -48,10 +47,10 @@ function SevBadge({ sev, sm = false }) {
 // ─── MISSING HEATMAP ─────────────────────────────────────────────────────────
 // SVG bar chart: one bar per column showing % missing
 function MissingHeatmap({ columns }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const cols = columns.filter(c => c.stats.naPct > 0).slice(0, 30);
   if (!cols.length) return (
-    <div style={{ fontSize: 11, color: C.green, fontFamily: mono, padding: "0.75rem 0" }}>
+    <div style={{ fontSize: T.code.fontSize, color: C.green, fontFamily: T.code.fontFamily, padding: "0.75rem 0" }}>
       ✓ No missing values detected
     </div>
   );
@@ -60,7 +59,7 @@ function MissingHeatmap({ columns }) {
   const H = cols.length * (BAR_H + GAP) + 20;
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ fontFamily: mono, overflow: "visible" }}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ fontFamily: T.code.fontFamily, overflow: "visible" }}>
       {cols.map((c, i) => {
         const pct  = c.stats.naPct;
         const barW = Math.max(2, (W - LABEL_W - 60) * pct);
@@ -70,8 +69,8 @@ function MissingHeatmap({ columns }) {
           <g key={c.col}>
             {/* Column label */}
             <text x={LABEL_W - 6} y={y + BAR_H * 0.72}
-              textAnchor="end" fontSize={9} fill={C.textDim}
-              style={{ fontFamily: mono }}>
+              textAnchor="end" fontSize={T.caption.fontSize} fill={C.textDim}
+              style={{ fontFamily: T.code.fontFamily }}>
               {c.col.length > 14 ? c.col.slice(0, 13) + "…" : c.col}
             </text>
             {/* Background track */}
@@ -82,14 +81,14 @@ function MissingHeatmap({ columns }) {
               fill={col} opacity={0.75} rx={2} />
             {/* Percentage label */}
             <text x={LABEL_W + (W - LABEL_W - 55) + 6} y={y + BAR_H * 0.72}
-              fontSize={9} fill={col} style={{ fontFamily: mono }}>
+              fontSize={T.caption.fontSize} fill={col} style={{ fontFamily: T.code.fontFamily }}>
               {(pct * 100).toFixed(1)}%
             </text>
             {/* Systematic marker */}
             {c.missingPattern?.isSystematic && (
               <text x={W - 8} y={y + BAR_H * 0.72}
-                fontSize={8} fill={C.orange} textAnchor="end"
-                style={{ fontFamily: mono }}>sys</text>
+                fontSize={T.caption.fontSize} fill={C.orange} textAnchor="end"
+                style={{ fontFamily: T.code.fontFamily }}>sys</text>
             )}
           </g>
         );
@@ -100,9 +99,9 @@ function MissingHeatmap({ columns }) {
 
 // ─── CORRELATION MATRIX ───────────────────────────────────────────────────────
 function CorrelationList({ pairs }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   if (!pairs.length) return (
-    <div style={{ fontSize: 11, color: C.green, fontFamily: mono, padding: "0.75rem 0" }}>
+    <div style={{ fontSize: T.code.fontSize, color: C.green, fontFamily: T.code.fontFamily, padding: "0.75rem 0" }}>
       ✓ No high correlations detected (threshold |r| ≥ 0.85)
     </div>
   );
@@ -119,12 +118,12 @@ function CorrelationList({ pairs }) {
             borderRadius: 3,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 11, color: C.text, fontFamily: mono, flex: 1 }}>
+              <span style={{ fontSize: T.code.fontSize, color: C.text, fontFamily: T.code.fontFamily, flex: 1 }}>
                 <span style={{ color: col }}>{a}</span>
                 <span style={{ color: C.textMuted }}> × </span>
                 <span style={{ color: col }}>{b}</span>
               </span>
-              <span style={{ fontSize: 12, color: col, fontFamily: mono, fontWeight: 700 }}>
+              <span style={{ fontSize: T.code.fontSize, color: col, fontFamily: T.code.fontFamily, fontWeight: 700 }}>
                 r = {r.toFixed(3)}
               </span>
             </div>
@@ -132,7 +131,7 @@ function CorrelationList({ pairs }) {
             <div style={{ height: 3, background: C.border, borderRadius: 2, overflow: "hidden" }}>
               <div style={{ width: `${pct}%`, height: "100%", background: col, borderRadius: 2 }} />
             </div>
-            <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginTop: 4 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
               {abs > 0.95
                 ? "Near-perfect collinearity — including both will likely cause identification failure."
                 : "Strong correlation — VIF may be elevated. Consider dropping one or constructing a composite."}
@@ -146,7 +145,7 @@ function CorrelationList({ pairs }) {
 
 // ─── COLUMN DETAIL CARD ───────────────────────────────────────────────────────
 function ColDetail({ col, onApplyStep }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const SEV = makeSEV(C);
   const s   = col.stats;
   const sev = SEV[col.severity] || SEV.ok;
@@ -160,10 +159,10 @@ function ColDetail({ col, onApplyStep }) {
     }}>
       {/* Header row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 13, color: sev.color, fontFamily: mono, flex: 1 }}>
+        <span style={{ fontSize: T.body.fontSize, color: sev.color, fontFamily: T.code.fontFamily, flex: 1 }}>
           {col.col}
         </span>
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, padding: "1px 5px",
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, padding: "1px 5px",
           border: `1px solid ${C.border2}`, borderRadius: 2 }}>
           {col.type}
         </span>
@@ -182,7 +181,7 @@ function ColDetail({ col, onApplyStep }) {
             ["n",      s.total],
             ["NA",     `${(s.naPct * 100).toFixed(1)}%`],
           ].map(([label, val]) => val != null && (
-            <div key={label} style={{ fontSize: 10, fontFamily: mono }}>
+            <div key={label} style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily }}>
               <span style={{ color: C.textMuted }}>{label} </span>
               <span style={{ color: C.text }}>{val}</span>
             </div>
@@ -192,7 +191,7 @@ function ColDetail({ col, onApplyStep }) {
 
       {/* Outlier detail */}
       {col.outlierReport && col.outlierReport.iqrCount > 0 && (
-        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, marginBottom: 6, lineHeight: 1.6 }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 6, lineHeight: 1.6 }}>
           <span style={{ color: C.orange }}>IQR outliers: {col.outlierReport.iqrCount}</span>
           {" · z-score (|z|>3): "}{col.outlierReport.zCount}
           {" · skew: "}<span style={{ color: Math.abs(col.outlierReport.skewness) > 1 ? C.yellow : C.textMuted }}>
@@ -214,10 +213,10 @@ function ColDetail({ col, onApplyStep }) {
             border: `1px solid ${C.border}`, borderRadius: 3,
           }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: (SEV[iss.severity] || SEV.ok).color, fontFamily: mono, marginBottom: 2 }}>
+              <div style={{ fontSize: T.code.fontSize, color: (SEV[iss.severity] || SEV.ok).color, fontFamily: T.code.fontFamily, marginBottom: 2 }}>
                 {iss.title}
               </div>
-              <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.5 }}>{iss.detail}</div>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5 }}>{iss.detail}</div>
             </div>
             {iss.suggestedStep && onApplyStep && (
               <button
@@ -244,7 +243,7 @@ function ColDetail({ col, onApplyStep }) {
                 }}
                 style={{
                   padding: "0.25rem 0.6rem", borderRadius: 3, cursor: "pointer",
-                  fontFamily: mono, fontSize: 10, flexShrink: 0,
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, flexShrink: 0,
                   background: "transparent",
                   border: `1px solid ${(SEV[iss.severity] || SEV.ok).color}`,
                   color: (SEV[iss.severity] || SEV.ok).color,
@@ -263,7 +262,7 @@ function ColDetail({ col, onApplyStep }) {
 
 // ─── META SUMMARY BAR ─────────────────────────────────────────────────────────
 function MetaBar({ meta, panelSummary }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const comp     = meta.completeness;
   const compCol  = comp > 0.95 ? C.green : comp > 0.8 ? C.yellow : C.red;
 
@@ -284,8 +283,8 @@ function MetaBar({ meta, panelSummary }) {
           padding: "0.65rem 0.8rem", background: C.surface2,
           border: `1px solid ${C.border}`, borderRadius: 3, textAlign: "center",
         }}>
-          <div style={{ fontSize: 18, color, fontFamily: mono, marginBottom: 2 }}>{val}</div>
-          <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
+          <div style={{ fontSize: 18, color, fontFamily: T.code.fontFamily, marginBottom: 2 }}>{val}</div>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
         </div>
       ))}
 
@@ -298,10 +297,10 @@ function MetaBar({ meta, panelSummary }) {
             border: `1px solid ${col}30`, borderRadius: 3, textAlign: "center",
             gridColumn: "span 2",
           }}>
-            <div style={{ fontSize: 11, color: col, fontFamily: mono, marginBottom: 3 }}>
+            <div style={{ fontSize: T.code.fontSize, color: col, fontFamily: T.code.fontFamily, marginBottom: 3 }}>
               {ps.balance === "strongly_balanced" ? "✓ Balanced panel" : "⚠ Unbalanced panel"}
             </div>
-            <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
               {ps.nEntities} entities · {ps.nPeriods} periods
               {ps.hasDups && " · DUPLICATES ⚠"}
               {ps.attritionPct > 0 && ` · ${(ps.attritionPct * 100).toFixed(0)}% attrition`}
@@ -315,7 +314,7 @@ function MetaBar({ meta, panelSummary }) {
 
 // ─── SECTION HEADER ───────────────────────────────────────────────────────────
 function SectionHeader({ title, count, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.gold;
   return (
     <div style={{
@@ -323,11 +322,11 @@ function SectionHeader({ title, count, color }) {
       marginBottom: "0.8rem", paddingBottom: "0.4rem",
       borderBottom: `1px solid ${C.border}`,
     }}>
-      <span style={{ fontSize: 10, color, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+      <span style={{ fontSize: T.caption.fontSize, color, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
         {title}
       </span>
       {count != null && (
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
           ({count})
         </span>
       )}
@@ -342,7 +341,7 @@ const COORD_COLS = /^(lat(itude)?|lon(gitude)?|x|y)$/i;
 const CAT_COL_THRESHOLD = 0.05; // 5% case anomaly rate triggers warning
 
 function SmartQualitySignals({ columns, rows }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
 
   const signals = useMemo(() => {
     const out = [];
@@ -395,7 +394,7 @@ function SmartQualitySignals({ columns, rows }) {
 
   if (!signals.length) {
     return (
-      <div style={{ fontSize: 11, color: C.green, fontFamily: mono, padding: "0.75rem 0" }}>
+      <div style={{ fontSize: T.code.fontSize, color: C.green, fontFamily: T.code.fontFamily, padding: "0.75rem 0" }}>
         ✓ No smart quality signals detected.
       </div>
     );
@@ -415,12 +414,12 @@ function SmartQualitySignals({ columns, rows }) {
               display: "flex", alignItems: "flex-start", gap: 10,
             }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: C.orange, fontFamily: mono, marginBottom: 3 }}>
+                <div style={{ fontSize: T.code.fontSize, color: C.orange, fontFamily: T.code.fontFamily, marginBottom: 3 }}>
                   ⚠ {sig.count} malformed coordinate{sig.count > 1 ? "s" : ""} in{" "}
                   <span style={{ color: C.text }}>{sig.col}</span>
                 </div>
                 {sig.sample.length > 0 && (
-                  <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
                     Samples: {sig.sample.map(s => (
                       <span key={s} style={{
                         marginRight: 6, padding: "1px 5px",
@@ -432,9 +431,9 @@ function SmartQualitySignals({ columns, rows }) {
                 )}
               </div>
               <span style={{
-                fontSize: 8, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
+                fontSize: T.caption.fontSize, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
                 background: `${C.orange}20`, border: `1px solid ${C.orange}50`,
-                color: C.orange, fontFamily: mono, letterSpacing: "0.08em",
+                color: C.orange, fontFamily: T.code.fontFamily, letterSpacing: "0.08em",
               }}>E1 COORD</span>
             </div>
           );
@@ -451,12 +450,12 @@ function SmartQualitySignals({ columns, rows }) {
               display: "flex", alignItems: "flex-start", gap: 10,
             }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: C.yellow, fontFamily: mono, marginBottom: 3 }}>
+                <div style={{ fontSize: T.code.fontSize, color: C.yellow, fontFamily: T.code.fontFamily, marginBottom: 3 }}>
                   ⚠ {(sig.rate * 100).toFixed(1)}% case anomalies in{" "}
                   <span style={{ color: C.text }}>{sig.col}</span>
                 </div>
                 {sig.anomalies.length > 0 && (
-                  <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
                     Examples: {sig.anomalies.slice(0, 5).map(s => (
                       <span key={s} style={{
                         marginRight: 6, padding: "1px 5px",
@@ -471,9 +470,9 @@ function SmartQualitySignals({ columns, rows }) {
                 )}
               </div>
               <span style={{
-                fontSize: 8, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
+                fontSize: T.caption.fontSize, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
                 background: `${C.yellow}18`, border: `1px solid ${C.yellow}40`,
-                color: C.yellow, fontFamily: mono, letterSpacing: "0.08em",
+                color: C.yellow, fontFamily: T.code.fontFamily, letterSpacing: "0.08em",
               }}>E2 CASE</span>
             </div>
           );
@@ -490,12 +489,12 @@ function SmartQualitySignals({ columns, rows }) {
               display: "flex", alignItems: "flex-start", gap: 10,
             }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: C.red, fontFamily: mono, marginBottom: 3 }}>
+                <div style={{ fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginBottom: 3 }}>
                   ⚠ {sig.hits.length} OCR substitution{sig.hits.length > 1 ? "s" : ""} detected in{" "}
                   <span style={{ color: C.text }}>{sig.col}</span>
                 </div>
                 {sig.hits.length > 0 && (
-                  <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.7 }}>
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.7 }}>
                     {sig.hits.slice(0, 4).map((h, hi) => (
                       <span key={hi} style={{ marginRight: 10 }}>
                         <span style={{ color: C.red }}>{h.original}</span>
@@ -510,9 +509,9 @@ function SmartQualitySignals({ columns, rows }) {
                 )}
               </div>
               <span style={{
-                fontSize: 8, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
+                fontSize: T.caption.fontSize, padding: "2px 6px", borderRadius: 2, flexShrink: 0,
                 background: `${C.red}18`, border: `1px solid ${C.red}40`,
-                color: C.red, fontFamily: mono, letterSpacing: "0.08em",
+                color: C.red, fontFamily: T.code.fontFamily, letterSpacing: "0.08em",
               }}>E3 OCR</span>
             </div>
           );
@@ -526,12 +525,12 @@ function SmartQualitySignals({ columns, rows }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function DataQualityReport({ report, rows = [], onApplyStep, onExportMd }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const SEV = makeSEV(C);
   const [section, setSection] = useState("flags");
 
   if (!report) return (
-    <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontFamily: mono, fontSize: 12 }}>
+    <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
       Run quality scan to see results.
     </div>
   );
@@ -551,7 +550,7 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
   ];
 
   return (
-    <div style={{ fontFamily: mono }}>
+    <div style={{ fontFamily: T.code.fontFamily }}>
       {/* Meta summary */}
       <MetaBar meta={meta} panelSummary={panelSummary} />
 
@@ -563,19 +562,19 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
           borderLeft: `4px solid ${C.red}`, borderRadius: 4,
           display: "flex", alignItems: "center", gap: 10,
         }}>
-          <span style={{ fontSize: 13, color: C.red }}>●</span>
+          <span style={{ fontSize: T.body.fontSize, color: C.red }}>●</span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 11, color: C.red, fontFamily: mono }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily }}>
               {criticalCount} critical issue{criticalCount > 1 ? "s" : ""} detected
             </div>
-            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 2 }}>
               These must be resolved before running any estimator.
             </div>
           </div>
           {onExportMd && (
             <button onClick={onExportMd} style={{
               padding: "0.3rem 0.75rem", borderRadius: 3, cursor: "pointer",
-              fontFamily: mono, fontSize: 10, background: "transparent",
+              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: "transparent",
               border: `1px solid ${C.border2}`, color: C.textDim,
             }}>
               ↓ Export .md
@@ -589,7 +588,7 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.8rem" }}>
           <button onClick={onExportMd} style={{
             padding: "0.28rem 0.7rem", borderRadius: 3, cursor: "pointer",
-            fontFamily: mono, fontSize: 10, background: "transparent",
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: "transparent",
             border: `1px solid ${C.border2}`, color: C.textDim,
             transition: "all 0.12s",
           }}>
@@ -609,14 +608,14 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
             background: section === key ? C.goldFaint : C.surface,
             border: "none",
             color: section === key ? C.gold : C.textDim,
-            cursor: "pointer", fontFamily: mono, fontSize: 9,
+            cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
             borderBottom: section === key ? `2px solid ${C.gold}` : "2px solid transparent",
             transition: "all 0.12s", whiteSpace: "nowrap",
           }}>
             {label}
             {badge && (
               <span style={{
-                marginLeft: 4, fontSize: 8, padding: "1px 4px",
+                marginLeft: 4, fontSize: T.caption.fontSize, padding: "1px 4px",
                 background: C.goldFaint, border: `1px solid ${C.goldDim}`,
                 borderRadius: 2, color: C.gold,
               }}>
@@ -632,7 +631,7 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
         <div>
           <SectionHeader title="Actionable flags" count={issueCount} color={C.gold} />
           {issueCount === 0 ? (
-            <div style={{ fontSize: 11, color: C.green, fontFamily: mono, padding: "0.75rem 0" }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.green, fontFamily: T.code.fontFamily, padding: "0.75rem 0" }}>
               ✓ No issues detected — dataset looks clean.
             </div>
           ) : (
@@ -647,11 +646,11 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
                   }}>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, color: sev.color, fontFamily: mono, marginBottom: 3 }}>
+                        <div style={{ fontSize: T.code.fontSize, color: sev.color, fontFamily: T.code.fontFamily, marginBottom: 3 }}>
                           {f.col && <span style={{ color: C.textDim }}>[{f.col}] </span>}
                           {f.title}
                         </div>
-                        <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.5 }}>{f.detail}</div>
+                        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5 }}>{f.detail}</div>
                       </div>
                       <SevBadge sev={f.severity} sm />
                     </div>
@@ -672,7 +671,7 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
             <div style={{
               marginTop: "1rem", padding: "0.5rem 0.75rem",
               background: `${C.orange}0a`, border: `1px solid ${C.orange}30`,
-              borderRadius: 3, fontSize: 10, color: C.orange, fontFamily: mono, lineHeight: 1.6,
+              borderRadius: 3, fontSize: T.caption.fontSize, color: C.orange, fontFamily: T.code.fontFamily, lineHeight: 1.6,
             }}>
               ⚠ Systematic missingness detected in: {
                 columns.filter(c => c.missingPattern?.isSystematic).map(c => c.col).join(", ")
@@ -687,7 +686,7 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
         <div>
           <SectionHeader title="Outlier summary — numeric columns" color={C.orange} />
           {columns.filter(c => c.outlierReport && c.outlierReport.iqrCount > 0).length === 0 ? (
-            <div style={{ fontSize: 11, color: C.green, fontFamily: mono, padding: "0.75rem 0" }}>
+            <div style={{ fontSize: T.code.fontSize, color: C.green, fontFamily: T.code.fontFamily, padding: "0.75rem 0" }}>
               ✓ No IQR-based outliers detected in any numeric column.
             </div>
           ) : (
@@ -708,10 +707,10 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
                         border: `1px solid ${C.border}`, borderLeft: `3px solid ${col}`,
                         borderRadius: 3,
                       }}>
-                        <div style={{ fontSize: 11, color: col, fontFamily: mono, marginBottom: 5 }}>
+                        <div style={{ fontSize: T.code.fontSize, color: col, fontFamily: T.code.fontFamily, marginBottom: 5 }}>
                           {c.col}
                         </div>
-                        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.7 }}>
+                        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.7 }}>
                           <span style={{ color: C.text }}>IQR:</span> {o.iqrCount} ({(o.iqrPct * 100).toFixed(1)}%)<br />
                           <span style={{ color: C.text }}>z-score:</span> {o.zCount}<br />
                           <span style={{ color: C.text }}>skew:</span>{" "}
@@ -731,8 +730,8 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
                             desc: `winsorize ${c.col}`,
                           })} style={{
                             marginTop: 8, padding: "0.22rem 0.6rem",
-                            borderRadius: 3, cursor: "pointer", fontFamily: mono,
-                            fontSize: 9, background: "transparent",
+                            borderRadius: 3, cursor: "pointer", fontFamily: T.code.fontFamily,
+                            fontSize: T.caption.fontSize, background: "transparent",
                             border: `1px solid ${col}`, color: col,
                           }}>
                             Winsorize →
@@ -761,14 +760,14 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
           <SectionHeader title="All columns" count={columns.length} color={C.teal} />
           {/* Summary table */}
           <div style={{ overflowX: "auto", marginBottom: "1.2rem" }}>
-            <table style={{ borderCollapse: "collapse", fontSize: 10, width: "100%", fontFamily: mono }}>
+            <table style={{ borderCollapse: "collapse", fontSize: T.caption.fontSize, width: "100%", fontFamily: T.code.fontFamily }}>
               <thead>
                 <tr style={{ background: C.surface2 }}>
                   {["Column", "Type", "Missing", "Outliers (IQR)", "Unique", "Severity"].map(h => (
                     <th key={h} style={{
                       padding: "0.4rem 0.6rem", textAlign: "left", fontWeight: 400,
                       color: C.textMuted, borderBottom: `1px solid ${C.border}`,
-                      whiteSpace: "nowrap", fontSize: 9, letterSpacing: "0.1em",
+                      whiteSpace: "nowrap", fontSize: T.caption.fontSize, letterSpacing: "0.1em",
                     }}>{h}</th>
                   ))}
                 </tr>
@@ -808,7 +807,7 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
         <div>
           <SectionHeader title="Smart quality signals — E1 Coord · E2 Case · E3 OCR" color={C.teal} />
           <div style={{
-            fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.6,
+            fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.6,
             marginBottom: "1rem", padding: "0.5rem 0.75rem",
             background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 3,
           }}>

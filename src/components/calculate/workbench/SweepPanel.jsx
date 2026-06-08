@@ -1,6 +1,5 @@
 import { useTheme } from "../../../ThemeContext.jsx";
 
-const mono = "'IBM Plex Mono', monospace";
 
 // Comparative-statics controls. Picks one parameter to sweep, the value range
 // and number of family curves, and (Step 2) the optimum-locus mode.
@@ -10,7 +9,7 @@ const mono = "'IBM Plex Mono', monospace";
 //   sweep           : { param, from, to, steps, showFamily, locus }
 //   onChange        : (patch) => void
 export default function SweepPanel({ detectedSymbols, params, sweep, onChange }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const sw = sweep || {};
 
   // Choosing a param seeds from/to from that param's slider bounds.
@@ -31,8 +30,8 @@ export default function SweepPanel({ detectedSymbols, params, sweep, onChange })
   };
 
   return (
-    <div style={{ fontFamily: mono, marginTop: 14, borderTop: `1px solid ${C.border2}`, paddingTop: 10 }}>
-      <div style={{ fontSize: 9, color: C.blue, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8 }}>
+    <div style={{ fontFamily: T.code.fontFamily, marginTop: 14, borderTop: `1px solid ${C.border2}`, paddingTop: 10 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.blue, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8 }}>
         Comparative statics
       </div>
 
@@ -80,13 +79,13 @@ export default function SweepPanel({ detectedSymbols, params, sweep, onChange })
 }
 
 function row(C) {
-  return { display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: C.textDim || "#888" };
+  return { display: "flex", alignItems: "center", gap: 6, fontSize: T.caption.fontSize, color: C.textDim || "#888" };
 }
 function num(C) {
   return { width: 64, background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
-    fontFamily: mono, fontSize: 11, padding: "2px 4px" };
+    fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 4px" };
 }
 function sel(C) {
   return { background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
-    fontFamily: mono, fontSize: 11, padding: "2px 4px" };
+    fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 4px" };
 }

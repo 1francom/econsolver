@@ -9,7 +9,6 @@ import { useState, useEffect } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import { POPULAR_OECD, OECD_GROUPS, fetchMultipleOECD } from "../../services/data/fetchers/oecd.js";
 
-const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // OECD member countries (ISO2 codes)
 const OECD_MEMBERS = [
@@ -29,23 +28,23 @@ const COUNTRY_SETS = [
 ];
 
 function Tag({ label, onRemove, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.blue;
   return (
-    <span style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"2px 8px", background:`${color}18`, border:`1px solid ${color}40`, borderRadius:3, fontSize:10, color, fontFamily:mono }}>
+    <span style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"2px 8px", background:`${color}18`, border:`1px solid ${color}40`, borderRadius:3, fontSize: T.caption.fontSize, color, fontFamily: T.code.fontFamily }}>
       {label}
-      <button onClick={onRemove} style={{ background:"none", border:"none", color, cursor:"pointer", fontSize:11, lineHeight:1, padding:0 }}>×</button>
+      <button onClick={onRemove} style={{ background:"none", border:"none", color, cursor:"pointer", fontSize: T.code.fontSize, lineHeight:1, padding:0 }}>×</button>
     </span>
   );
 }
 
 function Spinner() {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return <div style={{ width:14, height:14, border:`2px solid ${C.border2}`, borderTopColor:C.gold, borderRadius:"50%", animation:"spin 0.7s linear infinite", flexShrink:0 }} />;
 }
 
 export default function OECDFetcher({ onLoad, onClose }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [selected,   setSelected]   = useState([]);
   const [groupFilter, setGroupFilter] = useState("All");
   const [countrySet, setCountrySet] = useState(0);
@@ -96,16 +95,16 @@ export default function OECDFetcher({ onLoad, onClose }) {
         {/* Header */}
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"0.75rem 1.1rem", background:C.bg, borderBottom:`1px solid ${C.border}` }}>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:9, color:C.textMuted, letterSpacing:"0.22em", textTransform:"uppercase", fontFamily:mono, marginBottom:2 }}>OECD Data · SDMX-JSON</div>
-            <div style={{ fontSize:15, color:C.text, fontFamily:mono }}>Import OECD Indicators</div>
+            <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, letterSpacing:"0.22em", textTransform:"uppercase", fontFamily: T.code.fontFamily, marginBottom:2 }}>OECD Data · SDMX-JSON</div>
+            <div style={{ fontSize:15, color:C.text, fontFamily: T.code.fontFamily }}>Import OECD Indicators</div>
           </div>
-          <button onClick={onClose} style={{ background:"none", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textMuted, cursor:"pointer", fontFamily:mono, fontSize:11, padding:"0.25rem 0.6rem" }}>✕ Close</button>
+          <button onClick={onClose} style={{ background:"none", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textMuted, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding:"0.25rem 0.6rem" }}>✕ Close</button>
         </div>
 
         <div style={{ flex:1, overflowY:"auto" }}>
           {/* Step 1: Pick indicators */}
           <div style={{ padding:"1rem 1.1rem", borderBottom:`1px solid ${C.border}` }}>
-            <div style={{ fontSize:9, color:C.textMuted, letterSpacing:"0.18em", textTransform:"uppercase", fontFamily:mono, marginBottom:8 }}>
+            <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, letterSpacing:"0.18em", textTransform:"uppercase", fontFamily: T.code.fontFamily, marginBottom:8 }}>
               1 · Select indicators <span style={{ color:C.textMuted }}>(up to 6)</span>
             </div>
 
@@ -113,7 +112,7 @@ export default function OECDFetcher({ onLoad, onClose }) {
             <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
               {["All", ...OECD_GROUPS].map(g => (
                 <button key={g} onClick={() => setGroupFilter(g)}
-                  style={{ padding:"2px 10px", borderRadius:20, background: groupFilter===g ? `${C.blue}22` : "transparent", border:`1px solid ${groupFilter===g ? C.blue : C.border2}`, color: groupFilter===g ? C.blue : C.textMuted, cursor:"pointer", fontFamily:mono, fontSize:9, transition:"all 0.1s" }}>
+                  style={{ padding:"2px 10px", borderRadius:20, background: groupFilter===g ? `${C.blue}22` : "transparent", border:`1px solid ${groupFilter===g ? C.blue : C.border2}`, color: groupFilter===g ? C.blue : C.textMuted, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.1s" }}>
                   {g}
                 </button>
               ))}
@@ -129,13 +128,13 @@ export default function OECDFetcher({ onLoad, onClose }) {
                     onMouseEnter={e => { if(!active) e.currentTarget.style.background=C.surface2; }}
                     onMouseLeave={e => { if(!active) e.currentTarget.style.background="transparent"; }}>
                     <div style={{ width:14, height:14, flexShrink:0, marginTop:2, border:`1px solid ${active?C.blue:C.border2}`, borderRadius:2, background: active?C.blue:"transparent", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                      {active && <span style={{ color:C.bg, fontSize:9, lineHeight:1 }}>✓</span>}
+                      {active && <span style={{ color:C.bg, fontSize: T.caption.fontSize, lineHeight:1 }}>✓</span>}
                     </div>
                     <div style={{ flex:1 }}>
-                      <div style={{ fontSize:11, color:C.text, fontFamily:mono }}>{ind.name}</div>
-                      <div style={{ fontSize:9, color:C.textMuted, fontFamily:mono, marginTop:1 }}>{ind.dataset} · {ind.id}</div>
+                      <div style={{ fontSize: T.code.fontSize, color:C.text, fontFamily: T.code.fontFamily }}>{ind.name}</div>
+                      <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginTop:1 }}>{ind.dataset} · {ind.id}</div>
                     </div>
-                    <span style={{ fontSize:8, color:C.textMuted, fontFamily:mono, flexShrink:0, marginTop:3, padding:"1px 6px", border:`1px solid ${C.border}`, borderRadius:10 }}>{ind.group}</span>
+                    <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, flexShrink:0, marginTop:3, padding:"1px 6px", border:`1px solid ${C.border}`, borderRadius:10 }}>{ind.group}</span>
                   </div>
                 );
               })}
@@ -153,30 +152,30 @@ export default function OECDFetcher({ onLoad, onClose }) {
 
           {/* Step 2: Options */}
           <div style={{ padding:"1rem 1.1rem", borderBottom:`1px solid ${C.border}` }}>
-            <div style={{ fontSize:9, color:C.textMuted, letterSpacing:"0.18em", textTransform:"uppercase", fontFamily:mono, marginBottom:10 }}>2 · Options</div>
+            <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, letterSpacing:"0.18em", textTransform:"uppercase", fontFamily: T.code.fontFamily, marginBottom:10 }}>2 · Options</div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
               <div>
-                <div style={{ fontSize:9, color:C.textMuted, fontFamily:mono, marginBottom:4 }}>Countries</div>
+                <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginBottom:4 }}>Countries</div>
                 <select value={countrySet} onChange={e => setCountrySet(Number(e.target.value))}
-                  style={{ width:"100%", padding:"0.38rem 0.6rem", background:C.surface2, border:`1px solid ${C.border2}`, borderRadius:3, color:C.text, fontFamily:mono, fontSize:11 }}>
+                  style={{ width:"100%", padding:"0.38rem 0.6rem", background:C.surface2, border:`1px solid ${C.border2}`, borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
                   {COUNTRY_SETS.map((s,i) => <option key={i} value={i}>{s.label}</option>)}
                 </select>
               </div>
               <div>
-                <div style={{ fontSize:9, color:C.textMuted, fontFamily:mono, marginBottom:4 }}>Start year</div>
+                <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginBottom:4 }}>Start year</div>
                 <input type="number" min={1970} max={endYear} value={startYear}
                   onChange={e => setStartYear(Math.max(1970, Math.min(endYear, Number(e.target.value))))}
-                  style={{ width:"100%", padding:"0.38rem 0.6rem", background:C.surface2, border:`1px solid ${C.border2}`, borderRadius:3, color:C.text, fontFamily:mono, fontSize:11, boxSizing:"border-box" }} />
+                  style={{ width:"100%", padding:"0.38rem 0.6rem", background:C.surface2, border:`1px solid ${C.border2}`, borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, boxSizing:"border-box" }} />
               </div>
               <div>
-                <div style={{ fontSize:9, color:C.textMuted, fontFamily:mono, marginBottom:4 }}>End year</div>
+                <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginBottom:4 }}>End year</div>
                 <input type="number" min={startYear} max={2024} value={endYear}
                   onChange={e => setEndYear(Math.min(2024, Math.max(startYear, Number(e.target.value))))}
-                  style={{ width:"100%", padding:"0.38rem 0.6rem", background:C.surface2, border:`1px solid ${C.border2}`, borderRadius:3, color:C.text, fontFamily:mono, fontSize:11, boxSizing:"border-box" }} />
+                  style={{ width:"100%", padding:"0.38rem 0.6rem", background:C.surface2, border:`1px solid ${C.border2}`, borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, boxSizing:"border-box" }} />
               </div>
             </div>
             {selected.length > 0 && (
-              <div style={{ marginTop:10, padding:"0.5rem 0.75rem", background:C.surface3, border:`1px solid ${C.border}`, borderRadius:3, fontSize:10, color:C.textDim, fontFamily:mono }}>
+              <div style={{ marginTop:10, padding:"0.5rem 0.75rem", background:C.surface3, border:`1px solid ${C.border}`, borderRadius:3, fontSize: T.caption.fontSize, color:C.textDim, fontFamily: T.code.fontFamily }}>
                 Output: <span style={{ color:C.gold }}>wide panel</span> · country, iso2, year
                 {selected.map(s => <span key={s.id} style={{ color:C.blue }}>{", "}{s.id}</span>)}
                 {" · "}{COUNTRY_SETS[countrySet].codes.length} countries · {endYear-startYear+1} years
@@ -186,27 +185,27 @@ export default function OECDFetcher({ onLoad, onClose }) {
 
           {/* Status */}
           {step === "fetching" && (
-            <div style={{ padding:"0.8rem 1.1rem", display:"flex", alignItems:"center", gap:10, color:C.textDim, fontSize:11, fontFamily:mono }}>
+            <div style={{ padding:"0.8rem 1.1rem", display:"flex", alignItems:"center", gap:10, color:C.textDim, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
               <Spinner />
               <span>Fetching from OECD API…  (may take 5–15 s for large requests)</span>
             </div>
           )}
           {step === "error" && (
-            <div style={{ padding:"0.8rem 1.1rem", display:"flex", gap:8, background:`${C.red}15`, borderLeft:`3px solid ${C.red}`, fontSize:11, color:C.red, fontFamily:mono }}>
+            <div style={{ padding:"0.8rem 1.1rem", display:"flex", gap:8, background:`${C.red}15`, borderLeft:`3px solid ${C.red}`, fontSize: T.code.fontSize, color:C.red, fontFamily: T.code.fontFamily }}>
               <span>⚠ {error}</span>
-              <button onClick={() => setStep("pick")} style={{ marginLeft:"auto", background:"none", border:`1px solid ${C.red}40`, borderRadius:2, color:C.red, cursor:"pointer", fontFamily:mono, fontSize:9, padding:"2px 8px" }}>Retry</button>
+              <button onClick={() => setStep("pick")} style={{ marginLeft:"auto", background:"none", border:`1px solid ${C.red}40`, borderRadius:2, color:C.red, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding:"2px 8px" }}>Retry</button>
             </div>
           )}
         </div>
 
         {/* Footer */}
         <div style={{ padding:"0.65rem 1.1rem", background:C.bg, borderTop:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10 }}>
-          <div style={{ flex:1, fontSize:9, color:C.textMuted, fontFamily:mono }}>
+          <div style={{ flex:1, fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>
             Data from <span style={{ color:C.textDim }}>OECD Data · SDMX-JSON</span> · Public domain · No API key
           </div>
-          <button onClick={onClose} style={{ padding:"0.38rem 0.9rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily:mono, fontSize:11 }}>Cancel</button>
+          <button onClick={onClose} style={{ padding:"0.38rem 0.9rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>Cancel</button>
           <button onClick={handleFetch} disabled={!selected.length || step==="fetching"}
-            style={{ padding:"0.38rem 1.1rem", background: selected.length?C.blue:C.border2, border:"none", borderRadius:3, color:C.bg, cursor: selected.length?"pointer":"not-allowed", fontFamily:mono, fontSize:11, fontWeight:700, opacity: step==="fetching"?0.6:1, transition:"all 0.12s" }}>
+            style={{ padding:"0.38rem 1.1rem", background: selected.length?C.blue:C.border2, border:"none", borderRadius:3, color:C.bg, cursor: selected.length?"pointer":"not-allowed", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, fontWeight:700, opacity: step==="fetching"?0.6:1, transition:"all 0.12s" }}>
             ↓ Fetch {selected.length > 0 ? `${selected.length} indicator${selected.length>1?"s":""}` : ""}
           </button>
         </div>
