@@ -15,12 +15,12 @@ export const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 export function Lbl({ children, color, mb = 6 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{
       fontSize: 10, color: color ?? C.textMuted,
       letterSpacing: "0.2em", textTransform: "uppercase",
-      marginBottom: mb, fontFamily: mono,
+      marginBottom: mb, fontFamily: T.label.fontFamily,
     }}>
       {children}
     </div>
@@ -28,7 +28,7 @@ export function Lbl({ children, color, mb = 6 }) {
 }
 
 export function Tabs({ tabs, active, set, accent, sm = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const ac = accent ?? C.gold;
   return (
     <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: "1.2rem" }}>
@@ -38,7 +38,7 @@ export function Tabs({ tabs, active, set, accent, sm = false }) {
           background: active === k ? C.goldFaint : C.surface,
           border: "none",
           color: active === k ? ac : C.textDim,
-          cursor: "pointer", fontFamily: mono, fontSize: sm ? 9 : 11,
+          cursor: "pointer", fontFamily: T.body.fontFamily, fontSize: sm ? 9 : 11,
           borderBottom: active === k ? `2px solid ${ac}` : "2px solid transparent",
           transition: "all 0.12s",
         }}>
@@ -50,12 +50,12 @@ export function Tabs({ tabs, active, set, accent, sm = false }) {
 }
 
 export function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const col = color ?? C.gold;
   const b = {
     padding: sm ? "0.28rem 0.65rem" : "0.48rem 0.95rem",
     borderRadius: 3, cursor: dis ? "not-allowed" : "pointer",
-    fontFamily: mono, fontSize: sm ? 10 : 11,
+    fontFamily: T.body.fontFamily, fontSize: sm ? 10 : 11,
     transition: "all 0.13s", opacity: dis ? 0.4 : 1,
   };
   if (v === "solid") return <button onClick={onClick} disabled={dis} style={{ ...b, background: col, color: C.bg, border: `1px solid ${col}`, fontWeight: 700 }}>{ch}</button>;
@@ -64,13 +64,13 @@ export function Btn({ onClick, ch, color, v = "out", dis = false, sm = false }) 
 }
 
 export function Badge({ ch, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const col = color ?? C.textMuted;
   return (
     <span style={{
       fontSize: 9, padding: "2px 6px", border: `1px solid ${col}`,
       color: col, borderRadius: 2, letterSpacing: "0.1em",
-      fontFamily: mono, whiteSpace: "nowrap",
+      fontFamily: T.label.fontFamily, whiteSpace: "nowrap",
     }}>
       {ch}
     </span>
@@ -78,14 +78,14 @@ export function Badge({ ch, color }) {
 }
 
 export function NA({ pct }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const c = pct > .3 ? C.red : pct > .1 ? C.yellow : C.green;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
       <span style={{ display: "inline-block", width: 24, height: 3, background: C.border, borderRadius: 2, overflow: "hidden" }}>
         <span style={{ display: "block", width: `${Math.min(pct * 100, 100)}%`, height: "100%", background: c }} />
       </span>
-      {pct > 0 && <span style={{ fontSize: 9, color: c, fontFamily: mono }}>{(pct * 100).toFixed(0)}%</span>}
+      {pct > 0 && <span style={{ fontSize: 9, color: c, fontFamily: T.data.fontFamily }}>{(pct * 100).toFixed(0)}%</span>}
     </span>
   );
 }
@@ -102,7 +102,7 @@ export function Spin() {
 }
 
 export function Grid({ headers, rows, hi, max = 20, types, onType }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const vis = rows.slice(0, max);
   if (!headers.length) return null;
   const tc = { numeric: C.blue, binary: C.purple, categorical: C.purple, string: C.textMuted, date: C.teal };
@@ -113,7 +113,7 @@ export function Grid({ headers, rows, hi, max = 20, types, onType }) {
           <tr style={{ background: C.surface2 }}>
             {headers.map(h => (
               <th key={h} style={{
-                padding: "0.45rem 0.75rem", textAlign: "left", fontFamily: mono,
+                padding: "0.45rem 0.75rem", textAlign: "left", fontFamily: T.label.fontFamily,
                 fontWeight: 400, fontSize: 10, color: h === hi ? C.teal : C.textDim,
                 whiteSpace: "nowrap", borderBottom: `1px solid ${C.border}`,
                 position: "sticky", top: 0, background: C.surface2,
@@ -127,7 +127,7 @@ export function Grid({ headers, rows, hi, max = 20, types, onType }) {
                       style={{
                         fontSize: 9, padding: "1px 3px", background: C.surface,
                         border: `1px solid ${C.border2}`, borderRadius: 2,
-                        color: tc[types[h]] || C.textMuted, fontFamily: mono,
+                        color: tc[types[h]] || C.textMuted, fontFamily: T.label.fontFamily,
                         cursor: "pointer", outline: "none",
                       }}
                     >
@@ -149,7 +149,7 @@ export function Grid({ headers, rows, hi, max = 20, types, onType }) {
                 const isNull = v === null || v === undefined;
                 return (
                   <td key={h} style={{
-                    padding: "0.35rem 0.75rem", fontFamily: mono, fontSize: 11,
+                    padding: "0.35rem 0.75rem", fontFamily: T.data.fontFamily, fontSize: 11,
                     color: isNull ? C.textMuted : h === hi ? C.teal : C.text,
                     borderBottom: `1px solid ${C.border}`,
                     whiteSpace: "nowrap", maxWidth: 180,
@@ -166,7 +166,7 @@ export function Grid({ headers, rows, hi, max = 20, types, onType }) {
       {rows.length > max && (
         <div style={{
           padding: "0.35rem 0.75rem", fontSize: 10, color: C.textMuted,
-          fontFamily: mono, background: C.surface2, borderTop: `1px solid ${C.border}`,
+          fontFamily: T.caption.fontFamily, background: C.surface2, borderTop: `1px solid ${C.border}`,
         }}>
           … {rows.length - max} more rows
         </div>

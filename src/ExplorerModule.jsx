@@ -18,7 +18,7 @@ import { callClaude } from "./services/AI/AIService.js";
 const mono = "'IBM Plex Mono','JetBrains Mono',Consolas,monospace";
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
-function Lbl({children,color,mb=6}){const{C}=useTheme();color=color??C.textMuted;return<div style={{fontSize:10,color,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:mb,fontFamily:mono}}>{children}</div>;}
+function Lbl({children,color,mb=6}){const{C,T}=useTheme();color=color??C.textMuted;return<div style={{fontSize:10,color,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:mb,fontFamily:T.label.fontFamily}}>{children}</div>;}
 function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
   const{C}=useTheme();color=color??C.gold;
   const b={padding:sm?"0.28rem 0.65rem":"0.48rem 0.95rem",borderRadius:3,cursor:dis?"not-allowed":"pointer",fontFamily:mono,fontSize:sm?10:11,transition:"all 0.13s",opacity:dis?0.4:1};
@@ -1603,7 +1603,7 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
 
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
 export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset, pid}) {
-  const{C}=useTheme();
+  const{C,T}=useTheme();
   const {headers, cleanRows:rows, panelIndex:panel, filename, pipeline = []} = cleanedData;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
@@ -1649,7 +1649,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   }
 
   return(
-    <div style={{display:"flex",height:"100%",minHeight:0,background:C.bg,color:C.text,fontFamily:mono,overflow:"hidden"}}>
+    <div style={{display:"flex",height:"100%",minHeight:0,background:C.bg,color:C.text,fontFamily:T.body.fontFamily,overflow:"hidden"}}>
       <div style={{flex:1,minWidth:0,overflowY:"auto",padding:"1.4rem",paddingBottom:"3rem"}}>
         {/* Header */}
         <div style={{marginBottom:"1.2rem",display:"flex",alignItems:"flex-start",gap:12}}>

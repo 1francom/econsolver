@@ -424,7 +424,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
   return (
     <div style={{ display:"flex", height:"100%", minHeight:0,
-      background:C.bg, color:C.text, fontFamily:mono, overflow:"hidden" }}>
+      background:C.bg, color:C.text, fontFamily:T.body.fontFamily, overflow:"hidden" }}>
 
       <div style={{ flex:1, minWidth:0, overflowY:"auto",
         padding:"1.4rem", paddingBottom:"3rem" }}>
