@@ -52,6 +52,10 @@ function buildScript(tab, result, allDatasets = {}) {
       cutoff:     spec.cutoff     ?? null,
       bandwidth:  spec.bandwidth  ?? null,
       kernel:     spec.kernel     ?? "triangular",
+      factorVars:        spec.factorVars        ?? [],
+      interactionTerms:  spec.interactionTerms  ?? [],
+      xVarsRaw:          spec.xVarsRaw          ?? null,
+      wVarsRaw:          spec.wVarsRaw          ?? null,
     },
   };
 

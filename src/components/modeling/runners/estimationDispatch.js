@@ -15,11 +15,12 @@ import {
   runSpatialRDD, runSpatialRegressionFromRows,
   wrapResult, diagnoseFit,
 } from "../../../math/index.js";
-import { applyFactors, resolveEstimator } from "../helpers.js";
+import { applyFactors, expandInteractions, resolveEstimator } from "../helpers.js";
 
 export function dispatchEstimation(dataRows, ctx) {
   const {
     yVar, xVars, wVars, factorVars,
+    interactionTerms = [],
     model, family, weightVar, seOpts, seType, panel,
     zVars, postVar, treatVar,
     runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
@@ -33,9 +34,11 @@ export function dispatchEstimation(dataRows, ctx) {
 
   const y = yVar[0];
   if (!y) return { error: "Select a dependent variable (Y)." };
-  // ── Factor expansion (outside try to avoid TDZ) ──────────────────────────
-  const { rows: _r1, vars: expX } = applyFactors(dataRows, xVars, factorVars);
-  const { rows: expRows, vars: expW } = applyFactors(_r1, wVars, factorVars);
+  // ── Interaction + factor expansion (outside try to avoid TDZ) ──────────────
+  const { rows: ixRows, xVars: ixX, wVars: ixW } =
+    expandInteractions(dataRows, xVars, wVars, interactionTerms, factorVars);
+  const { rows: _r1, vars: expX } = applyFactors(ixRows, ixX, factorVars);
+  const { rows: expRows, vars: expW } = applyFactors(_r1, ixW, factorVars);
   dataRows = expRows; // parameter reassignment: safe in JS
   const effModel = resolveEstimator(model, family, !!weightVar[0]);
   try {
@@ -243,14 +246,16 @@ export function dispatchEstimation(dataRows, ctx) {
       if (!ec) return { error: "Select an Entity (i) column in the configuration panel below." };
       // Full FE list: entity dim + any additional FE dims (dedup, drop empties/X overlaps)
       const feCols = [ec, ...poissonExtraFE].filter((c, i, a) => c && a.indexOf(c) === i && !allX.includes(c));
+      const offCol = poissonOffsetCol || null;
       let res;
-      if (feCols.length > 1) {
-        res = runPoissonFEMulti(dataRows, y, allX, feCols, seOpts);
+      // runPoissonFEMulti supports offsetCol; use it for multi-way FE or when offset is present
+      if (feCols.length > 1 || offCol) {
+        res = runPoissonFEMulti(dataRows, y, allX, feCols, seOpts, { offsetCol: offCol });
       } else {
         res = runPoissonFE(dataRows, y, allX, ec, seOpts);
       }
       if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
-      return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, feCols }), panelFE: null, panelFD: null };
+      return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, feCols, offsetCol: offCol }), panelFE: null, panelFD: null };
 
     } else if (effModel === "SunAbraham") {
       const cCol = cohortCol[0];

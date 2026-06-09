@@ -1,19 +1,20 @@
 // ─── ECON STUDIO · src/components/modeling/VariableSelector.jsx ───────────────
-// Variable-assignment panel: Y (dependent), X (regressors), W (controls).
-// Renders only the columns relevant to the active estimator.
-// Model-specific extras (Z, DiD dummies, RDD running var) live in ModelConfiguration.
+// Variable-assignment panel: Y (dependent), X (regressors), W (controls),
+// and optional Interactions section (X1*X2 / X1:X2 builder).
 //
 // Props:
-//   model        {string}    – active estimator ID
-//   numericCols  {string[]}  – all numeric columns in the dataset
-//   yVar         {string[]}  – selected Y (single-element array)
-//   setYVar      {fn}
-//   xVars        {string[]}  – selected X regressors
-//   setXVars     {fn}
-//   wVars        {string[]}  – selected controls
-//   setWVars     {fn}
+//   model              {string}    – active estimator ID
+//   numericCols        {string[]}  – all numeric columns in the dataset
+//   yVar               {string[]}  – selected Y (single-element array)
+//   setYVar            {fn}
+//   xVars              {string[]}  – selected X regressors
+//   setXVars           {fn}
+//   wVars              {string[]}  – selected controls
+//   setWVars           {fn}
+//   interactionTerms   {Array}     – [{var1, var2, type:"*"|":"}]
+//   setInteractionTerms {fn}
 
-import { VarPanel, useTheme } from "./shared.jsx";
+import { VarPanel, mono, useTheme } from "./shared.jsx";
 
 // Models that expose an X (Features) selector
 const SHOW_X = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit", "Poisson", "GMM", "LIML", "PoissonFE", "LSDV"]);
@@ -33,12 +34,34 @@ export default function VariableSelector({
   setWVars,
   factorVars,
   onToggleFactor,
+  interactionTerms = [],
+  setInteractionTerms,
 }) {
   const { C, T } = useTheme();
   // X/W pickers show all columns (numeric + categorical); Y picker is numeric-only
   const xwCols = allCols ?? numericCols;
   const availForX = xwCols.filter(h => !yVar.includes(h));
   const availForW = xwCols.filter(h => !yVar.includes(h) && !xVars.includes(h));
+
+  const addTerm = () =>
+    setInteractionTerms?.(prev => [...prev, { var1: "", var2: "", type: "*" }]);
+  const removeTerm = i =>
+    setInteractionTerms?.(prev => prev.filter((_, j) => j !== i));
+  const updateTerm = (i, key, val) =>
+    setInteractionTerms?.(prev => prev.map((t, j) => j === i ? { ...t, [key]: val } : t));
+
+  const selStyle = {
+    background: "#111", color: C.fg ?? "#e0e0e0", border: `1px solid #333`,
+    borderRadius: 3, padding: "1px 4px", fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10,
+    flex: 1, minWidth: 0, cursor: "pointer",
+  };
+  const typeBtnStyle = {
+    background: "#1a1a1a", color: C.teal, border: `1px solid ${C.teal}`,
+    borderRadius: 3, padding: "1px 6px", fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10,
+    cursor: "pointer", flexShrink: 0, minWidth: 22, textAlign: "center",
+  };
+
+  const showInteractions = SHOW_X.has(model) && setInteractionTerms;
 
   return (
     <>
@@ -86,6 +109,58 @@ export default function VariableSelector({
           factorVars={factorVars}
           onToggleFactor={onToggleFactor}
         />
+      )}
+
+      {/* ── Interactions ── */}
+      {showInteractions && (
+        <div style={{ marginTop: 8, padding: "6px 8px", border: `1px solid #222`, borderRadius: 4 }}>
+          <div style={{ fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10, color: C.teal, marginBottom: 6, letterSpacing: "0.04em" }}>
+            INTERACTIONS
+          </div>
+          {interactionTerms.map((term, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
+              <select
+                value={term.var1}
+                onChange={e => updateTerm(i, "var1", e.target.value)}
+                style={selStyle}
+              >
+                <option value="">— var1 —</option>
+                {xwCols.filter(c => !yVar.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button
+                onClick={() => updateTerm(i, "type", term.type === "*" ? ":" : "*")}
+                style={typeBtnStyle}
+                title={term.type === "*" ? "main effects + interaction (A*B)" : "interaction only (A:B)"}
+              >
+                {term.type}
+              </button>
+              <select
+                value={term.var2}
+                onChange={e => updateTerm(i, "var2", e.target.value)}
+                style={selStyle}
+              >
+                <option value="">— var2 —</option>
+                {xwCols.filter(c => !yVar.includes(c) && c !== term.var1).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button
+                onClick={() => removeTerm(i)}
+                style={{ ...typeBtnStyle, color: "#888", borderColor: "#333" }}
+                title="Remove"
+              >✕</button>
+            </div>
+          ))}
+          <button
+            onClick={addTerm}
+            style={{ ...typeBtnStyle, color: "#888", borderColor: "#333", padding: "2px 8px", marginTop: 2 }}
+          >
+            + add
+          </button>
+          {interactionTerms.length > 0 && (
+            <div style={{ fontFamily: mono, fontSize: (T?.caption?.fontSize ?? 10) - 1, color: "#555", marginTop: 6 }}>
+              * = main effects + interaction · : = interaction only
+            </div>
+          )}
+        </div>
       )}
     </>
   );

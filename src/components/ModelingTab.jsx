@@ -265,6 +265,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [yVar,       setYVar]       = useState([]);
   const [xVars,      setXVars]      = useState([]);
   const [wVars,      setWVars]      = useState([]);
+  const [interactionTerms, setInteractionTerms] = useState([]);
   const [zVars,      setZVars]      = useState([]);
   const [postVar,    setPostVar]    = useState([]);
   const [treatVar,   setTreatVar]   = useState([]);
@@ -542,18 +543,27 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // ── PURE ESTIMATION HELPER (no setState) ────────────────────────────────────
   // Returns { result, panelFE, panelFD } on success, { error } on failure.
   // dataRows is passed explicitly so runAllSubsets can call it on filtered data.
-  const _runEstimation = useCallback((dataRows) => dispatchEstimation(dataRows, {
-    yVar, xVars, wVars, factorVars,
-    model, family, weightVar, seOpts, seType, panel,
-    zVars, postVar, treatVar,
-    runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
-    treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE,
-    poissonEntityCol, poissonOffsetCol, poissonExtraFE,
-    cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
-    csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
-    spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
-    resolveSpatialWeights,
-  }), [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights]);
+  const _runEstimation = useCallback((dataRows) => {
+    const dispatch = dispatchEstimation(dataRows, {
+      yVar, xVars, wVars, factorVars,
+      interactionTerms,
+      model, family, weightVar, seOpts, seType, panel,
+      zVars, postVar, treatVar,
+      runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
+      treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE,
+      poissonEntityCol, poissonOffsetCol, poissonExtraFE,
+      cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
+      csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
+      spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
+      resolveSpatialWeights,
+    });
+    // Enrich result spec with raw var lists + factor/interaction info for replication scripts
+    const specExtras = { factorVars: [...factorVars], interactionTerms, xVarsRaw: [...xVars], wVarsRaw: [...wVars] };
+    if (dispatch?.result?.spec)      Object.assign(dispatch.result.spec,      specExtras);
+    if (dispatch?.result?.fe?.spec)  Object.assign(dispatch.result.fe.spec,   specExtras);
+    if (dispatch?.result?.fd?.spec)  Object.assign(dispatch.result.fd.spec,   specExtras);
+    return dispatch;
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -683,7 +693,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         fuzzyTreatCol: treatVar[0] || null,
       };
 
-      if (effModel !== "SpatialRegression" && shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(effModel))) {
+      if (effModel !== "SpatialRegression" && !interactionTerms.length && shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(effModel))) {
         try {
           if (effModel === "2SLS") {
             // ── 2SLS SQL branch (Fase 3a + Fase 8 robust-SE backfill) ──
@@ -1735,6 +1745,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             wVars={wVars} setWVars={setWVars}
             factorVars={factorVars}
             onToggleFactor={toggleFactor}
+            interactionTerms={interactionTerms}
+            setInteractionTerms={setInteractionTerms}
           />
 
           <ModelConfiguration

@@ -84,7 +84,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -517,12 +517,35 @@ function transpileStep(step, allDatasets = {}) {
   }
 }
 
+// ─── STATA VARLIST BUILDER ────────────────────────────────────────────────────
+// Builds Stata varlist RHS. Factor vars use i. prefix; interactions use ## (*) or # (:).
+// Continuous vars inside interactions get the c. prefix (required by Stata).
+function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms) {
+  const fmtBase  = v => fvSet.has(v) ? `i.${v}` : v;
+  const fmtInInt = v => fvSet.has(v) ? `i.${v}` : `c.${v}`;
+  const rawX = xVarsRaw ?? xVars;
+  const rawW = wVarsRaw ?? wVars;
+  const parts = [...rawX, ...rawW].map(fmtBase);
+  for (const { var1, var2, type } of (interactionTerms ?? [])) {
+    if (!var1 || !var2) continue;
+    const f1 = fmtInInt(var1); const f2 = fmtInInt(var2);
+    if (type === "*") {
+      const i1 = parts.indexOf(fmtBase(var1)); if (i1 >= 0) parts.splice(i1, 1);
+      const i2 = parts.indexOf(fmtBase(var2)); if (i2 >= 0) parts.splice(i2, 1);
+      parts.push(`${f1}##${f2}`);
+    } else {
+      parts.push(`${f1}#${f2}`);
+    }
+  }
+  return parts.join(" ") || "1";
+}
+
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
-  const xList = allX.map(fmtS).join(" ");
+  const xList = buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
 
   switch (type) {
     case "OLS":
@@ -900,7 +923,8 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     const estoreNames = [];
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-            treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod } = configs[0].model ?? {};
+            treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
+            interactionTerms: ixm = [], xVarsRaw: xrm = null, wVarsRaw: wrm = null } = configs[0].model ?? {};
     const allX = [...xVars, ...wVars];
 
     configs.forEach((c) => {
@@ -910,7 +934,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       lines.push(`preserve`);
       if (filterExpr) lines.push(`  keep if ${filterExpr}`);
       else            lines.push(`  * Full sample — no filter`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm });
       let hasStore = false;
       modelLines.forEach(l => {
         const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
@@ -940,10 +964,11 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       estoreNames.push({ name: estName, label: c.label ?? c.model?.type ?? `Model ${i+1}` });
       const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
-              treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod } = c.model ?? {};
+              treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
+              interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc });
       let hasStore = false;
       modelLines.forEach(l => {
         const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
