@@ -3,8 +3,16 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans.
 
 **Track:** C — Cross-cutting hardening
-**Status:** Queued.
+**Status:** DONE (2026-06-09).
 **Blocks:** Fase X5 (bug bash).
+
+> **Closure (2026-06-09):** All acceptance criteria met and browser-validated by Franco.
+> (a) Prompt caching now provably effective — `SHARED_CONTEXT` grown to ~2330 est tokens to clear the 2048-token Haiku cache floor (it is the only `cache_control` block); harness asserts the cached block ≥ per-model minimum. Fixed a latent bug where the ~794-token block was silently below the minimum and never cached.
+> (b) PII stripped before egress — fixed `piiDetector.js` snake_case hole (`\b` boundaries failed on `respondent_name`/`monthly_income`); `wrangling/utils.js callAI` filters sample values unconditionally (Franco's option-A call).
+> (c) Unit inference 100% (37/37 ≥95%) under a dimension-aware token-group grader; coefficient narratives clean (correct signs/significance, no fabricated metrics).
+> (d) Model routing deterministic — harness green (corrected stale plan model IDs to haiku-4-5 / sonnet-4-6 / opus-4-7).
+> Harness `window.__validation.faseX3()` = 23/23; live eval `window.__liveEval.faseX3()` passed. Supabase feedback gate cleared (0 unprocessed rows; no open AI/privacy/narrative items).
+> Deferred (not a gate): tighten `INFER_UNITS_PROMPT` toward compact unit strings — contingent on a dictionary-rendering decision.
 
 **Goal:** Lock down `src/services/AI/AIService.js` and its prompts so that (a) prompt caching is provably active on every call, (b) the privacy filter strips PII before any network egress, (c) AI-inferred variable units and coefficient narratives meet a measurable accuracy bar, and (d) model routing (Sonnet vs Haiku) is deterministic.
 

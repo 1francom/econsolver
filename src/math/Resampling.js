@@ -39,6 +39,7 @@
 
 import { makeRNG, shuffle, sampleWithReplacement } from "./rng.js";
 import { pnorm, qnorm } from "./calcEngine.js";
+import { transpose, matMul, matInv } from "./LinearEngine.js";
 
 export function clean(values) {
   return values.filter(v => typeof v === "number" && isFinite(v));
@@ -206,8 +207,20 @@ export function subsampleMean(values, m, B = 2000, alpha = 0.05, seed = null) {
 
 // ─── 3. Permutation test (generalized two-group contrast) ─────────────────────
 // ─── CONTRAST REGISTRY (two-group, operate on (a[], b[])) ─────────────────────
+// A note on STUDENTIZATION. `studDiffMeans` is the Welch t-statistic,
+//   t = (x̄_A − x̄_B) / √(s²_A/n_A + s²_B/n_B),
+// where the standard error is recomputed FROM THE PERMUTED GROUPS each iteration
+// (the contrast receives freshly-relabelled gA/gB on every permutation). This is
+// what makes the studentized permutation test asymptotically valid under unequal
+// group variances (Janssen 1997; Chung & Romano 2013): it tests the weak null of
+// equal means, whereas the raw `diffMeans` permutation test is only exact under
+// the strong null that the two distributions are identical (exchangeability).
 const CONTRASTS = {
   diffMeans:   (a, b) => mean(a) - mean(b),
+  studDiffMeans: (a, b) => {
+    const se = Math.sqrt(variance(a) / a.length + variance(b) / b.length);
+    return se > 0 ? (mean(a) - mean(b)) / se : 0;
+  },
   diffMedians: (a, b) => median(a) - median(b),
   diffSd:      (a, b) => sd(a) - sd(b),
   meanRatio:   (a, b) => mean(a) / mean(b),
@@ -280,6 +293,183 @@ export function permutationTest(a, b, statName = "diffMeans", { B = 2000, exact 
     if (cmp(d)) extreme++;
   }
   return { stat: statName, contrast: statName, observed, pValue: (1 + extreme) / (B + 1), exact: false, nPerm: B, seed: usedSeed, replicates, alternative };
+}
+
+// ─── 3b. Studentized vs raw permutation comparison ────────────────────────────
+// Runs ONE permutation loop and evaluates BOTH the raw difference-in-means and
+// the Welch-studentized statistic on the SAME relabellings. Because the reference
+// shuffles are shared, any difference between the two reference distributions (and
+// their p-values) is attributable purely to studentizing — this is the pedagogical
+// payoff: it isolates why the studentized test stays calibrated under unequal
+// variances while the raw test can be size-distorted. Exact enumeration when
+// exact===true OR (exact===null AND C(N,nA) ≤ 50000); otherwise seeded Monte Carlo.
+export function permutationCompare(a, b, { B = 2000, exact = null, seed = null, alternative = "two-sided" } = {}) {
+  const A = clean(a), Bv = clean(b);
+  if (A.length < 2 || Bv.length < 2) return { error: "Each group needs at least 2 finite observations." };
+  const raw = CONTRASTS.diffMeans, stud = CONTRASTS.studDiffMeans;
+  const nA = A.length, nB = Bv.length, N = nA + nB;
+  const pooled = A.concat(Bv);
+  const obsRaw = raw(A, Bv), obsStud = stud(A, Bv);
+  const total = combinations(N, nA);
+  const doExact = exact === true || (exact === null && total !== Infinity && total <= 50000);
+
+  const cmp = (d, obs) => {
+    if (alternative === "greater") return d >= obs - 1e-12;
+    if (alternative === "less") return d <= obs + 1e-12;
+    return Math.abs(d) >= Math.abs(obs) - 1e-12;
+  };
+
+  const repRaw = [], repStud = [];
+  let exRaw = 0, exStud = 0;
+
+  if (doExact) {
+    const idx = Array.from({ length: nA }, (_, i) => i);
+    const used = new Array(N);
+    let nPerm = 0;
+    while (true) {
+      used.fill(false);
+      for (let i = 0; i < nA; i++) used[idx[i]] = true;
+      const gA = [], gB = [];
+      for (let i = 0; i < N; i++) (used[i] ? gA : gB).push(pooled[i]);
+      const dR = raw(gA, gB), dS = stud(gA, gB);
+      repRaw.push(dR); repStud.push(dS); nPerm++;
+      if (cmp(dR, obsRaw)) exRaw++;
+      if (cmp(dS, obsStud)) exStud++;
+      let p = nA - 1;
+      while (p >= 0 && idx[p] === N - nA + p) p--;
+      if (p < 0) break;
+      idx[p]++;
+      for (let k = p + 1; k < nA; k++) idx[k] = idx[k - 1] + 1;
+    }
+    return {
+      compare: true, exact: true, nPerm, seed: null, alternative, nA, nB,
+      raw:  { contrast: "diffMeans",     observed: obsRaw,  pValue: exRaw / nPerm,  replicates: repRaw },
+      stud: { contrast: "studDiffMeans", observed: obsStud, pValue: exStud / nPerm, replicates: repStud },
+    };
+  }
+
+  if (!(B >= 50)) return { error: "B must be ≥ 50." };
+  const { rand, seed: usedSeed } = makeRNG(seed);
+  for (let bi = 0; bi < B; bi++) {
+    const sh = shuffle(rand, pooled);
+    const gA = sh.slice(0, nA), gB = sh.slice(nA);
+    const dR = raw(gA, gB), dS = stud(gA, gB);
+    repRaw.push(dR); repStud.push(dS);
+    if (cmp(dR, obsRaw)) exRaw++;
+    if (cmp(dS, obsStud)) exStud++;
+  }
+  return {
+    compare: true, exact: false, nPerm: B, seed: usedSeed, alternative, nA, nB,
+    raw:  { contrast: "diffMeans",     observed: obsRaw,  pValue: (1 + exRaw) / (B + 1),  replicates: repRaw },
+    stud: { contrast: "studDiffMeans", observed: obsStud, pValue: (1 + exStud) / (B + 1), replicates: repStud },
+  };
+}
+
+// ─── 3c. Freedman–Lane permutation test for a regression coefficient ──────────
+// Tests H0: β_D = 0 in  y = β0 + β_D·D + Z·γ + ε, holding covariates Z fixed.
+// Procedure (Freedman & Lane 1983):
+//   1. Fit the REDUCED model y ~ 1 + Z; keep its fitted values ŷ_R and residuals ê_R.
+//   2. For each permutation, build y* = ŷ_R + π(ê_R) and regress y* on the FULL
+//      design X = [1, D, Z]; record the coefficient on D (and its t-statistic).
+//   3. p = (1 + #{|stat*| ≥ |stat_obs|}) / (B + 1).
+// Because X is fixed across permutations, (X'X)⁻¹ and the β-projection P = (X'X)⁻¹X'
+// are formed once; each replication is two matrix–vector products. Two statistics
+// are evaluated on the SAME permutations so they can be compared directly:
+//   raw  : β_D*                    (un-studentized slope)
+//   stud : t_D* = β_D*/se(β_D*)    (se recomputed per permutation)
+// The studentized statistic is the one that remains calibrated under
+// heteroskedasticity (cf. Winkler et al. 2014; DiCiccio & Romano 2017). With no
+// covariates this reduces to permuting y against D.
+function matVec(M, v) {
+  const out = new Array(M.length);
+  for (let i = 0; i < M.length; i++) {
+    let s = 0; const row = M[i];
+    for (let j = 0; j < row.length; j++) s += row[j] * v[j];
+    out[i] = s;
+  }
+  return out;
+}
+
+export function permutationRegressionCoef(y, d, covariates = [], { B = 2000, seed = null, alternative = "two-sided" } = {}) {
+  // Listwise-complete rows across y, d, and every covariate.
+  const n0 = Math.min(y.length, d.length, ...covariates.map(c => c.length));
+  const nCov = covariates.length;
+  const Y = [], D = [], Z = covariates.map(() => []);
+  for (let i = 0; i < n0; i++) {
+    const yi = Number(y[i]), di = Number(d[i]);
+    const zi = covariates.map(c => Number(c[i]));
+    if (!isFinite(yi) || !isFinite(di) || zi.some(v => !isFinite(v))) continue;
+    Y.push(yi); D.push(di); zi.forEach((v, j) => Z[j].push(v));
+  }
+  const n = Y.length;
+  const k = 2 + nCov;                       // intercept + D + covariates
+  if (n < k + 1) return { error: `Need at least ${k + 1} complete rows (have ${n}).` };
+  if (!(B >= 50)) return { error: "B must be ≥ 50." };
+
+  // Full design X = [1, D, Z...] with D at column index 1.
+  const X = [];
+  for (let i = 0; i < n; i++) {
+    const row = [1, D[i]];
+    for (let j = 0; j < nCov; j++) row.push(Z[j][i]);
+    X.push(row);
+  }
+  const Xt = transpose(X);
+  const A = matInv(matMul(Xt, X));          // (X'X)⁻¹, k×k
+  if (!A) return { error: "Design matrix is singular (collinear regressors)." };
+  const P = matMul(A, Xt);                  // k×n β-projection
+  const Add = A[1][1];                      // [(X'X)⁻¹]_DD
+  const dfResid = n - k;
+
+  const statOf = (ystar) => {
+    const beta = matVec(P, ystar);
+    const bD = beta[1];
+    const fit = matVec(X, beta);
+    let ssr = 0; for (let i = 0; i < n; i++) { const e = ystar[i] - fit[i]; ssr += e * e; }
+    const se = Math.sqrt((ssr / dfResid) * Add);
+    return { bD, se, t: se > 0 ? bD / se : 0 };
+  };
+  const obs = statOf(Y);
+
+  // Reduced model y ~ 1 + Z (drop D); permute its residuals.
+  const Xr = [];
+  for (let i = 0; i < n; i++) {
+    const row = [1];
+    for (let j = 0; j < nCov; j++) row.push(Z[j][i]);
+    Xr.push(row);
+  }
+  const Ar = matInv(matMul(transpose(Xr), Xr));
+  if (!Ar) return { error: "Reduced design is singular (collinear covariates)." };
+  const betaR = matVec(matMul(Ar, transpose(Xr)), Y);
+  const fitR = matVec(Xr, betaR);
+  const residR = new Array(n);
+  for (let i = 0; i < n; i++) residR[i] = Y[i] - fitR[i];
+
+  const cmp = (val, o) => {
+    if (alternative === "greater") return val >= o - 1e-12;
+    if (alternative === "less") return val <= o + 1e-12;
+    return Math.abs(val) >= Math.abs(o) - 1e-12;
+  };
+
+  const { rand, seed: usedSeed } = makeRNG(seed);
+  const repRaw = new Array(B), repStud = new Array(B);
+  let exRaw = 0, exStud = 0;
+  const ystar = new Array(n);
+  for (let b = 0; b < B; b++) {
+    const sh = shuffle(rand, residR);
+    for (let i = 0; i < n; i++) ystar[i] = fitR[i] + sh[i];
+    const s = statOf(ystar);
+    repRaw[b] = s.bD; repStud[b] = s.t;
+    if (cmp(s.bD, obs.bD)) exRaw++;
+    if (cmp(s.t, obs.t)) exStud++;
+  }
+
+  return {
+    regression: true, compare: true, exact: false, nPerm: B, seed: usedSeed, alternative,
+    n, k, dfResid, nCov,
+    betaD: obs.bD, seD: obs.se, tD: obs.t,
+    raw:  { contrast: "betaD", observed: obs.bD, pValue: (1 + exRaw) / (B + 1), replicates: repRaw },
+    stud: { contrast: "tD",    observed: obs.t,  pValue: (1 + exStud) / (B + 1), replicates: repStud },
+  };
 }
 
 // Backward-compatible two-sample mean-difference permutation (Monte Carlo).

@@ -2364,9 +2364,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     First stage F ({fs.endVar}): {fs.Fstat?.toFixed(2)} {fs.weak ? "⚠ Weak instrument" : "✓"}
                   </InfoBox>
                 ))}
-                <Lbl color={C.textMuted}>Coefficients — IV-Poisson (exp link)</Lbl>
+                <Lbl color={C.textMuted}>Coefficients — IV-Poisson (exp link) — toggle β / IRR</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se}
-                  tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel="z" />
+                  tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel="z" irr={r.IRR} />
                 <ExportBar yVar={yVar[0]} results={r} model="IVPoisson"
                   onReport={() => openReport({ ...r, modelLabel: "IV-Poisson", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                   replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "IVPoisson", yVar: yVar[0] } } : null}
@@ -2581,20 +2581,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "BIC",     value: r.BIC?.toFixed(1)         ?? "—", color: C.textDim },
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
-                <Lbl color={C.textMuted}>Coefficient Table (log-linear; IRR = exp(β))</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
-                {r.IRR?.length > 0 && (
-                  <div style={{ marginTop: "1rem" }}>
-                    <Lbl color={C.textMuted}>Incidence Rate Ratios (IRR = exp(β))</Lbl>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                      {r.varNames.map((v, i) => (
-                        <div key={v} style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textDim, background: C.surface2, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border}` }}>
-                          {v}: <span style={{ color: C.text }}>{r.IRR[i]?.toFixed(4) ?? "—"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} />
                 <PlotSelector accentColor={"#9e7ec8"} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
                     node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
@@ -2630,8 +2618,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     ? `AIC/BIC penalty includes all FE dims (k = ${r.k} regressors + ${(r.feDims ?? []).reduce((s, d) => s + d.nLevels, 0)} FE levels − ${r.nFE - 1} normalization${r.nFE - 1 > 1 ? "s" : ""} — comparable to R fixest::fepois AIC)`
                     : `AIC/BIC penalty includes entity FEs (k = ${r.k} regressors + ${r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)`}
                 </div>
-                <Lbl color={C.textMuted}>Coefficient Table (log-linear, with IRR)</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} />
                 {r.nFE > 1 && r.feDims && (
                   <div style={{ marginTop: "1rem" }}>
                     <Lbl color={C.textMuted}>Absorbed Fixed-Effect Dimensions</Lbl>
@@ -3233,7 +3221,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
         {/* ── Coefficient Test (post-estimation hypothesis test) ── */}
         {pinnedModels.length > 0 && (
-          <CoefficientTestPanel models={pinnedModels} />
+          <CoefficientTestPanel models={pinnedModels} liveResult={result} />
         )}
 
         {/* ── Model Buffer Bar ── */}

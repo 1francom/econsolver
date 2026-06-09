@@ -262,12 +262,14 @@ function ciMultiplier(df) {
   return 1.96;
 }
 
-export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [] }) {
+export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [], irr = null }) {
   const binarySet = new Set(binaryVars);
   const { C, T } = useTheme();
   const [open, setOpen] = useState(null);
   const [copied, setCopied] = useState(null);
+  const [showIrr, setShowIrr] = useState(false);
   const z    = ciMultiplier(df);
+  const irrMode = showIrr && irr?.length > 0;
 
   function toLatex() {
     const bodyRows = varNames.map((v, i) => {
@@ -321,11 +323,25 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
         textTransform: "uppercase", gap: 6,
         borderBottom: `1px solid ${C.border}`, fontFamily: T.code.fontFamily,
       }}>
-        <div>Variable</div>
-        <div style={{ textAlign: "right" }}>β̂</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          Variable
+          {irr?.length > 0 && (
+            <button onClick={() => setShowIrr(v => !v)} style={{
+              fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
+              padding: "1px 6px", borderRadius: 3, cursor: "pointer",
+              border: `1px solid ${irrMode ? "#9e7ec8" : C.border2}`,
+              background: irrMode ? "#9e7ec8" + "22" : "transparent",
+              color: irrMode ? "#9e7ec8" : C.textDim,
+              letterSpacing: "0.1em", textTransform: "uppercase",
+            }}>
+              {irrMode ? "IRR" : "β"}
+            </button>
+          )}
+        </div>
+        <div style={{ textAlign: "right" }}>{irrMode ? "IRR" : "β̂"}</div>
         <div style={{ textAlign: "right" }}>(SE)</div>
-        <div style={{ textAlign: "right", color: C.teal + "cc" }}>CI 2.5%</div>
-        <div style={{ textAlign: "right", color: C.teal + "cc" }}>CI 97.5%</div>
+        <div style={{ textAlign: "right", color: C.teal + "cc" }}>{irrMode ? "CI lo" : "CI 2.5%"}</div>
+        <div style={{ textAlign: "right", color: C.teal + "cc" }}>{irrMode ? "CI hi" : "CI 97.5%"}</div>
         <div style={{ textAlign: "right" }}>{statLabel}</div>
         <div style={{ textAlign: "right" }}>p</div>
         <div style={{ textAlign: "center" }}>sig</div>
@@ -334,6 +350,17 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
       {varNames.map((v, i) => {
         const b = beta[i], s = se[i], p = pVals[i];
         const lo = b - z * s, hi = b + z * s;
+        const irrVal = irr?.[i];
+        // Delta-method CI for IRR: exp(β ± z·SE)
+        const irrLo = irrMode && isFinite(b) && isFinite(s) ? Math.exp(b - z * s) : null;
+        const irrHi = irrMode && isFinite(b) && isFinite(s) ? Math.exp(b + z * s) : null;
+        const dispVal = irrMode ? irrVal : b;
+        const dispLo  = irrMode ? irrLo  : lo;
+        const dispHi  = irrMode ? irrHi  : hi;
+        // IRR > 1 = rate increase (green), < 1 = rate decrease (red)
+        const dispColor = irrMode
+          ? (irrVal >= 1 ? C.green : C.red)
+          : (b >= 0 ? C.green : C.red);
         const isInt = v === "(Intercept)", isOpen = open === i, sig = p < 0.05;
         return (
           <div key={v} style={{ borderTop: i > 0 ? `1px solid ${C.border}` : "none" }}>
@@ -353,10 +380,21 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                 {sig && !isInt && <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.teal, display: "inline-block", flexShrink: 0 }} />}
                 {v}{!isInt && <span style={{ fontSize: T.caption.fontSize, color: C.textDim }}>▾</span>}
               </div>
-              <div style={{ textAlign: "right", fontSize: T.body.fontSize, color: b >= 0 ? C.green : C.red, fontFamily: T.code.fontFamily }}>{b.toFixed(4)}</div>
+              <div style={{ textAlign: "right", fontSize: T.body.fontSize, color: dispColor, fontFamily: T.code.fontFamily }}>
+                {dispVal != null && isFinite(dispVal) ? dispVal.toFixed(4) : "—"}
+                {irrMode && irrVal != null && isFinite(irrVal) && (
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textDim, marginLeft: 4 }}>
+                    ({((irrVal - 1) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </div>
               <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: C.textDim }}>({s.toFixed(4)})</div>
-              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: sig ? C.teal + "cc" : C.textMuted }}>{lo.toFixed(4)}</div>
-              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: sig ? C.teal + "cc" : C.textMuted }}>{hi.toFixed(4)}</div>
+              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: sig ? C.teal + "cc" : C.textMuted }}>
+                {dispLo != null && isFinite(dispLo) ? dispLo.toFixed(4) : "—"}
+              </div>
+              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: sig ? C.teal + "cc" : C.textMuted }}>
+                {dispHi != null && isFinite(dispHi) ? dispHi.toFixed(4) : "—"}
+              </div>
               <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: C.textDim }}>{tStats?.[i] != null ? Number(tStats[i]).toFixed(3) : "—"}</div>
               <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p?.toFixed(4) ?? "—"}</div>
               <div style={{ textAlign: "center", fontSize: T.code.fontSize, color: C.gold }}>{stars(p)}</div>
