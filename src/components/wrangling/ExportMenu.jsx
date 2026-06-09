@@ -10,11 +10,11 @@
 //   allDatasets — { id: { name, filename } } — for resolving join/append names
 
 import { useState } from "react";
-import { useTheme, mono } from "./shared.jsx";
+import { useTheme } from "./shared.jsx";
 import { generateCleanScript } from "../../pipeline/exporter.js";
 
 function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDatasets = {} }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   const base        = filename ? filename.replace(/\.[^.]+$/, "") : "dataset";
   const dsName      = datasetName || base;
@@ -89,7 +89,7 @@ function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDataset
         onClick={() => setOpen(o => !o)}
         style={{
           padding:"0.28rem 0.65rem", borderRadius:3, cursor:"pointer",
-          fontFamily:mono, fontSize:10,
+          fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
           background: open ? `${C.teal}18` : "transparent",
           color:       open ? C.teal : C.textDim,
           border:`1px solid ${open ? C.teal : C.border2}`,
@@ -114,16 +114,16 @@ function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDataset
                 padding:"0.6rem 0.85rem",
                 background:"transparent", border:"none",
                 borderBottom:`1px solid ${C.border}`,
-                color:C.textDim, cursor:"pointer", fontFamily:mono,
+                color:C.textDim, cursor:"pointer", fontFamily: T.code.fontFamily,
                 textAlign:"left", transition:"background 0.1s",
               }}
                 onMouseEnter={e => e.currentTarget.style.background = `${C.teal}0a`}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}
               >
-                <span style={{ fontSize:11, color:C.text }}>
+                <span style={{ fontSize: T.code.fontSize, color:C.text }}>
                   <span style={{ color:C.teal, marginRight:6 }}>{icon}</span>{label}
                 </span>
-                <span style={{ fontSize:9, color:C.textMuted, marginTop:2 }}>{hint}</span>
+                <span style={{ fontSize: T.caption.fontSize, color:C.textMuted, marginTop:2 }}>{hint}</span>
               </button>
             ))}
           </div>

@@ -11,7 +11,7 @@
 //   numericCols   {string[]} – column count (for status line)
 
 import { useState, useEffect, useRef } from "react";
-import { useTheme, mono, Section, InfoBox } from "./shared.jsx";
+import { useTheme, Section, InfoBox } from "./shared.jsx";
 
 // ─── MODEL REGISTRY ───────────────────────────────────────────────────────────
 // Single source of truth for all estimator metadata.
@@ -40,10 +40,12 @@ export const MODELS = [
   { id: "SpatialRegression", label: "Spatial Reg.",    group: "Spatial",   desc: "SLX, SAR, SEM, and SDM with a spatial weights matrix",                 color: "#6ec8b4" },
   // Synthetic
   { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)",  color: "#6e9ec8" },
+  // Count outcomes
+  { id: "NegBinFE",        label: "Negative Binomial FE", group: "Count outcomes", desc: "NB2 with absorbed fixed effects and overdispersion", color: "#9e7ec8" },
 ];
 
 // ordered group list (controls render order)
-const GROUP_ORDER = ["Linear", "Panel", "DiD", "IV", "RD", "Spatial", "Synthetic"];
+const GROUP_ORDER = ["Linear", "Panel", "Count outcomes", "DiD", "IV", "RD", "Spatial", "Synthetic"];
 
 // Outcome families each strategy supports.
 // "linear" is always implied. Only non-linear entries listed.
@@ -68,7 +70,7 @@ export default function EstimatorSidebar({
   family,          // "linear" | "poisson" | "logit" | "probit"
   onFamilySelect,  // (family: string) => void
 }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
@@ -110,7 +112,7 @@ export default function EstimatorSidebar({
               borderRadius: 4,
               color: selected.color,
               cursor: "pointer",
-              fontFamily: mono, fontSize: 13,
+              fontFamily: T.code.fontFamily, fontSize: T.body.fontSize,
               letterSpacing: "0.06em",
               transition: "border-color 0.13s",
             }}
@@ -119,7 +121,7 @@ export default function EstimatorSidebar({
               <span style={{ color: C.gold, marginRight: 7 }}>●</span>
               {selected.label}
             </span>
-            <span style={{ fontSize: 10, color: C.textMuted }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
               {open ? "▲" : "▼"}
             </span>
           </button>
@@ -145,10 +147,10 @@ export default function EstimatorSidebar({
                   {/* Group header */}
                   <div style={{
                     padding: "5px 10px 3px",
-                    fontSize: 9, letterSpacing: "0.22em",
+                    fontSize: T.caption.fontSize, letterSpacing: "0.22em",
                     textTransform: "uppercase",
                     color: C.textMuted,
-                    fontFamily: mono,
+                    fontFamily: T.code.fontFamily,
                     borderBottom: `1px solid ${C.border}`,
                     background: C.surface2,
                     position: "sticky", top: 0,
@@ -180,7 +182,7 @@ export default function EstimatorSidebar({
                           borderBottom: `1px solid ${C.border}`,
                           color: !avail ? C.textMuted : isSelected ? m.color : C.textDim,
                           cursor: !avail ? "not-allowed" : "pointer",
-                          fontFamily: mono, fontSize: 12,
+                          fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
                           textAlign: "left",
                           opacity: !avail ? 0.45 : 1,
                           transition: "background 0.1s",
@@ -189,12 +191,12 @@ export default function EstimatorSidebar({
                         onMouseLeave={e => { e.currentTarget.style.background = isSelected ? `${m.color}14` : "transparent"; }}
                       >
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          {!avail && <span style={{ fontSize: 9 }}>🔒</span>}
-                          {isSelected && <span style={{ color: m.color, fontSize: 10 }}>●</span>}
+                          {!avail && <span style={{ fontSize: T.caption.fontSize }}>🔒</span>}
+                          {isSelected && <span style={{ color: m.color, fontSize: T.caption.fontSize }}>●</span>}
                           {m.label}
                         </span>
                         <span style={{
-                          fontSize: 9, color: C.textMuted,
+                          fontSize: T.caption.fontSize, color: C.textMuted,
                           letterSpacing: "0.04em",
                           whiteSpace: "nowrap",
                           overflow: "hidden",
@@ -236,7 +238,7 @@ export default function EstimatorSidebar({
 
           return (
             <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 8, letterSpacing: "0.18em", textTransform: "uppercase", color: C.textMuted, marginBottom: 5, fontFamily: mono }}>
+              <div style={{ fontSize: T.caption.fontSize, letterSpacing: "0.18em", textTransform: "uppercase", color: C.textMuted, marginBottom: 5, fontFamily: T.code.fontFamily }}>
                 Outcome family
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -259,9 +261,9 @@ export default function EstimatorSidebar({
                         border: `1px solid ${isActive ? chipColor : C.border2}`,
                         borderRadius: 3,
                         padding: "3px 9px",
-                        fontSize: 10,
+                        fontSize: T.caption.fontSize,
                         letterSpacing: "0.06em",
-                        fontFamily: mono,
+                        fontFamily: T.code.fontFamily,
                         background: isActive ? `${chipColor}18` : "transparent",
                         color: isActive ? chipColor : isPlanned ? "#333" : "#666",
                         cursor: isPlanned ? "not-allowed" : "pointer",
@@ -281,9 +283,9 @@ export default function EstimatorSidebar({
                   background: "#9e7ec810",
                   border: "1px solid #9e7ec830",
                   borderLeft: "3px solid #9e7ec8",
-                  borderRadius: 3, fontSize: 10,
+                  borderRadius: 3, fontSize: T.caption.fontSize,
                   color: "#9e7ec8",
-                  fontFamily: mono,
+                  fontFamily: T.code.fontFamily,
                 }}>
                   {HINT[`${model}_${family}`] ?? `${model} + ${family}`}
                 </div>

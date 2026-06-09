@@ -916,11 +916,31 @@ export default function ModelConfiguration({
     );
   }
 
-  if (model === "FE" && family === "poisson") {
+  if ((model === "FE" && family === "poisson") || model === "NegBinFE") {
     const entityCol = panel?.entityCol || poissonEntityCol;
     const extraFE = poissonExtraFE ?? [];
     const toggleExtra = (h) =>
       setPoissonExtraFE(extraFE.includes(h) ? extraFE.filter(c => c !== h) : [...extraFE, h]);
+    const offsetPanel = (
+      <Section title="Exposure (optional)">
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 6, fontFamily: T.code.fontFamily }}>
+          Select a column holding exposure, population size, or observation length for an offset.
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          <button
+            onClick={() => setPoissonOffsetCol("")}
+            style={{ padding: "0.28rem 0.6rem", border: `1px solid ${!poissonOffsetCol ? C.teal : C.border2}`, background: !poissonOffsetCol ? `${C.teal}18` : "transparent", color: !poissonOffsetCol ? C.teal : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
+            {!poissonOffsetCol ? "✓ " : ""}None
+          </button>
+          {(headers ?? []).map(h => (
+            <button key={h} onClick={() => setPoissonOffsetCol(h)}
+              style={{ padding: "0.28rem 0.6rem", border: `1px solid ${poissonOffsetCol === h ? C.gold : C.border2}`, background: poissonOffsetCol === h ? `${C.gold}18` : "transparent", color: poissonOffsetCol === h ? C.gold : C.textDim, borderRadius: 3, cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
+              {poissonOffsetCol === h ? "✓ " : ""}{h}
+            </button>
+          ))}
+        </div>
+      </Section>
+    );
     // Additional fixed-effect dimensions ⇒ N-way Poisson FE (runPoissonFEMulti).
     // Candidates exclude the entity column already used as the first FE dim.
     const extraFEPanel = (
@@ -949,6 +969,7 @@ export default function ModelConfiguration({
               <span style={{ color: C.textMuted }}> (from panel structure)</span>
             </div>
           </Section>
+          {offsetPanel}
           {extraFEPanel}
         </>
       );
@@ -965,6 +986,7 @@ export default function ModelConfiguration({
             ))}
           </div>
         </Section>
+        {poissonEntityCol ? offsetPanel : null}
         {poissonEntityCol ? extraFEPanel : null}
       </>
     );

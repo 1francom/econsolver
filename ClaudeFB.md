@@ -179,8 +179,8 @@
 - [2026-05-25 09:25] · Calculate
   Only 1 equation is plotted
 
-- [2026-05-25 19:26] · Report
-  AI does not recognize the pipeline steps in the Script generation
+- ~~[2026-05-25 19:26] · Report
+  AI does not recognize the pipeline steps in the Script generation~~ ✓ DONE (2026-06-09 — pipeline field verified in cleanedData → sessionSnapshot → UNIFIED_SCRIPT_PROMPT)
 
 - [2026-05-19 08:18] · Explore
   Color references in the plot builder for "color = X"
@@ -208,8 +208,8 @@
 
 ### Bugs
 
-- [14:22] · Model
-  Redefine the event study model separating in Sun-Abraham and Callaway-Santana heterogeneity-robust DiD estimators
+- ~~[14:22] · Model
+  Redefine the event study model separating in Sun-Abraham and Callaway-Santana heterogeneity-robust DiD estimators~~ ✓ DONE 2026-06-09
 
 ---
 
@@ -298,13 +298,13 @@
 
 ### Bugs
 
-- [21:27] · Data
-  Don't round the numbers when inserting, deleting or overwriting
+- ~~[21:27] · Data
+  Don't round the numbers when inserting, deleting or overwriting~~ ✓ DONE 2026-06-09
 
 ### Features
 
-- [12:23] · Spatial
-  Allow for colour selection with the "color by" option, useful for scales also
+- ~~[12:23] · Spatial
+  Allow for colour selection with the "color by" option, useful for scales also~~ ✓ DONE 2026-06-09
 
 ---
 
@@ -322,3 +322,12 @@
 
 - [08:52] · Model
   Allow users to edit LaTeX table variable names — currently RDD always shows "D (treatment)", "running − c", "D x (running − c)" regardless of actual column names
+
+---
+
+## 2026-06-08 batch
+
+### Features
+
+- [14:03] · Simulate
+  Add studentization for permutation tests

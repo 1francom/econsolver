@@ -1,0 +1,45 @@
+{
+  "_note": "Seed fixtures for Fase X3 Task 5 (coefficient-narrative guardrails). Each case fixes a regression result with known sign + significance. The live-eval harness runs interpretRegression and checks: narrative sign matches β̂ sign; no 'significant' claim when p>0.05; no 'not significant' claim when p<0.05; no invented metrics. Narrative review is ultimately human-judged.",
+  "cases": [
+    {
+      "label": "positive significant",
+      "result": { "label": "OLS", "spec": { "yVar": "wage", "xVars": ["educ"] }, "varNames": ["(Intercept)", "educ"], "beta": [8.2, 0.78], "se": [1.1, 0.09], "pVals": [0.001, 0.0001], "R2": 0.31, "adjR2": 0.30, "n": 2000 },
+      "checks": { "sign": { "educ": "+" }, "significant": ["educ"], "notSignificant": [] }
+    },
+    {
+      "label": "negative significant",
+      "result": { "label": "OLS", "spec": { "yVar": "mortality", "xVars": ["income"] }, "varNames": ["(Intercept)", "income"], "beta": [12.0, -0.0042], "se": [2.0, 0.0008], "pVals": [0.0001, 0.00002], "R2": 0.22, "adjR2": 0.21, "n": 1500 },
+      "checks": { "sign": { "income": "-" }, "significant": ["income"], "notSignificant": [] }
+    },
+    {
+      "label": "near-zero insignificant",
+      "result": { "label": "OLS", "spec": { "yVar": "y", "xVars": ["x_noise"] }, "varNames": ["(Intercept)", "x_noise"], "beta": [1.0, 0.003], "se": [0.5, 0.05], "pVals": [0.04, 0.95], "R2": 0.01, "adjR2": 0.00, "n": 800 },
+      "checks": { "sign": { "x_noise": "+" }, "significant": [], "notSignificant": ["x_noise"] }
+    },
+    {
+      "label": "marginally significant",
+      "result": { "label": "OLS", "spec": { "yVar": "y", "xVars": ["x_marg"] }, "varNames": ["(Intercept)", "x_marg"], "beta": [0.5, 0.21], "se": [0.2, 0.105], "pVals": [0.01, 0.046], "R2": 0.08, "adjR2": 0.07, "n": 600 },
+      "checks": { "sign": { "x_marg": "+" }, "significant": ["x_marg"], "notSignificant": [] }
+    },
+    {
+      "label": "log-log elasticity",
+      "result": { "label": "OLS", "spec": { "yVar": "log_sales", "xVars": ["log_price"] }, "varNames": ["(Intercept)", "log_price"], "beta": [4.0, -1.35], "se": [0.3, 0.12], "pVals": [0.0001, 0.0001], "R2": 0.55, "adjR2": 0.54, "n": 1200 },
+      "checks": { "sign": { "log_price": "-" }, "significant": ["log_price"], "notSignificant": [] }
+    },
+    {
+      "label": "log-level semi-elasticity",
+      "result": { "label": "OLS", "spec": { "yVar": "log_wage", "xVars": ["educ"] }, "varNames": ["(Intercept)", "educ"], "beta": [1.5, 0.072], "se": [0.1, 0.006], "pVals": [0.0001, 0.0001], "R2": 0.18, "adjR2": 0.17, "n": 3000 },
+      "checks": { "sign": { "educ": "+" }, "significant": ["educ"], "notSignificant": [] }
+    },
+    {
+      "label": "mixed two regressors",
+      "result": { "label": "OLS", "spec": { "yVar": "y", "xVars": ["x_pos", "x_ns"] }, "varNames": ["(Intercept)", "x_pos", "x_ns"], "beta": [2.0, 0.9, -0.01], "se": [0.4, 0.2, 0.3], "pVals": [0.001, 0.0001, 0.97], "R2": 0.14, "adjR2": 0.13, "n": 900 },
+      "checks": { "sign": { "x_pos": "+", "x_ns": "-" }, "significant": ["x_pos"], "notSignificant": ["x_ns"] }
+    },
+    {
+      "label": "DiD ATT significant",
+      "result": { "label": "TWFE DiD", "type": "DiD", "spec": { "yVar": "employment", "xVars": ["treat_post"] }, "varNames": ["(Intercept)", "treat_post"], "beta": [10.0, -2.4], "se": [1.0, 0.7], "pVals": [0.0001, 0.0006], "R2": 0.4, "adjR2": 0.39, "n": 5000, "att": -2.4, "attP": 0.0006 },
+      "checks": { "sign": { "treat_post": "-" }, "significant": ["treat_post"], "notSignificant": [] }
+    }
+  ]
+}

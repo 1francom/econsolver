@@ -1,5 +1,5 @@
 // ─── ECON STUDIO · spatial/plot/legend.js ─ (moved verbatim from SpatialTab.jsx)
-import { mono } from "../shared/constants.js";
+import { MONO_STACK } from "../../../../theme.js";
 
 // Fixed margins so y-axis labels like "34.52°S" always fit
 export const GEO_MARGIN = { top: 20, right: 20, bottom: 34, left: 72 };
@@ -17,7 +17,7 @@ export function appendSvgLegend(svg, legend, C, plotW, plotH, gutterW = 160) {
       ? legend.cats.map(v => ({ label: String(v), color: legend.cmap[v] }))
       : null;
   const g = document.createElementNS(ns, "g");
-  g.setAttribute("font-family", mono);
+  g.setAttribute("font-family", MONO_STACK);
   g.setAttribute("font-size", "9");
   const x = plotW + 12;
   const y = 18;

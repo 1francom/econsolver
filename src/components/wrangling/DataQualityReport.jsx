@@ -283,7 +283,7 @@ function MetaBar({ meta, panelSummary }) {
           padding: "0.65rem 0.8rem", background: C.surface2,
           border: `1px solid ${C.border}`, borderRadius: 3, textAlign: "center",
         }}>
-          <div style={{ fontSize: 18, color, fontFamily: T.code.fontFamily, marginBottom: 2 }}>{val}</div>
+          <div style={{ fontSize: T.h2.fontSize, color, fontFamily: T.code.fontFamily, marginBottom: 2 }}>{val}</div>
           <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
         </div>
       ))}

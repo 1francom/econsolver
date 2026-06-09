@@ -64,8 +64,8 @@ export const TYPE_ROLES = {
   h3:      { fam: "sans", size: 13, weight: 500, ls: "0",      lh: 1.3  },
   body:    { fam: "sans", size: 13, weight: 400, ls: "0",      lh: 1.5  },
   label:   { fam: "sans", size: 10, weight: 500, ls: "0.2em",  lh: 1.3, transform: "uppercase" },
-  data:    { fam: "mono", size: 13, weight: 400, ls: "0",      lh: 1.4, tnum: true },
-  code:    { fam: "mono", size: 12, weight: 400, ls: "0",      lh: 1.5  },
+  data:    { fam: "monospace", size: 13, weight: 400, ls: "0",      lh: 1.4, tnum: true },
+  code:    { fam: "monospace", size: 12, weight: 400, ls: "0",      lh: 1.5  },
   caption: { fam: "sans", size: 10, weight: 400, ls: "0.04em", lh: 1.4  },
 };
 
@@ -108,7 +108,7 @@ export function buildTokens({ theme = "dark", sansFont = "IBM Plex Sans", densit
   for (const role in TYPE_ROLES) {
     const r = TYPE_ROLES[role];
     T[role] = {
-      fontFamily: r.fam === "mono" ? MONO_STACK : sans,
+      fontFamily: r.fam === "monospace" ? MONO_STACK : sans,
       fontSize: Math.max(MIN_FONT, Math.round(r.size * mult)) + "px",
       fontWeight: r.weight,
       letterSpacing: r.ls,

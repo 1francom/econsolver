@@ -8,6 +8,7 @@ const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0])
 const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fb;
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
+import { pnorm } from "./math/calcEngine.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
@@ -225,6 +226,48 @@ function SummaryTable({rows,headers,info,panel}){
   }
 
   const fmt=v=>v!=null?v.toFixed(3):"—";
+  const [copiedExport,setCopiedExport]=useState("");
+
+  function buildRows(){
+    return numH.map(h=>{
+      const subset=groupBy?null:rows;
+      return{h,groups:groups.map(g=>{
+        const sub=groupBy?rows.filter(r=>r[groupBy]===g):rows;
+        return{g,s:statsFor(sub,h)};
+      })};
+    });
+  }
+
+  function copyCSV(){
+    const tblRows=buildRows();
+    const hdr=["Variable",...groups.flatMap(g=>allCols.map(([k,l])=>groupBy?`${g}_${l}`:l))];
+    const lines=[hdr.join(","),...tblRows.map(({h,groups:grs})=>[
+      h,...grs.flatMap(({s})=>allCols.map(([k])=>s[k]!=null?s[k].toFixed(3):""))
+    ].join(","))];
+    navigator.clipboard?.writeText(lines.join("\n")).then(()=>{setCopiedExport("csv");setTimeout(()=>setCopiedExport(""),2000);});
+  }
+
+  function copyLatex(){
+    const tblRows=buildRows();
+    const nDataCols=groups.length*allCols.length;
+    const lines=[
+      `\\begin{tabular}{l${"r".repeat(nDataCols)}}`,
+      `\\toprule`,
+    ];
+    if(groupBy){
+      lines.push(`Variable & ${groups.map(g=>`\\multicolumn{${allCols.length}}{c}{${g}}`).join(" & ")} \\\\`);
+      lines.push(`\\cmidrule(lr){2-${nDataCols+1}}`);
+    }
+    lines.push(`Variable & ${groups.flatMap(()=>allCols.map(([,l])=>l)).join(" & ")} \\\\`);
+    lines.push(`\\midrule`);
+    tblRows.forEach(({h,groups:grs})=>{
+      lines.push(`${h} & ${grs.flatMap(({s})=>allCols.map(([k])=>s[k]!=null?s[k].toFixed(3):"—")).join(" & ")} \\\\`);
+    });
+    lines.push(`\\bottomrule`);
+    lines.push(`\\end{tabular}`);
+    navigator.clipboard?.writeText(lines.join("\n")).then(()=>{setCopiedExport("latex");setTimeout(()=>setCopiedExport(""),2000);});
+  }
+
   // Column order matches R summary(): Min | Q1 | Median | Mean | Q3 | Max | SD
   const baseCols=[["min","Min"],["q1","Q1"],["median","Median"],["mean","Mean"],["q3","Q3"],["max","Max"],["std","SD"]];
   const extraCols=extraQs.map(p=>[`p${p}`,`P${p}`]);
@@ -339,9 +382,89 @@ function SummaryTable({rows,headers,info,panel}){
         </div>
       )}
 
-      <div style={{marginTop:8,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
-        {view==="stats"?`N=${rows.length} total observations · ${numH.length} numeric variables`:`Showing ${view}(${viewN}) of ${rows.length} rows`}
+      <div style={{marginTop:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
+          {view==="stats"?`N=${rows.length} total observations · ${numH.length} numeric variables`:`Showing ${view}(${viewN}) of ${rows.length} rows`}
+        </span>
+        {view==="stats"&&numH.length>0&&<>
+          {[["csv","CSV"],["latex","LaTeX"]].map(([id,label])=>(
+            <button key={id} onClick={id==="csv"?copyCSV:copyLatex}
+              style={{padding:"2px 10px",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,letterSpacing:"0.08em",border:`1px solid ${copiedExport===id?C.teal:C.border2}`,borderRadius:2,background:copiedExport===id?`${C.teal}1a`:"transparent",color:copiedExport===id?C.teal:C.textMuted,cursor:"pointer"}}>
+              {copiedExport===id?"✓":label}
+            </button>
+          ))}
+        </>}
       </div>
+    </div>
+  );
+}
+
+// ─── DISPERSION PANEL (B1 — overdispersion / count diagnostics) ───────────────
+function DispersionPanel({rows,headers,info}){
+  const{C,T}=useTheme();
+  const[open,setOpen]=useState(false);
+  const[col,setCol]=useState("");
+  const numCols=useMemo(()=>headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null),[headers,info]);
+  const effCol=numCols.includes(col)?col:(numCols[0]??"");
+
+  const res=useMemo(()=>{
+    if(!effCol)return null;
+    const vals=rows.map(r=>r[effCol]).filter(v=>typeof v==="number"&&isFinite(v)&&v>=0);
+    const n=vals.length;
+    if(n<10)return{error:"Need ≥10 non-negative values."};
+    const mu=vals.reduce((s,v)=>s+v,0)/n;
+    if(mu<=0)return{error:"Mean must be positive."};
+    const varVal=vals.reduce((s,v)=>s+(v-mu)**2,0)/(n-1);
+    const ratio=varVal/mu;
+    // Cameron-Trivedi (1990) auxiliary regression: z_i = ((y_i-μ)²-y_i)/μ, t-stat of intercept
+    const zi=vals.map(v=>((v-mu)**2-v)/mu);
+    const zMean=zi.reduce((s,v)=>s+v,0)/n;
+    const zVar=zi.reduce((s,v)=>s+(v-zMean)**2,0)/(n-1);
+    const ctStat=zMean/Math.sqrt(zVar/n);
+    const pVal=Math.max(0,1-pnorm(ctStat)); // one-sided H₁: overdispersed
+    return{n,mu,varVal,ratio,ctStat,pVal};
+  },[effCol,rows]);
+
+  const fld={background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:T.code.fontFamily,fontSize:T.code.fontSize,padding:"0.28rem 0.55rem",outline:"none"};
+  const f=v=>typeof v==="number"&&isFinite(v)?v.toFixed(4):"—";
+
+  return(
+    <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden",marginTop:"1.4rem"}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{background:C.surface2,padding:"0.55rem 0.85rem",borderBottom:open?`1px solid ${C.border}`:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+        <span style={{fontSize:T.caption.fontSize,color:C.textMuted}}>{open?"▾":"▸"}</span>
+        <span style={{fontSize:T.caption.fontSize,color:C.textDim,letterSpacing:"0.2em",textTransform:"uppercase",fontFamily:T.code.fontFamily}}>Count Diagnostics</span>
+        <span style={{marginLeft:"auto",fontSize:T.caption.fontSize,color:C.textMuted}}>var/mean · Cameron-Trivedi</span>
+      </div>
+      {open&&(
+        <div style={{padding:"0.85rem",background:C.surface,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <span style={{fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily,letterSpacing:"0.14em",textTransform:"uppercase"}}>Column</span>
+            <select value={effCol} onChange={e=>setCol(e.target.value)} style={fld}>
+              {numCols.map(h=><option key={h} value={h}>{h}</option>)}
+            </select>
+          </div>
+          {res?.error&&<div style={{fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,color:C.red}}>{res.error}</div>}
+          {res&&!res.error&&(
+            <div style={{background:`${C.gold}0a`,border:`1px solid ${C.gold}30`,borderRadius:3,padding:"0.65rem 0.9rem",fontFamily:T.code.fontFamily,fontSize:T.code.fontSize,color:C.text,lineHeight:1.9}}>
+              <div><span style={{color:C.textMuted}}>n = </span>{res.n}<span style={{color:C.textMuted}}>  ·  mean = </span>{f(res.mu)}<span style={{color:C.textMuted}}>  ·  var = </span>{f(res.varVal)}</div>
+              <div>
+                <span style={{color:C.textMuted}}>var/mean = </span>
+                <span style={{color:res.ratio>1?C.red:C.teal,fontSize:T.body.fontSize}}>{f(res.ratio)}</span>
+                <span style={{color:C.textMuted}}>  {res.ratio>2?"(strong overdispersion)":res.ratio>1.2?"(moderate overdispersion)":res.ratio<=1?"(equidispersed/underdispersed)":"(mild overdispersion)"}  </span>
+              </div>
+              <div>
+                <span style={{color:C.textMuted}}>CT z = </span>
+                <span style={{color:C.gold}}>{f(res.ctStat)}</span>
+                <span style={{color:C.textMuted}}>  ·  p (one-sided) = </span>
+                <span style={{color:res.pVal<0.05?C.teal:C.text}}>{res.pVal<1e-4?"<0.0001":f(res.pVal)}</span>
+                {res.pVal<0.05
+                  ?<span style={{color:C.red}}>  → overdispersion detected; consider Negative Binomial or QMLE</span>
+                  :<span style={{color:C.teal}}>  → fail to reject equidispersion; Poisson is consistent</span>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1729,6 +1852,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         {tab==="summary"&&(
           <>
             <SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel}/>
+            <DispersionPanel rows={filteredRows} headers={headers} info={info}/>
             <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
               <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset}/>

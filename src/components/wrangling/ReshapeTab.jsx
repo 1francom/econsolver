@@ -1,8 +1,9 @@
 // ─── ECON STUDIO · components/wrangling/ReshapeTab.jsx ─────────────────────
 import { useState, useMemo } from "react";
-import { useTheme, mono, Lbl, Tabs, Btn } from "./shared.jsx";
+import { useTheme, Lbl, Tabs, Btn } from "./shared.jsx";
 
 function GroupTransformSection({ headers, onAdd, C }) {
+  const { T } = useTheme();
   const [by, setBy]   = useState([]);
   const [col, setCol] = useState("");
   const [fn, setFn]   = useState("mean");
@@ -12,7 +13,7 @@ function GroupTransformSection({ headers, onAdd, C }) {
   return (
     <div style={{marginBottom:"1.2rem"}}>
       <Lbl color={C.gold}>Group transform - broadcast a group stat back to every row</Lbl>
-      <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginBottom:6}}>
+      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:6}}>
         Like group_by() |&gt; mutate(): adds a column, keeps all rows.
       </div>
       <Lbl color={C.gold}>Group by</Lbl>
@@ -21,21 +22,21 @@ function GroupTransformSection({ headers, onAdd, C }) {
           <button key={h} onClick={()=>toggle(h)}
             style={{padding:"0.2rem 0.5rem",border:`1px solid ${by.includes(h)?C.gold:C.border2}`,
               background:by.includes(h)?`${C.gold}18`:"transparent",color:by.includes(h)?C.gold:C.textDim,
-              borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono}}>{h}</button>
+              borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{h}</button>
         ))}
       </div>
       <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
         <select value={col} onChange={e=>setCol(e.target.value)}
-          style={{padding:"0.3rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11}}>
+          style={{padding:"0.3rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize}}>
           <option value="">- column -</option>
           {headers.map(h=><option key={h} value={h}>{h}</option>)}
         </select>
         <select value={fn} onChange={e=>setFn(e.target.value)}
-          style={{padding:"0.3rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11}}>
+          style={{padding:"0.3rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize}}>
           {["mean","sum","sd","min","max","count","median","rank"].map(f=><option key={f} value={f}>{f}</option>)}
         </select>
         <input value={nn} onChange={e=>setNn(e.target.value)} placeholder={auto}
-          style={{flex:1,minWidth:120,padding:"0.3rem 0.5rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+          style={{flex:1,minWidth:120,padding:"0.3rem 0.5rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"}}/>
       </div>
       <Btn onClick={()=>onAdd({type:"group_transform",by,col,fn,nn:nn||auto,
         desc:`group_transform ${fn}(${col}) by ${by.join(", ")} -> ${nn||auto}`})}
@@ -48,7 +49,7 @@ function GroupTransformSection({ headers, onAdd, C }) {
 // pivot_longer (wide→long) + sort rows.
 // Group & Summarize lives in ExplorerModule for non-destructive descriptive stats.
 function ReshapeTab({ rows, headers, info, onAdd }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [sub, setSub] = useState("pivot");
 
   // ── pivot_longer state ────────────────────────────────────────────────────
@@ -261,7 +262,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
 
   const inS = { padding:"0.38rem 0.6rem", background:C.surface2,
     border:`1px solid ${C.border2}`, borderRadius:3, color:C.text,
-    fontFamily:mono, fontSize:11, outline:"none" };
+    fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline:"none" };
 
   return (
     <div>
@@ -273,7 +274,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
         <div>
           <div style={{padding:"0.65rem 1rem",background:C.surface,
             border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,
-            borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+            borderRadius:4,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
             Converts <span style={{color:C.gold}}>wide format</span> to{" "}
             <span style={{color:C.teal}}>long format</span>.
             Equivalent to <code style={{color:C.green}}>tidyr::pivot_longer()</code>.
@@ -290,10 +291,10 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                 border:`1px solid ${pivMode===k ? C.teal : C.border2}`,
                 background: pivMode===k ? `${C.teal}12` : "transparent",
                 color: pivMode===k ? C.teal : C.textDim,
-                borderRadius:4, cursor:"pointer", fontFamily:mono, transition:"all 0.1s",
+                borderRadius:4, cursor:"pointer", fontFamily: T.code.fontFamily, transition:"all 0.1s",
               }}>
-                <div style={{fontSize:11, marginBottom:2}}>{pivMode===k ? "✓ " : ""}{l}</div>
-                <div style={{fontSize:9, color:C.textMuted}}>{hint}</div>
+                <div style={{fontSize: T.code.fontSize, marginBottom:2}}>{pivMode===k ? "✓ " : ""}{l}</div>
+                <div style={{fontSize: T.caption.fontSize, color:C.textMuted}}>{hint}</div>
               </button>
             ))}
           </div>
@@ -305,7 +306,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
               {detectedGroups.length > 0 && pivGroups.length === 0 && (
                 <div style={{padding:"0.6rem 0.9rem",background:`${C.gold}08`,
                   border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,
-                  borderRadius:4,marginBottom:"1rem",fontSize:10,fontFamily:mono,color:C.textDim}}>
+                  borderRadius:4,marginBottom:"1rem",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,color:C.textDim}}>
                   <span style={{color:C.gold}}>Auto-detected {detectedGroups.length} variable group{detectedGroups.length!==1?"s":""}:</span>{" "}
                   {detectedGroups.map(g => (
                     <span key={g.prefix} style={{color:C.text,marginRight:6}}>{g.prefix}*</span>
@@ -314,7 +315,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                     style={{marginLeft:8,padding:"0.15rem 0.55rem",
                       border:`1px solid ${C.gold}`,borderRadius:2,
                       background:"transparent",color:C.gold,cursor:"pointer",
-                      fontSize:9,fontFamily:mono}}>
+                      fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>
                     Use all →
                   </button>
                 </div>
@@ -333,7 +334,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
               {pivGroups.length === 0 && (
                 <div style={{padding:"0.6rem 0.9rem",background:C.surface,
                   border:`1px dashed ${C.border2}`,borderRadius:4,
-                  fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"0.8rem"}}>
+                  fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"0.8rem"}}>
                   Add one group per variable (e.g. income_ → income, hours_ → hours).
                 </div>
               )}
@@ -350,7 +351,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                           placeholder="column prefix (e.g. income_)"
                           style={{...inS, width:"100%", boxSizing:"border-box"}}/>
                         {matchedCols.length > 0 && (
-                          <div style={{fontSize:9,color:C.teal,fontFamily:mono,marginTop:2}}>
+                          <div style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily,marginTop:2}}>
                             matches: {matchedCols.slice(0,4).join(", ")}{matchedCols.length>4?`… +${matchedCols.length-4}`:""}
                           </div>
                         )}
@@ -362,7 +363,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                       <button onClick={() => removeGroup(i)} style={{
                         background:"transparent",border:`1px solid ${C.border2}`,
                         borderRadius:2,color:C.textMuted,cursor:"pointer",
-                        fontSize:11,padding:"0.2rem 0.4rem"}}>✕</button>
+                        fontSize: T.code.fontSize,padding:"0.2rem 0.4rem"}}>✕</button>
                     </div>
                   );
                 })}
@@ -370,7 +371,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
               <button onClick={() => addGroup()}
                 style={{padding:"0.25rem 0.7rem",border:`1px dashed ${C.teal}`,
                   background:"transparent",color:C.teal,borderRadius:3,
-                  cursor:"pointer",fontSize:10,fontFamily:mono,marginBottom:"1.2rem"}}>
+                  cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,marginBottom:"1.2rem"}}>
                 + add variable group
               </button>
 
@@ -378,19 +379,19 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
               {pivGroups.some(g=>g.prefix&&g.colName) && multiKeyValues.length > 0 && (
                 <div style={{padding:"0.55rem 0.85rem",background:`${C.teal}08`,
                   border:`1px solid ${C.teal}30`,borderRadius:3,marginBottom:"1rem",
-                  fontSize:11,fontFamily:mono,color:C.textDim,lineHeight:1.8}}>
+                  fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,color:C.textDim,lineHeight:1.8}}>
                   <span style={{color:C.gold}}>→</span>{" "}
                   {rows.length} rows × {headers.length} cols{" "}
                   <span style={{color:C.textMuted}}>→</span>{" "}
                   <span style={{color:C.teal}}>{rows.length * multiKeyValues.length}</span> rows × {idColsMulti.length + 1 + pivGroups.filter(g=>g.colName).length} cols
-                  <div style={{fontSize:9,color:C.textMuted,marginTop:3}}>
+                  <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:3}}>
                     Key: <span style={{color:C.violet}}>{keyName||"?"}</span>{" = "}
                     {multiKeyValues.slice(0,6).map(k=>(
                       <span key={k} style={{color:C.text,marginRight:4}}>{k}</span>
                     ))}
                     {multiKeyValues.length>6 && <span>+{multiKeyValues.length-6} more</span>}
                   </div>
-                  <div style={{fontSize:9,color:C.textMuted,marginTop:2}}>
+                  <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:2}}>
                     Value cols: {pivGroups.filter(g=>g.colName).map(g=>(
                       <span key={g.colName} style={{color:C.teal,marginRight:4}}>{g.colName}</span>
                     ))}
@@ -408,11 +409,11 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                 <button onClick={()=>setPivCols(headers.filter(h=>info[h]?.isNum))}
                   style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
                     background:"transparent",color:C.textDim,borderRadius:2,
-                    cursor:"pointer",fontSize:9,fontFamily:mono}}>select all numeric</button>
+                    cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>select all numeric</button>
                 <button onClick={()=>setPivCols([])}
                   style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
                     background:"transparent",color:C.textDim,borderRadius:2,
-                    cursor:"pointer",fontSize:9,fontFamily:mono}}>clear</button>
+                    cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>clear</button>
               </div>
               <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem",
                 maxHeight:140,overflowY:"auto",padding:"0.5rem",
@@ -425,7 +426,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                       border:`1px solid ${sel ? C.teal : C.border2}`,
                       background: sel ? `${C.teal}18` : "transparent",
                       color: sel ? C.teal : info[h]?.isNum ? C.blue : C.textDim,
-                      borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+                      borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,
                       transition:"all 0.1s",
                     }}>
                       {sel ? "✓ " : ""}{h}
@@ -448,7 +449,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                   </div>
                 ))}
               </div>
-              <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginBottom:"1rem"}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"1rem"}}>
                 Separator splits column name to extract key value — e.g.{" "}
                 <span style={{color:C.text}}>income_2019</span> with sep{" "}
                 <span style={{color:C.text}}>_</span> → key={" "}
@@ -458,7 +459,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
               {pivCols.length > 0 && (
                 <div style={{padding:"0.5rem 0.75rem",background:C.surface,
                   border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",
-                  fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.7}}>
+                  fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,lineHeight:1.7}}>
                   <span style={{color:C.textDim}}>ID cols: </span>
                   {idColsSimple.slice(0,5).map(h=>(
                     <span key={h} style={{color:C.gold,marginRight:5}}>{h}</span>
@@ -478,7 +479,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                 justifyContent:"space-between",alignItems:"center",
                 background:C.surface,border:`1px solid ${C.border}`,
                 borderLeft:`3px solid ${C.violet}`,borderRadius:4,
-                color:C.text,cursor:"pointer",fontFamily:mono,fontSize:11}}>
+                color:C.text,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize}}>
               <span>Pivot Wider</span>
               <span style={{color:C.violet}}>{wideOpen ? "hide" : "show"}</span>
             </button>
@@ -487,7 +488,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
               <div style={{padding:"0.9rem 0 0"}}>
                 <div style={{padding:"0.65rem 1rem",background:C.surface,
                   border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.violet}`,
-                  borderRadius:4,marginBottom:"1rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+                  borderRadius:4,marginBottom:"1rem",fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
                   Converts <span style={{color:C.teal}}>long format</span> to{" "}
                   <span style={{color:C.gold}}>wide format</span>.
                   Equivalent to <code style={{color:C.green}}>tidyr::pivot_wider()</code>.
@@ -498,11 +499,11 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                   <button onClick={()=>setWideIdCols(wideIdCandidates)}
                     style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
                       background:"transparent",color:C.textDim,borderRadius:2,
-                      cursor:"pointer",fontSize:9,fontFamily:mono}}>select all ids</button>
+                      cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>select all ids</button>
                   <button onClick={()=>setWideIdCols([])}
                     style={{padding:"0.2rem 0.55rem",border:`1px solid ${C.border2}`,
                       background:"transparent",color:C.textDim,borderRadius:2,
-                      cursor:"pointer",fontSize:9,fontFamily:mono}}>clear</button>
+                      cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>clear</button>
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem",
                   maxHeight:110,overflowY:"auto",padding:"0.5rem",
@@ -515,7 +516,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                         border:`1px solid ${sel ? C.gold : C.border2}`,
                         background: sel ? `${C.gold}18` : "transparent",
                         color: sel ? C.gold : info[h]?.isNum ? C.blue : C.textDim,
-                        borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+                        borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,
                         transition:"all 0.1s",
                       }}>
                         {h}
@@ -561,12 +562,12 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                 {canWider && (
                   <div style={{padding:"0.55rem 0.85rem",background:`${C.violet}08`,
                     border:`1px solid ${C.violet}30`,borderRadius:3,marginBottom:"1rem",
-                    fontSize:11,fontFamily:mono,color:C.textDim,lineHeight:1.7}}>
+                    fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,color:C.textDim,lineHeight:1.7}}>
                     <span style={{color:C.gold}}>{"->"}</span>{" "}
                     {rows.length} rows x {headers.length} cols{" "}
                     <span style={{color:C.textMuted}}>{"->"}</span>{" "}
                     <span style={{color:C.violet}}>{wideRowCount}</span> rows x {wideEffectiveIdCols.length + wideOutputCols.length} cols
-                    <div style={{fontSize:9,color:C.textMuted,marginTop:3}}>
+                    <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:3}}>
                       New cols: {wideOutputCols.slice(0,6).map(h=>(
                         <span key={h} style={{color:C.text,marginRight:4}}>{h}</span>
                       ))}
@@ -587,7 +588,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
         <div>
           <div style={{padding:"0.65rem 1rem",background:C.surface,
             border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.gold}`,
-            borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+            borderRadius:4,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
             Collapse rows to one row per group and compute summary statistics.
           </div>
 
@@ -605,7 +606,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                   border:`1px solid ${sel ? C.gold : C.border2}`,
                   background: sel ? `${C.gold}18` : "transparent",
                   color: sel ? C.gold : info[h]?.isNum ? C.blue : C.textDim,
-                  borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,
+                  borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,
                   transition:"all 0.1s",
                 }}>
                   {sel ? "✓ " : ""}{h}
@@ -619,17 +620,17 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
             <button onClick={()=>addSumAgg()} style={{
               padding:"0.2rem 0.55rem",border:`1px solid ${C.blue}`,
               background:`${C.blue}10`,color:C.blue,borderRadius:2,
-              cursor:"pointer",fontSize:9,fontFamily:mono}}>+ add row</button>
+              cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>+ add row</button>
           </div>
 
           {sumNumCols.length > 0 && (
             <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:"0.8rem"}}>
-              <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,alignSelf:"center",marginRight:2}}>quick add:</span>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,alignSelf:"center",marginRight:2}}>quick add:</span>
               {sumNumCols.map(h => (
                 <button key={h} onClick={()=>addSumAgg(h,"mean")}
                   style={{padding:"0.18rem 0.5rem",border:`1px solid ${C.border2}`,
                     background:"transparent",color:C.textDim,borderRadius:2,
-                    cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.1s"}}>
+                    cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
                   + {h}
                 </button>
               ))}
@@ -639,7 +640,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
           {sumAggs.length === 0 && (
             <div style={{padding:"0.65rem 1rem",background:C.surface,
               border:`1px dashed ${C.border2}`,borderRadius:4,
-              fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"1rem"}}>
+              fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"1rem"}}>
               Add at least one aggregation.
             </div>
           )}
@@ -690,7 +691,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                 <button onClick={()=>rmSumAgg(i)} style={{
                   background:"transparent",border:`1px solid ${C.border2}`,
                   borderRadius:2,color:C.textMuted,cursor:"pointer",
-                  fontSize:11,padding:"0.34rem 0.5rem"}}>×</button>
+                  fontSize: T.code.fontSize,padding:"0.34rem 0.5rem"}}>×</button>
               </div>
             ))}
           </div>
@@ -705,7 +706,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
         <div>
           <div style={{padding:"0.65rem 1rem",background:C.surface,
             border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.blue}`,
-            borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+            borderRadius:4,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
             Sort rows by one or more columns. Equivalent to{" "}
             <code style={{color:C.green}}>dplyr::arrange()</code>.{" "}
             Multiple keys are applied in priority order — first key wins.
@@ -718,7 +719,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
           {arrCols.length === 0 && (
             <div style={{padding:"0.65rem 1rem",background:C.surface,
               border:`1px dashed ${C.border2}`,borderRadius:4,
-              fontSize:11,color:C.textMuted,fontFamily:mono,marginBottom:"0.8rem"}}>
+              fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"0.8rem"}}>
               Add at least one sort key below.
             </div>
           )}
@@ -734,19 +735,19 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                     disabled={i===0}
                     style={{background:"transparent",border:"none",
                       color:i===0?C.textMuted:C.textDim,cursor:i===0?"default":"pointer",
-                      fontSize:9,padding:"1px 2px",lineHeight:1}}>▲</button>
+                      fontSize: T.caption.fontSize,padding:"1px 2px",lineHeight:1}}>▲</button>
                   <button onClick={()=>setArrCols(p=>{const n=[...p];if(i<p.length-1){[n[i],n[i+1]]=[n[i+1],n[i]];}return n;})}
                     disabled={i===arrCols.length-1}
                     style={{background:"transparent",border:"none",
                       color:i===arrCols.length-1?C.textMuted:C.textDim,
                       cursor:i===arrCols.length-1?"default":"pointer",
-                      fontSize:9,padding:"1px 2px",lineHeight:1}}>▼</button>
+                      fontSize: T.caption.fontSize,padding:"1px 2px",lineHeight:1}}>▼</button>
                 </div>
                 <select value={ak.col}
                   onChange={e=>setArrCols(p=>p.map((x,j)=>j!==i?x:{...x,col:e.target.value}))}
                   style={{padding:"0.38rem 0.6rem",background:C.surface2,
                     border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,
-                    fontFamily:mono,fontSize:11,outline:"none",width:"100%"}}>
+                    fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none",width:"100%"}}>
                   <option value="">— column —</option>
                   {headers.map(h=><option key={h} value={h}>{h}</option>)}
                 </select>
@@ -754,7 +755,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                   {[["asc","↑ asc"],["desc","↓ desc"]].map(([d,l])=>(
                     <button key={d}
                       onClick={()=>setArrCols(p=>p.map((x,j)=>j!==i?x:{...x,dir:d}))}
-                      style={{padding:"0.22rem 0.5rem",fontSize:9,fontFamily:mono,
+                      style={{padding:"0.22rem 0.5rem",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,
                         border:`1px solid ${ak.dir===d?C.blue:C.border2}`,
                         background:ak.dir===d?`${C.blue}18`:"transparent",
                         color:ak.dir===d?C.blue:C.textDim,
@@ -764,20 +765,20 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
                 <button onClick={()=>setArrCols(p=>p.filter((_,j)=>j!==i))}
                   style={{background:"transparent",border:`1px solid ${C.border2}`,
                     borderRadius:2,color:C.textMuted,cursor:"pointer",
-                    fontSize:11,padding:"0.2rem 0.4rem"}}>✕</button>
+                    fontSize: T.code.fontSize,padding:"0.2rem 0.4rem"}}>✕</button>
               </div>
             ))}
           </div>
 
           {/* Quick-add chips */}
           <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:"1rem"}}>
-            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,
+            <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,
               alignSelf:"center",marginRight:2}}>add:</span>
             {headers.filter(h=>!arrCols.some(ak=>ak.col===h)).map(h=>(
               <button key={h} onClick={()=>setArrCols(p=>[...p,{col:h,dir:"asc"}])}
                 style={{padding:"0.18rem 0.5rem",border:`1px solid ${C.border2}`,
                   background:"transparent",color:C.textDim,borderRadius:2,
-                  cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.1s"}}
+                  cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}
                 onMouseEnter={e=>{e.currentTarget.style.borderColor=C.blue;e.currentTarget.style.color=C.blue;}}
                 onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}>
                 + {h}
@@ -789,7 +790,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
           {arrCols.some(ak=>ak.col) && (
             <div style={{padding:"0.55rem 0.85rem",background:`${C.blue}08`,
               border:`1px solid ${C.blue}30`,borderRadius:3,marginBottom:"1rem",
-              fontSize:11,fontFamily:mono,color:C.textDim}}>
+              fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,color:C.textDim}}>
               <span style={{color:C.gold}}>→</span>{" "}
               arrange(<span style={{color:C.blue}}>
                 {arrCols.filter(ak=>ak.col).map((ak,i,arr)=>(

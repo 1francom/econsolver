@@ -13,6 +13,8 @@ if (import.meta.env.DEV) {
   import('./math/__validation__/workbenchStoreValidation.js')
   // Self-registers window.__validation.workbenchOps() for card→engine→result checks.
   import('./math/__validation__/workbenchOpsValidation.js')
+  // Self-registers window.__validation.faseX3() for AI-service hardening audit (caching/routing/privacy/LocalAI).
+  import('./services/AI/__validation__/faseX3Validation.js')
 }
 
 if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'fase5') {
@@ -80,6 +82,21 @@ if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('vali
       document.documentElement.dataset.fase8Validation = JSON.stringify({
         error: error?.message ?? String(error),
       })
+    })
+}
+
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'faseX3live') {
+  // LIVE eval — real API calls (Tasks 4 & 5). Costs tokens; gated behind its own param.
+  import('./services/AI/__validation__/faseX3LiveEval.js')
+    .then(({ runFaseX3LiveEval }) => runFaseX3LiveEval())
+    .then(out => {
+      document.documentElement.dataset.faseX3LiveEval = JSON.stringify({
+        unitAccuracy: out.t4?.accuracy, unitPass: out.t4?.pass,
+        narrativeFlags: out.t5?.results?.filter(r => !r.ok).map(r => `${r.case}: ${r.note}`),
+      })
+    })
+    .catch(error => {
+      document.documentElement.dataset.faseX3LiveEval = JSON.stringify({ error: error?.message ?? String(error) })
     })
 }
 

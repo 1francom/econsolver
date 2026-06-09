@@ -7,12 +7,14 @@ import { makeCabaMetricGrid } from "../shared/crs.js";
 import { geoBbox } from "./geo.js";
 import { GEO_MARGIN, appendSvgLegend } from "./legend.js";
 import { kde2d, polygonCentroid, transformCoord } from "../../../../math/SpatialEngine.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
 
 export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
   { Plt, layers, rows, availableDatasets, title, subtitle, caption,
     maxW = 700, maxH = 0, forceH = 0, showTiles = false, C },
   ref
 ) {
+  const { T } = useTheme();
   const canvasRef  = useRef(null);
   const tileCanRef = useRef(null);
   const wrapperRef = useRef(null);
@@ -48,21 +50,21 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       const textColor = showTiles ? "#111" : (C?.text ?? "#c8c8c8");
       const mutedColor = showTiles ? "#555" : (C?.textMuted ?? "#8a9ab0");
       if (title) {
-        ctx.font = "bold 15px serif";
+        ctx.font = `bold ${T.h2.fontSize} serif`;
         ctx.fillStyle = textColor;
         ctx.textAlign = "center";
         ctx.textBaseline = "alphabetic";
         ctx.fillText(title, svgW / 2, 20);
       }
       if (subtitle) {
-        ctx.font = "11px serif";
+        ctx.font = `${T.caption.fontSize} serif`;
         ctx.fillStyle = mutedColor;
         ctx.textAlign = "center";
         ctx.fillText(subtitle, svgW / 2, title ? 40 : 20);
       }
       // Caption at bottom
       if (caption) {
-        ctx.font = "9px serif";
+        ctx.font = `${T.caption.fontSize} serif`;
         ctx.fillStyle = mutedColor;
         ctx.textAlign = "right";
         ctx.fillText(caption, svgW - 8, totalH - 6);
@@ -113,7 +115,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       };
       document.body.appendChild(iframe);
     },
-  }), [showTiles, C?.bg, title, subtitle, caption]);
+  }), [showTiles, C?.bg, title, subtitle, caption, T.caption.fontSize, T.h2.fontSize]);
 
   useEffect(() => {
     if (!Plt || !canvasRef.current || layers.length === 0) return;
@@ -328,7 +330,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       const svg = Plt.plot({
         width: plotW, height: plotH,
         marginTop: MT, marginRight: MR, marginBottom: MB, marginLeft: ML,
-        style: { background: showTiles ? "transparent" : (C?.bg ?? "#0e1117"), color: C?.text ?? "#c8c8c8", fontFamily: "serif", fontSize: "11px" },
+        style: { background: showTiles ? "transparent" : (C?.bg ?? "#0e1117"), color: C?.text ?? "#c8c8c8", fontFamily: "serif", fontSize: T.caption.fontSize },
         x: { domain: [xMin, xMax], label: null, nice: false, grid: true,
              tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°W` : `${d.toFixed(2)}°E` },
         y: { domain: [yMin, yMax], label: null, nice: false, grid: true,
@@ -339,7 +341,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       el.appendChild(svg);
     } catch (e) {
       const errDiv = document.createElement("div");
-      errDiv.style.cssText = `color:${C?.red ?? "#c47070"};font-family:monospace;font-size:10px;padding:8px`;
+      errDiv.style.cssText = `color:${C?.red ?? "#c47070"};font-family:monospace;font-size:${T.caption.fontSize};padding:8px`;
       errDiv.textContent = e.message;
       el.appendChild(errDiv);
     }
@@ -376,17 +378,17 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     }
 
     return () => { while (el.firstChild) el.removeChild(el.firstChild); };
-  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, maxW, maxH, forceH, showTiles, C]);
+  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, maxW, maxH, forceH, showTiles, C, T.caption.fontSize]);
 
   return (
     <div ref={wrapperRef} style={{ fontFamily: "serif", color: C?.text ?? "#c8c8c8", background: C?.bg ?? "#0e1117", padding: "12px 8px 8px", borderRadius: 4, border: `1px solid ${C?.border ?? "#2e3340"}` }}>
-      {title    && <div style={{ textAlign: "center", fontSize: 15, fontWeight: "bold", marginBottom: 2 }}>{title}</div>}
-      {subtitle && <div style={{ textAlign: "center", fontSize: 11, color: C?.textMuted ?? "#8a9ab0", marginBottom: 6 }}>{subtitle}</div>}
+      {title    && <div style={{ textAlign: "center", fontSize: T.h2.fontSize, fontWeight: "bold", marginBottom: 2 }}>{title}</div>}
+      {subtitle && <div style={{ textAlign: "center", fontSize: T.caption.fontSize, color: C?.textMuted ?? "#8a9ab0", marginBottom: 6 }}>{subtitle}</div>}
       <div style={{ position: "relative" }}>
         {showTiles && <canvas ref={tileCanRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />}
         <div ref={canvasRef} style={{ position: "relative", textAlign: "center" }} />
       </div>
-      {caption  && <div style={{ textAlign: "right", fontSize: 9, color: C?.textMuted ?? "#5a6880", marginTop: 4 }}>{caption}</div>}
+      {caption  && <div style={{ textAlign: "right", fontSize: T.caption.fontSize, color: C?.textMuted ?? "#5a6880", marginTop: 4 }}>{caption}</div>}
     </div>
   );
 });

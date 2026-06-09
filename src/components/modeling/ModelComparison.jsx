@@ -653,7 +653,7 @@ export default function ModelComparison({ models, dataDictionary, pipeline = [],
           </div>
           <button onClick={onClose}
             style={{ background: "none", border: "none", cursor: "pointer",
-                     color: C.textMuted, fontSize: 16, padding: "0 4px" }}>
+                     color: C.textMuted, fontSize: T.body.fontSize, padding: "0 4px" }}>
             ×
           </button>
         </div>

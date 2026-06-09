@@ -77,7 +77,13 @@ export function detectPII(headers, sampleRows = []) {
   const result = {};
 
   for (const col of headers) {
-    const colLower = col.toLowerCase();
+    // Normalize separators to spaces so \b word-boundary rules fire on
+    // snake_case / kebab-case / dot.case / camelCase column names.
+    // (\b fails on "respondent_name" because "_" is a regex word char.)
+    const colLower = String(col)
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2") // camelCase → "camel Case"
+      .replace(/[_\-.]+/g, " ")                // snake/kebab/dot → space
+      .toLowerCase();
     let sensitivity = PII_SENSITIVITY.NONE;
     const reasons = [];
 

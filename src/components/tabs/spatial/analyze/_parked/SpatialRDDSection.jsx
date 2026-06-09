@@ -1,12 +1,14 @@
 // ─── ECON STUDIO · spatial/analyze/_parked/SpatialRDDSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo } from "react";
-import { mono } from "../../shared/constants.js";
+import { useTheme } from "../../../../../ThemeContext.jsx";
+
 import { ColSelect, NumInput, ApplyBtn, ErrBanner } from "../../shared/atoms.jsx";
 import { runSpatialRDD } from "../../../../../math/SpatialRDDEngine.js";
 import { wrapResult } from "../../../../../math/EstimationResult.js";
 import * as modelBuffer from "../../../../../services/modelBuffer.js";
 
 export function SpatialRDDSection({ rows, headers, C }) {
+  const { T } = useTheme();
   const numericHeaders = useMemo(
     () => headers.filter(h => rows.slice(0, 50).some(r => typeof r[h] === "number")),
     [rows, headers]
@@ -78,7 +80,7 @@ export function SpatialRDDSection({ rows, headers, C }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Local linear RD with distance-to-boundary as the running variable
         (Keele &amp; Titiunik 2015). Pair with the <em>Distance to Boundary</em>
         section above to generate the distance &amp; treatment columns first.
@@ -93,11 +95,11 @@ export function SpatialRDDSection({ rows, headers, C }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>
+          <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
             Kernel
           </label>
           <select value={kernel} onChange={e => setKernel(e.target.value)}
-            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
             <option value="triangular">triangular</option>
             <option value="uniform">uniform</option>
             <option value="epanechnikov">epanechnikov</option>
@@ -105,11 +107,11 @@ export function SpatialRDDSection({ rows, headers, C }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>
+          <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
             Bandwidth
           </label>
           <select value={bwMode} onChange={e => setBwMode(e.target.value)}
-            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
             <option value="auto">auto (IK)</option>
             <option value="manual">manual</option>
           </select>
@@ -120,11 +122,11 @@ export function SpatialRDDSection({ rows, headers, C }) {
         ) : <div />}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: mono }}>
+          <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
             SE type
           </label>
           <select value={seType} onChange={e => setSeType(e.target.value)}
-            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+            style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
             <option value="classical">classical</option>
             <option value="HC0">HC0</option>
             <option value="HC1">HC1</option>
@@ -137,7 +139,7 @@ export function SpatialRDDSection({ rows, headers, C }) {
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} label="Estimate Spatial RD" C={C} />
         {result && (
-          <span style={{ fontSize: 9, color: C.teal, fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily }}>
             ✓ LATE = {result.late?.toFixed(4)} (SE {result.lateSE?.toFixed(4)},
             p = {result.lateP?.toFixed(4)}) · h = {result.h?.toFixed(4)} ·
             n = {result.n} ({result.nTreated} treated / {result.nControl} control)
@@ -145,7 +147,7 @@ export function SpatialRDDSection({ rows, headers, C }) {
         )}
       </div>
       {bufferedId && (
-        <div style={{ fontSize: 9, color: C.gold, fontFamily: mono }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily }}>
           → pinned to model buffer (id {bufferedId.slice(0, 8)}…). Open the Model tab to inspect.
         </div>
       )}

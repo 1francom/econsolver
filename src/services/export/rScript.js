@@ -532,25 +532,52 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
   }
 }
 
+// ─── R FORMULA BUILDER ────────────────────────────────────────────────────────
+// Builds the RHS of an R formula from raw variable lists + interaction terms.
+// Uses xVarsRaw/wVarsRaw (pre-expansion) when available; else falls back to
+// the post-expansion dummy columns (xVars/wVars). Factor vars are wrapped in
+// factor(). Interactions use R's * (main effects + product) or : (product only).
+function buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms) {
+  const fmt = v => fvSet.has(v) ? `factor(${rName(v)})` : rName(v);
+  const rawX = xVarsRaw ?? xVars;
+  const rawW = wVarsRaw ?? wVars;
+
+  const parts = [...rawX, ...rawW].map(fmt);
+  for (const { var1, var2, type } of (interactionTerms ?? [])) {
+    if (!var1 || !var2) continue;
+    const f1 = fmt(var1);
+    const f2 = fmt(var2);
+    if (type === "*") {
+      // Remove individual main effects (they'll be re-emitted via A*B)
+      const i1 = parts.indexOf(f1); if (i1 >= 0) parts.splice(i1, 1);
+      const i2 = parts.indexOf(f2); if (i2 >= 0) parts.splice(i2, 1);
+      parts.push(`${f1} * ${f2}`);
+    } else {
+      parts.push(`${f1} : ${f2}`);
+    }
+  }
+  return parts.join(" + ") || "1";
+}
+
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
 function transpileModel(model) {
   const {
     type, yVar, xVars = [], wVars = [],
     zVars = [], postVar, treatVar,
     runningVar, cutoff, bandwidth, kernel = "triangular", polyOrder = 1,
-    entityCol, timeCol, factorVars = [], feCols = null,
+    entityCol, timeCol, factorVars = [], feCols = null, offsetCol = null,
     treatedUnit, treatTime,
     distCol, treatmentCol,
     weightCol = null,
     cohortCol, periodCol, controlMode, refPeriod,
+    interactionTerms = [], xVarsRaw = null, wVarsRaw = null,
   } = model;
 
   const fvSet = new Set(factorVars);
   const fmtR  = v => fvSet.has(v) ? `factor(${rName(v)})` : rName(v);
 
   const y    = rName(yVar);
-  const allX = [...xVars, ...wVars].map(fmtR);
-  const xStr = allX.join(" + ") || "1";
+  const xStr = buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
 
   switch (type) {
 
@@ -960,6 +987,26 @@ function transpileModel(model) {
         `# Overdispersion check: Pearson chi-sq / df`,
         `pearson_resid <- residuals(fit, type = "pearson")`,
         `cat("Pearson chi-sq / df:", sum(pearson_resid^2) / fit$nobs, "\\n")`,
+      ].join("\n");
+    }
+
+    case "NegBinFE": {
+      const fes = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]).map(rName);
+      const feTerms = fes.map(f => `factor(${f})`);
+      const cov = xVars.map(fmtR).filter(Boolean);
+      const rhs = [...cov, ...feTerms].join(" + ") || "1";
+      const offsetArg = offsetCol ? `,\n  offset = log(${rName(offsetCol)})` : "";
+      return [
+        `# Negative Binomial FE (NB2 with fixed-effect dummies)`,
+        `library(MASS)`,
+        ``,
+        `fit <- MASS::glm.nb(${y} ~ ${rhs},`,
+        `  data = df${offsetArg})`,
+        ``,
+        `summary(fit)`,
+        `cat("Dispersion alpha:", 1 / fit$theta, "\\n")`,
+        `cat("Incidence Rate Ratios:\\n")`,
+        `print(exp(coef(fit)))`,
       ].join("\n");
     }
 
@@ -1440,6 +1487,10 @@ function buildPackageList(modelType, pipeline) {
     pkgs.add("sandwich");
     pkgs.add("lmtest");
     pkgs.delete("fixest");  // base R glm() — no fixest needed
+  }
+  if (modelType === "NegBinFE") {
+    pkgs.add("MASS");
+    pkgs.delete("fixest");
   }
 
   // Pipeline-specific

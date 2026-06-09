@@ -5,7 +5,7 @@
 // in ./results/. Keep this module free of estimator-specific logic.
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { useTheme, mono } from "./shared.jsx";
+import { useTheme } from "./shared.jsx";
 import { stars, buildLatex, buildCSVExport, downloadText } from "../../math/index.js";
 import { generateRScript }      from "../../services/export/rScript.js";
 import { generatePythonScript } from "../../services/export/pythonScript.js";
@@ -13,31 +13,31 @@ import { generateStataScript }  from "../../services/export/stataScript.js";
 import { downloadReplicationBundle } from "../../services/export/replicationBundle.js";
 
 export function Lbl({ children, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.textMuted;
   return (
-    <div style={{ fontSize: 9, color, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8, fontFamily: mono }}>
+    <div style={{ fontSize: T.caption.fontSize, color, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 8, fontFamily: T.code.fontFamily }}>
       {children}
     </div>
   );
 }
 export function Badge({ label, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
-    <span style={{ fontSize: 9, padding: "2px 7px", border: `1px solid ${color}`, color, borderRadius: 2, letterSpacing: "0.1em", fontFamily: mono }}>
+    <span style={{ fontSize: T.caption.fontSize, padding: "2px 7px", border: `1px solid ${color}`, color, borderRadius: 2, letterSpacing: "0.1em", fontFamily: T.code.fontFamily }}>
       {label}
     </span>
   );
 }
 export function InfoBox({ children, color }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   color = color ?? C.blue;
   return (
     <div style={{
       padding: "0.65rem 0.9rem", background: `${color}08`,
       border: `1px solid ${color}30`, borderLeft: `3px solid ${color}`,
-      borderRadius: 4, fontSize: 11, color: C.textDim, lineHeight: 1.7,
-      fontFamily: mono, marginBottom: "1rem",
+      borderRadius: 4, fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.7,
+      fontFamily: T.code.fontFamily, marginBottom: "1rem",
     }}>
       {children}
     </div>
@@ -62,7 +62,7 @@ function buildEquationLatex(varNames, beta, yVar) {
 }
 
 export function RegressionEquation({ varNames, beta, yVar }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [latexCopied, setLatexCopied] = useState(false);
   if (!varNames.length || !beta.length) return null;
   const interceptIdx = varNames.indexOf("(Intercept)");
@@ -87,14 +87,14 @@ export function RegressionEquation({ varNames, beta, yVar }) {
     }}>
       {/* header row: title + copy LaTeX button */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <div style={{ fontSize: 9, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: mono }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
           Estimated Regression Equation
         </div>
         <button
           onClick={copyLatex}
           title="Copy as LaTeX equation"
           style={{
-            fontSize: 8, fontFamily: mono, letterSpacing: "0.1em",
+            fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, letterSpacing: "0.1em",
             padding: "2px 8px", borderRadius: 3, cursor: "pointer",
             border: `1px solid ${latexCopied ? C.teal : C.border2}`,
             background: latexCopied ? `${C.teal}18` : "transparent",
@@ -107,7 +107,7 @@ export function RegressionEquation({ varNames, beta, yVar }) {
       </div>
       {/* equation line — only this row scrolls horizontally */}
       <div style={{ overflowX: "auto", whiteSpace: "nowrap" }}>
-        <div style={{ fontSize: 13, fontFamily: mono, color: C.text, lineHeight: 1.8, display: "inline" }}>
+        <div style={{ fontSize: T.body.fontSize, fontFamily: T.code.fontFamily, color: C.text, lineHeight: 1.8, display: "inline" }}>
           <span style={{ color: C.teal }}>{yVar ? `${yVar}̂` : "ŷ"}</span>
           <span style={{ color: C.textDim }}> = </span>
           {b0 != null && <span style={{ color: b0 >= 0 ? C.text : C.red }}>{b0 < 0 ? "–" : ""}{fmt(b0)}</span>}
@@ -125,7 +125,7 @@ export function RegressionEquation({ varNames, beta, yVar }) {
           })}
         </div>
       </div>
-      <div style={{ marginTop: 6, fontSize: 9, color: C.textMuted, fontFamily: mono, letterSpacing: "0.06em" }}>
+      <div style={{ marginTop: 6, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.06em" }}>
         <span style={{ color: C.teal }}>teal</span> = significant (p&lt;0.05) ·{" "}
         <span style={{ color: C.red }}>red</span> = negative · coefficients rounded to 4 d.p.
       </div>
@@ -135,7 +135,7 @@ export function RegressionEquation({ varNames, beta, yVar }) {
 
 // ─── FOREST PLOT ─────────────────────────────────────────────────────────────
 export function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename = "coefficient_plot.svg" }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const items = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
     .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s));
@@ -173,18 +173,18 @@ export function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", f
         padding: "0.35rem 0.9rem", background: C.surface,
         borderBottom: `1px solid ${C.border}`,
       }}>
-        <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>
           Coefficient plot · 95% CI
         </span>
         <button onClick={handleExport}
-          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: mono, fontSize: 9, transition: "all 0.12s" }}
+          style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
         >↓ SVG</button>
       </div>
       <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
         <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", maxWidth: 700, minWidth: 360, height: "auto", maxHeight: "45vh", display: "block", fontFamily: mono }}>
+          style={{ width: "100%", maxWidth: 700, minWidth: 360, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
           <rect width={W} height={H} fill={C.bg} />
           {items.map((_, i) => (
             <rect key={i} x={PAD.l} y={PAD.t + i * rowH} width={iW} height={rowH}
@@ -262,12 +262,14 @@ function ciMultiplier(df) {
   return 1.96;
 }
 
-export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [] }) {
+export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [], irr = null }) {
   const binarySet = new Set(binaryVars);
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(null);
   const [copied, setCopied] = useState(null);
+  const [showIrr, setShowIrr] = useState(false);
   const z    = ciMultiplier(df);
+  const irrMode = showIrr && irr?.length > 0;
 
   function toLatex() {
     const bodyRows = varNames.map((v, i) => {
@@ -317,15 +319,29 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
       <div style={{
         display: "grid", gridTemplateColumns: COLS,
         background: C.surface, padding: "0.5rem 0.75rem",
-        fontSize: 9, color: C.textMuted, letterSpacing: "0.13em",
+        fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.13em",
         textTransform: "uppercase", gap: 6,
-        borderBottom: `1px solid ${C.border}`, fontFamily: mono,
+        borderBottom: `1px solid ${C.border}`, fontFamily: T.code.fontFamily,
       }}>
-        <div>Variable</div>
-        <div style={{ textAlign: "right" }}>β̂</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          Variable
+          {irr?.length > 0 && (
+            <button onClick={() => setShowIrr(v => !v)} style={{
+              fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
+              padding: "1px 6px", borderRadius: 3, cursor: "pointer",
+              border: `1px solid ${irrMode ? "#9e7ec8" : C.border2}`,
+              background: irrMode ? "#9e7ec8" + "22" : "transparent",
+              color: irrMode ? "#9e7ec8" : C.textDim,
+              letterSpacing: "0.1em", textTransform: "uppercase",
+            }}>
+              {irrMode ? "IRR" : "β"}
+            </button>
+          )}
+        </div>
+        <div style={{ textAlign: "right" }}>{irrMode ? "IRR" : "β̂"}</div>
         <div style={{ textAlign: "right" }}>(SE)</div>
-        <div style={{ textAlign: "right", color: C.teal + "cc" }}>CI 2.5%</div>
-        <div style={{ textAlign: "right", color: C.teal + "cc" }}>CI 97.5%</div>
+        <div style={{ textAlign: "right", color: C.teal + "cc" }}>{irrMode ? "CI lo" : "CI 2.5%"}</div>
+        <div style={{ textAlign: "right", color: C.teal + "cc" }}>{irrMode ? "CI hi" : "CI 97.5%"}</div>
         <div style={{ textAlign: "right" }}>{statLabel}</div>
         <div style={{ textAlign: "right" }}>p</div>
         <div style={{ textAlign: "center" }}>sig</div>
@@ -334,6 +350,17 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
       {varNames.map((v, i) => {
         const b = beta[i], s = se[i], p = pVals[i];
         const lo = b - z * s, hi = b + z * s;
+        const irrVal = irr?.[i];
+        // Delta-method CI for IRR: exp(β ± z·SE)
+        const irrLo = irrMode && isFinite(b) && isFinite(s) ? Math.exp(b - z * s) : null;
+        const irrHi = irrMode && isFinite(b) && isFinite(s) ? Math.exp(b + z * s) : null;
+        const dispVal = irrMode ? irrVal : b;
+        const dispLo  = irrMode ? irrLo  : lo;
+        const dispHi  = irrMode ? irrHi  : hi;
+        // IRR > 1 = rate increase (green), < 1 = rate decrease (red)
+        const dispColor = irrMode
+          ? (irrVal >= 1 ? C.green : C.red)
+          : (b >= 0 ? C.green : C.red);
         const isInt = v === "(Intercept)", isOpen = open === i, sig = p < 0.05;
         return (
           <div key={v} style={{ borderTop: i > 0 ? `1px solid ${C.border}` : "none" }}>
@@ -344,31 +371,42 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                 padding: "0.65rem 0.75rem", gap: 6,
                 background: isOpen ? C.surface2 : i % 2 === 0 ? C.surface : C.surface2,
                 cursor: isInt ? "default" : "pointer",
-                alignItems: "center", transition: "background 0.1s", fontFamily: mono,
+                alignItems: "center", transition: "background 0.1s", fontFamily: T.code.fontFamily,
               }}
               onMouseOver={e => { if (!isInt) e.currentTarget.style.background = C.surface2; }}
               onMouseOut={e => { if (!isOpen) e.currentTarget.style.background = i % 2 === 0 ? C.surface : C.surface2; }}
             >
-              <div style={{ fontSize: 12, color: isInt ? C.textMuted : C.text, display: "flex", alignItems: "center", gap: 5 }}>
+              <div style={{ fontSize: T.code.fontSize, color: isInt ? C.textMuted : C.text, display: "flex", alignItems: "center", gap: 5 }}>
                 {sig && !isInt && <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.teal, display: "inline-block", flexShrink: 0 }} />}
-                {v}{!isInt && <span style={{ fontSize: 9, color: C.textDim }}>▾</span>}
+                {v}{!isInt && <span style={{ fontSize: T.caption.fontSize, color: C.textDim }}>▾</span>}
               </div>
-              <div style={{ textAlign: "right", fontSize: 13, color: b >= 0 ? C.green : C.red, fontFamily: mono }}>{b.toFixed(4)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>({s.toFixed(4)})</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: sig ? C.teal + "cc" : C.textMuted }}>{lo.toFixed(4)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: sig ? C.teal + "cc" : C.textMuted }}>{hi.toFixed(4)}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: C.textDim }}>{tStats?.[i] != null ? Number(tStats[i]).toFixed(3) : "—"}</div>
-              <div style={{ textAlign: "right", fontSize: 11, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p?.toFixed(4) ?? "—"}</div>
-              <div style={{ textAlign: "center", fontSize: 12, color: C.gold }}>{stars(p)}</div>
+              <div style={{ textAlign: "right", fontSize: T.body.fontSize, color: dispColor, fontFamily: T.code.fontFamily }}>
+                {dispVal != null && isFinite(dispVal) ? dispVal.toFixed(4) : "—"}
+                {irrMode && irrVal != null && isFinite(irrVal) && (
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textDim, marginLeft: 4 }}>
+                    ({((irrVal - 1) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </div>
+              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: C.textDim }}>({s.toFixed(4)})</div>
+              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: sig ? C.teal + "cc" : C.textMuted }}>
+                {dispLo != null && isFinite(dispLo) ? dispLo.toFixed(4) : "—"}
+              </div>
+              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: sig ? C.teal + "cc" : C.textMuted }}>
+                {dispHi != null && isFinite(dispHi) ? dispHi.toFixed(4) : "—"}
+              </div>
+              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: C.textDim }}>{tStats?.[i] != null ? Number(tStats[i]).toFixed(3) : "—"}</div>
+              <div style={{ textAlign: "right", fontSize: T.code.fontSize, color: p < 0.05 ? C.gold : C.textMuted }}>{p < 0.001 ? "<0.001" : p?.toFixed(4) ?? "—"}</div>
+              <div style={{ textAlign: "center", fontSize: T.code.fontSize, color: C.gold }}>{stars(p)}</div>
             </div>
             {isOpen && (
               <div style={{
                 padding: "0.8rem 1.1rem 0.8rem 1.4rem", background: C.surface2,
                 borderTop: `1px solid ${C.border}`, borderLeft: `3px solid ${C.gold}`,
-                animation: "fadeUp 0.18s ease", fontSize: 12,
-                color: "#b0a888", lineHeight: 1.8, fontFamily: mono,
+                animation: "fadeUp 0.18s ease", fontSize: T.code.fontSize,
+                color: "#b0a888", lineHeight: 1.8, fontFamily: T.code.fontFamily,
               }}>
-                <span style={{ color: C.goldDim, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase" }}>
+                <span style={{ color: C.goldDim, fontSize: T.caption.fontSize, letterSpacing: "0.15em", textTransform: "uppercase" }}>
                   Economic Interpretation ·{" "}
                 </span>
                 {meMap?.[v] != null ? (
@@ -548,7 +586,7 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
       <div style={{
         padding: "0.4rem 0.75rem", background: C.surface,
         borderTop: `1px solid ${C.border}`,
-        fontSize: 9, color: C.textMuted, fontFamily: mono,
+        fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <span>● significant at 5% · SE in parentheses</span>
@@ -558,7 +596,7 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
             <button key={fmt} onClick={() => copyFmt(fmt)} style={{
               background: "none", border: `1px solid ${C.border}`, borderRadius: 3,
               color: copied === fmt ? C.teal : C.textMuted,
-              fontFamily: mono, fontSize: 8, padding: "1px 6px",
+              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1px 6px",
               cursor: "pointer", letterSpacing: "0.08em",
               transition: "color 0.15s, border-color 0.15s",
               borderColor: copied === fmt ? C.teal : C.border,
@@ -574,7 +612,7 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
 
 // ─── FIT STATS BAR ────────────────────────────────────────────────────────────
 export function FitBar({ items }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{
       display: "grid", gridTemplateColumns: `repeat(${items.length}, 1fr)`,
@@ -582,9 +620,9 @@ export function FitBar({ items }) {
     }}>
       {items.map(s => (
         <div key={s.label} style={{ background: C.surface, padding: "0.65rem 0.9rem" }} title={s.hint || ""}>
-          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 3, fontFamily: mono }}>{s.label}</div>
-          <div style={{ fontSize: 16, color: s.color || C.gold, fontFamily: mono }}>{s.value}</div>
-          {s.sub && <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2, fontFamily: mono }}>{s.sub}</div>}
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 3, fontFamily: T.code.fontFamily }}>{s.label}</div>
+          <div style={{ fontSize: T.h2.fontSize, color: s.color || C.gold, fontFamily: T.code.fontFamily }}>{s.value}</div>
+          {s.sub && <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 2, fontFamily: T.code.fontFamily }}>{s.sub}</div>}
         </div>
       ))}
     </div>
@@ -593,7 +631,7 @@ export function FitBar({ items }) {
 
 // ─── REPLICATE DROPDOWN ───────────────────────────────────────────────────────
 function ReplicateDropdown({ replicateConfig, model }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -647,13 +685,13 @@ function ReplicateDropdown({ replicateConfig, model }) {
           height: "100%", padding: "0.6rem 1rem", background: open ? `${C.gold}14` : C.surface,
           border: "none", borderLeft: `1px solid ${C.border}`,
           color: open ? C.gold : C.textDim,
-          cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
+          cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, transition: "background 0.15s",
           display: "flex", alignItems: "center", gap: 5, borderRadius: "0 0 4px 0",
         }}
         onMouseOver={e => { e.currentTarget.style.background = `${C.gold}14`; e.currentTarget.style.color = C.gold; }}
         onMouseOut={e =>  { if (!open) { e.currentTarget.style.background = C.surface; e.currentTarget.style.color = C.textDim; } }}
       >
-        ⟨/⟩ Replicate <span style={{ fontSize: 9 }}>▾</span>
+        ⟨/⟩ Replicate <span style={{ fontSize: T.caption.fontSize }}>▾</span>
       </button>
       {open && (
         <div style={{
@@ -669,7 +707,7 @@ function ReplicateDropdown({ replicateConfig, model }) {
                 style={{
                   display: "block", width: "100%", textAlign: "left",
                   padding: "0.55rem 1rem", background: "transparent", border: "none",
-                  color, cursor: "pointer", fontFamily: mono, fontSize: 11,
+                  color, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
                   transition: "background 0.1s",
                 }}
                 onMouseOver={e => { e.currentTarget.style.background = `${color}14`; }}
@@ -685,7 +723,7 @@ function ReplicateDropdown({ replicateConfig, model }) {
 
 // ─── EXPORT BAR ───────────────────────────────────────────────────────────────
 export function ExportBar({ yVar, results, model, onReport, replicateConfig, latexBuilder, csvBuilder }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [showLatex, setShowLatex] = useState(false);
   const [copied, setCopied]       = useState(false);
   const latex = useMemo(
@@ -699,7 +737,7 @@ export function ExportBar({ yVar, results, model, onReport, replicateConfig, lat
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: "1.2rem" }}>
-      <div style={{ background: C.surface, padding: "0.45rem 1rem", fontSize: 9, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: mono, borderRadius: "4px 4px 0 0" }}>
+      <div style={{ background: C.surface, padding: "0.45rem 1rem", fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, fontFamily: T.code.fontFamily, borderRadius: "4px 4px 0 0" }}>
         Export
       </div>
       {/* Button row — inner group has overflow:hidden for rounded corners; Replicate sits outside it */}
@@ -714,7 +752,7 @@ export function ExportBar({ yVar, results, model, onReport, replicateConfig, lat
                 flex: 1, padding: "0.6rem 1rem",
                 background: active ? C.goldFaint : C.surface,
                 border: "none", color: active ? C.gold : C.textDim,
-                cursor: "pointer", fontFamily: mono, fontSize: 11, transition: "background 0.15s",
+                cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, transition: "background 0.15s",
               }}
               onMouseOver={e => { if (!active) e.currentTarget.style.background = C.surface2; }}
               onMouseOut={e =>  { if (!active) e.currentTarget.style.background = C.surface; }}
@@ -726,8 +764,8 @@ export function ExportBar({ yVar, results, model, onReport, replicateConfig, lat
             <button onClick={onReport}
               style={{
                 flex: 1, padding: "0.6rem 1rem", background: C.surface,
-                border: "none", color: C.purple, cursor: "pointer", fontFamily: mono,
-                fontSize: 11, transition: "background 0.15s",
+                border: "none", color: C.purple, cursor: "pointer", fontFamily: T.code.fontFamily,
+                fontSize: T.code.fontSize, transition: "background 0.15s",
               }}
               onMouseOver={e => { e.currentTarget.style.background = `${C.purple}14`; }}
               onMouseOut={e =>  { e.currentTarget.style.background = C.surface; }}
@@ -741,7 +779,7 @@ export function ExportBar({ yVar, results, model, onReport, replicateConfig, lat
       {showLatex && (
         <div style={{ background: C.surface2, borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: 10, color: "#5a8a5a", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: mono }}>LaTeX · {model}</span>
+            <span style={{ fontSize: T.caption.fontSize, color: "#5a8a5a", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>LaTeX · {model}</span>
             <button
               onClick={() => { navigator.clipboard.writeText(latex); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
               style={{
@@ -749,13 +787,13 @@ export function ExportBar({ yVar, results, model, onReport, replicateConfig, lat
                 background: copied ? `${C.green}18` : "transparent",
                 border: `1px solid ${copied ? C.green : C.border2}`,
                 color: copied ? C.green : C.textMuted,
-                borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: mono, transition: "all 0.2s",
+                borderRadius: 3, cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, transition: "all 0.2s",
               }}
             >
               {copied ? "✓ Copied!" : "Copy"}
             </button>
           </div>
-          <pre style={{ margin: 0, fontFamily: mono, fontSize: 10, color: C.green, lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre" }}>
+          <pre style={{ margin: 0, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.green, lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre" }}>
             {latex}
           </pre>
         </div>

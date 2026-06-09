@@ -24,6 +24,14 @@ function vectorCells(prefix, got, want, tol) {
 
 export async function runSpatialRegressionValidation() {
   const bench = await loadBench();
+  if (bench.meta?.source !== "spatialreg") {
+    console.warn(
+      `⚠ spatialReg benchmarks are '${bench.meta?.source ?? "unstamped"}' — NOT validated against R. ` +
+      `These checks are an engine self-consistency/regression guard only. ` +
+      `Run spatialRegressionRValidation.R to replace with real spatialreg numbers (set meta.source="spatialreg") ` +
+      `before trusting coef/SE accuracy.`
+    );
+  }
   const { y, x, z, weights } = bench.fixture;
   const X = x.map((v, i) => [v, z[i]]);
   const W = { weights, summary: { n: y.length, links: weights.length, type: "rook", style: "W" } };

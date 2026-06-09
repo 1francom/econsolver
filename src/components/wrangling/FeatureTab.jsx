@@ -1,6 +1,6 @@
 // ─── ECON STUDIO · components/wrangling/FeatureTab.jsx ─────────────────────
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { useTheme, mono, Lbl, Tabs, Btn } from "./shared.jsx";
+import { useTheme, Lbl, Tabs, Btn } from "./shared.jsx";
 import { computeColStats } from "../../services/data/duckdb.js";
 const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
@@ -15,7 +15,7 @@ import { isSafeExpr } from "../../pipeline/exprGuard.js";
 // Security: new Function() is an intentional expression sandbox here —
 // same pattern used throughout runner.js, FormatTab, CalculateTab.
 function MutateSubTab({rows, headers, info, onAdd}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [steps,     setSteps]  = useState([{name:"",expr:""}]);
   const [activeIdx, setActive] = useState(0);
   const [refOpen,   setRefOpen]= useState(false);
@@ -150,7 +150,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
 
   const canAdd = steps.some(s => s.name.trim() && s.expr.trim()) && !preview?.error;
   const inpS={width:"100%",boxSizing:"border-box",padding:"0.45rem 0.7rem",background:C.surface2,
-    border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"};
+    border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"};
 
   const OPS=[["==","=="],["!=","!="],[">=",">="],["<=","<="],[">"," >"],["<"," <"]];
   function addFilt(){setGmFilter(fs=>[...fs,{col:headers[0]||"",op:"==",val:""}]);}
@@ -209,7 +209,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
       {/* Context note */}
       <div style={{padding:"0.5rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
         borderLeft:`3px solid ${isGrouped?C.purple:C.green}`,borderRadius:4,marginBottom:"1rem",
-        fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+        fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
         {isGrouped
           ?<>Grouped mutate — <span style={{color:C.purple}}>group_by() %&gt;% mutate()</span>. Columns become <b>arrays</b> within each group. Use <span style={{color:C.purple}}>any/all/sum/mean/min/max/count/first/last</span>. All rows kept.</>
           :<>dplyr <span style={{color:C.green}}>mutate()</span> — columns are per-row scalars. Math operators (+, −, *, /, **) and helpers: <span style={{color:C.blue}}>log sqrt exp abs pow round min max floor ceil clamp ifelse case_when</span>. Ctrl+Enter to apply.</>}
@@ -220,11 +220,11 @@ function MutateSubTab({rows, headers, info, onAdd}){
         background:isGrouped?`${C.purple}06`:C.surface2,
         border:`1px solid ${isGrouped?C.purple+"40":C.border}`,borderRadius:4}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-          <span style={{fontSize:9,color:isGrouped?C.purple:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,fontWeight:isGrouped?700:400}}>
+          <span style={{fontSize: T.caption.fontSize,color:isGrouped?C.purple:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,fontWeight:isGrouped?700:400}}>
             Group by
           </span>
           {isGrouped&&<button onClick={()=>{setGmBy([]);setGmFilter([]);}}
-            style={{fontSize:9,color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontFamily:mono}}>✕ clear</button>}
+            style={{fontSize: T.caption.fontSize,color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontFamily: T.code.fontFamily}}>✕ clear</button>}
         </div>
         <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
           {headers.map(h=>(
@@ -232,7 +232,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
               style={{padding:"0.2rem 0.5rem",border:`1px solid ${gmBy.includes(h)?C.purple:C.border}`,
                 background:gmBy.includes(h)?`${C.purple}18`:"transparent",
                 color:gmBy.includes(h)?C.purple:C.textMuted,
-                borderRadius:3,cursor:"pointer",fontSize:9,fontFamily:mono,transition:"all 0.1s"}}>
+                borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
               {gmBy.includes(h)?"✓ ":""}{h}
             </button>
           ))}
@@ -240,23 +240,23 @@ function MutateSubTab({rows, headers, info, onAdd}){
         {isGrouped&&(
           <div style={{marginTop:"0.65rem",borderTop:`1px solid ${C.purple}20`,paddingTop:"0.65rem"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:gmFilter.length?6:0}}>
-              <span style={{fontSize:9,color:C.textMuted,letterSpacing:"0.15em",textTransform:"uppercase",fontFamily:mono}}>Filter within group</span>
-              <button onClick={addFilt} style={{fontSize:9,color:C.purple,background:"none",border:`1px solid ${C.purple}40`,borderRadius:3,cursor:"pointer",fontFamily:mono,padding:"0.1rem 0.35rem"}}>+ condition</button>
-              {!gmFilter.length&&<span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>— none (aggregates use all group rows)</span>}
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.15em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>Filter within group</span>
+              <button onClick={addFilt} style={{fontSize: T.caption.fontSize,color:C.purple,background:"none",border:`1px solid ${C.purple}40`,borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,padding:"0.1rem 0.35rem"}}>+ condition</button>
+              {!gmFilter.length&&<span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>— none (aggregates use all group rows)</span>}
             </div>
             {gmFilter.map((f,i)=>(
               <div key={i} style={{display:"flex",gap:4,alignItems:"center",marginBottom:4}}>
                 <select value={f.col} onChange={e=>setFilt(i,"col",e.target.value)}
-                  style={{flex:2,padding:"0.22rem 0.4rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10}}>
+                  style={{flex:2,padding:"0.22rem 0.4rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
                   {headers.map(h=><option key={h} value={h}>{h}</option>)}
                 </select>
                 <select value={f.op} onChange={e=>setFilt(i,"op",e.target.value)}
-                  style={{flex:"0 0 48px",padding:"0.22rem 0.3rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10}}>
+                  style={{flex:"0 0 48px",padding:"0.22rem 0.3rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
                   {OPS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
                 </select>
                 <input value={f.val} onChange={e=>setFilt(i,"val",e.target.value)} placeholder="value"
-                  style={{flex:2,padding:"0.22rem 0.4rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>
-                <button onClick={()=>rmFilt(i)} style={{color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontSize:11}}>✕</button>
+                  style={{flex:2,padding:"0.22rem 0.4rem",background:C.surface,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,outline:"none"}}/>
+                <button onClick={()=>rmFilt(i)} style={{color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontSize: T.code.fontSize}}>✕</button>
               </div>
             ))}
           </div>
@@ -286,7 +286,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
               gap:6,marginBottom:5,alignItems:"center",
               background:i===activeIdx?`${C.green}06`:"transparent",
               borderRadius:3,padding:"0 0 0 0"}}>
-            <span style={{fontSize:9,color:C.textMuted,fontFamily:mono,textAlign:"right",paddingRight:2}}>{i+1}</span>
+            <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,textAlign:"right",paddingRight:2}}>{i+1}</span>
             <input value={s.name} placeholder="e.g. treat"
               onChange={e=>{setStepField(i,"name",e.target.value);setActive(i);}}
               onFocus={()=>setActive(i)}
@@ -299,7 +299,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
               style={{...inpS,resize:"vertical",lineHeight:1.5,borderColor:i===activeIdx?`${C.green}70`:inpS.borderColor}}/>
             {steps.length>1&&(
               <button onClick={e=>{e.stopPropagation();removeStep(i);}}
-                style={{background:"none",border:"none",cursor:"pointer",color:C.textMuted,fontSize:13,lineHeight:1,padding:0}}>✕</button>
+                style={{background:"none",border:"none",cursor:"pointer",color:C.textMuted,fontSize: T.body.fontSize,lineHeight:1,padding:0}}>✕</button>
             )}
           </div>
         ))}
@@ -307,12 +307,12 @@ function MutateSubTab({rows, headers, info, onAdd}){
 
       {/* Script preview + actions */}
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1rem",flexWrap:"wrap"}}>
-        <div style={{flex:1,padding:"0.4rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.9,minHeight:28}}>
+        <div style={{flex:1,padding:"0.4rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily,lineHeight:1.9,minHeight:28}}>
           {steps.filter(s=>s.name.trim()&&s.expr.trim()).length===0
             ? <span style={{color:C.textMuted,fontStyle:"italic"}}>formula preview</span>
             : steps.filter(s=>s.name.trim()&&s.expr.trim()).map((s,i)=>(
                 <div key={i}>
-                  {isGrouped&&i===0&&<span style={{color:C.purple,marginRight:6,fontSize:9}}>group_by({gmBy.join(",")})</span>}
+                  {isGrouped&&i===0&&<span style={{color:C.purple,marginRight:6,fontSize: T.caption.fontSize}}>group_by({gmBy.join(",")})</span>}
                   <span style={{color:C.green}}>{s.name.trim()}</span>
                   <span style={{color:C.border2,margin:"0 6px"}}>=</span>
                   <span style={{color:C.text}}>{s.expr.trim()}</span>
@@ -322,7 +322,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
         </div>
         <button onClick={addStep}
           style={{padding:"0.38rem 0.75rem",background:"none",border:`1px solid ${C.border2}`,borderRadius:3,
-            color:C.textMuted,fontFamily:mono,fontSize:10,cursor:"pointer",whiteSpace:"nowrap"}}
+            color:C.textMuted,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,cursor:"pointer",whiteSpace:"nowrap"}}
           onMouseEnter={e=>{e.currentTarget.style.borderColor=C.green;e.currentTarget.style.color=C.green;}}
           onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textMuted;}}>
           + Add step
@@ -338,17 +338,17 @@ function MutateSubTab({rows, headers, info, onAdd}){
         <div style={{marginBottom:"1.2rem",padding:"0.7rem",
           background:preview.error?`${C.red}08`:isGrouped?`${C.purple}08`:`${C.green}08`,
           border:`1px solid ${preview.error?C.red+"30":isGrouped?C.purple+"30":C.green+"30"}`,borderRadius:4}}>
-          <div style={{fontSize:9,color:preview.error?C.red:isGrouped?C.purple:C.green,
-            letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:6}}>
+          <div style={{fontSize: T.caption.fontSize,color:preview.error?C.red:isGrouped?C.purple:C.green,
+            letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:6}}>
             {preview.error?"✕ Error":isGrouped?"✓ Preview — first 4 groups":"✓ Preview — first 6 rows"}
           </div>
-          {preview.error?<div style={{fontSize:11,color:C.red,fontFamily:mono}}>{preview.error}</div>
+          {preview.error?<div style={{fontSize: T.code.fontSize,color:C.red,fontFamily: T.code.fontFamily}}>{preview.error}</div>
           :isGrouped?(
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
               {preview.vals.map((v,i)=>(
                 <div key={i} style={{display:"flex",gap:10,alignItems:"center"}}>
-                  <span style={{fontSize:10,color:C.textMuted,fontFamily:mono,minWidth:100,flexShrink:0}}>{preview.labels[i]}</span>
-                  <span style={{fontSize:11,fontFamily:mono,padding:"2px 8px",borderRadius:2,
+                  <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,minWidth:100,flexShrink:0}}>{preview.labels[i]}</span>
+                  <span style={{fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,padding:"2px 8px",borderRadius:2,
                     border:`1px solid ${v===null?C.border:C.purple+"40"}`,
                     color:v===null?C.textMuted:C.purple,background:v===null?"transparent":`${C.purple}0a`}}>
                     {v===null?"·":typeof v==="boolean"?String(v):typeof v==="number"?(Number.isInteger(v)?v:v.toFixed(4).replace(/\.?0+$/,"")):String(v)}
@@ -359,7 +359,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
           ):(
             <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
               {preview.vals.map((v,i)=>(
-                <span key={i} style={{fontSize:11,fontFamily:mono,padding:"2px 8px",borderRadius:2,
+                <span key={i} style={{fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,padding:"2px 8px",borderRadius:2,
                   border:`1px solid ${v===null?C.border:C.green+"40"}`,
                   color:v===null?C.textMuted:C.green,background:v===null?"transparent":`${C.green}0a`}}>
                   {v===null?"·":typeof v==="number"?(Number.isInteger(v)?v:v.toFixed(4).replace(/\.?0+$/,"")):String(v)}
@@ -377,7 +377,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
           {(isGrouped?G_EXAMPLES:EXAMPLES).map(([n,e])=>(
             <button key={n} onClick={()=>{setStepField(activeIdx,"name",n);setStepField(activeIdx,"expr",e);}}
               style={{padding:"0.22rem 0.55rem",border:`1px solid ${C.border2}`,background:"transparent",
-                color:C.textMuted,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.1s"}}
+                color:C.textMuted,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}
               onMouseEnter={e2=>{e2.currentTarget.style.borderColor=C.green;e2.currentTarget.style.color=C.green;}}
               onMouseLeave={e2=>{e2.currentTarget.style.borderColor=C.border2;e2.currentTarget.style.color=C.textMuted;}}>
               {n}
@@ -394,14 +394,14 @@ function MutateSubTab({rows, headers, info, onAdd}){
             <button key={h} onClick={()=>{const p=steps[activeIdx]?.expr??"";setStepField(activeIdx,"expr",p+(p&&!p.endsWith(" ")?" ":"")+h);}}
               title={info[h]?.isNum?`μ=${info[h].mean?.toFixed(2)} · [${info[h].min?.toFixed(2)}, ${info[h].max?.toFixed(2)}]`:`${info[h]?.uCount} unique vals`}
               style={{padding:"0.2rem 0.5rem",border:`1px solid ${C.border}`,background:"transparent",
-                color:info[h]?.isNum?C.blue:C.purple,borderRadius:2,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.1s"}}
+                color:info[h]?.isNum?C.blue:C.purple,borderRadius:2,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}
               onMouseEnter={e=>{e.currentTarget.style.background=`${info[h]?.isNum?C.blue:C.purple}18`;}}
               onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
               {h}
             </button>
           ))}
         </div>
-        <div style={{fontSize:9,color:C.textMuted,fontFamily:mono,marginTop:3}}>
+        <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginTop:3}}>
           Click to insert · <span style={{color:C.blue}}>blue</span> = numeric · <span style={{color:C.purple}}>purple</span> = categorical
           {isGrouped&&<span style={{color:C.purple,marginLeft:8}}>· arrays in group mode</span>}
         </div>
@@ -411,15 +411,15 @@ function MutateSubTab({rows, headers, info, onAdd}){
       <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
         <button onClick={()=>setRefOpen(o=>!o)}
           style={{width:"100%",padding:"0.5rem 0.85rem",background:C.surface2,border:"none",
-            display:"flex",alignItems:"center",cursor:"pointer",color:C.textMuted,fontFamily:mono,fontSize:10}}>
-          <span style={{fontSize:9,letterSpacing:"0.18em",textTransform:"uppercase"}}>{refOpen?"▾":"▸"} Helper functions reference</span>
+            display:"flex",alignItems:"center",cursor:"pointer",color:C.textMuted,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
+          <span style={{fontSize: T.caption.fontSize,letterSpacing:"0.18em",textTransform:"uppercase"}}>{refOpen?"▾":"▸"} Helper functions reference</span>
         </button>
         {refOpen&&(
           <div style={{background:C.surface}}>
             {H_SECTIONS.filter(s=>!s.label.startsWith("Group")||isGrouped).map(sec=>(
               <div key={sec.label} style={{borderBottom:`1px solid ${C.border}`}}>
                 <div style={{padding:"0.35rem 0.85rem",background:`${sec.color}0a`,
-                  fontSize:9,color:sec.color,letterSpacing:"0.16em",textTransform:"uppercase",fontFamily:mono,fontWeight:700}}>
+                  fontSize: T.caption.fontSize,color:sec.color,letterSpacing:"0.16em",textTransform:"uppercase",fontFamily: T.code.fontFamily,fontWeight:700}}>
                   {sec.label}
                 </div>
                 {sec.items.map(([sig,desc,ins])=>{
@@ -427,12 +427,12 @@ function MutateSubTab({rows, headers, info, onAdd}){
                   return(
                   <div key={sig} style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,
                     padding:"0.28rem 0.85rem",borderTop:`1px solid ${C.border}20`}}>
-                    <code style={{fontSize:10,color:sec.color,fontFamily:mono,cursor:clickable?"pointer":"default",opacity:clickable?1:0.75}}
+                    <code style={{fontSize: T.caption.fontSize,color:sec.color,fontFamily: T.code.fontFamily,cursor:clickable?"pointer":"default",opacity:clickable?1:0.75}}
                       onClick={clickable?()=>{const p=steps[activeIdx]?.expr??"";const token=ins!==undefined?ins:sig.split("(")[0].trim()+"(";setStepField(activeIdx,"expr",p+(p&&!p.endsWith(" ")?" ":"")+token);}:undefined}
                       title={clickable?"Click to insert":undefined}>
                       {sig}
                     </code>
-                    <span style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>{desc}</span>
+                    <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>{desc}</span>
                   </div>
                 );})}
               </div>
@@ -449,7 +449,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
 // ─── CONDITIONAL SUB-TAB ─────────────────────────────────────────────────────
 // Provides if_else and case_when step builders.
 function ConditionalSubTab({ headers, onAdd }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [mode, setMode] = useState("if_else"); // "if_else" | "case_when"
 
   // if_else state
@@ -466,7 +466,7 @@ function ConditionalSubTab({ headers, onAdd }) {
   const inpS = {
     width: "100%", boxSizing: "border-box", padding: "0.42rem 0.65rem",
     background: C.surface2, border: `1px solid ${C.border2}`,
-    borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 11, outline: "none",
+    borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline: "none",
   };
   const taS = { ...inpS, resize: "vertical", lineHeight: 1.5, rows: 2 };
 
@@ -495,7 +495,7 @@ function ConditionalSubTab({ headers, onAdd }) {
     padding: "0.3rem 0.85rem", border: `1px solid ${active ? C.gold : C.border2}`,
     background: active ? `${C.gold}18` : "transparent",
     color: active ? C.gold : C.textMuted,
-    borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: mono,
+    borderRadius: 3, cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
   });
 
   return (
@@ -509,27 +509,27 @@ function ConditionalSubTab({ headers, onAdd }) {
       {mode === "if_else" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ padding: "0.5rem 0.9rem", background: C.surface, border: `1px solid ${C.border}`,
-            borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.6 }}>
+            borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
             <span style={{ color: C.gold }}>if_else(cond, trueVal, falseVal)</span> — creates a new column.
             Condition is a JS expression (column names available). True/false values can be literals or column names.
           </div>
           <div>
-            <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Output column name</div>
+            <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Output column name</div>
             <input value={ifeNN} onChange={e => setIfeNN(e.target.value)} placeholder="e.g. adult" style={inpS} />
           </div>
           <div>
-            <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Condition</div>
+            <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Condition</div>
             <textarea value={ifeCond} rows={2} onChange={e => setIfeCond(e.target.value)}
               placeholder={"e.g. age >= 18\ne.g. gdp > 1000 && year >= 2000"} style={taS} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <div>
-              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Value when true</div>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Value when true</div>
               <input value={ifeTrueVal} onChange={e => setIfeTrueVal(e.target.value)}
                 placeholder="literal or column name" style={inpS} />
             </div>
             <div>
-              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Value when false</div>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Value when false</div>
               <input value={ifeFalseVal} onChange={e => setIfeFalseVal(e.target.value)}
                 placeholder="literal or column name" style={inpS} />
             </div>
@@ -541,15 +541,15 @@ function ConditionalSubTab({ headers, onAdd }) {
       {mode === "case_when" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ padding: "0.5rem 0.9rem", background: C.surface, border: `1px solid ${C.border}`,
-            borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: 10, color: C.textMuted, fontFamily: mono, lineHeight: 1.6 }}>
+            borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
             <span style={{ color: C.gold }}>case_when(c1 → v1, c2 → v2, …, default)</span> — first matching condition wins.
             Conditions are JS expressions; values are literals.
           </div>
           <div>
-            <div style={{ fontSize: 9, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Output column name</div>
+            <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Output column name</div>
             <input value={cwNN} onChange={e => setCwNN(e.target.value)} placeholder="e.g. size_cat" style={inpS} />
           </div>
-          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Cases — first match wins</div>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Cases — first match wins</div>
           {cwCases.map((c, i) => (
             <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 22px", gap: 6, alignItems: "center" }}>
               <textarea value={c.cond} rows={2} onChange={e => setCwCases(cs => cs.map((x,j) => j===i ? {...x, cond: e.target.value} : x))}
@@ -558,20 +558,20 @@ function ConditionalSubTab({ headers, onAdd }) {
                 placeholder={`value  e.g. "small"`} style={inpS} />
               {cwCases.length > 1
                 ? <button onClick={() => setCwCases(cs => cs.filter((_,j) => j !== i))}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, fontSize: 13 }}>✕</button>
+                    style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, fontSize: T.body.fontSize }}>✕</button>
                 : <span />
               }
             </div>
           ))}
           <button onClick={() => setCwCases(cs => [...cs, { cond: "", val: "" }])} style={{
             padding: "0.28rem 0.7rem", background: "transparent", border: `1px dashed ${C.border2}`,
-            borderRadius: 3, color: C.textMuted, cursor: "pointer", fontSize: 10, fontFamily: mono, alignSelf: "flex-start",
+            borderRadius: 3, color: C.textMuted, cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, alignSelf: "flex-start",
           }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.color = C.gold; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
           >+ case</button>
           <div>
-            <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: mono, marginBottom: 4 }}>Default value (no match)</div>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Default value (no match)</div>
             <input value={cwDefault} onChange={e => setCwDefault(e.target.value)}
               placeholder='e.g. "other" or 0' style={inpS} />
           </div>
@@ -585,7 +585,7 @@ function ConditionalSubTab({ headers, onAdd }) {
 
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
   const [qt,setQt]=useState("log"),[qc,setQc]=useState(""),[xc2,setXc2]=useState("");
   const [pop,setPop]=useState("lag"),[pc,setPc]=useState(""),[lagN,setLagN]=useState(1);
@@ -714,7 +714,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
   };
   const canExtract=dateSrc&&Object.values(dateParts).some(Boolean);
 
-  const inpS={width:"100%",boxSizing:"border-box",padding:"0.42rem 0.65rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"};
+  const inpS={width:"100%",boxSizing:"border-box",padding:"0.42rem 0.65rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"};
 
   return(
     <div>
@@ -727,7 +727,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
           (<>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
                 <Lbl mb={0}>New variable name</Lbl>
-                {nm&&<span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>← auto-suggested</span>}
+                {nm&&<span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>← auto-suggested</span>}
               </div>
               <input value={nm} onChange={e=>{setNm(e.target.value);prevAutoRef.current="";}}
                 placeholder="e.g. log_wage, wage_lag1, treat_x_post"
@@ -747,7 +747,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
           <Lbl color={C.teal}>Transform</Lbl>
           <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
             {[["log","ln(x)"],["sq","x²"],["std","z-score"],["ix","x₁×x₂"],["exp","exp(x)"]].map(([k,l])=>(
-              <button key={k} onClick={()=>setQt(k)} style={{padding:"0.32rem 0.75rem",border:`1px solid ${qt===k?C.teal:C.border2}`,background:qt===k?`${C.teal}18`:"transparent",color:qt===k?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>
+              <button key={k} onClick={()=>setQt(k)} style={{padding:"0.32rem 0.75rem",border:`1px solid ${qt===k?C.teal:C.border2}`,background:qt===k?`${C.teal}18`:"transparent",color:qt===k?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
                 {qt===k?"✓ ":""}{l}
               </button>
             ))}
@@ -756,14 +756,14 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
           {/* Source column — always first */}
           <Lbl color={C.teal}>{qt==="ix"?"X₁":"Source column"}</Lbl>
           <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>
-            {numC.map(h=><button key={h} onClick={()=>setQc(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${qc===h?C.teal:C.border2}`,background:qc===h?`${C.teal}18`:"transparent",color:qc===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{qc===h?"✓ ":""}{h}</button>)}
+            {numC.map(h=><button key={h} onClick={()=>setQc(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${qc===h?C.teal:C.border2}`,background:qc===h?`${C.teal}18`:"transparent",color:qc===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>{qc===h?"✓ ":""}{h}</button>)}
           </div>
-          {qt==="ix"&&<><Lbl color={C.teal}>X₂</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>{numC.filter(h=>h!==qc).map(h=><button key={h} onClick={()=>setXc2(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${xc2===h?C.teal:C.border2}`,background:xc2===h?`${C.teal}18`:"transparent",color:xc2===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{xc2===h?"✓ ":""}{h}</button>)}</div></>}
+          {qt==="ix"&&<><Lbl color={C.teal}>X₂</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>{numC.filter(h=>h!==qc).map(h=><button key={h} onClick={()=>setXc2(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${xc2===h?C.teal:C.border2}`,background:xc2===h?`${C.teal}18`:"transparent",color:xc2===h?C.teal:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>{xc2===h?"✓ ":""}{h}</button>)}</div></>}
 
 
 
           {/* Formula preview for non-winz transforms */}
-          {qc&&qt!=="winz"&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
+          {qc&&qt!=="winz"&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
             {qt==="log"&&<><span style={{color:C.teal}}>{nm||"?"}</span> = ln(<span style={{color:C.gold}}>{qc}</span>)</>}
             {qt==="sq"&&<><span style={{color:C.teal}}>{nm||"?"}</span> = <span style={{color:C.gold}}>{qc}</span>²</>}
             {qt==="std"&&<><span style={{color:C.teal}}>{nm||"?"}</span> = (<span style={{color:C.gold}}>{qc}</span>−μ)/σ</>}
@@ -777,14 +777,14 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
       {vt==="date"&&(
         <div>
           {/* Info */}
-          <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",fontSize:11,color:C.textDim,lineHeight:1.6}}>
+          <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
             Extracts calendar features as new numeric columns. Numeric <span style={{color:C.gold}}>YYYYMMDD</span> (e.g. <span style={{color:C.gold}}>20200101</span>) and 6-digit <span style={{color:C.gold}}>YYMMDD</span> (e.g. <span style={{color:C.gold}}>911202</span>) columns are auto-detected and parsed to ISO first.
           </div>
 
           {/* Source column */}
           <Lbl color={C.violet}>Date source column</Lbl>
           {dateC.length===0?(
-            <div style={{fontSize:11,color:C.orange,fontFamily:mono,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4}}>
+            <div style={{fontSize: T.code.fontSize,color:C.orange,fontFamily: T.code.fontFamily,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4}}>
               No date columns detected. Supports ISO strings ("2021-06-15"), numeric YYYYMMDD (20210615), and 6-digit YYMMDD (911202).
             </div>
           ):(
@@ -795,9 +795,9 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
                     border:`1px solid ${dateSrc===h?C.violet:C.border2}`,
                     background:dateSrc===h?`${C.violet}18`:"transparent",
                     color:dateSrc===h?C.violet:C.textDim,
-                    borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>
+                    borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
                   {dateSrc===h?"✓ ":""}{h}
-                  {numericDateC.includes(h)&&<span style={{fontSize:8,padding:"1px 4px",background:`${C.gold}20`,border:`1px solid ${C.gold}40`,color:C.gold,borderRadius:2}}>NUM</span>}
+                  {numericDateC.includes(h)&&<span style={{fontSize: T.caption.fontSize,padding:"1px 4px",background:`${C.gold}20`,border:`1px solid ${C.gold}40`,color:C.gold,borderRadius:2}}>NUM</span>}
                 </button>
               ))}
             </div>
@@ -806,7 +806,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
           {/* Parse format — only for numeric YYYYMMDD columns */}
           {dateSrc&&numericDateC.includes(dateSrc)&&(
             <div style={{padding:"0.7rem 0.9rem",background:`${C.gold}08`,border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.1rem"}}>
-              <div style={{fontSize:10,color:C.gold,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:6,fontFamily:mono}}>Numeric format</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.gold,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:6,fontFamily: T.code.fontFamily}}>Numeric format</div>
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
                 {[
                   ["YYYYMMDD","YYYYMMDD","20200115"],
@@ -820,12 +820,12 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
                     style={{padding:"0.25rem 0.65rem",border:`1px solid ${dateParseMode===k?C.gold:C.border2}`,
                       background:dateParseMode===k?`${C.gold}18`:"transparent",
                       color:dateParseMode===k?C.gold:C.textDim,
-                      borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"}}>
-                    {dateParseMode===k?"✓ ":""}{l}<span style={{fontSize:8,color:C.textMuted,marginLeft:4}}>{ex}</span>
+                      borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
+                    {dateParseMode===k?"✓ ":""}{l}<span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:4}}>{ex}</span>
                   </button>
                 ))}
               </div>
-              <div style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
                 Adds a <span style={{color:C.teal}}>date_parse</span> step automatically → new column <span style={{color:C.teal}}>{dateSrc}_iso</span>
               </div>
             </div>
@@ -852,20 +852,20 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
                     border:`1px solid ${dateParts[key]?C.violet:C.border2}`,
                     background:dateParts[key]?C.violet:"transparent",
                     cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
-                    color:C.bg,fontSize:9,flexShrink:0}}>
+                    color:C.bg,fontSize: T.caption.fontSize,flexShrink:0}}>
                   {dateParts[key]?"✓":""}
                 </button>
                 <div>
-                  <div style={{fontSize:11,color:dateParts[key]?C.text:C.textDim,fontFamily:mono}}>{label}</div>
+                  <div style={{fontSize: T.code.fontSize,color:dateParts[key]?C.text:C.textDim,fontFamily: T.code.fontFamily}}>{label}</div>
                   {dateParts[key]&&dateSrc?(
                     <input value={dateNames[key]} onChange={e=>setDateNames(n=>({...n,[key]:e.target.value}))}
                       placeholder={`${dateSrc}_${key}`}
                       style={{marginTop:3,padding:"0.22rem 0.4rem",background:C.surface2,
                         border:`1px solid ${C.border2}`,borderRadius:2,
-                        color:C.text,fontFamily:mono,fontSize:9,outline:"none",
+                        color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,outline:"none",
                         width:"100%",boxSizing:"border-box"}}/>
                   ):(
-                    <div style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{hint}</div>
+                    <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>{hint}</div>
                   )}
                 </div>
               </div>
@@ -874,7 +874,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
 
           {/* Preview */}
           {dateSrc&&canExtract&&(
-            <div style={{padding:"0.55rem 0.85rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"0.9rem",fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.8}}>
+            <div style={{padding:"0.55rem 0.85rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"0.9rem",fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily,lineHeight:1.8}}>
               {numericDateC.includes(dateSrc)&&(
                 <div><span style={{color:C.gold}}>→</span> Parse: <span style={{color:C.gold}}>{dateSrc}</span> <span style={{color:C.textMuted}}>({dateParseMode})</span> → <span style={{color:C.teal}}>{dateSrc}_iso</span></div>
               )}
@@ -895,21 +895,21 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
       {/* ── Panel Operators ── */}
       {vt==="panel"&&(
         !isP
-          ?<div style={{padding:"1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4,fontSize:12,color:C.orange,lineHeight:1.7}}>⚠ Set panel index first (Panel Structure tab). Operators respect entity boundaries to prevent cross-unit contamination.</div>
+          ?<div style={{padding:"1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4,fontSize: T.code.fontSize,color:C.orange,lineHeight:1.7}}>⚠ Set panel index first (Panel Structure tab). Operators respect entity boundaries to prevent cross-unit contamination.</div>
           :<div>
-            <div style={{padding:"0.48rem 0.75rem",background:`${C.blue}15`,border:`1px solid ${C.blue}30`,borderRadius:3,marginBottom:"1.2rem",fontSize:11,color:C.blue,fontFamily:mono}}>i={panel.entityCol} · t={panel.timeCol} · entity-bounded operators</div>
+            <div style={{padding:"0.48rem 0.75rem",background:`${C.blue}15`,border:`1px solid ${C.blue}30`,borderRadius:3,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.blue,fontFamily: T.code.fontFamily}}>i={panel.entityCol} · t={panel.timeCol} · entity-bounded operators</div>
             <Lbl color={C.orange}>Operator</Lbl>
             <div style={{display:"flex",gap:4,marginBottom:"1.2rem"}}>
               {[["lag","L. Lag","yᵢ,ₜ₋ₙ"],["lead","F. Lead","yᵢ,ₜ₊ₙ"],["diff","Δ Diff","Δyᵢₜ"]].map(([k,l,f])=>(
-                <button key={k} onClick={()=>setPop(k)} style={{flex:1,padding:"0.5rem 0.65rem",border:`1px solid ${pop===k?C.orange:C.border2}`,background:pop===k?`${C.orange}18`:"transparent",color:pop===k?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s",textAlign:"center"}}>
-                  <div style={{fontWeight:700,marginBottom:2}}>{l}</div><div style={{fontSize:9,color:C.textMuted}}>{f}</div>
+                <button key={k} onClick={()=>setPop(k)} style={{flex:1,padding:"0.5rem 0.65rem",border:`1px solid ${pop===k?C.orange:C.border2}`,background:pop===k?`${C.orange}18`:"transparent",color:pop===k?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s",textAlign:"center"}}>
+                  <div style={{fontWeight:700,marginBottom:2}}>{l}</div><div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>{f}</div>
                 </button>
               ))}
             </div>
-            {(pop==="lag"||pop==="lead")&&<div style={{marginBottom:"1.2rem"}}><Lbl>Periods n</Lbl><div style={{display:"flex",gap:4}}>{[1,2,3,4].map(n=><button key={n} onClick={()=>setLagN(n)} style={{width:34,padding:"0.32rem",border:`1px solid ${lagN===n?C.orange:C.border2}`,background:lagN===n?`${C.orange}18`:"transparent",color:lagN===n?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize:12,fontFamily:mono,transition:"all 0.12s"}}>{n}</button>)}</div></div>}
+            {(pop==="lag"||pop==="lead")&&<div style={{marginBottom:"1.2rem"}}><Lbl>Periods n</Lbl><div style={{display:"flex",gap:4}}>{[1,2,3,4].map(n=><button key={n} onClick={()=>setLagN(n)} style={{width:34,padding:"0.32rem",border:`1px solid ${lagN===n?C.orange:C.border2}`,background:lagN===n?`${C.orange}18`:"transparent",color:lagN===n?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>{n}</button>)}</div></div>}
             <Lbl>Source column</Lbl>
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>{numC.map(h=><button key={h} onClick={()=>setPc(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${pc===h?C.orange:C.border2}`,background:pc===h?`${C.orange}18`:"transparent",color:pc===h?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono,transition:"all 0.12s"}}>{pc===h?"✓ ":""}{h}</button>)}</div>
-            {pc&&nm.trim()&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>{numC.map(h=><button key={h} onClick={()=>setPc(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${pc===h?C.orange:C.border2}`,background:pc===h?`${C.orange}18`:"transparent",color:pc===h?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>{pc===h?"✓ ":""}{h}</button>)}</div>
+            {pc&&nm.trim()&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
               {pop==="lag"&&<><span style={{color:C.teal}}>{nm.trim()}</span>[i,t] = <span style={{color:C.gold}}>{pc}</span>[i,t−{lagN}] within i={panel.entityCol}</>}
               {pop==="lead"&&<><span style={{color:C.teal}}>{nm.trim()}</span>[i,t] = <span style={{color:C.gold}}>{pc}</span>[i,t+{lagN}] within i={panel.entityCol}</>}
               {pop==="diff"&&<><span style={{color:C.teal}}>{nm.trim()}</span> = Δ<span style={{color:C.gold}}>{pc}</span> within i={panel.entityCol}</>}
@@ -925,141 +925,15 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
       {/* ── Conditional ── */}
       {vt==="conditional"&&<ConditionalSubTab headers={headers} onAdd={onAdd}/>}
 
-      {/* ── Group mutate (removed — integrated into ƒ Mutate tab) ── */}
-      {vt==="group_REMOVED"&&(()=>{
-        const OPS=[["==","=="],["!=","!="],[">=",">="],["<=","<="],[">"," >"],["<"," <"]];
-        const FNS=[
-          ["any","any(condition)","boolean — true for all rows in group if any row matches"],
-          ["all","all(condition)","boolean — true if every row in group matches"],
-          ["sum","sum(col)","sum of column within group"],
-          ["mean","mean(col)","mean of column within group"],
-          ["min","min(col)","minimum within group"],
-          ["max","max(col)","maximum within group"],
-          ["count","count()","number of rows in group"],
-          ["first","first(col)","first observed value in group"],
-          ["last","last(col)","last observed value in group"],
-        ];
-        const chip=(active,color)=>({padding:"0.22rem 0.55rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:mono,transition:"all 0.12s"});
-        const selFn=FNS.find(f=>f[0]===gmFn)||FNS[0];
-        const needsCond=gmFn==="any"||gmFn==="all";
-        const needsCol=!needsCond&&gmFn!=="count";
-        const numC2=headers.filter(h=>info[h]?.isNum);
-        const canApply=gmBy.length>0&&gmNewCol.trim()&&(needsCond?gmConds.length>0&&gmConds.every(c=>c.col&&c.val!==undefined):(!needsCol||gmCol));
-
-        function addCond(){setGmConds(cs=>[...cs,{col:headers[0]||"",op:"==",val:""}]);}
-        function rmCond(i){setGmConds(cs=>cs.filter((_,j)=>j!==i));}
-        function setCond(i,k,v){setGmConds(cs=>cs.map((c,j)=>j===i?{...c,[k]:v}:c));}
-
-        function apply(){
-          if(!canApply) return;
-          const step={
-            type:"grouped_mutate",
-            by:gmBy,fn:gmFn,
-            newCol:gmNewCol.trim(),
-          };
-          if(needsCond) step.condition=gmConds.map(c=>({col:c.col,op:c.op,val:isNaN(+c.val)?c.val:+c.val}));
-          else if(needsCol) step.col=gmCol;
-          const byStr=gmBy.join(", ");
-          const fStr=needsCond?`${gmFn}(${gmConds.map(c=>`${c.col} ${c.op} ${c.val}`).join(" & ")})`
-            :needsCol?`${gmFn}(${gmCol})`:"count()";
-          step.desc=`group_by(${byStr}) mutate(${gmNewCol} = ${fStr})`;
-          onAdd(step);
-          setGmBy([]);setGmNewCol("");setGmConds([{col:headers[0]||"",op:"==",val:""}]);
-        }
-
-        return(
-          <div style={{marginTop:"0.8rem"}}>
-            <div style={{fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.65,marginBottom:"1.2rem",padding:"0.6rem 0.8rem",background:C.surface2,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
-              Like dplyr <span style={{color:C.teal}}>group_by() %&gt;% mutate()</span> — computes a new column per group and broadcasts it back to every row. Dataset shape is unchanged.
-            </div>
-
-            {/* Group by */}
-            <div style={{marginBottom:"1.2rem"}}>
-              <Lbl color={C.teal}>Group by</Lbl>
-              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                {headers.map(h=>(
-                  <button key={h} onClick={()=>setGmBy(bs=>bs.includes(h)?bs.filter(b=>b!==h):[...bs,h])} style={chip(gmBy.includes(h),C.teal)}>
-                    {gmBy.includes(h)?"✓ ":""}{h}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Function */}
-            <div style={{marginBottom:"1.2rem"}}>
-              <Lbl>Function</Lbl>
-              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6}}>
-                {FNS.map(([k,label])=>(
-                  <button key={k} onClick={()=>setGmFn(k)} style={chip(gmFn===k,C.gold)}>{label}</button>
-                ))}
-              </div>
-              <div style={{fontSize:10,color:C.textMuted,fontFamily:mono}}>{selFn[2]}</div>
-            </div>
-
-            {/* Source column (for non-conditional fns) */}
-            {needsCol&&(
-              <div style={{marginBottom:"1.2rem"}}>
-                <Lbl>Source column</Lbl>
-                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {numC2.map(h=>(
-                    <button key={h} onClick={()=>setGmCol(h)} style={chip(gmCol===h,C.blue)}>{h}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Conditions (for any/all) */}
-            {needsCond&&(
-              <div style={{marginBottom:"1.2rem"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                  <Lbl mb={0}>Conditions (AND)</Lbl>
-                  <button onClick={addCond} style={{fontSize:9,color:C.teal,background:"none",border:`1px solid ${C.teal}40`,borderRadius:3,cursor:"pointer",fontFamily:mono,padding:"0.15rem 0.45rem"}}>+ add</button>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {gmConds.map((c,i)=>(
-                    <div key={i} style={{display:"flex",gap:5,alignItems:"center"}}>
-                      <select value={c.col} onChange={e=>setCond(i,"col",e.target.value)}
-                        style={{flex:2,padding:"0.28rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10}}>
-                        {headers.map(h=><option key={h} value={h}>{h}</option>)}
-                      </select>
-                      <select value={c.op} onChange={e=>setCond(i,"op",e.target.value)}
-                        style={{flex:"0 0 52px",padding:"0.28rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10}}>
-                        {OPS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                      </select>
-                      <input value={c.val} onChange={e=>setCond(i,"val",e.target.value)}
-                        placeholder="value"
-                        style={{flex:2,padding:"0.28rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:10,outline:"none"}}/>
-                      {gmConds.length>1&&<button onClick={()=>rmCond(i)} style={{color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontSize:12}}>✕</button>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* New column name */}
-            <div style={{marginBottom:"1.2rem"}}>
-              <Lbl>New column name</Lbl>
-              <input value={gmNewCol} onChange={e=>setGmNewCol(e.target.value)}
-                placeholder="e.g. treat"
-                style={{width:"100%",boxSizing:"border-box",padding:"0.42rem 0.65rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
-            </div>
-
-            <div style={{display:"flex",gap:8}}>
-              <Btn onClick={apply} color={C.teal} v="solid" dis={!canApply} ch="⊞ Add to pipeline →" sm/>
-            </div>
-          </div>
-        );
-      })()}
-
       {/* ── Formatting (Numbers + Strings combined) ── */}
       {vt==="formatting"&&(
         <div>
           <div style={{marginBottom:"1.2rem",padding:"0.65rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
-            <div style={{fontSize:10,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:4}}>Numbers</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:4}}>Numbers</div>
             <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="numbers"/>
           </div>
           <div style={{padding:"0.65rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.gold}`,borderRadius:4}}>
-            <div style={{fontSize:10,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:mono,marginBottom:4}}>Strings</div>
+            <div style={{fontSize: T.caption.fontSize,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:4}}>Strings</div>
             <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="strings"/>
           </div>
         </div>

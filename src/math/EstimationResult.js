@@ -102,6 +102,7 @@ const ESTIMATOR_META = {
   LSDV:            { label: "Panel LSDV",          color: "#6e9ec8" },
   Poisson:         { label: "Poisson GLM",          color: "#9e7ec8" },
   PoissonFE:       { label: "Poisson FE",          color: "#9e7ec8" },
+  NegBinFE:        { label: "Negative Binomial FE", color: "#9e7ec8" },
   SyntheticControl:{ label: "Synthetic Control",   color: "#c8b46e" },
   CallawayCS:      { label: "Callaway-Sant'Anna DiD", color: "#6ec8b4" },
   SpatialRegression:{ label: "Spatial Regression", color: "#6ec8b4" },
@@ -122,6 +123,7 @@ const FAMILY_MAP = {
   LSDV: "panel",
   Poisson: "count",
   PoissonFE: "count",
+  NegBinFE: "count",
   SyntheticControl: "sc",
   CallawayCS: "did",
   SpatialRegression: "spatial",
@@ -194,6 +196,7 @@ function buildFormula(type, spec) {
     case "Probit":    return `Probit(${yVar}) ~ ${x}`;
     case "Poisson":   return `Poisson(${yVar}) ~ ${x}`;
     case "PoissonFE": return `Poisson(${yVar}) ~ ${x} | ${(feCols && feCols.length ? feCols : [entityCol ?? "?"]).join(" + ")}`;
+    case "NegBinFE":  return `NegBin(${yVar}) ~ ${x} | ${(feCols && feCols.length ? feCols : [entityCol ?? "?"]).join(" + ")}`;
     case "EventStudy": return `${yVar} ~ event(${kPre ?? "-K"}…${kPost ?? "+K"}) | ${entityCol ?? "?"} + ${timeCol ?? "?"}`;
     case "SunAbraham": return `Poisson(${yVar}) ~ sunab(${spec.cohortCol ?? "cohort"}, ${spec.periodCol ?? "period"})${xVars.length ? " + " + x : ""}${feCols && feCols.length ? " | " + feCols.join(" + ") : ""}`;
     case "LSDV":      return `${yVar} ~ ${x} + α_i${spec.lsdvTimeFE ? " + γ_t" : ""}`;
@@ -721,6 +724,47 @@ function wrapPoissonFE(eng, spec) {
 // ─── SYNTHETIC CONTROL ───────────────────────────────────────────────────────
 // eng shape: { weights, preFit, postGap, rmspe_pre, rmspe_post,
 //              placebos, pValue, donors, treatedUnit, treatTime }
+// eng shape mirrors runPoissonFEMulti plus NB2 dispersion diagnostics:
+// { alpha, alphaCI, overdispersionTest }
+export function wrapNegBinFE(eng, spec) {
+  return {
+    ...base("NegBinFE", spec),
+    modelType:       "NegBinFE",
+    varNames:        eng.varNames       ?? [],
+    beta:            clean(eng.beta),
+    se:              clean(eng.se),
+    testStats:       clean(eng.zStats),
+    testStatLabel:   "z",
+    pVals:           clean(eng.pVals),
+    n:               eng.n              ?? 0,
+    k:               eng.k              ?? (eng.beta ? eng.beta.length : null),
+    df:              eng.df             ?? 0,
+    logLik:          eng.logLik         ?? null,
+    mcFaddenR2:      eng.McFaddenR2     ?? null,
+    AIC:             eng.AIC            ?? null,
+    BIC:             eng.BIC            ?? null,
+    resid:           eng.resid          ?? [],
+    Yhat:            eng.fitted         ?? [],
+    alphas:          eng.alphas         ?? null,
+    converged:       eng.converged      ?? false,
+    iterations:      eng.iterations     ?? null,
+    nFE:             eng.nFE            ?? 1,
+    feDims:          eng.feDims         ?? null,
+    feLevels:        eng.nLevels        ?? null,
+    droppedZeroLevels: eng.droppedZeroLevels ?? 0,
+    droppedSingletons: eng.droppedSingletons ?? 0,
+    alpha:           eng.alpha          ?? null,
+    alphaCI:         eng.alphaCI        ?? null,
+    overdispersionTest: eng.overdispersionTest ?? null,
+    extra: {
+      alpha: eng.alpha ?? null,
+      alphaCI: eng.alphaCI ?? null,
+      overdispersionTest: eng.overdispersionTest ?? null,
+    },
+    IRR:              (eng.beta ?? []).map(b => Math.exp(b)),
+  };
+}
+
 function wrapSyntheticControl(eng, spec) {
   return {
     ...base("SyntheticControl", spec),
@@ -863,6 +907,7 @@ export function wrapResult(type, engineOutput, spec, extras = {}) {
     case "LSDV":             r = wrapLSDV(engineOutput, spec); break;
     case "Poisson":          r = wrapPoisson(engineOutput, spec); break;
     case "PoissonFE":        r = wrapPoissonFE(engineOutput, spec); break;
+    case "NegBinFE":         r = wrapNegBinFE(engineOutput, spec); break;
     case "SyntheticControl": r = wrapSyntheticControl(engineOutput, spec); break;
     case "CallawayCS":       r = wrapCallawayCS(engineOutput, spec); break;
     case "SpatialRegression": r = wrapSpatialRegression(engineOutput, spec); break;

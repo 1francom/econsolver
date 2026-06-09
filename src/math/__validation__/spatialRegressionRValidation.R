@@ -41,6 +41,11 @@ for (i in seq_len(n)) {
 }
 
 out <- list(
+  meta = list(
+    source = "spatialreg",
+    rPackage = "spatialreg::lmSLX/lagsarlm/errorsarlm",
+    note = "Real R benchmarks. AIC/BIC use spatialreg's parameter count (betas + spatial param + sigma2)."
+  ),
   fixture = list(y = y, x = x, z = z, weights = weights),
   models = list(
     SLX = list(beta = coef_vec(slx), se = se_vec(slx), R2 = summary(slx)$r.squared),

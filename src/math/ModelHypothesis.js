@@ -1,4 +1,5 @@
-import { pnorm, pt } from "./calcEngine.js";
+import { pnorm, pt, pchisq } from "./calcEngine.js";
+import { matInv } from "./LinearEngine.js";
 
 function finiteNumber(v) {
   return typeof v === "number" && isFinite(v);
@@ -170,6 +171,46 @@ export function coefficientHypothesisTest(term, nullValue = 0, alternative = "tw
     alternative,
     pValue: Math.max(0, Math.min(1, pValue)),
   };
+}
+
+// Joint Wald test: H₀: Rβ = r (user selects subset of coefficient indices).
+// vcov must be the full k×k variance-covariance matrix.
+// Returns χ²(q) and F = χ²/q (using model df if provided for the F-distribution).
+export function waldTest(beta, vcov, indices, h0s = null) {
+  const q = indices.length;
+  if (q < 1) return { error: "Select at least one coefficient." };
+  if (!beta || !vcov) return { error: "Variance-covariance matrix not available for this result." };
+
+  const h = Array.isArray(h0s) && h0s.length === q ? h0s : indices.map(() => 0);
+
+  const Rb = indices.map((i, j) => {
+    const b = Number(beta[i]);
+    const r = Number(h[j]);
+    return isFinite(b) ? b - r : NaN;
+  });
+  if (Rb.some(v => !isFinite(v))) return { error: "Selected coefficients contain non-finite values." };
+
+  const sub = indices.map(ri => indices.map(ci => {
+    const v = vcov[ri]?.[ci];
+    return (Array.isArray(vcov[ri]) && isFinite(v)) ? v : NaN;
+  }));
+  if (sub.some(row => row.some(v => !isFinite(v)))) return { error: "Variance-covariance submatrix contains non-finite values." };
+
+  const subInv = matInv(sub);
+  if (!subInv) return { error: "Variance-covariance submatrix is singular." };
+
+  const tmp = subInv.map(row => row.reduce((s, v, j) => s + v * Rb[j], 0));
+  const chiSq = tmp.reduce((s, v, i) => s + v * Rb[i], 0);
+  if (!isFinite(chiSq) || chiSq < 0) return { error: "Wald statistic is non-finite — check coefficient selection." };
+
+  const rawPval = 1 - pchisq(chiSq, q);
+  // pchisq can return NaN when chiSq is extreme (gamma function overflow);
+  // for chiSq > 0 this means p ≈ 0 (test is overwhelmingly significant).
+  const chiSqPval = (isFinite(rawPval) && rawPval >= 0)
+    ? Math.max(0, Math.min(1, rawPval))
+    : 0;
+
+  return { chiSq, df: q, chiSqPval, indices, h0s: h };
 }
 
 export function generateModelHypothesisScript(language, test, meta = {}) {

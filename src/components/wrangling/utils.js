@@ -194,14 +194,30 @@ import {
   WRANGLING_TRANSFORM_PROMPT,
   WRANGLING_QUERY_PROMPT,
 } from "../../services/AI/Prompts/index.js";
+import { detectPII } from "../../services/Privacy/piiDetector.js";
+import { filterSampleRows } from "../../services/Privacy/privacyFilter.js";
 
 export async function callAI(instruction, col, sample, mode) {
   const isQ = mode === "query";
   const system = isQ ? WRANGLING_QUERY_PROMPT : WRANGLING_TRANSFORM_PROMPT;
 
+  // Privacy-first egress filter (Fase X3, option A): route sample values through the
+  // sanctioned detectPII → filterSampleRows choke point UNCONDITIONALLY before any
+  // network egress. Users may not realize a column Q&A / transform exposes raw cell
+  // values. HIGH-sensitivity cols → values dropped; MEDIUM → masked/rounded; LOW/NONE
+  // → passed through so non-PII inference quality is preserved.
+  const slice     = sample.slice(0, isQ ? 8 : 5);
+  const piiRows   = slice.map(v => ({ [col]: v }));
+  const piiConfig = detectPII([col], piiRows);
+  const { rows: safeRows } = filterSampleRows([col], piiRows, piiConfig);
+  const safeVals  = safeRows
+    .map(r => { const k = Object.keys(r)[0]; return k === undefined ? undefined : r[k]; })
+    .filter(v => v !== undefined);
+
+  const sampleList = safeVals.map((v, i) => `${i+1}.${JSON.stringify(v)}`).join(", ");
   const user = isQ
-    ? `Column: "${col}". Sample (8 vals): ${sample.map((v,i)=>`${i+1}.${JSON.stringify(v)}`).join(", ")}. Question: "${instruction}". Return JSON now.`
-    : `Column: "${col}". Sample (5 vals): ${sample.slice(0,5).map((v,i)=>`${i+1}.${JSON.stringify(v)}`).join(", ")}. Instruction: "${instruction}". Return JSON now.`;
+    ? `Column: "${col}". Sample (${safeVals.length} vals): ${sampleList}. Question: "${instruction}". Return JSON now.`
+    : `Column: "${col}". Sample (${safeVals.length} vals): ${sampleList}. Instruction: "${instruction}". Return JSON now.`;
 
   try {
     const raw = await callClaude({ system, user, maxTokens: 1000 });

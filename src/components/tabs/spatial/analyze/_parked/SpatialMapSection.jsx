@@ -1,6 +1,7 @@
 // ─── ECON STUDIO · spatial/analyze/_parked/SpatialMapSection.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo, useEffect, useRef } from "react";
-import { mono } from "../../shared/constants.js";
+import { useTheme } from "../../../../../ThemeContext.jsx";
+
 import { BASEMAPS, addBasemap, loadLeaflet } from "../../shared/leaflet.js";
 import { leafletPolygonLatLngs, wktToLeaflet } from "../../shared/wkt.js";
 import { buildColorScale } from "../../shared/color.js";
@@ -10,6 +11,7 @@ import { getPlotHistory, savePlotHistory } from "../../../../../services/Persist
 import { MapLegend } from "../../map/MapLegend.jsx";
 
 export function SpatialMapSection({ rows, headers, C, pid }) {
+  const { T } = useTheme();
   const wktHeaders = useMemo(() => headers.filter(h => {
     const sample = rows.find(r => r[h] != null)?.[h];
     return typeof sample === "string" && /^(POINT|POLYGON|MULTIPOLYGON)/i.test(sample.trim());
@@ -164,13 +166,13 @@ export function SpatialMapSection({ rows, headers, C, pid }) {
       {/* Controls */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.12em", textTransform: "uppercase" }}>
             Basemap
           </span>
           {Object.entries(BASEMAPS).map(([key, cfg]) => (
             <button key={key} onClick={() => setBasemap(key)}
               style={{
-                padding: "3px 9px", borderRadius: 3, fontFamily: mono, fontSize: 9, cursor: "pointer",
+                padding: "3px 9px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: basemap === key ? `${C.teal}18` : "transparent",
                 border: `1px solid ${basemap === key ? C.teal + "60" : C.border2}`,
                 color: basemap === key ? C.teal : C.textMuted,
@@ -184,7 +186,7 @@ export function SpatialMapSection({ rows, headers, C, pid }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input type="checkbox" checked={showPoints} onChange={e => setShowPoints(e.target.checked)}
               style={{ accentColor: C.teal, cursor: "pointer" }} />
-            <span style={{ fontSize: 9, color: C.teal, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.12em", textTransform: "uppercase" }}>
               Points layer
             </span>
           </div>
@@ -203,14 +205,14 @@ export function SpatialMapSection({ rows, headers, C, pid }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input type="checkbox" checked={showPolygons} onChange={e => setShowPolygons(e.target.checked)}
               style={{ accentColor: C.teal, cursor: "pointer" }} />
-            <span style={{ fontSize: 9, color: C.teal, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.12em", textTransform: "uppercase" }}>
               Boundaries layer
             </span>
-            <span style={{ fontSize: 8, color: C.textMuted }}>(WKT geometry)</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>(WKT geometry)</span>
           </div>
           <div style={{ opacity: showPolygons ? 1 : 0.4, pointerEvents: showPolygons ? "auto" : "none" }}>
             {wktHeaders.length === 0 ? (
-              <div style={{ fontSize: 9, color: C.textMuted, lineHeight: 1.6 }}>
+              <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.6 }}>
                 No WKT geometry column detected. Load a shapefile or run a Spatial Join
                 to add council / neighborhood / city boundary polygons.
               </div>
@@ -229,11 +231,11 @@ export function SpatialMapSection({ rows, headers, C, pid }) {
       {pid && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={saveMap}
-            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal, cursor: "pointer" }}
+            style={{ padding: "3px 10px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal, cursor: "pointer" }}
           >Save map</button>
           {mapHistory.length > 0 && (
             <button onClick={() => setHistOpen(o => !o)}
-              style={{ padding: "3px 8px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
+              style={{ padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
             >{histOpen ? "▲" : "▼"} {mapHistory.length} saved</button>
           )}
         </div>
@@ -244,20 +246,20 @@ export function SpatialMapSection({ rows, headers, C, pid }) {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {mapHistory.map(entry => (
             <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border2}`, background: C.surface }}>
-              <span style={{ fontFamily: mono, fontSize: 9, color: C.text }}>{entry.name}</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text }}>{entry.name}</span>
               <button onClick={() => loadMapEntry(entry)}
-                style={{ padding: "1px 6px", borderRadius: 2, fontFamily: mono, fontSize: 8, background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal, cursor: "pointer" }}
+                style={{ padding: "1px 6px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal, cursor: "pointer" }}
               >Load</button>
               <button onClick={() => deleteMapEntry(entry.id)}
-                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, lineHeight: 1, color: C.textMuted, padding: "0 2px" }}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: T.code.fontSize, lineHeight: 1, color: C.textMuted, padding: "0 2px" }}
               >×</button>
             </div>
           ))}
         </div>
       )}
 
-      {err && <div style={{ color: C.red, fontFamily: mono, fontSize: 10 }}>{err}</div>}
-      {!L   && <div style={{ color: C.textMuted, fontFamily: mono, fontSize: 10 }}>Loading Leaflet…</div>}
+      {err && <div style={{ color: C.red, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>{err}</div>}
+      {!L   && <div style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>Loading Leaflet…</div>}
 
       {/* Map — fixed-height wrapper prevents ResizeObserver feedback loop */}
       <div ref={wrapRef} style={{ position: "relative", height: 480, borderRadius: 4, overflow: "hidden", border: `1px solid ${C.border2}` }}>

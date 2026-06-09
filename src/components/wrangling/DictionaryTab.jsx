@@ -1,6 +1,6 @@
 // ─── ECON STUDIO · components/wrangling/DictionaryTab.jsx ──────────────────
 import { useState, useEffect } from "react";
-import { useTheme, mono, Lbl, Btn, Grid, Spin } from "./shared.jsx";
+import { useTheme, Lbl, Btn, Grid, Spin } from "./shared.jsx";
 import { callAI } from "./utils.js";
 import { inferVariableUnits } from "../../services/AI/AIService.js";
 
@@ -8,7 +8,7 @@ import { inferVariableUnits } from "../../services/AI/AIService.js";
 // Allows AI inference of column descriptions + manual editing.
 // Props: headers, rows (sample), dict, setDict
 function DataDictionaryTab({ headers, rows, dict, setDict }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState("");
   const [done,    setDone]    = useState(false);
@@ -39,19 +39,19 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
         padding: "0.65rem 1rem", background: C.surface,
         border: `1px solid ${C.border}`, borderLeft: `3px solid ${C.violet}`,
         borderRadius: 4, marginBottom: "1.2rem",
-        fontSize: 11, color: C.textDim, lineHeight: 1.7,
+        fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.7,
         display: "flex", alignItems: "flex-start", gap: 10,
       }}>
-        <span style={{ color: C.violet, fontSize: 13, lineHeight: 1 }}>◈</span>
+        <span style={{ color: C.violet, fontSize: T.body.fontSize, lineHeight: 1 }}>◈</span>
         <div>
           <span style={{ color: C.text }}>Data Dictionary</span>
           {" — "}
           Map each column to a human-readable description. The AI Narrative in
           the Reporting Module uses these to phrase coefficients naturally
           (e.g.{" "}
-          <span style={{ color: C.gold, fontFamily: mono }}>"one additional year of education"</span>
+          <span style={{ color: C.gold, fontFamily: T.code.fontFamily }}>"one additional year of education"</span>
           {" "}instead of{" "}
-          <span style={{ color: C.red, fontFamily: mono }}>"a 1 unit increase in educ"</span>
+          <span style={{ color: C.red, fontFamily: T.code.fontFamily }}>"a 1 unit increase in educ"</span>
           ).
         </div>
       </div>
@@ -67,12 +67,12 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
         />
         {loading && <Spin />}
         {done && !loading && (
-          <span style={{ fontSize: 10, color: C.green, fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.green, fontFamily: T.code.fontFamily }}>
             ✓ Inferred {headers.length} descriptions — edit below as needed.
           </span>
         )}
         {hasDict && !loading && !done && (
-          <span style={{ fontSize: 10, color: C.textMuted, fontFamily: mono }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
             Dictionary loaded — edit any cell directly.
           </span>
         )}
@@ -81,7 +81,7 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
       {/* ── Error ── */}
       {error && (
         <div style={{
-          fontSize: 11, color: C.red, fontFamily: mono, lineHeight: 1.6,
+          fontSize: T.code.fontSize, color: C.red, fontFamily: T.code.fontFamily, lineHeight: 1.6,
           padding: "0.65rem 1rem", border: `1px solid ${C.red}40`,
           borderLeft: `3px solid ${C.red}`, borderRadius: 4, marginBottom: "1rem",
         }}>
@@ -92,13 +92,13 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
       {/* ── Editable table ── */}
       {hasDict ? (
         <div style={{ overflowX: "auto", borderRadius: 4, border: `1px solid ${C.border}` }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11, fontFamily: mono }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
             <thead>
               <tr style={{ background: C.surface2 }}>
                 {[["Variable", "34%", C.textDim], ["Description", "66%", C.textDim]].map(([label, w, c]) => (
                   <th key={label} style={{
                     width: w, padding: "0.45rem 0.85rem", textAlign: "left",
-                    fontSize: 9, color: c, letterSpacing: "0.18em",
+                    fontSize: T.caption.fontSize, color: c, letterSpacing: "0.18em",
                     textTransform: "uppercase", fontWeight: 400,
                     borderBottom: `1px solid ${C.border}`,
                   }}>
@@ -119,12 +119,12 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
                     <td style={{
                       padding: "0.45rem 0.85rem",
                       borderBottom: `1px solid ${C.border}`,
-                      color: accent, fontFamily: mono, fontSize: 11,
+                      color: accent, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
                       whiteSpace: "nowrap",
                     }}>
                       {h}
-                      {isDummy  && <span style={{ marginLeft: 6, fontSize: 9, color: C.purple, opacity: 0.7 }}>dummy</span>}
-                      {isLog    && <span style={{ marginLeft: 6, fontSize: 9, color: C.teal, opacity: 0.7 }}>log</span>}
+                      {isDummy  && <span style={{ marginLeft: 6, fontSize: T.caption.fontSize, color: C.purple, opacity: 0.7 }}>dummy</span>}
+                      {isLog    && <span style={{ marginLeft: 6, fontSize: T.caption.fontSize, color: C.teal, opacity: 0.7 }}>log</span>}
                     </td>
                     {/* Editable description */}
                     <td style={{ padding: "0.3rem 0.65rem", borderBottom: `1px solid ${C.border}` }}>
@@ -137,7 +137,7 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
                           background: "transparent",
                           border: `1px solid transparent`,
                           borderRadius: 3, color: C.text,
-                          fontFamily: mono, fontSize: 11, outline: "none",
+                          fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline: "none",
                           transition: "border-color 0.13s",
                         }}
                         onFocus={e  => { e.target.style.borderColor = C.border2; e.target.style.background = C.surface3; }}
@@ -156,8 +156,8 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
           padding: "2.5rem 1.5rem", textAlign: "center",
           border: `1px dashed ${C.border2}`, borderRadius: 4,
         }}>
-          <div style={{ fontSize: 24, marginBottom: 10 }}>◈</div>
-          <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.7 }}>
+          <div style={{ fontSize: T.display.fontSize, marginBottom: 10 }}>◈</div>
+          <div style={{ fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.7 }}>
             Click <span style={{ color: C.violet }}>"Infer Descriptions with AI"</span> to
             auto-populate the dictionary from your column names and sample data,
             or add descriptions manually after the table appears.

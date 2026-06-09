@@ -160,7 +160,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
                   <div style={{ fontSize: T.caption.fontSize, color: accent, letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: 6 }}>
                     User Guide
                   </div>
-                  <div style={{ fontSize: 22, color: C.text, letterSpacing: "-0.02em" }}>
+                  <div style={{ fontSize: T.h2.fontSize, color: C.text, letterSpacing: "-0.02em" }}>
                     {title}
                   </div>
                 </div>

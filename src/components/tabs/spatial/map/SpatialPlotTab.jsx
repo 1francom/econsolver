@@ -1,6 +1,7 @@
 // ─── ECON STUDIO · spatial/map/SpatialPlotTab.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo, useEffect, useRef } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
+
 import { BASEMAPS, addBasemap, loadLeaflet } from "../shared/leaflet.js";
 import { loadProj4, PRESET_CRS, isProjectedWKT, makeCabaMetricGrid } from "../shared/crs.js";
 import { leafletPolygonLatLngs, wktToLeaflet } from "../shared/wkt.js";
@@ -13,6 +14,7 @@ import { loadSpatialMaps, saveSpatialMaps } from "../../../../services/Persisten
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 
 export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid }) {
+  const { T } = useTheme();
   const wrapRef    = useRef(null);
   const mapDivRef  = useRef(null);
   const leafMapRef = useRef(null);
@@ -227,7 +229,8 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
       if (m) {
         if (Array.isArray(m.layers)) setLayers(m.layers);
         if (m.basemap)               setBasemap(m.basemap);
-        if (typeof m.crsInput === "string") setCrsInput(m.crsInput);
+        // Re-apply CRS so proj4fn is live (not just restoring the string)
+        if (typeof m.crsInput === "string" && m.crsInput) applyCrs(m.crsInput);
       }
       hydratedRef.current = true;
     });
@@ -455,7 +458,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
     return null;
   }, [layers, rows, availableDatasets]);
 
-  if (!L) return <div style={{ padding: "2rem", fontFamily: mono, fontSize: 10, color: C.textMuted }}>Loading Leaflet…</div>;
+  if (!L) return <div style={{ padding: "2rem", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>Loading Leaflet…</div>;
 
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
@@ -471,13 +474,13 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
             flexShrink: 0,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-              <span style={{ fontSize: 8, letterSpacing: "0.12em", textTransform: "uppercase",
-                color: activeCrs ? C.teal : C.gold, fontFamily: mono }}>
+              <span style={{ fontSize: T.caption.fontSize, letterSpacing: "0.12em", textTransform: "uppercase",
+                color: activeCrs ? C.teal : C.gold, fontFamily: T.code.fontFamily }}>
                 {activeCrs ? "✓ CRS active" : "⚠ Projected CRS detected"}
               </span>
               {activeCrs && (
                 <button onClick={clearCrs} style={{
-                  marginLeft: "auto", padding: "1px 6px", borderRadius: 2, fontFamily: mono, fontSize: 7,
+                  marginLeft: "auto", padding: "1px 6px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                   background: "transparent", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer",
                 }}>clear</button>
               )}
@@ -487,7 +490,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
               {Object.entries(PRESET_CRS).map(([name, proj4str]) => (
                 <button key={name} onClick={() => applyCrs(proj4str)}
                   style={{
-                    padding: "2px 5px", borderRadius: 2, fontFamily: mono, fontSize: 7,
+                    padding: "2px 5px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                     background: activeCrs === proj4str ? `${C.gold}22` : "transparent",
                     border: `1px solid ${activeCrs === proj4str ? C.gold : C.border2}`,
                     color: activeCrs === proj4str ? C.gold : C.textMuted,
@@ -503,33 +506,33 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                 style={{
                   flex: 1, padding: "3px 5px", background: C.bg,
                   border: `1px solid ${C.border2}`, borderRadius: 2,
-                  color: C.text, fontFamily: mono, fontSize: 8, outline: "none",
+                  color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none",
                   minWidth: 0,
                 }}
               />
               <button onClick={() => applyCrs()} disabled={crsLoading || !crsInput.trim()}
                 style={{
-                  padding: "3px 7px", borderRadius: 2, fontFamily: mono, fontSize: 8,
+                  padding: "3px 7px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                   background: `${C.teal}18`, border: `1px solid ${C.teal}55`,
                   color: C.teal, cursor: "pointer", flexShrink: 0,
                 }}
               >{crsLoading ? "…" : "Apply"}</button>
             </div>
-            {crsErr && <div style={{ fontSize: 7, color: C.red, fontFamily: mono, marginTop: 3 }}>{crsErr}</div>}
+            {crsErr && <div style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginTop: 3 }}>{crsErr}</div>}
           </div>
         )}
 
         {/* Layer list */}
         <div style={{ padding: "0.75rem 0.65rem 0.6rem", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 8, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: mono, marginBottom: 5 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 5 }}>
               Basemap
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4 }}>
               {Object.entries(BASEMAPS).map(([key, cfg]) => (
                 <button key={key} onClick={() => setBasemap(key)}
                   style={{
-                    padding: "3px 5px", borderRadius: 3, fontFamily: mono, fontSize: 8, cursor: "pointer",
+                    padding: "3px 5px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                     background: basemap === key ? `${C.teal}18` : "transparent",
                     border: `1px solid ${basemap === key ? C.teal + "60" : C.border2}`,
                     color: basemap === key ? C.teal : C.textMuted,
@@ -539,11 +542,11 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
             </div>
           </div>
 
-          <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: mono, marginBottom: 8 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.22em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 8 }}>
             Map Layers
           </div>
           {layers.length === 0 && (
-            <div style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, marginBottom: 8 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: 8 }}>
               Add layers to build your map.
             </div>
           )}
@@ -560,7 +563,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                 width: 7, height: 7, borderRadius: ly.type === "points" ? "50%" : 1, flexShrink: 0,
                 background: ly.type === "boundary" ? ly.borderColor : ly.type === "grid" ? ly.borderColor : ly.type === "line" ? (ly.lineColor ?? "#6e9ec8") : ly.fillColor,
               }} />
-              <span style={{ flex: 1, fontFamily: mono, fontSize: 9, color: activeId === ly.id ? C.teal : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ flex: 1, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: activeId === ly.id ? C.teal : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {ly.type}
                 {ly.type === "boundary" && ly.wktCol && ` · ${ly.wktCol}`}
                 {ly.type === "grid" && (ly.mode === "latlon" || ly.mode === "generate") && ` · ${ly.cellsize}m`}
@@ -570,10 +573,10 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                 {ly.type === "points" && ly.mode !== "wkt" && ly.latCol && ` · ${ly.latCol}/${ly.lonCol}`}
               </span>
               <button onClick={e => { e.stopPropagation(); updateLayer({ ...ly, visible: !ly.visible }); }}
-                style={{ background: "none", border: "none", cursor: "pointer", fontFamily: mono, fontSize: 10, padding: "0 2px", color: ly.visible ? C.textDim : C.textMuted }}
+                style={{ background: "none", border: "none", cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0 2px", color: ly.visible ? C.textDim : C.textMuted }}
               >{ly.visible ? "●" : "○"}</button>
               <button onClick={e => { e.stopPropagation(); removeLayer(ly.id); }}
-                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, padding: "0 2px", lineHeight: 1, color: C.textMuted }}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: T.code.fontSize, padding: "0 2px", lineHeight: 1, color: C.textMuted }}
               >×</button>
             </div>
           ))}
@@ -581,7 +584,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
             {[["boundary","Boundary"], ["grid","Grid"], ["points","Points"], ["line","Line"]].map(([t, lbl]) => (
               <button key={t} onClick={() => addLayer(t)}
-                style={{ padding: "3px 7px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: "none", border: `1px dashed ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
+                style={{ padding: "3px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: "none", border: `1px dashed ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
               >+{lbl}</button>
             ))}
           </div>
@@ -590,14 +593,14 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           {layers.length > 0 && (
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
               <button onClick={downloadMapHtml}
-                style={{ padding: "3px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.gold}15`, border: `1px solid ${C.gold}55`, color: C.gold, cursor: "pointer" }}
+                style={{ padding: "3px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.gold}15`, border: `1px solid ${C.gold}55`, color: C.gold, cursor: "pointer" }}
               >⬇ map.html</button>
               <div style={{ display: "flex", gap: 4 }}>
                 <button onClick={downloadMapPng}
-                  style={{ flex: 1, padding: "3px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}12`, border: `1px solid ${C.teal}40`, color: C.teal, cursor: "pointer" }}
+                  style={{ flex: 1, padding: "3px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.teal}12`, border: `1px solid ${C.teal}40`, color: C.teal, cursor: "pointer" }}
                 >⬇ .png</button>
                 <button onClick={downloadMapPdf}
-                  style={{ flex: 1, padding: "3px 6px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.teal}12`, border: `1px solid ${C.teal}40`, color: C.teal, cursor: "pointer" }}
+                  style={{ flex: 1, padding: "3px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.teal}12`, border: `1px solid ${C.teal}40`, color: C.teal, cursor: "pointer" }}
                 >⬇ .pdf</button>
               </div>
             </div>
@@ -614,12 +617,12 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                   const d = ptDiag[activeLayer.id];
                   if (!d || d.total === 0) return null;
                   if (d.valid === d.total) return (
-                    <div style={{ marginTop: 8, padding: "5px 8px", borderRadius: 3, background: `${C.teal}12`, border: `1px solid ${C.teal}30`, fontFamily: mono, fontSize: 9, color: C.teal }}>
+                    <div style={{ marginTop: 8, padding: "5px 8px", borderRadius: 3, background: `${C.teal}12`, border: `1px solid ${C.teal}30`, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal }}>
                       ✓ {d.valid.toLocaleString()} points plotted
                     </div>
                   );
                   if (d.valid === 0) return (
-                    <div style={{ marginTop: 8, padding: "6px 8px", borderRadius: 3, background: `${C.gold}12`, border: `1px solid ${C.gold}50`, fontFamily: mono, fontSize: 9, color: C.gold, lineHeight: 1.5 }}>
+                    <div style={{ marginTop: 8, padding: "6px 8px", borderRadius: 3, background: `${C.gold}12`, border: `1px solid ${C.gold}50`, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold, lineHeight: 1.5 }}>
                       ⚠ 0 of {d.total.toLocaleString()} points plotted — all values are outside WGS84 bounds
                       (lat: −90…90, lon: −180…180).<br/>
                       {d.outOfBounds > 0 && `${d.outOfBounds.toLocaleString()} rows filtered.`}{" "}
@@ -629,14 +632,14 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                     </div>
                   );
                   return (
-                    <div style={{ marginTop: 8, padding: "5px 8px", borderRadius: 3, background: `${C.gold}0c`, border: `1px solid ${C.gold}40`, fontFamily: mono, fontSize: 9, color: C.gold }}>
+                    <div style={{ marginTop: 8, padding: "5px 8px", borderRadius: 3, background: `${C.gold}0c`, border: `1px solid ${C.gold}40`, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold }}>
                       ⚠ {d.valid.toLocaleString()} of {d.total.toLocaleString()} points plotted
                       ({d.outOfBounds.toLocaleString()} out-of-bounds filtered)
                     </div>
                   );
                 })()}
               </>
-            : <div style={{ fontFamily: mono, fontSize: 9, color: C.textMuted }}>Select or add a layer.</div>
+            : <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>Select or add a layer.</div>
           }
         </div>
 
@@ -644,15 +647,15 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         {generatedGrid && (
           <div style={{ padding: "0.65rem", borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
             {generatedGrid.error ? (
-              <div style={{ fontSize: 9, color: C.red, fontFamily: mono, lineHeight: 1.5 }}>{generatedGrid.error}</div>
+              <div style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily, lineHeight: 1.5 }}>{generatedGrid.error}</div>
             ) : (
               <>
-                <div style={{ fontSize: 9, color: C.teal, fontFamily: mono, marginBottom: 6 }}>
+                <div style={{ fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily, marginBottom: 6 }}>
                   {generatedGrid.cells.length.toLocaleString()} grid cells generated
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="grid_cells"
-                    style={{ flex: 1, padding: "3px 6px", background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: mono, fontSize: 9, color: C.text, outline: "none" }}
+                    style={{ flex: 1, padding: "3px 6px", background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, outline: "none" }}
                   />
                   <button
                     onClick={() => saveName && onAddDataset?.(saveName, generatedGrid.cells, [
@@ -660,7 +663,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                       "centroid_x", "centroid_y", "area_m2", "cellsize_m", "metric_crs"
                     ])}
                     disabled={!saveName}
-                    style={{ padding: "3px 9px", borderRadius: 3, fontFamily: mono, fontSize: 9, background: `${C.gold}18`, border: `1px solid ${C.gold}`, color: C.gold, cursor: "pointer" }}
+                    style={{ padding: "3px 9px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.gold}18`, border: `1px solid ${C.gold}`, color: C.gold, cursor: "pointer" }}
                   >Save</button>
                 </div>
               </>
@@ -668,7 +671,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
           </div>
         )}
 
-        {mapErr && <div style={{ padding: "0.5rem", fontSize: 9, color: C.red, fontFamily: mono }}>{mapErr}</div>}
+        {mapErr && <div style={{ padding: "0.5rem", fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily }}>{mapErr}</div>}
       </div>
 
       {/* ── MAP ─────────────────────────────────────────────────────────────── */}
@@ -679,9 +682,9 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
         </div>
         {layers.length === 0 && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 500 }}>
-            <div style={{ background: `${C.bg}bf`, border: `1px solid ${C.border2}`, borderRadius: 4, padding: "1.2rem 2rem", fontFamily: mono, fontSize: 10, color: C.textMuted, textAlign: "center" }}>
+            <div style={{ background: `${C.bg}bf`, border: `1px solid ${C.border2}`, borderRadius: 4, padding: "1.2rem 2rem", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, textAlign: "center" }}>
               Add a Boundary, Grid, Points, or Line layer<br />
-              <span style={{ fontSize: 9 }}>to build your spatial plot.</span>
+              <span style={{ fontSize: T.caption.fontSize }}>to build your spatial plot.</span>
             </div>
           </div>
         )}

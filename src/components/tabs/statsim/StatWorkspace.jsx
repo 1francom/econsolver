@@ -20,7 +20,7 @@ import { useState, useMemo } from "react";
 import { evalExpression, buildScope,
   dnorm, pnorm, qnorm, dt, pt, qt, dbinom, pbinom, dpois, ppois, dchisq, pchisq, qchisq,
 } from "../../../math/calcEngine.js";
-import { bootstrapMean, subsampleMean, permutationTwoSampleMean, bootstrapStatistic, permutationTest } from "../../../math/Resampling.js";
+import { bootstrapMean, subsampleMean, permutationTwoSampleMean, bootstrapStatistic, permutationTest, permutationCompare, permutationRegressionCoef } from "../../../math/Resampling.js";
 import { mulberry32 } from "../../../math/rng.js";
 import { useSessionLog } from "../../../services/session/sessionLog.jsx";
 import { useTheme } from "../../../ThemeContext.jsx";
@@ -704,6 +704,10 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
   const [rsSeed,    setRsSeed]    = useState("");
   const [rsContrast,setRsContrast]= useState("diffMeans");
   const [rsAlt,     setRsAlt]     = useState("two-sided");
+  const [rsCompare, setRsCompare] = useState(false);       // perm: raw vs studentized side-by-side
+  const [rsYCol,    setRsYCol]    = useState("");           // regperm: outcome Y
+  const [rsDCol,    setRsDCol]    = useState("");           // regperm: regressor D (coef under test)
+  const [rsCovCols, setRsCovCols] = useState([]);           // regperm: covariate columns Z
 
   // ── Probability ─────────────────────────────────────────────────────────────
   const [probOpen,  setProbOpen]  = useState(false);
@@ -992,7 +996,7 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
           const ratioWarn = rsMode === "subsample" && n > 0 && mEffective / n > 0.5;
 
           function runRS() {
-            if (!rsCol) return;
+            if (rsMode === "regperm" ? (!rsYCol || !rsDCol) : !rsCol) return;
             setRsBusy(true); setRsResult(null);
             setTimeout(() => {
               try {
@@ -1002,6 +1006,16 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                   res = bootstrapStatistic(colVals(rsCol), rsStat, { B: rsB, alpha: 0.05, ciType: rsCiType, seed: seedArg });
                 } else if (rsMode === "subsample") {
                   res = subsampleMean(colVals(rsCol), mEffective, rsB, 0.05, seedArg);
+                } else if (rsMode === "regperm") {
+                  if (rsYCol === rsDCol) {
+                    res = { error: "Outcome Y and regressor D must differ." };
+                  } else {
+                    // Pass row-aligned columns (NOT colVals — that filters NaNs per
+                    // column and would break row alignment). The engine does its own
+                    // listwise-complete deletion across Y, D, Z by row index.
+                    const rawCol = (col) => rows.map(r => Number(r[col]));
+                    res = permutationRegressionCoef(rawCol(rsYCol), rawCol(rsDCol), rsCovCols.map(rawCol), { B: rsB, seed: seedArg, alternative: rsAlt });
+                  }
                 } else {
                   if (!rsGroupCol || !rsLevelA || !rsLevelB || rsLevelA === rsLevelB) {
                     res = { error: "Pick two distinct levels of the group column." };
@@ -1013,7 +1027,9 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                       if (g === rsLevelA) a.push(v);
                       else if (g === rsLevelB) b.push(v);
                     }
-                    res = permutationTest(a, b, rsContrast, { B: rsB, exact: null, seed: seedArg, alternative: rsAlt });
+                    res = rsCompare
+                      ? permutationCompare(a, b, { B: rsB, exact: null, seed: seedArg, alternative: rsAlt })
+                      : permutationTest(a, b, rsContrast, { B: rsB, exact: null, seed: seedArg, alternative: rsAlt });
                   }
                 }
                 setRsResult(res);
@@ -1029,6 +1045,18 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                       module: "stat", opType: "subsample",
                       params: { col: rsCol, m: res.m, B: rsB, seed: res.seed },
                       label: `Subsample mean(${rsCol}): est=${res.meanHat?.toFixed?.(4)}, m=${res.m}, seed=${res.seed}`,
+                    });
+                  } else if (rsMode === "regperm") {
+                    appendLog?.({
+                      module: "stat", opType: "permutation",
+                      params: { y: rsYCol, d: rsDCol, covariates: rsCovCols, method: "freedman-lane", alternative: rsAlt, B: rsB, seed: res.seed },
+                      label: `Freedman–Lane β(${rsDCol}) on ${rsYCol}${rsCovCols.length ? ` | ${rsCovCols.join(", ")}` : ""}: β=${res.betaD?.toFixed?.(4)}, t=${res.tD?.toFixed?.(4)}, p_raw=${res.raw.pValue?.toFixed?.(4)}, p_stud=${res.stud.pValue?.toFixed?.(4)}, B=${res.nPerm}, seed=${res.seed}`,
+                    });
+                  } else if (res.compare) {
+                    appendLog?.({
+                      module: "stat", opType: "permutation",
+                      params: { col: rsCol, groupCol: rsGroupCol, levelA: rsLevelA, levelB: rsLevelB, contrast: "raw_vs_studentized", alternative: rsAlt, B: rsB, exact: res.exact, seed: res.seed },
+                      label: `Permutation raw vs studentized (${rsLevelA} vs ${rsLevelB}): p_raw=${res.raw.pValue?.toFixed?.(4)}, p_stud=${res.stud.pValue?.toFixed?.(4)}, ${res.exact ? `exact (${res.nPerm} perms)` : `MC B=${res.nPerm}, seed=${res.seed}`}`,
                     });
                   } else {
                     appendLog?.({
@@ -1052,14 +1080,17 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                 {modeBtn("boot", "Bootstrap (with replacement)")}
                 {modeBtn("subsample", "Subsample (without replacement)")}
                 {modeBtn("perm", "Permutation (2-sample)")}
+                {modeBtn("regperm", "Regression coef (Freedman–Lane)")}
               </div>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {rsMode !== "regperm" && (<>
                 <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>variable</span>
                 <select value={rsCol} onChange={e => { setRsCol(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 220 }}>
                   <option value="">— pick numeric column —</option>
                   {numericHeaders.map(h => <option key={h}>{h}</option>)}
                 </select>
+                </>)}
 
                 {rsMode === "boot" && (
                   <>
@@ -1099,12 +1130,46 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                       {levels.map(l => <option key={l}>{l}</option>)}
                     </select>
                     <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>contrast</span>
-                    <select value={rsContrast} onChange={e => { setRsContrast(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 150 }}>
+                    <select value={rsContrast} onChange={e => { setRsContrast(e.target.value); setRsResult(null); }} disabled={rsCompare} style={{ ...fieldStyle(C, T), maxWidth: 180, opacity: rsCompare ? 0.5 : 1 }}>
                       <option value="diffMeans">diff of means</option>
+                      <option value="studDiffMeans">studentized diff (Welch t)</option>
                       <option value="diffMedians">diff of medians</option>
                       <option value="diffSd">diff of sd</option>
                       <option value="meanRatio">ratio of means</option>
                     </select>
+                    <select value={rsAlt} onChange={e => { setRsAlt(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T) }}>
+                      <option value="two-sided">two-sided</option>
+                      <option value="greater">greater</option>
+                      <option value="less">less</option>
+                    </select>
+                    <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: rsCompare ? C.teal : C.textMuted }}>
+                      <input type="checkbox" checked={rsCompare} onChange={e => { setRsCompare(e.target.checked); setRsResult(null); }} />
+                      compare raw vs studentized
+                    </label>
+                  </>
+                )}
+
+                {rsMode === "regperm" && (
+                  <>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>outcome Y</span>
+                    <select value={rsYCol} onChange={e => { setRsYCol(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 160 }}>
+                      <option value="">— pick Y —</option>
+                      {numericHeaders.map(h => <option key={h}>{h}</option>)}
+                    </select>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>regressor D</span>
+                    <select value={rsDCol} onChange={e => { setRsDCol(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T), maxWidth: 160 }}>
+                      <option value="">— pick D —</option>
+                      {numericHeaders.filter(h => h !== rsYCol).map(h => <option key={h}>{h}</option>)}
+                    </select>
+                    <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>covariates Z</span>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {numericHeaders.filter(h => h !== rsYCol && h !== rsDCol).map(h => {
+                        const on = rsCovCols.includes(h);
+                        return <button key={h} onClick={() => { setRsCovCols(cs => on ? cs.filter(c => c !== h) : [...cs, h]); setRsResult(null); }}
+                          style={{ padding: "0.2rem 0.5rem", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer", borderRadius: 3, background: on ? `${C.blue}22` : "transparent", border: `1px solid ${on ? C.blue : C.border2}`, color: on ? C.blue : C.textDim }}>{h}</button>;
+                      })}
+                      {numericHeaders.filter(h => h !== rsYCol && h !== rsDCol).length === 0 && <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim }}>none</span>}
+                    </div>
                     <select value={rsAlt} onChange={e => { setRsAlt(e.target.value); setRsResult(null); }} style={{ ...fieldStyle(C, T) }}>
                       <option value="two-sided">two-sided</option>
                       <option value="greater">greater</option>
@@ -1133,7 +1198,9 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                   onChange={e => setRsSeed(e.target.value)} style={{ ...fieldStyle(C, T), width: 80 }} />
 
                 <Btn ch={rsBusy ? "Running…" : "Run"} v="solid" color={C.teal} onClick={runRS} sm
-                  dis={rsBusy || !rsCol || (rsMode === "perm" && (!rsGroupCol || !rsLevelA || !rsLevelB || rsLevelA === rsLevelB))} />
+                  dis={rsBusy || (rsMode === "regperm"
+                    ? (!rsYCol || !rsDCol || rsYCol === rsDCol)
+                    : (!rsCol || (rsMode === "perm" && (!rsGroupCol || !rsLevelA || !rsLevelB || rsLevelA === rsLevelB))))} />
               </div>
 
               {ratioWarn && (
@@ -1170,6 +1237,80 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                   <div>p ({rsResult.alternative}) = <span style={{ color: rsResult.pValue < 0.05 ? C.gold : C.textDim }}>{fmt(rsResult.pValue, 4)}</span> &nbsp; {rsResult.exact ? `exact (${rsResult.nPerm} perms)` : `MC B=${rsResult.nPerm}, seed=${rsResult.seed}`}</div>
                   <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.observed} color={C.gold} />
                 </ResultBox>
+              )}
+
+              {rsResult && !rsResult.error && rsResult.compare && !rsResult.regression && (
+                <>
+                  <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5, padding: "2px 0" }}>
+                    Same {rsResult.exact ? `${rsResult.nPerm} exact` : `${rsResult.nPerm} Monte-Carlo`} relabellings of the group
+                    label, two statistics. The <span style={{ color: C.gold }}>raw</span> difference-in-means tests the strong
+                    null that both groups are <em>identically distributed</em> (exchangeable); the
+                    <span style={{ color: C.teal }}> studentized</span> Welch-t divides by the SE recomputed inside each
+                    permutation, so it stays calibrated under unequal variances and tests the weaker null of <em>equal means</em>.
+                    The shuffle is identical for both — only the statistic differs. (Reading the shuffle as the design's own
+                    re-randomization rather than population exchangeability is the permutation-vs-randomization distinction; the
+                    arithmetic is the same.)
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 240px", minWidth: 240 }}>
+                      <ResultBox color={C.gold}>
+                        <div>raw diff of means &nbsp;({rsLevelA} vs {rsLevelB})</div>
+                        <div>observed = <span style={{ color: C.gold }}>{fmt(rsResult.raw.observed, 4)}</span></div>
+                        <div>p ({rsResult.alternative}) = <span style={{ color: rsResult.raw.pValue < 0.05 ? C.gold : C.textDim }}>{fmt(rsResult.raw.pValue, 4)}</span></div>
+                        <ReplicateHistogram replicates={rsResult.raw.replicates} marker={rsResult.raw.observed} color={C.gold} />
+                      </ResultBox>
+                    </div>
+                    <div style={{ flex: "1 1 240px", minWidth: 240 }}>
+                      <ResultBox color={C.teal}>
+                        <div>studentized (Welch t) &nbsp;({rsLevelA} vs {rsLevelB})</div>
+                        <div>observed = <span style={{ color: C.teal }}>{fmt(rsResult.stud.observed, 4)}</span></div>
+                        <div>p ({rsResult.alternative}) = <span style={{ color: rsResult.stud.pValue < 0.05 ? C.teal : C.textDim }}>{fmt(rsResult.stud.pValue, 4)}</span></div>
+                        <ReplicateHistogram replicates={rsResult.stud.replicates} marker={rsResult.stud.observed} color={C.teal} />
+                      </ResultBox>
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim }}>
+                    {rsResult.exact ? `exact enumeration (${rsResult.nPerm} permutations)` : `Monte-Carlo B=${rsResult.nPerm}, seed=${rsResult.seed}`}
+                  </div>
+                </>
+              )}
+
+              {rsResult && !rsResult.error && rsResult.regression && (
+                <>
+                  <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5, padding: "2px 0" }}>
+                    Freedman–Lane tests H₀: β(<span style={{ color: C.blue }}>{rsDCol}</span>) = 0 in&nbsp;
+                    <span style={{ color: C.text }}>{rsYCol} ~ {rsDCol}{rsCovCols.length ? " + " + rsCovCols.join(" + ") : ""}</span>.
+                    The reduced model {rsYCol} ~ 1{rsCovCols.length ? " + " + rsCovCols.join(" + ") : ""} is fit once; its residuals are
+                    permuted and added back to the reduced fitted values to build each y*, which is re-regressed on the full design.
+                    The <span style={{ color: C.gold }}>raw</span> slope β* and the <span style={{ color: C.teal }}>studentized</span> t* = β*/se(β*)
+                    are read off the SAME permutations — only the studentized one stays calibrated under heteroskedasticity.
+                  </div>
+                  <ResultBox color={C.blue}>
+                    <div>observed   β({rsDCol}) = <span style={{ color: C.blue }}>{fmt(rsResult.betaD, 4)}</span> &nbsp;&nbsp; se = {fmt(rsResult.seD, 4)} &nbsp;&nbsp; t = {fmt(rsResult.tD, 4)}</div>
+                    <div>n = {rsResult.n} &nbsp;&nbsp; k = {rsResult.k} &nbsp;&nbsp; df = {rsResult.dfResid} &nbsp;&nbsp; covariates = {rsResult.nCov}</div>
+                  </ResultBox>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 240px", minWidth: 240 }}>
+                      <ResultBox color={C.gold}>
+                        <div>raw slope β({rsDCol})</div>
+                        <div>observed = <span style={{ color: C.gold }}>{fmt(rsResult.raw.observed, 4)}</span></div>
+                        <div>p ({rsResult.alternative}) = <span style={{ color: rsResult.raw.pValue < 0.05 ? C.gold : C.textDim }}>{fmt(rsResult.raw.pValue, 4)}</span></div>
+                        <ReplicateHistogram replicates={rsResult.raw.replicates} marker={rsResult.raw.observed} color={C.gold} />
+                      </ResultBox>
+                    </div>
+                    <div style={{ flex: "1 1 240px", minWidth: 240 }}>
+                      <ResultBox color={C.teal}>
+                        <div>studentized t({rsDCol})</div>
+                        <div>observed = <span style={{ color: C.teal }}>{fmt(rsResult.stud.observed, 4)}</span></div>
+                        <div>p ({rsResult.alternative}) = <span style={{ color: rsResult.stud.pValue < 0.05 ? C.teal : C.textDim }}>{fmt(rsResult.stud.pValue, 4)}</span></div>
+                        <ReplicateHistogram replicates={rsResult.stud.replicates} marker={rsResult.stud.observed} color={C.teal} />
+                      </ResultBox>
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim }}>
+                    Monte-Carlo B={rsResult.nPerm}, seed={rsResult.seed}
+                  </div>
+                </>
               )}
             </div>
           );

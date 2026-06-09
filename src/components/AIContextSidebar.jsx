@@ -535,7 +535,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         gap: 16, padding: "2rem", boxShadow: "-8px 0 32px rgba(0,0,0,0.6)",
       }}>
-        <div style={{ fontSize: 28 }}>✦</div>
+        <div style={{ fontSize: T.display.fontSize }}>✦</div>
         <div style={{ fontSize: T.body.fontSize, fontFamily: T.code.fontFamily, color: C.gold, letterSpacing: "0.1em", textTransform: "uppercase" }}>
           Premium Feature
         </div>

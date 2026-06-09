@@ -1,0 +1,49 @@
+{
+  "_note": "Fixture set for Fase X3 Task 4 (unit-inference accuracy ≥95% target). 'expected' is a human-readable canonical label; grading is DIMENSION-AWARE via 'accept' — an array of token-groups. A model answer is a hit when EVERY group has ≥1 synonym present as a substring of the normalized answer (AND across groups, OR within a group). This grades the unit DIMENSION the model identified, not exact prose, since inferVariableUnits emits descriptive strings. Extend toward 100 vars; widen 'accept' when a genuinely-correct answer is wrongly missed, fix the prompt when a wrong dimension slips through.",
+  "variables": [
+    { "name": "gdp_usd",            "samples": [21433226, 21527000, 22996100],     "expected": "USD",                    "accept": [["usd", "dollar", "us$"]] },
+    { "name": "gdp_per_capita_eur", "samples": [38500, 39120, 40010],              "expected": "EUR per capita",         "accept": [["eur", "euro"], ["per capita", "capita"]] },
+    { "name": "debt_pct_gdp",       "samples": [98.2, 102.7, 105.1],               "expected": "% of GDP",               "accept": [["percent", "%", "pct"], ["gdp"]] },
+    { "name": "exports_usd_mn",     "samples": [1450.5, 1502.3, 1488.9],           "expected": "USD millions",           "accept": [["usd", "dollar", "us$"], ["million", "mn"]] },
+    { "name": "wage_hourly_eur",    "samples": [14.5, 15.2, 16.0],                 "expected": "EUR per hour",           "accept": [["eur", "euro"], ["hour", "hourly", "per hour"]] },
+    { "name": "household_income",   "samples": [42000, 51000, 38000],              "expected": "currency (income)",      "accept": [["currency", "income", "monetary", "money", "usd", "eur", "dollar", "euro"]] },
+    { "name": "price_index_cpi",    "samples": [103.4, 105.1, 107.8],              "expected": "index (CPI, base=100)",  "accept": [["index", "cpi", "consumer price"]] },
+
+    { "name": "population",         "samples": [83149300, 83190556, 83237124],     "expected": "count (persons)",        "accept": [["count", "number", "persons", "people", "population", "inhabitant"]] },
+    { "name": "n_firms",            "samples": [1240, 1255, 1280],                 "expected": "count (firms)",          "accept": [["count", "number"], ["firm", "compan", "business", "establishment"]] },
+    { "name": "units_sold",         "samples": [320, 410, 388],                    "expected": "count (units)",          "accept": [["count", "number", "quantity", "units sold", "sold"]] },
+    { "name": "num_employees",      "samples": [12, 45, 230],                      "expected": "count (employees)",      "accept": [["count", "number"], ["employee", "worker", "staff", "headcount"]] },
+    { "name": "households",         "samples": [40500, 40720, 41010],              "expected": "count (households)",     "accept": [["count", "number", "household"]] },
+
+    { "name": "year",               "samples": [2018, 2019, 2020],                 "expected": "year",                   "accept": [["year", "calendar", "annual"]] },
+    { "name": "month",              "samples": [1, 2, 12],                         "expected": "month",                  "accept": [["month"]] },
+    { "name": "quarter",            "samples": ["2020Q1", "2020Q2", "2020Q3"],     "expected": "quarter",                "accept": [["quarter"]] },
+    { "name": "days_since_event",   "samples": [0, 14, 365],                       "expected": "days",                   "accept": [["day"]] },
+    { "name": "tenure_months",      "samples": [3, 24, 60],                        "expected": "months",                 "accept": [["month"]] },
+    { "name": "age_years",          "samples": [23, 41, 67],                       "expected": "years (age)",            "accept": [["year"]] },
+
+    { "name": "unemployment_rate",  "samples": [5.1, 5.4, 6.2],                    "expected": "percent",                "accept": [["percent", "%", "pct", "rate", "proportion"]] },
+    { "name": "inflation_pct",      "samples": [2.1, 3.4, 7.9],                    "expected": "percent",                "accept": [["percent", "%", "pct", "rate"]] },
+    { "name": "interest_rate_bps",  "samples": [25, 50, 75],                       "expected": "basis points",           "accept": [["basis point", "bps"]] },
+    { "name": "gdp_growth",         "samples": [2.1, -3.4, 4.0],                   "expected": "percent (growth rate)",  "accept": [["percent", "%", "pct", "rate", "growth"]] },
+    { "name": "co2_per_capita",     "samples": [8.1, 7.9, 7.4],                    "expected": "tonnes per capita",      "accept": [["per capita", "capita"], ["tonne", "ton", "emission", "co2"]] },
+    { "name": "density_per_km2",    "samples": [232, 240, 251],                    "expected": "persons per km²",        "accept": [["density", "person", "people", "population", "inhabitant"], ["km", "kilomet", "square"]] },
+
+    { "name": "literacy_rate",      "samples": [0.98, 0.97, 0.99],                 "expected": "proportion [0,1]",       "accept": [["proportion", "share", "fraction", "rate", "ratio", "percent"]] },
+    { "name": "employment_share",   "samples": [0.62, 0.64, 0.61],                "expected": "proportion [0,1]",       "accept": [["proportion", "share", "fraction", "rate", "ratio", "percent"]] },
+    { "name": "treated",            "samples": [0, 1, 0],                          "expected": "binary indicator",       "accept": [["binary", "indicator", "dummy", "boolean", "treatment", "0 1"]] },
+    { "name": "female",             "samples": [1, 0, 1],                          "expected": "binary indicator",       "accept": [["binary", "indicator", "dummy", "boolean", "gender", "sex", "0 1"]] },
+    { "name": "vote_share",         "samples": [0.512, 0.486, 0.503],             "expected": "proportion [0,1]",       "accept": [["proportion", "share", "fraction", "percent", "ratio"]] },
+
+    { "name": "country_id",         "samples": ["DE", "FR", "IT"],                 "expected": "none (categorical id)",  "accept": [["identifier", "categorical", "code", "none", "country"]] },
+    { "name": "firm_id",            "samples": [100234, 100235, 100236],           "expected": "none (identifier)",      "accept": [["identifier", "categorical", "code", "none"]] },
+    { "name": "region_code",        "samples": ["DE-BY", "DE-HE", "DE-SN"],        "expected": "none (categorical)",     "accept": [["identifier", "categorical", "code", "region", "none"]] },
+    { "name": "sector",             "samples": ["manufacturing", "services", "agriculture"], "expected": "none (categorical)", "accept": [["categor", "category", "nominal", "sector", "none", "identifier"]] },
+    { "name": "survey_wave",        "samples": [1, 2, 3],                          "expected": "none (categorical wave)","accept": [["categor", "wave", "round", "none", "identifier", "number"]] },
+
+    { "name": "distance_km",        "samples": [12.4, 88.1, 5.0],                  "expected": "kilometres",             "accept": [["km", "kilomet"]] },
+    { "name": "area_hectares",      "samples": [120, 340, 78],                     "expected": "hectares",               "accept": [["hectare"]] },
+    { "name": "temperature_c",      "samples": [14.2, 22.7, -3.1],                 "expected": "degrees Celsius",        "accept": [["celsius", "centigrade", "degree"]] }
+  ],
+  "discrepancies": []
+}

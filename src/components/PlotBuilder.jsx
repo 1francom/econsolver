@@ -109,8 +109,9 @@ const PREF_TO_PRESET = { "teal-gold": "teal-gold", observable: "observable10", t
 
 
 const POSITION_OPTIONS = {
-  bar:   ["identity", "stack"],
-  point: ["identity", "jitter"],
+  bar:      ["identity", "stack", "dodge"],
+  point:    ["identity", "jitter", "dodge"],
+  errorbar: ["identity", "dodge"],
 };
 
 function genId() { return "ly_" + Math.random().toString(36).slice(2, 8); }
@@ -194,7 +195,7 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
         const rOpt  = aes.sizeCol  ? { r: aes.sizeCol }  : { r: size };
         const sym   = shape !== "circle" ? { symbol: shape } : {};
         const dotO  = { x: aes.x, y: aes.y, fill: colorVal, ...rOpt, ...sym, fillOpacity: 0.78 * op };
-        if (ly.position === "jitter") {
+        if (ly.position === "jitter" || ly.position === "dodge") {
           marks.push(Plt.dot(rows, Plt.dodgeX("middle", { ...dotO, padding: 1 })));
         } else {
           marks.push(Plt.dot(rows, dotO));
@@ -220,6 +221,8 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
         const barExtra = bsW > 0 ? { stroke: colorVal, strokeWidth: bsW } : {};
         if (ly.position === "stack") {
           marks.push(Plt.barY(rows, Plt.stackY({ x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra })));
+        } else if (ly.position === "dodge") {
+          marks.push(Plt.barY(rows, Plt.dodgeX("middle", { x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra, padding: 0.1 })));
         } else {
           marks.push(Plt.barY(rows, { x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra }));
         }
@@ -328,12 +331,14 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
     case "errorbar": {
       if (aes.x && aes.yMin && aes.yMax) {
         const { strokeWidth: ebW = 1.5 } = ly.opts || {};
-        marks.push(Plt.ruleX(rows, {
-          x: aes.x, y1: aes.yMin, y2: aes.yMax,
-          stroke: colorVal, strokeWidth: ebW, strokeOpacity: op,
-        }));
-        marks.push(Plt.tickX(rows, { x: aes.x, y: aes.yMin, stroke: colorVal, strokeWidth: ebW, strokeOpacity: op }));
-        marks.push(Plt.tickX(rows, { x: aes.x, y: aes.yMax, stroke: colorVal, strokeWidth: ebW, strokeOpacity: op }));
+        const ebBase = { x: aes.x, y1: aes.yMin, y2: aes.yMax, stroke: colorVal, strokeWidth: ebW, strokeOpacity: op };
+        if (ly.position === "dodge") {
+          marks.push(Plt.ruleX(rows, Plt.dodgeX("middle", { ...ebBase, padding: 4 })));
+        } else {
+          marks.push(Plt.ruleX(rows, ebBase));
+          marks.push(Plt.tickX(rows, { x: aes.x, y: aes.yMin, stroke: colorVal, strokeWidth: ebW, strokeOpacity: op }));
+          marks.push(Plt.tickX(rows, { x: aes.x, y: aes.yMax, stroke: colorVal, strokeWidth: ebW, strokeOpacity: op }));
+        }
       }
       break;
     }

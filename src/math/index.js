@@ -73,6 +73,7 @@ export {
   runPoisson,
   runPoissonFE,
   runPoissonFEMulti,
+  runNegBinFE,
   runSunAbraham,
   normCDF,
   buildBinaryLatex,
@@ -86,7 +87,7 @@ export { runGMM, runLIML, runIVPoisson } from "./GMMEngine.js";
 export { runSyntheticControl } from "./SyntheticControlEngine.js";
 
 // ── Canonical result wrapper ──────────────────────────────────────────────────
-export { wrapResult, getCoeffBlock } from "./EstimationResult.js";
+export { wrapResult, wrapNegBinFE, getCoeffBlock } from "./EstimationResult.js";
 
 // ── Fit-failure diagnostics ──────────────────────────────────────────────────
 export { diagnoseFit } from "./diagnoseFit.js";

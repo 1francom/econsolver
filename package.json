@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/lint-undef.mjs && vite build",
     "lint": "eslint .",
+    "lint:undef": "node scripts/lint-undef.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

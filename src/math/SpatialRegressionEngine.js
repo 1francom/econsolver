@@ -147,6 +147,86 @@ function zPval(z) {
   return 2 * (1 - normalCDF(Math.abs(z)));
 }
 
+// Full information-matrix SE for the spatial-lag family (SAR/SDM).
+//
+// The conditional OLS SE σ²(X'X)⁻¹ understates β uncertainty because it ignores
+// the β–ρ covariance: spatialreg reports SEs from the inverse of the full
+// information matrix. We obtain the same thing as the inverse of the negative
+// Hessian of the σ²-profiled log-likelihood in the free parameters (β, ρ).
+// Profiling σ² out is valid here — the (β,ρ) block of the full inverse equals
+// the inverse of this Hessian (Schur complement w.r.t. σ²).
+//
+// Returns { seBeta[], seSpatial } in natural order, or null on any numerical
+// failure so the caller keeps its prior (conditional/concentrated) SEs.
+function lagFullInfoSE({ Y, Xaug, Wd, betaHat, rhoHat }) {
+  const n = Y.length;
+  const Wy = matVec(Wd, Y);
+  const p = betaHat.length;
+  const theta0 = [...betaHat, rhoHat];
+
+  // Negative σ²-profiled log-likelihood at free (β, ρ).
+  const negLL = (theta) => {
+    const rho = theta[p];
+    if (!(rho > RHO_MIN && rho < RHO_MAX)) return Infinity;
+    const ld = logDetIminus(Wd, rho);
+    if (!Number.isFinite(ld)) return Infinity;
+    let ss = 0;
+    for (let i = 0; i < n; i++) {
+      let fitted = rho * Wy[i];
+      const row = Xaug[i];
+      for (let j = 0; j < p; j++) fitted += row[j] * theta[j];
+      const e = Y[i] - fitted;
+      ss += e * e;
+    }
+    const sigma2 = ss / n;
+    if (!(sigma2 > 0) || !Number.isFinite(sigma2)) return Infinity;
+    return -(ld - (n / 2) * (Math.log(TWO_PI * sigma2) + 1));
+  };
+
+  const m = p + 1;
+  const h = theta0.map((v) => 1e-4 * Math.max(1, Math.abs(v)));
+  const f0 = negLL(theta0);
+  if (!Number.isFinite(f0)) return null;
+
+  const bump = (idx, signs, steps) => {
+    const t = theta0.slice();
+    for (let k = 0; k < idx.length; k++) t[idx[k]] += signs[k] * steps[k];
+    return negLL(t);
+  };
+
+  const H = Array.from({ length: m }, () => Array(m).fill(0));
+  for (let i = 0; i < m; i++) {
+    const fp = bump([i], [1], [h[i]]);
+    const fm = bump([i], [-1], [h[i]]);
+    if (!Number.isFinite(fp) || !Number.isFinite(fm)) return null;
+    H[i][i] = (fp - 2 * f0 + fm) / (h[i] * h[i]);
+  }
+  for (let i = 0; i < m; i++) {
+    for (let j = i + 1; j < m; j++) {
+      const fpp = bump([i, j], [1, 1], [h[i], h[j]]);
+      const fpm = bump([i, j], [1, -1], [h[i], h[j]]);
+      const fmp = bump([i, j], [-1, 1], [h[i], h[j]]);
+      const fmm = bump([i, j], [-1, -1], [h[i], h[j]]);
+      if (![fpp, fpm, fmp, fmm].every(Number.isFinite)) return null;
+      const v = (fpp - fpm - fmp + fmm) / (4 * h[i] * h[j]);
+      H[i][j] = v;
+      H[j][i] = v;
+    }
+  }
+
+  const cov = matInv(H);
+  if (!cov) return null;
+  const seBeta = [];
+  for (let i = 0; i < p; i++) {
+    const d = cov[i][i];
+    if (!(d > 0) || !Number.isFinite(d)) return null;
+    seBeta.push(Math.sqrt(d));
+  }
+  const dRho = cov[p][p];
+  if (!(dRho > 0) || !Number.isFinite(dRho)) return null;
+  return { seBeta, seSpatial: Math.sqrt(dRho) };
+}
+
 function augmentedX(X, Wd, model) {
   if (model === "SDM" || model === "SLX") {
     const WX = lagMatrix(Wd, X);
@@ -185,9 +265,13 @@ function concentratedSpatial({ Y, Xraw, Wd, varNames, model }) {
 
   const rho = best.rho;
   const beta = best.fit.beta;
-  const seBeta = best.fit.XtXinv.map((row, i) => Math.sqrt(Math.max(0, row[i] * best.sigma2)));
+  // Conditional SEs as fallback; prefer the full information-matrix SEs (which
+  // capture the β–ρ covariance) so we match spatialreg::lagsarlm.
+  let seBeta = best.fit.XtXinv.map((row, i) => Math.sqrt(Math.max(0, row[i] * best.sigma2)));
   const info = -secondDerivative(objective, rho);
-  const seRho = info > 0 ? Math.sqrt(1 / info) : NaN;
+  let seRho = info > 0 ? Math.sqrt(1 / info) : NaN;
+  const fullSE = lagFullInfoSE({ Y, Xaug, Wd, betaHat: beta, rhoHat: rho });
+  if (fullSE) { seBeta = fullSE.seBeta; seRho = fullSE.seSpatial; }
   const yhat = Xaug.map((row, i) => row.reduce((s, v, j) => s + v * beta[j], 0) + rho * Wy[i]);
   const resid = Y.map((y, i) => y - yhat[i]);
   const meanY = Y.reduce((s, v) => s + v, 0) / n;

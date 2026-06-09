@@ -9,7 +9,7 @@
 //   SubsetManager (default)                    ← UI component
 
 import { useState } from "react";
-import { useTheme, mono } from "../modeling/shared.jsx";
+import { useTheme } from "../modeling/shared.jsx";
 
 // ─── PURE FILTER FUNCTION ────────────────────────────────────────────────────
 // Apply an array of filter conditions to rows.
@@ -52,7 +52,7 @@ function filterLabel(filters) {
 
 // ─── SUB-COMPONENTS ──────────────────────────────────────────────────────────
 function FilterRow({ filter, headers, onChange, onRemove }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 4 }}>
       {/* Column */}
@@ -61,7 +61,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
         onChange={e => onChange({ ...filter, col: e.target.value })}
         style={{
           flex: 2, background: C.bg, color: C.text, border: `1px solid ${C.border}`,
-          borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px",
+          borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px",
         }}
       >
         <option value="">— col —</option>
@@ -74,7 +74,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
         onChange={e => onChange({ ...filter, op: e.target.value })}
         style={{
           flex: 1, background: C.bg, color: C.teal, border: `1px solid ${C.border}`,
-          borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 5px",
+          borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px",
         }}
       >
         {OPS.map(op => <option key={op} value={op}>{op}</option>)}
@@ -87,7 +87,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
         placeholder="value"
         style={{
           flex: 2, background: C.bg, color: C.text, border: `1px solid ${C.border}`,
-          borderRadius: 3, fontFamily: mono, fontSize: 10, padding: "3px 6px",
+          borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 6px",
           outline: "none",
         }}
       />
@@ -97,7 +97,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
         onClick={onRemove}
         style={{
           background: "none", border: "none", color: C.textMuted,
-          cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1,
+          cursor: "pointer", fontSize: T.body.fontSize, padding: "0 3px", lineHeight: 1,
         }}
         title="Remove condition"
       >×</button>
@@ -106,7 +106,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
 }
 
 function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const filtered = applySubsetFilter(rows, subset.filters);
   const nLabel   = rows.length ? `n=${filtered.length} / ${rows.length}` : "";
 
@@ -125,19 +125,19 @@ function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
           style={{
             flex: 1, background: "transparent", border: "none",
             borderBottom: `1px solid ${C.border2}`,
-            color: C.text, fontFamily: mono, fontSize: 11, padding: "2px 0",
+            color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 0",
             outline: "none",
           }}
           placeholder="Subset name"
         />
-        <span style={{ fontSize: 9, color: C.textMuted, fontFamily: mono, flexShrink: 0 }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, flexShrink: 0 }}>
           {nLabel}
         </span>
         <button
           onClick={onRemove}
           style={{
             background: "none", border: "none", color: C.textMuted,
-            cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1,
+            cursor: "pointer", fontSize: T.body.fontSize, padding: "0 2px", lineHeight: 1,
           }}
           title="Delete subset"
         >×</button>
@@ -168,7 +168,7 @@ function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
         })}
         style={{
           background: "none", border: `1px dashed ${C.border2}`,
-          color: C.textMuted, fontFamily: mono, fontSize: 9,
+          color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
           padding: "2px 8px", borderRadius: 3, cursor: "pointer",
           letterSpacing: "0.1em", marginTop: 2,
         }}
@@ -188,7 +188,7 @@ function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
 //   onRunAll     () => void         — "Run all subsets" callback
 //   running      bool               — disable buttons during estimation
 export default function SubsetManager({ headers, rows, subsets, onChange, onRunAll, running }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
 
   const addSubset = () => {
@@ -219,13 +219,13 @@ export default function SubsetManager({ headers, rows, subsets, onChange, onRunA
           background: open ? `${C.gold}0d` : C.surface,
           border: `1px solid ${open ? C.gold + "50" : C.border}`,
           borderRadius: open ? "4px 4px 0 0" : 4,
-          cursor: "pointer", fontFamily: mono, transition: "all 0.13s",
+          cursor: "pointer", fontFamily: T.code.fontFamily, transition: "all 0.13s",
         }}
       >
-        <span style={{ fontSize: 9, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase" }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase" }}>
           ◈ Subsets {subsets.length > 0 ? `(${subsets.length})` : ""}
         </span>
-        <span style={{ fontSize: 9, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
       </button>
 
       {open && (
@@ -236,7 +236,7 @@ export default function SubsetManager({ headers, rows, subsets, onChange, onRunA
         }}>
           {/* Full sample — always present */}
           <div style={{
-            fontSize: 9, color: C.textMuted, fontFamily: mono,
+            fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
             padding: "4px 8px", marginBottom: 8,
             border: `1px solid ${C.border}`, borderRadius: 3,
           }}>
@@ -262,7 +262,7 @@ export default function SubsetManager({ headers, rows, subsets, onChange, onRunA
               style={{
                 flex: 1, background: "none",
                 border: `1px dashed ${C.border2}`,
-                color: C.textMuted, fontFamily: mono, fontSize: 9,
+                color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 padding: "5px 0", borderRadius: 3, cursor: "pointer",
                 letterSpacing: "0.12em",
               }}
@@ -278,7 +278,7 @@ export default function SubsetManager({ headers, rows, subsets, onChange, onRunA
                   flex: 2, background: running ? "transparent" : `${C.gold}15`,
                   border: `1px solid ${running ? C.border : C.gold + "60"}`,
                   color: running ? C.textMuted : C.gold,
-                  fontFamily: mono, fontSize: 9, padding: "5px 0",
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "5px 0",
                   borderRadius: 3,
                   cursor: running ? "not-allowed" : "pointer",
                   letterSpacing: "0.12em",
@@ -291,7 +291,7 @@ export default function SubsetManager({ headers, rows, subsets, onChange, onRunA
 
           {canRunAll && (
             <div style={{
-              fontSize: 9, color: C.textMuted, fontFamily: mono,
+              fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
               marginTop: 8, lineHeight: 1.6,
             }}>
               Runs current model spec on each subset + full sample.

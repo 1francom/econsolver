@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { mono } from "../shared/constants.js";
+import { useTheme } from "../../../../ThemeContext.jsx";
+
 import { ColSelect, TextInput, ApplyBtn, ResultPreview, ErrBanner } from "../shared/atoms.jsx";
 import { guessWktCol } from "../shared/guess.js";
 import { arealInterpolate } from "../../../../math/SpatialEngine.js";
@@ -17,11 +18,12 @@ function datasetList(rows, headers, availableDatasets) {
 }
 
 function DatasetSelect({ label, value, onChange, datasets, C }) {
+  const { T } = useTheme();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>{label}</label>
+      <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>{label}</label>
       <select value={value} onChange={e => onChange(e.target.value)}
-        style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: mono, fontSize: 10, outline: "none" }}>
+        style={{ padding: "4px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
         {datasets.map(ds => <option key={ds.id} value={ds.id}>{ds.name}</option>)}
       </select>
     </div>
@@ -29,6 +31,7 @@ function DatasetSelect({ label, value, onChange, datasets, C }) {
 }
 
 export function ArealInterpolateSection({ rows, headers, availableDatasets, C, onResult }) {
+  const { T } = useTheme();
   const datasets = useMemo(() => datasetList(rows, headers, availableDatasets), [rows, headers, availableDatasets]);
   const [sourceId, setSourceId] = useState("active");
   const [targetId, setTargetId] = useState(availableDatasets[0]?.id ?? "active");
@@ -81,7 +84,7 @@ export function ArealInterpolateSection({ rows, headers, availableDatasets, C, o
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.7 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.7 }}>
         Transfers polygon attributes from a source layer to a target polygon layer using intersection area weights in EPSG:32721.
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -95,7 +98,7 @@ export function ArealInterpolateSection({ rows, headers, availableDatasets, C, o
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {[["extensive", "Extensive sum"], ["intensive", "Intensive mean"]].map(([mode, label]) => (
           <button key={mode} onClick={() => setExtensive(mode === "extensive")}
-            style={{ padding: "3px 10px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+            style={{ padding: "3px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
               background: (extensive ? "extensive" : "intensive") === mode ? `${C.teal}18` : "transparent",
               border: `1px solid ${(extensive ? "extensive" : "intensive") === mode ? C.teal : C.border2}`,
               borderRadius: 3, color: (extensive ? "extensive" : "intensive") === mode ? C.teal : C.textDim }}>
@@ -104,11 +107,11 @@ export function ArealInterpolateSection({ rows, headers, availableDatasets, C, o
         ))}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <label style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Value columns</label>
+        <label style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.12em", textTransform: "uppercase" }}>Value columns</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
           {numericSourceHeaders.map(h => (
             <button key={h} onClick={() => toggleValue(h)}
-              style={{ padding: "2px 8px", fontFamily: mono, fontSize: 9, cursor: "pointer",
+              style={{ padding: "2px 8px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: valueCols.includes(h) ? `${C.gold}18` : "transparent",
                 border: `1px solid ${valueCols.includes(h) ? C.gold : C.border2}`,
                 borderRadius: 3, color: valueCols.includes(h) ? C.gold : C.textDim }}>
@@ -119,7 +122,7 @@ export function ArealInterpolateSection({ rows, headers, availableDatasets, C, o
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <ApplyBtn onClick={apply} disabled={!canApply} C={C} label="Interpolate" />
-        {result && <span style={{ fontSize: 9, color: C.teal }}>OK: {result.rows.length} target polygons</span>}
+        {result && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>OK: {result.rows.length} target polygons</span>}
       </div>
       <ErrBanner msg={err} C={C} />
       {result && <ResultPreview rows={result.rows} newCols={[effectiveTargetId, ...result.cols]} C={C} />}

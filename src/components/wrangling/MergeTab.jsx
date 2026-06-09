@@ -1,6 +1,6 @@
 // ─── ECON STUDIO · components/wrangling/MergeTab.jsx ───────────────────────
 import { useState, useMemo } from "react";
-import { useTheme, mono, Lbl, Tabs, Btn, Grid } from "./shared.jsx";
+import { useTheme, Lbl, Tabs, Btn, Grid } from "./shared.jsx";
 import VectorAssignForm from "./VectorAssignForm.jsx";
 
 const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suffix:"_r" });
@@ -9,7 +9,7 @@ const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suff
 // JOIN and APPEND operations against other loaded datasets.
 // RHS always uses raw (pre-pipeline) data of the referenced dataset.
 function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
-  const { C } = useTheme();
+  const { C, T } = useTheme();
   const [subTab, setSubTab]       = useState("join");
   // JOIN state — array of staged joins, runs in order through runner.js
   const [joins, setJoins]         = useState([emptyJoin()]);
@@ -120,7 +120,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   const colBtnStyle = (sel, color) => ({
     padding:"0.28rem 0.55rem", border:`1px solid ${sel?color:C.border}`,
     background:sel?`${color}18`:"transparent", color:sel?color:C.textDim,
-    borderRadius:2, cursor:"pointer", fontSize:10, fontFamily:mono,
+    borderRadius:2, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
     textAlign:"left", transition:"all 0.1s",
   });
 
@@ -128,8 +128,8 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   if (!allDatasets.length) {
     return (
       <div style={{padding:"2.5rem 1.5rem",textAlign:"center",border:`1px dashed ${C.border2}`,borderRadius:4}}>
-        <div style={{fontSize:22,marginBottom:10}}>⊞</div>
-        <div style={{fontSize:12,color:C.textDim,lineHeight:1.8,fontFamily:mono}}>
+        <div style={{fontSize: T.display.fontSize,marginBottom:10}}>⊞</div>
+        <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.8,fontFamily: T.code.fontFamily}}>
           No other datasets loaded.<br/>
           Use the <span style={{color:C.teal}}>Dataset Manager</span> sidebar
           to load a second file — then join or append it here.
@@ -149,7 +149,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
           {/* Context note */}
           <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
             borderLeft:`3px solid ${C.blue}`,borderRadius:4,marginBottom:"1.2rem",
-            fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+            fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
             Equivalent to dplyr's <span style={{color:C.blue}}>left_join()</span> / <span style={{color:C.blue}}>inner_join()</span>.
             Stage multiple joins below — they apply sequentially, so a later join can use
             a column added by an earlier one. Each right dataset is referenced in its
@@ -168,14 +168,14 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                 border:`1px solid ${C.border}`, borderRadius:4,
               }}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.7rem"}}>
-                  <span style={{fontSize:10,color:C.teal,letterSpacing:"0.18em",
-                    textTransform:"uppercase",fontFamily:mono}}>Join {idx+1}</span>
+                  <span style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",
+                    textTransform:"uppercase",fontFamily: T.code.fontFamily}}>Join {idx+1}</span>
                   <span style={{flex:1}}/>
                   {joins.length > 1 && (
                     <button onClick={()=>removeJoin(idx)}
                       style={{padding:"0.18rem 0.55rem",border:`1px solid ${C.border2}`,
                         background:"transparent",color:C.textMuted,borderRadius:3,
-                        cursor:"pointer",fontSize:10,fontFamily:mono}}
+                        cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}
                       title="Remove this join">× Remove</button>
                   )}
                 </div>
@@ -189,9 +189,9 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                       style={{padding:"0.35rem 0.75rem",border:`1px solid ${j.rightId===d.id?C.teal:C.border2}`,
                         background:j.rightId===d.id?`${C.teal}18`:"transparent",
                         color:j.rightId===d.id?C.teal:C.textDim,borderRadius:3,cursor:"pointer",
-                        fontSize:11,fontFamily:mono,transition:"all 0.1s"}}>
+                        fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
                       {j.rightId===d.id?"✓ ":""}{d.filename}
-                      <span style={{fontSize:9,color:C.textMuted,marginLeft:6}}>
+                      <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
                         {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
                       </span>
                     </button>
@@ -236,16 +236,16 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                           <div style={{flex:1,height:4,background:C.border,borderRadius:2,overflow:"hidden"}}>
                             <div style={{width:`${firstMatchPreview.pct*100}%`,height:"100%",background:mc,borderRadius:2,transition:"width 0.3s"}}/>
                           </div>
-                          <span style={{fontSize:11,color:mc,fontFamily:mono,flexShrink:0}}>
+                          <span style={{fontSize: T.code.fontSize,color:mc,fontFamily: T.code.fontFamily,flexShrink:0}}>
                             {(firstMatchPreview.pct*100).toFixed(1)}%
                           </span>
                         </div>
-                        <div style={{fontSize:11,color:C.textDim,fontFamily:mono}}>
+                        <div style={{fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
                           <span style={{color:mc}}>{firstMatchPreview.matched.toLocaleString()}</span>
                           {" of "}{firstMatchPreview.validRows.toLocaleString()} left rows matched
                         </div>
                         {firstMatchPreview.keyNulls > 0 && (
-                          <div style={{fontSize:10,color:C.orange,fontFamily:mono,marginTop:4}}>
+                          <div style={{fontSize: T.caption.fontSize,color:C.orange,fontFamily: T.code.fontFamily,marginTop:4}}>
                             ⚠ {firstMatchPreview.keyNulls} row{firstMatchPreview.keyNulls!==1?"s":""} have null in key column '{j.leftKey}'.
                           </div>
                         )}
@@ -262,14 +262,14 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                           <button key={k} onClick={()=>updateJoin(idx,{how:k})}
                             style={{padding:"0.3rem 0.7rem",border:`1px solid ${j.how===k?C.teal:C.border2}`,
                               background:j.how===k?`${C.teal}18`:"transparent",color:j.how===k?C.teal:C.textDim,
-                              borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>
+                              borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily}}>
                             {j.how===k?"✓ ":""}{l}
                           </button>
                         ))}
                       </div>
                     </div>
                     {noCols ? (
-                      <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,alignSelf:"center"}}>
+                      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,alignSelf:"center"}}>
                         Filters rows only - no columns added.
                       </div>
                     ) : (
@@ -278,7 +278,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                         <input value={j.suffix} onChange={e=>updateJoin(idx,{suffix:e.target.value})} placeholder="_r"
                           style={{width:"100%",boxSizing:"border-box",padding:"0.35rem 0.55rem",
                             background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,
-                            color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+                            color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"}}/>
                       </div>
                     )}
                   </div>
@@ -286,7 +286,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                   {/* Formula preview */}
                   {j.leftKey && j.rightKey && (
                     <div style={{padding:"0.42rem 0.7rem",background:C.surface2,border:`1px solid ${C.border}`,
-                      borderRadius:3,fontSize:11,color:C.textDim,fontFamily:mono}}>
+                      borderRadius:3,fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
                       <span style={{color:C.gold}}>{idx===0?"this":`(after ${idx} join${idx>1?"s":""})`}</span>{" "}
                       {j.how.toUpperCase()} JOIN{" "}
                       <span style={{color:C.teal}}>{rDs.filename}</span>
@@ -307,7 +307,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             <button onClick={addJoin}
               style={{padding:"0.4rem 0.85rem",border:`1px dashed ${C.teal}`,
                 background:"transparent",color:C.teal,borderRadius:3,
-                cursor:"pointer",fontSize:11,fontFamily:mono}}>
+                cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily}}>
               + Add another join
             </button>
             <span style={{flex:1}}/>
@@ -325,7 +325,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
         <div>
           <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
             borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",
-            fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+            fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
             Vertically stacks rows from another dataset — equivalent to dplyr's{" "}
             <span style={{color:C.violet}}>bind_rows()</span> / SQL's UNION ALL.
             Columns are matched by name. Mismatched columns are filled with null.
@@ -338,9 +338,9 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                 style={{padding:"0.4rem 0.9rem",border:`1px solid ${appendId===d.id?C.violet:C.border2}`,
                   background:appendId===d.id?`${C.violet}18`:"transparent",
                   color:appendId===d.id?C.violet:C.textDim,borderRadius:3,cursor:"pointer",
-                  fontSize:11,fontFamily:mono,transition:"all 0.1s"}}>
+                  fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
                 {appendId===d.id?"✓ ":""}{d.filename}
-                <span style={{fontSize:9,color:C.textMuted,marginLeft:6}}>
+                <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
                   {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
                 </span>
               </button>
@@ -357,15 +357,15 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
               ].map(([val,label,color])=>(
                 <div key={label} style={{padding:"0.65rem",background:C.surface2,
                   border:`1px solid ${C.border}`,borderRadius:3,textAlign:"center"}}>
-                  <div style={{fontSize:20,color,fontFamily:mono,marginBottom:3}}>{val}</div>
-                  <div style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>{label}</div>
+                  <div style={{fontSize: T.h2.fontSize,color,fontFamily: T.code.fontFamily,marginBottom:3}}>{val}</div>
+                  <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>{label}</div>
                 </div>
               ))}
             </div>
             {appendPreview.onlyLeft > 0 || appendPreview.onlyRight > 0 ? (
               <div style={{padding:"0.5rem 0.75rem",background:`${C.yellow}08`,
                 border:`1px solid ${C.yellow}30`,borderLeft:`3px solid ${C.yellow}`,
-                borderRadius:4,marginBottom:"1rem",fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+                borderRadius:4,marginBottom:"1rem",fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
                 ⚠ Schema mismatch — {appendPreview.onlyLeft} column{appendPreview.onlyLeft!==1?"s":""} found
                 only in left, {appendPreview.onlyRight} only in right.
                 These will be filled with null for the rows that lack them.
@@ -373,12 +373,12 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             ) : (
               <div style={{padding:"0.5rem 0.75rem",background:`${C.green}08`,
                 border:`1px solid ${C.green}30`,borderLeft:`3px solid ${C.green}`,
-                borderRadius:4,marginBottom:"1rem",fontSize:10,color:C.green,fontFamily:mono}}>
+                borderRadius:4,marginBottom:"1rem",fontSize: T.caption.fontSize,color:C.green,fontFamily: T.code.fontFamily}}>
                 ✓ Schemas match exactly — clean append.
               </div>
             )}
             <div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,
-              borderRadius:3,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono}}>
+              borderRadius:3,marginBottom:"1rem",fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
               Result: <span style={{color:C.violet}}>
                 {(rows.length+appendPreview.rightRows).toLocaleString()}
               </span> rows × <span style={{color:C.violet}}>
@@ -394,7 +394,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
         <div>
           <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
             borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.2rem",
-            fontSize:10,color:C.textMuted,fontFamily:mono,lineHeight:1.6}}>
+            fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
             Set & bind operations against another dataset - dplyr <span style={{color:C.gold}}>bind_cols</span> /{" "}
             <span style={{color:C.gold}}>union</span> / <span style={{color:C.gold}}>intersect</span> /{" "}
             <span style={{color:C.gold}}>setdiff</span>.
@@ -407,7 +407,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
               <button key={k} onClick={()=>setCombineOp(k)}
                 style={{padding:"0.35rem 0.7rem",border:`1px solid ${combineOp===k?C.gold:C.border2}`,
                   background:combineOp===k?`${C.gold}18`:"transparent",color:combineOp===k?C.gold:C.textDim,
-                  borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>
+                  borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily}}>
                 {combineOp===k?"✓ ":""}{l}
               </button>
             ))}
@@ -419,9 +419,9 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
               <button key={d.id} onClick={()=>setCombineId(d.id)}
                 style={{padding:"0.4rem 0.9rem",border:`1px solid ${combineId===d.id?C.gold:C.border2}`,
                   background:combineId===d.id?`${C.gold}18`:"transparent",color:combineId===d.id?C.gold:C.textDim,
-                  borderRadius:3,cursor:"pointer",fontSize:11,fontFamily:mono}}>
+                  borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily}}>
                 {combineId===d.id?"✓ ":""}{d.filename}
-                <span style={{fontSize:9,color:C.textMuted,marginLeft:6}}>
+                <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
                   {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
                 </span>
               </button>
@@ -433,13 +433,13 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
               <Lbl color={C.textDim}>Suffix for column conflicts</Lbl>
               <input value={combineSuffix} onChange={e=>setCombineSuffix(e.target.value)} placeholder="_r"
                 style={{padding:"0.35rem 0.55rem",background:C.surface2,border:`1px solid ${C.border2}`,
-                  borderRadius:3,color:C.text,fontFamily:mono,fontSize:11,outline:"none"}}/>
+                  borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"}}/>
             </div>
           )}
 
           {combinePreview && (
             <div style={{padding:"0.55rem 0.8rem",background:C.surface2,border:`1px solid ${C.border}`,
-              borderRadius:4,marginBottom:"1rem",fontSize:11,color:C.textDim,fontFamily:mono,lineHeight:1.6}}>
+              borderRadius:4,marginBottom:"1rem",fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
               {combinePreview.kind==="bind_cols" ? (<>
                 Result: <span style={{color:C.gold}}>{combinePreview.outRows.toLocaleString()}</span> rows ×{" "}
                 <span style={{color:C.gold}}>{combinePreview.outCols}</span> cols
@@ -467,7 +467,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
       <div style={{marginTop:"2rem"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"0.7rem"}}>
           <Lbl mb={0}>Current dataset — pipeline output</Lbl>
-          <span style={{fontSize:9,color:C.textMuted,fontFamily:mono}}>
+          <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
             {rows.length.toLocaleString()} rows × {headers.length} cols
           </span>
           <button
@@ -494,7 +494,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
               marginLeft:"auto", padding:"0.25rem 0.65rem",
               background:"transparent", border:`1px solid ${C.border2}`,
               borderRadius:3, color:C.textDim, cursor:"pointer",
-              fontFamily:mono, fontSize:10, transition:"all 0.12s",
+              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.12s",
             }}
             onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;e.currentTarget.style.color=C.teal;}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
