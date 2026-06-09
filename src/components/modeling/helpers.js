@@ -8,7 +8,7 @@ export function buildModelAvail(panelOk, panelFdOk) {
     FE: panelOk, FD: panelFdOk,
     LSDV: panelOk, TWFE: panelOk, EventStudy: panelOk,
     "2SLS": true, RDD: true, FuzzyRDD: true, SpatialRDD: true, DiD: true,
-    Logit: true, Probit: true, Poisson: true, PoissonFE: true,
+    Logit: true, Probit: true, Poisson: true, PoissonFE: true, NegBinFE: true,
     GMM: true, LIML: true,
     SunAbraham: true, CallawayCS: true,
     SpatialRegression: true,

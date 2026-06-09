@@ -37,6 +37,7 @@ export function generateStataScript(config = {}) {
     kernel        = "triangular",
     distCol       = null,
     treatmentCol  = null,
+    offsetCol     = null,
   } = model;
 
   const stem     = filename.replace(/\.[^.]+$/, "");
@@ -84,7 +85,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -541,7 +542,7 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
@@ -821,6 +822,20 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`ppmlhdfe ${yVar}${cov ? ` ${cov}` : ""}, absorb(${fes.join(" ")}) vce(cluster ${fes[0]})`);
       lines.push(`* Incidence Rate Ratios (manual — Stata PPML reports log-IRR by default):`);
       lines.push(`* nlcom (exp(_b[${xVars[0] ?? "x"}]))`);
+      break;
+    }
+
+    case "NegBinFE": {
+      const fes = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]);
+      const cov = xVars.join(" ");
+      const feTerms = fes.map(f => `i.${f}`).join(" ");
+      const offsetOpt = offsetCol ? " offset(__nb_offset)" : "";
+      lines.push(`* Negative Binomial FE (NB2 with fixed-effect indicators)`);
+      if (offsetCol) {
+        lines.push(`gen double __nb_offset = log(${offsetCol})`);
+      }
+      lines.push(`nbreg ${yVar}${cov ? ` ${cov}` : ""}${feTerms ? ` ${feTerms}` : ""}, vce(cluster ${fes[0]})${offsetOpt} irr`);
+      lines.push(`estimates store m_negbin_fe`);
       break;
     }
 

@@ -38,6 +38,7 @@ export function generatePythonScript(config = {}) {
     kernel        = "triangular",
     distCol       = null,
     treatmentCol  = null,
+    offsetCol     = null,
   } = model;
 
   const stem    = filename.replace(/\.[^.]+$/, "");
@@ -108,7 +109,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push("# ── Estimation ─────────────────────────────────────────────────────────────");
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -510,7 +511,7 @@ function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
   const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
@@ -883,6 +884,22 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`    print(model.summary())`);
       lines.push(`    import numpy as np`);
       lines.push(`    print("IRR:", np.exp(model.params))`);
+      break;
+    }
+
+    case "NegBinFE": {
+      const fes = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]);
+      const rhs = [...xVars, ...fes.map(f => `C(${f})`)].join(" + ") || "1";
+      const formula = `"${yVar} ~ ${rhs}"`;
+      lines.push(`# Negative Binomial FE (NB2 with fixed-effect dummies)`);
+      if (offsetCol) {
+        lines.push(`model = smf.negativebinomial(${formula}, data=df, offset=np.log(df["${offsetCol}"])).fit()`);
+      } else {
+        lines.push(`model = smf.negativebinomial(${formula}, data=df).fit()`);
+      }
+      lines.push(`print(model.summary())`);
+      lines.push(`print("IRR:")`);
+      lines.push(`print(np.exp(model.params))`);
       break;
     }
 

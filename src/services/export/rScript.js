@@ -565,7 +565,7 @@ function transpileModel(model) {
     type, yVar, xVars = [], wVars = [],
     zVars = [], postVar, treatVar,
     runningVar, cutoff, bandwidth, kernel = "triangular", polyOrder = 1,
-    entityCol, timeCol, factorVars = [], feCols = null,
+    entityCol, timeCol, factorVars = [], feCols = null, offsetCol = null,
     treatedUnit, treatTime,
     distCol, treatmentCol,
     weightCol = null,
@@ -987,6 +987,26 @@ function transpileModel(model) {
         `# Overdispersion check: Pearson chi-sq / df`,
         `pearson_resid <- residuals(fit, type = "pearson")`,
         `cat("Pearson chi-sq / df:", sum(pearson_resid^2) / fit$nobs, "\\n")`,
+      ].join("\n");
+    }
+
+    case "NegBinFE": {
+      const fes = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]).map(rName);
+      const feTerms = fes.map(f => `factor(${f})`);
+      const cov = xVars.map(fmtR).filter(Boolean);
+      const rhs = [...cov, ...feTerms].join(" + ") || "1";
+      const offsetArg = offsetCol ? `,\n  offset = log(${rName(offsetCol)})` : "";
+      return [
+        `# Negative Binomial FE (NB2 with fixed-effect dummies)`,
+        `library(MASS)`,
+        ``,
+        `fit <- MASS::glm.nb(${y} ~ ${rhs},`,
+        `  data = df${offsetArg})`,
+        ``,
+        `summary(fit)`,
+        `cat("Dispersion alpha:", 1 / fit$theta, "\\n")`,
+        `cat("Incidence Rate Ratios:\\n")`,
+        `print(exp(coef(fit)))`,
       ].join("\n");
     }
 
@@ -1467,6 +1487,10 @@ function buildPackageList(modelType, pipeline) {
     pkgs.add("sandwich");
     pkgs.add("lmtest");
     pkgs.delete("fixest");  // base R glm() — no fixest needed
+  }
+  if (modelType === "NegBinFE") {
+    pkgs.add("MASS");
+    pkgs.delete("fixest");
   }
 
   // Pipeline-specific

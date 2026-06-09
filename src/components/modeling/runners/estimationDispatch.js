@@ -10,7 +10,7 @@ import {
   run2x2DiD, runTWFEDiD, ikBandwidth,
   runLogit, runProbit,
   runGMM, runLIML, runIVPoisson,
-  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti,
+  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runNegBinFE,
   runSunAbraham, runSyntheticControl, runCallawayCS,
   runSpatialRDD, runSpatialRegressionFromRows,
   wrapResult, diagnoseFit,
@@ -256,6 +256,16 @@ export function dispatchEstimation(dataRows, ctx) {
       }
       if (!res || res.error) return { error: res?.error ?? "Poisson FE failed. Ensure Y is a non-negative count variable." };
       return { result: wrapResult("PoissonFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, feCols, offsetCol: offCol }), panelFE: null, panelFD: null };
+
+    } else if (effModel === "NegBinFE") {
+      if (!allX.length) return { error: "Select at least one regressor (X)." };
+      const ec = panel?.entityCol || poissonEntityCol;
+      if (!ec) return { error: "Select an Entity (i) column in the configuration panel below." };
+      const feCols = [ec, ...poissonExtraFE].filter((c, i, a) => c && a.indexOf(c) === i && !allX.includes(c));
+      const offCol = poissonOffsetCol || null;
+      const res = runNegBinFE(dataRows, y, allX, feCols, seOpts, offCol);
+      if (!res || res.error) return { error: res?.error ?? "Negative Binomial FE failed. Ensure Y is a non-negative count variable." };
+      return { result: wrapResult("NegBinFE", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, feCols, offsetCol: offCol }), panelFE: null, panelFD: null };
 
     } else if (effModel === "SunAbraham") {
       const cCol = cohortCol[0];

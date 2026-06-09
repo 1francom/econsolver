@@ -40,10 +40,12 @@ export const MODELS = [
   { id: "SpatialRegression", label: "Spatial Reg.",    group: "Spatial",   desc: "SLX, SAR, SEM, and SDM with a spatial weights matrix",                 color: "#6ec8b4" },
   // Synthetic
   { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)",  color: "#6e9ec8" },
+  // Count outcomes
+  { id: "NegBinFE",        label: "Negative Binomial FE", group: "Count outcomes", desc: "NB2 with absorbed fixed effects and overdispersion", color: "#9e7ec8" },
 ];
 
 // ordered group list (controls render order)
-const GROUP_ORDER = ["Linear", "Panel", "DiD", "IV", "RD", "Spatial", "Synthetic"];
+const GROUP_ORDER = ["Linear", "Panel", "Count outcomes", "DiD", "IV", "RD", "Spatial", "Synthetic"];
 
 // Outcome families each strategy supports.
 // "linear" is always implied. Only non-linear entries listed.

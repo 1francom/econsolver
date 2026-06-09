@@ -1612,7 +1612,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
       model, family, yVar, xVars, wVars, zVars, weightVar, factorVars, seType,
       clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
-      postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol]);
+      postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol, poissonOffsetCol, poissonExtraFE]);
 
   // B2: fire estimate() after xVars state update has settled
   useEffect(() => {
@@ -2603,13 +2603,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             );
           })()}
 
-          {/* Poisson FE */}
-          {result?.type === "PoissonFE" && (() => {
+          {/* Poisson / Negative Binomial FE */}
+          {(result?.type === "PoissonFE" || result?.type === "NegBinFE") && (() => {
             const r = result;
+            const isNegBin = r.type === "NegBinFE";
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: T.caption.fontSize, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson FE Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>{isNegBin ? "Negative Binomial FE Results" : "Poisson FE Results"}</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.nFE > 1 && <Badge label={`${r.nFE}-way FE`} color="#9e7ec8" />}
                   {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
@@ -2632,6 +2633,22 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} />
+                {isNegBin && (
+                  <div style={{ marginTop: "1rem", marginBottom: "1rem", padding: "0.85rem 1rem", background: C.surface2, border: `1px solid #9e7ec840`, borderLeft: "3px solid #9e7ec8", borderRadius: 4 }}>
+                    <div style={{ fontSize: T.caption.fontSize, color: "#9e7ec8", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6, fontFamily: T.code.fontFamily }}>
+                      Dispersion
+                    </div>
+                    <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
+                      alpha = {Number.isFinite(r.alpha) ? r.alpha.toFixed(4) : "NA"}
+                      {r.alphaCI && Number.isFinite(r.alphaCI[0]) && Number.isFinite(r.alphaCI[1])
+                        ? ` [${r.alphaCI[0].toFixed(4)}, ${r.alphaCI[1].toFixed(4)}]`
+                        : ""}
+                    </div>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
+                      Cameron-Trivedi z = {Number.isFinite(r.overdispersionTest?.stat) ? r.overdispersionTest.stat.toFixed(3) : "NA"}, p = {Number.isFinite(r.overdispersionTest?.pValue) ? r.overdispersionTest.pValue.toFixed(4) : "NA"}
+                    </div>
+                  </div>
+                )}
                 {r.nFE > 1 && r.feDims && (
                   <div style={{ marginTop: "1rem" }}>
                     <Lbl color={C.textMuted}>Absorbed Fixed-Effect Dimensions</Lbl>
@@ -2672,8 +2689,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 )}
                 <PlotSelector accentColor={"#9e7ec8"} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
-                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poissonfe" filename="poissonfe_coefficients.svg" /> },
+                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={isNegBin ? "forest-negbinfe" : "forest-poissonfe"} filename={isNegBin ? "negbinfe_coefficients.svg" : "poissonfe_coefficients.svg"} /> },
                 ]} />
+                <ExportBar yVar={yVar[0]} results={r} model={r.type}
+                  onReport={() => openReport({ ...r, modelLabel: isNegBin ? "Negative Binomial FE" : "Poisson FE", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
+                  replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars, feCols: r.spec?.feCols, entityCol: r.spec?.entityCol, offsetCol: r.spec?.offsetCol } } : null}
+                />
               </div>
             );
           })()}

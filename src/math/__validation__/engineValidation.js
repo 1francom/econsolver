@@ -27,7 +27,7 @@
 import { runOLS, runWLS }                    from "../LinearEngine.js";
 import { runFE, runFD }                      from "../PanelEngine.js";
 import { run2SLS, runSharpRDD, ikBandwidth } from "../CausalEngine.js";
-import { runLogit, runProbit }               from "../NonLinearEngine.js";
+import { runLogit, runProbit, runNegBinFE }  from "../NonLinearEngine.js";
 import { runGMM, runLIML, runIVPoisson }     from "../GMMEngine.js";
 import { runSyntheticControl }               from "../SyntheticControlEngine.js";
 
@@ -1136,6 +1136,37 @@ function validateSyntheticControl() {
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 
+function validateNegBinFE() {
+  const rows = [];
+  const mult = [0.2, 2.8, 0.7, 2.4, 0.4, 3.1];
+  for (let unit = 1; unit <= 8; unit++) {
+    const a = (unit - 4.5) * 0.12;
+    for (let time = 1; time <= 6; time++) {
+      const x = Math.sin(time * 0.8 + unit * 0.3) + time * 0.12;
+      const mu = Math.exp(a + 0.45 * x);
+      const y = Math.max(0, Math.round(mu * mult[(unit + time) % mult.length]));
+      rows.push({ y, x, unit, time });
+    }
+  }
+
+  const r = runNegBinFE(rows, "y", ["x"], ["unit"]);
+  let pass = 0, fail = 0;
+  const ok = (label, cond) => {
+    if (cond) pass++;
+    else { fail++; console.warn(`  x NegBinFE: ${label}`); }
+  };
+
+  ok("fit returns no error", !!r && !r.error);
+  if (!r || r.error) return { pass, fail };
+  ok("alpha > 0", Number.isFinite(r.alpha) && r.alpha > 0);
+  ok("alphaCI has two finite bounds", r.alphaCI?.length === 2 && r.alphaCI.every(Number.isFinite));
+  ok("one coefficient", r.beta?.length === 1 && r.varNames?.[0] === "x");
+  ok("finite SE", r.se?.length === 1 && Number.isFinite(r.se[0]) && r.se[0] >= 0);
+  ok("fitted length matches n", r.fitted?.length === r.n);
+  ok("overdispersion test exists", Number.isFinite(r.overdispersionTest?.stat) && Number.isFinite(r.overdispersionTest?.pValue));
+  return { pass, fail };
+}
+
 export function runAllValidations() {
   const suites = [
     ["OLS internal consistency",  validateOLS],
@@ -1184,6 +1215,8 @@ if (typeof window === "undefined") {
   runAllValidations();
 } else {
   // Browser: attach to window so dev can run it manually
+  window.__validation = window.__validation || {};
+  window.__validation.negBinFE = () => runSuite("Negative Binomial FE", validateNegBinFE);
   window.__econValidate = runAllValidations;
   console.log("[Litux] Validation loaded. Run window.__econValidate() to execute.");
 }
