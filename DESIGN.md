@@ -322,21 +322,50 @@ Avoid deeply nested scroll containers. Only one element per module should own th
 
 ### Elevation Ladder
 
+Access via `const { elev } = useTheme()` — the object already reflects the active theme.
+
+**DARK theme** (source: `ELEV_DARK` in `src/theme.js`):
+
 | Level | Token | Border | Box Shadow | Use |
 |-------|-------|--------|------------|-----|
-| Flat | `elev.flat` | `1px solid C.border` | `none` | Default — panels, cards, table rows |
-| Raised | `elev.raised` | `1px solid C.border2` | faint top-lighter glow | Dropdowns, active panels, focused inputs |
-| Popover | `elev.popover` | `1px solid C.border2` | soft 8px shadow | Autocomplete menus, color pickers, small overlays |
-| Modal | `elev.modal` | `1px solid C.border2` | medium 24px shadow + dim backdrop | Confirmation dialogs, settings overlays |
-| Tooltip | `elev.tooltip` | `1px solid C.border` | 4px shadow | Hover tooltips, info popovers |
+| Flat | `elev.flat` | `1px solid #1c1c1c` | `none` | Dividers, table borders, flat cards |
+| Raised | `elev.raised` | `1px solid #252525` | `inset 0 1px 0 rgba(255,255,255,0.03)` | Panels, cards, sidebars |
+| Popover | `elev.popover` | `1px solid #252525` | `0 8px 24px rgba(0,0,0,0.6)` | Dropdowns, context menus, small overlays |
+| Modal | `elev.modal` | `1px solid #2e2e2e` | `0 16px 48px rgba(0,0,0,0.7)` | Dialog overlays, settings panels |
+| Tooltip | `elev.tooltip` | `1px solid #2e2e2e` | `0 4px 12px rgba(0,0,0,0.5)` | Hover tooltips, info popovers |
+
+**LIGHT theme** (source: `ELEV_LIGHT` in `src/theme.js`):
+
+| Level | Token | Border | Box Shadow |
+|-------|-------|--------|------------|
+| Flat | `elev.flat` | `1px solid #d8d5cf` | `none` |
+| Raised | `elev.raised` | `1px solid #d8d5cf` | `0 1px 2px rgba(0,0,0,0.04)` |
+| Popover | `elev.popover` | `1px solid #c8c4bc` | `0 8px 24px rgba(0,0,0,0.12)` |
+| Modal | `elev.modal` | `1px solid #c8c4bc` | `0 16px 48px rgba(0,0,0,0.18)` |
+| Tooltip | `elev.tooltip` | `1px solid #c8c4bc` | `0 4px 12px rgba(0,0,0,0.12)` |
 
 ### Dark Theme Strategy
 
-On `#080808`, box shadows are nearly invisible — a pure black surface absorbs any dark shadow. On dark, elevation is communicated through **lighter top-borders** (the raised surface appears to catch light from above) and **subtle background lightening** up the surface stack (`C.bg` → `C.surface` → `C.surface2` → `C.surface3`). Reserve actual box-shadow glow for popover/modal level and above.
+On `#080808`, box shadows are nearly invisible — a pure black surface absorbs dark shadow. On dark, elevation is communicated through **lighter top-borders** (the raised surface appears to catch light from above) and **a subtle inset white glow** (`inset 0 1px 0 rgba(255,255,255,0.03)`) for raised surfaces. Reserve actual box-shadow for popover/modal level and above. Background lightening across the surface stack (`C.bg` → `C.surface` → `C.surface2` → `C.surface3`) also contributes to perceived depth.
 
 ### Light Theme Strategy
 
-On light, conventional soft box shadows work as expected. Use `rgba(0,0,0,0.08)` for raised, `rgba(0,0,0,0.14)` for popover, `rgba(0,0,0,0.20)` for modal. Border width stays 1px throughout.
+On light, conventional drop shadows work as expected — `elev.raised` uses a 1px soft shadow; `elev.popover` and above use increasingly strong `rgba(0,0,0,*)` shadows. Border width stays 1px throughout.
+
+### Usage
+
+```js
+const { C, elev, radius } = useTheme();
+
+// Panel
+<div style={{ background: C.surface, ...elev.raised, borderRadius: radius.md }}>
+
+// Dropdown
+<div style={{ background: C.surface2, ...elev.popover, borderRadius: radius.sm }}>
+
+// Modal
+<div style={{ background: C.surface, ...elev.modal, borderRadius: radius.md }}>
+```
 
 ### Today's Baseline
 
@@ -443,6 +472,79 @@ The interface should feel like a precision instrument, not a consumer app. Avoid
 
 **10. Check both dark and light palette tokens.**
 The `C` object returned by `useTheme()` already reflects the active theme — you do not need to branch on dark/light in your component code. Just use `C.*` tokens and theming is automatic.
+
+### Quick-Reference Style Templates
+
+Copy-paste starting points. All assume `const { C, T, space, radius, elev } = useTheme();` at top of component.
+
+**Ghost/secondary button:**
+```js
+style={{
+  border: `1px solid ${C.border2}`,
+  borderRadius: radius.sm,
+  background: 'transparent',
+  color: C.textDim,
+  fontFamily: T.label.fontFamily,
+  fontSize: T.label.fontSize,
+  fontWeight: T.label.fontWeight,
+  textTransform: 'uppercase',
+  letterSpacing: T.label.letterSpacing,
+  padding: `${space[1]}px ${space[3]}px`,
+  cursor: 'pointer',
+}}
+```
+
+**Card / panel container:**
+```js
+style={{
+  background: C.surface,
+  ...elev.raised,
+  borderRadius: radius.md,
+  padding: space[5],
+}}
+```
+
+**Numeric table cell (coefficients, SE, p-values):**
+```js
+style={{
+  ...T.data,
+  color: C.text,
+  padding: `${space[1]}px ${space[3]}px`,
+  textAlign: 'right',
+}}
+```
+
+**Section eyebrow / header:**
+```js
+style={{
+  ...T.label,
+  color: C.textDim,
+  borderLeft: `2px solid ${C.teal}`,
+  paddingLeft: space[2],
+  marginBottom: space[2],
+}}
+```
+
+**Text input:**
+```js
+style={{
+  background: C.surface2,
+  color: C.text,
+  border: `1px solid ${C.border2}`,
+  borderRadius: radius.sm,
+  padding: `${space[2]}px ${space[3]}px`,
+  fontFamily: T.body.fontFamily,
+  fontSize: T.body.fontSize,
+  outline: 'none',
+  width: '100%',
+}}
+```
+
+**Small caption / hint text:**
+```js
+style={{ ...T.caption, color: C.textMuted }}
+// NOT: style={{ fontSize: '10px', ... }}
+```
 
 ---
 
