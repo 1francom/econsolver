@@ -229,7 +229,8 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
       if (m) {
         if (Array.isArray(m.layers)) setLayers(m.layers);
         if (m.basemap)               setBasemap(m.basemap);
-        if (typeof m.crsInput === "string") setCrsInput(m.crsInput);
+        // Re-apply CRS so proj4fn is live (not just restoring the string)
+        if (typeof m.crsInput === "string" && m.crsInput) applyCrs(m.crsInput);
       }
       hydratedRef.current = true;
     });

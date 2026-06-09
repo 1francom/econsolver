@@ -264,7 +264,11 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       setLocalProjects(local);
       // Unlock prompt removed — users unlock manually via the sync panel when needed
       if (user && cloud.length && hasSyncSession() && cloud.some(cp => !local.some(lp => lp.pid === cp.pid))) {
-        setRestoreOpen(true);
+        // Only prompt once per browser session — not on every project switch or window refocus
+        if (!sessionStorage.getItem("econ_restore_prompted")) {
+          sessionStorage.setItem("econ_restore_prompted", "1");
+          setRestoreOpen(true);
+        }
       }
     } catch {
       if (user) setSyncState("offline");
