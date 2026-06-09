@@ -208,7 +208,7 @@ export function SpatialMapSection({ rows, headers, C, pid }) {
             <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.12em", textTransform: "uppercase" }}>
               Boundaries layer
             </span>
-            <span style={{ fontSize: 8, color: C.textMuted }}>(WKT geometry)</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>(WKT geometry)</span>
           </div>
           <div style={{ opacity: showPolygons ? 1 : 0.4, pointerEvents: showPolygons ? "auto" : "none" }}>
             {wktHeaders.length === 0 ? (
@@ -248,7 +248,7 @@ export function SpatialMapSection({ rows, headers, C, pid }) {
             <div key={entry.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 3, border: `1px solid ${C.border2}`, background: C.surface }}>
               <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text }}>{entry.name}</span>
               <button onClick={() => loadMapEntry(entry)}
-                style={{ padding: "1px 6px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: 8, background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal, cursor: "pointer" }}
+                style={{ padding: "1px 6px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal, cursor: "pointer" }}
               >Load</button>
               <button onClick={() => deleteMapEntry(entry.id)}
                 style={{ background: "none", border: "none", cursor: "pointer", fontSize: T.code.fontSize, lineHeight: 1, color: C.textMuted, padding: "0 2px" }}

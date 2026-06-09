@@ -621,7 +621,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
             const accents = [C.teal, C.purple];
             return (
               <div key={i} style={{
-                fontSize: 12.5, color: C.text, lineHeight: 1.9,
+                fontSize: T.body.fontSize, color: C.text, lineHeight: 1.9,
                 fontFamily: "'Georgia','Times New Roman',serif",
                 padding: "1rem 1.2rem",
                 background: i % 2 === 0 ? C.surface : C.surface2,

@@ -62,7 +62,7 @@ export default function ObservatorioFetcher({ onLoad, onClose }) {
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"0.75rem 1.1rem", background:C.bg, borderBottom:`1px solid ${C.border}` }}>
           <div style={{ flex:1 }}>
             <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, letterSpacing:"0.22em", textTransform:"uppercase", fontFamily: T.code.fontFamily, marginBottom:2 }}>Registro · Femicidios / Travesticidios</div>
-            <div style={{ fontSize:15, color:C.text, fontFamily: T.code.fontFamily }}>Observatorio Lucía Pérez</div>
+            <div style={{ fontSize: T.h2.fontSize, color:C.text, fontFamily: T.code.fontFamily }}>Observatorio Lucía Pérez</div>
           </div>
           <button onClick={onClose} style={{ background:"none", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textMuted, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding:"0.25rem 0.6rem" }}>✕ Close</button>
         </div>

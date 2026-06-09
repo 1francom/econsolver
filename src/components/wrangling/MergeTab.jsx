@@ -128,7 +128,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   if (!allDatasets.length) {
     return (
       <div style={{padding:"2.5rem 1.5rem",textAlign:"center",border:`1px dashed ${C.border2}`,borderRadius:4}}>
-        <div style={{fontSize:22,marginBottom:10}}>⊞</div>
+        <div style={{fontSize: T.display.fontSize,marginBottom:10}}>⊞</div>
         <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.8,fontFamily: T.code.fontFamily}}>
           No other datasets loaded.<br/>
           Use the <span style={{color:C.teal}}>Dataset Manager</span> sidebar
@@ -357,7 +357,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
               ].map(([val,label,color])=>(
                 <div key={label} style={{padding:"0.65rem",background:C.surface2,
                   border:`1px solid ${C.border}`,borderRadius:3,textAlign:"center"}}>
-                  <div style={{fontSize:20,color,fontFamily: T.code.fontFamily,marginBottom:3}}>{val}</div>
+                  <div style={{fontSize: T.h2.fontSize,color,fontFamily: T.code.fontFamily,marginBottom:3}}>{val}</div>
                   <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>{label}</div>
                 </div>
               ))}

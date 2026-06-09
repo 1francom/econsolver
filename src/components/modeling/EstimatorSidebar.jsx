@@ -236,7 +236,7 @@ export default function EstimatorSidebar({
 
           return (
             <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 8, letterSpacing: "0.18em", textTransform: "uppercase", color: C.textMuted, marginBottom: 5, fontFamily: T.code.fontFamily }}>
+              <div style={{ fontSize: T.caption.fontSize, letterSpacing: "0.18em", textTransform: "uppercase", color: C.textMuted, marginBottom: 5, fontFamily: T.code.fontFamily }}>
                 Outcome family
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>

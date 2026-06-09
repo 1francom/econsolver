@@ -236,13 +236,13 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                     transition: "all 0.12s",
                   }}>
                     <span style={{
-                      fontSize: 8, color: isTarget ? C.red : isDownstream ? C.yellow : C.textMuted,
+                      fontSize: T.caption.fontSize, color: isTarget ? C.red : isDownstream ? C.yellow : C.textMuted,
                       fontFamily: T.code.fontFamily, flexShrink: 0, minWidth: 12, textAlign: "right",
                     }}>
                       {i + 1}
                     </span>
                     <span style={{
-                      fontSize: 8, color: isTarget ? C.red : isDownstream ? C.yellow : col,
+                      fontSize: T.caption.fontSize, color: isTarget ? C.red : isDownstream ? C.yellow : col,
                       fontFamily: T.code.fontFamily, flexShrink: 0, minWidth: 14, textAlign: "center",
                     }}>
                       {isDownstream ? "!" : ico}
@@ -333,7 +333,7 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                   >
                     <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : "#555" }} />
                     <span style={{
-                      fontSize: 8, color: isActiveBranch ? C.gold : "#888",
+                      fontSize: T.caption.fontSize, color: isActiveBranch ? C.gold : "#888",
                       fontFamily: T.code.fontFamily, letterSpacing: "0.1em", flexShrink: 0,
                     }}>
                       {isActiveBranch ? "⊣ branch" : "⊣"}

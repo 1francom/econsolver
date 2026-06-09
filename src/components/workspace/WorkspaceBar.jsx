@@ -184,7 +184,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
             borderLeft: `1px solid ${C.border}`,
             color: C.textDim,
             cursor: "pointer",
-            fontSize: 16,
+            fontSize: T.body.fontSize,
             lineHeight: 1,
             height: "100%",
           }}

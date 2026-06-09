@@ -319,7 +319,7 @@ function StandardizeDialog({col,clusters,rawVals,rows,onConfirm,onCancel}){
         <div style={{padding:"1rem 1.2rem",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10,background:C.surface2,flexShrink:0}}>
           <div style={{flex:1}}>
             <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.22em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:3}}>Category Standardization</div>
-            <div style={{fontSize:15,color:C.text,fontFamily: T.code.fontFamily}}><span style={{color:C.gold}}>{col}</span> — {clusters.length} group{clusters.length!==1?"s":""} detected</div>
+            <div style={{fontSize: T.h2.fontSize,color:C.text,fontFamily: T.code.fontFamily}}><span style={{color:C.gold}}>{col}</span> — {clusters.length} group{clusters.length!==1?"s":""} detected</div>
           </div>
           <button onClick={onCancel} style={{background:"transparent",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textMuted,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,padding:"0.3rem 0.6rem"}}>✕ Close</button>
         </div>

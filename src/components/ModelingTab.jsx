@@ -1828,7 +1828,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 }}>
                   <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 8, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP OUT</div>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP OUT</div>
                       <select
                         value={swapOut}
                         onChange={e => setSwapOut(e.target.value)}
@@ -1839,7 +1839,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       </select>
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 8, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP IN</div>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.12em", marginBottom: 3 }}>SWAP IN</div>
                       <select
                         value={swapIn}
                         onChange={e => setSwapIn(e.target.value)}
@@ -2127,7 +2127,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       </tbody>
                     </table>
                     {peekCols.length < headers.length && (
-                      <div style={{ padding: "3px 8px", fontSize: 8, color: C.textMuted, fontFamily: T.code.fontFamily, borderTop: `1px solid ${C.border}` }}>
+                      <div style={{ padding: "3px 8px", fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, borderTop: `1px solid ${C.border}` }}>
                         Showing {peekCols.length} of {headers.length} cols · first 8 rows
                       </div>
                     )}
@@ -2139,7 +2139,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           {!result && !err && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60%", gap: "1rem" }}>
-              <div style={{ fontSize: 32, opacity: 0.15 }}>◈</div>
+              <div style={{ fontSize: T.display.fontSize, opacity: 0.15 }}>◈</div>
               <div style={{ fontSize: T.code.fontSize, color: C.textMuted, letterSpacing: "0.15em", textTransform: "uppercase" }}>
                 Configure your model specification and click Estimate
               </div>
@@ -2751,7 +2751,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 6 }}>
                       Average Treatment Effect on the Treated (ATT)
                     </div>
-                    <div style={{ fontSize: 24, color: r.attP < 0.05 ? C.teal : C.textDim, fontFamily: T.code.fontFamily }}>
+                    <div style={{ fontSize: T.h2.fontSize, color: r.attP < 0.05 ? C.teal : C.textDim, fontFamily: T.code.fontFamily }}>
                       {r.att >= 0 ? "+" : ""}{r.att.toFixed(4)}{stars(r.attP)}
                     </div>
                     <div style={{ fontSize: T.code.fontSize, color: C.textDim, marginTop: 4 }}>
@@ -2959,7 +2959,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       ? "Local Average Treatment Effect (LATE) at the boundary"
                       : `Local Average Treatment Effect (LATE) at cutoff = ${rdd.cutoff}`}
                   </div>
-                  <div style={{ fontSize: 24, color: r.lateP != null && r.lateP < 0.05 ? C.orange : C.textDim }}>
+                  <div style={{ fontSize: T.h2.fontSize, color: r.lateP != null && r.lateP < 0.05 ? C.orange : C.textDim }}>
                     {r.late != null && isFinite(r.late) ? (r.late >= 0 ? "+" : "") + r.late.toFixed(4) : "N/A"}{r.lateP != null ? stars(r.lateP) : ""}
                   </div>
                   <div style={{ fontSize: T.code.fontSize, color: C.textDim, marginTop: 4 }}>

@@ -96,7 +96,7 @@ export default function LoginForm() {
           background: "none",
           border: "none",
           color: C.textMuted,
-          fontSize: 16,
+          fontSize: T.body.fontSize,
           cursor: "pointer",
           padding: "0.4rem",
           lineHeight: 1,
@@ -110,7 +110,7 @@ export default function LoginForm() {
       {/* ── Brand ── */}
       <div style={{ textAlign: "center", marginBottom: "3rem" }}>
         <div style={{
-          fontSize: 36,
+          fontSize: T.display.fontSize,
           fontWeight: 700,
           color: C.teal,
           letterSpacing: "0.12em",

@@ -40,7 +40,7 @@ function StatPill({ label, value, color }) {
       background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 4,
       minWidth: 80,
     }}>
-      <div style={{ fontSize: 18, color, fontFamily: T.code.fontFamily, fontWeight: 600 }}>{value}</div>
+      <div style={{ fontSize: T.h2.fontSize, color, fontFamily: T.code.fontFamily, fontWeight: 600 }}>{value}</div>
       <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 3 }}>{label}</div>
     </div>
   );
@@ -315,7 +315,7 @@ export default function AuditTrail({ trail, filename = "analysis", onClose }) {
           </button>
           <button onClick={onClose}
             style={{ background: "none", border: "none", cursor: "pointer",
-                     color: C.textMuted, fontSize: 16, padding: "0 4px" }}>
+                     color: C.textMuted, fontSize: T.body.fontSize, padding: "0 4px" }}>
             ×
           </button>
         </div>

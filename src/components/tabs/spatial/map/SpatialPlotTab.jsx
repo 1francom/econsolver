@@ -473,13 +473,13 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
             flexShrink: 0,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-              <span style={{ fontSize: 8, letterSpacing: "0.12em", textTransform: "uppercase",
+              <span style={{ fontSize: T.caption.fontSize, letterSpacing: "0.12em", textTransform: "uppercase",
                 color: activeCrs ? C.teal : C.gold, fontFamily: T.code.fontFamily }}>
                 {activeCrs ? "✓ CRS active" : "⚠ Projected CRS detected"}
               </span>
               {activeCrs && (
                 <button onClick={clearCrs} style={{
-                  marginLeft: "auto", padding: "1px 6px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: 7,
+                  marginLeft: "auto", padding: "1px 6px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                   background: "transparent", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer",
                 }}>clear</button>
               )}
@@ -489,7 +489,7 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
               {Object.entries(PRESET_CRS).map(([name, proj4str]) => (
                 <button key={name} onClick={() => applyCrs(proj4str)}
                   style={{
-                    padding: "2px 5px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: 7,
+                    padding: "2px 5px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                     background: activeCrs === proj4str ? `${C.gold}22` : "transparent",
                     border: `1px solid ${activeCrs === proj4str ? C.gold : C.border2}`,
                     color: activeCrs === proj4str ? C.gold : C.textMuted,
@@ -505,33 +505,33 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
                 style={{
                   flex: 1, padding: "3px 5px", background: C.bg,
                   border: `1px solid ${C.border2}`, borderRadius: 2,
-                  color: C.text, fontFamily: T.code.fontFamily, fontSize: 8, outline: "none",
+                  color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none",
                   minWidth: 0,
                 }}
               />
               <button onClick={() => applyCrs()} disabled={crsLoading || !crsInput.trim()}
                 style={{
-                  padding: "3px 7px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: 8,
+                  padding: "3px 7px", borderRadius: 2, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                   background: `${C.teal}18`, border: `1px solid ${C.teal}55`,
                   color: C.teal, cursor: "pointer", flexShrink: 0,
                 }}
               >{crsLoading ? "…" : "Apply"}</button>
             </div>
-            {crsErr && <div style={{ fontSize: 7, color: C.red, fontFamily: T.code.fontFamily, marginTop: 3 }}>{crsErr}</div>}
+            {crsErr && <div style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginTop: 3 }}>{crsErr}</div>}
           </div>
         )}
 
         {/* Layer list */}
         <div style={{ padding: "0.75rem 0.65rem 0.6rem", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 8, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 5 }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 5 }}>
               Basemap
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4 }}>
               {Object.entries(BASEMAPS).map(([key, cfg]) => (
                 <button key={key} onClick={() => setBasemap(key)}
                   style={{
-                    padding: "3px 5px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: 8, cursor: "pointer",
+                    padding: "3px 5px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                     background: basemap === key ? `${C.teal}18` : "transparent",
                     border: `1px solid ${basemap === key ? C.teal + "60" : C.border2}`,
                     color: basemap === key ? C.teal : C.textMuted,

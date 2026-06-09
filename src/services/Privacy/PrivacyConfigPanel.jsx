@@ -16,6 +16,7 @@
 
 import { useMemo } from "react";
 import { MONO_STACK } from "../../theme.js";
+import { useTheme } from "../../ThemeContext.jsx";
 import { PII_SENSITIVITY }  from "../services/privacy/piiDetector.js";
 import { buildEgressReport } from "../services/privacy/privacyFilter.js";
 import { maskStringValue }   from "../services/privacy/anonymizer.js";
@@ -57,12 +58,13 @@ const SENS_LABEL = {
 
 // ─── MICRO COMPONENTS ─────────────────────────────────────────────────────────
 function Btn({ onClick, disabled, color, solid, children, sm }) {
+  const { T } = useTheme();
   const base = {
     padding:     sm ? "0.22rem 0.55rem" : "0.32rem 0.75rem",
     borderRadius: 3,
     cursor:      disabled ? "not-allowed" : "pointer",
     fontFamily: MONO_STACK,
-    fontSize:    sm ? 10 : 11,
+    fontSize:    T.caption.fontSize,
     border:      `1px solid ${color ?? C.border2}`,
     background:  solid ? (color ?? C.teal) : "transparent",
     color:       solid ? C.bg : (color ?? C.textDim),
@@ -73,10 +75,11 @@ function Btn({ onClick, disabled, color, solid, children, sm }) {
 }
 
 function Badge({ sensitivity }) {
+  const { T } = useTheme();
   const color = SENS_COLOR[sensitivity] ?? C.textMuted;
   return (
     <span style={{
-      fontSize: 8, letterSpacing: "0.15em", textTransform: "uppercase",
+      fontSize: T.caption.fontSize, letterSpacing: "0.15em", textTransform: "uppercase",
       padding: "2px 6px", border: `1px solid ${color}`, borderRadius: 2,
       color, fontFamily: MONO_STACK,
     }}>
@@ -86,9 +89,10 @@ function Badge({ sensitivity }) {
 }
 
 function SectionHead({ children }) {
+  const { T } = useTheme();
   return (
     <div style={{
-      fontSize: 9, color: C.teal, letterSpacing: "0.24em",
+      fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em",
       textTransform: "uppercase", fontFamily: MONO_STACK,
       padding: "0.5rem 1rem", background: C.surface,
       borderBottom: `1px solid ${C.border}`,
@@ -100,6 +104,7 @@ function SectionHead({ children }) {
 
 // ─── COLUMN ROW ───────────────────────────────────────────────────────────────
 function ColumnRow({ col, entry, sampleValues, onChange }) {
+  const { T } = useTheme();
   const { sensitivity, suppress, alias = "", reasons = [] } = entry;
   const color = SENS_COLOR[sensitivity] ?? C.textMuted;
   const isHigh = sensitivity === PII_SENSITIVITY.HIGH;
@@ -116,10 +121,10 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
       background: suppress ? `${C.red}15` : C.bg,
     }}>
       {/* Column name */}
-      <div style={{ fontFamily: MONO_STACK, fontSize: 11, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ fontFamily: MONO_STACK, fontSize: T.caption.fontSize, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {col}
         {reasons.length > 0 && (
-          <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 2 }}>
             {reasons.slice(0, 2).join(" · ")}
           </div>
         )}
@@ -137,7 +142,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
             onChange={e => onChange(col, { suppress: e.target.checked })}
             style={{ accentColor: C.red }}
           />
-          <span style={{ fontFamily: MONO_STACK, fontSize: 10, color: suppress ? C.red : C.textDim }}>
+          <span style={{ fontFamily: MONO_STACK, fontSize: T.caption.fontSize, color: suppress ? C.red : C.textDim }}>
             Suppress
           </span>
         </label>
@@ -154,7 +159,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
               width: "100%", boxSizing: "border-box",
               padding: "0.25rem 0.45rem",
               background: C.surface2, border: `1px solid ${C.border2}`,
-              borderRadius: 3, color: C.text, fontFamily: MONO_STACK, fontSize: 10,
+              borderRadius: 3, color: C.text, fontFamily: MONO_STACK, fontSize: T.caption.fontSize,
               outline: "none",
             }}
           />
@@ -171,7 +176,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
                : String(v ?? "—"));
           return (
             <span key={i} style={{
-              fontSize: 9, fontFamily: MONO_STACK, color: C.textMuted,
+              fontSize: T.caption.fontSize, fontFamily: MONO_STACK, color: C.textMuted,
               padding: "1px 5px", border: `1px solid ${C.border}`,
               borderRadius: 2, whiteSpace: "nowrap",
             }}>
@@ -186,6 +191,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
 
 // ─── EGRESS SUMMARY BAR ───────────────────────────────────────────────────────
 function EgressBar({ report }) {
+  const { T } = useTheme();
   return (
     <div style={{
       padding: "0.55rem 1rem",
@@ -193,21 +199,21 @@ function EgressBar({ report }) {
       borderBottom: `1px solid ${C.border}`,
       display: "flex", gap: 16, alignItems: "center",
     }}>
-      <span style={{ fontSize: 9, color: C.textMuted, fontFamily: MONO_STACK, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: MONO_STACK, letterSpacing: "0.1em", textTransform: "uppercase" }}>
         Egress preview
       </span>
       {report.safe.length > 0 && (
-        <span style={{ fontSize: 10, fontFamily: MONO_STACK, color: C.green }}>
+        <span style={{ fontSize: T.caption.fontSize, fontFamily: MONO_STACK, color: C.green }}>
           ✓ {report.safe.length} safe
         </span>
       )}
       {report.aliased.length > 0 && (
-        <span style={{ fontSize: 10, fontFamily: MONO_STACK, color: C.yellow }}>
+        <span style={{ fontSize: T.caption.fontSize, fontFamily: MONO_STACK, color: C.yellow }}>
           ◈ {report.aliased.length} aliased
         </span>
       )}
       {report.suppressed.length > 0 && (
-        <span style={{ fontSize: 10, fontFamily: MONO_STACK, color: C.red }}>
+        <span style={{ fontSize: T.caption.fontSize, fontFamily: MONO_STACK, color: C.red }}>
           ✕ {report.suppressed.length} suppressed
         </span>
       )}
@@ -224,6 +230,7 @@ export default function PrivacyConfigPanel({
   onConfirm,
   onCancel,
 }) {
+  const { T } = useTheme();
   const report = useMemo(
     () => buildEgressReport(headers, piiConfig),
     [headers, piiConfig]
@@ -257,13 +264,13 @@ export default function PrivacyConfigPanel({
         display: "flex", alignItems: "center", gap: 12,
       }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 9, color: C.red, letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: 2 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.red, letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: 2 }}>
             Datenschutz · Privacy Review
           </div>
-          <div style={{ fontSize: 13, color: C.text }}>
+          <div style={{ fontSize: T.body.fontSize, color: C.text }}>
             Review what will be sent to external API
           </div>
-          <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.textDim, marginTop: 2 }}>
             Columns marked HIGH are suppressed by default. Adjust aliases or suppress additional columns before confirming.
           </div>
         </div>
@@ -281,7 +288,7 @@ export default function PrivacyConfigPanel({
         borderBottom: `1px solid ${C.border}`,
       }}>
         {["Column", "Risk", "Action", "Alias (sent to API)", "Sample values"].map(h => (
-          <span key={h} style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.1em", textTransform: "uppercase" }}>{h}</span>
+          <span key={h} style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.1em", textTransform: "uppercase" }}>{h}</span>
         ))}
       </div>
 
@@ -325,7 +332,7 @@ export default function PrivacyConfigPanel({
         background: C.surface,
         display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center",
       }}>
-        <span style={{ flex: 1, fontSize: 10, color: C.textMuted }}>
+        <span style={{ flex: 1, fontSize: T.caption.fontSize, color: C.textMuted }}>
           {report.summary}
         </span>
         <Btn onClick={onCancel} color={C.textDim}>Cancel</Btn>

@@ -435,7 +435,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             <div style={{ ...T.label, color:C.teal, marginBottom:3 }}>
               Data Studio · Wrangling
             </div>
-            <div style={{ fontSize:19, letterSpacing:"-0.02em", marginBottom:3 }}>{filename}</div>
+            <div style={{ fontSize: T.h2.fontSize, letterSpacing:"-0.02em", marginBottom:3 }}>{filename}</div>
             <div style={{ fontSize: T.code.fontSize, color:C.textDim }}>
               <span style={{ color:C.gold }}>
                 {rawData._duckdb ? rawData._duckdb.rowCount.toLocaleString() : rawData.rows.length}

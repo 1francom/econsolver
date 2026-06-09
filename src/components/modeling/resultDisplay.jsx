@@ -94,7 +94,7 @@ export function RegressionEquation({ varNames, beta, yVar }) {
           onClick={copyLatex}
           title="Copy as LaTeX equation"
           style={{
-            fontSize: 8, fontFamily: T.code.fontFamily, letterSpacing: "0.1em",
+            fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, letterSpacing: "0.1em",
             padding: "2px 8px", borderRadius: 3, cursor: "pointer",
             border: `1px solid ${latexCopied ? C.teal : C.border2}`,
             background: latexCopied ? `${C.teal}18` : "transparent",
@@ -558,7 +558,7 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
             <button key={fmt} onClick={() => copyFmt(fmt)} style={{
               background: "none", border: `1px solid ${C.border}`, borderRadius: 3,
               color: copied === fmt ? C.teal : C.textMuted,
-              fontFamily: T.code.fontFamily, fontSize: 8, padding: "1px 6px",
+              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1px 6px",
               cursor: "pointer", letterSpacing: "0.08em",
               transition: "color 0.15s, border-color 0.15s",
               borderColor: copied === fmt ? C.teal : C.border,
@@ -583,7 +583,7 @@ export function FitBar({ items }) {
       {items.map(s => (
         <div key={s.label} style={{ background: C.surface, padding: "0.65rem 0.9rem" }} title={s.hint || ""}>
           <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 3, fontFamily: T.code.fontFamily }}>{s.label}</div>
-          <div style={{ fontSize: 16, color: s.color || C.gold, fontFamily: T.code.fontFamily }}>{s.value}</div>
+          <div style={{ fontSize: T.h2.fontSize, color: s.color || C.gold, fontFamily: T.code.fontFamily }}>{s.value}</div>
           {s.sub && <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 2, fontFamily: T.code.fontFamily }}>{s.sub}</div>}
         </div>
       ))}

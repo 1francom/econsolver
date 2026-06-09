@@ -263,14 +263,14 @@ function Uploader({onReady}){
     <div style={{maxWidth:560,margin:"0 auto",padding:"3rem 2rem",display:"flex",flexDirection:"column",alignItems:"center",gap:"1.5rem"}}>
       <div style={{textAlign:"center"}}>
         <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:5,fontFamily: T.code.fontFamily}}>Data Ingestion</div>
-        <div style={{fontSize:22,color:C.text,letterSpacing:"-0.02em"}}>Load your dataset</div>
+        <div style={{fontSize: T.h2.fontSize,color:C.text,letterSpacing:"-0.02em"}}>Load your dataset</div>
       </div>
       <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
         onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}}
         onClick={()=>ref.current?.click()}
         style={{width:"100%",border:`2px dashed ${drag?C.gold:C.border2}`,borderRadius:6,padding:"2.5rem 1.5rem",textAlign:"center",cursor:"pointer",background:drag?C.goldFaint:C.surface,transition:"all 0.15s"}}>
         <input ref={ref} type="file" accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.parquet,.zip" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
-        <div style={{fontSize:26,marginBottom:8}}>⬆</div>
+        <div style={{fontSize: T.display.fontSize,marginBottom:8}}>⬆</div>
         <div style={{fontSize: T.body.fontSize,color:C.text,marginBottom:4}}>Drop file or click to browse</div>
         <div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
       </div>
@@ -291,7 +291,7 @@ function NeedsData({ onGoToData }) {
   return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                  height:"100%",gap:12,fontFamily: T.code.fontFamily}}>
-      <div style={{fontSize:28,color:C.border2}}>⊕</div>
+      <div style={{fontSize: T.display.fontSize,color:C.border2}}>⊕</div>
       <div style={{fontSize: T.code.fontSize,color:C.textDim}}>No dataset loaded yet.</div>
       <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginBottom:4}}>
         Load a file, fetch from World Bank, or simulate data from the Data tab.
@@ -306,7 +306,7 @@ function NeedsOutput({ onGoToClean }) {
   const { C, T } = useTheme();
   return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:12,fontFamily: T.code.fontFamily}}>
-      <div style={{fontSize:28,color:C.border2}}>⌾</div>
+      <div style={{fontSize: T.display.fontSize,color:C.border2}}>⌾</div>
       <div style={{fontSize: T.code.fontSize,color:C.textDim}}>Apply your pipeline first.</div>
       <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginBottom:4}}>Go to Clean → run your steps → click "→ Analyze"</div>
       <Btn onClick={onGoToClean} v="solid" color={C.teal} ch="← Go to Clean"/>
@@ -1171,7 +1171,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
               <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.22em",textTransform:"uppercase",marginBottom:8}}>
                 Data · Load dataset
               </div>
-              <div style={{fontSize:16,color:C.text,marginBottom:6}}>Load your first dataset</div>
+              <div style={{fontSize: T.h2.fontSize,color:C.text,marginBottom:6}}>Load your first dataset</div>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,lineHeight:1.7}}>
                 Drop a file below, fetch from World Bank / OECD, or use the Simulate tab to generate synthetic data.
               </div>
@@ -1195,7 +1195,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
               {loading
                 ? <div style={{fontSize: T.code.fontSize,color:C.textDim}}>Parsing…</div>
                 : <>
-                    <div style={{fontSize:22,color:C.teal,marginBottom:8,opacity:0.6}}>↑</div>
+                    <div style={{fontSize: T.display.fontSize,color:C.teal,marginBottom:8,opacity:0.6}}>↑</div>
                     <div style={{fontSize: T.code.fontSize,color:C.textDim,marginBottom:4}}>Drop file(s) or click to browse</div>
                     <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>CSV · TSV · XLSX · JSON · Stata · R .rds · Shapefile (.shp+.dbf+.prj or .zip)</div>
                   </>
@@ -1784,7 +1784,7 @@ function Dashboard({onNew, onLoad}) {
               <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
                 Litux
               </div>
-              <div style={{fontSize:15,color:C.text,letterSpacing:"-0.01em",marginBottom:1}}>
+              <div style={{fontSize: T.h2.fontSize,color:C.text,letterSpacing:"-0.01em",marginBottom:1}}>
                 Projects
               </div>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>
@@ -1960,7 +1960,7 @@ function Dashboard({onNew, onLoad}) {
           <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:3}}>
             LMU Munich · Econometrics
           </div>
-          <div style={{fontSize:22,color:C.text,letterSpacing:"-0.02em",marginBottom:4}}>
+          <div style={{fontSize: T.h2.fontSize,color:C.text,letterSpacing:"-0.02em",marginBottom:4}}>
             Litux
           </div>
           <div style={{fontSize: T.code.fontSize,color:C.textMuted}}>
@@ -1981,7 +1981,7 @@ function Dashboard({onNew, onLoad}) {
           onMouseEnter={e=>{e.currentTarget.style.background=C.surface3;e.currentTarget.style.borderColor=C.goldDim;}}
           onMouseLeave={e=>{e.currentTarget.style.background=C.goldFaint;e.currentTarget.style.borderColor=C.border2;}}
         >
-          <span style={{fontSize:22, color:C.gold, flexShrink:0}}>⊕</span>
+          <span style={{fontSize: T.display.fontSize, color:C.gold, flexShrink:0}}>⊕</span>
           <div>
             <div style={{fontSize: T.body.fontSize,color:C.gold,marginBottom:3}}>New Project</div>
             <div style={{fontSize: T.caption.fontSize,color:C.goldDim}}>
@@ -2427,7 +2427,7 @@ function ProjectNamingScreen({ onConfirm, onBack }) {
           <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.26em",textTransform:"uppercase",marginBottom:8}}>
             Litux · New project
           </div>
-          <div style={{fontSize:18,color:C.text,marginBottom:6}}>Name your project</div>
+          <div style={{fontSize: T.h2.fontSize,color:C.text,marginBottom:6}}>Name your project</div>
           <div style={{fontSize: T.caption.fontSize,color:C.textMuted,lineHeight:1.6}}>
             You can load datasets, simulate data, or fetch from World Bank inside the workspace.
           </div>
@@ -2697,7 +2697,7 @@ export default function App() {
             onClick={goBack}
             title="Go back"
             style={{background:"transparent",border:"none",color:C.textMuted,cursor:"pointer",
-                    fontFamily: T.code.fontFamily,fontSize:16,lineHeight:1,padding:"0 4px",
+                    fontFamily: T.code.fontFamily,fontSize: T.body.fontSize,lineHeight:1,padding:"0 4px",
                     display:"flex",alignItems:"center",transition:"color 0.12s"}}
             onMouseEnter={e=>{ e.currentTarget.style.color=C.teal; }}
             onMouseLeave={e=>{ e.currentTarget.style.color=C.textMuted; }}

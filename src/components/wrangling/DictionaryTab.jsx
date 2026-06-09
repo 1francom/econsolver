@@ -156,7 +156,7 @@ function DataDictionaryTab({ headers, rows, dict, setDict }) {
           padding: "2.5rem 1.5rem", textAlign: "center",
           border: `1px dashed ${C.border2}`, borderRadius: 4,
         }}>
-          <div style={{ fontSize: 24, marginBottom: 10 }}>◈</div>
+          <div style={{ fontSize: T.display.fontSize, marginBottom: 10 }}>◈</div>
           <div style={{ fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.7 }}>
             Click <span style={{ color: C.violet }}>"Infer Descriptions with AI"</span> to
             auto-populate the dictionary from your column names and sample data,

@@ -11,7 +11,7 @@ function Heatmap({v}){
     <div style={{overflowX:"auto"}}>
       <table style={{borderCollapse:"collapse",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>
         <thead><tr>
-          <td style={{padding:"2px 4px",color:C.textMuted,fontSize:8}}>i\t</td>
+          <td style={{padding:"2px 4px",color:C.textMuted,fontSize: T.caption.fontSize}}>i\t</td>
           {ts.map(t=><td key={t} style={{padding:"2px 4px",color:C.textMuted,textAlign:"center",minWidth:26}}>{t}</td>)}
         </tr></thead>
         <tbody>{ents.map(e=>(
@@ -67,7 +67,7 @@ function PanelTab({rows,headers,panel,setPanel,onAdd}){
             {[{l:"Entities",v:v.entities.length,c:C.gold},{l:"Periods",v:v.times.length,c:C.blue},{l:"Obs",v:rows.length,c:C.text},{l:"Attrition",v:`${(v.attrition*100).toFixed(0)}%`,c:v.attrition>.1?C.red:C.green},{l:"Dups",v:v.dups.length,c:v.dups.length>0?C.red:C.green}].map(s=>(
               <div key={s.l} style={{background:C.surface,padding:"0.55rem 0.75rem"}}>
                 <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginBottom:2,fontFamily: T.code.fontFamily,letterSpacing:"0.1em",textTransform:"uppercase"}}>{s.l}</div>
-                <div style={{fontSize:17,color:s.c,fontFamily: T.code.fontFamily}}>{s.v}</div>
+                <div style={{fontSize: T.h2.fontSize,color:s.c,fontFamily: T.code.fontFamily}}>{s.v}</div>
               </div>
             ))}
           </div>

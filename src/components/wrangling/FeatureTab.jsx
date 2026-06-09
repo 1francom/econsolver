@@ -797,7 +797,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
                     color:dateSrc===h?C.violet:C.textDim,
                     borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
                   {dateSrc===h?"✓ ":""}{h}
-                  {numericDateC.includes(h)&&<span style={{fontSize:8,padding:"1px 4px",background:`${C.gold}20`,border:`1px solid ${C.gold}40`,color:C.gold,borderRadius:2}}>NUM</span>}
+                  {numericDateC.includes(h)&&<span style={{fontSize: T.caption.fontSize,padding:"1px 4px",background:`${C.gold}20`,border:`1px solid ${C.gold}40`,color:C.gold,borderRadius:2}}>NUM</span>}
                 </button>
               ))}
             </div>
@@ -821,7 +821,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
                       background:dateParseMode===k?`${C.gold}18`:"transparent",
                       color:dateParseMode===k?C.gold:C.textDim,
                       borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
-                    {dateParseMode===k?"✓ ":""}{l}<span style={{fontSize:8,color:C.textMuted,marginLeft:4}}>{ex}</span>
+                    {dateParseMode===k?"✓ ":""}{l}<span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:4}}>{ex}</span>
                   </button>
                 ))}
               </div>
