@@ -329,14 +329,23 @@ async function forcePushProject(pid, { version = null } = {}) {
   await uploadArtifacts(uploads);
   const encryptedManifest = await encryptJSON(key, manifest);
 
+  // Keep the human-readable cloud name in sync with the local registry on every
+  // push. The name is otherwise only written once at enableCloud, so projects
+  // named/renamed after first publish kept a stale (null) cloud name and the
+  // dashboard fell back to displaying their pid.
+  const localName = (await listProjects()).find(p => p.pid === pid)?.name ?? null;
+
+  const update = {
+    manifest: manifestToText(encryptedManifest),
+    version: nextVersion,
+    updated_at: new Date().toISOString(),
+  };
+  if (localName && localName !== pid) update.name = localName;
+
   const supabase = getSyncSupabase();
   const { error } = await supabase
     .from("synced_projects")
-    .update({
-      manifest: manifestToText(encryptedManifest),
-      version: nextVersion,
-      updated_at: new Date().toISOString(),
-    })
+    .update(update)
     .eq("pid", pid);
   if (error) throw error;
   await setSyncMeta(pid, {
@@ -364,7 +373,8 @@ export async function enableCloud(pid, passphrase) {
   await uploadArtifacts(uploads);
   const encryptedManifest = await encryptJSON(key, manifest);
 
-  const projectName = (await listProjects()).find(p => p.pid === pid)?.name ?? null;
+  const localName = (await listProjects()).find(p => p.pid === pid)?.name ?? null;
+  const projectName = (localName && localName !== pid) ? localName : null;
 
   const supabase = getSyncSupabase();
   const { error } = await supabase.from("synced_projects").upsert({
@@ -438,7 +448,31 @@ export async function listCloudProjects() {
     .select("pid,name,salt,verifier,version,updated_at")
     .order("updated_at", { ascending: false });
   if (error) throw error;
-  return data ?? [];
+  const rows = data ?? [];
+
+  // Reconcile + backfill cloud names from the local project registry. Rows
+  // published before the project was named (or renamed after first publish)
+  // carry a null/pid-shaped name and the dashboard falls back to the pid.
+  // Where the local registry holds a real name the cloud row lacks, adopt it
+  // for display and persist it once so other devices see it too. Idempotent:
+  // after the first heal the cloud name is set and no further writes fire.
+  const localByPid = new Map(
+    (await listProjects().catch(() => [])).map(p => [p.pid, p?.name])
+  );
+  for (const row of rows) {
+    const local = localByPid.get(row.pid);
+    if (!local || local === row.pid) continue;        // no better local name
+    if (local === row.name) continue;                 // already in sync
+    const cloudMissing = !row.name || row.name === row.pid;
+    row.name = local;                                 // fix display immediately
+    if (cloudMissing) {
+      supabase.from("synced_projects")
+        .update({ name: local })
+        .eq("pid", row.pid)
+        .then(() => {}, () => {});                     // fire-and-forget heal
+    }
+  }
+  return rows;
 }
 
 export async function detectConflict(pid) {

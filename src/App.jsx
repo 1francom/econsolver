@@ -2243,6 +2243,7 @@ function Dashboard({onNew, onLoad}) {
                   const isLocal = projects.some(lp => lp.pid === cp.pid);
                   const isPulling = pulling.has(cp.pid);
                   const isCloudRen = cloudRenaming === cp.pid;
+                  const hasName = cp.name && cp.name !== cp.pid;
                   return (
                     <div key={cp.pid} style={{
                       display:"flex", alignItems:"center", gap:8,
@@ -2271,18 +2272,28 @@ function Dashboard({onNew, onLoad}) {
                           />
                         ) : (
                           <div style={{display:"flex",alignItems:"center",gap:4,minWidth:0}}>
-                            <div style={{fontSize: T.code.fontSize,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>
-                              {cp.name || cp.pid}
-                            </div>
-                            <span
-                              onClick={() => { setCloudRenaming(cp.pid); setCloudRenameVal(cp.name || ""); }}
-                              title="Rename"
-                              style={{fontSize: T.caption.fontSize,color:C.border2,cursor:"pointer",flexShrink:0,lineHeight:1,userSelect:"none"}}
-                            >✎</span>
+                            {hasName ? (
+                              <>
+                                <div style={{fontSize: T.code.fontSize,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>
+                                  {cp.name}
+                                </div>
+                                <span
+                                  onClick={() => { setCloudRenaming(cp.pid); setCloudRenameVal(cp.name || ""); }}
+                                  title="Rename"
+                                  style={{fontSize: T.caption.fontSize,color:C.border2,cursor:"pointer",flexShrink:0,lineHeight:1,userSelect:"none"}}
+                                >✎</span>
+                              </>
+                            ) : (
+                              <div
+                                onClick={() => { setCloudRenaming(cp.pid); setCloudRenameVal(""); }}
+                                title="Give this project a name"
+                                style={{fontSize: T.code.fontSize,color:C.teal,cursor:"pointer",fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0,userSelect:"none"}}
+                              >+ Name this project</div>
+                            )}
                           </div>
                         )}
-                        <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:1}}>
-                          v{cp.version} · {cp.updated_at ? new Date(cp.updated_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : ""}
+                        <div style={{fontSize: T.caption.fontSize,color:C.textMuted,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          v{cp.version} · {cp.updated_at ? new Date(cp.updated_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : ""}{!hasName ? ` · ${cp.pid}` : ""}
                         </div>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
