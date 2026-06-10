@@ -178,6 +178,14 @@
 
 ---
 
+### Simulate / Resampling · 2026-06-08
+**Feedback:** `Add studentization for permutation tests`
+**File:** `src/math/Resampling.js` (`permutationTest`, line ~233), `src/components/tabs/statsim/StatWorkspace.jsx`
+**Suggestion:** `permutationTest` in `Resampling.js` already supports a `statName` argument. Add `statName === "studentizedDiff"` as a new option: the per-permutation statistic becomes `(ȳ_A − ȳ_B) / sqrt(var_A/n_A + var_B/n_B)` (Welch-style studentization). The observed statistic and the permutation null distribution both use this studentized ratio, making the test more robust to heteroskedasticity and unequal group sizes. Wire the option into `StatWorkspace.jsx` as a "Studentize" checkbox next to the permutation test controls.
+**Invariants:** `src/math/Resampling.js` must remain zero-React. The `studentized` variant must still respect the `alternative` (two-sided/greater/less) parameter and the seeded RNG.
+
+---
+
 ## Performance
 
 ### [high] · Data · 2026-05-08
