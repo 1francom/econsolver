@@ -1,7 +1,7 @@
 # Plan — Phase 9.3/9.4/9.5: Cross-Dataset (Two-Tier) Pipeline — finish & wire
 
 **Date:** 2026-06-10
-**Status:** IN PROGRESS
+**Status:** DONE (implementation) — browser-validation PENDING (Franco). Task 3b = deferred follow-up.
 **Owner:** Claude (resumable by Codex — this doc is self-contained)
 **Spec:** Phase 9.3/9.4/9.5 in `ClaudePlan.md` (body, "Phase 9: Workspace Architecture")
 
@@ -144,7 +144,7 @@ would supersede Task 2's persistence). Recommend evaluating (b). Scope as its ow
 change. **Not a data-loss risk** (the cascade no longer deletes datasets) — it is a
 consistency/export-fidelity issue.
 
-### Task 4 — End-to-end verification pass  *(no code unless a defect is found)*
+### Task 4 — End-to-end verification pass  *(PENDING — Franco, browser; no code unless a defect is found)*
 - Load 2 datasets → join in Clean (Merge) → confirm: (a) G-step appears in
   DatasetManager interaction log; (b) deleting the G-step shows `CascadeConfirm`
   with the right cascade; (c) "save snapshot first" works; (d) workspace export
@@ -168,4 +168,5 @@ consistency/export-fidelity issue.
 - 2026-06-10: GAP C DECIDED = keep in-place (Franco). Replication double-join risk analyzed + resolved via `gStepId` filter in `generateWorkspaceScript` (folded into Task 1). Task 3 unblocked (now spec-text + cascade verify). All tasks ready; none blocked.
 - 2026-06-10: **Task 1 DONE** (browser-validation pending). (a) `gStepId` filter applied to all 3 language branches in `exporter.js` `generateWorkspaceScript` (no double-join). (b) "Export workspace script" R/Stata/Python footer added to `DatasetManager.jsx` Interactions section → `exportWorkspace(language)` loads per-dataset pipelines+filenames via `loadProjectPipelines(pid)`, builds the `datasets` arg, calls `generateWorkspaceScript`, downloads `workspace_replication.{R,do,py}`. Shown when ≥1 dataset. Build + lint:undef green.
 - 2026-06-10: **Task 2 DONE** (browser-validation pending). `saveSessionMeta`/`loadSessionMeta`/`deleteSessionMeta` added to `indexedDB.js` (key `sessionMeta_<pid>` in the pipelines store, no schema bump; mirrors plotHistory). `deleteProject` cascade clears it. `SessionStateProvider` now takes `pid`, hydrates `globalPipeline`+`calcWorkspace` via `HYDRATE_SESSION_META` on open (hydratedRef guard) and debounce-saves (400ms) on change; `App.jsx` passes `pid={pid}`. Cross-dataset lineage + interaction log now survive reload. Build + lint:undef green.
+- 2026-06-10: **CLOSED — Tasks 1–3 implemented; build + lint:undef green.** Task 4 (e2e) left PENDING for Franco's browser pass; Task 3b (G-step↔local-step desync — consistency, not data-loss) deferred as a follow-up. Moving on.
 - 2026-06-10: **Task 3 DONE** (browser-validation pending). Verification surfaced a **data-loss bug**: the cascade helpers (written for the derived-node model) put `outputDatasetId` — which equals the SOURCE `leftDatasetId` under in-place — into `datasetIds`, and `execCascade` deletes those datasets, so removing one join would delete the source left dataset. Fixed: `computeGStepCascade`/`computeDatasetCascade` rewritten for in-place — `datasetIds` always `[]` (no dataset ever removed by a cascade); CascadeConfirm degrades to interactions-only (its dataset section + "save snapshot" are gated on a non-empty list). Spec text in `ClaudePlan.md` (9.3) updated with an AS-BUILT in-place note covering state/deletion/export + the Task 3b limitation. Build + lint:undef green. **NEW: Task 3b filed** (G-step ↔ local-step desync — consistency/export-fidelity, not data-loss). **Next: Task 4 (e2e), and evaluate Task 3b option (b) derive-from-local.**
