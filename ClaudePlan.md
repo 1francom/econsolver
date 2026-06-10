@@ -47,6 +47,7 @@ Econ Studio is transitioning from a feature-based tool to a professional SaaS pr
 | 2026-06-01 | `plans/2026-06-01-stat-sim-inference-deepening.md` | DONE | Implementation plan for Spec A: 14 tasks (rng.js, pf, 6 SampleTests, bootstrapStatistic+jackknife, permutationTest, SampleTestPanel/StatWorkspace/SimulateTab UI, Node validation harness + R cross-check). All landed; harness 81/81 green. Deferred: §4.1 R/Py/Stata snippet generators |
 | 2026-06-07 | `specs/2026-06-07-design-language-refresh-design.md` | DONE (Franco signed off 2026-06-10) | UI upgrade Workstream A. T1–T9 complete + density T.*.fontSize tokens propagated to all 25 remaining files (Codex c339947 2026-06-09); T9 root `DESIGN.md` authored (commit 06c6dbd 2026-06-09). T10 final visual pass = Franco's subjective sign-off, complete. |
 | 2026-06-07 | `plans/2026-06-07-design-language-refresh.md` | DONE | T1–T10 complete: density token migration + root DESIGN.md (06c6dbd) + final visual pass signed off 2026-06-10. |
+| 2026-06-10 | `plans/2026-06-10-phase9-cross-dataset-pipeline.md` | IN PROGRESS | Phase 9.3/9.4/9.5 finish-and-wire. **Audit 2026-06-10: ~80% already built** (globalPipeline state + G-step registration + cascade UI + `generateWorkspaceScript` topo-sort exporter all exist). 3 real gaps: (A) `generateWorkspaceScript` unwired to any button; (B) `globalPipeline` not persisted (ephemeral `sessionState`, lost on reload); (C) derived-dataset model — **DECIDED keep-in-place** (Franco 2026-06-10); replication double-join risk resolved via `gStepId` filter. **Tasks 1–3 DONE 2026-06-10** (browser-validation pending): T1 workspace export wired in DatasetManager + double-join fix; T2 `globalPipeline` persisted to IDB (`sessionMeta_<pid>`); T3 fixed a cascade **data-loss bug** (was deleting the source left dataset on join removal) + in-place AS-BUILT spec note. **Remaining:** Task 4 (e2e browser verify) + Task 3b (G-step↔local-step desync — consistency/export-fidelity, not data-loss; recommend derive-globalPipeline-from-local). Codex-resumable. |
 | 2026-06-02 | `specs/2026-06-02-qte-stat-sim-design.md` | DONE | Unconditional QTE in Stat & Simulation: `src/math/QTE.js` (`quantileTreatmentEffect`, type-7 quantiles via exported `Resampling.quantile`, seeded within-group bootstrap percentile/basic/BCa band) + `QTEPanel.jsx` (table + QTE-vs-τ SVG with dashed ATE line + overlaid-CDF SVG with QTE arrow) mounted in StatWorkspace + SimulateTab (simulated data). Validated: `inferenceValidation.js` qte suite 30 checks green (point QTE = R quantile(type=7) diff to 6dp, ATE = lm slope); R block in `inferenceRValidation.R`. Covariate-adjusted QR deferred to Modeling. Franco: browser-validate on Vercel |
 | 2026-06-02 | `specs/2026-06-02-dgp-builder-upgrade-design.md` | IN PROGRESS | DGP builder upgrade: Categorical/factor draw (A ✓), GroupID/CycleID panel-ID generators (B ✓), end-to-end string preservation (C ✓) — all landed via shared `src/math/dgpDraw.js` (imported by SimulateTab + exprEval.worker.js → parity by construction); R/Py/Stata script-export extended; structural harness `__validation__/dgpValidation.js` green (37 checks); build clean. Optional Phase D (dplyr Expression helpers) deferred. Franco: browser-validate categorical/panel sim |
 | 2026-06-01 | Supabase live RLS / advisor audit (`THREAT_MODEL.md` §3.7) | DONE | B1–B4 remediated; 2 migrations applied; 10→1 advisor lints. Open: enable leaked-password protection, rotate `AGENT_SECRET`, `db pull` migrations into repo |
@@ -609,6 +610,26 @@ G2  intersect(df_merged, df_controls) → df_final
 3. Then local pipeline steps on the derived dataset run (post-merge transformations)
 
 This order is deterministic and matches how `runner.js` already replays steps.
+
+> **AS-BUILT — in-place model (2026-06-10, supersedes the derived-dataset language in 9.2–9.5).**
+> A join/append does **not** create a new `◎` derived dataset node; it augments the
+> **left** dataset in place (`outputDatasetId === leftDatasetId`). Franco's Gap-C decision.
+> - **State:** every local step carries `datasetId`; join/append also register a G-step in
+>   the session `globalPipeline` (`WranglingModule.addStep`), now persisted to IndexedDB
+>   (`sessionMeta_<pid>`) so lineage survives reload.
+> - **Deletion (9.4):** no dataset is ever removed by a cascade (it would delete a source
+>   dataset). Deleting a G-step removes only that interaction; deleting a source dataset
+>   removes every G-step that references it. The "save snapshot / derived datasets removed"
+>   flow does not apply.
+> - **Export (9.5):** `generateWorkspaceScript` (`pipeline/exporter.js`) emits each dataset's
+>   non-`gStepId` local steps in topo order, then the cross-dataset joins from `globalPipeline`
+>   against the cleaned right df. Single-dataset/Clean export emits joins inline (raw right
+>   load). The `gStepId` filter prevents double-emission.
+> - **KNOWN LIMITATION (Task 3b):** the G-step record and the left dataset's local join step
+>   are two records for one op, linked by `gStepId`; deleting one does not yet delete the
+>   other, so they can desync (a deleted G-step still runs locally; a deleted local step
+>   orphans its G-step). Fix: keep them in sync, or derive `globalPipeline` from local
+>   pipelines. Tracked in `plans/2026-06-10-phase9-cross-dataset-pipeline.md`.
 
 ---
 

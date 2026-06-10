@@ -2788,7 +2788,7 @@ export default function App() {
         )}
 
         {screen==="workspace" && (
-          <SessionStateProvider key={pid}>
+          <SessionStateProvider key={pid} pid={pid}>
           <SessionLogProvider>
 
             <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
