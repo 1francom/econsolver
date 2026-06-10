@@ -32,6 +32,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
   const [pendingRows, setPendingRows] = useState(null);
   const [pendingCols, setPendingCols] = useState([]);
   const [pendingHeaders, setPendingHeaders] = useState(null);
+  const [pendingKey, setPendingKey] = useState(null);
 
   const numericHeaders = useMemo(
     () => headers.filter(h => rows.slice(0, 20).some(r => typeof r[h] === "number")),
@@ -45,11 +46,35 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
     if (hasRows) loadLeaflet().catch(() => {});
   }, [hasRows]);
 
+  const hasData = rows.length > 0 && headers.length > 0;
+
+  // The tab receives post-pipeline rows for the active spatial dataset, while
+  // availableDatasets is the raw manager mirror. Keep named selections for the
+  // active dataset aligned with the same cleaned data used by "Active dataset".
+  const spatialDatasets = useMemo(() => {
+    if (!pid || !availableDatasets.length) return availableDatasets;
+    let matched = false;
+    const merged = availableDatasets.map(ds => {
+      if (ds.id !== pid) return ds;
+      matched = true;
+      return { ...ds, rows, headers };
+    });
+    if (matched) return merged;
+    return [{ id: pid, name: "Active dataset", filename: "Active dataset", rows, headers }, ...availableDatasets];
+  }, [availableDatasets, pid, rows, headers]);
+
+  // Key derived from the active dataset's column fingerprint.
+  // When headers change (dataset switch), all section sub-components remount
+  // so their useState() column selections reset to the new dataset's guesses.
+  const sectionsKey = headers.join("\0");
+  const visiblePendingRows = pendingKey === sectionsKey ? pendingRows : null;
+
   const handleResult = useCallback((resultRows, newCols, baseHeaders = null) => {
     setPendingRows(resultRows);
     setPendingCols(newCols);
     setPendingHeaders(baseHeaders);
-  }, []);
+    setPendingKey(sectionsKey);
+  }, [sectionsKey]);
 
   function handleSave(name, resultRows) {
     const allHeaders = [...new Set([...(pendingHeaders ?? headers), ...pendingCols])];
@@ -57,21 +82,8 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
     setPendingRows(null);
     setPendingCols([]);
     setPendingHeaders(null);
+    setPendingKey(null);
   }
-
-  const hasData = rows.length > 0 && headers.length > 0;
-
-  // Key derived from the active dataset's column fingerprint.
-  // When headers change (dataset switch), all section sub-components remount
-  // so their useState() column selections reset to the new dataset's guesses.
-  const sectionsKey = headers.join("\0");
-
-  // Clear any pending result from the previous dataset when headers change.
-  useEffect(() => {
-    setPendingRows(null);
-    setPendingCols([]);
-    setPendingHeaders(null);
-  }, [sectionsKey]);
 
   return (
     <div style={{
@@ -136,9 +148,10 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
         <div style={{ flex: 1, overflow: "hidden" }}>
           <SpatialPlotTab
             rows={rows} headers={headers}
-            availableDatasets={availableDatasets}
+            availableDatasets={spatialDatasets}
             onAddDataset={onAddDataset}
             C={C}
+            pid={pid}
           />
         </div>
       )}
@@ -148,7 +161,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
         <div style={{ flex: 1, overflow: "hidden" }}>
           <SpatialGeoPlot
             rows={rows} headers={headers}
-            availableDatasets={availableDatasets}
+            availableDatasets={spatialDatasets}
             C={C}
             pid={pid}
           />
@@ -175,7 +188,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
             <Section title="Metric Buffers" badge="50m / 1km" C={C}>
               <MetricBufferSection
                 rows={rows} headers={headers}
-                availableDatasets={availableDatasets}
+                availableDatasets={spatialDatasets}
                 onResult={handleResult}
                 C={C}
               />
@@ -184,7 +197,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
             <Section title="Buffer Exposure" badge="dissolve / overlap" C={C}>
               <BufferExposureSection
                 rows={rows} headers={headers}
-                availableDatasets={availableDatasets}
+                availableDatasets={spatialDatasets}
                 onResult={handleResult}
                 C={C}
               />
@@ -194,7 +207,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
               <GridSection
                 rows={rows}
                 headers={headers}
-                availableDatasets={availableDatasets}
+                availableDatasets={spatialDatasets}
                 onResult={handleResult}
                 C={C}
               />
@@ -203,7 +216,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
             <Section title="Areal Interpolation" badge="polygon x polygon" C={C}>
               <ArealInterpolateSection
                 rows={rows} headers={headers}
-                availableDatasets={availableDatasets}
+                availableDatasets={spatialDatasets}
                 C={C} onResult={handleResult}
               />
             </Section>
@@ -211,7 +224,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
             <Section title="Spatial Join (point-in-polygon)" badge="requires polygon dataset" C={C}>
               <SpatialJoinSection
                 rows={rows} headers={headers}
-                availableDatasets={availableDatasets}
+                availableDatasets={spatialDatasets}
                 C={C} onResult={handleResult}
               />
             </Section>
@@ -219,14 +232,14 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
             <Section title="Aggregate Points to Grid" badge="count / sum / mean / share" C={C}>
               <AggregateToGridSection
                 rows={rows} headers={headers}
-                availableDatasets={availableDatasets}
+                availableDatasets={spatialDatasets}
                 C={C} onResult={handleResult}
               />
             </Section>
             <Section title="Nearest Neighbour" badge="O(n × m) brute-force" C={C}>
               <NearestNeighborSection
                 rows={rows} headers={numericHeaders.length ? numericHeaders : headers}
-                availableDatasets={availableDatasets}
+                availableDatasets={spatialDatasets}
                 C={C} onResult={handleResult}
               />
             </Section>
@@ -234,7 +247,7 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
             <Section title="Distance to Boundary" badge="Spatial RD running variable" C={C}>
               <BoundaryDistanceSection
                 rows={rows} headers={numericHeaders.length ? numericHeaders : headers}
-                availableDatasets={availableDatasets}
+                availableDatasets={spatialDatasets}
                 C={C} onResult={handleResult}
               />
             </Section>
@@ -246,10 +259,10 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
           </div>
 
           {/* Sticky save bar — visible wherever the user is in the list */}
-          {pendingRows && (
+          {visiblePendingRows && (
             <div style={{ position: "sticky", bottom: 0, left: 0, right: 0, zIndex: 10, paddingTop: 8 }}>
               <OutputPanel
-                pendingRows={pendingRows}
+                pendingRows={visiblePendingRows}
                 pendingCols={pendingCols}
                 onSave={handleSave}
                 C={C}
