@@ -1,7 +1,7 @@
 // ─── ECON STUDIO · spatial/plot/SpatialGeoPlot.jsx ─ (moved verbatim from SpatialTab.jsx)
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useTheme } from "../../../../ThemeContext.jsx";
-import { getPlotHistory, savePlotHistory } from "../../../../services/Persistence/plotHistory.js";
+import { getGeoPlotConfig, getPlotHistory, saveGeoPlotConfig, savePlotHistory } from "../../../../services/Persistence/plotHistory.js";
 import { loadGeoPlt, mkGeoLayer } from "./geo.js";
 import { GeoLayerConfig } from "./GeoLayerConfig.jsx";
 import { GeoPlotCanvas } from "./GeoPlotCanvas.jsx";
@@ -24,11 +24,45 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const [showTiles,   setShowTiles]   = useState(false);
   const wrapRef    = useRef(null);
   const geoPlotRef = useRef(null);
+  const hydratedRef = useRef(false);
   const [canvasW, setCanvasW] = useState(700);
   const [canvasH, setCanvasH] = useState(500);
 
   useEffect(() => { loadGeoPlt().then(setPlt).catch(e => setPltErr(e.message)); }, []);
   useEffect(() => { if (!pid) return; getPlotHistory(pid).then(h => setPlotHistory(h ?? [])).catch(() => {}); }, [pid]);
+  useEffect(() => {
+    let cancelled = false;
+    hydratedRef.current = false;
+    if (!pid) {
+      hydratedRef.current = true;
+      return () => { cancelled = true; };
+    }
+    getGeoPlotConfig(pid).then(cfg => {
+      if (cancelled) return;
+      if (!cfg) {
+        hydratedRef.current = true;
+        return;
+      }
+      if (Array.isArray(cfg.layers)) setLayers(cfg.layers);
+      if (cfg.activeId != null) setActiveId(cfg.activeId);
+      if (typeof cfg.title === "string") setTitle(cfg.title);
+      if (typeof cfg.subtitle === "string") setSubtitle(cfg.subtitle);
+      if (typeof cfg.caption === "string") setCaption(cfg.caption);
+      if (cfg.userH != null) setUserH(cfg.userH);
+      if (typeof cfg.showTiles === "boolean") setShowTiles(cfg.showTiles);
+      hydratedRef.current = true;
+    }).catch(() => {
+      if (!cancelled) hydratedRef.current = true;
+    });
+    return () => { cancelled = true; };
+  }, [pid]);
+  useEffect(() => {
+    if (!pid || !hydratedRef.current) return;
+    const t = setTimeout(() => {
+      saveGeoPlotConfig(pid, { layers, activeId, title, subtitle, caption, userH, showTiles }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(t);
+  }, [pid, layers, activeId, title, subtitle, caption, userH, showTiles]);
   useEffect(() => {
     if (!wrapRef.current) return;
     const ro = new ResizeObserver(([e]) => {

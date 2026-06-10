@@ -24,3 +24,25 @@ export async function savePlotHistory(pid, history) {
     t.onerror    = e => reject(e.target.error);
   });
 }
+
+export async function getGeoPlotConfig(pid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE, "readonly");
+    const s   = t.objectStore(STORE);
+    const req = s.get(`geoPlotConfig_${pid}`);
+    req.onsuccess = () => resolve(req.result?.config ?? null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+export async function saveGeoPlotConfig(pid, config) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE, "readwrite");
+    const s   = t.objectStore(STORE);
+    s.put({ id: `geoPlotConfig_${pid}`, config, ts: Date.now() });
+    t.oncomplete = () => resolve();
+    t.onerror    = e => reject(e.target.error);
+  });
+}
