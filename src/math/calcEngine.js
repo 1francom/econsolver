@@ -1,6 +1,7 @@
 // ─── ECON STUDIO · src/math/calcEngine.js ────────────────────────────────────
 // Pure-JS math utilities for the Calculate tab.
-// No React. No side effects. No external imports.
+// No React. No side effects. (One pure-JS security import: the shared expression
+// denylist guard — single source of truth, never duplicated here.)
 //
 // Exports:
 //   solveRoot(fn, a, b, tol, maxIter)            — Brent's method (single equation)
@@ -18,6 +19,8 @@
 //   dbinom/pbinom       — Binomial
 //   dpois/ppois         — Poisson
 //   dchisq/pchisq       — Chi-squared
+
+import { assertSafeExpr } from "../pipeline/exprGuard.js";
 
 // ─── BRENT'S METHOD ──────────────────────────────────────────────────────────
 /**
@@ -246,6 +249,11 @@ export function predict(beta, xVec, XtXinv, s2, df = 100) {
 // ─── EXPRESSION EVALUATOR ────────────────────────────────────────────────────
 export function evalExpression(expr, scope = {}) {
   try {
+    // SECURITY (§10.1): reject forbidden identifiers (fetch/window/constructor/
+    // import/…) at parse time before compiling. The workbench routes eval through
+    // nerdamer buildFunction (AST-derived, no globals); this guards the shared
+    // main-thread calculator path that compiles raw user input dynamically.
+    assertSafeExpr(expr);
     const mathNames = Object.getOwnPropertyNames(Math);
     const mathVals  = mathNames.map(n => Math[n]);
     const fn = new Function(
