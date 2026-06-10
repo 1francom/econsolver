@@ -331,3 +331,12 @@
 
 - [14:03] · Simulate
   Add studentization for permutation tests
+
+---
+
+## 2026-06-10 batch
+
+### Bugs
+
+- [09:06] · Model
+  Fix the size of the Plot Builder in ModelingTab — users should be able to resize it; PNG export should not have size/aesthetic problems
