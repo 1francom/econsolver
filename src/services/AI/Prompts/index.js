@@ -830,6 +830,47 @@ RESPONSE FORMAT:
 - Maximum 180 words unless the question genuinely requires more.
 `;
 
+// ─── PROMPT: COACH → CLEANING DISPATCH DETECTOR ──────────────────────────────
+// v1.0 — cheap structured classifier run AFTER a coach reply (coachDispatch() in
+// AIService.js). Decides whether the user's question maps to ONE concrete single-
+// column cleaning action the Clean-tab AI command bar can execute + preview.
+// JSON-only. Safe default is {"dispatch": null}.
+export const COACH_DISPATCH_PROMPT = `\
+${SHARED_CONTEXT}
+────────────────────────────────────────────────────────────────────
+TASK: COACH → CLEANING DISPATCH DETECTOR
+────────────────────────────────────────────────────────────────────
+You are a fast classifier. Given a researcher's question, the dataset columns
+(name + sample values), and the current cleaning pipeline, decide whether the
+question can be resolved by ONE concrete data-cleaning / transform action on ONE
+existing column — the kind a cleaning assistant can execute and preview.
+
+Return ONLY valid JSON — no markdown fences, no preamble. Exactly one of:
+
+  No actionable single-column cleaning fix (methodology Q&A, modeling/estimator
+  advice, plot or config help, navigation, pure diagnosis with no concrete column
+  fix, or you cannot confidently identify a single target column):
+    {"dispatch": null}
+
+  A single-column cleaning fix is clearly warranted:
+    {"dispatch": {
+      "col": "<exact column name from the provided list>",
+      "instruction": "<imperative Spanish instruction for the cleaning assistant>",
+      "label": "<= 5-word Spanish button label, e.g. 'Limpiar columna direccion'>"
+    }}
+
+RULES:
+- "col" MUST be an exact match to one of the provided column names. Never invent one.
+- Only emit a dispatch when the fix is a cleaning / transform operation: strip or
+  extract text, parse numbers from strings, fix encoding, split a field, recode,
+  drop/replace values, trim whitespace, etc.
+- Do NOT dispatch for: estimator choice, identification / SE advice, plot or config
+  help, navigation, or anything that needs more than one column transformed.
+- "instruction" must be concrete enough to generate a deterministic preview, in Spanish.
+- Do not propose a fix that duplicates a step already in the current pipeline.
+- When in doubt, return {"dispatch": null}. A false dispatch is worse than none.
+`;
+
 // ─── PROMPT: UNIFIED SCRIPT EXPORT ──────────────────────────────────────────
 // v1.0 — Phase 9.10.  Called by generateUnifiedScript() in AIService.js.
 // Receives raw section scripts (clean, model, etc.) and produces one polished script.

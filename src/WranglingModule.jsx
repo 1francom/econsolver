@@ -46,7 +46,7 @@ export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, projectPid, allDatasets = [], onSaveSubset, addStepRef }) {
+export default function WranglingModule({ rawData, filename, onComplete, onReady, pid, projectPid, allDatasets = [], onSaveSubset, addStepRef, assistantPrefill = null, onConsumePrefill = null }) {
   // Per-dataset pipelines are stored under the parent project's pid (Phase 0.2
   // schema). Fall back to `pid` so single-dataset legacy paths still work —
   // they treat the project pid and the primary dataset id as the same value.
@@ -659,7 +659,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         ]} active={tab} set={setTab}/>
 
         {/* ── AI command bar (NL → validated pipeline steps) ── */}
-        <NLCommandBar rows={rows} headers={headers} onAddSteps={steps => steps.forEach(addStep)} />
+        <NLCommandBar rows={rows} headers={headers} onAddSteps={steps => steps.forEach(addStep)}
+          prefill={assistantPrefill} onConsumePrefill={onConsumePrefill}
+          onPrefillNavigate={() => setTab("clean")} />
 
         {/* ── Tab panels ── */}
         {tab === "clean" && (

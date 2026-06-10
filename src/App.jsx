@@ -2518,6 +2518,9 @@ export default function App() {
   const [activeResult,       setActiveResult]      = useState(null);
   const [modelingSession,    setModelingSession]   = useState({ pinnedModels: [], subsets: null, inferenceOpts: null });
   const [coachPrefill,       setCoachPrefill]      = useState(null);
+  // Coach → Clean dispatch: pre-loads the Clean-tab AI command bar with a column
+  // + instruction and navigates there. Consumed once by NLCommandBar.
+  const [assistantPrefill,   setAssistantPrefill]  = useState(null);
   const [feedbackOpen,       setFeedbackOpen]      = useState(false);
 
   const [availableDatasets,  setAvailableDatasets] = useState([]);
@@ -2589,6 +2592,15 @@ export default function App() {
     if (newTab === activeTab) return;
     pushHistory(screen, activeTab);
     setActiveTab(newTab);
+  }
+
+  // Coach dispatched a cleaning action → go to Clean, hand the {col, instruction}
+  // to the AI command bar, and close the sidebar so the user sees the preview.
+  function handleDispatchToAssistant({ col, instruction }) {
+    if (!instruction) return;
+    navigateToTab("clean");
+    setAssistantPrefill({ col, instruction, ts: Date.now() });
+    setSidebarOpen(false);
   }
 
   // ── Load a saved project from the dashboard ──────────────────────────────
@@ -2850,6 +2862,8 @@ export default function App() {
                     }}
                     onActiveDatasetChange={id => setActiveDatasetId(id)}
                     activeDatasetId={tabDsId("clean")}
+                    assistantPrefill={assistantPrefill}
+                    onConsumePrefill={() => setAssistantPrefill(null)}
                   />
                 </div>
 
@@ -2983,6 +2997,7 @@ export default function App() {
             inferenceOpts={modelingSession.inferenceOpts}
             prefillMessage={coachPrefill}
             pid={pid}
+            onDispatchToAssistant={handleDispatchToAssistant}
           />
           </SessionLogProvider>
           </SessionStateProvider>

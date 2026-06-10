@@ -22,6 +22,7 @@ import {
   CLEANING_SUGGESTIONS_PROMPT,
   COMPARE_MODELS_PROMPT,
   RESEARCH_COACH_PROMPT,
+  COACH_DISPATCH_PROMPT,
   UNIFIED_SCRIPT_PROMPT,
   INTERPRET_MARGINAL_EFFECTS_PROMPT,
   INTERPRET_OPTIMIZATION_PROMPT,
@@ -962,6 +963,63 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
     if (err.message === "PREMIUM_REQUIRED") throw err; // let caller handle the gate
     console.warn("[AIService] researchCoach failed:", err.message);
     return "The research coach is unavailable — check your API key and network connection.";
+  }
+}
+
+// ─── 5b. COACH → CLEANING DISPATCH ────────────────────────────────────────────
+// Cheap, non-streaming structured call run AFTER a coach reply. Decides whether
+// the user's question maps to a single-column cleaning action the Clean-tab AI
+// command bar (NLCommandBar → nlToPipeline) can execute and preview.
+//
+// Returns: Promise<{ col, instruction, label } | null>  — null = no dispatch.
+// Routed to the fast/cheap model; any failure returns null (safe default — the
+// streamed coach reply is unaffected).
+export async function coachDispatch({ question, headers = [], sampleRows = [], pipeline = [], dataDictionary = null } = {}) {
+  if (!question?.trim() || !headers.length) return null;
+
+  const taskPrompt = COACH_DISPATCH_PROMPT.replace(SHARED_CONTEXT, "").trim();
+
+  // Compact column block: name (+ dictionary label) + up to 4 sample values.
+  const colBlock = headers.map(h => {
+    const samples = [];
+    for (const r of sampleRows) {
+      if (r?.[h] != null) { samples.push(JSON.stringify(r[h])); if (samples.length >= 4) break; }
+    }
+    const dict = dataDictionary?.[h] ? ` — ${dataDictionary[h]}` : "";
+    return `  ${h}${dict}: ${samples.join(", ")}`;
+  }).join("\n");
+  const pipeBlock = pipeline.length
+    ? pipeline.map(s => `  [${s.type}]${s.col ? ` ${s.col}` : ""}`).join("\n")
+    : "  (none)";
+
+  const userPrompt =
+    `DATASET COLUMNS:\n${colBlock}\n\n` +
+    `CURRENT PIPELINE STEPS:\n${pipeBlock}\n\n` +
+    `RESEARCHER QUESTION: ${question.trim()}\n\nReturn the JSON now.`;
+
+  let raw;
+  try {
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 220, model: MODEL_FAST });
+  } catch (err) {
+    console.warn("[AIService] coachDispatch failed:", err.message);
+    return null;
+  }
+
+  const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    const d = parsed?.dispatch;
+    if (!d || typeof d !== "object") return null;
+    // Validate col is an exact header match — never trust a fabricated name.
+    if (!headers.includes(d.col)) return null;
+    if (typeof d.instruction !== "string" || !d.instruction.trim()) return null;
+    return {
+      col: d.col,
+      instruction: d.instruction.trim(),
+      label: (typeof d.label === "string" && d.label.trim()) ? d.label.trim() : `Limpiar columna ${d.col}`,
+    };
+  } catch {
+    return null; // parse failure → no dispatch (safe default)
   }
 }
 

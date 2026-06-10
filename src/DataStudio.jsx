@@ -674,7 +674,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
 // services/data/rowIdentity.js for invariants.
 const ensureRowIds = ensureRowIdentity;
 
-const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets, onComplete, onOutputReady, onDatasetsChange, onActiveDatasetChange, activeDatasetId }, ref) {
+const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets, onComplete, onOutputReady, onDatasetsChange, onActiveDatasetChange, activeDatasetId, assistantPrefill = null, onConsumePrefill = null }, ref) {
   const { C, T } = useTheme();
   const dispatch = useSessionDispatch();
 
@@ -1076,6 +1076,8 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
             allDatasets={otherDatasets}
             onSaveSubset={handleSaveSubset}
             addStepRef={wranglingAddStepRef}
+            assistantPrefill={assistantPrefill}
+            onConsumePrefill={onConsumePrefill}
           />
         </div>
       ) : (
