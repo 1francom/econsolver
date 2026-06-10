@@ -14,7 +14,7 @@
 | 2026-05-11 | Data | Edit cells button does not work | high | ui | `src/ExplorerModule.jsx` | fixed (minor bugs remain) |
 | 2026-05-11 | Explore | The graph does not fit the screen | medium | ui | `src/components/PlotBuilder.jsx`, `src/components/ModelingTab.jsx` | fixed |
 | 2026-05-11 | Model | McRary plot does not work — McCrary density test could not be computed | high | math | `src/math/CausalEngine.js`, `src/components/modeling/ModelPlots.jsx` | fixed |
-| 2026-05-13 | Data | .dta files are wrong loaded and readed | high | data | `src/services/data/parsers/stata.js` | pending |
+| 2026-05-13 | Data | .dta files are wrong loaded and readed | high | data | `src/services/data/parsers/stata.js` | fixed (2026-06-03 — stata.js supports formats 113–119 / Stata 8–15; old-binary + XML-tag parsers + format-119 stride fix; Franco: confirm on a real .dta) |
 | 2026-05-13 | Spatial | Multipolygon geometry does not work | high | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | fixed |
 | 2026-05-13 | Spatial | Grids: adjust the size of border grids by cutting them | medium | ui | `src/components/tabs/SpatialTab.jsx`, `src/math/SpatialEngine.js` | fixed (2026-05-18 — Sutherland-Hodgman polygon clipping in `clipRectToRings`) |
 | 2026-05-13 | Model | Show clearer errors — "Matrix is singular or insufficient data" too vague | medium | ui | `src/components/ModelingTab.jsx`, `src/math/LinearEngine.js` | fixed |
@@ -38,4 +38,4 @@
 | 2026-06-02 | Calculate | Crash on LaTeX export | critical | export | `src/ReportingModule.jsx` | fixed (2026-06-05 — confirmed by Franco) |
 | 2026-06-02 | Model | AI interpretation does not adapt to estimator-specific semantics (e.g. Poisson coefficients should be shown as incidence rate ratios / semi-elasticities, not linear marginal effects) | high | ai | `src/services/AI/Prompts/index.js`, `src/services/AI/AIService.js` | fixed (2026-06-03 — ESTIMATOR TYPE RULES J–R added to INTERPRET_REGRESSION_PROMPT; result.type threaded into user prompt) |
 | 2026-06-05 | Data | Numbers are rounded when inserting, deleting or overwriting cells in the data viewer | medium | ui | `src/ExplorerModule.jsx` | fixed (2026-06-09) |
-| 2026-06-06 | Spatial | Geocoding directions might be upgraded — geocoder address resolution quality needs improvement | low | data | `src/components/tabs/spatial/analyze/GeocodeSection.jsx` | open |
+| 2026-06-06 | Spatial | Geocoding directions might be upgraded — geocoder address resolution quality needs improvement | low | data | `src/components/tabs/spatial/analyze/GeocodeSection.jsx` | works — enhancement only (Franco confirms geocoding functions 2026-06-10; Photon/Komoot precision is a provider limit, not a defect) |
