@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useTheme } from "../modeling/shared.jsx";
 import { HintBox } from "../HelpSystem.jsx";
 import { assertSafeExpr } from "../../pipeline/exprGuard.js";
+import { HELPERS } from "../../pipeline/expressionHelpers.js";
 import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.js";
 import { useSessionLog } from "../../services/session/sessionLog.jsx";
 import { mulberry32 } from "../../math/rng.js";
@@ -48,13 +49,14 @@ function buildScope(variables, nObs, rng) {
       if (!expr) return { error: `${v.name}: expression is empty.` };
       try {
         const varNames = Object.keys(scope), varArrays = Object.values(scope);
+        const helperNames = Object.keys(HELPERS), helperFns = Object.values(HELPERS);
         assertSafeExpr(expr); // SECURITY: reject denylisted identifiers
         // The expression evaluator is intentional — user-defined DGP expressions
         // are evaluated in a sandboxed scope with only DGP variables exposed.
         // eslint-disable-next-line no-new-func
-        const fn = new Function(...varNames, "N", "observations", `"use strict"; return (${expr});`);
+        const fn = new Function(...varNames, ...helperNames, "N", "observations", `"use strict"; return (${expr});`);
         const arr = [];
-        for (let i = 0; i < nObs; i++) arr.push(fn(...varArrays.map(a => a[i]), nObs, nObs));
+        for (let i = 0; i < nObs; i++) arr.push(fn(...varArrays.map(a => a[i]), ...helperFns, nObs, nObs));
         scope[v.name] = arr;
       } catch (e) { return { error: `${v.name}: ${e.message}` }; }
     } else if (v.dist === "Constant") {
@@ -71,15 +73,16 @@ function buildScope(variables, nObs, rng) {
     } else if (v.dist === "ForLoop") {
       const initExpr = (v.params.init || "0").trim(), updExpr = (v.params.update || "prev").trim();
       const varNames = Object.keys(scope), varArrays = Object.values(scope);
+      const helperNames = Object.keys(HELPERS), helperFns = Object.values(HELPERS);
       try {
         assertSafeExpr(initExpr); assertSafeExpr(updExpr); // SECURITY
         const arr = new Array(nObs);
         // eslint-disable-next-line no-new-func
-        const initFn = new Function(...varNames, "N", "observations", `"use strict"; return (${initExpr});`);
-        arr[0] = initFn(...varArrays.map(a => a[0]), nObs, nObs);
+        const initFn = new Function(...varNames, ...helperNames, "N", "observations", `"use strict"; return (${initExpr});`);
+        arr[0] = initFn(...varArrays.map(a => a[0]), ...helperFns, nObs, nObs);
         // eslint-disable-next-line no-new-func
-        const updFn = new Function("prev", "i", ...varNames, "N", "observations", `"use strict"; return (${updExpr});`);
-        for (let i = 1; i < nObs; i++) arr[i] = updFn(arr[i - 1], i, ...varArrays.map(a => a[i]), nObs, nObs);
+        const updFn = new Function("prev", "i", ...varNames, ...helperNames, "N", "observations", `"use strict"; return (${updExpr});`);
+        for (let i = 1; i < nObs; i++) arr[i] = updFn(arr[i - 1], i, ...varArrays.map(a => a[i]), ...helperFns, nObs, nObs);
         scope[v.name] = arr;
       } catch (e) { return { error: `${v.name}: ${e.message}` }; }
     } else if (v.dist === "WhileLoop") {
@@ -245,12 +248,17 @@ function ParamEditor({ dist, params, onChange }) {
     </label>
   );
   if (dist === "Expression")  return (
-    <input
-      value={params.expr ?? ""}
-      onChange={e => onChange({ ...params, expr: e.target.value })}
-      placeholder="e.g. 1 + 2*X1 + eps"
-      style={{ ...fieldStyle(C, T), width: 240 }}
-    />
+    <div>
+      <input
+        value={params.expr ?? ""}
+        onChange={e => onChange({ ...params, expr: e.target.value })}
+        placeholder="e.g. 1 + 2*X1 + eps"
+        style={{ ...fieldStyle(C, T), width: 240 }}
+      />
+      <div style={{ marginTop: 4, maxWidth: 420, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
+        Helpers: ifelse, case_when, cut, pick, log/log10/log2, sqrt, abs, sign, round, floor, ceiling, exp, coalesce, pmin/pmax, clamp, rescale.
+      </div>
+    </div>
   );
   if (dist === "ForLoop") return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -321,6 +329,198 @@ function MCHistogram({ betas, trueVal, meanVal }) {
 }
 
 // ─── SCRIPT GENERATOR ─────────────────────────────────────────────────────────
+function splitDgpArgs(source) {
+  const args = [];
+  let depth = 0, quote = "", current = "";
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote && source[i - 1] !== "\\") quote = "";
+    } else if (ch === "\"" || ch === "'") { quote = ch; current += ch; }
+    else if (ch === "(" || ch === "[") { depth++; current += ch; }
+    else if (ch === ")" || ch === "]") { depth--; current += ch; }
+    else if (ch === "," && depth === 0) { args.push(current.trim()); current = ""; }
+    else current += ch;
+  }
+  if (current.trim()) args.push(current.trim());
+  return args;
+}
+
+function replaceDgpCalls(source, name, build) {
+  let result = String(source);
+  const pattern = new RegExp(`\\b${name}\\s*\\(`, "g");
+  let match;
+  while ((match = pattern.exec(result))) {
+    const open = result.indexOf("(", match.index);
+    let depth = 1, quote = "", close = -1;
+    for (let i = open + 1; i < result.length; i++) {
+      const ch = result[i];
+      if (quote) {
+        if (ch === quote && result[i - 1] !== "\\") quote = "";
+      } else if (ch === "\"" || ch === "'") quote = ch;
+      else if (ch === "(") depth++;
+      else if (ch === ")" && --depth === 0) { close = i; break; }
+    }
+    if (close < 0) break;
+    const replacement = build(splitDgpArgs(result.slice(open + 1, close)));
+    if (!replacement) { pattern.lastIndex = close + 1; continue; }
+    result = result.slice(0, match.index) + replacement + result.slice(close + 1);
+    pattern.lastIndex = match.index + replacement.length;
+  }
+  return result;
+}
+
+function rArray(value) {
+  const text = String(value ?? "").trim();
+  return text.startsWith("[") && text.endsWith("]")
+    ? `c(${text.slice(1, -1).replace(/'([^']*)'/g, '"$1"')})`
+    : text;
+}
+
+function literalArray(value) {
+  const text = String(value ?? "").trim();
+  return text.startsWith("[") && text.endsWith("]") ? splitDgpArgs(text.slice(1, -1)) : null;
+}
+
+function topLevelDgpCall(expr, name) {
+  const text = String(expr ?? "").trim();
+  if (!new RegExp(`^${name}\\s*\\(`).test(text)) return null;
+  let depth = 1, quote = "";
+  const open = text.indexOf("(");
+  for (let i = open + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote && text[i - 1] !== "\\") quote = "";
+    } else if (ch === "\"" || ch === "'") quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")" && --depth === 0) {
+      return text.slice(i + 1).trim() ? null : splitDgpArgs(text.slice(open + 1, i));
+    }
+  }
+  return null;
+}
+
+function translateDgpR(expr) {
+  if (/=>|`/.test(expr)) return { expr, review: true };
+  let out = String(expr);
+  out = replaceDgpCalls(out, "cut", args => `cut(${args.map(rArray).join(", ")})`);
+  out = replaceDgpCalls(out, "pick", args => `pick(${args.map(rArray).join(", ")})`);
+  out = replaceDgpCalls(out, "case_when", args => {
+    const pairs = [];
+    for (let i = 0; i + 1 < args.length; i += 2) pairs.push(`${args[i]} ~ ${args[i + 1]}`);
+    const fallback = args.length % 2 ? args[args.length - 1] : "NA";
+    return `dplyr::case_when(${pairs.join(", ")}, .default = ${fallback})`;
+  });
+  out = replaceDgpCalls(out, "clamp", a => a.length >= 3 ? `pmax(${a[1]}, pmin(${a[2]}, ${a[0]}))` : null);
+  out = replaceDgpCalls(out, "rescale", a => {
+    if (a.length < 3) return null;
+    const nMin = a[3] ?? "0", nMax = a[4] ?? "1";
+    return `(${nMin} + (${a[0]} - ${a[1]}) * (${nMax} - ${nMin}) / (${a[2]} - ${a[1]}))`;
+  });
+  out = out.replace(/\bcoalesce\s*\(/g, "dplyr::coalesce(")
+    .replace(/===/g, "==").replace(/!==/g, "!=").replace(/&&/g, "&").replace(/\|\|/g, "|")
+    .replace(/\bMath\.ceil\b/g, "ceiling").replace(/\bMath\.(log|exp|sqrt|abs|round|floor|max|min)\b/g, "$1")
+    .replace(/\btrue\b/g, "TRUE").replace(/\bfalse\b/g, "FALSE").replace(/\bnull\b/g, "NA")
+    .replace(/'([^']*)'/g, '"$1"');
+  return { expr: out, review: false };
+}
+
+function translateDgpPython(expr) {
+  if (/=>|`/.test(expr)) return { expr, review: true };
+  let out = String(expr);
+  out = replaceDgpCalls(out, "case_when", args => {
+    const conds = [], vals = [];
+    for (let i = 0; i + 1 < args.length; i += 2) { conds.push(args[i]); vals.push(args[i + 1]); }
+    const fallback = args.length % 2 ? args[args.length - 1] : "None";
+    return `np.select([${conds.join(", ")}], [${vals.join(", ")}], default=${fallback})`;
+  });
+  out = replaceDgpCalls(out, "clamp", a => a.length >= 3 ? `np.clip(${a[0]}, ${a[1]}, ${a[2]})` : null);
+  out = replaceDgpCalls(out, "rescale", a => {
+    if (a.length < 3) return null;
+    const nMin = a[3] ?? "0", nMax = a[4] ?? "1";
+    return `(${nMin} + (${a[0]} - ${a[1]}) * (${nMax} - ${nMin}) / (${a[2]} - ${a[1]}))`;
+  });
+  out = replaceDgpCalls(out, "coalesce", args => {
+    if (!args.length) return "None";
+    let fallback = args[args.length - 1];
+    for (let i = args.length - 2; i >= 0; i--) fallback = `np.where(pd.notna(${args[i]}), ${args[i]}, ${fallback})`;
+    return fallback;
+  });
+  out = out.replace(/\bMath\.(log|log10|log2|sqrt|abs|sign|round|floor|ceil|exp)\b/g, "np.$1")
+    .replace(/\bifelse\s*\(/g, "np.where(")
+    .replace(/\bpmin\s*\(/g, "np.minimum(").replace(/\bpmax\s*\(/g, "np.maximum(")
+    .replace(/\bceiling\s*\(/g, "np.ceil(")
+    .replace(/(^|[^\w.])(log|log10|log2|sqrt|abs|sign|round|floor|exp)\s*\(/g, "$1np.$2(")
+    .replace(/===/g, "==").replace(/!==/g, "!=").replace(/&&/g, " & ").replace(/\|\|/g, " | ")
+    .replace(/\btrue\b/g, "True").replace(/\bfalse\b/g, "False").replace(/\bnull\b/g, "None")
+    .replace(/'([^']*)'/g, '"$1"');
+  return { expr: out, review: false };
+}
+
+function translateDgpStata(expr) {
+  if (/=>|`/.test(expr)) return { expr, review: true };
+  let out = String(expr);
+  out = replaceDgpCalls(out, "case_when", args => {
+    const hasDefault = args.length % 2 === 1;
+    let result = hasDefault ? args[args.length - 1] : ".";
+    for (let i = args.length - (hasDefault ? 3 : 2); i >= 0; i -= 2) result = `cond(${args[i]}, ${args[i + 1]}, ${result})`;
+    return result;
+  });
+  out = replaceDgpCalls(out, "coalesce", args => {
+    if (!args.length) return ".";
+    let result = args[args.length - 1];
+    for (let i = args.length - 2; i >= 0; i--) result = `cond(missing(${args[i]}), ${result}, ${args[i]})`;
+    return result;
+  });
+  out = replaceDgpCalls(out, "clamp", a => a.length >= 3 ? `max(${a[1]}, min(${a[2]}, ${a[0]}))` : null);
+  out = replaceDgpCalls(out, "rescale", a => {
+    if (a.length < 3) return null;
+    const nMin = a[3] ?? "0", nMax = a[4] ?? "1";
+    return `(${nMin} + (${a[0]} - ${a[1]}) * (${nMax} - ${nMin}) / (${a[2]} - ${a[1]}))`;
+  });
+  out = out.replace(/\bMath\.log\b/g, "ln").replace(/\bMath\.ceil\b/g, "ceil")
+    .replace(/\bMath\.(exp|sqrt|abs|round|floor)\b/g, "$1")
+    .replace(/\bifelse\s*\(/g, "cond(").replace(/\bpmin\s*\(/g, "min(").replace(/\bpmax\s*\(/g, "max(")
+    .replace(/\blog\s*\(/g, "ln(").replace(/\bceiling\s*\(/g, "ceil(")
+    .replace(/===/g, "==").replace(/!==/g, "!=").replace(/&&/g, " & ").replace(/\|\|/g, " | ")
+    .replace(/\btrue\b/g, "1").replace(/\bfalse\b/g, "0").replace(/\bnull\b/g, ".")
+    .replace(/'([^']*)'/g, '"$1"');
+  return { expr: out, review: /\b(cut|pick)\s*\(/.test(out) };
+}
+
+function stataCutLines(name, args) {
+  if (args.length < 2) return null;
+  const breaks = literalArray(args[1]);
+  const labels = args[2] ? literalArray(args[2]) : null;
+  if (!breaks?.length || breaks.some(x => !isFinite(Number(x)))) return null;
+  const tmp = `__cut_${name}`;
+  const lines = [`egen ${tmp} = cut(${args[0]}), at(-1e300 ${breaks.join(" ")} 1e300) icodes`];
+  if (!labels) return [...lines, `rename ${tmp} ${name}`];
+  const strings = labels.every(x => /^("[^"]*"|'[^']*')$/.test(x));
+  const numbers = labels.every(x => isFinite(Number(x)));
+  if (!strings && !numbers) return null;
+  lines.push(strings ? `generate strL ${name} = ""` : `generate double ${name} = .`);
+  labels.forEach((label, i) => lines.push(`replace ${name} = ${label.replace(/^'|'$/g, '"')} if ${tmp} == ${i}`));
+  lines.push(`drop ${tmp}`);
+  return lines;
+}
+
+function stataPickExpression(args) {
+  if (args.length < 2) return null;
+  const probs = literalArray(args[1])?.map(Number);
+  const labels = args[2] ? literalArray(args[2]) : null;
+  if (!probs?.length || probs.some(x => !isFinite(x))) return null;
+  const values = labels?.length ? labels : probs.map((_, i) => String(i));
+  let result = values[values.length - 1];
+  let cumulative = probs.reduce((sum, p) => sum + p, 0) - probs[probs.length - 1];
+  for (let i = probs.length - 2; i >= 0; i--) {
+    result = `cond(${args[0]} < ${cumulative}, ${values[i]}, ${result})`;
+    cumulative -= probs[i];
+  }
+  return result.replace(/'([^']*)'/g, '"$1"');
+}
+
 export function generateSimScript(language, n, seed, variables) {
   const distR = {
     Normal:       v => `rnorm(n, mean=${v.params.mean??0}, sd=${v.params.sd??1})`,
@@ -361,9 +561,24 @@ export function generateSimScript(language, n, seed, variables) {
     return { levels, probs, allNum, asCode, k: levels.length };
   };
 
+  const helperSource = variables.flatMap(v => [v.params.expr, v.params.init, v.params.update]).filter(Boolean).join("\n");
+  const usesHelper = name => new RegExp(`\\b${name}\\s*\\(`).test(helperSource);
   const lines = [];
   if (language === "r") {
     lines.push(`set.seed(${seed})`, `n <- ${n}`, `N <- n`, `observations <- n`);
+    if (usesHelper("cut")) lines.push(
+      `cut <- function(x, breaks, labels) {`,
+      `  idx <- findInterval(x, breaks)`,
+      `  if (missing(labels)) return(idx)`,
+      `  c(labels, NA)[idx + 1L]`,
+      `}`,
+    );
+    if (usesHelper("pick")) lines.push(
+      `pick <- function(u, probs, labels=NULL) {`,
+      `  values <- if (is.null(labels)) seq_along(probs) - 1L else labels`,
+      `  sample(values, length(u), replace=TRUE, prob=probs)`,
+      `}`,
+    );
     variables.forEach(v => {
       if (v.dist === "Sequence") {
         const from = v.params.from ?? "1", by = v.params.by ?? "1";
@@ -383,15 +598,19 @@ export function generateSimScript(language, n, seed, variables) {
         const T = Math.max(1, Math.floor(+(v.params.period ?? 1) || 1));
         lines.push(`${v.name} <- rep(1:${T}, length.out=n)`);
       } else if (v.dist === "Expression") {
-        lines.push(`# ${v.name} = ${v.params.expr||""}`, `${v.name} <- ${v.params.expr||"NA"}`);
+        const translated = translateDgpR(v.params.expr || "NA");
+        lines.push(`# ${v.name} = ${v.params.expr||""}`);
+        if (translated.review) lines.push(`# NOTE: review untranslated DGP expression below`);
+        lines.push(`${v.name} <- ${translated.expr}`);
       } else if (v.dist === "ForLoop") {
-        const init = v.params.init || "0";
-        const upd  = v.params.update || "prev";
+        const init = translateDgpR(v.params.init || "0");
+        const upd  = translateDgpR(v.params.update || "prev");
         lines.push(
           `# ForLoop: ${v.name}`,
+          ...(init.review || upd.review ? [`# NOTE: review untranslated DGP expression below`] : []),
           `${v.name} <- numeric(n)`,
-          `${v.name}[1] <- ${init}`,
-          `for (i in 2:n) { ${v.name}[i] <- ${upd.replace(/\bprev\b/g, `${v.name}[i-1]`).replace(/\bi\b/g, "i")} }`,
+          `${v.name}[1] <- ${init.expr}`,
+          `for (i in 2:n) { ${v.name}[i] <- ${upd.expr.replace(/\bprev\b/g, `${v.name}[i-1]`).replace(/\bi\b/g, "i")} }`,
         );
       } else if (v.dist === "WhileLoop") {
         const init = v.params.init || "1";
@@ -413,6 +632,20 @@ export function generateSimScript(language, n, seed, variables) {
     lines.push(`df <- data.frame(${variables.map(v=>v.name).join(", ")})`);
   } else if (language === "python") {
     lines.push("import numpy as np", "import pandas as pd", `rng = np.random.default_rng(${seed})`, `n = ${n}`, `N = n`, `observations = n`);
+    if (usesHelper("cut")) lines.push(
+      `def cut(x, breaks, labels=None):`,
+      `    codes = np.asarray(pd.cut(x, bins=[-np.inf, *breaks, np.inf], labels=False, right=False))`,
+      `    if labels is None:`,
+      `        return codes`,
+      `    values = np.asarray([*labels, *([None] * max(0, len(breaks) + 1 - len(labels)))], dtype=object)`,
+      `    return values[codes]`,
+    );
+    if (usesHelper("pick")) lines.push(
+      `def pick(u, probs, labels=None):`,
+      `    values = np.arange(len(probs)) if labels is None else labels`,
+      `    draw = rng.choice(values, size=np.size(u), p=probs)`,
+      `    return draw.item() if np.ndim(u) == 0 else draw`,
+    );
     variables.forEach(v => {
       if (v.dist === "Sequence") {
         const from = v.params.from ?? "1", by = v.params.by ?? "1";
@@ -432,17 +665,21 @@ export function generateSimScript(language, n, seed, variables) {
         const T = Math.max(1, Math.floor(+(v.params.period ?? 1) || 1));
         lines.push(`${v.name} = (np.arange(n) % ${T}) + 1`);
       } else if (v.dist === "Expression") {
-        lines.push(`# ${v.name} = ${v.params.expr||""}`, `${v.name} = ${v.params.expr||"None"}`);
+        const translated = translateDgpPython(v.params.expr || "None");
+        lines.push(`# ${v.name} = ${v.params.expr||""}`);
+        if (translated.review) lines.push(`# NOTE: review untranslated DGP expression below`);
+        lines.push(`${v.name} = ${translated.expr}`);
       } else if (v.dist === "ForLoop") {
-        const init = v.params.init || "0";
-        const upd  = v.params.update || "prev";
+        const init = translateDgpPython(v.params.init || "0");
+        const upd  = translateDgpPython(v.params.update || "prev");
         lines.push(
           `# ForLoop: ${v.name}`,
+          ...(init.review || upd.review ? [`# NOTE: review untranslated DGP expression below`] : []),
           `${v.name} = np.empty(n)`,
-          `${v.name}[0] = ${init}`,
+          `${v.name}[0] = ${init.expr}`,
           `for i in range(1, n):`,
           `    prev = ${v.name}[i-1]`,
-          `    ${v.name}[i] = ${upd}`,
+          `    ${v.name}[i] = ${upd.expr}`,
         );
       } else if (v.dist === "WhileLoop") {
         const init = v.params.init || "1";
@@ -487,15 +724,28 @@ export function generateSimScript(language, n, seed, variables) {
         const T = Math.max(1, Math.floor(+(v.params.period ?? 1) || 1));
         lines.push(`generate ${v.name} = mod(_n - 1, ${T}) + 1`);
       } else if (v.dist === "Expression") {
-        lines.push(`* ${v.name} = ${v.params.expr||""}`, `generate ${v.name} = ${v.params.expr||"."}`);
+        const raw = v.params.expr || ".";
+        const cutArgs = topLevelDgpCall(raw, "cut");
+        const pickArgs = topLevelDgpCall(raw, "pick");
+        const cutLines = cutArgs ? stataCutLines(v.name, cutArgs) : null;
+        const pickExpr = pickArgs ? stataPickExpression(pickArgs) : null;
+        lines.push(`* ${v.name} = ${v.params.expr||""}`);
+        if (cutLines) lines.push(...cutLines);
+        else if (pickExpr) lines.push(`generate ${v.name} = ${pickExpr}`);
+        else {
+          const translated = translateDgpStata(raw);
+          if (translated.review) lines.push(`* NOTE: review untranslated DGP expression below`);
+          lines.push(`generate ${v.name} = ${translated.expr}`);
+        }
       } else if (v.dist === "ForLoop") {
-        const init = v.params.init || "0";
-        const upd  = v.params.update || "prev";
-        const rUpd = upd.replace(/\bprev\b/g, `${v.name}[_n-1]`).replace(/\bi\b/g, "_n");
+        const init = translateDgpStata(v.params.init || "0");
+        const upd  = translateDgpStata(v.params.update || "prev");
+        const rUpd = upd.expr.replace(/\bprev\b/g, `${v.name}[_n-1]`).replace(/\bi\b/g, "_n");
         lines.push(
           `* ForLoop: ${v.name}`,
+          ...(init.review || upd.review ? [`* NOTE: review untranslated DGP expression below`] : []),
           `generate ${v.name} = .`,
-          `replace ${v.name} = ${init} in 1`,
+          `replace ${v.name} = ${init.expr} in 1`,
           `forvalues i = 2/\`=_N' { quietly replace ${v.name} = ${rUpd} in \`i' }`,
         );
       } else if (v.dist === "WhileLoop") {
