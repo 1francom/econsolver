@@ -15,6 +15,9 @@ import {
   oneSampleMeanTest, varianceTest, parameterTest,
   twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest,
 } from "../../../math/SampleTests.js";
+import { generateStatInferenceScript } from "../../../services/export/statInferenceScript.js";
+
+const LANGS = [["r", "R"], ["python", "Python"], ["stata", "Stata"]];
 
 function fmt(n, d = 6) {
   return (typeof n === "number" && isFinite(n)) ? n.toFixed(d) : "—";
@@ -46,6 +49,7 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
   const [nObs, setNObs] = useState("");
   const [s1, setS1] = useState(""); const [n1, setN1] = useState("");
   const [s2, setS2] = useState(""); const [n2, setN2] = useState("");
+  const [copied, setCopied] = useState("");
 
   const field = { background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none" };
 
@@ -86,6 +90,26 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
     if (mode === "mean") return oneSampleMeanTest(selCol.values, h0, alt);
     return varianceTest(selCol.values, h0, alt);
   }, [mode, selCol, selColB, h0, alt, estimate, se, df, pooled, corrMethod, succ, nObs, s1, n1, s2, n2, TWO_COL]);
+
+  function copyScript(lang) {
+    if (!result || result.error || mode === "parameter") return;
+    const op = {
+      mean: "oneSampleMeanTest", variance: "varianceTest", "two-mean": "twoSampleMeanTest",
+      paired: "pairedMeanTest", "one-prop": "onePropTest", "two-prop": "twoPropTest",
+      correlation: "correlationTest", "var-ratio": "varianceRatioTest",
+    }[mode];
+    const params = {
+      values: selCol?.values, a: selCol?.values, b: selColB?.values,
+      mu0: Number(h0), nullValue: Number(h0), alternative: alt, pooled, method: corrMethod,
+      successes: Number(succ), n: Number(nObs), p0: Number(h0),
+      s1: Number(s1), n1: Number(n1), s2: Number(s2), n2: Number(n2),
+    };
+    const snippet = generateStatInferenceScript(lang, op, params, result);
+    navigator.clipboard?.writeText(snippet.trimStart()).then(() => {
+      setCopied(lang);
+      setTimeout(() => setCopied(""), 2000);
+    }).catch(() => {});
+  }
 
   const modeBtn = (id, label) => (
     <button key={id} onClick={() => switchMode(id)}
@@ -280,6 +304,18 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
                 <span style={{ color: C.textMuted }}>  ·  p = </span>
                 <span style={{ color: result.pValue < 0.05 ? C.teal : C.text }}>{result.pValue < 1e-4 ? "<0.0001" : fmt(result.pValue, 4)}</span>
               </div>
+            </div>
+          )}
+
+          {result && !result.error && mode !== "parameter" && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>copy test code</span>
+              {LANGS.map(([id, label]) => (
+                <button key={id} onClick={() => copyScript(id)}
+                  style={{ padding: "2px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.08em", border: `1px solid ${copied === id ? C.teal : C.border2}`, borderRadius: 2, background: copied === id ? `${C.teal}1a` : "transparent", color: copied === id ? C.teal : C.textMuted, cursor: "pointer" }}>
+                  {copied === id ? "✓" : label}
+                </button>
+              ))}
             </div>
           )}
         </div>
