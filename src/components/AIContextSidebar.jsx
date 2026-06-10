@@ -10,7 +10,7 @@
 //   modelResult    object|null  — active model result from ModelingTab
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { researchCoach } from "../services/AI/AIService.js";
+import { researchCoach, coachDispatch } from "../services/AI/AIService.js";
 import { loadCoachChats, saveCoachChats } from "../services/Persistence/indexedDB.js";
 import { buildMetadataReport } from "../core/validation/metadataExtractor.js";
 import { useSessionState } from "../services/session/sessionState.jsx";
@@ -223,6 +223,30 @@ function Bubble({ role, text, images }) {
   );
 }
 
+// Action button rendered under an assistant message that carries a cleaning
+// dispatch — one click navigates to Clean and pre-loads the AI command bar.
+function DispatchButton({ action, onClick }) {
+  const { C, T } = useTheme();
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 8, marginLeft: 22 }}>
+      <button
+        onClick={onClick}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "0.4rem 0.7rem", cursor: "pointer",
+          background: `${C.teal}18`, border: `1px solid ${C.teal}`, borderRadius: 6,
+          color: C.teal, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.04em",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = `${C.teal}28`; }}
+        onMouseLeave={e => { e.currentTarget.style.background = `${C.teal}18`; }}
+        title={`AI Assistant: ${action.instruction}`}
+      >
+        → {action.label}
+      </button>
+    </div>
+  );
+}
+
 function ThinkingBubble() {
   const { C, T } = useTheme();
   return (
@@ -282,7 +306,7 @@ function stripForStorage(conversations) {
   }));
 }
 
-export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null, pid = null, pinnedModels = [], subsets = null, inferenceOpts = null }) {
+export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null, pid = null, pinnedModels = [], subsets = null, inferenceOpts = null, onDispatchToAssistant = null }) {
   const { C, T } = useTheme();
   const { tier, session } = useAuth();
   const isPremium = !import.meta.env.VITE_AI_PROXY_ENABLED || import.meta.env.VITE_AI_PROXY_ENABLED !== "true" || PREMIUM_TIERS.has(tier);
@@ -497,6 +521,30 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
             : (h.content ?? h.text),
         })),
       });
+
+      // ── Coach → cleaning dispatch ─────────────────────────────────────────
+      // After the reply streams in, run a cheap structured check: does this
+      // question map to a single-column cleaning action the Clean-tab command
+      // bar can execute? If so, attach the action to the assistant message so a
+      // "→ apply" button renders below it. Only when a handler is wired and we
+      // have a dataset; any failure is silent (reply is unaffected).
+      if (onDispatchToAssistant && cleanedData?.headers?.length) {
+        const action = await coachDispatch({
+          question: q,
+          headers: cleanedData.headers,
+          sampleRows: (cleanedData.cleanRows ?? []).slice(0, 8),
+          pipeline: (cleanedData.pipeline ?? cleanedData.changeLog ?? []).map(s => ({ type: s.type, col: s.col ?? s.c1 ?? s.nn ?? null })),
+          dataDictionary: cleanedData.dataDictionary ?? null,
+        }).catch(() => null);
+        if (action) {
+          updateActive(msgs => {
+            const copy = msgs.slice();
+            const last = copy[copy.length - 1];
+            if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, dispatch: action };
+            return copy;
+          });
+        }
+      }
     } finally {
       setLoading(false);
       abortRef.current = null;
@@ -656,7 +704,17 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
             </>
           )}
 
-          {history.map((h, i) => <Bubble key={i} role={h.role} text={h.text} images={h.images} />)}
+          {history.map((h, i) => (
+            <div key={i}>
+              <Bubble role={h.role} text={h.text} images={h.images} />
+              {h.dispatch && onDispatchToAssistant && (
+                <DispatchButton
+                  action={h.dispatch}
+                  onClick={() => onDispatchToAssistant({ col: h.dispatch.col, instruction: h.dispatch.instruction })}
+                />
+              )}
+            </div>
+          ))}
           {loading && history[history.length - 1]?.role !== "assistant" && <ThinkingBubble />}
           <div ref={bottomRef} />
         </div>

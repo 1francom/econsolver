@@ -2,17 +2,18 @@
 // Natural-language command bar: AI proposes declarative pipeline steps, which
 // are validated against the registry and previewed via a non-destructive
 // dry-run before the user applies them. Spans the wrangling module.
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useTheme, Btn, Lbl } from "./shared.jsx";
 import { nlToPipeline } from "../../services/AI/AIService.js";
 import { validateAISteps } from "../../pipeline/stepValidator.js";
 import { runPipeline } from "../../pipeline/runner.js";
 
-export default function NLCommandBar({ rows = [], headers = [], onAddSteps }) {
+export default function NLCommandBar({ rows = [], headers = [], onAddSteps, prefill = null, onConsumePrefill = null, onPrefillNavigate = null }) {
   const { C, T } = useTheme();
   const [command, setCommand] = useState("");
   const [busy, setBusy]       = useState(false);
   const [result, setResult]   = useState(null); // { interpretation, valid, rejected, notes, preview, newCols } | { error }
+  const lastPrefillTs = useRef(null);
 
   // Build column context (name + coarse dtype + up to 5 samples) from current data.
   const columns = useMemo(() => headers.map(h => {
@@ -22,10 +23,23 @@ export default function NLCommandBar({ rows = [], headers = [], onAddSteps }) {
     return { name: h, dtype, samples };
   }), [rows, headers]);
 
-  async function run() {
-    if (!command.trim()) return;
+  // Coach dispatch: when a {col, instruction} prefill arrives, fill the bar and
+  // auto-run the preview. Guarded by ts so it fires once per dispatch.
+  useEffect(() => {
+    if (!prefill?.instruction || prefill.ts === lastPrefillTs.current) return;
+    lastPrefillTs.current = prefill.ts;
+    setCommand(prefill.instruction);
+    onPrefillNavigate?.();
+    run(prefill.instruction);
+    onConsumePrefill?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
+
+  async function run(cmdArg) {
+    const cmd = (typeof cmdArg === "string" ? cmdArg : command).trim();
+    if (!cmd) return;
     setBusy(true); setResult(null);
-    const resp = await nlToPipeline({ command, columns });
+    const resp = await nlToPipeline({ command: cmd, columns });
     if (resp.error) { setResult({ error: resp.error }); setBusy(false); return; }
     const { valid, rejected } = validateAISteps(resp.steps, headers);
 
