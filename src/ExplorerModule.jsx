@@ -2,6 +2,7 @@
 // Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
 // Consumes cleanedData emitted by WranglingModule.
 import { useState, useMemo, useRef, useEffect, Fragment } from "react";
+import { extractAllRows } from "./services/data/duckdb.js";
 import { useTheme } from "./ThemeContext.jsx";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
@@ -1723,7 +1724,20 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
 export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset, pid}) {
   const{C,T}=useTheme();
-  const {headers, cleanRows:rows, panelIndex:panel, filename, pipeline = []} = cleanedData;
+  const {headers, cleanRows:previewRows, panelIndex:panel, filename, pipeline = []} = cleanedData;
+  // DuckDB-backed datasets ship only a 500-row preview in cleanRows; pull the FULL
+  // table for computation (summary stats, distributions, correlation, plots). The
+  // raw data grid can stay on the preview — this only affects analysis.
+  const duckTable = cleanedData._duckdb?.tableName ?? null;
+  const [fullRows, setFullRows] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    setFullRows(null);
+    if (!duckTable) return;
+    extractAllRows(duckTable).then(all => { if (!cancelled) setFullRows(all); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [duckTable]);
+  const rows = (duckTable && fullRows) ? fullRows : previewRows;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
   const [filterConds, setFilterConds] = useState([]);

@@ -811,9 +811,12 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     onDatasetsChange?.(datasets.map(d => ({
       id:       d.id,
       filename: d.filename,
-      rows:     d.rawData?.rows    ?? [],
+      rows:     d.rawData?.rows    ?? [],   // preview only for DuckDB-backed datasets
       headers:  d.rawData?.headers ?? [],
       crs:      datasetCrs(d),
+      // Full-table pointer — consumers MUST compute off this (SQL / extractAllRows),
+      // never off `rows`, which is a 500-row preview for large DuckDB datasets.
+      _duckdb:  d.rawData?._duckdb  ?? null,
     })));
   }, [datasets]);
 
