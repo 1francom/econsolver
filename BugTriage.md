@@ -41,3 +41,4 @@
 | 2026-06-05 | Data | Numbers are rounded when inserting, deleting or overwriting cells in the data viewer | medium | ui | `src/ExplorerModule.jsx` | fixed (2026-06-09) |
 | 2026-06-06 | Spatial | Geocoding directions might be upgraded — geocoder address resolution quality needs improvement | low | data | `src/components/tabs/spatial/analyze/GeocodeSection.jsx` | works — enhancement only (Franco confirms geocoding functions 2026-06-10; Photon/Komoot precision is a provider limit, not a defect) |
 | 2026-06-10 | Model | Plot Builder in ModelingTab is not resizable by the user; PNG export has size/aesthetic problems | medium | ui | `src/components/PlotBuilder.jsx`, `src/components/ModelingTab.jsx` | open |
+| 2026-06-11 | Model | Y~Y_hat, Residual vs fitted, and Q-Q plot missing for OLS | high | ui | `src/components/modeling/ResidualPlots.jsx`, `src/components/modeling/DiagnosticsPanel.jsx` | open |
