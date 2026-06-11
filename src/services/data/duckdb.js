@@ -10,6 +10,7 @@
  */
 
 import * as duckdb from "@duckdb/duckdb-wasm";
+import { tableFromJSON } from "apache-arrow";
 import {
   loadFromOPFS,
   saveToOPFS,
@@ -201,5 +202,52 @@ export async function loadLargeCSV(file) {
     headers,
     rows, // preview only — full data served via getTablePage / extractAllRows
     _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, opfsCacheKey },
+  };
+}
+
+/**
+ * Parse a browser-only format once, then keep only a preview in React state.
+ * OPFS restores skip the expensive JS parser on subsequent loads.
+ */
+export async function loadLargeParsedData(file, parse, tablePrefix = "data") {
+  const tableName = `${tablePrefix}_${Date.now()}`;
+  const opfsCacheKey = getParquetCacheKey(file);
+  const { db, conn } = await getDuckDB();
+
+  const cacheHit = await loadFromOPFS(db, tableName, file);
+  if (cacheHit) {
+    const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
+    const rowCount = Number(countRes.toArray()[0].n);
+    window.__validation?.fase9?.recordHit?.();
+    const { headers, rows } = await queryDuckDB(
+      `SELECT * FROM "${tableName}" LIMIT ${PREVIEW_ROWS}`
+    );
+    return {
+      headers,
+      rows,
+      _duckdb: { tableName, rowCount, truncated: true, cached: true, opfsCacheKey },
+    };
+  }
+
+  window.__validation?.fase9?.recordMiss?.();
+  const parsed = await parse();
+  if (!parsed?.rows?.length) return parsed;
+
+  const arrowTable = tableFromJSON(parsed.rows);
+  await conn.insertArrowTable(arrowTable, { name: tableName, create: true });
+  const rowCount = parsed.rows.length;
+
+  saveToOPFS(db, tableName, file).catch(() =>
+    window.__validation?.fase9?.recordErr?.()
+  );
+
+  const { headers, rows } = await queryDuckDB(
+    `SELECT * FROM "${tableName}" LIMIT ${PREVIEW_ROWS}`
+  );
+  return {
+    ...parsed,
+    headers,
+    rows,
+    _duckdb: { tableName, rowCount, truncated: true, cached: false, opfsCacheKey },
   };
 }

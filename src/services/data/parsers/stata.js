@@ -17,18 +17,71 @@ const MISSING = {
 // Float missings: .  = 0x7f000000, .a–.z = 0x7f000001..0x7f00001a
 // Double missings: . = 0x7fe0000000000000 (as unsigned), etc.
 function isFloatMissing(val) {
+  if (Number.isNaN(val)) return true;
   // IEEE 754 bit pattern: Stata float missing range ≥ 0x7f000000 (as uint32)
   const buf = new ArrayBuffer(4);
   new DataView(buf).setFloat32(0, val, false); // big-endian bits
   const bits = new DataView(buf).getUint32(0, false);
-  return bits >= 0x7f000000;
+  return (bits & 0x80000000) === 0 && bits >= 0x7f000000;
 }
 
 function isDoubleMissing(val) {
+  if (Number.isNaN(val)) return true;
   const buf = new ArrayBuffer(8);
   new DataView(buf).setFloat64(0, val, false);
   const hi = new DataView(buf).getUint32(0, false);
-  return hi >= 0x7fe00000;
+  return (hi & 0x80000000) === 0 && hi >= 0x7fe00000;
+}
+
+const STATA_EPOCH = Date.UTC(1960, 0, 1);
+
+function isoDate(year, month = 0, day = 1) {
+  const date = new Date(0);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCFullYear(year, month, day);
+  return date.toISOString().slice(0, 10);
+}
+
+function stataDateConverter(format) {
+  const rawFormat = format.trim();
+  if (rawFormat.startsWith('%tC')) return null; // Leap-second adjusted datetimes are not implemented.
+  const fmt = rawFormat.toLowerCase();
+  let unit = null;
+  if (fmt.startsWith('%tc')) unit = 'c';
+  else if (fmt.startsWith('%td') || fmt.startsWith('%d')) unit = 'd';
+  else if (fmt.startsWith('%tw')) unit = 'w';
+  else if (fmt.startsWith('%tm')) unit = 'm';
+  else if (fmt.startsWith('%tq')) unit = 'q';
+  else if (fmt.startsWith('%th')) unit = 'h';
+  else if (fmt.startsWith('%ty')) unit = 'y';
+  if (!unit) return null;
+
+  return (value) => {
+    if (value === null) return null;
+    if (unit === 'c') return new Date(STATA_EPOCH + value).toISOString();
+    if (unit === 'd') return new Date(STATA_EPOCH + value * 86400000).toISOString().slice(0, 10);
+    if (unit === 'y') return isoDate(value);
+
+    const periodsPerYear = unit === 'm' ? 12 : unit === 'q' ? 4 : unit === 'h' ? 2 : 52;
+    const yearOffset = Math.floor(value / periodsPerYear);
+    const period = ((value % periodsPerYear) + periodsPerYear) % periodsPerYear;
+    if (unit === 'w') {
+      const start = new Date(0);
+      start.setUTCHours(0, 0, 0, 0);
+      start.setUTCFullYear(1960 + yearOffset, 0, 1 + period * 7);
+      return start.toISOString().slice(0, 10);
+    }
+    const month = period * (unit === 'm' ? 1 : unit === 'q' ? 3 : 6);
+    return isoDate(1960 + yearOffset, month);
+  };
+}
+
+function readUint64(view, offset, littleEndian) {
+  const first = view.getUint32(offset, littleEndian);
+  const second = view.getUint32(offset + 4, littleEndian);
+  const lo = littleEndian ? first : second;
+  const hi = littleEndian ? second : first;
+  return hi * 2 ** 32 + lo;
 }
 
 // ── Tag search helpers ────────────────────────────────────────────────────────
@@ -109,7 +162,6 @@ function parseStataOld(bytes, view) {
 
   // fmtlist — read display formats to detect date columns
   // Stata date formats: %td (daily), %tm (monthly), %tq (quarterly), %th (half-yearly), %ty (yearly)
-  const STATA_EPOCH = Date.UTC(1960, 0, 1); // 1960-01-01
   const fmts = [];
   for (let k = 0; k < K; k++) {
     const chunk = bytes.subarray(off, off + FMT_LEN);
@@ -118,23 +170,7 @@ function parseStataOld(bytes, view) {
     off += FMT_LEN;
   }
   // Map column index → date converter (null = not a date)
-  const dateConv = fmts.map(f => {
-    const m = f.match(/^%(-?\d+)?t([dqmhyw])/i);
-    if (!m) return null;
-    const unit = m[2].toLowerCase();
-    return (v) => {
-      if (v === null) return null;
-      let ms;
-      if (unit === 'd') ms = STATA_EPOCH + v * 86400000;
-      else if (unit === 'w') ms = STATA_EPOCH + v * 7 * 86400000;
-      else if (unit === 'm') { const y = 1960 + Math.floor(v / 12); const mo = ((v % 12) + 12) % 12; ms = Date.UTC(y, mo, 1); }
-      else if (unit === 'q') { const y = 1960 + Math.floor(v / 4); const mo = ((v % 4) + 4) % 4 * 3; ms = Date.UTC(y, mo, 1); }
-      else if (unit === 'h') { const y = 1960 + Math.floor(v / 2); const mo = (v % 2 + 2) % 2 * 6; ms = Date.UTC(y, mo, 1); }
-      else if (unit === 'y') return String(v);  // year is itself
-      else return v;
-      return new Date(ms).toISOString().slice(0, 10);
-    };
-  });
+  const dateConv = fmts.map(stataDateConverter);
 
   // value-label names, variable labels — skip
   off += K * LBLNAME_LEN;
@@ -158,6 +194,8 @@ function parseStataOld(bytes, view) {
       off += 1;
 
       if (marker === 0) {
+        // Expansion fields end with a five-byte zero record (type + int32 length).
+        off += 4;
         break;
       }
 
@@ -252,9 +290,7 @@ export function parseStata(arrayBuffer) {
     N = view.getUint32(nPos, le);
   } else {
     // uint64 — JS safe up to 2^53
-    const lo = view.getUint32(nPos, le);
-    const hi = view.getUint32(nPos + 4, le);
-    N = hi * 2 ** 32 + lo;
+    N = readUint64(view, nPos, le);
   }
 
   // ── Dataset label ────────────────────────────────────────────────────────
@@ -281,9 +317,7 @@ export function parseStata(arrayBuffer) {
   const offsets = [];
   for (let i = 0; i < 14; i++) {
     const base = mapTagEnd + i * 8;
-    const lo = view.getUint32(base, le);
-    const hi = view.getUint32(base + 4, le);
-    offsets.push(hi * 2 ** 32 + lo);
+    offsets.push(readUint64(view, base, le));
   }
   // Stata map layout (0-indexed):
   // [0]=stata_dta [1]=map [2]=variable_types [3]=varnames [4]=sortlist
@@ -292,17 +326,16 @@ export function parseStata(arrayBuffer) {
   const dataOffset = offsets[9];
 
   // ── Variable types ───────────────────────────────────────────────────────
-  const vtPos = tagPos(bytes, '<variable_types>') + '<variable_types>'.length;
+  const vtPos = offsets[2] + '<variable_types>'.length;
   const types = [];
   for (let i = 0; i < K; i++) {
     types.push(view.getUint16(vtPos + i * 2, le));
   }
 
   // ── Variable names ───────────────────────────────────────────────────────
-  // Format 119 (Stata 15 large): 129-byte name slots (128 chars + null).
-  // Formats 117/118: 33-byte slots (32 chars + null).
-  const NAME_LEN = format === 119 ? 129 : 33;
-  const vnPos = tagPos(bytes, '<varnames>') + '<varnames>'.length;
+  // Format 117 uses 33-byte slots; formats 118/119 use 129-byte slots.
+  const NAME_LEN = format >= 118 ? 129 : 33;
+  const vnPos = offsets[3] + '<varnames>'.length;
   const headers = [];
   for (let i = 0; i < K; i++) {
     const start = vnPos + i * NAME_LEN;
@@ -324,6 +357,20 @@ export function parseStata(arrayBuffer) {
   }
 
   const widths = types.map(typeWidth);
+  const invalidType = types.find((t, i) => widths[i] === 0);
+  if (invalidType !== undefined) throw new Error(`Unsupported Stata storage type ${invalidType}.`);
+
+  // Display formats identify numeric columns stored as Stata elapsed dates.
+  const FORMAT_LEN = format >= 118 ? 57 : 49;
+  const formatsPos = offsets[5] + '<formats>'.length;
+  const formats = [];
+  for (let i = 0; i < K; i++) {
+    const start = formatsPos + i * FORMAT_LEN;
+    let end = start;
+    while (end < start + FORMAT_LEN && bytes[end] !== 0) end++;
+    formats.push(dec.decode(bytes.subarray(start, end)));
+  }
+  const dateConv = formats.map(stataDateConverter);
 
   // ── Data ─────────────────────────────────────────────────────────────────
   // Skip past <data> tag at the mapped offset
@@ -371,7 +418,7 @@ export function parseStata(arrayBuffer) {
         val = null;
       }
 
-      row[name] = val;
+      row[name] = dateConv[c] ? dateConv[c](val) : val;
       pos += w;
     }
     rows.push(row);

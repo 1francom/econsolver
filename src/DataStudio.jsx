@@ -402,6 +402,14 @@ async function parseFile(file) {
   }
   if (ext === "dta") {
     const { parseStata } = await import("./services/data/parsers/stata.js");
+    if (file.size > 10 * 1024 * 1024) {
+      const { loadLargeParsedData } = await import("./services/data/duckdb.js");
+      return withLoadOpts(await loadLargeParsedData(
+        file,
+        async () => parseStata(await file.arrayBuffer()),
+        "stata"
+      ), { format: "stata", engine: "duckdb" });
+    }
     const buf = await file.arrayBuffer();
     return withLoadOpts(await parseStata(buf), { format: "stata" });
   }
