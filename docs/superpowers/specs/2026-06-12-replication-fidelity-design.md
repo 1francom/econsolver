@@ -204,9 +204,11 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   plot history UI. Runs on the cleaned dataset df.
   **Approximation note:** PlotBuilder density uses binned proportions; the R export
   uses ggplot2's kernel `geom_density(adjust=...)`, preserving the configured adjust value.
-- [ ] **P2 — Spatial Plot geo variant.** Extend the translator for WKT geometry →
+- [x] **P2 — Spatial Plot geo variant.** *(code-complete 2026-06-12, browser-validation pending Franco)* Extend the translator for WKT geometry →
   `sf::st_as_sf` + `geom_sf`/`geom_polygon`; fill scales. Basemap tile: drop with a
   comment, or `ggspatial::annotation_map_tile` with a caveat.
+  **Approximation note:** heatmaps use ggplot2's `stat_density_2d` KDE rather than
+  Litux's metric-grid KDE; basemaps use internet-fetched `ggspatial` tiles at render time.
 - [ ] **P3 — Spatial Map named history + leaflet/folium generator.** Promote
   `SpatialPlotTab` from single autosave to a named saved-maps history (mirror
   `plotHistory`: a "Save map" button → list). Generate R `leaflet()` (addTiles/

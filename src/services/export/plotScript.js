@@ -1,5 +1,8 @@
 // Deterministic PlotBuilder config -> R/ggplot2 translator.
 
+import { toDfVar } from "../../pipeline/exporter.js";
+import { buildRLoadLine } from "./loadLine.js";
+
 const BREWER_SCHEMES = {
   dark2: "Dark2",
   set1: "Set1",
@@ -319,6 +322,228 @@ export function buildGgplot(plotEntry, { dfVar = "df" } = {}) {
     "",
     ...palette.comments,
     palette.comments.length ? "" : null,
+    `plot <- ${chain}`,
+    "",
+    "plot",
+  ].filter(line => line != null).join("\n");
+}
+
+const BASEMAP_TYPES = {
+  light: "cartolight",
+  dark: "cartodark",
+  osm: "osm",
+};
+
+function geoDataset(layer, datasets) {
+  if (!layer?.datasetId || layer.datasetId === "active") {
+    return { dfVar: "df", dataset: null };
+  }
+  const dataset = datasets.find(item => item.id === layer.datasetId) ?? null;
+  return {
+    dfVar: toDfVar(dataset?.name ?? dataset?.filename ?? layer.datasetId),
+    dataset,
+  };
+}
+
+function wktConversion(sfVar, dfVar, wktCol) {
+  return `${sfVar} <- sf::st_as_sf(${dfVar}, wkt = ${rString(wktCol)}, crs = 4326)`;
+}
+
+function geoFillColumn(layer) {
+  return layer?.fillByCol || layer?.colorByCol || "";
+}
+
+function geoFillArgs(layer) {
+  const fillCol = geoFillColumn(layer);
+  return {
+    fillCol,
+    aes: fillCol ? `aes(fill = ${rColumn(fillCol)})` : null,
+    fixed: fillCol || !layer?.fill || layer.fill === "none" ? null : `fill = ${rString(layer.fill)}`,
+    alpha: rNumber(fillCol ? (layer?.colorFillOpacity ?? 0.65) : (layer?.fillOpacity ?? 0), "0"),
+  };
+}
+
+function geoSfLayer(layer, sfVar) {
+  const fill = geoFillArgs(layer);
+  const stroke = layer?.stroke && layer.stroke !== "none" ? layer.stroke : "transparent";
+  const linewidth = rNumber(Number(layer?.strokeWidth ?? 0.8) / 2, "0.4");
+  const args = [`data = ${sfVar}`];
+
+  if (layer.type === "boundary" || layer.type === "line") {
+    args.push("fill = NA", `color = ${rString(stroke)}`, `linewidth = ${linewidth}`);
+  } else if (layer.type === "point") {
+    const colorCol = layer.colorCol || "";
+    if (colorCol) args.push(`aes(color = ${rColumn(colorCol)})`);
+    else args.push(`color = ${rString(layer.fill || stroke)}`);
+    args.push(`size = ${rNumber(layer.radius ?? 4, "4")}`);
+    args.push(`alpha = ${rNumber(layer.fillOpacity ?? 0.78, "0.78")}`);
+  } else {
+    if (fill.aes) args.push(fill.aes);
+    if (fill.fixed) args.push(fill.fixed);
+    args.push(`color = ${rString(stroke)}`, `linewidth = ${linewidth}`, `alpha = ${fill.alpha}`);
+  }
+
+  return `geom_sf(${args.join(", ")})`;
+}
+
+function gridPreparation(layer, index, dfVar) {
+  const sfVar = `sf_${index}`;
+  const cellsize = rNumber(layer.cellsize ?? 500, "500");
+  const metricVar = `metric_${index}`;
+  const gridVar = `grid_${index}`;
+
+  if (layer.mode === "boundary" && (layer.boundaryCol || layer.wktCol)) {
+    const sourceVar = `boundary_${index}`;
+    const wktCol = layer.boundaryCol || layer.wktCol;
+    const lines = [
+      wktConversion(sourceVar, dfVar, wktCol),
+      `${metricVar} <- sf::st_transform(${sourceVar}, 32721)`,
+      `${gridVar} <- sf::st_make_grid(${metricVar}, cellsize = ${cellsize}, what = "polygons")`,
+      layer.clipBorder !== false
+        ? `${sfVar} <- sf::st_intersection(sf::st_as_sf(${gridVar}), sf::st_union(${metricVar})) |> sf::st_transform(4326)`
+        : `${sfVar} <- sf::st_as_sf(${gridVar}) |> sf::st_transform(4326)`,
+    ];
+    return { sfVar, lines };
+  }
+
+  if (layer.mode === "latlon" && layer.latCol && layer.lonCol) {
+    const pointsVar = `points_${index}`;
+    const lines = [
+      `${pointsVar} <- sf::st_as_sf(${dfVar}, coords = c(${rString(layer.lonCol)}, ${rString(layer.latCol)}), crs = 4326, remove = FALSE)`,
+      `${metricVar} <- sf::st_transform(${pointsVar}, 32721)`,
+      `${gridVar} <- sf::st_make_grid(sf::st_as_sfc(sf::st_bbox(${metricVar})), cellsize = ${cellsize}, what = "polygons")`,
+      `${sfVar} <- sf::st_as_sf(${gridVar}) |> sf::st_transform(4326)`,
+    ];
+    return { sfVar, lines };
+  }
+
+  return null;
+}
+
+function geoLayerScript(layer, index, datasets) {
+  const { dfVar } = geoDataset(layer, datasets);
+  const sfVar = `sf_${index}`;
+  const prep = [];
+  const components = [];
+  const comments = [];
+  let mappedFill = false;
+  let mappedColor = false;
+
+  const wktMode = ["polygon", "boundary", "line"].includes(layer.type)
+    || (layer.type === "point" && layer.mode === "wkt")
+    || (layer.type === "grid" && layer.mode === "wkt");
+
+  if (wktMode && layer.wktCol) {
+    prep.push(wktConversion(sfVar, dfVar, layer.wktCol));
+    components.push(geoSfLayer(layer, sfVar));
+  } else if (layer.type === "point" && layer.latCol && layer.lonCol) {
+    const args = [
+      `data = ${dfVar}`,
+      `aes(x = ${rColumn(layer.lonCol)}, y = ${rColumn(layer.latCol)}${layer.colorCol ? `, color = ${rColumn(layer.colorCol)}` : ""})`,
+      layer.colorCol ? null : `color = ${rString(layer.fill || "black")}`,
+      `size = ${rNumber(layer.radius ?? 4, "4")}`,
+      `alpha = ${rNumber(layer.fillOpacity ?? 0.78, "0.78")}`,
+    ];
+    components.push(geomCall("geom_point", args));
+  } else if (layer.type === "heatmap" && layer.latCol && layer.lonCol) {
+    comments.push(`# KDE approximation — Litux uses bandwidth=${layer.bandwidth ?? 250}, gridN=${layer.gridN ?? 45}; ggplot's kde2d differs slightly`);
+    components.push(geomCall("stat_density_2d", [
+      `data = ${dfVar}`,
+      `aes(x = ${rColumn(layer.lonCol)}, y = ${rColumn(layer.latCol)}, fill = after_stat(level))`,
+      `geom = "polygon"`,
+      `alpha = ${rNumber(layer.fillOpacity ?? 0.72, "0.72")}`,
+    ]));
+    mappedFill = true;
+  } else if (layer.type === "grid") {
+    const grid = gridPreparation(layer, index, dfVar);
+    if (grid) {
+      prep.push(...grid.lines);
+      components.push(geoSfLayer(layer, grid.sfVar));
+    }
+  }
+
+  if (["polygon", "grid"].includes(layer.type) && geoFillColumn(layer)) mappedFill = true;
+  if (layer.type === "point" && layer.colorCol) mappedColor = true;
+
+  if (layer.labelCol && components.length && (layer.type === "polygon" || layer.type === "grid")) {
+    const labelSfVar = prep.length ? (layer.type === "grid" && layer.mode !== "wkt" ? `sf_${index}` : sfVar) : sfVar;
+    components.push(geomCall("geom_sf_text", [
+      `data = ${labelSfVar}`,
+      `aes(label = ${rColumn(layer.labelCol)})`,
+      `size = ${rNumber(Number(layer.labelSize ?? 10) / 3, "3.333333")}`,
+    ]));
+  }
+
+  return { prep, components, comments, mappedFill, mappedColor };
+}
+
+function geoLoadLines(layers, datasets) {
+  const ids = [...new Set(layers
+    .map(layer => layer?.datasetId)
+    .filter(datasetId => datasetId && datasetId !== "active"))];
+  const lines = [];
+
+  ids.forEach(datasetId => {
+    const dataset = datasets.find(item => item.id === datasetId) ?? null;
+    const name = dataset?.name ?? dataset?.filename ?? datasetId;
+    const dfVar = toDfVar(name);
+    const filename = dataset?.filename;
+    lines.push(`# Load ${dfVar}${filename ? ` from ${rString(filename)}` : ` for dataset ${rString(name)}`}`);
+    if (filename) {
+      lines.push(buildRLoadLine(filename, dataset?.loadOpts ?? null).replace(/^df\b/, dfVar));
+    }
+  });
+
+  return lines;
+}
+
+export function buildGeoGgplot(geoEntry, { datasets = [], basemap = "none" } = {}) {
+  const entry = geoEntry ?? {};
+  const layers = (Array.isArray(entry.layers) ? entry.layers : []).filter(layer => layer?.visible !== false);
+  const prep = [];
+  const comments = [];
+  const components = [];
+  let mappedFill = false;
+  let mappedColor = false;
+
+  if (basemap !== "none") {
+    comments.push("# basemap tiles require internet; ggspatial fetches them at render time");
+    components.push(`ggspatial::annotation_map_tile(type = ${rString(BASEMAP_TYPES[basemap] ?? basemap)}, zoomin = 0)`);
+  }
+
+  layers.forEach((layer, index) => {
+    const built = geoLayerScript(layer, index + 1, datasets);
+    prep.push(...built.prep);
+    comments.push(...built.comments);
+    components.push(...built.components);
+    mappedFill ||= built.mappedFill;
+    mappedColor ||= built.mappedColor;
+  });
+
+  if (mappedFill) components.push("scale_fill_viridis_c()");
+  if (mappedColor) components.push("scale_color_viridis_c()");
+  components.push("coord_sf()");
+
+  const labels = [];
+  if (entry.title) labels.push(`title = ${rString(entry.title)}`);
+  if (entry.subtitle) labels.push(`subtitle = ${rString(entry.subtitle)}`);
+  if (entry.caption) labels.push(`caption = ${rString(entry.caption)}`);
+  if (labels.length) components.push(`labs(${labels.join(", ")})`);
+  components.push("theme_minimal()");
+
+  const loadLines = geoLoadLines(layers, datasets);
+  const chain = ["ggplot()", ...components].join(" +\n  ");
+  return [
+    "library(ggplot2)",
+    "library(sf)",
+    basemap !== "none" ? "library(ggspatial)" : null,
+    "",
+    ...loadLines,
+    loadLines.length ? "" : null,
+    ...prep,
+    prep.length ? "" : null,
+    ...comments,
+    comments.length ? "" : null,
     `plot <- ${chain}`,
     "",
     "plot",

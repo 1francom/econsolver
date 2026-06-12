@@ -6,6 +6,7 @@ import { loadGeoPlt, mkGeoLayer } from "./geo.js";
 import { GeoLayerConfig } from "./GeoLayerConfig.jsx";
 import { GeoPlotCanvas } from "./GeoPlotCanvas.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
+import { buildGeoGgplot } from "../../../../services/export/plotScript.js";
 
 export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const { T } = useTheme();
@@ -19,6 +20,7 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const [plotHistory, setPlotHistory] = useState([]);
   const [histIdx,     setHistIdx]     = useState(null);
   const [histOpen,    setHistOpen]    = useState(false);
+  const [rCopied,     setRCopied]     = useState(false);
   const [compareIds,  setCompareIds]  = useState(new Set());
   const [userH,       setUserH]       = useState(null); // null = auto
   const [basemap,     setBasemap]     = useState("none"); // none | light | dark | osm
@@ -126,6 +128,15 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
 
   function newPlot() { setLayers([]); setActiveId(null); setTitle(""); setSubtitle(""); setCaption(""); setHistIdx(null); }
 
+  function copyRScript() {
+    if (layers.length === 0) return;
+    const script = buildGeoGgplot(currentEntry(), { datasets: availableDatasets, basemap });
+    navigator.clipboard.writeText(script).then(() => {
+      setRCopied(true);
+      setTimeout(() => setRCopied(false), 1600);
+    }).catch(() => setRCopied(false));
+  }
+
   const view      = histIdx !== null ? plotHistory[histIdx] : null;
   const dLayers   = view ? view.layers   : layers;
   const dTitle    = view ? view.title    : title;
@@ -230,6 +241,14 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
               style={{ padding: "2px 10px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.teal}18`, border: `1px solid ${C.teal}60`, color: C.teal, cursor: "pointer" }}>Save</button>}
             <button onClick={newPlot}
               style={{ padding: "2px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}>New</button>
+            <button onClick={copyRScript} disabled={layers.length === 0} title="Copy current spatial plot as R/ggplot2 + sf"
+              style={{ padding: "2px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                background: rCopied ? `${C.teal}18` : "none",
+                border: `1px solid ${rCopied ? C.teal : C.border2}`,
+                color: rCopied ? C.teal : layers.length > 0 ? C.textMuted : C.border,
+                cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+              {rCopied ? "Copied ✓" : "R"}
+            </button>
           </div>
         </div>
       </div>
