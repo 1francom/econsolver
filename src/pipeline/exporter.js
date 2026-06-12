@@ -81,6 +81,14 @@ function toStataFile(name) {
   return name.replace(/[^a-zA-Z0-9_]/g, "_") + ".dta";
 }
 
+// Datasets created in-app (spatial outputs, no-recipe derivatives) have bare
+// names like "grid_cells" — normalize to "<name>.csv" so the emitted load line
+// references a real exportable file. Placeholders (<path_to_…>) pass through.
+function toLoadFile(ds) {
+  const f = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
+  return f.startsWith("<") || /\.[A-Za-z0-9]+$/.test(f) ? f : `${f}.csv`;
+}
+
 // ─── SINGLE-DATASET SCRIPT ────────────────────────────────────────────────────
 
 /**
@@ -245,7 +253,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
     for (const ds of ordered) {
       if (deriveChildIds.has(ds.id)) continue;
       const df   = toDfVar(ds.name);
-      const file = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
+      const file = toLoadFile(ds);
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
@@ -301,7 +309,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
 
     for (const ds of ordered) {
       if (deriveChildIds.has(ds.id)) continue;
-      const file    = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
+      const file    = toLoadFile(ds);
       const dtaFile = toStataFile(ds.name);
       lines.push(`* ${"─".repeat(60)}`);
       lines.push(`* Dataset: ${ds.name}`);
@@ -361,7 +369,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
     for (const ds of ordered) {
       if (deriveChildIds.has(ds.id)) continue;
       const df   = toDfVar(ds.name);
-      const file = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
+      const file = toLoadFile(ds);
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);

@@ -1209,12 +1209,24 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
   let loadHint = "";
   if (snapshot?.datasets?.length) {
     const calls = snapshot.datasets.map(d => {
-      const file = d.filename ?? d.name;
-      if (language === "stata")  return `  ${buildStataLoadLine(file, d.loadOpts)}`;
+      const cmt = language === "stata" ? "*" : "#";
+      // Recipe-backed derive-children are rebuilt in-script from their parent —
+      // a file load here would duplicate the dataset (and reference a file that
+      // does not exist).
+      if (d.derived) {
+        return `  ${cmt} ${toDfVar(d.name)} is DERIVED in-script from its parent dataset — do not load it from a file.`;
+      }
+      // Derived-without-recipe datasets (e.g. spatial outputs) carry no extension
+      // on their name; the user must export them from Litux as <name>.csv first.
+      const rawFile    = d.filename ?? d.name;
+      const hasExt     = /\.[A-Za-z0-9]+$/.test(rawFile);
+      const file       = hasExt ? rawFile : `${rawFile}.csv`;
+      const exportNote = hasExt ? "" : `  ${cmt} export "${file}" from Litux first`;
+      if (language === "stata")  return `  ${buildStataLoadLine(file, d.loadOpts)}${exportNote}`;
       const line = language === "python"
         ? buildPyLoadLine(file, d.loadOpts)
         : buildRLoadLine(file, d.loadOpts);
-      return `  ${line.replace(/^df\b/, toDfVar(d.name))}`;
+      return `  ${line.replace(/^df\b/, toDfVar(d.name))}${exportNote}`;
     });
     loadHint = `\n\nREQUIRED LOAD CALLS (${langLabel}) — emit ALL of these verbatim, one per session dataset:\n${calls.join("\n")}`;
   } else if (snapshot?.dataLoadOpts) {

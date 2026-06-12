@@ -776,8 +776,40 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   //    ids (__row_id/__ri) that don't exist in the raw file — not faithfully
   //    replicable in R/Stata. Python's pandas handles them; R/Stata get a
   //    warning + a cleaned-dataset download instead.
-  const manualEdits = (cleanedData?.pipeline ?? []).filter(s => s.type === "patch").length;
+  //    Patches are counted across ALL session datasets — edits on a non-active
+  //    dataset must keep the warning visible when the user switches the Report
+  //    dataset (Franco, browser-test 2026-06-12). Non-active pipelines come
+  //    from the per-project IDB record; the active one uses its live pipeline.
+  const [editsByDataset, setEditsByDataset] = useState({}); // { dsName: patchCount }
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const counts = {};
+      let map = {};
+      try { map = (await loadProjectPipelines(pid))?.datasetPipelines ?? {}; } catch { /* no IDB record yet */ }
+      if (availableDatasets.length) {
+        for (const ds of availableDatasets) {
+          const isActive = ds.filename === cleanedData?.filename;
+          const pipe = isActive
+            ? (cleanedData?.pipeline ?? map[ds.id]?.pipeline ?? [])
+            : (map[ds.id]?.pipeline ?? []);
+          const n = (Array.isArray(pipe) ? pipe : []).filter(s => s.type === "patch").length;
+          if (n > 0) counts[ds.name ?? ds.filename ?? ds.id] = n;
+        }
+      } else {
+        const n = (cleanedData?.pipeline ?? []).filter(s => s.type === "patch").length;
+        if (n > 0) counts[cleanedData?.filename ?? "dataset"] = n;
+      }
+      if (!cancelled) setEditsByDataset(counts);
+    })();
+    return () => { cancelled = true; };
+  }, [open, pid, availableDatasets, cleanedData]);
+
+  const editedNames     = Object.keys(editsByDataset);
+  const manualEdits     = editedNames.reduce((s, k) => s + editsByDataset[k], 0);
   const showEditWarning = manualEdits > 0 && lang !== "python";
+  const activeHasEdits  = (cleanedData?.pipeline ?? []).some(s => s.type === "patch");
 
   function downloadCleanCSV() {
     const headers = (cleanedData?.headers ?? []).filter(h => h !== "__ri" && h !== "__row_id");
@@ -920,9 +952,9 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         ? "REPLICATE: all pinned models plus the active model, without duplicating an identical active pin. Preserve every labeled model block and its source dataset binding."
         : "REPLICATE: active model only.";
       const userInstruction = [structureInstruction, replicationInstruction].filter(Boolean).join("\n");
-      const base = (cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "");
+      const cleanedFiles = editedNames.map(n => `"${n.replace(/\.[^.]+$/, "")}_cleaned.csv"`).join(", ");
       const manualEditNote = showEditWarning
-        ? `This session contains ${manualEdits} manual cell edit(s) ("patch" steps keyed on internal row ids __row_id/__ri that do NOT exist in the raw file). Do NOT emit row-id-based patch assignments. Instead, in the Data Loading section add a prominent comment telling the user to load the exported cleaned dataset "${base}_cleaned.csv" (downloadable from Litux) for an exact replication.`
+        ? `This session contains ${manualEdits} manual cell edit(s) ("patch" steps keyed on internal row ids __row_id/__ri that do NOT exist in the raw file) on the following dataset(s): ${editedNames.map(n => `"${n}"`).join(", ")}. Do NOT emit row-id-based patch assignments. Instead, in the Data Loading section add a prominent comment telling the user to load the exported cleaned dataset(s) ${cleanedFiles} (downloadable from Litux) for an exact replication.`
         : null;
       const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot, userInstruction, manualEditNote });
       setScript(out);
@@ -979,16 +1011,23 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             <div style={{ marginBottom: "0.9rem", padding: "0.6rem 0.8rem",
                           border: `1px solid ${C.gold}60`, borderRadius: 3, background: `${C.gold}0d` }}>
               <div style={{ fontSize: T.code.fontSize, color: C.gold, fontFamily: T.code.fontFamily, lineHeight: 1.55 }}>
-                ⚠ This pipeline contains {manualEdits} manual cell edit{manualEdits === 1 ? "" : "s"} that
-                can't be faithfully replicated in {lang === "r" ? "R" : "Stata"}. For an exact replication,
-                download the cleaned dataset and load it directly in your script.
+                ⚠ This session contains {manualEdits} manual cell edit{manualEdits === 1 ? "" : "s"} on{" "}
+                {editedNames.map(n => `"${n}"`).join(", ")} that can't be faithfully replicated
+                in {lang === "r" ? "R" : "Stata"}. For an exact replication, download the cleaned
+                dataset{editedNames.length === 1 ? "" : "s"} and load {editedNames.length === 1 ? "it" : "them"} directly in your script.
               </div>
-              <button onClick={downloadCleanCSV}
-                style={{ marginTop: 6, padding: "0.26rem 0.7rem", borderRadius: 3, cursor: "pointer",
-                         fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
-                         border: `1px solid ${C.gold}`, background: "transparent", color: C.gold }}>
-                ↓ Download cleaned dataset (CSV)
-              </button>
+              {activeHasEdits ? (
+                <button onClick={downloadCleanCSV}
+                  style={{ marginTop: 6, padding: "0.26rem 0.7rem", borderRadius: 3, cursor: "pointer",
+                           fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                           border: `1px solid ${C.gold}`, background: "transparent", color: C.gold }}>
+                  ↓ Download cleaned dataset (CSV)
+                </button>
+              ) : (
+                <div style={{ marginTop: 6, fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
+                  Switch the Report dataset to {editedNames.map(n => `"${n}"`).join(" / ")} to download its cleaned CSV.
+                </div>
+              )}
             </div>
           )}
 
@@ -1162,10 +1201,20 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
   //    replicate all loads, and `globalPipeline` carries cross-dataset G-steps.
   const { log: sessionLog } = useSessionLog();
   const { globalPipeline } = useSessionState();
-  const snapshot = useMemo(
-    () => buildSessionSnapshot({ cleanedData, result: rawResult, pinnedModels, sessionLog, datasets: availableDatasets }),
-    [cleanedData, rawResult, pinnedModels, sessionLog, availableDatasets]
-  );
+  // Datasets that are derive-children (recipe-backed, Fase 2.1) are rebuilt
+  // IN-SCRIPT from their parent — the snapshot marks them so REQUIRED LOAD
+  // CALLS never instructs the AI to also load them from a (nonexistent) file.
+  const snapshot = useMemo(() => {
+    const deriveChildIds = new Set(
+      (globalPipeline ?? [])
+        .filter(g => g.opType === "derive" && g.leftDatasetId && g.params?.recipe)
+        .map(g => g.leftDatasetId)
+    );
+    const datasets = availableDatasets.map(d =>
+      deriveChildIds.has(d.id) ? { ...d, derived: true } : d
+    );
+    return buildSessionSnapshot({ cleanedData, result: rawResult, pinnedModels, sessionLog, datasets });
+  }, [cleanedData, rawResult, pinnedModels, sessionLog, availableDatasets, globalPipeline]);
 
   // Detect Sharp RDD / Spatial RD — canonical shape uses type, legacy shape carries rddData or raw fields
   const isRDD = rawResult?.type === "RDD" || rawResult?.type === "SpatialRDD" || !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);

@@ -73,6 +73,7 @@ export function buildSessionSnapshot({
           name:     d.name ?? d.filename ?? d.id,
           filename: d.filename ?? null,
           loadOpts: d.loadOpts ?? null,
+          derived:  d.derived ?? false,   // recipe-backed derive-child: built in-script, never loaded from file
         }))
       : null,
     modelDataset,
@@ -99,8 +100,12 @@ export function serializeSnapshot(snapshot) {
 
   // ── Session datasets (multi-dataset workspaces) ────────────────────────────
   if (snapshot.datasets?.length) {
-    lines.push(`SESSION DATASETS (${snapshot.datasets.length} — load ALL of them, each into its own data frame):`);
+    lines.push(`SESSION DATASETS (${snapshot.datasets.length} — load every FILE-BACKED one into its own data frame; derived ones are built in-script):`);
     snapshot.datasets.forEach(d => {
+      if (d.derived) {
+        lines.push(`  ${toDfVar(d.name)} ← DERIVED IN-SCRIPT from its parent dataset (see derivation step) — do NOT load it from a file.`);
+        return;
+      }
       const o = d.loadOpts ?? {};
       const parts = [];
       if (o.format)    parts.push(`format=${o.format}`);
