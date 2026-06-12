@@ -185,7 +185,8 @@ export function serializeSnapshot(snapshot) {
   if (snapshot.pinnedModels?.length) {
     lines.push(`\nPINNED MODELS (${snapshot.pinnedModels.length}):`);
     snapshot.pinnedModels.forEach((m, i) => {
-      lines.push(`  (${i + 1}) ${m.label ?? m.type}: ${m.spec?.yVar ?? "?"} ~ ${(m.spec?.xVars ?? []).join(" + ") || "?"}`);
+      const source = m.spec?.filename ? ` [source: ${m.spec.filename}]` : "";
+      lines.push(`  (${i + 1}) ${m.label ?? m.type}: ${m.spec?.yVar ?? "?"} ~ ${(m.spec?.xVars ?? []).join(" + ") || "?"}${source}`);
     });
   }
 

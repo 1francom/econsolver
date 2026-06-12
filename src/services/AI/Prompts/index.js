@@ -924,8 +924,11 @@ TRANSFORMATION RULES (apply all):
        cover all steps, keep them. If any step is missing, add it.
     d. Reflect the SE TYPE from the snapshot in the estimation call when
        applicable (e.g. fixest cluster=, plm vcov, statsmodels cov_type).
-    e. If PINNED MODELS or SUBSETS are listed, mention them in a final
-       comment block — do not estimate them unless the section script does.
+    e. If the payload says "REPLICATE: all pinned models", emit every labeled
+       pinned-model estimation block supplied in the MODEL section, preserving
+       each model's specification and source dataset binding. Otherwise emit
+       only the active-model block. SUBSETS remain comment-only unless their
+       estimation code is explicitly supplied.
     f. If a MODEL SOURCE DATASET line is present, the estimation MUST run
        on that dataset's data frame (R/Python: data = df_<name>; Stata:
        'use' that dataset's cleaned data before the estimation command).

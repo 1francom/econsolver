@@ -3067,7 +3067,7 @@ export default function App() {
                 {/* REPORT — Phase 9.10 */}
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
                   {tabOutput("report")
-                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} availableDatasets={availableDatasets} pid={pid} />
+                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} availableDatasets={availableDatasets} pinnedModels={modelingSession?.pinnedModels ?? []} pid={pid} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }
                 </div>
