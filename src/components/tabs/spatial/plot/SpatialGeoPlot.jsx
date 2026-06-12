@@ -21,7 +21,7 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const [histOpen,    setHistOpen]    = useState(false);
   const [compareIds,  setCompareIds]  = useState(new Set());
   const [userH,       setUserH]       = useState(null); // null = auto
-  const [showTiles,   setShowTiles]   = useState(false);
+  const [basemap,     setBasemap]     = useState("none"); // none | light | dark | osm
   const wrapRef    = useRef(null);
   const geoPlotRef = useRef(null);
   const hydratedRef = useRef(false);
@@ -49,7 +49,8 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
       if (typeof cfg.subtitle === "string") setSubtitle(cfg.subtitle);
       if (typeof cfg.caption === "string") setCaption(cfg.caption);
       if (cfg.userH != null) setUserH(cfg.userH);
-      if (typeof cfg.showTiles === "boolean") setShowTiles(cfg.showTiles);
+      if (typeof cfg.basemap === "string") setBasemap(cfg.basemap);
+      else if (cfg.showTiles === true) setBasemap("light"); // migrate old boolean toggle
       hydratedRef.current = true;
     }).catch(() => {
       if (!cancelled) hydratedRef.current = true;
@@ -59,10 +60,10 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   useEffect(() => {
     if (!pid || !hydratedRef.current) return;
     const t = setTimeout(() => {
-      saveGeoPlotConfig(pid, { layers, activeId, title, subtitle, caption, userH, showTiles }).catch(() => {});
+      saveGeoPlotConfig(pid, { layers, activeId, title, subtitle, caption, userH, basemap }).catch(() => {});
     }, 400);
     return () => clearTimeout(t);
-  }, [pid, layers, activeId, title, subtitle, caption, userH, showTiles]);
+  }, [pid, layers, activeId, title, subtitle, caption, userH, basemap]);
   useEffect(() => {
     if (!wrapRef.current) return;
     const ro = new ResizeObserver(([e]) => {
@@ -195,14 +196,19 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
             )}
           </div>
 
-          {/* Tiles toggle */}
-          <button onClick={() => setShowTiles(t => !t)}
-            style={{ padding: "2px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
-              background: showTiles ? `${C.teal}20` : "none",
-              border: `1px solid ${showTiles ? C.teal + "60" : C.border2}`,
-              color: showTiles ? C.teal : C.textMuted }}>
-            OSM
-          </button>
+          {/* Basemap selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>MAP</span>
+            {[["none", "Off"], ["light", "Light"], ["dark", "Dark"], ["osm", "OSM"]].map(([key, lbl]) => (
+              <button key={key} onClick={() => setBasemap(key)}
+                style={{ padding: "2px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
+                  background: basemap === key ? `${C.teal}20` : "none",
+                  border: `1px solid ${basemap === key ? C.teal + "60" : C.border2}`,
+                  color: basemap === key ? C.teal : C.textMuted }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
 
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5 }}>
             {dLayers.length > 0 && (<>
@@ -241,7 +247,7 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
           <GeoPlotCanvas ref={geoPlotRef} Plt={Plt} layers={dLayers} rows={rows} availableDatasets={availableDatasets}
             title={dTitle} subtitle={dSubtitle} caption={dCaption} maxW={maxW}
             maxH={Math.max(420, (typeof window !== "undefined" ? window.innerHeight : 850) - 170)}
-            forceH={userH ?? 0} showTiles={showTiles} C={C} />
+            forceH={userH ?? 0} basemap={basemap} C={C} />
         )}
 
         {/* History strip */}

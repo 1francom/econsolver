@@ -12,6 +12,98 @@ import { SpatialLayerEditor } from "./SpatialLayerEditor.jsx";
 import { mkSLayer } from "./layers.js";
 import { loadSpatialMaps, saveSpatialMaps } from "../../../../services/Persistence/indexedDB.js";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
+import { MONO_STACK } from "../../../../theme.js";
+
+// ── PNG export helpers (Leaflet → canvas) ────────────────────────────────────
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+}
+
+// Re-draw the active MapLegend onto the export canvas (bottom-right), mirroring
+// MapLegend.jsx — since that legend is a DOM overlay, not part of the map SVG.
+function paintMapLegend(ctx, legend, W, H, C, T) {
+  if (!legend) return;
+  const font = T?.code?.fontFamily || MONO_STACK;
+  const fs = 11, pad = 8, rowH = 16, sw = 9, gap = 6;
+  const title = String(legend.col ?? "").toUpperCase();
+
+  let items = [];
+  if (legend.type === "categorical")          items = legend.cats.map(c => ({ label: String(c), color: legend.cmap[c] }));
+  else if (legend.type === "numeric-discrete") items = legend.values.map(v => ({ label: String(v), color: legend.cmap[String(v)] }));
+
+  ctx.save();
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.font = `${fs}px ${font}`;
+
+  let maxLabel = ctx.measureText(title).width;
+  for (const it of items) maxLabel = Math.max(maxLabel, sw + gap + ctx.measureText(it.label).width);
+
+  let boxW, boxH;
+  if (legend.type === "gradient") {
+    boxW = Math.max(120, maxLabel + pad * 2);
+    boxH = pad + fs + 6 + 8 + 4 + fs + pad;
+  } else {
+    boxW = Math.max(90, maxLabel + pad * 2);
+    boxH = pad + fs + 6 + items.length * rowH + pad - 4;
+  }
+  const x = W - boxW - 8;
+  const y = H - boxH - 24;
+
+  ctx.globalAlpha = 0.94;
+  ctx.fillStyle = C?.surface ?? "#ffffff";
+  roundRectPath(ctx, x, y, boxW, boxH, 4); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = C?.border2 ?? "#dddddd";
+  roundRectPath(ctx, x, y, boxW, boxH, 4); ctx.stroke();
+
+  ctx.fillStyle = C?.textMuted ?? "#777777";
+  ctx.font = `${fs - 1}px ${font}`;
+  ctx.fillText(title, x + pad, y + pad + fs - 2);
+  ctx.font = `${fs}px ${font}`;
+
+  if (legend.type === "gradient") {
+    const barX = x + pad, barY = y + pad + fs + 4, barW = boxW - pad * 2, barH = 8;
+    const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+    const pal = legend.pal;
+    if (pal?.stops)               pal.stops.forEach((c, i, a) => grad.addColorStop(i / (a.length - 1), `rgb(${c.join(",")})`));
+    else if (pal?.low && pal?.high) { grad.addColorStop(0, `rgb(${pal.low.join(",")})`); grad.addColorStop(1, `rgb(${pal.high.join(",")})`); }
+    else                          { grad.addColorStop(0, "#149470"); grad.addColorStop(1, "#d27d12"); }
+    ctx.fillStyle = grad;
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = C?.textDim ?? "#777777";
+    ctx.fillText(Number(legend.min).toFixed(2), barX, barY + barH + fs);
+    ctx.textAlign = "right";
+    ctx.fillText(Number(legend.max).toFixed(2), barX + barW, barY + barH + fs);
+    ctx.textAlign = "left";
+  } else {
+    items.forEach((it, i) => {
+      const iy = y + pad + fs + 6 + i * rowH;
+      ctx.fillStyle = it.color;
+      roundRectPath(ctx, x + pad, iy - sw + 1, sw, sw, 2); ctx.fill();
+      ctx.fillStyle = C?.text ?? "#333333";
+      ctx.fillText(it.label, x + pad + sw + gap, iy);
+    });
+  }
+  ctx.restore();
+}
+
+function paintMapAttribution(ctx, W, H, T, text = "© OpenStreetMap © CARTO") {
+  ctx.save();
+  ctx.font = `9px ${T?.code?.fontFamily || MONO_STACK}`;
+  ctx.fillStyle = "rgba(90,90,90,0.85)";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(text, W - 4, H - 2);
+  ctx.restore();
+}
 
 export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid }) {
   const { T } = useTheme();
@@ -101,6 +193,7 @@ function parseWkt(wkt){
   if(s.startsWith("MULTILINESTRING")){const lines=groups(inner).map(parseRing).filter(r=>r.length>=2);return lines.length?{type:"multiline",rings:lines}:null;}
   return null;
 }
+const LEGEND=${JSON.stringify(activeLegend)};
 const map=L.map("map");
 L.tileLayer(BASEMAP.url,{attribution:BASEMAP.attribution,maxZoom:19,detectRetina:true,crossOrigin:true}).addTo(map);
 const group=L.featureGroup().addTo(map);
@@ -118,6 +211,36 @@ for(const ly of LAYERS){
   }
 }
 try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map.setView([20,0],2);}catch(_){map.setView([20,0],2);}
+if(LEGEND){
+  const ctl=L.control({position:"bottomright"});
+  ctl.onAdd=function(){
+    const div=L.DomUtil.create("div");
+    div.style.cssText="background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px;font:11px ui-monospace,SFMono-Regular,monospace;box-shadow:0 1px 4px rgba(0,0,0,0.2);line-height:1.4";
+    const t=document.createElement("div");
+    t.style.cssText="text-transform:uppercase;letter-spacing:0.1em;color:#777;margin-bottom:4px";
+    t.textContent=LEGEND.col||"";div.appendChild(t);
+    function row(color,label,round){
+      const r=document.createElement("div");
+      r.style.cssText="display:flex;align-items:center;gap:5px;margin-bottom:2px";
+      const sw=document.createElement("span");
+      sw.style.cssText="width:9px;height:9px;flex-shrink:0;display:inline-block;border-radius:"+(round?"50%":"2px")+";background:"+color;
+      const lb=document.createElement("span");lb.textContent=label;
+      r.appendChild(sw);r.appendChild(lb);div.appendChild(r);
+    }
+    if(LEGEND.type==="categorical"){for(const c of LEGEND.cats)row(LEGEND.cmap[c],String(c),true);}
+    else if(LEGEND.type==="numeric-discrete"){for(const v of LEGEND.values)row(LEGEND.cmap[String(v)],String(v),false);}
+    else if(LEGEND.type==="gradient"){
+      const p=LEGEND.pal;const g=p&&p.stops?p.stops.map(c=>"rgb("+c.join(",")+")").join(","):p&&p.low&&p.high?"rgb("+p.low.join(",")+"),rgb("+p.high.join(",")+")":"#149470,#d27d12";
+      const bar=document.createElement("div");bar.style.cssText="height:8px;border-radius:2px;margin-bottom:3px;background:linear-gradient(to right,"+g+")";div.appendChild(bar);
+      const mm=document.createElement("div");mm.style.cssText="display:flex;justify-content:space-between;color:#777";
+      const lo=document.createElement("span");lo.textContent=Number(LEGEND.min).toFixed(2);
+      const hi=document.createElement("span");hi.textContent=Number(LEGEND.max).toFixed(2);
+      mm.appendChild(lo);mm.appendChild(hi);div.appendChild(mm);
+    }
+    return div;
+  };
+  ctl.addTo(map);
+}
 <\/script></body></html>`;
 
     const blob = new Blob([html], { type: "text/html" });
@@ -127,69 +250,127 @@ try{const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(0.06));else map
     URL.revokeObjectURL(url);
   }
 
-  // ── Download map as PNG (vector overlay cropped to visible area) ────────────
-  function downloadMapPng() {
+  // ── Compose the live map into a canvas: fresh basemap tiles (CORS-clean) +
+  //    vector overlay + legend + attribution. Shared by PNG and PDF export. ────
+  function buildMapCanvas() {
     const map = leafMapRef.current;
-    if (!map) return;
-    const overlaySvg = map.getPanes().overlayPane?.querySelector("svg");
-    if (!overlaySvg) { alert("No vector layers to export."); return; }
+    if (!map) return Promise.resolve(null);
+    const container     = map.getContainer();
+    const containerRect = container.getBoundingClientRect();
+    const size  = map.getSize();
+    const W = Math.max(1, size.x), H = Math.max(1, size.y);
+    const scale = 2;
 
-    // Leaflet's overlay SVG extends beyond the viewport by its padding (default ~200px).
-    // Crop to the visible map container using viewBox.
-    const containerRect = map.getContainer().getBoundingClientRect();
-    const svgRect       = overlaySvg.getBoundingClientRect();
-    const vbX = containerRect.left - svgRect.left;
-    const vbY = containerRect.top  - svgRect.top;
-    const vbW = Math.max(1, containerRect.width);
-    const vbH = Math.max(1, containerRect.height);
+    const canvas = document.createElement("canvas");
+    canvas.width  = W * scale;
+    canvas.height = H * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "#f0ede8";
+    ctx.fillRect(0, 0, W, H);
 
-    const svgClone = overlaySvg.cloneNode(true);
-    svgClone.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
-    svgClone.setAttribute("width",  vbW);
-    svgClone.setAttribute("height", vbH);
+    // 1 — basemap tiles, loaded fresh with crossOrigin (deterministic, no DOM
+    //     cache-taint). Positioned via Leaflet's own pixel projection so they
+    //     line up exactly with the vector overlay.
+    const cfg      = BASEMAPS[basemap] ?? BASEMAPS.light;
+    const z        = Math.round(map.getZoom());
+    const tileSize = 256;
+    const nTiles   = Math.pow(2, z);
+    const pb       = map.getPixelBounds();
+    const minX = Math.floor(pb.min.x / tileSize), maxX = Math.floor(pb.max.x / tileSize);
+    const minY = Math.floor(pb.min.y / tileSize), maxY = Math.floor(pb.max.y / tileSize);
 
-    const svgStr  = new XMLSerializer().serializeToString(svgClone);
-    const svgBlob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-    const blobUrl = URL.createObjectURL(svgBlob);
-    const img = new Image();
-    img.onload = () => {
-      const scale = 2;
-      const canvas = document.createElement("canvas");
-      canvas.width  = Math.round(vbW) * scale;
-      canvas.height = Math.round(vbH) * scale;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#f0ede8"; // light CARTO-style background
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.scale(scale, scale);
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(blobUrl);
-      const a = document.createElement("a");
-      a.href = canvas.toDataURL("image/png");
-      a.download = "spatial_map.png";
-      a.click();
-    };
-    img.onerror = () => { URL.revokeObjectURL(blobUrl); alert("PNG export failed — try a different browser."); };
-    img.src = blobUrl;
+    const tilePromises = [];
+    for (let i = minX; i <= maxX; i++) {
+      for (let j = minY; j <= maxY; j++) {
+        if (j < 0 || j >= nTiles) continue;
+        const wrapX = ((i % nTiles) + nTiles) % nTiles;
+        const url = cfg.url
+          .replace("{s}", "a")
+          .replace("{z}", String(z))
+          .replace("{x}", String(wrapX))
+          .replace("{y}", String(j))
+          .replace("{r}", "@2x");
+        const dx = i * tileSize - pb.min.x;
+        const dy = j * tileSize - pb.min.y;
+        tilePromises.push(new Promise(res => {
+          const im = new Image();
+          im.crossOrigin = "anonymous";
+          im.onload  = () => res({ im, dx, dy });
+          im.onerror = () => res(null);
+          im.src = url;
+        }));
+      }
+    }
+
+    // 2 — vector overlay (points / polygons / lines), cropped to the viewport.
+    const drawVectors = () => new Promise(res => {
+      const overlaySvg = map.getPanes().overlayPane?.querySelector("svg");
+      if (!overlaySvg) { res(); return; }
+      const svgRect  = overlaySvg.getBoundingClientRect();
+      const svgClone = overlaySvg.cloneNode(true);
+      svgClone.setAttribute("viewBox", `${containerRect.left - svgRect.left} ${containerRect.top - svgRect.top} ${W} ${H}`);
+      svgClone.setAttribute("width",  W);
+      svgClone.setAttribute("height", H);
+      const svgStr  = new XMLSerializer().serializeToString(svgClone);
+      const blobUrl = URL.createObjectURL(new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" }));
+      const img = new Image();
+      img.onload  = () => { ctx.drawImage(img, 0, 0, W, H); URL.revokeObjectURL(blobUrl); res(); };
+      img.onerror = () => { URL.revokeObjectURL(blobUrl); res(); };
+      img.src = blobUrl;
+    });
+
+    const attrText = basemap === "osm" ? "© OpenStreetMap" : "© OpenStreetMap © CARTO";
+
+    return Promise.all(tilePromises)
+      .then(tiles => {
+        for (const t of tiles) {
+          if (!t) continue;
+          try { ctx.drawImage(t.im, t.dx, t.dy, tileSize, tileSize); } catch { /* skip */ }
+        }
+        return drawVectors();
+      })
+      .then(() => {
+        paintMapLegend(ctx, activeLegend, W, H, C, T);
+        paintMapAttribution(ctx, W, H, T, attrText);
+        return canvas;
+      });
   }
 
-  // ── Download map as PDF (SVG in print iframe) ────────────────────────────────
+  // ── Download map as PNG (basemap + vectors + legend baked in) ────────────────
+  function downloadMapPng() {
+    buildMapCanvas().then(canvas => {
+      if (!canvas) return;
+      let url;
+      try { url = canvas.toDataURL("image/png"); }
+      catch { alert("PNG export blocked by tile CORS — try the Light or OSM basemap."); return; }
+      const a = document.createElement("a");
+      a.href = url; a.download = "spatial_map.png"; a.click();
+    });
+  }
+
+  // ── Download map as PDF (same composited canvas, printed via iframe) ─────────
   function downloadMapPdf() {
-    const map = leafMapRef.current;
-    if (!map) return;
-    const overlaySvg = map.getPanes().overlayPane?.querySelector("svg");
-    if (!overlaySvg) { alert("No vector layers to export."); return; }
-    const { width, height } = overlaySvg.getBoundingClientRect();
-    const svgStr  = new XMLSerializer().serializeToString(overlaySvg);
-    const blob    = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-    const blobUrl = URL.createObjectURL(blob);
-    const iframe  = document.createElement("iframe");
-    iframe.style.cssText = `position:fixed;top:-9999px;left:-9999px;width:${Math.max(1, Math.round(width))}px;height:${Math.max(1, Math.round(height))}px;border:none;`;
-    iframe.src = blobUrl;
-    iframe.onload = () => {
-      try { iframe.contentWindow.print(); } catch (_) { alert("PDF export: use the browser print dialog."); }
-      setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(iframe); }, 2000);
-    };
-    document.body.appendChild(iframe);
+    buildMapCanvas().then(canvas => {
+      if (!canvas) return;
+      let dataUrl;
+      try { dataUrl = canvas.toDataURL("image/png"); }
+      catch { alert("PDF export blocked by tile CORS — try the Light or OSM basemap."); return; }
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>spatial_map</title>`
+        + `<style>@page{margin:8mm}html,body{margin:0;padding:0}img{width:100%;height:auto;display:block}</style>`
+        + `</head><body><img src="${dataUrl}"></body></html>`;
+      const blobUrl = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+      const iframe  = document.createElement("iframe");
+      iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:900px;height:650px;border:none;";
+      iframe.src = blobUrl;
+      iframe.onload = () => {
+        setTimeout(() => {
+          try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (_) { void _; alert("PDF export: use the browser print dialog."); }
+          setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(iframe); }, 2000);
+        }, 300);
+      };
+      document.body.appendChild(iframe);
+    });
   }
 
   useEffect(() => {
