@@ -193,7 +193,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
 
 ### TRACK P — Plot replication (parallel; independent of the timeline)
 
-- [ ] **P1 — `plotConfig → ggplot2` translator.** New `src/services/export/plotScript.js`
+- [x] **P1 — `plotConfig → ggplot2` translator.** *(code-complete 2026-06-12, browser-validation pending Franco)* New `src/services/export/plotScript.js`
   (`buildGgplot(plotEntry)`). Map geoms 1:1: point→geom_point, line→geom_line,
   bar→geom_col/geom_bar, histogram→geom_histogram, density→geom_density,
   smooth→geom_smooth, boxplot→geom_boxplot, errorbar→geom_errorbar, ribbon→geom_ribbon,
@@ -202,6 +202,8 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   labels→labs(title,x,y), palette from `scheme`. Read exact field names from
   `PlotBuilder.jsx` `savePlot`. Add a per-plot "Copy R" / mini-script button in the
   plot history UI. Runs on the cleaned dataset df.
+  **Approximation note:** PlotBuilder density uses binned proportions; the R export
+  uses ggplot2's kernel `geom_density(adjust=...)`, preserving the configured adjust value.
 - [ ] **P2 — Spatial Plot geo variant.** Extend the translator for WKT geometry →
   `sf::st_as_sf` + `geom_sf`/`geom_polygon`; fill scales. Basemap tile: drop with a
   comment, or `ggspatial::annotation_map_tile` with a caveat.
