@@ -754,12 +754,47 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   const [script,   setScript]   = useState("");
   const [error,    setError]    = useState("");
   const [copied,   setCopied]   = useState(false);
+  // ── Structuring question (Fase 0.2): how the user wants the script organised.
+  //    "execution" needs the unified timeline (Fase 3) — shown but disabled.
+  const [structureMode,     setStructureMode]     = useState("module"); // "module" | "execution" | "custom"
+  const [customInstruction, setCustomInstruction] = useState("");
 
   const LANGS = [
     { id: "r",      label: "R" },
     { id: "python", label: "Python" },
     { id: "stata",  label: "Stata" },
   ];
+
+  const STRUCTURES = [
+    { id: "module",    label: "Per module",          disabled: false, tip: "Sections grouped by workspace module (default)" },
+    { id: "execution", label: "Per execution order", disabled: true,  tip: "Coming soon — needs the unified session timeline" },
+    { id: "custom",    label: "Custom",              disabled: false, tip: "Give Claude your own structuring instruction" },
+  ];
+
+  // ── Manual cell edits (Fase 0.3, D2): `patch` steps are keyed on internal row
+  //    ids (__row_id/__ri) that don't exist in the raw file — not faithfully
+  //    replicable in R/Stata. Python's pandas handles them; R/Stata get a
+  //    warning + a cleaned-dataset download instead.
+  const manualEdits = (cleanedData?.pipeline ?? []).filter(s => s.type === "patch").length;
+  const showEditWarning = manualEdits > 0 && lang !== "python";
+
+  function downloadCleanCSV() {
+    const headers = (cleanedData?.headers ?? []).filter(h => h !== "__ri" && h !== "__row_id");
+    const rows    = cleanedData?.cleanRows ?? [];
+    const esc = v => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv  = [headers.join(",")]
+      .concat(rows.map(r => headers.map(h => esc(r[h])).join(",")))
+      .join("\n");
+    const base = (cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `${base}_cleaned.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
 
   function _buildModelScript(language) {
     if (!result) return "";
@@ -851,7 +886,17 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         if (modelFile) modelSc = modelSc.replace(/\bdf\b/g, toDfVar(modelDs?.name ?? modelFile));
       }
       const dict = cleanedData?.dataDictionary ?? null;
-      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot });
+      const userInstruction =
+        structureMode === "custom" && customInstruction.trim()
+          ? customInstruction.trim()
+          : structureMode === "module"
+            ? "Structure the script grouped by module section: Setup, Data Loading, Cleaning, Feature Engineering, Estimation, Results."
+            : null;
+      const base = (cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "");
+      const manualEditNote = showEditWarning
+        ? `This session contains ${manualEdits} manual cell edit(s) ("patch" steps keyed on internal row ids __row_id/__ri that do NOT exist in the raw file). Do NOT emit row-id-based patch assignments. Instead, in the Data Loading section add a prominent comment telling the user to load the exported cleaned dataset "${base}_cleaned.csv" (downloadable from Litux) for an exact replication.`
+        : null;
+      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot, userInstruction, manualEditNote });
       setScript(out);
     } catch (e) {
       setError(e.message ?? "Generation failed.");
@@ -899,6 +944,61 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             Generates one complete, documented replication script combining your
             pipeline + model. Claude restructures, comments, and deduplicates the
             auto-generated code.
+          </div>
+
+          {/* Manual-edit warning (Fase 0.3) — R/Stata only */}
+          {showEditWarning && (
+            <div style={{ marginBottom: "0.9rem", padding: "0.6rem 0.8rem",
+                          border: `1px solid ${C.gold}60`, borderRadius: 3, background: `${C.gold}0d` }}>
+              <div style={{ fontSize: T.code.fontSize, color: C.gold, fontFamily: T.code.fontFamily, lineHeight: 1.55 }}>
+                ⚠ This pipeline contains {manualEdits} manual cell edit{manualEdits === 1 ? "" : "s"} that
+                can't be faithfully replicated in {lang === "r" ? "R" : "Stata"}. For an exact replication,
+                download the cleaned dataset and load it directly in your script.
+              </div>
+              <button onClick={downloadCleanCSV}
+                style={{ marginTop: 6, padding: "0.26rem 0.7rem", borderRadius: 3, cursor: "pointer",
+                         fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                         border: `1px solid ${C.gold}`, background: "transparent", color: C.gold }}>
+                ↓ Download cleaned dataset (CSV)
+              </button>
+            </div>
+          )}
+
+          {/* Structuring question (Fase 0.2) */}
+          <div style={{ marginBottom: "0.9rem" }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
+                          letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6 }}>
+              How should the script be structured?
+            </div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {STRUCTURES.map(s => (
+                <button key={s.id} onClick={() => !s.disabled && setStructureMode(s.id)}
+                  disabled={s.disabled} title={s.tip}
+                  style={{
+                    padding: "0.26rem 0.7rem", borderRadius: 3,
+                    cursor: s.disabled ? "not-allowed" : "pointer",
+                    fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s",
+                    background: structureMode === s.id ? `${C.teal}15` : "transparent",
+                    border:     `1px solid ${structureMode === s.id ? C.teal : C.border2}`,
+                    color:      s.disabled ? C.textMuted : structureMode === s.id ? C.teal : C.textDim,
+                    opacity:    s.disabled ? 0.55 : 1,
+                  }}>
+                  {s.label}{s.disabled ? " ⏳" : ""}
+                </button>
+              ))}
+            </div>
+            {structureMode === "custom" && (
+              <textarea
+                value={customInstruction}
+                onChange={e => setCustomInstruction(e.target.value)}
+                placeholder='e.g. "One section per dataset, model at the end, comment every step in Spanish"'
+                rows={2}
+                style={{ width: "100%", marginTop: 6, padding: "0.45rem 0.6rem", resize: "vertical",
+                         background: C.bg, border: `1px solid ${C.teal}40`, borderRadius: 3,
+                         color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
+                         outline: "none", boxSizing: "border-box" }}
+              />
+            )}
           </div>
 
           {/* Language selector */}

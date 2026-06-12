@@ -892,9 +892,13 @@ TRANSFORMATION RULES (apply all):
 1.  Add a file-level header comment: # 1. Setup / # 2. Data Loading /
     # 3. Cleaning / # 4. Feature Engineering / # 5. Estimation / # 6. Results
     (adjust section numbers to match what is actually present).
-2.  Reorder statements for logical flow: library/package imports first,
-    data loading second, cleaning third, feature engineering fourth,
-    estimation last. Do NOT change the logic — only reorder.
+2.  PRESERVE OPERATION ORDER. The section scripts arrive in true execution
+    order — that order is authoritative. You may hoist library/package
+    imports to the top and group consecutive statements under section
+    headers, but you must NEVER move an operation before another operation
+    it depends on (e.g. a spatial join or grid assignment before the grid
+    it references, a model plot before its estimation, a transform before
+    the load of its dataset). When in doubt, keep the original sequence.
 3.  Collapse redundant intermediate assignments: if a variable is
     assigned and immediately overwritten, keep only the final value.
 4.  Add an inline comment on every non-obvious transformation
@@ -927,6 +931,10 @@ TRANSFORMATION RULES (apply all):
        'use' that dataset's cleaned data before the estimation command).
        Estimating on any other data frame is a fatal error — the model's
        variables only exist in its source dataset.
+9.  If a STRUCTURE INSTRUCTION block is present in the user payload, honor
+    it for how the script is SECTIONED and PRESENTED (grouping, headers,
+    commentary style). It refines rules 1–7 but never overrides rule 2:
+    dependency order is inviolable regardless of the requested structure.
 
 OUTPUT RULES (mandatory):
 - Return ONLY the script — no markdown fences, no preamble, no explanations.

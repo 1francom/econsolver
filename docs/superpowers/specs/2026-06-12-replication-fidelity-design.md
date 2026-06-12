@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Owner:** Franco Medero
 **Executors:** Claude Fable 5 (primary) → Codex (continuation when Fable 5 runs out of tokens)
-**Status:** Fase 0 = NOT STARTED. This doc is the single source of truth — design + task checklist.
+**Status:** Fase 0 = CODE-COMPLETE (2026-06-12, browser-validation pending Franco). Next: Franco's browser test, then Fase 1 / Track P. This doc is the single source of truth — design + task checklist.
 
 > **Read this first (executing agent):** you did NOT see the design conversation.
 > Every decision is locked in §2 — do not re-litigate. Work top-to-bottom through
@@ -92,7 +92,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
 
 ### FASE 0 — Pre-test safety (cheap, no timeline) — DO FIRST
 
-- [ ] **0.1 — Prompt: forbid reordering.**
+- [x] **0.1 — Prompt: forbid reordering.** *(code-complete 2026-06-12, browser-validation pending Franco)*
   File: `src/services/AI/Prompts/index.js`, `UNIFIED_SCRIPT_PROMPT` rule 2.
   Change rule 2 from "Reorder statements for logical flow…" to: preserve the order
   of operations exactly as given; group only with section headers; NEVER move an
@@ -101,7 +101,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   block is present in the user payload, honor it for sectioning/ordering.
   Accept: prompt text updated; `npm run build` green.
 
-- [ ] **0.2 — Structuring question + custom instruction.**
+- [x] **0.2 — Structuring question + custom instruction.** *(code-complete 2026-06-12, browser-validation pending Franco)*
   Files: `src/ReportingModule.jsx` (`AIUnifiedScript`), `src/services/AI/AIService.js`
   (`generateUnifiedScript`), `src/services/AI/Prompts/index.js`.
   - `AIUnifiedScript`: add state `structureMode` (`"module"` default | `"execution"` | `"custom"`)
@@ -116,7 +116,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   Accept: selecting Custom + typing an instruction changes the generated script's
   structure; build + lint:undef green.
 
-- [ ] **0.3 — Manual-edit warning (per-language).**
+- [x] **0.3 — Manual-edit warning (per-language).** *(code-complete 2026-06-12, browser-validation pending Franco. Note: prompt-level only — `manualEditNote` instructs Claude not to emit row-id patches; the deterministic translators in rScript/stataScript still emit them in their own mini-script paths, cleanup is Fase 2.3)*
   File: `src/ReportingModule.jsx` (`AIUnifiedScript`).
   - Detect ad-hoc cell edits: `const manualEdits = (cleanedData?.pipeline ?? []).filter(s => s.type === "patch")`.
   - If `manualEdits.length > 0` and lang ∈ {r, stata}: render a warning banner

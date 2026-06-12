@@ -1175,7 +1175,7 @@ export async function interpretOptimization({ session, results = {}, dataDiction
 // Returns: Promise<string> — the unified script text (no markdown fences).
 // On failure: returns a fallback that concatenates the sections with headers.
 
-export async function generateUnifiedScript(sections, language, dataDictionary = null, { snapshot = null } = {}) {
+export async function generateUnifiedScript(sections, language, dataDictionary = null, { snapshot = null, userInstruction = null, manualEditNote = null } = {}) {
   const langLabel = language === "r" ? "R" : language === "stata" ? "Stata" : "Python";
   const cmt       = language === "stata" ? "*" : "#";
 
@@ -1221,8 +1221,22 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
     loadHint = `\n\nREQUIRED LOAD CALL (${langLabel}): ${loadOptsToScriptHint(snapshot.dataLoadOpts, language)}`;
   }
 
+  // ── Structuring instruction (Fase 0.2) — how the user wants the script
+  //    sectioned/presented. High priority: placed right after TARGET LANGUAGE.
+  //    Prompt rule 9 honors it but never lets it override dependency order.
+  const structureBlk = userInstruction?.trim()
+    ? `\n\nSTRUCTURE INSTRUCTION:\n${userInstruction.trim()}`
+    : "";
+
+  // ── Manual-edit caveat (Fase 0.3, D2) — R/Stata sessions with cell edits.
+  const manualEditBlk = manualEditNote?.trim()
+    ? `\n\nMANUAL EDITS NOTE:\n${manualEditNote.trim()}`
+    : "";
+
   const userPrompt = [
     `TARGET LANGUAGE: ${langLabel}`,
+    structureBlk,
+    manualEditBlk,
     dictSection,
     snapshotBlk,
     loadHint,
