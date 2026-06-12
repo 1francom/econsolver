@@ -402,6 +402,14 @@ async function parseFile(file) {
   }
   if (ext === "dta") {
     const { parseStata } = await import("./services/data/parsers/stata.js");
+    if (file.size > 10 * 1024 * 1024) {
+      const { loadLargeParsedData } = await import("./services/data/duckdb.js");
+      return withLoadOpts(await loadLargeParsedData(
+        file,
+        async () => parseStata(await file.arrayBuffer()),
+        "stata"
+      ), { format: "stata", engine: "duckdb" });
+    }
     const buf = await file.arrayBuffer();
     return withLoadOpts(await parseStata(buf), { format: "stata" });
   }
@@ -803,9 +811,12 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     onDatasetsChange?.(datasets.map(d => ({
       id:       d.id,
       filename: d.filename,
-      rows:     d.rawData?.rows    ?? [],
+      rows:     d.rawData?.rows    ?? [],   // preview only for DuckDB-backed datasets
       headers:  d.rawData?.headers ?? [],
       crs:      datasetCrs(d),
+      // Full-table pointer — consumers MUST compute off this (SQL / extractAllRows),
+      // never off `rows`, which is a 500-row preview for large DuckDB datasets.
+      _duckdb:  d.rawData?._duckdb  ?? null,
     })));
   }, [datasets]);
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-30
 **Module:** CalculateTab redesign
-**Status:** Approved (design) — pending implementation plan
+**Status:** DONE (2026-06-10) — implemented (11 components in `calculate/workbench/`, v5 IDB store, nerdamer + Pyodide/SymPy CAS backends, mounted in CalculateTab) + §10 security audit passed. Browser-validation pending Franco.
 
 ## 1. Purpose
 

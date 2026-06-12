@@ -20,54 +20,30 @@ import {
   hasSyncSession,
 } from "../../services/sync/syncEngine.js";
 import { createShare, listMyShares, revokeShare } from "../../services/sync/shareEngine.js";
-import { getSyncMeta, listProjects } from "../../services/Persistence/indexedDB.js";
+import { getSyncMeta, listProjects, loadProjectPipelines } from "../../services/Persistence/indexedDB.js";
+import { generateWorkspaceScript } from "../../pipeline/exporter.js";
 
 
 // ─── CASCADE HELPERS ──────────────────────────────────────────────────────────
-// Given a root G-step, BFS to find all downstream G-steps and derived datasets.
-function computeGStepCascade(rootStep, allSteps) {
-  const gStepIds  = new Set([rootStep.id]);
-  const datasetIds = new Set([rootStep.outputDatasetId].filter(Boolean));
-
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const s of allSteps) {
-      if (gStepIds.has(s.id)) continue;
-      if ([s.leftDatasetId, s.rightDatasetId].some(d => d && datasetIds.has(d))) {
-        gStepIds.add(s.id);
-        if (s.outputDatasetId) datasetIds.add(s.outputDatasetId);
-        changed = true;
-      }
-    }
-  }
-
-  return { gStepIds: [...gStepIds], datasetIds: [...datasetIds] };
+// MODEL: in-place (Gap C decision 2026-06-10). A join/append augments the LEFT
+// dataset in place — outputDatasetId === leftDatasetId — it never creates a
+// derived dataset node. So cascades never remove a dataset (doing so would delete
+// a SOURCE dataset). They only remove cross-dataset interactions (G-steps).
+//
+// Deleting a single G-step removes just that interaction (datasetIds always []).
+function computeGStepCascade(rootStep, _allSteps) {
+  return { gStepIds: [rootStep.id], datasetIds: [] };
 }
 
-// Given a source dataset ID, BFS to find all G-steps + datasets in the cascade.
+// Deleting a source dataset invalidates every interaction that references it (as
+// left or right operand) — those joins can no longer run. No derived datasets
+// exist to remove (in-place), so datasetIds is empty; the dataset itself is
+// tracked separately as the deleted item.
 function computeDatasetCascade(dsId, allSteps) {
-  const rootSteps  = allSteps.filter(s => s.leftDatasetId === dsId || s.rightDatasetId === dsId);
-  const gStepIds   = new Set(rootSteps.map(s => s.id));
-  const datasetIds = new Set([dsId, ...rootSteps.map(s => s.outputDatasetId).filter(Boolean)]);
-
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const s of allSteps) {
-      if (gStepIds.has(s.id)) continue;
-      if ([s.leftDatasetId, s.rightDatasetId].some(d => d && datasetIds.has(d))) {
-        gStepIds.add(s.id);
-        if (s.outputDatasetId) datasetIds.add(s.outputDatasetId);
-        changed = true;
-      }
-    }
-  }
-
-  // Remove the source dataset itself from the cascade dataset list
-  // (it's tracked separately as the deleted item)
-  datasetIds.delete(dsId);
-  return { gStepIds: [...gStepIds], datasetIds: [...datasetIds] };
+  const gStepIds = allSteps
+    .filter(s => s.leftDatasetId === dsId || s.rightDatasetId === dsId)
+    .map(s => s.id);
+  return { gStepIds, datasetIds: [] };
 }
 
 // ─── CASCADE CONFIRM DIALOG ───────────────────────────────────────────────────
@@ -217,6 +193,44 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
   const [shareOpen,    setShareOpen]    = useState(false);
   const [shareEmail,   setShareEmail]   = useState("");
   const [shareCanEdit, setShareCanEdit] = useState(false);
+  // ── Workspace replication export (Phase 9.5) ──────────────────────────────────
+  const [wsExportBusy, setWsExportBusy] = useState("");
+
+  // Build the multi-dataset script via the topo-sort exporter and download it.
+  // Each dataset's local pipeline + filename come from the per-project IDB record
+  // (loadProjectPipelines), keyed by dataset id. globalPipeline carries the
+  // cross-dataset G-steps. Join/append local steps are skipped inside the
+  // exporter (gStepId filter) so they emit once, from the global section.
+  async function exportWorkspace(language) {
+    if (wsExportBusy) return;
+    setWsExportBusy(language);
+    try {
+      const rec = await loadProjectPipelines(pid);
+      const map = rec?.datasetPipelines ?? {};
+      const built = {};
+      for (const [id, meta] of Object.entries(datasets)) {
+        const dsRec = map[id] ?? {};
+        built[id] = {
+          id,
+          name:     meta.name ?? id,
+          filename: dsRec.filename ?? meta.filename ?? meta.loadOpts?.filename ?? null,
+          pipeline: Array.isArray(dsRec.pipeline) ? dsRec.pipeline : [],
+        };
+      }
+      const script = generateWorkspaceScript({ language, datasets: built, globalPipeline });
+      const ext  = language === "r" ? "R" : language === "stata" ? "do" : "py";
+      const blob = new Blob([script], { type: "text/plain" });
+      const a    = document.createElement("a");
+      a.href     = URL.createObjectURL(blob);
+      a.download = `workspace_replication.${ext}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      console.warn("[DatasetManager] workspace export failed:", e?.message);
+    } finally {
+      setWsExportBusy("");
+    }
+  }
   const [shareResult,  setShareResult]  = useState(null); // { shareUrl, shareId }
   const [shareBusy,    setShareBusy]    = useState(false);
   const [shareErr,     setShareErr]     = useState("");
@@ -902,6 +916,35 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Workspace replication export — full multi-dataset script (DAG-ordered) */}
+            {Object.keys(datasets).length > 0 && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "0.4rem 0.85rem", borderTop: `1px solid ${C.border}`,
+              }}>
+                <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.04em", flex: 1 }}>
+                  Export workspace script
+                </span>
+                {[["r", "R"], ["stata", "Stata"], ["python", "Python"]].map(([lang, label]) => (
+                  <button
+                    key={lang}
+                    onClick={() => exportWorkspace(lang)}
+                    disabled={!!wsExportBusy}
+                    title={`Full replication script (all datasets, ${label})`}
+                    style={{
+                      padding: "2px 8px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                      border: `1px solid ${wsExportBusy === lang ? C.teal : C.border2}`, borderRadius: 2,
+                      background: wsExportBusy === lang ? `${C.teal}1a` : "transparent",
+                      color: wsExportBusy === lang ? C.teal : C.textDim,
+                      cursor: wsExportBusy ? "default" : "pointer",
+                    }}
+                  >
+                    {wsExportBusy === lang ? "…" : label}
+                  </button>
+                ))}
               </div>
             )}
           </div>

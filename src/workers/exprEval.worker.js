@@ -24,6 +24,7 @@
 
 import { drawSamples } from "../math/dgpDraw.js";
 import { assertSafeExpr } from "../pipeline/exprGuard.js";
+import { HELPERS } from "../pipeline/expressionHelpers.js";
 
 // ── SECURITY: scrub exfiltration / escape globals from the worker scope ────────
 // Even if an evaluated expression reconstructs a function via the constructor
@@ -36,32 +37,6 @@ for (const k of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importS
 }
 
 // ── Helpers injected into mutate expressions ──────────────────────────────────
-const HELPERS = {
-  ifelse:    (cond, a, b) => cond ? a : b,
-  log:       x => (typeof x === "number" && x > 0) ? Math.log(x) : null,
-  log10:     x => (typeof x === "number" && x > 0) ? Math.log10(x) : null,
-  log2:      x => (typeof x === "number" && x > 0) ? Math.log2(x) : null,
-  sqrt:      x => (typeof x === "number" && x >= 0) ? Math.sqrt(x) : null,
-  abs:       x => typeof x === "number" ? Math.abs(x) : null,
-  sign:      x => typeof x === "number" ? Math.sign(x) : null,
-  round:     (x, d = 0) => typeof x === "number" ? +x.toFixed(d) : null,
-  floor:     x => typeof x === "number" ? Math.floor(x) : null,
-  ceiling:   x => typeof x === "number" ? Math.ceil(x) : null,
-  exp:       x => typeof x === "number" ? Math.exp(x) : null,
-  coalesce:  (...args) => args.find(v => v !== null && v !== undefined) ?? null,
-  pmin:      (a, b) => (typeof a === "number" && typeof b === "number") ? Math.min(a, b) : null,
-  pmax:      (a, b) => (typeof a === "number" && typeof b === "number") ? Math.max(a, b) : null,
-  clamp:     (x, lo, hi) => typeof x === "number" ? Math.max(lo, Math.min(hi, x)) : null,
-  rescale:   (x, oMin, oMax, nMin = 0, nMax = 1) =>
-    (typeof x === "number" && oMax !== oMin)
-      ? (nMin + (x - oMin) * (nMax - nMin) / (oMax - oMin))
-      : null,
-  case_when: (...pairs) => {
-    for (let i = 0; i < pairs.length - 1; i += 2) { if (pairs[i]) return pairs[i + 1]; }
-    return pairs.length % 2 === 1 ? pairs[pairs.length - 1] : null;
-  },
-};
-
 // ── eval_col ──────────────────────────────────────────────────────────────────
 function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, cases, defaultVal, rules, elseValue }) {
   if (mode === "ai_tr") {
@@ -185,9 +160,11 @@ function evalScope({ variables, nObs, seed }) {
         assertSafeExpr(expr);
         const varNames  = Object.keys(scope);
         const varArrays = Object.values(scope);
-        const fn = Function(...varNames, "N", "observations", `"use strict"; return (${expr});`);
+        const helperNames = Object.keys(HELPERS);
+        const helperFns = Object.values(HELPERS);
+        const fn = Function(...varNames, ...helperNames, "N", "observations", `"use strict"; return (${expr});`);
         const arr = [];
-        for (let i = 0; i < nObs; i++) arr.push(fn(...varArrays.map(a => a[i]), nObs, nObs));
+        for (let i = 0; i < nObs; i++) arr.push(fn(...varArrays.map(a => a[i]), ...helperFns, nObs, nObs));
         scope[v.name] = arr;
       } catch (e) { return { error: `${v.name}: ${e.message}` }; }
 
@@ -208,13 +185,15 @@ function evalScope({ variables, nObs, seed }) {
       const updExpr  = (v.params.update || "prev").trim();
       const varNames  = Object.keys(scope);
       const varArrays = Object.values(scope);
+      const helperNames = Object.keys(HELPERS);
+      const helperFns = Object.values(HELPERS);
       try {
         assertSafeExpr(initExpr); assertSafeExpr(updExpr);
         const arr    = new Array(nObs);
-        const initFn = Function(...varNames, "N", "observations", `"use strict"; return (${initExpr});`);
-        arr[0] = initFn(...varArrays.map(a => a[0]), nObs, nObs);
-        const updFn = Function("prev", "i", ...varNames, "N", "observations", `"use strict"; return (${updExpr});`);
-        for (let i = 1; i < nObs; i++) arr[i] = updFn(arr[i - 1], i, ...varArrays.map(a => a[i]), nObs, nObs);
+        const initFn = Function(...varNames, ...helperNames, "N", "observations", `"use strict"; return (${initExpr});`);
+        arr[0] = initFn(...varArrays.map(a => a[0]), ...helperFns, nObs, nObs);
+        const updFn = Function("prev", "i", ...varNames, ...helperNames, "N", "observations", `"use strict"; return (${updExpr});`);
+        for (let i = 1; i < nObs; i++) arr[i] = updFn(arr[i - 1], i, ...varArrays.map(a => a[i]), ...helperFns, nObs, nObs);
         scope[v.name] = arr;
       } catch (e) { return { error: `${v.name}: ${e.message}` }; }
 

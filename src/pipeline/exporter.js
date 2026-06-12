@@ -246,7 +246,10 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`${df} <- readr::read_csv(${file})`);
-      for (const step of (ds.pipeline ?? [])) {
+      // Skip cross-dataset (join/append) local steps — they are hoisted to the
+      // globalPipeline section below and emitted there against the CLEANED right
+      // df. Emitting them here too would double the join (Gap C resolution).
+      for (const step of (ds.pipeline ?? []).filter(s => !s.gStepId)) {
         lines.push(toR(step, df, allDatasets));
       }
       lines.push(``);
@@ -293,7 +296,10 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`* Dataset: ${ds.name}`);
       lines.push(`* ${"─".repeat(60)}`);
       lines.push(`import delimited ${file}, clear`);
-      for (const step of (ds.pipeline ?? [])) {
+      // Skip cross-dataset (join/append) local steps — they are hoisted to the
+      // globalPipeline section below and emitted there against the CLEANED right
+      // df. Emitting them here too would double the join (Gap C resolution).
+      for (const step of (ds.pipeline ?? []).filter(s => !s.gStepId)) {
         lines.push(toStata(step, "df", allDatasets));
       }
       lines.push(`save "${dtaFile}", replace`);
@@ -342,7 +348,10 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`${df} = pd.read_csv(${file})`);
-      for (const step of (ds.pipeline ?? [])) {
+      // Skip cross-dataset (join/append) local steps — they are hoisted to the
+      // globalPipeline section below and emitted there against the CLEANED right
+      // df. Emitting them here too would double the join (Gap C resolution).
+      for (const step of (ds.pipeline ?? []).filter(s => !s.gStepId)) {
         lines.push(toPython(step, df, allDatasets));
       }
       lines.push(``);

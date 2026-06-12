@@ -2665,7 +2665,7 @@ export default function App() {
   const tabRawData = (tab) => {
     const id = tabDsId(tab);
     const ds = availableDatasets.find(d => d.id === id);
-    return ds ? { rows: ds.rows ?? [], headers: ds.headers ?? [] } : null;
+    return ds ? { rows: ds.rows ?? [], headers: ds.headers ?? [], _duckdb: ds._duckdb ?? null } : null;
   };
 
   // Setter: update one tab's selection; optionally call switchToDataset
@@ -2681,7 +2681,7 @@ export default function App() {
     if (out) return out;
     const rd = tabRawData("model");
     if (!rd?.rows?.length) return null;
-    return { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0 };
+    return { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0, _duckdb: rd._duckdb ?? null };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outputs, activeDatasetIds, activeDatasetId, availableDatasets]);
 
@@ -2788,7 +2788,7 @@ export default function App() {
         )}
 
         {screen==="workspace" && (
-          <SessionStateProvider key={pid}>
+          <SessionStateProvider key={pid} pid={pid}>
           <SessionLogProvider>
 
             <div style={{display:"flex",flexDirection:"column",height:"100%"}}>

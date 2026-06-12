@@ -23,9 +23,12 @@ import { evalExpression, buildScope,
 import { bootstrapMean, subsampleMean, permutationTwoSampleMean, bootstrapStatistic, permutationTest, permutationCompare, permutationRegressionCoef } from "../../../math/Resampling.js";
 import { mulberry32 } from "../../../math/rng.js";
 import { useSessionLog } from "../../../services/session/sessionLog.jsx";
+import { generateStatInferenceScript } from "../../../services/export/statInferenceScript.js";
 import { useTheme } from "../../../ThemeContext.jsx";
 import SampleTestPanel from "./SampleTestPanel.jsx";
 import QTEPanel from "./QTEPanel.jsx";
+
+const RS_LANGS = [["r", "R"], ["python", "Python"], ["stata", "Stata"]];
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Lbl({ children, color, mb = 6 }) {
@@ -698,6 +701,8 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
   const [rsB,       setRsB]       = useState(2000);
   const [rsM,       setRsM]       = useState(0);
   const [rsResult,  setRsResult]  = useState(null);
+  const [rsRunSpec, setRsRunSpec] = useState(null);
+  const [rsCopied,  setRsCopied]  = useState("");
   const [rsBusy,    setRsBusy]    = useState(false);
   const [rsStat,    setRsStat]    = useState("mean");        // bootstrap statistic
   const [rsCiType,  setRsCiType]  = useState("percentile");
@@ -708,6 +713,15 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
   const [rsYCol,    setRsYCol]    = useState("");           // regperm: outcome Y
   const [rsDCol,    setRsDCol]    = useState("");           // regperm: regressor D (coef under test)
   const [rsCovCols, setRsCovCols] = useState([]);           // regperm: covariate columns Z
+
+  function copyResamplingScript(lang) {
+    if (!rsRunSpec || !rsResult || rsResult.error) return;
+    const snippet = generateStatInferenceScript(lang, rsRunSpec.op, rsRunSpec.params, rsResult);
+    navigator.clipboard?.writeText(snippet.trimStart()).then(() => {
+      setRsCopied(lang);
+      setTimeout(() => setRsCopied(""), 2000);
+    }).catch(() => {});
+  }
 
   // ── Probability ─────────────────────────────────────────────────────────────
   const [probOpen,  setProbOpen]  = useState(false);
@@ -997,13 +1011,18 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
 
           function runRS() {
             if (rsMode === "regperm" ? (!rsYCol || !rsDCol) : !rsCol) return;
-            setRsBusy(true); setRsResult(null);
+            setRsBusy(true); setRsResult(null); setRsRunSpec(null);
             setTimeout(() => {
               try {
-                let res;
+                let res, scriptSpec = null;
                 const seedArg = rsSeed === "" ? null : Number(rsSeed);
                 if (rsMode === "boot") {
-                  res = bootstrapStatistic(colVals(rsCol), rsStat, { B: rsB, alpha: 0.05, ciType: rsCiType, seed: seedArg });
+                  const values = colVals(rsCol);
+                  res = bootstrapStatistic(values, rsStat, { B: rsB, alpha: 0.05, ciType: rsCiType, seed: seedArg });
+                  if (!res.error) scriptSpec = {
+                    op: "bootstrapStatistic",
+                    params: { values, statName: rsStat, B: rsB, alpha: 0.05, ciType: rsCiType, seed: res.seed },
+                  };
                 } else if (rsMode === "subsample") {
                   res = subsampleMean(colVals(rsCol), mEffective, rsB, 0.05, seedArg);
                 } else if (rsMode === "regperm") {
@@ -1030,9 +1049,14 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                     res = rsCompare
                       ? permutationCompare(a, b, { B: rsB, exact: null, seed: seedArg, alternative: rsAlt })
                       : permutationTest(a, b, rsContrast, { B: rsB, exact: null, seed: seedArg, alternative: rsAlt });
+                    if (!rsCompare && !res.error) scriptSpec = {
+                      op: "permutationTest",
+                      params: { a, b, statName: rsContrast, B: res.nPerm, exact: res.exact, seed: res.seed, alternative: rsAlt },
+                    };
                   }
                 }
                 setRsResult(res);
+                setRsRunSpec(scriptSpec);
                 if (res && !res.error) {
                   if (rsMode === "boot") {
                     appendLog?.({
@@ -1237,6 +1261,18 @@ export default function StatWorkspace({ rows = [], headers = [], onAddDataset, o
                   <div>p ({rsResult.alternative}) = <span style={{ color: rsResult.pValue < 0.05 ? C.gold : C.textDim }}>{fmt(rsResult.pValue, 4)}</span> &nbsp; {rsResult.exact ? `exact (${rsResult.nPerm} perms)` : `MC B=${rsResult.nPerm}, seed=${rsResult.seed}`}</div>
                   <ReplicateHistogram replicates={rsResult.replicates} marker={rsResult.observed} color={C.gold} />
                 </ResultBox>
+              )}
+
+              {rsRunSpec && rsResult && !rsResult.error && (
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>copy test code</span>
+                  {RS_LANGS.map(([id, label]) => (
+                    <button key={id} onClick={() => copyResamplingScript(id)}
+                      style={{ padding: "2px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.08em", border: `1px solid ${rsCopied === id ? C.teal : C.border2}`, borderRadius: 2, background: rsCopied === id ? `${C.teal}1a` : "transparent", color: rsCopied === id ? C.teal : C.textMuted, cursor: "pointer" }}>
+                      {rsCopied === id ? "✓" : label}
+                    </button>
+                  ))}
+                </div>
               )}
 
               {rsResult && !rsResult.error && rsResult.compare && !rsResult.regression && (

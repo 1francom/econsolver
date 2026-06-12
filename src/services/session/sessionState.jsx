@@ -5,7 +5,8 @@
 //
 // Mounted at workspace level with key={pid} so each project gets a fresh state.
 
-import { createContext, useContext, useReducer } from "react";
+import { createContext, useContext, useReducer, useEffect, useRef } from "react";
+import { saveSessionMeta, loadSessionMeta } from "../Persistence/indexedDB.js";
 
 // ─── CONTEXT ─────────────────────────────────────────────────────────────────
 const StateCtx    = createContext(null);
@@ -80,14 +81,48 @@ function reducer(state, action) {
     case "SET_CALC_WORKSPACE":
       return { ...state, calcWorkspace: action.workspace };
 
+    case "HYDRATE_SESSION_META":
+      return {
+        ...state,
+        globalPipeline: Array.isArray(action.meta?.globalPipeline) ? action.meta.globalPipeline : state.globalPipeline,
+        calcWorkspace:  action.meta?.calcWorkspace ?? state.calcWorkspace,
+      };
+
     default:
       return state;
   }
 }
 
 // ─── PROVIDER ─────────────────────────────────────────────────────────────────
-export function SessionStateProvider({ children }) {
+export function SessionStateProvider({ children, pid = null }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const hydratedRef = useRef(false);
+
+  // Hydrate cross-dataset lineage (globalPipeline) + calcWorkspace from IndexedDB
+  // when the project opens. The dataset registry itself is restored separately by
+  // DataStudio; G-steps reference stable dataset ids, so they resolve on reload.
+  useEffect(() => {
+    let cancelled = false;
+    hydratedRef.current = false;
+    if (!pid) { hydratedRef.current = true; return () => { cancelled = true; }; }
+    loadSessionMeta(pid).then(meta => {
+      if (cancelled) return;
+      if (meta) dispatch({ type: "HYDRATE_SESSION_META", meta });
+      hydratedRef.current = true;
+    }).catch(() => { if (!cancelled) hydratedRef.current = true; });
+    return () => { cancelled = true; };
+  }, [pid]);
+
+  // Debounced persist; never write before hydration completes (would clobber the
+  // stored lineage with the empty initial state).
+  useEffect(() => {
+    if (!pid || !hydratedRef.current) return;
+    const t = setTimeout(() => {
+      saveSessionMeta(pid, { globalPipeline: state.globalPipeline, calcWorkspace: state.calcWorkspace }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(t);
+  }, [pid, state.globalPipeline, state.calcWorkspace]);
+
   return (
     <StateCtx.Provider value={state}>
       <DispatchCtx.Provider value={dispatch}>

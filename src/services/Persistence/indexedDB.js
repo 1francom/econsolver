@@ -545,6 +545,7 @@ export async function deleteProject(pid) {
   await deleteCoachChats(pid);
   await deleteModelBuffer(pid);
   await deleteSpatialMaps(pid);
+  await deleteSessionMeta(pid);
 }
 
 /**
@@ -702,6 +703,37 @@ export async function loadSpatialMaps(pid) {
 }
 export async function deleteSpatialMaps(pid) {
   try { const db = await openDB(); await tx(STORE_SPATIAL_MAPS, db, "readwrite", s => s.delete(pid)); } catch { /* non-fatal */ }
+}
+
+// ─── SESSION META API (phase 9.3) ─────────────────────────────────────────────
+// Cross-dataset globalPipeline + Calculate-tab calcWorkspace, one record per
+// project pid. Stored in the pipelines store under a string key (mirrors
+// plotHistory) so no schema bump. The dataset registry itself lives in
+// dataset_registry; this holds only the session-level coordination state.
+//   Value : { id: `sessionMeta_${pid}`, meta: { globalPipeline, calcWorkspace }, ts }
+export async function saveSessionMeta(pid, meta) {
+  if (!pid) return { stored: false };
+  try {
+    const db = await openDB();
+    await tx(STORE_PIPE, db, "readwrite", s =>
+      s.put({ id: `sessionMeta_${pid}`, meta: meta ?? null, ts: Date.now() }));
+    return { stored: true };
+  } catch (err) { console.warn("[IDB] saveSessionMeta failed:", err.message); return { stored: false }; }
+}
+export async function loadSessionMeta(pid) {
+  if (!pid) return null;
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const t   = db.transaction(STORE_PIPE, "readonly");
+      const req = t.objectStore(STORE_PIPE).get(`sessionMeta_${pid}`);
+      req.onsuccess = e => resolve(e.target.result?.meta ?? null);
+      req.onerror   = e => reject(e.target.error);
+    });
+  } catch { return null; }
+}
+export async function deleteSessionMeta(pid) {
+  try { const db = await openDB(); await tx(STORE_PIPE, db, "readwrite", s => s.delete(`sessionMeta_${pid}`)); } catch { /* non-fatal */ }
 }
 
 // ─── DATASET REGISTRY API ─────────────────────────────────────────────────────
