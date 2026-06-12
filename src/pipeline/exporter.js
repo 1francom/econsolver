@@ -70,9 +70,11 @@ function pythonHeader(datasetName) {
 
 // ─── SAFE IDENTIFIER HELPERS ──────────────────────────────────────────────────
 
-function toDfVar(name) {
-  // Convert dataset name to a safe R/Python variable name
-  return "df_" + name.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^[0-9]/, "_");
+export function toDfVar(name) {
+  // Convert dataset name to a safe R/Python variable name.
+  // Strips the file extension first so "data.csv" → df_data, not df_data_csv.
+  const base = String(name ?? "dataset").replace(/\.[^.]+$/, "");
+  return "df_" + base.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^[0-9]/, "_");
 }
 
 function toStataFile(name) {
@@ -220,7 +222,7 @@ function topoSort(datasets, globalPipeline) {
  *
  * @param {object} opts
  * @param {"r"|"stata"|"python"} opts.language
- * @param {object}  opts.datasets        - { id: { id, name, filename, pipeline } }
+ * @param {object}  opts.datasets        - { id: { id, name, filename, pipeline, loadOpts? } }
  * @param {object[]} opts.globalPipeline - G-steps array
  * @returns {string}
  */
@@ -239,13 +241,11 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
     const lines = [rHeader("Workspace — All Datasets")];
     for (const ds of ordered) {
       const df   = toDfVar(ds.name);
-      const file = ds.filename
-        ? `"${ds.filename}"`
-        : `"<path_to_${ds.name.replace(/\s+/g, "_")}.csv>"`;
+      const file = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
-      lines.push(`${df} <- readr::read_csv(${file})`);
+      lines.push(buildRLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
       // Skip cross-dataset (join/append) local steps — they are hoisted to the
       // globalPipeline section below and emitted there against the CLEANED right
       // df. Emitting them here too would double the join (Gap C resolution).
@@ -288,14 +288,12 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
     lines.push(``);
 
     for (const ds of ordered) {
-      const file    = ds.filename
-        ? `"${ds.filename}"`
-        : `"<path_to_${ds.name.replace(/\s+/g, "_")}.csv>"`;
+      const file    = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
       const dtaFile = toStataFile(ds.name);
       lines.push(`* ${"─".repeat(60)}`);
       lines.push(`* Dataset: ${ds.name}`);
       lines.push(`* ${"─".repeat(60)}`);
-      lines.push(`import delimited ${file}, clear`);
+      lines.push(buildStataLoadLine(file, ds.loadOpts ?? null));
       // Skip cross-dataset (join/append) local steps — they are hoisted to the
       // globalPipeline section below and emitted there against the CLEANED right
       // df. Emitting them here too would double the join (Gap C resolution).
@@ -341,13 +339,11 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
     const lines = [pythonHeader("Workspace — All Datasets")];
     for (const ds of ordered) {
       const df   = toDfVar(ds.name);
-      const file = ds.filename
-        ? `"${ds.filename}"`
-        : `"<path_to_${ds.name.replace(/\s+/g, "_")}.csv>"`;
+      const file = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
-      lines.push(`${df} = pd.read_csv(${file})`);
+      lines.push(buildPyLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
       // Skip cross-dataset (join/append) local steps — they are hoisted to the
       // globalPipeline section below and emitted there against the CLEANED right
       // df. Emitting them here too would double the join (Gap C resolution).

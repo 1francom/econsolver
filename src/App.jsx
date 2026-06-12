@@ -67,18 +67,88 @@ const DEMO_CSV = `wage,educ,exper,union,country,id,year
 
 const PRELOADED_DATASETS = [
   {
-    id: "fast_food_did",
-    label: "Fast food DiD",
-    filename: "fast_food_DiD.csv",
-    url: "/preloaded/fast_food_DiD.csv",
-    hint: "Card-Krueger fast food panel for DiD",
+    id: "comunas_metadata",
+    label: "Comunas metadata",
+    filename: "comunas_metadata.csv",
+    url: "/preloaded/comunas_metadata.csv",
+    hint: "Geographic metadata for the crime panel dataset",
   },
   {
-    id: "rdrobust_senate",
-    label: "Senate RD",
-    filename: "rdrobust_senate.csv",
-    url: "/preloaded/rdrobust_senate.csv",
-    hint: "Regression discontinuity sample",
+    id: "crimen_panel_data",
+    label: "Crime panel data",
+    filename: "crimen_panel_data.csv",
+    url: "/preloaded/crimen_panel_data.csv",
+    hint: "Commune-level crime and security budget panel",
+  },
+  {
+    id: "dataset_2sls",
+    label: "2SLS",
+    filename: "dataset_2SLS.csv",
+    url: "/preloaded/dataset_2SLS.csv",
+    hint: "Instrumental variables and two-stage least squares",
+  },
+  {
+    id: "dataset_did",
+    label: "Difference-in-Differences",
+    filename: "dataset_DiD.csv",
+    url: "/preloaded/dataset_DiD.csv",
+    hint: "Treatment and post-period data for DiD",
+  },
+  {
+    id: "dataset_fuzzy_rdd",
+    label: "Fuzzy RDD",
+    filename: "dataset_fuzzy_rdd.csv",
+    url: "/preloaded/dataset_fuzzy_rdd.csv",
+    hint: "Fuzzy regression discontinuity design",
+  },
+  {
+    id: "dataset_ols",
+    label: "OLS",
+    filename: "dataset_OLS.csv",
+    url: "/preloaded/dataset_OLS.csv",
+    hint: "Multiple linear regression sample",
+  },
+  {
+    id: "dataset_panel",
+    label: "Panel data",
+    filename: "dataset_Panel.csv",
+    url: "/preloaded/dataset_Panel.csv",
+    hint: "Entity-time panel with outcome and covariates",
+  },
+  {
+    id: "dataset_rdd",
+    label: "Sharp RDD",
+    filename: "dataset_RDD.csv",
+    url: "/preloaded/dataset_RDD.csv",
+    hint: "Sharp regression discontinuity design",
+  },
+  {
+    id: "dataset_twfe",
+    label: "TWFE",
+    filename: "dataset_TWFE.csv",
+    url: "/preloaded/dataset_TWFE.csv",
+    hint: "Staggered treatment panel for two-way fixed effects",
+  },
+  {
+    id: "data_gmm",
+    label: "GMM",
+    filename: "data_GMM.csv",
+    url: "/preloaded/data_GMM.csv",
+    hint: "Moment-condition instruments for GMM estimation",
+  },
+  {
+    id: "fulton_data",
+    label: "Fulton fish market",
+    filename: "PS2_Ex1_Fulton_data.csv",
+    url: "/preloaded/PS2_Ex1_Fulton_data.csv",
+    hint: "Daily Fulton fish market price and quantity data",
+  },
+  {
+    id: "synth_control_simulated_panel",
+    label: "Synthetic control",
+    filename: "synth_control_simulated_panel.csv",
+    url: "/preloaded/synth_control_simulated_panel.csv",
+    hint: "Simulated regional panel for synthetic control",
   },
 ];
 
@@ -1045,7 +1115,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
 }
 
 // Dataset overview + load controls (file upload, World Bank, OECD).
-function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset }) {
+function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset, onRenameDataset }) {
   const { C, T } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","JSON","DTA","RDS","DBF","SHP","ZIP"];
   const fileRef  = useRef();
@@ -1058,6 +1128,8 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
   const [preloadedOpen, setPreloadedOpen] = useState(false);
   const [dragOver,  setDragOver]  = useState(false);
   const [view,      setView]      = useState("overview"); // "overview" | "grid"
+  const [renamingId, setRenamingId] = useState(null);     // dataset being renamed inline
+  const [renameVal,  setRenameVal]  = useState("");
 
   // The active dataset (from the availableDatasets mirror) is the display source.
   const activeDs    = availableDatasets.find(d => d.id === activeDatasetId) ?? null;
@@ -1254,7 +1326,15 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                 <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:8}}>Session datasets</div>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   {availableDatasets.map((ds) => {
-                    const isActive = ds.id === activeDatasetId;
+                    const isActive  = ds.id === activeDatasetId;
+                    const dsLabel   = ds.name ?? ds.filename ?? ds.id;
+                    const isRenamed = ds.name && ds.name !== ds.filename;
+                    const renaming  = renamingId === ds.id;
+                    const commitRename = () => {
+                      const v = renameVal.trim();
+                      if (v && v !== dsLabel) onRenameDataset?.(ds.id, v);
+                      setRenamingId(null);
+                    };
                     return (
                       <div key={ds.id} style={{display:"flex",alignItems:"center",gap:4}}>
                         <button onClick={() => onSelectDataset?.(ds.id)}
@@ -1267,16 +1347,47 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                           <span style={{fontSize: T.caption.fontSize,color: isActive ? C.teal : C.textMuted}}>
                             {isActive ? "●" : "○"}
                           </span>
-                          <span style={{fontSize: T.caption.fontSize,color: isActive ? C.text : C.textDim,flex:1,
-                                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                            {ds.filename ?? ds.id}
-                          </span>
-                          {ds.rowCount && (
+                          {renaming ? (
+                            <input
+                              autoFocus
+                              value={renameVal}
+                              onChange={e => setRenameVal(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              onKeyDown={e => {
+                                if (e.key === "Enter")  commitRename();
+                                if (e.key === "Escape") setRenamingId(null);
+                              }}
+                              onBlur={commitRename}
+                              style={{flex:1,minWidth:0,background:C.bg,border:`1px solid ${C.teal}60`,
+                                      borderRadius:2,padding:"1px 6px",color:C.text,
+                                      fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,outline:"none"}}
+                            />
+                          ) : (
+                            <span style={{fontSize: T.caption.fontSize,color: isActive ? C.text : C.textDim,flex:1,
+                                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}
+                                  title={isRenamed ? `file: ${ds.filename}` : undefined}>
+                              {dsLabel}
+                              {isRenamed && (
+                                <span style={{color:C.textMuted}}> · {ds.filename}</span>
+                              )}
+                            </span>
+                          )}
+                          {ds.rowCount && !renaming && (
                             <span style={{fontSize: T.caption.fontSize,color:C.textMuted,flexShrink:0}}>
                               {ds.rowCount.toLocaleString()} × {ds.colCount ?? "?"}
                             </span>
                           )}
                         </button>
+                        <button
+                          onClick={() => { setRenamingId(ds.id); setRenameVal(dsLabel); }}
+                          title="Rename dataset (sets the data-frame name in replication scripts)"
+                          style={{flexShrink:0,width:20,height:20,display:"flex",alignItems:"center",
+                                  justifyContent:"center",background:"transparent",border:"none",
+                                  cursor:"pointer",color:C.textMuted,fontSize: T.caption.fontSize,lineHeight:1,
+                                  borderRadius:2,transition:"color 0.1s"}}
+                          onMouseEnter={e => e.currentTarget.style.color = C.teal}
+                          onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                        >✎</button>
                         <button
                           onClick={() => onDeleteDataset?.(ds.id)}
                           title="Remove dataset"
@@ -2844,6 +2955,7 @@ export default function App() {
                     activeDatasetId={tabDsId("data")}
                     onSelectDataset={id => selectDataset("data", id, true)}
                     onDeleteDataset={id => { studioRef.current?.removeDataset(id); }}
+                    onRenameDataset={(id, name) => { studioRef.current?.renameDataset?.(id, name); }}
                   />
                 </div>
 
@@ -2954,7 +3066,7 @@ export default function App() {
                 {/* REPORT — Phase 9.10 */}
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
                   {tabOutput("report")
-                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} availableDatasets={availableDatasets} />
+                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} availableDatasets={availableDatasets} pid={pid} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }
                 </div>

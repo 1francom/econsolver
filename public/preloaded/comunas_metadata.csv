@@ -1,0 +1,21 @@
+"id","nombre_comuna","area_km2","es_centro_urbano"
+1,"Comuna 1",18.72,0
+2,"Comuna 2",19.06,0
+3,"Comuna 3",9.29,0
+4,"Comuna 4",17.46,0
+5,"Comuna 5",14.63,0
+6,"Comuna 6",12.79,1
+7,"Comuna 7",16.05,0
+8,"Comuna 8",7.02,0
+9,"Comuna 9",14.85,0
+10,"Comuna 10",15.58,0
+11,"Comuna 11",11.87,1
+12,"Comuna 12",15.79,1
+13,"Comuna 13",19.02,1
+14,"Comuna 14",8.83,1
+15,"Comuna 15",11.93,0
+16,"Comuna 16",19.1,1
+17,"Comuna 17",19.67,0
+18,"Comuna 18",6.76,1
+19,"Comuna 19",12.12,1
+20,"Comuna 20",13.4,1

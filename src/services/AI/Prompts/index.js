@@ -910,14 +910,23 @@ TRANSFORMATION RULES (apply all):
        Python: pd.read_csv(file, sep=";"), Stata: import delimited "...",
        delimiter(";") clear). Excel must include the sheet name. Stata .dta
        must use 'use ... , clear' / R 'haven::read_dta' / Py 'pd.read_stata'.
-    b. If a "REQUIRED LOAD CALL" line is provided, that load call is
-       authoritative — emit it verbatim in the Data Loading section.
+    b. If "REQUIRED LOAD CALL(S)" lines are provided, those load calls are
+       authoritative — emit EVERY one of them verbatim in the Data Loading
+       section. A multi-dataset session loads ALL its datasets, each into
+       its own named data frame (df_<name>); never collapse them into a
+       single generic 'df' and never drop a dataset because the model does
+       not use it.
     c. Walk the PIPELINE step list in order. If the section scripts already
        cover all steps, keep them. If any step is missing, add it.
     d. Reflect the SE TYPE from the snapshot in the estimation call when
        applicable (e.g. fixest cluster=, plm vcov, statsmodels cov_type).
     e. If PINNED MODELS or SUBSETS are listed, mention them in a final
        comment block — do not estimate them unless the section script does.
+    f. If a MODEL SOURCE DATASET line is present, the estimation MUST run
+       on that dataset's data frame (R/Python: data = df_<name>; Stata:
+       'use' that dataset's cleaned data before the estimation command).
+       Estimating on any other data frame is a fatal error — the model's
+       variables only exist in its source dataset.
 
 OUTPUT RULES (mandatory):
 - Return ONLY the script — no markdown fences, no preamble, no explanations.
