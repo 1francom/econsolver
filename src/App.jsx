@@ -2900,7 +2900,7 @@ export default function App() {
 
         {screen==="workspace" && (
           <SessionStateProvider key={pid} pid={pid}>
-          <SessionLogProvider>
+          <SessionLogProvider pid={pid}>
 
             <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
               <WorkspaceBar

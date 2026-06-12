@@ -134,13 +134,19 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
 
 ### FASE 1 — Unified, persisted execution timeline + Explore instrumentation
 
-- [ ] **1.1 — Timeline store.** New `src/services/Persistence/timeline.js` mirroring
-  `plotHistory.js` (`getTimeline(pid)`, `appendTimeline(pid, event)`, keyed
-  `timeline_<pid>` in the `pipelines` store). Event shape: `{ id, ts, kind, datasetId?, params, reproducible, label }`.
-- [ ] **1.2 — Persist + broaden `sessionLog`.** Wire `appendLog` to also persist via
-  `appendTimeline`. Add emitters for `dataset_load` (DataStudio load paths),
-  `estimate` (ModelingTab on successful estimate), and `pipeline_step` summary per
-  dataset. Keep existing spatial/calc/sim emitters.
+- [x] **1.1 — Timeline store.** *(code-complete 2026-06-12)* New `src/services/Persistence/timeline.js` mirroring
+  `plotHistory.js` (`getTimeline(pid)`, `appendTimeline(pid, event)`, `saveTimeline`, keyed
+  `timeline_<pid>` in the `pipelines` store). Events stored in the sessionLog entry shape
+  (module/opType/timestamp/params/reproducible/label, opType = event kind).
+- [x] **1.2 — Persist + broaden `sessionLog`.** *(code-complete 2026-06-12, browser-validation pending Franco)*
+  `SessionLogProvider` gains `pid` (App passes it): hydrates from `getTimeline` on mount,
+  `appendLog` writes through `appendTimeline`, `clearLog` wipes. New `useSessionLogOptional`
+  (no-throw) for components that may render outside the provider. Emitters added:
+  `dataset_load` + `dataset_derive` (DataStudio `addParsedDataset`/`handleSaveSubset` —
+  the two funnels), `estimate` (ModelingTab result-change effect — covers ALL estimator
+  branches), `pipeline_step` (WranglingModule `addStep` funnel, tagged with datasetId).
+  `serializeSnapshot` MODULE OPERATIONS capped at last 60 entries (persisted log grows
+  across sessions; protects the AI payload budget).
 - [ ] **1.3 — Explore instrumentation (D5).** In `ExplorerModule.jsx`, add a
   save/pin affordance to TS/distribution/correlation quick-look plots (route their
   config into `plotHistory` like ◈ Plot Builder) and to descriptive outputs

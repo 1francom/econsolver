@@ -198,11 +198,15 @@ export function serializeSnapshot(snapshot) {
   }
 
   // ── Session log (cross-module operations) ─────────────────────────────────
+  // The log is persisted across sessions (Fase 1.2) and can grow large —
+  // cap at the most recent 60 entries to protect the AI payload budget.
   if (snapshot.sessionLog?.length) {
-    lines.push(`\nMODULE OPERATIONS (${snapshot.sessionLog.length}, chronological):`);
-    snapshot.sessionLog
+    const capped = snapshot.sessionLog
       .slice()
       .sort((a, b) => a.timestamp - b.timestamp)
+      .slice(-60);
+    lines.push(`\nMODULE OPERATIONS (showing ${capped.length} of ${snapshot.sessionLog.length}, chronological):`);
+    capped
       .forEach((entry, i) => {
         const flag = entry.reproducible ? "" : " [non-reproducible]";
         const params = entry.params

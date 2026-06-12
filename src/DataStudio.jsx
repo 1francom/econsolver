@@ -25,6 +25,7 @@ import { saveRawData, loadRawData, deleteRawData, saveDatasetRegistry, loadDatas
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
 import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
+import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { deleteCacheEntry } from "./services/data/parquetCache.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 
@@ -685,6 +686,8 @@ const ensureRowIds = ensureRowIdentity;
 const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets, onComplete, onOutputReady, onDatasetsChange, onActiveDatasetChange, activeDatasetId, assistantPrefill = null, onConsumePrefill = null }, ref) {
   const { C, T } = useTheme();
   const dispatch = useSessionDispatch();
+  // Execution-timeline emitter (Fase 1.2) — no-op when outside the provider.
+  const { appendLog } = useSessionLogOptional();
 
   // Ref exposed to WranglingModule so DataViewer can dispatch patch steps
   const wranglingAddStepRef = useRef(null);
@@ -865,8 +868,13 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         loadOpts: parsed._loadOpts ?? null,
       });
     }
+    appendLog({
+      module: "data", opType: "dataset_load", datasetId: id,
+      params: { filename, loadOpts: parsed._loadOpts ?? null, rows: parsed.rows.length, cols: parsed.headers.length },
+      label:  `Loaded ${filename} (${parsed.rows.length.toLocaleString()} × ${parsed.headers.length})`,
+    });
     return id;
-  }, [dispatch]);
+  }, [dispatch, appendLog]);
 
   const handleLoadFile = useCallback(async (file) => {
     setLoading(true);
@@ -956,8 +964,16 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         headers:  headers,
       });
     }
+    appendLog({
+      module: "data", opType: "dataset_derive", datasetId: id,
+      // reproducible:false until Fase 2.1 records the deriving recipe as a
+      // globalPipeline edge — for now only the parent pointer is known.
+      reproducible: false,
+      params: { name, originId: activeId, rows: rows.length, cols: headers.length },
+      label:  `Derived dataset ${name} (${rows.length.toLocaleString()} × ${headers.length})`,
+    });
     return id;
-  }, [activeId, dispatch]);
+  }, [activeId, dispatch, appendLog]);
 
   // Expose imperative handles so DataTab can add datasets without prop-drilling.
   // Must come after handleLoadFile and handleSaveSubset are defined.

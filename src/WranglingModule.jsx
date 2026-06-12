@@ -38,6 +38,7 @@ import {
 
 // ── Session state — two-tier pipeline registry ─────────────────────────────
 import { useSessionDispatch } from "./services/session/sessionState.jsx";
+import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 
 // ── Re-exports (consumed by ModelingTab and other modules) ─────────────────
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
@@ -54,6 +55,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const { C, T } = useTheme();
   // Session dispatch — may be null when rendered outside SessionStateProvider (tests/legacy)
   const sessionDispatch = useSessionDispatch();
+  // Execution-timeline emitter (Fase 1.2) — no-op when outside the provider.
+  const { appendLog } = useSessionLogOptional();
 
   // State starts empty — IndexedDB load is async (see useEffect below)
   const [pipeline,         setPipeline]        = useState([]);
@@ -286,7 +289,12 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       snapshot(p);
       return [...p, { ...s, id: stepId, datasetId: pid, ...(gStepId ? { gStepId } : {}) }];
     });
-  }, [snapshot, pid, sessionDispatch]);
+    appendLog({
+      module: "clean", opType: "pipeline_step", datasetId: pid,
+      params: { stepType: s.type, desc: s.desc ?? s.description ?? null, ...(gStepId ? { gStepId } : {}) },
+      label:  `[${filename ?? pid}] ${s.type}${s.desc ? " — " + s.desc : ""}`,
+    });
+  }, [snapshot, pid, sessionDispatch, appendLog, filename]);
 
   // Expose addStep via ref so DataStudio can dispatch patch steps from DataViewer
   useEffect(() => {
