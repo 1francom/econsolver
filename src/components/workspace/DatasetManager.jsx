@@ -215,6 +215,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
           name:     meta.name ?? id,
           filename: dsRec.filename ?? meta.filename ?? meta.loadOpts?.filename ?? null,
           pipeline: Array.isArray(dsRec.pipeline) ? dsRec.pipeline : [],
+          loadOpts: dsRec.loadOpts ?? meta.loadOpts ?? null,
         };
       }
       const script = generateWorkspaceScript({ language, datasets: built, globalPipeline });

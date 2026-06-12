@@ -2,7 +2,7 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { parseWktRings } from "../shared/wkt.js";
 import { buildColorScale } from "../shared/color.js";
-import { CARTO_TILE, lonToTx, latToTy, txToLon, tyToLat, pickTileZ } from "../shared/leaflet.js";
+import { BASEMAPS, lonToTx, latToTy, txToLon, tyToLat, pickTileZ } from "../shared/leaflet.js";
 import { makeCabaMetricGrid } from "../shared/crs.js";
 import { geoBbox } from "./geo.js";
 import { GEO_MARGIN, appendSvgLegend } from "./legend.js";
@@ -11,10 +11,11 @@ import { useTheme } from "../../../../ThemeContext.jsx";
 
 export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
   { Plt, layers, rows, availableDatasets, title, subtitle, caption,
-    maxW = 700, maxH = 0, forceH = 0, showTiles = false, C },
+    maxW = 700, maxH = 0, forceH = 0, basemap = "none", C },
   ref
 ) {
   const { T } = useTheme();
+  const showTiles = basemap != null && basemap !== "none";
   const canvasRef  = useRef(null);
   const tileCanRef = useRef(null);
   const wrapperRef = useRef(null);
@@ -115,7 +116,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       };
       document.body.appendChild(iframe);
     },
-  }), [showTiles, C?.bg, title, subtitle, caption, T.caption.fontSize, T.h2.fontSize]);
+  }), [basemap, C?.bg, title, subtitle, caption, T.caption.fontSize, T.h2.fontSize]);
 
   useEffect(() => {
     if (!Plt || !canvasRef.current || layers.length === 0) return;
@@ -367,7 +368,13 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           const lat1 = tyToLat(ty,   z), lat0 = tyToLat(ty + 1, z); // lat1 > lat0
           const px0 = lonToPx(lon0), px1 = lonToPx(lon1);
           const py0 = latToPy(lat1), py1 = latToPy(lat0);
-          const url = CARTO_TILE.replace("{z}", z).replace("{x}", tx).replace("{y}", ty);
+          const tcfg = BASEMAPS[basemap] ?? BASEMAPS.light;
+          const url = tcfg.url
+            .replace("{s}", "a")
+            .replace("{z}", String(z))
+            .replace("{x}", String(tx))
+            .replace("{y}", String(ty))
+            .replace("{r}", "");
           const img = new Image();
           img.crossOrigin = "anonymous";
           img.onload = () => { try { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); } catch (err) { void err; } };
@@ -378,7 +385,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     }
 
     return () => { while (el.firstChild) el.removeChild(el.firstChild); };
-  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, maxW, maxH, forceH, showTiles, C, T.caption.fontSize]);
+  }, [Plt, layers, rows, availableDatasets, title, subtitle, caption, maxW, maxH, forceH, basemap, C, T.caption.fontSize]);
 
   return (
     <div ref={wrapperRef} style={{ fontFamily: "serif", color: C?.text ?? "#c8c8c8", background: C?.bg ?? "#0e1117", padding: "12px 8px 8px", borderRadius: 4, border: `1px solid ${C?.border ?? "#2e3340"}` }}>

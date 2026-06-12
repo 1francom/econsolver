@@ -23,6 +23,7 @@
 //   await generateUnifiedScript(sections, "r", dataDictionary, { snapshot: snap });
 
 import { trimResult } from "../Persistence/trimResult.js";
+import { toDfVar } from "../../pipeline/exporter.js";
 
 // Helper: keep payloads small for the cached system prompt budget.
 function trimPipeline(pipeline) {
@@ -51,6 +52,7 @@ export function buildSessionSnapshot({
   inferenceOpts = null,
   estimatorMeta = null,
   sessionLog = null,
+  datasets = null,          // ALL session datasets: [{ id, name, filename, loadOpts }]
 } = {}) {
   const filename = cleanedData?.filename ?? result?.spec?.filename ?? null;
   const loadOpts = cleanedData?.loadOpts ?? result?.spec?.dataLoadOpts ?? null;
@@ -59,8 +61,21 @@ export function buildSessionSnapshot({
     ? { filename, ...(loadOpts ?? { format: "csv" }) }
     : loadOpts ?? null;
 
+  // The dataset the active model was estimated on (spec.filename is stamped by
+  // ModelingTab at estimation time). Replication scripts must run the model
+  // against THIS dataset's data frame, never the Report tab's active dataset.
+  const modelDataset = result?.spec?.filename ?? null;
+
   return {
     dataLoadOpts,
+    datasets: Array.isArray(datasets)
+      ? datasets.map(d => ({
+          name:     d.name ?? d.filename ?? d.id,
+          filename: d.filename ?? null,
+          loadOpts: d.loadOpts ?? null,
+        }))
+      : null,
+    modelDataset,
     pipeline:       trimPipeline(cleanedData?.pipeline ?? result?.spec?.pipeline ?? []),
     dataDictionary: trimDict(cleanedData?.dataDictionary ?? result?.spec?.dataDictionary),
     panelIndex:     cleanedData?.panelIndex ?? null,
@@ -82,8 +97,31 @@ export function serializeSnapshot(snapshot) {
   if (!snapshot) return "";
   const lines = [];
 
-  // ── Data load context ──────────────────────────────────────────────────────
-  if (snapshot.dataLoadOpts) {
+  // ── Session datasets (multi-dataset workspaces) ────────────────────────────
+  if (snapshot.datasets?.length) {
+    lines.push(`SESSION DATASETS (${snapshot.datasets.length} — load ALL of them, each into its own data frame):`);
+    snapshot.datasets.forEach(d => {
+      const o = d.loadOpts ?? {};
+      const parts = [];
+      if (o.format)    parts.push(`format=${o.format}`);
+      if (o.delimiter && o.delimiter !== "auto") parts.push(`delimiter=${JSON.stringify(o.delimiter)}`);
+      if (o.encoding && o.encoding !== "utf-8")  parts.push(`encoding="${o.encoding}"`);
+      if (o.sheetName) parts.push(`sheet="${o.sheetName}"`);
+      lines.push(`  ${toDfVar(d.name)} ← "${d.filename ?? d.name}"${parts.length ? " (" + parts.join(", ") + ")" : ""}`);
+    });
+    if (snapshot.modelDataset) {
+      // modelDataset is the FILENAME stamped at estimation time; the df identifier
+      // comes from the dataset's (possibly user-renamed) display name.
+      const src = snapshot.datasets.find(d => d.filename === snapshot.modelDataset)
+               ?? snapshot.datasets.find(d => d.name === snapshot.modelDataset);
+      lines.push(`MODEL SOURCE DATASET: "${snapshot.modelDataset}" → the estimation MUST run on ${toDfVar(src?.name ?? snapshot.modelDataset)}.`);
+    }
+    lines.push("");
+  }
+
+  // ── Data load context (single-dataset sessions only — the SESSION DATASETS
+  //    block above is authoritative when present) ──────────────────────────────
+  if (snapshot.dataLoadOpts && !snapshot.datasets?.length) {
     const o = snapshot.dataLoadOpts;
     const parts = [];
     if (o.filename)  parts.push(`filename="${o.filename}"`);

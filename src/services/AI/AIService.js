@@ -30,6 +30,8 @@ import {
   buildMetadataContext,
 } from "./Prompts/index.js";
 import { serializeSnapshot, loadOptsToScriptHint } from "./sessionSnapshot.js";
+import { toDfVar } from "../../pipeline/exporter.js";
+import { buildRLoadLine, buildPyLoadLine, buildStataLoadLine } from "../export/loadLine.js";
 import { serializeAllowedSteps, serializeCapabilityMap } from "./appCapabilityMap.js";
 import { filterVariableNames, filterSampleRows } from "../Privacy/privacyFilter.js";
 import { detectPII } from "../Privacy/piiDetector.js";
@@ -1202,9 +1204,22 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
 
   // ── Session snapshot block (load opts, pipeline order, panel, etc.) ───────
   const snapshotBlk = snapshot ? `\n\nSESSION SNAPSHOT:\n${serializeSnapshot(snapshot)}` : "";
-  const loadHint = snapshot?.dataLoadOpts
-    ? `\n\nREQUIRED LOAD CALL (${langLabel}): ${loadOptsToScriptHint(snapshot.dataLoadOpts, language)}`
-    : "";
+  // Multi-dataset sessions: one authoritative load call per dataset, each bound
+  // to its df_<name> identifier. Single-dataset sessions keep the legacy hint.
+  let loadHint = "";
+  if (snapshot?.datasets?.length) {
+    const calls = snapshot.datasets.map(d => {
+      const file = d.filename ?? d.name;
+      if (language === "stata")  return `  ${buildStataLoadLine(file, d.loadOpts)}`;
+      const line = language === "python"
+        ? buildPyLoadLine(file, d.loadOpts)
+        : buildRLoadLine(file, d.loadOpts);
+      return `  ${line.replace(/^df\b/, toDfVar(d.name))}`;
+    });
+    loadHint = `\n\nREQUIRED LOAD CALLS (${langLabel}) — emit ALL of these verbatim, one per session dataset:\n${calls.join("\n")}`;
+  } else if (snapshot?.dataLoadOpts) {
+    loadHint = `\n\nREQUIRED LOAD CALL (${langLabel}): ${loadOptsToScriptHint(snapshot.dataLoadOpts, language)}`;
+  }
 
   const userPrompt = [
     `TARGET LANGUAGE: ${langLabel}`,

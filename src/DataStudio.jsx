@@ -731,6 +731,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
           const entries = loaded.filter(Boolean).map(({ meta, raw }) => ({
             id:       meta.id,
             filename: meta.filename,
+            name:     meta.name ?? undefined,   // user-given display name (rename)
             rawData:  ensureRowIds(raw),
             crs:      meta.crs ?? raw?._crs ?? null,
             origin:   meta.origin ?? undefined,
@@ -769,6 +770,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     saveDatasetRegistry(projectPid, datasets.map(d => ({
       id:       d.id,
       filename: d.filename,
+      name:     d.name ?? null,
       source:   d.source ?? "loaded",
       origin:   d.origin ?? null,
       crs:      datasetCrs(d),
@@ -794,7 +796,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       registeredIds.current.add(d.id);
       registerDataset(dispatch, {
         id:       d.id,
-        name:     d.filename,
+        name:     d.name ?? d.filename,
         source:   "loaded",
         // Use full DuckDB row count when available, fall back to extracted length
         rowCount: d.rawData._duckdb?.rowCount ?? d.rawData.rows?.length    ?? 0,
@@ -811,9 +813,11 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     onDatasetsChange?.(datasets.map(d => ({
       id:       d.id,
       filename: d.filename,
+      name:     d.name ?? d.filename,       // user-given display name drives df_<name> in scripts
       rows:     d.rawData?.rows    ?? [],   // preview only for DuckDB-backed datasets
       headers:  d.rawData?.headers ?? [],
       crs:      datasetCrs(d),
+      loadOpts: d.rawData?._loadOpts ?? null,
       // Full-table pointer — consumers MUST compute off this (SQL / extractAllRows),
       // never off `rows`, which is a 500-row preview for large DuckDB datasets.
       _duckdb:  d.rawData?._duckdb  ?? null,
@@ -959,6 +963,15 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     addParsed:        addParsedDataset,
     addApiData:       (fname, rows, headers) => handleSaveSubset(fname, rows, headers),
     switchToDataset:  (id) => setActiveId(id),
+    // Rename a dataset (display name only — the original filename is kept for
+    // load calls). The name drives the df_<name> identifier in replication
+    // scripts, DatasetManager labels, and the AI session snapshot.
+    renameDataset:    (id, newName) => {
+      const name = String(newName ?? "").trim();
+      if (!name) return;
+      setDatasets(prev => prev.map(d => d.id === id ? { ...d, name } : d));
+      if (dispatch) dispatch({ type: "UPDATE_DATASET_META", id, patch: { name } });
+    },
     removeDataset:    (id) => {
       setDatasets(prev => {
         const ds = prev.find(d => d.id === id);

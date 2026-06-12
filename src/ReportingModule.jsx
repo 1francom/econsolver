@@ -16,7 +16,9 @@ import { stars, buildLatex } from "./math/index.js";
 import { interpretRegression, generateUnifiedScript } from "./services/AI/AIService.js";
 import { buildSessionSnapshot } from "./services/AI/sessionSnapshot.js";
 import { useSessionLog } from "./services/session/sessionLog.jsx";
-import { generateCleanScript } from "./pipeline/exporter.js";
+import { useSessionState } from "./services/session/sessionState.jsx";
+import { generateCleanScript, generateWorkspaceScript, toDfVar } from "./pipeline/exporter.js";
+import { loadProjectPipelines } from "./services/Persistence/indexedDB.js";
 import { generateRScript }     from "./services/export/rScript.js";
 import { generatePythonScript } from "./services/export/pythonScript.js";
 import { generateStataScript } from "./services/export/stataScript.js";
@@ -744,7 +746,7 @@ function SigCallout({ result }) {
 // Props:
 //   result       — normalised EstimationResult (for model section)
 //   cleanedData  — { cleanRows, headers, pipeline, dataDictionary, filename }
-function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = [] }) {
+function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = [], pid = null, globalPipeline = [] }) {
   const { C, T } = useTheme();
   const [open,     setOpen]     = useState(false);
   const [lang,     setLang]     = useState("r");
@@ -762,11 +764,17 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   function _buildModelScript(language) {
     if (!result) return "";
     const spec = result.spec ?? {};
+    // The model's SOURCE dataset (spec.filename, stamped at estimation time) may
+    // differ from the Report tab's active dataset — load opts and pipeline must
+    // come from the source, never silently from the active one.
+    const modelFile    = spec.filename ?? cleanedData?.filename ?? "dataset.csv";
+    const modelDs      = availableDatasets.find(d => d.filename === modelFile) ?? null;
+    const sameAsActive = modelFile === cleanedData?.filename;
     const config = {
-      filename:       spec.filename       ?? cleanedData?.filename ?? "dataset.csv",
-      pipeline:       spec.pipeline       ?? cleanedData?.pipeline ?? [],
-      dataDictionary: spec.dataDictionary ?? cleanedData?.dataDictionary ?? null,
-      dataLoadOpts:   cleanedData?.loadOpts ?? snapshot?.dataLoadOpts ?? null,
+      filename:       modelFile,
+      pipeline:       spec.pipeline       ?? (sameAsActive ? cleanedData?.pipeline ?? [] : []),
+      dataDictionary: spec.dataDictionary ?? (sameAsActive ? cleanedData?.dataDictionary : null),
+      dataLoadOpts:   modelDs?.loadOpts ?? (sameAsActive ? cleanedData?.loadOpts : null) ?? null,
       model: {
         type:       result.type     ?? "OLS",
         yVar:       spec.yVar       ?? "",
@@ -796,20 +804,53 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
     setError("");
     setScript("");
     try {
-      const dsName  = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
-      const dsMap = Object.fromEntries(
-        availableDatasets.map(ds => [ds.id, { name: ds.name ?? ds.filename, filename: ds.filename }])
-      );
-      const cleanSc = generateCleanScript({
-        language:    lang,
-        datasetName: dsName,
-        filename:    cleanedData?.filename ?? "dataset.csv",
-        pipeline:    cleanedData?.pipeline ?? [],
-        loadOpts:    cleanedData?.loadOpts ?? null,
-        allDatasets: dsMap,
-      });
-      const modelSc = _buildModelScript(lang);
-      const dict    = cleanedData?.dataDictionary ?? null;
+      const multiDataset = availableDatasets.length > 1 || globalPipeline.length > 0;
+      let cleanSc;
+      if (multiDataset) {
+        // Workspace skeleton: ALL session datasets in topological order, each
+        // loaded into its own df_<name> with its own load opts + pipeline,
+        // then cross-dataset G-steps. Per-dataset pipelines come from IDB;
+        // the Report-active dataset uses its live (possibly newer) pipeline.
+        let map = {};
+        try { map = (await loadProjectPipelines(pid))?.datasetPipelines ?? {}; } catch { /* no IDB record yet */ }
+        const built = {};
+        for (const ds of availableDatasets) {
+          const dsRec    = map[ds.id] ?? {};
+          const isActive = ds.filename === cleanedData?.filename;
+          built[ds.id] = {
+            id:       ds.id,
+            name:     ds.name ?? ds.filename ?? ds.id,
+            filename: dsRec.filename ?? ds.filename ?? null,
+            pipeline: isActive
+              ? (cleanedData?.pipeline ?? dsRec.pipeline ?? [])
+              : (Array.isArray(dsRec.pipeline) ? dsRec.pipeline : []),
+            loadOpts: ds.loadOpts ?? dsRec.loadOpts ?? null,
+          };
+        }
+        cleanSc = generateWorkspaceScript({ language: lang, datasets: built, globalPipeline });
+      } else {
+        const dsName = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
+        const dsMap  = Object.fromEntries(
+          availableDatasets.map(ds => [ds.id, { name: ds.name ?? ds.filename, filename: ds.filename }])
+        );
+        cleanSc = generateCleanScript({
+          language:    lang,
+          datasetName: dsName,
+          filename:    cleanedData?.filename ?? "dataset.csv",
+          pipeline:    cleanedData?.pipeline ?? [],
+          loadOpts:    cleanedData?.loadOpts ?? null,
+          allDatasets: dsMap,
+        });
+      }
+      let modelSc = _buildModelScript(lang);
+      if (modelSc && lang !== "stata") {
+        // Bind the model section to its source data frame so it matches the
+        // workspace skeleton (df_<name>) instead of the generic `df`.
+        const modelFile = result?.spec?.filename ?? cleanedData?.filename;
+        const modelDs   = availableDatasets.find(d => d.filename === modelFile) ?? null;
+        if (modelFile) modelSc = modelSc.replace(/\bdf\b/g, toDfVar(modelDs?.name ?? modelFile));
+      }
+      const dict = cleanedData?.dataDictionary ?? null;
       const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot });
       setScript(out);
     } catch (e) {
@@ -950,7 +991,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function ReportingModule({ result: rawResult, cleanedData, availableDatasets = [], onClose }) {
+export default function ReportingModule({ result: rawResult, cleanedData, availableDatasets = [], pid = null, onClose }) {
   const { C, T } = useTheme();
   const [tab, setTab] = useState("forest");
 
@@ -961,10 +1002,13 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
 
   // ── Build session snapshot once per render — passed to AI calls so Claude
   //    sees data load opts (sep, sheet, encoding), pipeline, dictionary, etc.
+  //    `datasets` lists EVERY session dataset so multi-dataset workspaces
+  //    replicate all loads, and `globalPipeline` carries cross-dataset G-steps.
   const { log: sessionLog } = useSessionLog();
+  const { globalPipeline } = useSessionState();
   const snapshot = useMemo(
-    () => buildSessionSnapshot({ cleanedData, result: rawResult, sessionLog }),
-    [cleanedData, rawResult, sessionLog]
+    () => buildSessionSnapshot({ cleanedData, result: rawResult, sessionLog, datasets: availableDatasets }),
+    [cleanedData, rawResult, sessionLog, availableDatasets]
   );
 
   // Detect Sharp RDD / Spatial RD — canonical shape uses type, legacy shape carries rddData or raw fields
@@ -1185,7 +1229,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
         </div>
 
         {/* ── AI Unified Script Export — Phase 9.10 ── */}
-        <AIUnifiedScript result={result} cleanedData={cleanedData} snapshot={snapshot} availableDatasets={availableDatasets} />
+        <AIUnifiedScript result={result} cleanedData={cleanedData} snapshot={snapshot} availableDatasets={availableDatasets} pid={pid} globalPipeline={globalPipeline} />
 
       </div>
     </div>
