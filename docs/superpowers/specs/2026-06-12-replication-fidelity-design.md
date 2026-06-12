@@ -162,7 +162,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
 
 ### FASE 2 — Manual-edit honesty + spatial ordering + derivation edges
 
-- [ ] **2.1 — Derivation edges (D4).** In `handleSaveSubset` (DataStudio.jsx), when a
+- [x] **2.1 — Derivation edges (D4).** *(code-complete 2026-06-12, browser-validation pending Franco)* In `handleSaveSubset` (DataStudio.jsx), when a
   subset is saved from a known recipe (group_summarize/filter/etc.), register a
   `globalPipeline` derivation G-step (`opType:"derive"`, `parentId`, `recipe`) via
   `addGlobalStep`, instead of only the `origin` pointer. Extend `generateWorkspaceScript`

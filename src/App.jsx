@@ -2988,8 +2988,8 @@ export default function App() {
                         cleanedData={tabOutput("explore")}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
-                        onSaveDataset={(name, rows, headers) => {
-                          const newId = studioRef.current?.addApiData(name, rows, headers);
+                        onSaveDataset={(name, rows, headers, recipe = null) => {
+                          const newId = studioRef.current?.addApiData(name, rows, headers, recipe);
                           if (newId) selectDataset("explore", newId);
                         }}
                       />

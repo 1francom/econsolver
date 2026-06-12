@@ -937,7 +937,8 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
 
   // Save a derived dataset (pipeline output or summarize result) into the manager.
   // Appears immediately in the sidebar with its own empty pipeline.
-  const handleSaveSubset = useCallback((name, rows, headers) => {
+  const handleSaveSubset = useCallback((name, rows, headers, recipe = null) => {
+    const parentId = activeId;
     const id    = genId();
     // ensureRowIds: assign __ri so cell editing (patch step) works for
     // simulated / API-loaded / derived datasets, not just file uploads
@@ -950,7 +951,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       id,
       filename: name,
       rawData,
-      origin:   activeId,   // informational — which dataset it came from
+      origin:   parentId,   // informational — which dataset it came from
     };
     setDatasets(prev => [...prev, entry]);
     setActiveId(id);        // switch to the new subset immediately
@@ -963,13 +964,23 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         colCount: headers.length,
         headers:  headers,
       });
+      if (recipe && parentId) {
+        dispatch({
+          type: "ADD_GLOBAL_STEP",
+          step: {
+            id: `G_${Date.now()}`,
+            opType: "derive",
+            leftDatasetId: id,
+            rightDatasetId: parentId,
+            params: { recipe },
+          },
+        });
+      }
     }
     appendLog({
       module: "data", opType: "dataset_derive", datasetId: id,
-      // reproducible:false until Fase 2.1 records the deriving recipe as a
-      // globalPipeline edge — for now only the parent pointer is known.
-      reproducible: false,
-      params: { name, originId: activeId, rows: rows.length, cols: headers.length },
+      reproducible: !!recipe,
+      params: { name, originId: parentId, rows: rows.length, cols: headers.length, ...(recipe ? { recipe } : {}) },
       label:  `Derived dataset ${name} (${rows.length.toLocaleString()} × ${headers.length})`,
     });
     return id;
@@ -981,7 +992,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     addFile:          handleLoadFile,
     addFiles:         handleLoadFiles,
     addParsed:        addParsedDataset,
-    addApiData:       (fname, rows, headers) => handleSaveSubset(fname, rows, headers),
+    addApiData:       (fname, rows, headers, recipe = null) => handleSaveSubset(fname, rows, headers, recipe),
     switchToDataset:  (id) => setActiveId(id),
     // Rename a dataset (display name only — the original filename is kept for
     // load calls). The name drives the df_<name> identifier in replication

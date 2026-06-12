@@ -1626,7 +1626,11 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
                 />
                 <button onClick={()=>{
                   const name=(saveName.trim()||`summary_${sumResult.by.join("_")}`);
-                  onSaveDataset(name, sumResult.rows, sumResult.headers);
+                  onSaveDataset(name, sumResult.rows, sumResult.headers, {
+                    type: "group_summarize",
+                    by: [...sumResult.by],
+                    aggs: sumResult.aggs.map(agg => ({ ...agg })),
+                  });
                   setSaved(true);setTimeout(()=>setSaved(false),2000);
                 }} style={{
                   padding:"0.22rem 0.6rem",background:saved?`${C.teal}18`:`${C.teal}12`,

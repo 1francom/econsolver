@@ -231,6 +231,9 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
   if (!dsList.length) return `# No datasets in session`;
 
   const allDatasets = Object.fromEntries(dsList.map(d => [d.id, { name: d.name, filename: d.filename }]));
+  const deriveChildIds = new Set(globalPipeline
+    .filter(g => g.opType === "derive" && g.leftDatasetId && g.params?.recipe)
+    .map(g => g.leftDatasetId));
 
   // Topological order
   const orderedIds = topoSort(dsList, globalPipeline);
@@ -240,6 +243,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
   if (language === "r") {
     const lines = [rHeader("Workspace — All Datasets")];
     for (const ds of ordered) {
+      if (deriveChildIds.has(ds.id)) continue;
       const df   = toDfVar(ds.name);
       const file = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
       lines.push(`# ${"─".repeat(60)}`);
@@ -271,6 +275,14 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
           lines.push(`${leftDf} <- dplyr::${how}(${leftDf}, ${rightDf}, by = c(${lk} = ${rk}))`);
         } else if (g.opType === "append") {
           lines.push(`${leftDf} <- dplyr::bind_rows(${leftDf}, ${rightDf})`);
+        } else if (g.opType === "derive" && rightDs && g.params?.recipe) {
+          const translated = toR(g.params.recipe, rightDf, allDatasets)
+            .replace(new RegExp(`^${rightDf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*<-`), `${leftDf} <-`);
+          lines.push(`# Derived dataset: ${leftDs.name} from ${rightDs.name}`);
+          lines.push(translated);
+          for (const step of (leftDs.pipeline ?? []).filter(s => !s.gStepId)) {
+            lines.push(toR(step, leftDf, allDatasets));
+          }
         } else {
           lines.push(`# G-step: ${g.opType} — ${leftDs.name} ← ${rightDs?.name ?? "?"}`);
         }
@@ -288,6 +300,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
     lines.push(``);
 
     for (const ds of ordered) {
+      if (deriveChildIds.has(ds.id)) continue;
       const file    = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
       const dtaFile = toStataFile(ds.name);
       lines.push(`* ${"─".repeat(60)}`);
@@ -325,6 +338,14 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
           lines.push(`use "${leftFile}", clear`);
           lines.push(`append using "${rightFile}"`);
           lines.push(`save "${leftFile}", replace`);
+        } else if (g.opType === "derive" && rightDs && g.params?.recipe) {
+          lines.push(`* Derived dataset: ${leftDs.name} from ${rightDs.name}`);
+          lines.push(`use "${rightFile}", clear`);
+          lines.push(toStata(g.params.recipe, "df", allDatasets));
+          for (const step of (leftDs.pipeline ?? []).filter(s => !s.gStepId)) {
+            lines.push(toStata(step, "df", allDatasets));
+          }
+          lines.push(`save "${leftFile}", replace`);
         } else {
           lines.push(`* G-step: ${g.opType} — ${leftDs.name} ← ${rightDs?.name ?? "?"}`);
         }
@@ -338,6 +359,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
   if (language === "python") {
     const lines = [pythonHeader("Workspace — All Datasets")];
     for (const ds of ordered) {
+      if (deriveChildIds.has(ds.id)) continue;
       const df   = toDfVar(ds.name);
       const file = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
       lines.push(`# ${"─".repeat(60)}`);
@@ -369,6 +391,14 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
           lines.push(`${leftDf} = pd.merge(${leftDf}, ${rightDf}, left_on=${lk}, right_on=${rk}, how="${how}")`);
         } else if (g.opType === "append") {
           lines.push(`${leftDf} = pd.concat([${leftDf}, ${rightDf}], ignore_index=True)`);
+        } else if (g.opType === "derive" && rightDs && g.params?.recipe) {
+          const translated = toPython(g.params.recipe, rightDf, allDatasets)
+            .replace(new RegExp(`^${rightDf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=`), `${leftDf} =`);
+          lines.push(`# Derived dataset: ${leftDs.name} from ${rightDs.name}`);
+          lines.push(translated);
+          for (const step of (leftDs.pipeline ?? []).filter(s => !s.gStepId)) {
+            lines.push(toPython(step, leftDf, allDatasets));
+          }
         } else {
           lines.push(`# G-step: ${g.opType} — ${leftDs.name} ← ${rightDs?.name ?? "?"}`);
         }
