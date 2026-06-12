@@ -147,13 +147,18 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   branches), `pipeline_step` (WranglingModule `addStep` funnel, tagged with datasetId).
   `serializeSnapshot` MODULE OPERATIONS capped at last 60 entries (persisted log grows
   across sessions; protects the AI payload budget).
-- [ ] **1.3 — Explore instrumentation (D5).** In `ExplorerModule.jsx`, add a
-  save/pin affordance to TS/distribution/correlation quick-look plots (route their
-  config into `plotHistory` like ◈ Plot Builder) and to descriptive outputs
-  (`summary`, `quantile(probs=…)`, correlation matrix) → emit an `explore_stat`
-  timeline event capturing EXACT args (D8). Do NOT auto-log renders; only on
-  explicit pin/save.
-  Accept: pinned Explore artifacts survive reload and appear in the timeline; build + lint green.
+- [x] **1.3 — Explore instrumentation (D5).** *(code-complete 2026-06-12, browser-validation pending Franco)*
+  `PinBtn` ("⊕ Pin") added to every Explore surface; each pin emits an `explore_stat`
+  timeline event with EXACT args (D8) + the active QuickFilter conds + dataset name:
+  summary (columns/groupBy/custom percentiles), head/tail (n), overdispersion (col, CT),
+  histogram (col/bins/transform), bar chart (col/order), spaghetti (col/entity/time),
+  correlation (method/cols), time series (y/time/group/agg), ACF-PACF (maxLag), ADF.
+  **Deviation from spec text (justified):** quick-look plots pin to the TIMELINE, not
+  `plotHistory` — plotHistory is the PlotBuilder layer-config shape; forcing quick-look
+  configs into it would corrupt the PlotBuilder history UI. The `explore_stat` params
+  carry everything Track P needs to emit plot code. Nothing auto-logs; pin-only.
+  Accept: pinned Explore artifacts survive reload (timeline IDB) and appear in MODULE
+  OPERATIONS; build + lint green.
 
 ### FASE 2 — Manual-edit honesty + spatial ordering + derivation edges
 

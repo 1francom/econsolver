@@ -15,6 +15,7 @@ import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 import { generateCleanScript } from "./pipeline/exporter.js";
 import { callClaude } from "./services/AI/AIService.js";
+import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
@@ -26,6 +27,28 @@ function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
   return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:`1px solid ${C.border2}`,color:dis?C.textMuted:C.textDim}}>{ch}</button>;
 }
 function Spin(){const{C,T}=useTheme();return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
+
+// ─── PIN FOR REPLICATION (Fase 1.3, D5) ──────────────────────────────────────
+// Explore is exploratory by default — nothing is logged automatically. This
+// button lets the user pin the CURRENT view (plot config or descriptive stat,
+// with its exact arguments) as an `explore_stat` event on the execution
+// timeline, making it part of the replication script.
+function PinBtn({ onClick, title = "Pin this view to the replication timeline" }) {
+  const { C, T } = useTheme();
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      onClick={() => { onClick?.(); setDone(true); setTimeout(() => setDone(false), 1800); }}
+      title={title}
+      style={{ padding: "0.2rem 0.55rem", borderRadius: 3, cursor: "pointer", flexShrink: 0,
+               fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s",
+               border: `1px solid ${done ? C.teal : C.border2}`,
+               background: done ? `${C.teal}15` : "transparent",
+               color: done ? C.teal : C.textDim }}>
+      {done ? "Pinned ✓" : "⊕ Pin"}
+    </button>
+  );
+}
 
 // ─── MINI MATH ────────────────────────────────────────────────────────────────
 function olsSimple(xs,ys){
@@ -195,7 +218,7 @@ function CorrHeatmap({headers,rows,info}){
 }
 
 // ─── SUMMARY TABLE (Table 1) ──────────────────────────────────────────────────
-function SummaryTable({rows,headers,info,panel}){
+function SummaryTable({rows,headers,info,panel,onPin}){
   const{C,T}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
   const catH=headers.filter(h=>info[h]?.isCat&&!info[h]?.isNum);
@@ -322,6 +345,13 @@ function SummaryTable({rows,headers,info,panel}){
             <button onClick={addQ} style={{padding:"0.2rem 0.5rem",border:`1px solid ${C.border2}`,borderRadius:3,background:"transparent",color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,cursor:"pointer"}}>+P</button>
           </div>
         </div></>}
+        {onPin&&<><div style={{flex:1}}/>
+        <PinBtn onClick={()=>{
+          if(view==="stats") onPin(
+            {kind:"summary",columns:numH,groupBy:groupBy||null,percentiles:extraQs.length?extraQs:null},
+            `Summary stats (${numH.length} vars${groupBy?`, by ${groupBy}`:""}${extraQs.length?`, P${extraQs.join("/P")}`:""})`);
+          else onPin({kind:view,n:viewN},`${view}(${viewN})`);
+        }}/></>}
       </div>
 
       {/* ── Stats table ── */}
@@ -401,7 +431,7 @@ function SummaryTable({rows,headers,info,panel}){
 }
 
 // ─── DISPERSION PANEL (B1 — overdispersion / count diagnostics) ───────────────
-function DispersionPanel({rows,headers,info}){
+function DispersionPanel({rows,headers,info,onPin}){
   const{C,T}=useTheme();
   const[open,setOpen]=useState(false);
   const[col,setCol]=useState("");
@@ -435,6 +465,9 @@ function DispersionPanel({rows,headers,info}){
         <span style={{fontSize:T.caption.fontSize,color:C.textMuted}}>{open?"▾":"▸"}</span>
         <span style={{fontSize:T.caption.fontSize,color:C.textDim,letterSpacing:"0.2em",textTransform:"uppercase",fontFamily:T.code.fontFamily}}>Count Diagnostics</span>
         <span style={{marginLeft:"auto",fontSize:T.caption.fontSize,color:C.textMuted}}>var/mean · Cameron-Trivedi</span>
+        {onPin&&open&&effCol&&<span onClick={e=>e.stopPropagation()}>
+          <PinBtn onClick={()=>onPin({kind:"overdispersion",col:effCol,test:"cameron-trivedi"},`Overdispersion check: ${effCol} (var/mean + CT)`)}/>
+        </span>}
       </div>
       {open&&(
         <div style={{padding:"0.85rem",background:C.surface,display:"flex",flexDirection:"column",gap:10}}>
@@ -471,7 +504,7 @@ function DispersionPanel({rows,headers,info}){
 }
 
 // ─── DISTRIBUTION TAB ─────────────────────────────────────────────────────────
-function DistributionTab({rows,headers,info,panel}){
+function DistributionTab({rows,headers,info,panel,onPin}){
   const{C,T}=useTheme();
   const palette = [
     { label:"teal",  val:C.teal },
@@ -521,8 +554,15 @@ function DistributionTab({rows,headers,info,panel}){
   return(
     <div>
       {/* sub-tab bar */}
-      <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
+      <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem",alignItems:"center"}}>
         {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
+        {onPin&&<div style={{padding:"0 6px",background:C.surface}}>
+          <PinBtn onClick={()=>{
+            if(sub==="hist") onPin({kind:"histogram",col:histCol,bins:nBins,transform:transform==="none"?null:transform},`Histogram: ${histCol} (${nBins} bins${transform!=="none"?", "+transform:""})`);
+            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder},`Bar chart: ${catCol} (order: ${catOrder})`);
+            else onPin({kind:"spaghetti",col:spagCol,entityCol:panel?.entityCol,timeCol:panel?.timeCol},`Spaghetti: ${spagCol} by ${panel?.entityCol} over ${panel?.timeCol}`);
+          }}/>
+        </div>}
       </div>
 
       {/* ── HISTOGRAM ── */}
@@ -822,7 +862,7 @@ function AdfPanel({ results }) {
 }
 
 // ─── TIME SERIES TAB ──────────────────────────────────────────────────────────
-function TimeSeriesTab({ rows, headers, info, panel }) {
+function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const{C,T}=useTheme();
   const numH = headers.filter(h => info[h]?.isNum);
   const catH = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && headers.includes(h)));
@@ -957,10 +997,17 @@ function TimeSeriesTab({ rows, headers, info, panel }) {
   return (
     <div>
       {/* Sub-tab toggle */}
-      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 3, overflow: "hidden", marginBottom: "1rem", width: "fit-content" }}>
+      <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 3, overflow: "hidden", marginBottom: "1rem", width: "fit-content", alignItems: "center" }}>
         {[["line","⬡ Line chart"],["acf","⬡ ACF / PACF"],["adf","⬡ ADF test"]].map(([k, l]) => (
           <button key={k} onClick={() => setTsView(k)} style={{ padding: "0.3rem 0.9rem", background: tsView === k ? C.surface3 : C.surface, border: "none", borderBottom: tsView === k ? `2px solid ${C.teal}` : "2px solid transparent", color: tsView === k ? C.teal : C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}>{l}</button>
         ))}
+        {onPin&&<div style={{padding:"0 6px",background:C.surface}}>
+          <PinBtn onClick={()=>{
+            if(tsView==="line") onPin({kind:"timeseries",yCol,timeCol:tCol,groupCol:grpCol||null,agg},`Time series: ${agg}(${yCol}) over ${tCol}${grpCol?` by ${grpCol}`:""}`);
+            else if(tsView==="acf") onPin({kind:"acf_pacf",yCol,timeCol:tCol,maxLag},`ACF/PACF: ${yCol} (lags 1–${maxLag})`);
+            else onPin({kind:"adf",yCol,timeCol:tCol,lagOrder:2},`ADF test: ${yCol}`);
+          }}/>
+        </div>}
       </div>
 
       {/* Controls */}
@@ -1747,6 +1794,16 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   },[rows,filterConds]);
   const corrRef = useRef(null);
 
+  // ── Pin-for-replication emitter (Fase 1.3, D5) ──────────────────────────────
+  // Every pin records the active QuickFilter so the replicated stat/plot runs
+  // on exactly the rows the user was looking at (D8 argument fidelity).
+  const { appendLog } = useSessionLogOptional();
+  const pinExplore = (params, label) => appendLog({
+    module: "explore", opType: "explore_stat",
+    params: { ...params, dataset: filename ?? null, filters: filterConds.length ? filterConds : null },
+    label,
+  });
+
   function downloadExploreScript(language) {
     const ext    = { r: "R", stata: "do", python: "py" }[language];
     const base   = (filename || "dataset").replace(/\.[^.]+$/, "");
@@ -1865,19 +1922,23 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         </div>
         {tab==="summary"&&(
           <>
-            <SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel}/>
-            <DispersionPanel rows={filteredRows} headers={headers} info={info}/>
+            <SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>
+            <DispersionPanel rows={filteredRows} headers={headers} info={info} onPin={pinExplore}/>
             <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
               <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset}/>
             </div>
           </>
         )}
-        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
         {tab==="corr"&&(
           <div>
-            <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
-              Pearson correlation between all numeric variables. Red = negative, Teal = positive.
+            <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4,display:"flex",alignItems:"center",gap:10}}>
+              <span style={{flex:1}}>Pearson correlation between all numeric variables. Red = negative, Teal = positive.</span>
+              <PinBtn onClick={()=>{
+                const cols=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+                pinExplore({kind:"correlation",method:"pearson",cols},`Correlation matrix (pearson) over ${cols.length} numeric vars`);
+              }}/>
             </div>
             <div ref={corrRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
               <div style={{padding:"0.5rem"}}>
@@ -1887,7 +1948,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             </div>
           </div>
         )}
-        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel}/>}
+        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
         {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
     </div>
