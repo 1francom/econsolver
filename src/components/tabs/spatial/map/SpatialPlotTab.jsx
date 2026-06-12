@@ -12,6 +12,7 @@ import { mkSLayer } from "./layers.js";
 import { loadSpatialMaps, saveSpatialMaps } from "../../../../services/Persistence/indexedDB.js";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { MONO_STACK } from "../../../../theme.js";
+import { useSessionLogOptional } from "../../../../services/session/sessionLog.jsx";
 
 // ── PNG export helpers (Leaflet → canvas) ────────────────────────────────────
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -106,6 +107,7 @@ function paintMapAttribution(ctx, W, H, T, text = "© OpenStreetMap © CARTO") {
 
 export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid }) {
   const { T } = useTheme();
+  const { appendLog } = useSessionLogOptional();
   const wrapRef    = useRef(null);
   const mapDivRef  = useRef(null);
   const leafMapRef = useRef(null);
@@ -558,6 +560,44 @@ if(LEGEND){
     catch (e) { return { cells: null, error: e.message }; }
   }, [layers, rows, availableDatasets]);
 
+  function saveGeneratedGrid() {
+    if (!saveName || !generatedGrid?.cells?.length) return;
+    const gridLayer = layers.find(l =>
+      l.type === "grid" && l.cellsize > 0 && (
+        (l.mode === "generate" && l.boundaryCol) ||
+        (l.mode === "latlon" && l.latCol && l.lonCol)
+      )
+    );
+    if (!gridLayer) return;
+
+    const gridDsId = crypto.randomUUID();
+    appendLog({
+      module: "spatial",
+      opType: "grid_create_map",
+      datasetId: gridDsId,
+      params: {
+        gridDsId,
+        gridName: saveName,
+        sourceDatasetId: !gridLayer.datasetId || gridLayer.datasetId === "active" ? pid : gridLayer.datasetId,
+        mode: gridLayer.mode,
+        boundaryCol: gridLayer.boundaryCol || null,
+        latCol: gridLayer.latCol || null,
+        lonCol: gridLayer.lonCol || null,
+        cellSize: Number(gridLayer.cellsize),
+        clipBorder: gridLayer.clipBorder !== false,
+        wktCol: "geometry",
+        gridIdCol: "grid_id",
+        metricCrs: "EPSG:32721",
+        cellCount: generatedGrid.cells.length,
+      },
+      label: `Create map grid ${saveName} (${generatedGrid.cells.length.toLocaleString()} cells)`,
+    });
+    onAddDataset?.(saveName, generatedGrid.cells, [
+      "grid_id", "geometry", "metric_geometry", "centroid_lon", "centroid_lat",
+      "centroid_x", "centroid_y", "area_m2", "cellsize_m", "metric_crs",
+    ], { id: gridDsId });
+  }
+
   // Build Leaflet map
   useEffect(() => {
     if (!L || !mapDivRef.current) return;
@@ -884,10 +924,7 @@ if(LEGEND){
                     style={{ flex: 1, padding: "3px 6px", background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, outline: "none" }}
                   />
                   <button
-                    onClick={() => saveName && onAddDataset?.(saveName, generatedGrid.cells, [
-                      "grid_id", "geometry", "metric_geometry", "centroid_lon", "centroid_lat",
-                      "centroid_x", "centroid_y", "area_m2", "cellsize_m", "metric_crs"
-                    ])}
+                    onClick={saveGeneratedGrid}
                     disabled={!saveName}
                     style={{ padding: "3px 9px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.gold}18`, border: `1px solid ${C.gold}`, color: C.gold, cursor: "pointer" }}
                   >Save</button>

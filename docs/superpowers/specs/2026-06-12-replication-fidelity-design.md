@@ -170,7 +170,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   topo order. Fallback to snapshot-as-data-source when no recipe is available.
   Caller must pass the recipe spec to `handleSaveSubset` (plumb from SubsetManager /
   Reshape save-as-dataset).
-- [ ] **2.2 — Spatial dependency ordering.** Emit spatial ops strictly in timeline
+- [x] **2.2 — Spatial dependency ordering.** *(code-complete 2026-06-12, browser-validation pending Franco)* Emit spatial ops strictly in timeline
   order; guarantee grid creation precedes any grid assignment/join. Verify the Map-tab
   grid-creation path lands a timeline event before assignment (Analyze-tab `GridSection`
   already logs; confirm Map tab).

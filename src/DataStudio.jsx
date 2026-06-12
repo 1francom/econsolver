@@ -937,9 +937,9 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
 
   // Save a derived dataset (pipeline output or summarize result) into the manager.
   // Appears immediately in the sidebar with its own empty pipeline.
-  const handleSaveSubset = useCallback((name, rows, headers, recipe = null) => {
+  const handleSaveSubset = useCallback((name, rows, headers, recipe = null, options = null) => {
     const parentId = activeId;
-    const id    = genId();
+    const id    = options?.id ?? genId();
     // ensureRowIds: assign __ri so cell editing (patch step) works for
     // simulated / API-loaded / derived datasets, not just file uploads
     const rawData = ensureRowIds({ rows, headers });
@@ -992,7 +992,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     addFile:          handleLoadFile,
     addFiles:         handleLoadFiles,
     addParsed:        addParsedDataset,
-    addApiData:       (fname, rows, headers, recipe = null) => handleSaveSubset(fname, rows, headers, recipe),
+    addApiData:       (fname, rows, headers, recipe = null, options = null) => handleSaveSubset(fname, rows, headers, recipe, options),
     switchToDataset:  (id) => setActiveId(id),
     // Rename a dataset (display name only — the original filename is kept for
     // load calls). The name drives the df_<name> identifier in replication

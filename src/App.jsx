@@ -3021,9 +3021,10 @@ export default function App() {
                     headers={tabOutput("spatial")?.headers ?? tabRawData("spatial")?.headers ?? []}
                     availableDatasets={availableDatasets}
                     pid={tabDsId("spatial")}
-                    onAddDataset={(name, rows, headers) => {
-                      const newId = studioRef.current?.addApiData(name, rows, headers);
+                    onAddDataset={(name, rows, headers, options = null) => {
+                      const newId = studioRef.current?.addApiData(name, rows, headers, null, options);
                       if (newId) selectDataset("spatial", newId);
+                      return newId;
                     }}
                     onMergeColumns={(resultRows, newCols) => {
                       const activeId = tabDsId("spatial");
