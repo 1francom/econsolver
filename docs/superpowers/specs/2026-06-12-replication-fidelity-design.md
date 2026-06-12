@@ -174,7 +174,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   order; guarantee grid creation precedes any grid assignment/join. Verify the Map-tab
   grid-creation path lands a timeline event before assignment (Analyze-tab `GridSection`
   already logs; confirm Map tab).
-- [ ] **2.3 — Manual-edit snapshot path** wired to the timeline (cleaned-dataset export
+- [x] **2.3 — Manual-edit snapshot path** *(code-complete 2026-06-12, browser-validation pending Franco)* wired to the timeline (cleaned-dataset export
   referenced as the load step for R/Stata when patches present).
 - [ ] **2.4 — Multi-model replication (Franco, browser-test 2026-06-12).** The unified
   script currently replicates only the ACTIVE result; all PINNED models should emit

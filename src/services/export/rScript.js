@@ -492,14 +492,9 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     }
 
     case "patch": {
-      // Cell edit — use __row_id (UUID) when available for sort-stable lookup,
-      // fall back to __ri (sequential int) for legacy steps.
       const col = step.col ?? "column";
-      const val = typeof step.value === "string" ? `"${step.value}"` : (step.value ?? "NA");
-      if (step.rowId) {
-        return `${dfVar}[${dfVar}$__row_id == "${step.rowId}", "${col}"] <- ${val}`;
-      }
-      return `${dfVar}[${dfVar}$__ri == ${step.ri}, "${col}"] <- ${val}  # __ri-based: may misalign after sort`;
+      const row = step.ri ?? step.rowId ?? "?";
+      return `# manual cell edit (${col} @ row ${row}) — not replayable on the raw file; load the exported *_cleaned.csv instead (see Data Loading note)`;
     }
 
     case "geocode": {
