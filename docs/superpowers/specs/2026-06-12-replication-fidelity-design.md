@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Owner:** Franco Medero
 **Executors:** Claude Fable 5 (primary) → Codex (continuation when Fable 5 runs out of tokens)
-**Status:** Fase 0 = CODE-COMPLETE (2026-06-12, browser-validation pending Franco). Next: Franco's browser test, then Fase 1 / Track P. This doc is the single source of truth — design + task checklist.
+**Status:** Fase 0 = DONE (browser-validated 2026-06-12; loadOpts-hydration regression found+fixed, task 2.4 added from the test). Fase 1 = CODE-COMPLETE (2026-06-12, browser-validation pending Franco). Next: Fase 2 (derivation edges, spatial ordering, manual-edit snapshot, multi-model 2.4) / Track P. This doc is the single source of truth — design + task checklist.
 
 > **Read this first (executing agent):** you did NOT see the design conversation.
 > Every decision is locked in §2 — do not re-litigate. Work top-to-bottom through
