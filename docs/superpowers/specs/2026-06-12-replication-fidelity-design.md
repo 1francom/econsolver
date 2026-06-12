@@ -165,6 +165,13 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   already logs; confirm Map tab).
 - [ ] **2.3 — Manual-edit snapshot path** wired to the timeline (cleaned-dataset export
   referenced as the load step for R/Stata when patches present).
+- [ ] **2.4 — Multi-model replication (Franco, browser-test 2026-06-12).** The unified
+  script currently replicates only the ACTIVE result; all PINNED models should emit
+  their own estimation blocks. `snapshot.pinnedModels` already carries trimmed specs
+  (`trimResult`) incl. each model's `spec.filename` → bind each to its source df like
+  the active model. UI: a toggle "Replicate: active model / all pinned models".
+  Deterministic side: `_buildModelScript` loops pinned specs; prompt rule 8e updates
+  from "mention them in a comment" to "emit each pinned model's estimation".
 
 ### FASE 3 — "Per execution order" mode
 

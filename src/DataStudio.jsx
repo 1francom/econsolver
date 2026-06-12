@@ -732,7 +732,11 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
             id:       meta.id,
             filename: meta.filename,
             name:     meta.name ?? undefined,   // user-given display name (rename)
-            rawData:  ensureRowIds(raw),
+            // Restore loadOpts captured at parse time (delimiter/sheet/encoding) —
+            // raw_data rows don't carry _loadOpts, only the registry meta does.
+            // Without this, a reloaded project loses e.g. read_delim(";") in
+            // replication scripts and falls back to extension inference.
+            rawData:  ensureRowIds(raw._loadOpts || !meta.loadOpts ? raw : { ...raw, _loadOpts: meta.loadOpts }),
             crs:      meta.crs ?? raw?._crs ?? null,
             origin:   meta.origin ?? undefined,
             source:   meta.source ?? undefined,
