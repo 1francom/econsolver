@@ -229,9 +229,12 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   Estimation section creates. Wired in `ModelingTab.jsx` via the PlotBuilder `scriptPreamble`
   prop (Track P5 seam) — passes a `(lang) => preamble` only when `result` exists; mode follows
   `plotDataMode`. **Split note:** P4 owns `modelPlotScript.js` + `ModelingTab.jsx` ONLY; the
-  `scriptPreamble` prop + `plot_df` plumbing live in PlotBuilder.jsx (Codex's P5 lane). Until
-  P5 lands, the prop is a harmless ignored prop.
-- [ ] **P5 — matplotlib + Stata twoway parity** for P1/P2 geoms.
+  `scriptPreamble` prop + `plot_df` plumbing live in PlotBuilder.jsx (Codex's P5 lane) and
+  are now wired end-to-end.
+- [x] **P5 — matplotlib + Stata twoway parity** for P1/P2 geoms. *(code-complete 2026-06-13, browser-validation pending Franco)*
+  **Approximation note:** Stata error bars and ribbons use `rcap` and `rarea`;
+  Stata geo export is intentionally skipped with a comment because Stata has no
+  native `sf`-style geometry plotting. Matplotlib geo uses geopandas.
 
 ---
 
