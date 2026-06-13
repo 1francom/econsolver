@@ -10,6 +10,7 @@ import { MapLegend } from "./MapLegend.jsx";
 import { SpatialLayerEditor } from "./SpatialLayerEditor.jsx";
 import { mkSLayer } from "./layers.js";
 import { loadSpatialMaps, saveSpatialMaps } from "../../../../services/Persistence/indexedDB.js";
+import { getMapHistory, saveMapHistory } from "../../../../services/Persistence/plotHistory.js";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { MONO_STACK } from "../../../../theme.js";
 import { useSessionLogOptional } from "../../../../services/session/sessionLog.jsx";
@@ -118,6 +119,8 @@ export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset,
   const [activeId, setActiveId]= useState(null);
   const [saveName, setSaveName]= useState("grid_cells");
   const [basemap,  setBasemap] = useState("light");
+  const [mapHistory, setMapHistory] = useState([]);
+  const [savedMapId, setSavedMapId] = useState(null);
   const [ptDiag,   setPtDiag]  = useState({});  // layerId → {total, valid, outOfBounds}
 
   // ── Download as HTML ─────────────────────────────────────────────────────────
@@ -469,6 +472,18 @@ if(LEGEND){
     const t = setTimeout(() => saveSpatialMaps(pid, { layers, basemap, crsInput }), 400);
     return () => clearTimeout(t);
   }, [pid, layers, basemap, crsInput]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!pid) {
+      setMapHistory([]);
+      setSavedMapId(null);
+      return () => { cancelled = true; };
+    }
+    getMapHistory(pid).then(history => {
+      if (!cancelled) setMapHistory(history ?? []);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [pid]);
 
   // Detect if any visible dataset contains projected WKT.
   const hasProjected = useMemo(() => {
@@ -525,6 +540,37 @@ if(LEGEND){
   const updateLayer = upd  => setLayers(prev => prev.map(l => l.id === upd.id ? upd : l));
   const removeLayer = id   => { setLayers(prev => prev.filter(l => l.id !== id)); setActiveId(prev => prev === id ? null : prev); };
   const activeLayer = layers.find(l => l.id === activeId) ?? null;
+
+  async function saveNamedMap() {
+    if (!pid || layers.length === 0) return;
+    const name = window.prompt("Map name:", `Map ${mapHistory.length + 1}`);
+    if (!name) return;
+    const now = Date.now();
+    const entry = { id: now, name, layers, basemap, crsInput, savedAt: now };
+    const next = [...mapHistory, entry];
+    setMapHistory(next);
+    setSavedMapId(entry.id);
+    await saveMapHistory(pid, next);
+  }
+
+  function loadNamedMap(id) {
+    const entry = mapHistory.find(item => item.id === id);
+    if (!entry) return;
+    setSavedMapId(id);
+    setLayers(Array.isArray(entry.layers) ? entry.layers : []);
+    setActiveId(null);
+    setBasemap(entry.basemap ?? "light");
+    if (entry.crsInput?.trim()) void applyCrs(entry.crsInput);
+    else clearCrs();
+  }
+
+  async function deleteNamedMap() {
+    if (savedMapId === null) return;
+    const next = mapHistory.filter(entry => entry.id !== savedMapId);
+    setMapHistory(next);
+    setSavedMapId(null);
+    if (pid) await saveMapHistory(pid, next);
+  }
 
   // Helper: resolve rows for a layer based on its datasetId
   function lyRows(ly) {
@@ -871,6 +917,33 @@ if(LEGEND){
               </div>
             </div>
           )}
+
+          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+            {pid && (
+              <button onClick={saveNamedMap} disabled={layers.length === 0}
+                style={{ padding: "3px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  background: `${C.teal}12`, border: `1px solid ${C.teal}40`,
+                  color: layers.length > 0 ? C.teal : C.border, cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+                Save map
+              </button>
+            )}
+            {mapHistory.length > 0 && (
+              <div style={{ display: "flex", gap: 4 }}>
+                <select value={savedMapId ?? ""} onChange={event => loadNamedMap(Number(event.target.value))}
+                  style={{ flex: 1, minWidth: 0, padding: "3px 5px", background: C.bg, border: `1px solid ${C.border2}`,
+                    borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
+                  <option value="">Saved maps...</option>
+                  {mapHistory.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+                </select>
+                <button onClick={deleteNamedMap} disabled={savedMapId === null} title="Delete selected saved map"
+                  style={{ padding: "3px 7px", borderRadius: 3, background: "none", border: `1px solid ${C.border2}`,
+                    color: savedMapId === null ? C.border : C.textMuted, fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize, cursor: savedMapId === null ? "not-allowed" : "pointer" }}>
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Layer editor */}
