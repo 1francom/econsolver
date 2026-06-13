@@ -1,7 +1,7 @@
 // Deterministic PlotBuilder config -> R/ggplot2 translator.
 
 import { toDfVar } from "../../pipeline/exporter.js";
-import { buildRLoadLine } from "./loadLine.js";
+import { buildPyLoadLine, buildRLoadLine } from "./loadLine.js";
 
 const BREWER_SCHEMES = {
   dark2: "Dark2",
@@ -548,4 +548,390 @@ export function buildGeoGgplot(geoEntry, { datasets = [], basemap = "none" } = {
     "",
     "plot",
   ].filter(line => line != null).join("\n");
+}
+
+function pyString(value) {
+  return JSON.stringify(String(value ?? ""));
+}
+
+function pyColumn(dfVar, column) {
+  return `${dfVar}[${pyString(column)}]`;
+}
+
+function pyNumber(value, fallback) {
+  if (value === "" || value == null) return String(fallback);
+  const number = Number(value);
+  return Number.isFinite(number) ? String(number) : String(fallback);
+}
+
+function pyColor(layer, fallback = null) {
+  if (layer?.aes?.color) return null;
+  return layer?.fill ? pyString(layer.fill) : fallback;
+}
+
+function matplotlibLayer(layer, index, dfVar) {
+  const aes = layer?.aes ?? {};
+  const opts = layer?.opts ?? {};
+  const alpha = pyNumber(layer?.opacity ?? 1, 1);
+  const lines = [];
+  let usesSeaborn = false;
+
+  switch (layer?.geom) {
+    case "point": {
+      if (!aes.x || !aes.y) break;
+      const args = [pyColumn(dfVar, aes.x), pyColumn(dfVar, aes.y)];
+      if (aes.color) args.push(`c=${pyColumn(dfVar, aes.color)}`);
+      else if (pyColor(layer)) args.push(`color=${pyColor(layer)}`);
+      if (aes.sizeCol) args.push(`s=${pyColumn(dfVar, aes.sizeCol)}`);
+      else args.push(`s=${pyNumber(opts.size ?? 3, 3)} ** 2`);
+      args.push(`alpha=${alpha}`);
+      if (layer.position === "jitter") {
+        lines.push(`# jitter requested in Litux; add deterministic noise if overlapping points need separation`);
+      }
+      lines.push(`ax.scatter(${args.join(", ")})`);
+      break;
+    }
+
+    case "line": {
+      if (!aes.x || !aes.y) break;
+      if (aes.color) {
+        lines.push(
+          `for group, group_df in ${dfVar}.groupby(${pyString(aes.color)}, dropna=False):`,
+          `    ax.plot(group_df[${pyString(aes.x)}], group_df[${pyString(aes.y)}], label=str(group), linewidth=${pyNumber(opts.strokeWidth ?? 1.8, 1.8)}, alpha=${alpha})`,
+        );
+      } else {
+        const color = pyColor(layer);
+        lines.push(`ax.plot(${pyColumn(dfVar, aes.x)}, ${pyColumn(dfVar, aes.y)}, linewidth=${pyNumber(opts.strokeWidth ?? 1.8, 1.8)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+      }
+      break;
+    }
+
+    case "bar": {
+      if (!aes.x) break;
+      const color = pyColor(layer);
+      if (aes.y) {
+        lines.push(`ax.bar(${pyColumn(dfVar, aes.x)}, ${pyColumn(dfVar, aes.y)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+      } else {
+        const counts = `_counts_${index}`;
+        lines.push(
+          `${counts} = ${pyColumn(dfVar, aes.x)}.value_counts(sort=False)`,
+          `ax.bar(${counts}.index, ${counts}.values, alpha=${alpha}${color ? `, color=${color}` : ""})`,
+        );
+      }
+      break;
+    }
+
+    case "histogram": {
+      if (!aes.x) break;
+      const color = pyColor(layer);
+      lines.push(`ax.hist(${pyColumn(dfVar, aes.x)}.dropna(), bins=${pyNumber(opts.bins ?? 20, 20)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+      break;
+    }
+
+    case "density": {
+      if (!aes.x) break;
+      usesSeaborn = true;
+      const args = [`data=${dfVar}`, `x=${pyString(aes.x)}`, `ax=ax`, `fill=True`, `alpha=${alpha}`, `bw_adjust=${pyNumber(opts.adjust ?? 1, 1)}`];
+      if (aes.color) args.push(`hue=${pyString(aes.color)}`);
+      else if (pyColor(layer)) args.push(`color=${pyColor(layer)}`);
+      lines.push(`sns.kdeplot(${args.join(", ")})`);
+      break;
+    }
+
+    case "smooth": {
+      if (!aes.x || !aes.y) break;
+      const method = opts.method ?? "lm";
+      const color = pyColor(layer);
+      if (method === "mean") {
+        lines.push(`ax.axhline(y=${pyColumn(dfVar, aes.y)}.mean(), linestyle="--", linewidth=2, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+      } else {
+        usesSeaborn = true;
+        const args = [`data=${dfVar}`, `x=${pyString(aes.x)}`, `y=${pyString(aes.y)}`, `ax=ax`, `scatter=False`, `ci=${method === "lm" && (opts.showSE ?? true) ? Math.round(Number(opts.ci ?? 0.95) * 100) : "None"}`, `lowess=${method === "loess" ? "True" : "False"}`];
+        if (color) args.push(`color=${color}`);
+        lines.push(`sns.regplot(${args.join(", ")})`);
+      }
+      break;
+    }
+
+    case "boxplot": {
+      if (!aes.y && !aes.x) break;
+      usesSeaborn = true;
+      const args = [`data=${dfVar}`, `ax=ax`];
+      if (aes.x) args.push(`x=${pyString(aes.x)}`);
+      if (aes.y) args.push(`y=${pyString(aes.y)}`);
+      if (aes.color) args.push(`hue=${pyString(aes.color)}`);
+      else if (pyColor(layer)) args.push(`color=${pyColor(layer)}`);
+      lines.push(`sns.boxplot(${args.join(", ")})`);
+      break;
+    }
+
+    case "errorbar": {
+      if (!aes.x || !aes.y || !aes.yMin || !aes.yMax) break;
+      const color = pyColor(layer);
+      lines.push(`ax.errorbar(${pyColumn(dfVar, aes.x)}, ${pyColumn(dfVar, aes.y)}, yerr=[${pyColumn(dfVar, aes.y)} - ${pyColumn(dfVar, aes.yMin)}, ${pyColumn(dfVar, aes.yMax)} - ${pyColumn(dfVar, aes.y)}], fmt="none", linewidth=${pyNumber(opts.strokeWidth ?? 1.5, 1.5)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+      break;
+    }
+
+    case "ribbon": {
+      if (!aes.x || !aes.yMin || !aes.yMax) break;
+      const color = pyColor(layer);
+      lines.push(`ax.fill_between(${pyColumn(dfVar, aes.x)}, ${pyColumn(dfVar, aes.yMin)}, ${pyColumn(dfVar, aes.yMax)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+      break;
+    }
+
+    case "hline":
+      lines.push(`ax.axhline(y=${pyNumber(layer.value, 0)}, linestyle="--", linewidth=1.5, alpha=${alpha}${pyColor(layer) ? `, color=${pyColor(layer)}` : ""})`);
+      break;
+
+    case "vline":
+      lines.push(`ax.axvline(x=${pyNumber(layer.value, 0)}, linestyle="--", linewidth=1.5, alpha=${alpha}${pyColor(layer) ? `, color=${pyColor(layer)}` : ""})`);
+      break;
+
+    default:
+      break;
+  }
+
+  return { lines, usesSeaborn };
+}
+
+function pyDomain(domain) {
+  if (!Array.isArray(domain) || (domain[0] == null && domain[1] == null)) return null;
+  const low = domain[0] == null ? "None" : pyNumber(domain[0], "None");
+  const high = domain[1] == null ? "None" : pyNumber(domain[1], "None");
+  return `${low}, ${high}`;
+}
+
+export function buildMatplotlibPlot(plotEntry, { dfVar = "df" } = {}) {
+  const entry = plotEntry ?? {};
+  const layers = (Array.isArray(entry.layers) ? entry.layers : [])
+    .filter(layer => layer?.visible !== false && layer?.geom !== "map");
+  const built = layers.map((layer, index) => matplotlibLayer(layer, index + 1, dfVar));
+  const usesSeaborn = built.some(layer => layer.usesSeaborn);
+  const lines = ["import matplotlib.pyplot as plt"];
+  if (usesSeaborn) lines.push("import seaborn as sns");
+  lines.push("", "fig, ax = plt.subplots()", "");
+  built.forEach(layer => {
+    if (layer.lines.length) lines.push(...layer.lines, "");
+  });
+
+  if (entry.xScale === "log") lines.push(`ax.set_xscale("log")`);
+  if (entry.yScale === "log") lines.push(`ax.set_yscale("log")`);
+  const xDomain = pyDomain(entry.xDomain);
+  const yDomain = pyDomain(entry.yDomain);
+  if (xDomain) lines.push(`ax.set_xlim(${xDomain})`);
+  if (yDomain) lines.push(`ax.set_ylim(${yDomain})`);
+  if (entry.title) lines.push(`ax.set_title(${pyString(entry.title)})`);
+  if (entry.xLabel) lines.push(`ax.set_xlabel(${pyString(entry.xLabel)})`);
+  if (entry.yLabel) lines.push(`ax.set_ylabel(${pyString(entry.yLabel)})`);
+  if (layers.some(layer => layer?.aes?.color)) lines.push("ax.legend()");
+  lines.push("fig.tight_layout()", "plt.show()");
+  return lines.join("\n");
+}
+
+function stataString(value) {
+  return `"${String(value ?? "").replace(/"/g, '\\"')}"`;
+}
+
+function stataNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(number) : String(fallback);
+}
+
+function stataLayer(layer) {
+  const aes = layer?.aes ?? {};
+  const opts = layer?.opts ?? {};
+
+  switch (layer?.geom) {
+    case "point":
+      return aes.x && aes.y ? { twoway: `scatter ${aes.y} ${aes.x}` } : null;
+    case "line":
+      return aes.x && aes.y ? { twoway: `line ${aes.y} ${aes.x}` } : null;
+    case "bar":
+      return aes.x && aes.y
+        ? { twoway: `bar ${aes.y} ${aes.x}` }
+        : aes.x ? { standalone: `graph bar (count), over(${aes.x})` } : null;
+    case "histogram":
+      return aes.x ? { standalone: `histogram ${aes.x}, bin(${stataNumber(opts.bins ?? 20, 20)})` } : null;
+    case "density":
+      return aes.x ? { standalone: `kdensity ${aes.x}` } : null;
+    case "smooth": {
+      if (!aes.x || !aes.y) return null;
+      const method = opts.method ?? "lm";
+      if (method === "mean") return { option: `yline(\`=r(mean)')`, comment: `* run summarize ${aes.y} before the graph to supply r(mean)` };
+      return { twoway: `${method === "loess" ? "lowess" : "lfit"} ${aes.y} ${aes.x}` };
+    }
+    case "boxplot": {
+      if (!aes.y && !aes.x) return null;
+      const value = aes.y || aes.x;
+      return { standalone: aes.x && aes.y ? `graph box ${value}, over(${aes.x})` : `graph box ${value}` };
+    }
+    case "errorbar":
+      return aes.x && aes.yMin && aes.yMax
+        ? { twoway: `rcap ${aes.yMax} ${aes.yMin} ${aes.x}`, comment: "* errorbar has no direct twoway equivalent - approximated with rcap" }
+        : null;
+    case "ribbon":
+      return aes.x && aes.yMin && aes.yMax
+        ? { twoway: `rarea ${aes.yMax} ${aes.yMin} ${aes.x}`, comment: "* ribbon has no direct twoway equivalent - approximated with rarea" }
+        : null;
+    case "hline":
+      return { option: `yline(${stataNumber(layer.value)})` };
+    case "vline":
+      return { option: `xline(${stataNumber(layer.value)})` };
+    default:
+      return null;
+  }
+}
+
+function stataDomain(axis, domain) {
+  if (!Array.isArray(domain) || domain[0] == null || domain[1] == null) return null;
+  return `${axis}scale(range(${stataNumber(domain[0])} ${stataNumber(domain[1])}))`;
+}
+
+export function buildStataPlot(plotEntry, { dataVar = "" } = {}) {
+  const entry = plotEntry ?? {};
+  const layers = (Array.isArray(entry.layers) ? entry.layers : [])
+    .filter(layer => layer?.visible !== false && layer?.geom !== "map");
+  const built = layers.map(stataLayer).filter(Boolean);
+  const comments = built.map(layer => layer.comment).filter(Boolean);
+  const twoway = built.map(layer => layer.twoway).filter(Boolean);
+  const standalone = built.map(layer => layer.standalone).filter(Boolean);
+  const options = built.map(layer => layer.option).filter(Boolean);
+
+  if (entry.xScale === "log") options.push("xscale(log)");
+  if (entry.yScale === "log") options.push("yscale(log)");
+  const xDomain = stataDomain("x", entry.xDomain);
+  const yDomain = stataDomain("y", entry.yDomain);
+  if (xDomain) options.push(xDomain);
+  if (yDomain) options.push(yDomain);
+  if (entry.title) options.push(`title(${stataString(entry.title)})`);
+  if (entry.xLabel) options.push(`xtitle(${stataString(entry.xLabel)})`);
+  if (entry.yLabel) options.push(`ytitle(${stataString(entry.yLabel)})`);
+
+  const lines = [
+    `* assumes the relevant dataset is loaded${dataVar ? ` (${dataVar})` : ""}`,
+    ...comments,
+  ];
+  if (twoway.length) {
+    lines.push(`twoway ${twoway.map(command => `(${command})`).join(" ")}${options.length ? `, ${options.join(" ")}` : ""}`);
+  }
+  standalone.forEach((command, index) => {
+    if (index === 0 && !twoway.length && options.length) {
+      lines.push(`${command}${command.includes(",") ? " " : ", "}${options.join(" ")}`);
+    } else {
+      lines.push(command);
+    }
+  });
+  if (!twoway.length && !standalone.length) lines.push("* no supported visible plot layers");
+  return lines.join("\n");
+}
+
+function geoPyDataset(layer, datasets) {
+  if (!layer?.datasetId || layer.datasetId === "active") {
+    return { dfVar: "df", dataset: null };
+  }
+  const dataset = datasets.find(item => item.id === layer.datasetId) ?? null;
+  return {
+    dfVar: toDfVar(dataset?.name ?? dataset?.filename ?? layer.datasetId),
+    dataset,
+  };
+}
+
+function geoPyLoadLines(layers, datasets) {
+  const ids = [...new Set(layers
+    .map(layer => layer?.datasetId)
+    .filter(datasetId => datasetId && datasetId !== "active"))];
+  const lines = [];
+  ids.forEach(datasetId => {
+    const dataset = datasets.find(item => item.id === datasetId) ?? null;
+    const name = dataset?.name ?? dataset?.filename ?? datasetId;
+    const dfVar = toDfVar(name);
+    const filename = dataset?.filename;
+    lines.push(`# Load ${dfVar}${filename ? ` from ${pyString(filename)}` : ` for dataset ${pyString(name)}`}`);
+    if (filename) {
+      lines.push(buildPyLoadLine(filename, dataset?.loadOpts ?? null)
+        .replace(/^df\b/, dfVar)
+        .replace(/\bgeopandas\./g, "gpd."));
+    }
+  });
+  return lines;
+}
+
+export function buildGeoMatplotlib(geoEntry, { datasets = [] } = {}) {
+  const entry = geoEntry ?? {};
+  const layers = (Array.isArray(entry.layers) ? entry.layers : []).filter(layer => layer?.visible !== false);
+  const prep = [];
+  const plots = [];
+  const comments = [];
+
+  layers.forEach((layer, index) => {
+    const { dfVar } = geoPyDataset(layer, datasets);
+    const geoVar = `geo_${index + 1}`;
+    const wktMode = ["polygon", "boundary", "line"].includes(layer.type)
+      || (layer.type === "point" && layer.mode === "wkt")
+      || (layer.type === "grid" && layer.mode === "wkt");
+
+    if (wktMode && layer.wktCol) {
+      prep.push(`${geoVar} = gpd.GeoDataFrame(${dfVar}.copy(), geometry=gpd.GeoSeries.from_wkt(${pyColumn(dfVar, layer.wktCol)}), crs="EPSG:4326")`);
+      const args = ["ax=ax"];
+      if (["boundary", "line"].includes(layer.type)) {
+        args.push(`facecolor="none"`, `edgecolor=${pyString(layer.stroke || "black")}`, `linewidth=${pyNumber(Number(layer.strokeWidth ?? 0.8) / 2, 0.4)}`);
+      } else if (layer.type === "point") {
+        if (layer.colorCol) args.push(`column=${pyString(layer.colorCol)}`, `legend=True`);
+        else args.push(`color=${pyString(layer.fill || "black")}`);
+        args.push(`markersize=${pyNumber(layer.radius ?? 4, 4)} ** 2`, `alpha=${pyNumber(layer.fillOpacity ?? 0.78, 0.78)}`);
+      } else {
+        const fillCol = geoFillColumn(layer);
+        if (fillCol) args.push(`column=${pyString(fillCol)}`, `legend=True`);
+        else if (layer.fill && layer.fill !== "none") args.push(`color=${pyString(layer.fill)}`);
+        args.push(`edgecolor=${pyString(layer.stroke || "transparent")}`, `linewidth=${pyNumber(Number(layer.strokeWidth ?? 0.8) / 2, 0.4)}`, `alpha=${pyNumber(fillCol ? layer.colorFillOpacity ?? 0.65 : layer.fillOpacity ?? 0, 0)}`);
+      }
+      plots.push(`${geoVar}.plot(${args.join(", ")})`);
+      if (layer.labelCol && ["polygon", "grid"].includes(layer.type)) {
+        plots.push(
+          `for _, row in ${geoVar}.iterrows():`,
+          `    point = row.geometry.representative_point()`,
+          `    ax.text(point.x, point.y, str(row[${pyString(layer.labelCol)}]), ha="center", va="center")`,
+        );
+      }
+      return;
+    }
+
+    if (layer.type === "point" && layer.latCol && layer.lonCol) {
+      const args = [pyColumn(dfVar, layer.lonCol), pyColumn(dfVar, layer.latCol)];
+      if (layer.colorCol) args.push(`c=${pyColumn(dfVar, layer.colorCol)}`);
+      else args.push(`color=${pyString(layer.fill || "black")}`);
+      args.push(`s=${pyNumber(layer.radius ?? 4, 4)} ** 2`, `alpha=${pyNumber(layer.fillOpacity ?? 0.78, 0.78)}`);
+      plots.push(`ax.scatter(${args.join(", ")})`);
+      return;
+    }
+
+    if (layer.type === "heatmap" && layer.latCol && layer.lonCol) {
+      comments.push(`# heatmap approximation: matplotlib hexbin differs from Litux KDE (bandwidth=${layer.bandwidth ?? 250}, gridN=${layer.gridN ?? 45})`);
+      plots.push(`ax.hexbin(${pyColumn(dfVar, layer.lonCol)}, ${pyColumn(dfVar, layer.latCol)}, gridsize=${pyNumber(layer.gridN ?? 45, 45)}, cmap="viridis", alpha=${pyNumber(layer.fillOpacity ?? 0.72, 0.72)})`);
+      return;
+    }
+
+    if (layer.type === "grid") {
+      comments.push(`# generated grid layer ${index + 1}: export its WKT dataset from Litux before plotting in geopandas`);
+    }
+  });
+
+  const loadLines = geoPyLoadLines(layers, datasets);
+  const lines = ["import matplotlib.pyplot as plt", "import geopandas as gpd"];
+  if (loadLines.length) lines.push("import pandas as pd");
+  lines.push("", ...loadLines);
+  if (loadLines.length) lines.push("");
+  lines.push(...prep);
+  if (prep.length) lines.push("");
+  lines.push(...comments);
+  if (comments.length) lines.push("");
+  lines.push("fig, ax = plt.subplots()", "", ...plots);
+  if (plots.length) lines.push("");
+  if (entry.title) lines.push(`ax.set_title(${pyString(entry.title)})`);
+  lines.push(`ax.set_aspect("equal", adjustable="datalim")`, "fig.tight_layout()", "plt.show()");
+  return lines.join("\n");
+}
+
+export function buildGeoStata() {
+  return "* Stata has no native sf/geo-plot; use the R or Python script for spatial maps.";
 }
