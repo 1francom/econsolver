@@ -35,9 +35,9 @@ function LoadingScreen() {
 }
 
 export default function AuthGate({ children }) {
-  const { user, loading } = useAuth();
+  const { user, loading, guest } = useAuth();
 
-  if (loading)  return <LoadingScreen />;
-  if (!user)    return <LoginForm />;
+  if (loading)         return <LoadingScreen />;
+  if (!user && !guest) return <LoginForm />;
   return children;
 }
