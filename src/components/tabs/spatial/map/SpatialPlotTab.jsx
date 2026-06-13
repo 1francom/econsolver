@@ -11,6 +11,7 @@ import { SpatialLayerEditor } from "./SpatialLayerEditor.jsx";
 import { mkSLayer } from "./layers.js";
 import { loadSpatialMaps, saveSpatialMaps } from "../../../../services/Persistence/indexedDB.js";
 import { getMapHistory, saveMapHistory } from "../../../../services/Persistence/plotHistory.js";
+import { buildFoliumPy, buildLeafletR } from "../../../../services/export/mapScript.js";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { MONO_STACK } from "../../../../theme.js";
 import { useSessionLogOptional } from "../../../../services/session/sessionLog.jsx";
@@ -121,6 +122,7 @@ export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset,
   const [basemap,  setBasemap] = useState("light");
   const [mapHistory, setMapHistory] = useState([]);
   const [savedMapId, setSavedMapId] = useState(null);
+  const [copiedScript, setCopiedScript] = useState(null);
   const [ptDiag,   setPtDiag]  = useState({});  // layerId → {total, valid, outOfBounds}
 
   // ── Download as HTML ─────────────────────────────────────────────────────────
@@ -540,13 +542,14 @@ if(LEGEND){
   const updateLayer = upd  => setLayers(prev => prev.map(l => l.id === upd.id ? upd : l));
   const removeLayer = id   => { setLayers(prev => prev.filter(l => l.id !== id)); setActiveId(prev => prev === id ? null : prev); };
   const activeLayer = layers.find(l => l.id === activeId) ?? null;
+  const currentMapEntry = () => ({ layers, basemap, crsInput });
 
   async function saveNamedMap() {
     if (!pid || layers.length === 0) return;
     const name = window.prompt("Map name:", `Map ${mapHistory.length + 1}`);
     if (!name) return;
     const now = Date.now();
-    const entry = { id: now, name, layers, basemap, crsInput, savedAt: now };
+    const entry = { id: now, name, ...currentMapEntry(), savedAt: now };
     const next = [...mapHistory, entry];
     setMapHistory(next);
     setSavedMapId(entry.id);
@@ -570,6 +573,18 @@ if(LEGEND){
     setMapHistory(next);
     setSavedMapId(null);
     if (pid) await saveMapHistory(pid, next);
+  }
+
+  function copyMapScript(language) {
+    if (layers.length === 0) return;
+    const entry = currentMapEntry();
+    const script = language === "r"
+      ? buildLeafletR(entry, { datasets: availableDatasets })
+      : buildFoliumPy(entry, { datasets: availableDatasets });
+    navigator.clipboard.writeText(script).then(() => {
+      setCopiedScript(language);
+      setTimeout(() => setCopiedScript(current => current === language ? null : current), 1600);
+    }).catch(() => setCopiedScript(null));
   }
 
   // Helper: resolve rows for a layer based on its datasetId
@@ -919,14 +934,30 @@ if(LEGEND){
           )}
 
           <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-            {pid && (
-              <button onClick={saveNamedMap} disabled={layers.length === 0}
-                style={{ padding: "3px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
-                  background: `${C.teal}12`, border: `1px solid ${C.teal}40`,
-                  color: layers.length > 0 ? C.teal : C.border, cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
-                Save map
+            <div style={{ display: "flex", gap: 4 }}>
+              {pid && (
+                <button onClick={saveNamedMap} disabled={layers.length === 0}
+                  style={{ flex: 1, padding: "3px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                    background: `${C.teal}12`, border: `1px solid ${C.teal}40`,
+                    color: layers.length > 0 ? C.teal : C.border, cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+                  Save map
+                </button>
+              )}
+              <button onClick={() => copyMapScript("r")} disabled={layers.length === 0} title="Copy current map as R leaflet"
+                style={{ padding: "3px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  background: copiedScript === "r" ? `${C.teal}18` : "none",
+                  border: `1px solid ${copiedScript === "r" ? C.teal : C.border2}`,
+                  color: layers.length > 0 ? C.textMuted : C.border, cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+                {copiedScript === "r" ? "Copied ✓" : "R"}
               </button>
-            )}
+              <button onClick={() => copyMapScript("python")} disabled={layers.length === 0} title="Copy current map as Python folium"
+                style={{ padding: "3px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  background: copiedScript === "python" ? `${C.teal}18` : "none",
+                  border: `1px solid ${copiedScript === "python" ? C.teal : C.border2}`,
+                  color: layers.length > 0 ? C.textMuted : C.border, cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+                {copiedScript === "python" ? "Copied ✓" : "Python"}
+              </button>
+            </div>
             {mapHistory.length > 0 && (
               <div style={{ display: "flex", gap: 4 }}>
                 <select value={savedMapId ?? ""} onChange={event => loadNamedMap(Number(event.target.value))}

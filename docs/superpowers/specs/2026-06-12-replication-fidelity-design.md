@@ -209,11 +209,14 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   comment, or `ggspatial::annotation_map_tile` with a caveat.
   **Approximation note:** heatmaps use ggplot2's `stat_density_2d` KDE rather than
   Litux's metric-grid KDE; basemaps use internet-fetched `ggspatial` tiles at render time.
-- [ ] **P3 — Spatial Map named history + leaflet/folium generator.** Promote
+- [x] **P3 — Spatial Map named history + leaflet/folium generator.** *(code-complete 2026-06-13, browser-validation pending Franco)* Promote
   `SpatialPlotTab` from single autosave to a named saved-maps history (mirror
   `plotHistory`: a "Save map" button → list). Generate R `leaflet()` (addTiles/
   addProviderTiles(basemap) + addPolygons/addCircleMarkers per layer) and Python
   `folium.Map` from `{layers, basemap, crsInput}`. Stata → warning comment.
+  **Approximation note:** generated lat/lon grids are not regenerated in either
+  script; the user is prompted to export and load the generated grid dataset.
+  Leaflet and folium basemap tiles require internet access when the script runs.
 - [ ] **P4 — Model plots.** Detect model-derived columns in the Model PlotBuilder
   config (`.fitted`, `.resid`, coef/CI — read the augmentation in `ModelingTab`).
   Emit `broom::augment(fit)` / `broom::tidy(fit, conf.int=TRUE)` (R),
