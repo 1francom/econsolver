@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { getSession, onAuthStateChange, getTier } from "./authService.js";
 import { setCurrentUser } from "../Persistence/indexedDB.js";
 import { clearSession, listCloudProjects } from "../sync/syncEngine.js";
+import { consumeGuestParam, isGuest, enterGuest as enterGuestStore, exitGuest as exitGuestStore } from "./guestMode.js";
 
 const AuthContext = createContext(null);
 
@@ -12,12 +13,33 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined); // undefined = still loading
   const [user,    setUser]    = useState(null);
   const [tier,    setTier]    = useState("free");
+  // Guest mode lets the app render with no account. Initialised synchronously on
+  // first render so there is no flash of the login screen when arriving via ?guest=1.
+  const [guest,   setGuest]   = useState(() => {
+    consumeGuestParam(); // promotes ?guest=1 → persistent flag and strips the param
+    return isGuest();
+  });
+
+  function enterGuest() {
+    enterGuestStore();
+    setGuest(true);
+  }
+
+  function exitGuest() {
+    exitGuestStore();
+    setGuest(false);
+  }
 
   async function applySession(s) {
     setSession(s);
     const u = s?.user ?? null;
     setUser(u);
     setCurrentUser(u?.id ?? null);
+    if (u) {
+      // A real account supersedes guest mode — never both at once.
+      exitGuestStore();
+      setGuest(false);
+    }
     if (!u) {
       clearSession();
       setTier("free");
@@ -53,7 +75,7 @@ export function AuthProvider({ children }) {
   const loading = session === undefined;
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, tier }}>
+    <AuthContext.Provider value={{ user, session, loading, tier, guest, enterGuest, exitGuest }}>
       {children}
     </AuthContext.Provider>
   );

@@ -186,10 +186,23 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
 
 ### FASE 3 — "Per execution order" mode
 
-- [ ] **3.1** Enable the "Per execution order" structuring mode: the deterministic
-  skeleton is the timeline walk; the AI preserves it.
-- [ ] **3.2** Interleaving detection (same dataset re-cleaned after modeling, or
-  multiple datasets modeled) → auto-pick the smart default structuring mode.
+- [x] **3.1** *(code-complete 2026-06-13, browser-validation pending Franco)* Enable the "Per execution order" structuring mode: the deterministic
+  skeleton is the timeline walk; the AI preserves it. **Split:** the PLANNER
+  (`src/services/export/timelinePlan.js` — `planExecutionOrder`/`detectInterleaving`/
+  `summarizePlan`, pure functions over the persisted timeline) was Codex's lane;
+  the WIRING (ReportingModule `AIUnifiedScript`) is Claude's. Execution branch walks
+  `plan.blocks`: load/clean → `generateCleanScript` for the dataset at its first
+  mention (block-level fidelity; a documented limitation — re-clean-after-model
+  collapses into the first block); estimate → matched pinned/active model via
+  `renderModel` inline in timeline order; explore/spatial → comment pointing to their
+  pin/export. `structureInstruction` for execution mode tells the AI to preserve the
+  exact order (no module regrouping). Models emit inline (modelSc="").
+- [x] **3.2** *(code-complete 2026-06-13, browser-validation pending Franco)* Interleaving detection (non-contiguous clean blocks, ≥2 datasets modeled,
+  or load-after-estimate) → `detectInterleaving` auto-selects "execution" mode once
+  when the panel opens (never overrides an explicit user pick) + shows a "⤳ Execution
+  order auto-selected: <reason>" hint. **Co-landing note:** Codex's `timelinePlan.js`
+  was uncommitted at the time Claude's wiring was written; the two commits must land
+  together (Claude holds the push until the planner is on origin).
 
 ### TRACK P — Plot replication (parallel; independent of the timeline)
 

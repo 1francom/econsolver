@@ -2,11 +2,13 @@
 // Welcome page + email/password login. Shown when the user is not authenticated.
 import { useState } from "react";
 import { signIn, signUp } from "../../services/auth/authService.js";
+import { useAuth } from "../../services/auth/AuthContext.jsx";
 import { useTheme } from "../../ThemeContext.jsx";
 
 
 export default function LoginForm() {
   const { C, T, theme, setTheme } = useTheme();
+  const { enterGuest } = useAuth();
   const [mode,     setMode]     = useState("login"); // "login" | "signup"
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
@@ -260,6 +262,62 @@ export default function LoginForm() {
           </button>
 
         </form>
+      </div>
+
+      {/* ── Guest entry ── */}
+      <div style={{
+        width: "100%",
+        maxWidth: 340,
+        marginTop: "1rem",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "0.5rem",
+      }}>
+        <div style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.6rem",
+          color: C.textMuted,
+          fontSize: T.caption.fontSize,
+          letterSpacing: "0.18em",
+        }}>
+          <div style={{ flex: 1, height: 1, background: C.border2 }} />
+          OR
+          <div style={{ flex: 1, height: 1, background: C.border2 }} />
+        </div>
+        <button
+          type="button"
+          onClick={enterGuest}
+          style={{
+            width: "100%",
+            padding: "0.6rem",
+            background: "transparent",
+            color: C.text,
+            border: `1px solid ${C.border2}`,
+            borderRadius: 3,
+            fontFamily: T.code.fontFamily,
+            fontSize: T.code.fontSize,
+            letterSpacing: "0.04em",
+            cursor: "pointer",
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.text; }}
+        >
+          Continue without an account →
+        </button>
+        <div style={{
+          fontSize: T.caption.fontSize,
+          color: C.textMuted,
+          letterSpacing: "0.03em",
+          lineHeight: 1.6,
+          textAlign: "center",
+          opacity: 0.75,
+        }}>
+          Your work stays in this browser. Create an account later to sync across devices.
+        </div>
       </div>
 
       {/* ── Footer note ── */}

@@ -8,6 +8,7 @@ import DatasetManager from "./DatasetManager.jsx";
 import AppearancePanel from "./AppearancePanel.jsx";
 import { useTheme } from "../../ThemeContext.jsx";
 import { signOut } from "../../services/auth/authService.js";
+import { useAuth } from "../../services/auth/AuthContext.jsx";
 import { clearAllLocalData } from "../../services/Persistence/indexedDB.js";
 
 
@@ -24,6 +25,7 @@ const TABS = [
 
 export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback }) {
   const { C, T, theme, setTheme } = useTheme();
+  const { guest, exitGuest } = useAuth();
   const [showAppearance, setShowAppearance] = useState(false);
 
   return (
@@ -223,10 +225,10 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
         ⊘
       </button>
 
-      {/* ── Sign out ── */}
+      {/* ── Sign out / exit guest ── */}
       <button
-        onClick={() => signOut()}
-        title="Sign out"
+        onClick={() => { if (guest) exitGuest(); else signOut(); }}
+        title={guest ? "Exit guest mode" : "Sign out"}
         style={{
           display: "flex",
           alignItems: "center",
