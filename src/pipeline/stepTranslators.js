@@ -546,6 +546,9 @@ export function toR(step, df = "df", allDatasets = {}) {
       return [
         `# Load right dataset: "${rightName}"`,
         `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        // Litux's join is a first-match LOOKUP — dedup right by key so dplyr
+        // reproduces the same row count (no many-to-many expansion).
+        `right_df <- dplyr::distinct(right_df, ${rStr(step.rightKey)}, .keep_all = TRUE)  # Litux keeps the first match per key`,
         `${df} <- ${how}(${df}, right_df, by = c(${rStr(step.leftKey)} = ${rStr(step.rightKey)}), suffix = c("", ${rStr(step.suffix ?? "_r")}))`,
       ].join("\n");
     }
@@ -867,6 +870,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
         `preserve`,
         `${stataRightLoad(step.rightId, allDatasets)}`,
         `rename ${stVar(step.rightKey)} ${stVar(step.leftKey)}`,
+        `* Litux's join is a first-match LOOKUP — keep one row per key so m:1 merge matches`,
+        `bysort ${stVar(step.leftKey)}: keep if _n == 1`,
         `save _right_tmp.dta, replace`,
         `restore`,
         `merge m:1 ${stVar(step.leftKey)} using _right_tmp.dta, ${how}`,
@@ -1158,6 +1163,9 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return [
         `# Join dataset: "${rightName}"`,
         `right_df = ${pyRightLoad(step.rightId, allDatasets)}`,
+        // Litux's join is a first-match LOOKUP — dedup right by key so pandas
+        // reproduces the same row count (no many-to-many expansion).
+        `right_df = right_df.drop_duplicates(subset=[${pyCol(step.rightKey)}], keep="first")  # Litux keeps the first match per key`,
         `${df} = pd.merge(${df}, right_df, left_on=${pyCol(step.leftKey)}, right_on=${pyCol(step.rightKey)}, how=${pyStr(how)}, suffixes=("", ${pyStr(step.suffix ?? "_r")}))`,
       ].join("\n");
     }

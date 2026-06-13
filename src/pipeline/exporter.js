@@ -280,6 +280,10 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
           const how = g.opType === "inner_join" ? "inner_join" : "left_join";
           const lk  = g.params?.leftKey  ? `"${g.params.leftKey}"`  : "<left_key>";
           const rk  = g.params?.rightKey ? `"${g.params.rightKey}"` : "<right_key>";
+          // Litux's join is a first-match LOOKUP (1:1) — dedup the right by its
+          // key so dplyr reproduces the same row count (no many-to-many expansion).
+          const rkBare = g.params?.rightKey;
+          if (rkBare) lines.push(`${rightDf} <- dplyr::distinct(${rightDf}, ${rk}, .keep_all = TRUE)  # Litux keeps the first match per key`);
           lines.push(`${leftDf} <- dplyr::${how}(${leftDf}, ${rightDf}, by = c(${lk} = ${rk}))`);
         } else if (g.opType === "append") {
           lines.push(`${leftDf} <- dplyr::bind_rows(${leftDf}, ${rightDf})`);
@@ -396,6 +400,9 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
         const rk = g.params?.rightKey ? `"${g.params.rightKey}"` : "<right_key>";
         if (g.opType === "join" || g.opType === "left_join" || g.opType === "inner_join") {
           const how = g.opType === "inner_join" ? "inner" : "left";
+          // Litux's join is a first-match LOOKUP — dedup right by key so pandas
+          // reproduces the same row count (no many-to-many expansion).
+          if (g.params?.rightKey) lines.push(`${rightDf} = ${rightDf}.drop_duplicates(subset=[${rk}], keep="first")  # Litux keeps the first match per key`);
           lines.push(`${leftDf} = pd.merge(${leftDf}, ${rightDf}, left_on=${lk}, right_on=${rk}, how="${how}")`);
         } else if (g.opType === "append") {
           lines.push(`${leftDf} = pd.concat([${leftDf}, ${rightDf}], ignore_index=True)`);
