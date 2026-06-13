@@ -18,6 +18,7 @@ import { buildSessionSnapshot } from "./services/AI/sessionSnapshot.js";
 import { useSessionLog } from "./services/session/sessionLog.jsx";
 import { useSessionState } from "./services/session/sessionState.jsx";
 import { generateCleanScript, generateWorkspaceScript, toDfVar } from "./pipeline/exporter.js";
+import { planExecutionOrder, detectInterleaving } from "./services/export/timelinePlan.js";
 import { loadProjectPipelines } from "./services/Persistence/indexedDB.js";
 import { generateRScript }     from "./services/export/rScript.js";
 import { generatePythonScript } from "./services/export/pythonScript.js";
@@ -767,10 +768,29 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   ];
 
   const STRUCTURES = [
-    { id: "module",    label: "Per module",          disabled: false, tip: "Sections grouped by workspace module (default)" },
-    { id: "execution", label: "Per execution order", disabled: true,  tip: "Coming soon — needs the unified session timeline" },
+    { id: "module",    label: "Per module",          disabled: false, tip: "Sections grouped by workspace module" },
+    { id: "execution", label: "Per execution order", disabled: false, tip: "Blocks in the exact order you ran them (best for interleaved workflows)" },
     { id: "custom",    label: "Custom",              disabled: false, tip: "Give Claude your own structuring instruction" },
   ];
+
+  // ── Interleaving detection (Fase 3.2) — when the session interleaves datasets
+  //    (e.g. Clean A → Model A → load B → Clean B → Model B), "Per execution
+  //    order" is the faithful default. Set once when the panel opens; never
+  //    override an explicit user pick afterwards.
+  const timeline = snapshot?.sessionLog ?? [];
+  const [interleaveHint, setInterleaveHint] = useState(null);
+  const interleaveApplied = useRef(false);
+  useEffect(() => {
+    if (!open || interleaveApplied.current) return;
+    interleaveApplied.current = true;
+    try {
+      const det = detectInterleaving(timeline);
+      if (det?.interleaved) {
+        setStructureMode("execution");
+        setInterleaveHint(det.reason ?? "Interleaved workflow detected");
+      }
+    } catch { /* planner not available — keep module default */ }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Manual cell edits (Fase 0.3, D2): `patch` steps are keyed on internal row
   //    ids (__row_id/__ri) that don't exist in the raw file — not faithfully
@@ -890,34 +910,92 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
     setScript("");
     try {
       const multiDataset = availableDatasets.length > 1 || globalPipeline.length > 0;
-      let cleanSc;
-      if (multiDataset) {
-        // Workspace skeleton: ALL session datasets in topological order, each
-        // loaded into its own df_<name> with its own load opts + pipeline,
-        // then cross-dataset G-steps. Per-dataset pipelines come from IDB;
-        // the Report-active dataset uses its live (possibly newer) pipeline.
-        let map = {};
-        try { map = (await loadProjectPipelines(pid))?.datasetPipelines ?? {}; } catch { /* no IDB record yet */ }
-        const built = {};
-        for (const ds of availableDatasets) {
-          const dsRec    = map[ds.id] ?? {};
-          const isActive = ds.filename === cleanedData?.filename;
-          built[ds.id] = {
-            id:       ds.id,
-            name:     ds.name ?? ds.filename ?? ds.id,
-            filename: dsRec.filename ?? ds.filename ?? null,
-            pipeline: isActive
-              ? (cleanedData?.pipeline ?? dsRec.pipeline ?? [])
-              : (Array.isArray(dsRec.pipeline) ? dsRec.pipeline : []),
-            loadOpts: ds.loadOpts ?? dsRec.loadOpts ?? null,
-          };
+      const comment = lang === "stata" ? "*" : "#";
+
+      // ── Per-dataset build map (used by every path) ─────────────────────────
+      // Per-dataset pipelines come from IDB; the Report-active dataset uses its
+      // live (possibly newer) pipeline.
+      let map = {};
+      try { map = (await loadProjectPipelines(pid))?.datasetPipelines ?? {}; } catch { /* no IDB record yet */ }
+      const built = {};
+      const dsMap = {};
+      for (const ds of availableDatasets) {
+        const dsRec    = map[ds.id] ?? {};
+        const isActive = ds.filename === cleanedData?.filename;
+        built[ds.id] = {
+          id:       ds.id,
+          name:     ds.name ?? ds.filename ?? ds.id,
+          filename: dsRec.filename ?? ds.filename ?? null,
+          pipeline: isActive
+            ? (cleanedData?.pipeline ?? dsRec.pipeline ?? [])
+            : (Array.isArray(dsRec.pipeline) ? dsRec.pipeline : []),
+          loadOpts: ds.loadOpts ?? dsRec.loadOpts ?? null,
+        };
+        dsMap[ds.id] = { name: ds.name ?? ds.filename, filename: ds.filename };
+      }
+
+      // Render one estimation block, bound to the model's source df (not the
+      // Report-active dataset). Shared by the module and execution paths.
+      const renderModel = (model, index) => {
+        let block = _buildModelScript(lang, model);
+        if (!block) return "";
+        if (lang !== "stata") {
+          const modelFile = model?.spec?.filename ?? cleanedData?.filename;
+          const modelDs   = availableDatasets.find(d => d.filename === modelFile) ?? null;
+          if (modelFile) block = block.replace(/\bdf\b/g, toDfVar(modelDs?.name ?? modelFile));
         }
+        const label = model?.label ?? model?.modelLabel ?? model?.type ?? "Model";
+        return `${comment} Model ${index + 1}: ${label}\n${block}`;
+      };
+
+      let cleanSc;
+      let modelSc;
+      if (structureMode === "execution" && timeline.length) {
+        // ── Execution-order skeleton (Fase 3.1) ──────────────────────────────
+        // Walk the timeline plan and emit each block where it actually happened.
+        // Data prep for a dataset is emitted (load + full pipeline) at its first
+        // mention; estimations are matched to their pinned/active model and
+        // emitted inline. The AI preserves this order (prompt rule 2 + 9).
+        const all  = [result, ...pinnedModels].filter(Boolean);
+        const matchModel = ev => {
+          const f = ev?.params?.filename, t = ev?.params?.type, y = ev?.params?.yVar;
+          return all.find(m => (m.spec?.filename ?? null) === f && (m.type ?? null) === t && (m.spec?.yVar ?? null) === y)
+              ?? all.find(m => (m.type ?? null) === t && (m.spec?.yVar ?? null) === y)
+              ?? null;
+        };
+        const plan = planExecutionOrder(timeline);
+        const emittedData = new Set();
+        let modelIdx = 0;
+        const out = [];
+        for (const blk of (plan?.blocks ?? [])) {
+          if (blk.kind === "load" || blk.kind === "clean") {
+            if (blk.datasetId && !emittedData.has(blk.datasetId) && built[blk.datasetId]) {
+              emittedData.add(blk.datasetId);
+              const ds = built[blk.datasetId];
+              out.push(generateCleanScript({
+                language: lang, datasetName: ds.name,
+                filename: ds.filename ?? `${ds.name}.csv`,
+                pipeline: ds.pipeline, loadOpts: ds.loadOpts, allDatasets: dsMap,
+              }));
+            }
+          } else if (blk.kind === "estimate") {
+            const m = matchModel(blk.events?.[0]);
+            out.push(m ? renderModel(m, modelIdx++)
+                       : `${comment} ${blk.label} — model not pinned; pin it in the Model tab to replicate`);
+          } else if (blk.kind === "explore") {
+            out.push(`${comment} ${blk.label} — Explore artifact (pin in Explore to emit plot/stat code)`);
+          } else if (blk.kind === "spatial") {
+            out.push(`${comment} ${blk.label} — spatial op (use the Spatial tab map/plot exports)`);
+          }
+        }
+        cleanSc = out.filter(Boolean).join("\n\n");
+        modelSc = ""; // models are emitted inline, in execution order
+      } else if (multiDataset) {
+        // Workspace skeleton: ALL session datasets in topological order.
         cleanSc = generateWorkspaceScript({ language: lang, datasets: built, globalPipeline });
+        modelSc = modelsToReplicate().map(renderModel).filter(Boolean).join("\n\n");
       } else {
         const dsName = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
-        const dsMap  = Object.fromEntries(
-          availableDatasets.map(ds => [ds.id, { name: ds.name ?? ds.filename, filename: ds.filename }])
-        );
         cleanSc = generateCleanScript({
           language:    lang,
           datasetName: dsName,
@@ -926,28 +1004,17 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           loadOpts:    cleanedData?.loadOpts ?? null,
           allDatasets: dsMap,
         });
+        modelSc = modelsToReplicate().map(renderModel).filter(Boolean).join("\n\n");
       }
-      const comment = lang === "stata" ? "*" : "#";
-      const modelSc = modelsToReplicate().map((model, index) => {
-        let block = _buildModelScript(lang, model);
-        if (!block) return "";
-        if (lang !== "stata") {
-          // Bind every estimation block to the data frame stamped on that
-          // model, not whichever dataset happens to be active in Report.
-          const modelFile = model?.spec?.filename ?? cleanedData?.filename;
-          const modelDs   = availableDatasets.find(d => d.filename === modelFile) ?? null;
-          if (modelFile) block = block.replace(/\bdf\b/g, toDfVar(modelDs?.name ?? modelFile));
-        }
-        const label = model?.label ?? model?.modelLabel ?? model?.type ?? "Model";
-        return `${comment} Model ${index + 1}: ${label}\n${block}`;
-      }).filter(Boolean).join("\n\n");
       const dict = cleanedData?.dataDictionary ?? null;
       const structureInstruction =
         structureMode === "custom" && customInstruction.trim()
           ? customInstruction.trim()
-          : structureMode === "module"
-            ? "Structure the script grouped by module section: Setup, Data Loading, Cleaning, Feature Engineering, Estimation, Results."
-            : null;
+          : structureMode === "execution"
+            ? "Structure the script in EXACT EXECUTION ORDER as given in the section blocks: do not regroup by module, preserve the interleaving of data prep and estimation exactly as ordered."
+            : structureMode === "module"
+              ? "Structure the script grouped by module section: Setup, Data Loading, Cleaning, Feature Engineering, Estimation, Results."
+              : null;
       const replicationInstruction = replicateMode === "all"
         ? "REPLICATE: all pinned models plus the active model, without duplicating an identical active pin. Preserve every labeled model block and its source dataset binding."
         : "REPLICATE: active model only.";
@@ -1054,6 +1121,11 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
                 </button>
               ))}
             </div>
+            {interleaveHint && structureMode === "execution" && (
+              <div style={{ marginTop: 6, fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily }}>
+                ⤳ Execution order auto-selected: {interleaveHint}
+              </div>
+            )}
             {structureMode === "custom" && (
               <textarea
                 value={customInstruction}
