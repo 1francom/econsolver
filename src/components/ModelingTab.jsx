@@ -86,6 +86,7 @@ import { runPipeline } from "../pipeline/runner.js";
 import { useTheme, mono }  from "../components/modeling/shared.jsx";
 import { useSessionLogOptional } from "../services/session/sessionLog.jsx";
 import PlotBuilder          from "./PlotBuilder.jsx";
+import { buildModelPlotPreamble } from "../services/export/modelPlotScript.js";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, SyntheticDiffPlot, SyntheticPlaceboPlot, SyntheticMSPEPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
@@ -3186,13 +3187,21 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   ))}
                 </div>
 
-                {/* PlotBuilder — key resets when template applied (G12+G13) */}
+                {/* PlotBuilder — key resets when template applied (G12+G13).
+                    scriptPreamble (Track P4): model plots use augmented columns
+                    (__resid__/__yhat__) that don't exist in the raw data, so a
+                    replication script must re-create them from the fitted model
+                    before the geom. PlotBuilder prepends this and plots over
+                    `plot_df` (Track P5 seam). */}
                 <PlotBuilder
                   key={plotTemplateKey}
                   pid={pid && `${pid}_model`}
                   headers={activePlotHeaders}
                   rows={activePlotRows}
                   initialLayers={plotInitLayers}
+                  scriptPreamble={result
+                    ? (lang => buildModelPlotPreamble(result, lang, { mode: plotDataMode === "comparison" ? "comparison" : "result" }))
+                    : undefined}
                   style={{ minHeight: 340 }}
                 />
               </div>

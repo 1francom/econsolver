@@ -217,11 +217,20 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   **Approximation note:** generated lat/lon grids are not regenerated in either
   script; the user is prompted to export and load the generated grid dataset.
   Leaflet and folium basemap tiles require internet access when the script runs.
-- [ ] **P4 — Model plots.** Detect model-derived columns in the Model PlotBuilder
-  config (`.fitted`, `.resid`, coef/CI — read the augmentation in `ModelingTab`).
-  Emit `broom::augment(fit)` / `broom::tidy(fit, conf.int=TRUE)` (R),
-  `fit.fittedvalues`/`fit.resid` (Py), `predict` (Stata) AFTER the estimation, then
-  the geom. Model plots must order after their estimation node.
+- [x] **P4 — Model plots.** *(code-complete 2026-06-13, browser-validation pending Franco — needs Codex's P5 `scriptPreamble` seam in PlotBuilder.jsx to be wired end-to-end)*
+  New `src/services/export/modelPlotScript.js` (`buildModelPlotPreamble(result, language, {mode})`):
+  emits the preamble that re-materializes the model-derived columns the Model PlotBuilder
+  uses. ModelingTab appends `__resid__`/`__yhat__` (not `.resid`/`.fitted`) to `resultRows`,
+  so the preamble defines those exact names on `plot_df`. R: `broom::augment(fit)` with a
+  `model.frame(fit)` + `residuals/fitted` fallback (works for lm/glm/fixest/ivreg) → aliases
+  `.resid`→`__resid__`, `.fitted`→`__yhat__`. Python: `fit.resid`/`fit.fittedvalues`. Stata:
+  `predict __yhat__, xb` + `predict __resid__, residuals`. `mode:"comparison"` (G13 coef plots)
+  emits a `broom::tidy`/`coefplot` stacking preamble instead. References the `fit` object the
+  Estimation section creates. Wired in `ModelingTab.jsx` via the PlotBuilder `scriptPreamble`
+  prop (Track P5 seam) — passes a `(lang) => preamble` only when `result` exists; mode follows
+  `plotDataMode`. **Split note:** P4 owns `modelPlotScript.js` + `ModelingTab.jsx` ONLY; the
+  `scriptPreamble` prop + `plot_df` plumbing live in PlotBuilder.jsx (Codex's P5 lane). Until
+  P5 lands, the prop is a harmless ignored prop.
 - [ ] **P5 — matplotlib + Stata twoway parity** for P1/P2 geoms.
 
 ---
