@@ -1953,7 +1953,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} datasetName={filename} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
     </div>
   );

@@ -22,6 +22,7 @@ import { PLOT_PALETTES, MONO_STACK } from "../theme.js";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
 import { buildGgplot, buildMatplotlibPlot, buildStataPlot } from "../services/export/plotScript.js";
+import { toDfVar } from "../pipeline/exporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
@@ -1115,7 +1116,9 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 // scriptPreamble(language) optionally prepends model-context replication code.
-export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid, scriptPreamble }) {
+// datasetName: source dataset name → R/Python df identifier (df_<name>) in copied
+// scripts so the export matches the unified-script convention. Defaults to "df".
+export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid, scriptPreamble, datasetName }) {
   const { C, T, prefs } = useTheme();
   const [layers,      setLayers]      = useState(initialLayers);
   const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
@@ -1242,7 +1245,8 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     const preamble = typeof scriptPreamble === "function"
       ? String(scriptPreamble(scriptLanguage) ?? "").trim()
       : "";
-    const dfVar = preamble && scriptLanguage !== "stata" ? "plot_df" : "df";
+    const baseDfVar = datasetName ? toDfVar(datasetName) : "df";
+    const dfVar = preamble && scriptLanguage !== "stata" ? "plot_df" : baseDfVar;
     const generated = scriptLanguage === "python"
       ? buildMatplotlibPlot(entry, { dfVar })
       : scriptLanguage === "stata"
@@ -1253,7 +1257,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
       setCopiedLanguage(scriptLanguage);
       setTimeout(() => setCopiedLanguage(current => current === scriptLanguage ? null : current), 1600);
     }).catch(() => setCopiedLanguage(null));
-  }, [layers.length, currentPlotEntry, scriptLanguage, scriptPreamble]);
+  }, [layers.length, currentPlotEntry, scriptLanguage, scriptPreamble, datasetName]);
 
   const newPlot = useCallback(() => {
     setLayers([]);

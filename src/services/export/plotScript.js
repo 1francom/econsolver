@@ -180,7 +180,10 @@ function buildLayer(layer, dfVar) {
         method === "lm" ? `level = ${rNumber(opts.ci ?? 0.95, "0.95")}` : null,
         method === "loess" ? `span = ${rNumber(opts.span ?? 0.75, "0.75")}` : null,
         `linewidth = 2`,
-        opacity,
+        // The layer opacity drives the SE ribbon `fill`; force it low so the
+        // ribbon stays translucent and the fitted line remains visible (the
+        // line itself is always opaque in geom_smooth).
+        `alpha = 0.2`,
       ]);
     }
 
