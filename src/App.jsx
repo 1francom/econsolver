@@ -19,6 +19,7 @@ import {
   saveProject, listProjects, deleteProject, clearAllProjects,
 } from "./services/Persistence/indexedDB.js";
 import { useAuth } from "./services/auth/AuthContext.jsx";
+import { signOut } from "./services/auth/authService.js";
 import { listCloudProjects, lockSession, pullProject, hasSyncSession, renameCloudProject } from "./services/sync/syncEngine.js";
 import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
@@ -1665,7 +1666,7 @@ function WorkspaceRegistrar({ filename, rawData }) {
 
 function Dashboard({onNew, onLoad}) {
   const { C, T, theme, setTheme } = useTheme();
-  const { user } = useAuth();
+  const { user, guest, exitGuest } = useAuth();
   const [projects,    setProjects]    = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [selected,    setSelected]    = useState(null);
@@ -2271,10 +2272,32 @@ function Dashboard({onNew, onLoad}) {
             <span style={{fontSize: T.body.fontSize, color:C.teal}}>☁</span>
             <span style={{fontSize: T.code.fontSize, color:C.text}}>Cloud projects</span>
             {cloudLoading && <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:"auto"}}>loading…</span>}
-            {user && !cloudLoading && (
-              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:"auto"}}>
-                {user.email}
-              </span>
+            {!cloudLoading && (user || guest) && (
+              <div style={{marginLeft:"auto", display:"flex", alignItems:"center", gap:10}}>
+                <span style={{fontSize: T.caption.fontSize, color:C.textMuted}}>
+                  {user ? user.email : "Guest session"}
+                </span>
+                <button
+                  onClick={() => { if (guest) exitGuest(); else signOut(); }}
+                  title={guest ? "Exit guest mode" : "Sign out"}
+                  style={{
+                    background:"transparent",
+                    border:`1px solid ${C.border2}`,
+                    borderRadius:3,
+                    color:C.textMuted,
+                    cursor:"pointer",
+                    fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize,
+                    letterSpacing:"0.06em",
+                    padding:"0.2rem 0.6rem",
+                    transition:"all 0.15s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.red; e.currentTarget.style.color = C.red; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+                >
+                  {guest ? "Exit" : "Sign out"}
+                </button>
+              </div>
             )}
           </div>
 
