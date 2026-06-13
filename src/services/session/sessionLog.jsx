@@ -14,23 +14,43 @@
 //     label:        string,   // human-readable one-liner
 //   }
 
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { getTimeline, appendTimeline, saveTimeline } from "../Persistence/timeline.js";
 
 const SessionLogContext = createContext(null);
 
-export function SessionLogProvider({ children }) {
+// pid: project id — when provided, the log is the in-memory mirror of the
+// persisted execution timeline (IDB `timeline_<pid>`): hydrated on mount,
+// appended-through on every entry. Without pid it degrades to the legacy
+// ephemeral in-memory log (Fase 1.2 of the replication-fidelity spec).
+export function SessionLogProvider({ children, pid = null }) {
   const [log, setLog] = useState([]);
 
+  // Hydrate from the persisted timeline once per project.
+  useEffect(() => {
+    if (!pid) return;
+    let cancelled = false;
+    getTimeline(pid)
+      .then(events => { if (!cancelled && events.length) setLog(events); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [pid]);
+
   const appendLog = useCallback((entry) => {
-    setLog(prev => [...prev, {
+    const full = {
       id:           crypto.randomUUID(),
       timestamp:    Date.now(),
       reproducible: true,
       ...entry,
-    }]);
-  }, []);
+    };
+    setLog(prev => [...prev, full]);
+    if (pid) appendTimeline(pid, full).catch(() => {});
+  }, [pid]);
 
-  const clearLog = useCallback(() => setLog([]), []);
+  const clearLog = useCallback(() => {
+    setLog([]);
+    if (pid) saveTimeline(pid, []).catch(() => {});
+  }, [pid]);
 
   return (
     <SessionLogContext.Provider value={{ log, appendLog, clearLog }}>
@@ -43,4 +63,11 @@ export function useSessionLog() {
   const ctx = useContext(SessionLogContext);
   if (!ctx) throw new Error("useSessionLog must be used inside SessionLogProvider");
   return ctx;
+}
+
+// Optional variant for components that may render outside the provider
+// (tests/legacy embeds): returns a no-op appendLog instead of throwing.
+const NOOP_CTX = { log: [], appendLog: () => {}, clearLog: () => {} };
+export function useSessionLogOptional() {
+  return useContext(SessionLogContext) ?? NOOP_CTX;
 }

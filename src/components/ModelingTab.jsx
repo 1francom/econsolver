@@ -84,7 +84,9 @@ import ExtractPanel         from "./modeling/ExtractPanel.jsx";
 import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
 import { runPipeline } from "../pipeline/runner.js";
 import { useTheme, mono }  from "../components/modeling/shared.jsx";
+import { useSessionLogOptional } from "../services/session/sessionLog.jsx";
 import PlotBuilder          from "./PlotBuilder.jsx";
+import { buildModelPlotPreamble } from "../services/export/modelPlotScript.js";
 import { buildMetadataReport }    from "../core/validation/metadataExtractor.js";
 import { generateCoachingSignals } from "../core/validation/coachingTriggers.js";
 import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, EndogeneityPlot, RDDPlot, DiDPlot, EventStudyPlot, EventCoeffsPlot, SyntheticGapPlot, SyntheticDiffPlot, SyntheticPlaceboPlot, SyntheticMSPEPlot, FirstStagePlot, RDDBandwidthPlot, RDDCovariateBalance, McCraryPlot, ROCCurve, PredProbHistogram } from "../components/modeling/ModelPlots.jsx";
@@ -203,6 +205,8 @@ function ModelHistory({ history, onRestore, onClear }) {
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onSessionStateChange, onCoachQuestion, onExtract, pid }) {
   const { C, T } = useTheme();
+  // Execution-timeline emitter (Fase 1.2) — no-op when outside the provider.
+  const { appendLog } = useSessionLogOptional();
   const rows    = cleanedData?.cleanRows ?? [];
   const dict    = cleanedData?.dataDictionary ?? {};
   const headers = cleanedData?.headers   ?? [];
@@ -473,6 +477,24 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
   // Notify parent when result changes (for global AI sidebar context)
   useEffect(() => { onResultChange?.(result); }, [result]);
+
+  // Execution-timeline emitter (Fase 1.2): one event per successful estimation,
+  // regardless of which branch (SQL fast path, JS, spatial) produced it.
+  useEffect(() => {
+    if (!result?.type) return;
+    appendLog({
+      module: "model", opType: "estimate",
+      params: {
+        type:     result.type,
+        yVar:     result.spec?.yVar ?? null,
+        xVars:    result.spec?.xVars ?? [],
+        seType:   result.seType ?? seType ?? "classical",
+        filename: result.spec?.filename ?? cleanedData?.filename ?? null,
+        n:        result.n ?? null,
+      },
+      label: `Estimated ${result.type}: ${result.spec?.yVar ?? "?"} ~ ${(result.spec?.xVars ?? []).join(" + ") || "?"}`,
+    });
+  }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Surface modeling session state (pinned models, subsets, inference) so the
   // global AI coach sidebar can build a full session snapshot.
@@ -3165,13 +3187,21 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   ))}
                 </div>
 
-                {/* PlotBuilder — key resets when template applied (G12+G13) */}
+                {/* PlotBuilder — key resets when template applied (G12+G13).
+                    scriptPreamble (Track P4): model plots use augmented columns
+                    (__resid__/__yhat__) that don't exist in the raw data, so a
+                    replication script must re-create them from the fitted model
+                    before the geom. PlotBuilder prepends this and plots over
+                    `plot_df` (Track P5 seam). */}
                 <PlotBuilder
                   key={plotTemplateKey}
                   pid={pid && `${pid}_model`}
                   headers={activePlotHeaders}
                   rows={activePlotRows}
                   initialLayers={plotInitLayers}
+                  scriptPreamble={result
+                    ? (lang => buildModelPlotPreamble(result, lang, { mode: plotDataMode === "comparison" ? "comparison" : "result" }))
+                    : undefined}
                   style={{ minHeight: 340 }}
                 />
               </div>

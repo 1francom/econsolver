@@ -25,6 +25,7 @@ import { saveRawData, loadRawData, deleteRawData, saveDatasetRegistry, loadDatas
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
 import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
+import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { deleteCacheEntry } from "./services/data/parquetCache.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 
@@ -685,6 +686,8 @@ const ensureRowIds = ensureRowIdentity;
 const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets, onComplete, onOutputReady, onDatasetsChange, onActiveDatasetChange, activeDatasetId, assistantPrefill = null, onConsumePrefill = null }, ref) {
   const { C, T } = useTheme();
   const dispatch = useSessionDispatch();
+  // Execution-timeline emitter (Fase 1.2) — no-op when outside the provider.
+  const { appendLog } = useSessionLogOptional();
 
   // Ref exposed to WranglingModule so DataViewer can dispatch patch steps
   const wranglingAddStepRef = useRef(null);
@@ -732,7 +735,11 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
             id:       meta.id,
             filename: meta.filename,
             name:     meta.name ?? undefined,   // user-given display name (rename)
-            rawData:  ensureRowIds(raw),
+            // Restore loadOpts captured at parse time (delimiter/sheet/encoding) —
+            // raw_data rows don't carry _loadOpts, only the registry meta does.
+            // Without this, a reloaded project loses e.g. read_delim(";") in
+            // replication scripts and falls back to extension inference.
+            rawData:  ensureRowIds(raw._loadOpts || !meta.loadOpts ? raw : { ...raw, _loadOpts: meta.loadOpts }),
             crs:      meta.crs ?? raw?._crs ?? null,
             origin:   meta.origin ?? undefined,
             source:   meta.source ?? undefined,
@@ -861,8 +868,13 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         loadOpts: parsed._loadOpts ?? null,
       });
     }
+    appendLog({
+      module: "data", opType: "dataset_load", datasetId: id,
+      params: { filename, loadOpts: parsed._loadOpts ?? null, rows: parsed.rows.length, cols: parsed.headers.length },
+      label:  `Loaded ${filename} (${parsed.rows.length.toLocaleString()} × ${parsed.headers.length})`,
+    });
     return id;
-  }, [dispatch]);
+  }, [dispatch, appendLog]);
 
   const handleLoadFile = useCallback(async (file) => {
     setLoading(true);
@@ -925,8 +937,9 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
 
   // Save a derived dataset (pipeline output or summarize result) into the manager.
   // Appears immediately in the sidebar with its own empty pipeline.
-  const handleSaveSubset = useCallback((name, rows, headers) => {
-    const id    = genId();
+  const handleSaveSubset = useCallback((name, rows, headers, recipe = null, options = null) => {
+    const parentId = activeId;
+    const id    = options?.id ?? genId();
     // ensureRowIds: assign __ri so cell editing (patch step) works for
     // simulated / API-loaded / derived datasets, not just file uploads
     const rawData = ensureRowIds({ rows, headers });
@@ -938,7 +951,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       id,
       filename: name,
       rawData,
-      origin:   activeId,   // informational — which dataset it came from
+      origin:   parentId,   // informational — which dataset it came from
     };
     setDatasets(prev => [...prev, entry]);
     setActiveId(id);        // switch to the new subset immediately
@@ -951,9 +964,27 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         colCount: headers.length,
         headers:  headers,
       });
+      if (recipe && parentId) {
+        dispatch({
+          type: "ADD_GLOBAL_STEP",
+          step: {
+            id: `G_${Date.now()}`,
+            opType: "derive",
+            leftDatasetId: id,
+            rightDatasetId: parentId,
+            params: { recipe },
+          },
+        });
+      }
     }
+    appendLog({
+      module: "data", opType: "dataset_derive", datasetId: id,
+      reproducible: !!recipe,
+      params: { name, originId: parentId, rows: rows.length, cols: headers.length, ...(recipe ? { recipe } : {}) },
+      label:  `Derived dataset ${name} (${rows.length.toLocaleString()} × ${headers.length})`,
+    });
     return id;
-  }, [activeId, dispatch]);
+  }, [activeId, dispatch, appendLog]);
 
   // Expose imperative handles so DataTab can add datasets without prop-drilling.
   // Must come after handleLoadFile and handleSaveSubset are defined.
@@ -961,7 +992,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     addFile:          handleLoadFile,
     addFiles:         handleLoadFiles,
     addParsed:        addParsedDataset,
-    addApiData:       (fname, rows, headers) => handleSaveSubset(fname, rows, headers),
+    addApiData:       (fname, rows, headers, recipe = null, options = null) => handleSaveSubset(fname, rows, headers, recipe, options),
     switchToDataset:  (id) => setActiveId(id),
     // Rename a dataset (display name only — the original filename is kept for
     // load calls). The name drives the df_<name> identifier in replication

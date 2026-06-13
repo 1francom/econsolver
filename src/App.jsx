@@ -2900,7 +2900,7 @@ export default function App() {
 
         {screen==="workspace" && (
           <SessionStateProvider key={pid} pid={pid}>
-          <SessionLogProvider>
+          <SessionLogProvider pid={pid}>
 
             <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
               <WorkspaceBar
@@ -2988,8 +2988,8 @@ export default function App() {
                         cleanedData={tabOutput("explore")}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
-                        onSaveDataset={(name, rows, headers) => {
-                          const newId = studioRef.current?.addApiData(name, rows, headers);
+                        onSaveDataset={(name, rows, headers, recipe = null) => {
+                          const newId = studioRef.current?.addApiData(name, rows, headers, recipe);
                           if (newId) selectDataset("explore", newId);
                         }}
                       />
@@ -3021,9 +3021,10 @@ export default function App() {
                     headers={tabOutput("spatial")?.headers ?? tabRawData("spatial")?.headers ?? []}
                     availableDatasets={availableDatasets}
                     pid={tabDsId("spatial")}
-                    onAddDataset={(name, rows, headers) => {
-                      const newId = studioRef.current?.addApiData(name, rows, headers);
+                    onAddDataset={(name, rows, headers, options = null) => {
+                      const newId = studioRef.current?.addApiData(name, rows, headers, null, options);
                       if (newId) selectDataset("spatial", newId);
+                      return newId;
                     }}
                     onMergeColumns={(resultRows, newCols) => {
                       const activeId = tabDsId("spatial");
@@ -3066,7 +3067,7 @@ export default function App() {
                 {/* REPORT — Phase 9.10 */}
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
                   {tabOutput("report")
-                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} availableDatasets={availableDatasets} pid={pid} />
+                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} availableDatasets={availableDatasets} pinnedModels={modelingSession?.pinnedModels ?? []} pid={pid} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }
                 </div>

@@ -746,7 +746,7 @@ function SigCallout({ result }) {
 // Props:
 //   result       — normalised EstimationResult (for model section)
 //   cleanedData  — { cleanRows, headers, pipeline, dataDictionary, filename }
-function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = [], pid = null, globalPipeline = [] }) {
+function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = [], pinnedModels = [], pid = null, globalPipeline = [] }) {
   const { C, T } = useTheme();
   const [open,     setOpen]     = useState(false);
   const [lang,     setLang]     = useState("r");
@@ -754,6 +754,11 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   const [script,   setScript]   = useState("");
   const [error,    setError]    = useState("");
   const [copied,   setCopied]   = useState(false);
+  // ── Structuring question (Fase 0.2): how the user wants the script organised.
+  //    "execution" needs the unified timeline (Fase 3) — shown but disabled.
+  const [structureMode,     setStructureMode]     = useState("module"); // "module" | "execution" | "custom"
+  const [customInstruction, setCustomInstruction] = useState("");
+  const [replicateMode,     setReplicateMode]     = useState("active"); // "active" | "all"
 
   const LANGS = [
     { id: "r",      label: "R" },
@@ -761,9 +766,72 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
     { id: "stata",  label: "Stata" },
   ];
 
-  function _buildModelScript(language) {
-    if (!result) return "";
-    const spec = result.spec ?? {};
+  const STRUCTURES = [
+    { id: "module",    label: "Per module",          disabled: false, tip: "Sections grouped by workspace module (default)" },
+    { id: "execution", label: "Per execution order", disabled: true,  tip: "Coming soon — needs the unified session timeline" },
+    { id: "custom",    label: "Custom",              disabled: false, tip: "Give Claude your own structuring instruction" },
+  ];
+
+  // ── Manual cell edits (Fase 0.3, D2): `patch` steps are keyed on internal row
+  //    ids (__row_id/__ri) that don't exist in the raw file — not faithfully
+  //    replicable in R/Stata. Python's pandas handles them; R/Stata get a
+  //    warning + a cleaned-dataset download instead.
+  //    Patches are counted across ALL session datasets — edits on a non-active
+  //    dataset must keep the warning visible when the user switches the Report
+  //    dataset (Franco, browser-test 2026-06-12). Non-active pipelines come
+  //    from the per-project IDB record; the active one uses its live pipeline.
+  const [editsByDataset, setEditsByDataset] = useState({}); // { dsName: patchCount }
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const counts = {};
+      let map = {};
+      try { map = (await loadProjectPipelines(pid))?.datasetPipelines ?? {}; } catch { /* no IDB record yet */ }
+      if (availableDatasets.length) {
+        for (const ds of availableDatasets) {
+          const isActive = ds.filename === cleanedData?.filename;
+          const pipe = isActive
+            ? (cleanedData?.pipeline ?? map[ds.id]?.pipeline ?? [])
+            : (map[ds.id]?.pipeline ?? []);
+          const n = (Array.isArray(pipe) ? pipe : []).filter(s => s.type === "patch").length;
+          if (n > 0) counts[ds.name ?? ds.filename ?? ds.id] = n;
+        }
+      } else {
+        const n = (cleanedData?.pipeline ?? []).filter(s => s.type === "patch").length;
+        if (n > 0) counts[cleanedData?.filename ?? "dataset"] = n;
+      }
+      if (!cancelled) setEditsByDataset(counts);
+    })();
+    return () => { cancelled = true; };
+  }, [open, pid, availableDatasets, cleanedData]);
+
+  const editedNames     = Object.keys(editsByDataset);
+  const manualEdits     = editedNames.reduce((s, k) => s + editsByDataset[k], 0);
+  const showEditWarning = manualEdits > 0 && lang !== "python";
+  const activeHasEdits  = (cleanedData?.pipeline ?? []).some(s => s.type === "patch");
+
+  function downloadCleanCSV() {
+    const headers = (cleanedData?.headers ?? []).filter(h => h !== "__ri" && h !== "__row_id");
+    const rows    = cleanedData?.cleanRows ?? [];
+    const esc = v => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv  = [headers.join(",")]
+      .concat(rows.map(r => headers.map(h => esc(r[h])).join(",")))
+      .join("\n");
+    const base = (cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `${base}_cleaned.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function _buildModelScript(language, model = result) {
+    if (!model) return "";
+    const spec = model.spec ?? {};
     // The model's SOURCE dataset (spec.filename, stamped at estimation time) may
     // differ from the Report tab's active dataset — load opts and pipeline must
     // come from the source, never silently from the active one.
@@ -776,7 +844,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
       dataDictionary: spec.dataDictionary ?? (sameAsActive ? cleanedData?.dataDictionary : null),
       dataLoadOpts:   modelDs?.loadOpts ?? (sameAsActive ? cleanedData?.loadOpts : null) ?? null,
       model: {
-        type:       result.type     ?? "OLS",
+        type:       model.type      ?? "OLS",
         yVar:       spec.yVar       ?? "",
         xVars:      spec.xVars      ?? [],
         wVars:      spec.wVars      ?? [],
@@ -797,6 +865,23 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
       if (language === "stata")  return generateStataScript(config);
     } catch { return ""; }
     return "";
+  }
+
+  function modelReplicationKey(model) {
+    const spec = model?.spec ?? {};
+    return JSON.stringify([
+      model?.type ?? model?.label ?? "model",
+      spec.filename ?? "", spec.yVar ?? "", spec.xVars ?? [], spec.wVars ?? [], spec.zVars ?? [],
+      spec.entityCol ?? null, spec.timeCol ?? null, spec.postVar ?? null, spec.treatVar ?? null,
+      spec.runningVar ?? null, spec.cutoff ?? null, spec.bandwidth ?? null, spec.kernel ?? null,
+      model?.seType ?? null,
+    ]);
+  }
+
+  function modelsToReplicate() {
+    if (replicateMode !== "all") return result ? [result] : [];
+    const activeKey = modelReplicationKey(result);
+    return [result, ...pinnedModels.filter(model => modelReplicationKey(model) !== activeKey)].filter(Boolean);
   }
 
   async function generate() {
@@ -842,16 +927,36 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           allDatasets: dsMap,
         });
       }
-      let modelSc = _buildModelScript(lang);
-      if (modelSc && lang !== "stata") {
-        // Bind the model section to its source data frame so it matches the
-        // workspace skeleton (df_<name>) instead of the generic `df`.
-        const modelFile = result?.spec?.filename ?? cleanedData?.filename;
-        const modelDs   = availableDatasets.find(d => d.filename === modelFile) ?? null;
-        if (modelFile) modelSc = modelSc.replace(/\bdf\b/g, toDfVar(modelDs?.name ?? modelFile));
-      }
+      const comment = lang === "stata" ? "*" : "#";
+      const modelSc = modelsToReplicate().map((model, index) => {
+        let block = _buildModelScript(lang, model);
+        if (!block) return "";
+        if (lang !== "stata") {
+          // Bind every estimation block to the data frame stamped on that
+          // model, not whichever dataset happens to be active in Report.
+          const modelFile = model?.spec?.filename ?? cleanedData?.filename;
+          const modelDs   = availableDatasets.find(d => d.filename === modelFile) ?? null;
+          if (modelFile) block = block.replace(/\bdf\b/g, toDfVar(modelDs?.name ?? modelFile));
+        }
+        const label = model?.label ?? model?.modelLabel ?? model?.type ?? "Model";
+        return `${comment} Model ${index + 1}: ${label}\n${block}`;
+      }).filter(Boolean).join("\n\n");
       const dict = cleanedData?.dataDictionary ?? null;
-      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot });
+      const structureInstruction =
+        structureMode === "custom" && customInstruction.trim()
+          ? customInstruction.trim()
+          : structureMode === "module"
+            ? "Structure the script grouped by module section: Setup, Data Loading, Cleaning, Feature Engineering, Estimation, Results."
+            : null;
+      const replicationInstruction = replicateMode === "all"
+        ? "REPLICATE: all pinned models plus the active model, without duplicating an identical active pin. Preserve every labeled model block and its source dataset binding."
+        : "REPLICATE: active model only.";
+      const userInstruction = [structureInstruction, replicationInstruction].filter(Boolean).join("\n");
+      const cleanedFiles = editedNames.map(n => `"${n.replace(/\.[^.]+$/, "")}_cleaned.csv"`).join(", ");
+      const manualEditNote = showEditWarning
+        ? `This session contains ${manualEdits} manual cell edit(s) ("patch" steps keyed on internal row ids __row_id/__ri that do NOT exist in the raw file) on the following dataset(s): ${editedNames.map(n => `"${n}"`).join(", ")}. Do NOT emit row-id-based patch assignments. Instead, in the Data Loading section add a prominent comment telling the user to load the exported cleaned dataset(s) ${cleanedFiles} (downloadable from Litux) for an exact replication.`
+        : null;
+      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot, userInstruction, manualEditNote });
       setScript(out);
     } catch (e) {
       setError(e.message ?? "Generation failed.");
@@ -899,6 +1004,96 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             Generates one complete, documented replication script combining your
             pipeline + model. Claude restructures, comments, and deduplicates the
             auto-generated code.
+          </div>
+
+          {/* Manual-edit warning (Fase 0.3) — R/Stata only */}
+          {showEditWarning && (
+            <div style={{ marginBottom: "0.9rem", padding: "0.6rem 0.8rem",
+                          border: `1px solid ${C.gold}60`, borderRadius: 3, background: `${C.gold}0d` }}>
+              <div style={{ fontSize: T.code.fontSize, color: C.gold, fontFamily: T.code.fontFamily, lineHeight: 1.55 }}>
+                ⚠ This session contains {manualEdits} manual cell edit{manualEdits === 1 ? "" : "s"} on{" "}
+                {editedNames.map(n => `"${n}"`).join(", ")} that can't be faithfully replicated
+                in {lang === "r" ? "R" : "Stata"}. For an exact replication, download the cleaned
+                dataset{editedNames.length === 1 ? "" : "s"} and load {editedNames.length === 1 ? "it" : "them"} directly in your script.
+              </div>
+              {activeHasEdits ? (
+                <button onClick={downloadCleanCSV}
+                  style={{ marginTop: 6, padding: "0.26rem 0.7rem", borderRadius: 3, cursor: "pointer",
+                           fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                           border: `1px solid ${C.gold}`, background: "transparent", color: C.gold }}>
+                  ↓ Download cleaned dataset (CSV)
+                </button>
+              ) : (
+                <div style={{ marginTop: 6, fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
+                  Switch the Report dataset to {editedNames.map(n => `"${n}"`).join(" / ")} to download its cleaned CSV.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Structuring question (Fase 0.2) */}
+          <div style={{ marginBottom: "0.9rem" }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
+                          letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6 }}>
+              How should the script be structured?
+            </div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {STRUCTURES.map(s => (
+                <button key={s.id} onClick={() => !s.disabled && setStructureMode(s.id)}
+                  disabled={s.disabled} title={s.tip}
+                  style={{
+                    padding: "0.26rem 0.7rem", borderRadius: 3,
+                    cursor: s.disabled ? "not-allowed" : "pointer",
+                    fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s",
+                    background: structureMode === s.id ? `${C.teal}15` : "transparent",
+                    border:     `1px solid ${structureMode === s.id ? C.teal : C.border2}`,
+                    color:      s.disabled ? C.textMuted : structureMode === s.id ? C.teal : C.textDim,
+                    opacity:    s.disabled ? 0.55 : 1,
+                  }}>
+                  {s.label}{s.disabled ? " ⏳" : ""}
+                </button>
+              ))}
+            </div>
+            {structureMode === "custom" && (
+              <textarea
+                value={customInstruction}
+                onChange={e => setCustomInstruction(e.target.value)}
+                placeholder='e.g. "One section per dataset, model at the end, comment every step in Spanish"'
+                rows={2}
+                style={{ width: "100%", marginTop: 6, padding: "0.45rem 0.6rem", resize: "vertical",
+                         background: C.bg, border: `1px solid ${C.teal}40`, borderRadius: 3,
+                         color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
+                         outline: "none", boxSizing: "border-box" }}
+              />
+            )}
+          </div>
+
+          {/* Model replication scope (Fase 2.4) */}
+          <div style={{ marginBottom: "0.9rem" }}>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
+                          letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6 }}>
+              Replicate:
+            </div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {[
+                { id: "active", label: "Active model", disabled: false },
+                { id: "all", label: `All pinned models (${pinnedModels.length})`, disabled: pinnedModels.length === 0 },
+              ].map(mode => (
+                <button key={mode.id} onClick={() => !mode.disabled && setReplicateMode(mode.id)}
+                  disabled={mode.disabled}
+                  style={{
+                    padding: "0.26rem 0.7rem", borderRadius: 3,
+                    cursor: mode.disabled ? "not-allowed" : "pointer",
+                    fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s",
+                    background: replicateMode === mode.id ? `${C.teal}15` : "transparent",
+                    border: `1px solid ${replicateMode === mode.id ? C.teal : C.border2}`,
+                    color: mode.disabled ? C.textMuted : replicateMode === mode.id ? C.teal : C.textDim,
+                    opacity: mode.disabled ? 0.55 : 1,
+                  }}>
+                  {replicateMode === mode.id ? "●" : "○"} {mode.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Language selector */}
@@ -991,7 +1186,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function ReportingModule({ result: rawResult, cleanedData, availableDatasets = [], pid = null, onClose }) {
+export default function ReportingModule({ result: rawResult, cleanedData, availableDatasets = [], pinnedModels = [], pid = null, onClose }) {
   const { C, T } = useTheme();
   const [tab, setTab] = useState("forest");
 
@@ -1006,10 +1201,20 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
   //    replicate all loads, and `globalPipeline` carries cross-dataset G-steps.
   const { log: sessionLog } = useSessionLog();
   const { globalPipeline } = useSessionState();
-  const snapshot = useMemo(
-    () => buildSessionSnapshot({ cleanedData, result: rawResult, sessionLog, datasets: availableDatasets }),
-    [cleanedData, rawResult, sessionLog, availableDatasets]
-  );
+  // Datasets that are derive-children (recipe-backed, Fase 2.1) are rebuilt
+  // IN-SCRIPT from their parent — the snapshot marks them so REQUIRED LOAD
+  // CALLS never instructs the AI to also load them from a (nonexistent) file.
+  const snapshot = useMemo(() => {
+    const deriveChildIds = new Set(
+      (globalPipeline ?? [])
+        .filter(g => g.opType === "derive" && g.leftDatasetId && g.params?.recipe)
+        .map(g => g.leftDatasetId)
+    );
+    const datasets = availableDatasets.map(d =>
+      deriveChildIds.has(d.id) ? { ...d, derived: true } : d
+    );
+    return buildSessionSnapshot({ cleanedData, result: rawResult, pinnedModels, sessionLog, datasets });
+  }, [cleanedData, rawResult, pinnedModels, sessionLog, availableDatasets, globalPipeline]);
 
   // Detect Sharp RDD / Spatial RD — canonical shape uses type, legacy shape carries rddData or raw fields
   const isRDD = rawResult?.type === "RDD" || rawResult?.type === "SpatialRDD" || !!(rawResult?.valid && rawResult?.leftFit && rawResult?.rightFit);
@@ -1229,7 +1434,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
         </div>
 
         {/* ── AI Unified Script Export — Phase 9.10 ── */}
-        <AIUnifiedScript result={result} cleanedData={cleanedData} snapshot={snapshot} availableDatasets={availableDatasets} pid={pid} globalPipeline={globalPipeline} />
+        <AIUnifiedScript result={result} cleanedData={cleanedData} snapshot={snapshot} availableDatasets={availableDatasets} pinnedModels={pinnedModels} pid={pid} globalPipeline={globalPipeline} />
 
       </div>
     </div>

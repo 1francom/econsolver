@@ -81,6 +81,14 @@ function toStataFile(name) {
   return name.replace(/[^a-zA-Z0-9_]/g, "_") + ".dta";
 }
 
+// Datasets created in-app (spatial outputs, no-recipe derivatives) have bare
+// names like "grid_cells" — normalize to "<name>.csv" so the emitted load line
+// references a real exportable file. Placeholders (<path_to_…>) pass through.
+function toLoadFile(ds) {
+  const f = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
+  return f.startsWith("<") || /\.[A-Za-z0-9]+$/.test(f) ? f : `${f}.csv`;
+}
+
 // ─── SINGLE-DATASET SCRIPT ────────────────────────────────────────────────────
 
 /**
@@ -231,6 +239,9 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
   if (!dsList.length) return `# No datasets in session`;
 
   const allDatasets = Object.fromEntries(dsList.map(d => [d.id, { name: d.name, filename: d.filename }]));
+  const deriveChildIds = new Set(globalPipeline
+    .filter(g => g.opType === "derive" && g.leftDatasetId && g.params?.recipe)
+    .map(g => g.leftDatasetId));
 
   // Topological order
   const orderedIds = topoSort(dsList, globalPipeline);
@@ -240,8 +251,9 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
   if (language === "r") {
     const lines = [rHeader("Workspace — All Datasets")];
     for (const ds of ordered) {
+      if (deriveChildIds.has(ds.id)) continue;
       const df   = toDfVar(ds.name);
-      const file = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
+      const file = toLoadFile(ds);
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
@@ -268,9 +280,21 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
           const how = g.opType === "inner_join" ? "inner_join" : "left_join";
           const lk  = g.params?.leftKey  ? `"${g.params.leftKey}"`  : "<left_key>";
           const rk  = g.params?.rightKey ? `"${g.params.rightKey}"` : "<right_key>";
+          // Litux's join is a first-match LOOKUP (1:1) — dedup the right by its
+          // key so dplyr reproduces the same row count (no many-to-many expansion).
+          const rkBare = g.params?.rightKey;
+          if (rkBare) lines.push(`${rightDf} <- dplyr::distinct(${rightDf}, ${rk}, .keep_all = TRUE)  # Litux keeps the first match per key`);
           lines.push(`${leftDf} <- dplyr::${how}(${leftDf}, ${rightDf}, by = c(${lk} = ${rk}))`);
         } else if (g.opType === "append") {
           lines.push(`${leftDf} <- dplyr::bind_rows(${leftDf}, ${rightDf})`);
+        } else if (g.opType === "derive" && rightDs && g.params?.recipe) {
+          const translated = toR(g.params.recipe, rightDf, allDatasets)
+            .replace(new RegExp(`^${rightDf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*<-`), `${leftDf} <-`);
+          lines.push(`# Derived dataset: ${leftDs.name} from ${rightDs.name}`);
+          lines.push(translated);
+          for (const step of (leftDs.pipeline ?? []).filter(s => !s.gStepId)) {
+            lines.push(toR(step, leftDf, allDatasets));
+          }
         } else {
           lines.push(`# G-step: ${g.opType} — ${leftDs.name} ← ${rightDs?.name ?? "?"}`);
         }
@@ -288,7 +312,8 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
     lines.push(``);
 
     for (const ds of ordered) {
-      const file    = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
+      if (deriveChildIds.has(ds.id)) continue;
+      const file    = toLoadFile(ds);
       const dtaFile = toStataFile(ds.name);
       lines.push(`* ${"─".repeat(60)}`);
       lines.push(`* Dataset: ${ds.name}`);
@@ -325,6 +350,14 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
           lines.push(`use "${leftFile}", clear`);
           lines.push(`append using "${rightFile}"`);
           lines.push(`save "${leftFile}", replace`);
+        } else if (g.opType === "derive" && rightDs && g.params?.recipe) {
+          lines.push(`* Derived dataset: ${leftDs.name} from ${rightDs.name}`);
+          lines.push(`use "${rightFile}", clear`);
+          lines.push(toStata(g.params.recipe, "df", allDatasets));
+          for (const step of (leftDs.pipeline ?? []).filter(s => !s.gStepId)) {
+            lines.push(toStata(step, "df", allDatasets));
+          }
+          lines.push(`save "${leftFile}", replace`);
         } else {
           lines.push(`* G-step: ${g.opType} — ${leftDs.name} ← ${rightDs?.name ?? "?"}`);
         }
@@ -338,8 +371,9 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
   if (language === "python") {
     const lines = [pythonHeader("Workspace — All Datasets")];
     for (const ds of ordered) {
+      if (deriveChildIds.has(ds.id)) continue;
       const df   = toDfVar(ds.name);
-      const file = ds.filename ?? `<path_to_${ds.name.replace(/\s+/g, "_")}.csv>`;
+      const file = toLoadFile(ds);
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
@@ -366,9 +400,20 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
         const rk = g.params?.rightKey ? `"${g.params.rightKey}"` : "<right_key>";
         if (g.opType === "join" || g.opType === "left_join" || g.opType === "inner_join") {
           const how = g.opType === "inner_join" ? "inner" : "left";
+          // Litux's join is a first-match LOOKUP — dedup right by key so pandas
+          // reproduces the same row count (no many-to-many expansion).
+          if (g.params?.rightKey) lines.push(`${rightDf} = ${rightDf}.drop_duplicates(subset=[${rk}], keep="first")  # Litux keeps the first match per key`);
           lines.push(`${leftDf} = pd.merge(${leftDf}, ${rightDf}, left_on=${lk}, right_on=${rk}, how="${how}")`);
         } else if (g.opType === "append") {
           lines.push(`${leftDf} = pd.concat([${leftDf}, ${rightDf}], ignore_index=True)`);
+        } else if (g.opType === "derive" && rightDs && g.params?.recipe) {
+          const translated = toPython(g.params.recipe, rightDf, allDatasets)
+            .replace(new RegExp(`^${rightDf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=`), `${leftDf} =`);
+          lines.push(`# Derived dataset: ${leftDs.name} from ${rightDs.name}`);
+          lines.push(translated);
+          for (const step of (leftDs.pipeline ?? []).filter(s => !s.gStepId)) {
+            lines.push(toPython(step, leftDf, allDatasets));
+          }
         } else {
           lines.push(`# G-step: ${g.opType} — ${leftDs.name} ← ${rightDs?.name ?? "?"}`);
         }

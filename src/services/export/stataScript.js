@@ -471,11 +471,8 @@ function transpileStep(step, allDatasets = {}) {
     }
     case "patch": {
       const col = step.col ?? "column";
-      const val = typeof step.value === "string" ? `"${step.value}"` : (step.value ?? ".");
-      if (step.rowId) {
-        return `replace ${col} = ${val} if __row_id == "${step.rowId}"`;
-      }
-      return `replace ${col} = ${val} if __ri == ${step.ri}  /* __ri-based: may misalign after sort */`;
+      const row = step.ri ?? step.rowId ?? "?";
+      return `* manual cell edit (${col} @ row ${row}) — not replayable on the raw file; load the exported *_cleaned.csv instead (see Data Loading note)`;
     }
 
     case "geocode": {

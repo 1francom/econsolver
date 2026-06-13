@@ -73,6 +73,7 @@ export function buildSessionSnapshot({
           name:     d.name ?? d.filename ?? d.id,
           filename: d.filename ?? null,
           loadOpts: d.loadOpts ?? null,
+          derived:  d.derived ?? false,   // recipe-backed derive-child: built in-script, never loaded from file
         }))
       : null,
     modelDataset,
@@ -99,8 +100,12 @@ export function serializeSnapshot(snapshot) {
 
   // ── Session datasets (multi-dataset workspaces) ────────────────────────────
   if (snapshot.datasets?.length) {
-    lines.push(`SESSION DATASETS (${snapshot.datasets.length} — load ALL of them, each into its own data frame):`);
+    lines.push(`SESSION DATASETS (${snapshot.datasets.length} — load every FILE-BACKED one into its own data frame; derived ones are built in-script):`);
     snapshot.datasets.forEach(d => {
+      if (d.derived) {
+        lines.push(`  ${toDfVar(d.name)} ← DERIVED IN-SCRIPT from its parent dataset (see derivation step) — do NOT load it from a file.`);
+        return;
+      }
       const o = d.loadOpts ?? {};
       const parts = [];
       if (o.format)    parts.push(`format=${o.format}`);
@@ -185,7 +190,8 @@ export function serializeSnapshot(snapshot) {
   if (snapshot.pinnedModels?.length) {
     lines.push(`\nPINNED MODELS (${snapshot.pinnedModels.length}):`);
     snapshot.pinnedModels.forEach((m, i) => {
-      lines.push(`  (${i + 1}) ${m.label ?? m.type}: ${m.spec?.yVar ?? "?"} ~ ${(m.spec?.xVars ?? []).join(" + ") || "?"}`);
+      const source = m.spec?.filename ? ` [source: ${m.spec.filename}]` : "";
+      lines.push(`  (${i + 1}) ${m.label ?? m.type}: ${m.spec?.yVar ?? "?"} ~ ${(m.spec?.xVars ?? []).join(" + ") || "?"}${source}`);
     });
   }
 
@@ -198,11 +204,15 @@ export function serializeSnapshot(snapshot) {
   }
 
   // ── Session log (cross-module operations) ─────────────────────────────────
+  // The log is persisted across sessions (Fase 1.2) and can grow large —
+  // cap at the most recent 60 entries to protect the AI payload budget.
   if (snapshot.sessionLog?.length) {
-    lines.push(`\nMODULE OPERATIONS (${snapshot.sessionLog.length}, chronological):`);
-    snapshot.sessionLog
+    const capped = snapshot.sessionLog
       .slice()
       .sort((a, b) => a.timestamp - b.timestamp)
+      .slice(-60);
+    lines.push(`\nMODULE OPERATIONS (showing ${capped.length} of ${snapshot.sessionLog.length}, chronological):`);
+    capped
       .forEach((entry, i) => {
         const flag = entry.reproducible ? "" : " [non-reproducible]";
         const params = entry.params

@@ -21,6 +21,8 @@ import { useTheme } from "./modeling/shared.jsx";
 import { PLOT_PALETTES, MONO_STACK } from "../theme.js";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
+import { buildGgplot, buildMatplotlibPlot, buildStataPlot } from "../services/export/plotScript.js";
+import { toDfVar } from "../pipeline/exporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
@@ -1113,7 +1115,10 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid }) {
+// scriptPreamble(language) optionally prepends model-context replication code.
+// datasetName: source dataset name → R/Python df identifier (df_<name>) in copied
+// scripts so the export matches the unified-script convention. Defaults to "df".
+export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid, scriptPreamble, datasetName }) {
   const { C, T, prefs } = useTheme();
   const [layers,      setLayers]      = useState(initialLayers);
   const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
@@ -1125,6 +1130,8 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   const [plotHistory,   setPlotHistory]   = useState([]);
   const [histIdx,       setHistIdx]       = useState(null); // null = editor mode
   const [histOpen,      setHistOpen]      = useState(false);
+  const [scriptLanguage,setScriptLanguage]= useState("r");
+  const [copiedLanguage,setCopiedLanguage]= useState(null);
   const [compareIds,    setCompareIds]    = useState(new Set());
   // Axis scale options (ggplot2: scale_x_log10, xlim, scale_y_continuous(labels=…))
   const [xScale,        setXScale]        = useState("linear"); // "linear" | "log" | "sqrt"
@@ -1200,23 +1207,29 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setYCatOrder(entry.yCatOrder || "");
   }, []);
 
+  const currentPlotEntry = useCallback(() => {
+    const scaleState = { xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder };
+    return {
+      layers: JSON.parse(JSON.stringify(layers)),
+      title, xLabel, yLabel, scheme, ...scaleState,
+    };
+  }, [layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder]);
+
   const savePlot = useCallback(() => {
     if (layers.length === 0) return;
-    const scaleState = { xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder };
+    const current = currentPlotEntry();
     let next;
     if (histIdx !== null && plotHistory[histIdx]) {
       const updated = {
         ...plotHistory[histIdx],
-        layers: JSON.parse(JSON.stringify(layers)),
-        title, xLabel, yLabel, scheme, ...scaleState,
+        ...current,
       };
       next = plotHistory.map((e, i) => i === histIdx ? updated : e);
     } else {
       const entry = {
         id:      "ph_" + Math.random().toString(36).slice(2, 8),
         name:    `Plot ${plotHistory.length + 1}`,
-        layers:  JSON.parse(JSON.stringify(layers)),
-        title, xLabel, yLabel, scheme, ...scaleState,
+        ...current,
         savedAt: Date.now(),
       };
       next = [...plotHistory, entry];
@@ -1224,7 +1237,27 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     }
     setPlotHistory(next);
     if (pid) savePlotHistory(pid, next).catch(() => {});
-  }, [plotHistory, histIdx, layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder, pid]);
+  }, [plotHistory, histIdx, layers.length, currentPlotEntry, pid]);
+
+  const copyPlotScript = useCallback(() => {
+    if (layers.length === 0) return;
+    const entry = currentPlotEntry();
+    const preamble = typeof scriptPreamble === "function"
+      ? String(scriptPreamble(scriptLanguage) ?? "").trim()
+      : "";
+    const baseDfVar = datasetName ? toDfVar(datasetName) : "df";
+    const dfVar = preamble && scriptLanguage !== "stata" ? "plot_df" : baseDfVar;
+    const generated = scriptLanguage === "python"
+      ? buildMatplotlibPlot(entry, { dfVar })
+      : scriptLanguage === "stata"
+        ? buildStataPlot(entry)
+        : buildGgplot(entry, { dfVar });
+    const script = preamble ? `${preamble}\n\n${generated}` : generated;
+    navigator.clipboard.writeText(script).then(() => {
+      setCopiedLanguage(scriptLanguage);
+      setTimeout(() => setCopiedLanguage(current => current === scriptLanguage ? null : current), 1600);
+    }).catch(() => setCopiedLanguage(null));
+  }, [layers.length, currentPlotEntry, scriptLanguage, scriptPreamble, datasetName]);
 
   const newPlot = useCallback(() => {
     setLayers([]);
@@ -1421,6 +1454,23 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: "none", color: C.textMuted, border: `1px solid ${C.border}`,
               }}>New</button>
+            <select value={scriptLanguage} onChange={event => setScriptLanguage(event.target.value)} title="Replication script language"
+              style={{
+                padding: "3px 5px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                cursor: "pointer", background: C.bg, color: C.textMuted, border: `1px solid ${C.border}`,
+              }}>
+              <option value="r">R</option>
+              <option value="python">Python</option>
+              <option value="stata">Stata</option>
+            </select>
+            <button onClick={copyPlotScript} disabled={layers.length === 0} title={`Copy current plot as ${scriptLanguage}`}
+              style={{
+                padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                cursor: layers.length > 0 ? "pointer" : "not-allowed",
+                background: copiedLanguage === scriptLanguage ? `${C.teal}18` : "none",
+                color: copiedLanguage === scriptLanguage ? C.teal : layers.length > 0 ? C.textMuted : C.border,
+                border: `1px solid ${copiedLanguage === scriptLanguage ? C.teal : C.border}`,
+              }}>{copiedLanguage === scriptLanguage ? "Copied ✓" : "Copy"}</button>
           </div>
 
           {visibleLayers.length > 0 && (

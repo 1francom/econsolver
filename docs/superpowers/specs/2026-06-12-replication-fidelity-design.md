@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Owner:** Franco Medero
 **Executors:** Claude Fable 5 (primary) → Codex (continuation when Fable 5 runs out of tokens)
-**Status:** Fase 0 = NOT STARTED. This doc is the single source of truth — design + task checklist.
+**Status:** Fase 0 = DONE (browser-validated 2026-06-12; loadOpts-hydration regression found+fixed, task 2.4 added from the test). Fase 1 = CODE-COMPLETE (2026-06-12, browser-validation pending Franco). Fase 2 = CODE-COMPLETE (2026-06-12; derivation `f057078f`, spatial ordering `d7a96868`, manual edits `51819010`, multi-model `d4bc3d4c`). **Fase 2 browser-test round (Franco 2026-06-12): APPROVED** — all datasets load, left_join ✓, in-R derived subset ✓, estimation ✓, manual-edit warning + note in script ✓. **3 follow-up fixes landed from the test:** (1) manual-edit warning now counts patches across ALL session datasets (was active-only → disappeared on Report dataset switch); banner names affected datasets, note lists each `<name>_cleaned.csv`; (2) recipe-backed derive-children excluded from REQUIRED LOAD CALLS + marked in SESSION DATASETS (script was loading "summary_nombre_comuna" from a nonexistent file AND deriving it); (3) extensionless in-app dataset names (grid_cells, spatial_result) normalized to `<name>.csv` + "export from Litux first" note in load hints and workspace skeleton. **Still pending from the test:** multi-model with 2+ pinned models across datasets (needs another browser round); spatial CODE generation is Track P (comments-only is by design for now); .docx modelsummary output "medio raro" (low-prio polish). **Track P browser-test round (Franco 2026-06-13):** P1/P4 plots render. 2 fixes landed: (a) Explore PlotBuilder Copy emitted bare `df` — now takes a `datasetName` prop → `df_<name>` (ExplorerModule passes `filename`); model context still uses `plot_df` via the preamble seam. (b) `geom_smooth` SE ribbon used the layer opacity (alpha=1 → opaque, hid the line) — now forced to `alpha = 0.2`. **RESOLVED (join semantics, Franco 2026-06-13): keep Litux's first-match lookup as correct; make the EXPORT reproduce it.** Litux's `join` runner is a first-match LOOKUP (1:1, "first match wins" — runner.js:809), but the emitted dplyr/pandas `left_join`/`merge` expands many-to-many on duplicate right keys → 20 vs 200 rows when joining metadata(left)×panel(right). Runtime LEFT UNCHANGED (Franco's call). Export now dedups the right table by key before joining so it reproduces Litux's row count in any direction (no-op when the right key is already unique): R `dplyr::distinct(right, key, .keep_all=TRUE)`, Python `drop_duplicates(subset=[key], keep="first")`, Stata `bysort key: keep if _n==1` before `merge m:1`. Applied in BOTH `exporter.js` (workspace G-step joins) and `stepTranslators.js` (local join steps). Next: Fase 3. This doc is the single source of truth — design + task checklist.
 
 > **Read this first (executing agent):** you did NOT see the design conversation.
 > Every decision is locked in §2 — do not re-litigate. Work top-to-bottom through
@@ -92,7 +92,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
 
 ### FASE 0 — Pre-test safety (cheap, no timeline) — DO FIRST
 
-- [ ] **0.1 — Prompt: forbid reordering.**
+- [x] **0.1 — Prompt: forbid reordering.** *(code-complete 2026-06-12, browser-validation pending Franco)*
   File: `src/services/AI/Prompts/index.js`, `UNIFIED_SCRIPT_PROMPT` rule 2.
   Change rule 2 from "Reorder statements for logical flow…" to: preserve the order
   of operations exactly as given; group only with section headers; NEVER move an
@@ -101,7 +101,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   block is present in the user payload, honor it for sectioning/ordering.
   Accept: prompt text updated; `npm run build` green.
 
-- [ ] **0.2 — Structuring question + custom instruction.**
+- [x] **0.2 — Structuring question + custom instruction.** *(code-complete 2026-06-12, browser-validation pending Franco)*
   Files: `src/ReportingModule.jsx` (`AIUnifiedScript`), `src/services/AI/AIService.js`
   (`generateUnifiedScript`), `src/services/AI/Prompts/index.js`.
   - `AIUnifiedScript`: add state `structureMode` (`"module"` default | `"execution"` | `"custom"`)
@@ -116,7 +116,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   Accept: selecting Custom + typing an instruction changes the generated script's
   structure; build + lint:undef green.
 
-- [ ] **0.3 — Manual-edit warning (per-language).**
+- [x] **0.3 — Manual-edit warning (per-language).** *(code-complete 2026-06-12, browser-validation pending Franco. Note: prompt-level only — `manualEditNote` instructs Claude not to emit row-id patches; the deterministic translators in rScript/stataScript still emit them in their own mini-script paths, cleanup is Fase 2.3)*
   File: `src/ReportingModule.jsx` (`AIUnifiedScript`).
   - Detect ad-hoc cell edits: `const manualEdits = (cleanedData?.pipeline ?? []).filter(s => s.type === "patch")`.
   - If `manualEdits.length > 0` and lang ∈ {r, stata}: render a warning banner
@@ -134,24 +134,35 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
 
 ### FASE 1 — Unified, persisted execution timeline + Explore instrumentation
 
-- [ ] **1.1 — Timeline store.** New `src/services/Persistence/timeline.js` mirroring
-  `plotHistory.js` (`getTimeline(pid)`, `appendTimeline(pid, event)`, keyed
-  `timeline_<pid>` in the `pipelines` store). Event shape: `{ id, ts, kind, datasetId?, params, reproducible, label }`.
-- [ ] **1.2 — Persist + broaden `sessionLog`.** Wire `appendLog` to also persist via
-  `appendTimeline`. Add emitters for `dataset_load` (DataStudio load paths),
-  `estimate` (ModelingTab on successful estimate), and `pipeline_step` summary per
-  dataset. Keep existing spatial/calc/sim emitters.
-- [ ] **1.3 — Explore instrumentation (D5).** In `ExplorerModule.jsx`, add a
-  save/pin affordance to TS/distribution/correlation quick-look plots (route their
-  config into `plotHistory` like ◈ Plot Builder) and to descriptive outputs
-  (`summary`, `quantile(probs=…)`, correlation matrix) → emit an `explore_stat`
-  timeline event capturing EXACT args (D8). Do NOT auto-log renders; only on
-  explicit pin/save.
-  Accept: pinned Explore artifacts survive reload and appear in the timeline; build + lint green.
+- [x] **1.1 — Timeline store.** *(code-complete 2026-06-12)* New `src/services/Persistence/timeline.js` mirroring
+  `plotHistory.js` (`getTimeline(pid)`, `appendTimeline(pid, event)`, `saveTimeline`, keyed
+  `timeline_<pid>` in the `pipelines` store). Events stored in the sessionLog entry shape
+  (module/opType/timestamp/params/reproducible/label, opType = event kind).
+- [x] **1.2 — Persist + broaden `sessionLog`.** *(code-complete 2026-06-12, browser-validation pending Franco)*
+  `SessionLogProvider` gains `pid` (App passes it): hydrates from `getTimeline` on mount,
+  `appendLog` writes through `appendTimeline`, `clearLog` wipes. New `useSessionLogOptional`
+  (no-throw) for components that may render outside the provider. Emitters added:
+  `dataset_load` + `dataset_derive` (DataStudio `addParsedDataset`/`handleSaveSubset` —
+  the two funnels), `estimate` (ModelingTab result-change effect — covers ALL estimator
+  branches), `pipeline_step` (WranglingModule `addStep` funnel, tagged with datasetId).
+  `serializeSnapshot` MODULE OPERATIONS capped at last 60 entries (persisted log grows
+  across sessions; protects the AI payload budget).
+- [x] **1.3 — Explore instrumentation (D5).** *(code-complete 2026-06-12, browser-validation pending Franco)*
+  `PinBtn` ("⊕ Pin") added to every Explore surface; each pin emits an `explore_stat`
+  timeline event with EXACT args (D8) + the active QuickFilter conds + dataset name:
+  summary (columns/groupBy/custom percentiles), head/tail (n), overdispersion (col, CT),
+  histogram (col/bins/transform), bar chart (col/order), spaghetti (col/entity/time),
+  correlation (method/cols), time series (y/time/group/agg), ACF-PACF (maxLag), ADF.
+  **Deviation from spec text (justified):** quick-look plots pin to the TIMELINE, not
+  `plotHistory` — plotHistory is the PlotBuilder layer-config shape; forcing quick-look
+  configs into it would corrupt the PlotBuilder history UI. The `explore_stat` params
+  carry everything Track P needs to emit plot code. Nothing auto-logs; pin-only.
+  Accept: pinned Explore artifacts survive reload (timeline IDB) and appear in MODULE
+  OPERATIONS; build + lint green.
 
 ### FASE 2 — Manual-edit honesty + spatial ordering + derivation edges
 
-- [ ] **2.1 — Derivation edges (D4).** In `handleSaveSubset` (DataStudio.jsx), when a
+- [x] **2.1 — Derivation edges (D4).** *(code-complete 2026-06-12, browser-validation pending Franco)* In `handleSaveSubset` (DataStudio.jsx), when a
   subset is saved from a known recipe (group_summarize/filter/etc.), register a
   `globalPipeline` derivation G-step (`opType:"derive"`, `parentId`, `recipe`) via
   `addGlobalStep`, instead of only the `origin` pointer. Extend `generateWorkspaceScript`
@@ -159,12 +170,19 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   topo order. Fallback to snapshot-as-data-source when no recipe is available.
   Caller must pass the recipe spec to `handleSaveSubset` (plumb from SubsetManager /
   Reshape save-as-dataset).
-- [ ] **2.2 — Spatial dependency ordering.** Emit spatial ops strictly in timeline
+- [x] **2.2 — Spatial dependency ordering.** *(code-complete 2026-06-12, browser-validation pending Franco)* Emit spatial ops strictly in timeline
   order; guarantee grid creation precedes any grid assignment/join. Verify the Map-tab
   grid-creation path lands a timeline event before assignment (Analyze-tab `GridSection`
   already logs; confirm Map tab).
-- [ ] **2.3 — Manual-edit snapshot path** wired to the timeline (cleaned-dataset export
+- [x] **2.3 — Manual-edit snapshot path** *(code-complete 2026-06-12, browser-validation pending Franco)* wired to the timeline (cleaned-dataset export
   referenced as the load step for R/Stata when patches present).
+- [x] **2.4 — Multi-model replication (Franco, browser-test 2026-06-12).** *(code-complete 2026-06-12, browser-validation pending Franco)* The unified
+  script currently replicates only the ACTIVE result; all PINNED models should emit
+  their own estimation blocks. `snapshot.pinnedModels` already carries trimmed specs
+  (`trimResult`) incl. each model's `spec.filename` → bind each to its source df like
+  the active model. UI: a toggle "Replicate: active model / all pinned models".
+  Deterministic side: `_buildModelScript` loops pinned specs; prompt rule 8e updates
+  from "mention them in a comment" to "emit each pinned model's estimation".
 
 ### FASE 3 — "Per execution order" mode
 
@@ -175,7 +193,7 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
 
 ### TRACK P — Plot replication (parallel; independent of the timeline)
 
-- [ ] **P1 — `plotConfig → ggplot2` translator.** New `src/services/export/plotScript.js`
+- [x] **P1 — `plotConfig → ggplot2` translator.** *(code-complete 2026-06-12, browser-validation pending Franco)* New `src/services/export/plotScript.js`
   (`buildGgplot(plotEntry)`). Map geoms 1:1: point→geom_point, line→geom_line,
   bar→geom_col/geom_bar, histogram→geom_histogram, density→geom_density,
   smooth→geom_smooth, boxplot→geom_boxplot, errorbar→geom_errorbar, ribbon→geom_ribbon,
@@ -184,20 +202,39 @@ lands, the Fase 0 rule is: **each artifact emits at the end of its owning sectio
   labels→labs(title,x,y), palette from `scheme`. Read exact field names from
   `PlotBuilder.jsx` `savePlot`. Add a per-plot "Copy R" / mini-script button in the
   plot history UI. Runs on the cleaned dataset df.
-- [ ] **P2 — Spatial Plot geo variant.** Extend the translator for WKT geometry →
+  **Approximation note:** PlotBuilder density uses binned proportions; the R export
+  uses ggplot2's kernel `geom_density(adjust=...)`, preserving the configured adjust value.
+- [x] **P2 — Spatial Plot geo variant.** *(code-complete 2026-06-12, browser-validation pending Franco)* Extend the translator for WKT geometry →
   `sf::st_as_sf` + `geom_sf`/`geom_polygon`; fill scales. Basemap tile: drop with a
   comment, or `ggspatial::annotation_map_tile` with a caveat.
-- [ ] **P3 — Spatial Map named history + leaflet/folium generator.** Promote
+  **Approximation note:** heatmaps use ggplot2's `stat_density_2d` KDE rather than
+  Litux's metric-grid KDE; basemaps use internet-fetched `ggspatial` tiles at render time.
+- [x] **P3 — Spatial Map named history + leaflet/folium generator.** *(code-complete 2026-06-13, browser-validation pending Franco)* Promote
   `SpatialPlotTab` from single autosave to a named saved-maps history (mirror
   `plotHistory`: a "Save map" button → list). Generate R `leaflet()` (addTiles/
   addProviderTiles(basemap) + addPolygons/addCircleMarkers per layer) and Python
   `folium.Map` from `{layers, basemap, crsInput}`. Stata → warning comment.
-- [ ] **P4 — Model plots.** Detect model-derived columns in the Model PlotBuilder
-  config (`.fitted`, `.resid`, coef/CI — read the augmentation in `ModelingTab`).
-  Emit `broom::augment(fit)` / `broom::tidy(fit, conf.int=TRUE)` (R),
-  `fit.fittedvalues`/`fit.resid` (Py), `predict` (Stata) AFTER the estimation, then
-  the geom. Model plots must order after their estimation node.
-- [ ] **P5 — matplotlib + Stata twoway parity** for P1/P2 geoms.
+  **Approximation note:** generated lat/lon grids are not regenerated in either
+  script; the user is prompted to export and load the generated grid dataset.
+  Leaflet and folium basemap tiles require internet access when the script runs.
+- [x] **P4 — Model plots.** *(code-complete 2026-06-13, browser-validation pending Franco — needs Codex's P5 `scriptPreamble` seam in PlotBuilder.jsx to be wired end-to-end)*
+  New `src/services/export/modelPlotScript.js` (`buildModelPlotPreamble(result, language, {mode})`):
+  emits the preamble that re-materializes the model-derived columns the Model PlotBuilder
+  uses. ModelingTab appends `__resid__`/`__yhat__` (not `.resid`/`.fitted`) to `resultRows`,
+  so the preamble defines those exact names on `plot_df`. R: `broom::augment(fit)` with a
+  `model.frame(fit)` + `residuals/fitted` fallback (works for lm/glm/fixest/ivreg) → aliases
+  `.resid`→`__resid__`, `.fitted`→`__yhat__`. Python: `fit.resid`/`fit.fittedvalues`. Stata:
+  `predict __yhat__, xb` + `predict __resid__, residuals`. `mode:"comparison"` (G13 coef plots)
+  emits a `broom::tidy`/`coefplot` stacking preamble instead. References the `fit` object the
+  Estimation section creates. Wired in `ModelingTab.jsx` via the PlotBuilder `scriptPreamble`
+  prop (Track P5 seam) — passes a `(lang) => preamble` only when `result` exists; mode follows
+  `plotDataMode`. **Split note:** P4 owns `modelPlotScript.js` + `ModelingTab.jsx` ONLY; the
+  `scriptPreamble` prop + `plot_df` plumbing live in PlotBuilder.jsx (Codex's P5 lane) and
+  are now wired end-to-end.
+- [x] **P5 — matplotlib + Stata twoway parity** for P1/P2 geoms. *(code-complete 2026-06-13, browser-validation pending Franco)*
+  **Approximation note:** Stata error bars and ribbons use `rcap` and `rarea`;
+  Stata geo export is intentionally skipped with a comment because Stata has no
+  native `sf`-style geometry plotting. Matplotlib geo uses geopandas.
 
 ---
 

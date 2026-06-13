@@ -6,6 +6,7 @@ import { loadGeoPlt, mkGeoLayer } from "./geo.js";
 import { GeoLayerConfig } from "./GeoLayerConfig.jsx";
 import { GeoPlotCanvas } from "./GeoPlotCanvas.jsx";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
+import { buildGeoGgplot, buildGeoMatplotlib, buildGeoStata } from "../../../../services/export/plotScript.js";
 
 export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const { T } = useTheme();
@@ -19,6 +20,8 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
   const [plotHistory, setPlotHistory] = useState([]);
   const [histIdx,     setHistIdx]     = useState(null);
   const [histOpen,    setHistOpen]    = useState(false);
+  const [scriptLanguage, setScriptLanguage] = useState("r");
+  const [copiedLanguage, setCopiedLanguage] = useState(null);
   const [compareIds,  setCompareIds]  = useState(new Set());
   const [userH,       setUserH]       = useState(null); // null = auto
   const [basemap,     setBasemap]     = useState("none"); // none | light | dark | osm
@@ -126,6 +129,20 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
 
   function newPlot() { setLayers([]); setActiveId(null); setTitle(""); setSubtitle(""); setCaption(""); setHistIdx(null); }
 
+  function copyPlotScript() {
+    if (layers.length === 0) return;
+    const entry = currentEntry();
+    const script = scriptLanguage === "python"
+      ? buildGeoMatplotlib(entry, { datasets: availableDatasets })
+      : scriptLanguage === "stata"
+        ? buildGeoStata(entry)
+        : buildGeoGgplot(entry, { datasets: availableDatasets, basemap });
+    navigator.clipboard.writeText(script).then(() => {
+      setCopiedLanguage(scriptLanguage);
+      setTimeout(() => setCopiedLanguage(current => current === scriptLanguage ? null : current), 1600);
+    }).catch(() => setCopiedLanguage(null));
+  }
+
   const view      = histIdx !== null ? plotHistory[histIdx] : null;
   const dLayers   = view ? view.layers   : layers;
   const dTitle    = view ? view.title    : title;
@@ -230,6 +247,21 @@ export function SpatialGeoPlot({ rows, headers, availableDatasets, C, pid }) {
               style={{ padding: "2px 10px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.teal}18`, border: `1px solid ${C.teal}60`, color: C.teal, cursor: "pointer" }}>Save</button>}
             <button onClick={newPlot}
               style={{ padding: "2px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: "none", border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}>New</button>
+            <select value={scriptLanguage} onChange={event => setScriptLanguage(event.target.value)} title="Replication script language"
+              style={{ padding: "2px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                background: C.bg, border: `1px solid ${C.border2}`, color: C.textMuted, cursor: "pointer" }}>
+              <option value="r">R</option>
+              <option value="python">Python</option>
+              <option value="stata">Stata</option>
+            </select>
+            <button onClick={copyPlotScript} disabled={layers.length === 0} title={`Copy current spatial plot as ${scriptLanguage}`}
+              style={{ padding: "2px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                background: copiedLanguage === scriptLanguage ? `${C.teal}18` : "none",
+                border: `1px solid ${copiedLanguage === scriptLanguage ? C.teal : C.border2}`,
+                color: copiedLanguage === scriptLanguage ? C.teal : layers.length > 0 ? C.textMuted : C.border,
+                cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+              {copiedLanguage === scriptLanguage ? "Copied ✓" : "Copy"}
+            </button>
           </div>
         </div>
       </div>

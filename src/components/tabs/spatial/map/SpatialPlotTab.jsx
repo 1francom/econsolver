@@ -10,8 +10,11 @@ import { MapLegend } from "./MapLegend.jsx";
 import { SpatialLayerEditor } from "./SpatialLayerEditor.jsx";
 import { mkSLayer } from "./layers.js";
 import { loadSpatialMaps, saveSpatialMaps } from "../../../../services/Persistence/indexedDB.js";
+import { getMapHistory, saveMapHistory } from "../../../../services/Persistence/plotHistory.js";
+import { buildFoliumPy, buildLeafletR } from "../../../../services/export/mapScript.js";
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { MONO_STACK } from "../../../../theme.js";
+import { useSessionLogOptional } from "../../../../services/session/sessionLog.jsx";
 
 // ── PNG export helpers (Leaflet → canvas) ────────────────────────────────────
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -106,6 +109,7 @@ function paintMapAttribution(ctx, W, H, T, text = "© OpenStreetMap © CARTO") {
 
 export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset, C, pid }) {
   const { T } = useTheme();
+  const { appendLog } = useSessionLogOptional();
   const wrapRef    = useRef(null);
   const mapDivRef  = useRef(null);
   const leafMapRef = useRef(null);
@@ -116,6 +120,9 @@ export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset,
   const [activeId, setActiveId]= useState(null);
   const [saveName, setSaveName]= useState("grid_cells");
   const [basemap,  setBasemap] = useState("light");
+  const [mapHistory, setMapHistory] = useState([]);
+  const [savedMapId, setSavedMapId] = useState(null);
+  const [copiedScript, setCopiedScript] = useState(null);
   const [ptDiag,   setPtDiag]  = useState({});  // layerId → {total, valid, outOfBounds}
 
   // ── Download as HTML ─────────────────────────────────────────────────────────
@@ -467,6 +474,18 @@ if(LEGEND){
     const t = setTimeout(() => saveSpatialMaps(pid, { layers, basemap, crsInput }), 400);
     return () => clearTimeout(t);
   }, [pid, layers, basemap, crsInput]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!pid) {
+      setMapHistory([]);
+      setSavedMapId(null);
+      return () => { cancelled = true; };
+    }
+    getMapHistory(pid).then(history => {
+      if (!cancelled) setMapHistory(history ?? []);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [pid]);
 
   // Detect if any visible dataset contains projected WKT.
   const hasProjected = useMemo(() => {
@@ -523,6 +542,50 @@ if(LEGEND){
   const updateLayer = upd  => setLayers(prev => prev.map(l => l.id === upd.id ? upd : l));
   const removeLayer = id   => { setLayers(prev => prev.filter(l => l.id !== id)); setActiveId(prev => prev === id ? null : prev); };
   const activeLayer = layers.find(l => l.id === activeId) ?? null;
+  const currentMapEntry = () => ({ layers, basemap, crsInput });
+
+  async function saveNamedMap() {
+    if (!pid || layers.length === 0) return;
+    const name = window.prompt("Map name:", `Map ${mapHistory.length + 1}`);
+    if (!name) return;
+    const now = Date.now();
+    const entry = { id: now, name, ...currentMapEntry(), savedAt: now };
+    const next = [...mapHistory, entry];
+    setMapHistory(next);
+    setSavedMapId(entry.id);
+    await saveMapHistory(pid, next);
+  }
+
+  function loadNamedMap(id) {
+    const entry = mapHistory.find(item => item.id === id);
+    if (!entry) return;
+    setSavedMapId(id);
+    setLayers(Array.isArray(entry.layers) ? entry.layers : []);
+    setActiveId(null);
+    setBasemap(entry.basemap ?? "light");
+    if (entry.crsInput?.trim()) void applyCrs(entry.crsInput);
+    else clearCrs();
+  }
+
+  async function deleteNamedMap() {
+    if (savedMapId === null) return;
+    const next = mapHistory.filter(entry => entry.id !== savedMapId);
+    setMapHistory(next);
+    setSavedMapId(null);
+    if (pid) await saveMapHistory(pid, next);
+  }
+
+  function copyMapScript(language) {
+    if (layers.length === 0) return;
+    const entry = currentMapEntry();
+    const script = language === "r"
+      ? buildLeafletR(entry, { datasets: availableDatasets })
+      : buildFoliumPy(entry, { datasets: availableDatasets });
+    navigator.clipboard.writeText(script).then(() => {
+      setCopiedScript(language);
+      setTimeout(() => setCopiedScript(current => current === language ? null : current), 1600);
+    }).catch(() => setCopiedScript(null));
+  }
 
   // Helper: resolve rows for a layer based on its datasetId
   function lyRows(ly) {
@@ -557,6 +620,44 @@ if(LEGEND){
     try { return { cells: makeCabaMetricGrid(wkt, gl.cellsize, gl.clipBorder !== false), error: null }; }
     catch (e) { return { cells: null, error: e.message }; }
   }, [layers, rows, availableDatasets]);
+
+  function saveGeneratedGrid() {
+    if (!saveName || !generatedGrid?.cells?.length) return;
+    const gridLayer = layers.find(l =>
+      l.type === "grid" && l.cellsize > 0 && (
+        (l.mode === "generate" && l.boundaryCol) ||
+        (l.mode === "latlon" && l.latCol && l.lonCol)
+      )
+    );
+    if (!gridLayer) return;
+
+    const gridDsId = crypto.randomUUID();
+    appendLog({
+      module: "spatial",
+      opType: "grid_create_map",
+      datasetId: gridDsId,
+      params: {
+        gridDsId,
+        gridName: saveName,
+        sourceDatasetId: !gridLayer.datasetId || gridLayer.datasetId === "active" ? pid : gridLayer.datasetId,
+        mode: gridLayer.mode,
+        boundaryCol: gridLayer.boundaryCol || null,
+        latCol: gridLayer.latCol || null,
+        lonCol: gridLayer.lonCol || null,
+        cellSize: Number(gridLayer.cellsize),
+        clipBorder: gridLayer.clipBorder !== false,
+        wktCol: "geometry",
+        gridIdCol: "grid_id",
+        metricCrs: "EPSG:32721",
+        cellCount: generatedGrid.cells.length,
+      },
+      label: `Create map grid ${saveName} (${generatedGrid.cells.length.toLocaleString()} cells)`,
+    });
+    onAddDataset?.(saveName, generatedGrid.cells, [
+      "grid_id", "geometry", "metric_geometry", "centroid_lon", "centroid_lat",
+      "centroid_x", "centroid_y", "area_m2", "cellsize_m", "metric_crs",
+    ], { id: gridDsId });
+  }
 
   // Build Leaflet map
   useEffect(() => {
@@ -831,6 +932,49 @@ if(LEGEND){
               </div>
             </div>
           )}
+
+          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", gap: 4 }}>
+              {pid && (
+                <button onClick={saveNamedMap} disabled={layers.length === 0}
+                  style={{ flex: 1, padding: "3px 6px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                    background: `${C.teal}12`, border: `1px solid ${C.teal}40`,
+                    color: layers.length > 0 ? C.teal : C.border, cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+                  Save map
+                </button>
+              )}
+              <button onClick={() => copyMapScript("r")} disabled={layers.length === 0} title="Copy current map as R leaflet"
+                style={{ padding: "3px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  background: copiedScript === "r" ? `${C.teal}18` : "none",
+                  border: `1px solid ${copiedScript === "r" ? C.teal : C.border2}`,
+                  color: layers.length > 0 ? C.textMuted : C.border, cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+                {copiedScript === "r" ? "Copied ✓" : "R"}
+              </button>
+              <button onClick={() => copyMapScript("python")} disabled={layers.length === 0} title="Copy current map as Python folium"
+                style={{ padding: "3px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  background: copiedScript === "python" ? `${C.teal}18` : "none",
+                  border: `1px solid ${copiedScript === "python" ? C.teal : C.border2}`,
+                  color: layers.length > 0 ? C.textMuted : C.border, cursor: layers.length > 0 ? "pointer" : "not-allowed" }}>
+                {copiedScript === "python" ? "Copied ✓" : "Python"}
+              </button>
+            </div>
+            {mapHistory.length > 0 && (
+              <div style={{ display: "flex", gap: 4 }}>
+                <select value={savedMapId ?? ""} onChange={event => loadNamedMap(Number(event.target.value))}
+                  style={{ flex: 1, minWidth: 0, padding: "3px 5px", background: C.bg, border: `1px solid ${C.border2}`,
+                    borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
+                  <option value="">Saved maps...</option>
+                  {mapHistory.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+                </select>
+                <button onClick={deleteNamedMap} disabled={savedMapId === null} title="Delete selected saved map"
+                  style={{ padding: "3px 7px", borderRadius: 3, background: "none", border: `1px solid ${C.border2}`,
+                    color: savedMapId === null ? C.border : C.textMuted, fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize, cursor: savedMapId === null ? "not-allowed" : "pointer" }}>
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Layer editor */}
@@ -884,10 +1028,7 @@ if(LEGEND){
                     style={{ flex: 1, padding: "3px 6px", background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, outline: "none" }}
                   />
                   <button
-                    onClick={() => saveName && onAddDataset?.(saveName, generatedGrid.cells, [
-                      "grid_id", "geometry", "metric_geometry", "centroid_lon", "centroid_lat",
-                      "centroid_x", "centroid_y", "area_m2", "cellsize_m", "metric_crs"
-                    ])}
+                    onClick={saveGeneratedGrid}
                     disabled={!saveName}
                     style={{ padding: "3px 9px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: `${C.gold}18`, border: `1px solid ${C.gold}`, color: C.gold, cursor: "pointer" }}
                   >Save</button>

@@ -1175,7 +1175,7 @@ export async function interpretOptimization({ session, results = {}, dataDiction
 // Returns: Promise<string> — the unified script text (no markdown fences).
 // On failure: returns a fallback that concatenates the sections with headers.
 
-export async function generateUnifiedScript(sections, language, dataDictionary = null, { snapshot = null } = {}) {
+export async function generateUnifiedScript(sections, language, dataDictionary = null, { snapshot = null, userInstruction = null, manualEditNote = null } = {}) {
   const langLabel = language === "r" ? "R" : language === "stata" ? "Stata" : "Python";
   const cmt       = language === "stata" ? "*" : "#";
 
@@ -1209,20 +1209,46 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
   let loadHint = "";
   if (snapshot?.datasets?.length) {
     const calls = snapshot.datasets.map(d => {
-      const file = d.filename ?? d.name;
-      if (language === "stata")  return `  ${buildStataLoadLine(file, d.loadOpts)}`;
+      const cmt = language === "stata" ? "*" : "#";
+      // Recipe-backed derive-children are rebuilt in-script from their parent —
+      // a file load here would duplicate the dataset (and reference a file that
+      // does not exist).
+      if (d.derived) {
+        return `  ${cmt} ${toDfVar(d.name)} is DERIVED in-script from its parent dataset — do not load it from a file.`;
+      }
+      // Derived-without-recipe datasets (e.g. spatial outputs) carry no extension
+      // on their name; the user must export them from Litux as <name>.csv first.
+      const rawFile    = d.filename ?? d.name;
+      const hasExt     = /\.[A-Za-z0-9]+$/.test(rawFile);
+      const file       = hasExt ? rawFile : `${rawFile}.csv`;
+      const exportNote = hasExt ? "" : `  ${cmt} export "${file}" from Litux first`;
+      if (language === "stata")  return `  ${buildStataLoadLine(file, d.loadOpts)}${exportNote}`;
       const line = language === "python"
         ? buildPyLoadLine(file, d.loadOpts)
         : buildRLoadLine(file, d.loadOpts);
-      return `  ${line.replace(/^df\b/, toDfVar(d.name))}`;
+      return `  ${line.replace(/^df\b/, toDfVar(d.name))}${exportNote}`;
     });
     loadHint = `\n\nREQUIRED LOAD CALLS (${langLabel}) — emit ALL of these verbatim, one per session dataset:\n${calls.join("\n")}`;
   } else if (snapshot?.dataLoadOpts) {
     loadHint = `\n\nREQUIRED LOAD CALL (${langLabel}): ${loadOptsToScriptHint(snapshot.dataLoadOpts, language)}`;
   }
 
+  // ── Structuring instruction (Fase 0.2) — how the user wants the script
+  //    sectioned/presented. High priority: placed right after TARGET LANGUAGE.
+  //    Prompt rule 9 honors it but never lets it override dependency order.
+  const structureBlk = userInstruction?.trim()
+    ? `\n\nSTRUCTURE INSTRUCTION:\n${userInstruction.trim()}`
+    : "";
+
+  // ── Manual-edit caveat (Fase 0.3, D2) — R/Stata sessions with cell edits.
+  const manualEditBlk = manualEditNote?.trim()
+    ? `\n\nMANUAL EDITS NOTE:\n${manualEditNote.trim()}`
+    : "";
+
   const userPrompt = [
     `TARGET LANGUAGE: ${langLabel}`,
+    structureBlk,
+    manualEditBlk,
     dictSection,
     snapshotBlk,
     loadHint,
@@ -1245,7 +1271,7 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
 
   try {
     const taskPrompt = UNIFIED_SCRIPT_PROMPT.replace(SHARED_CONTEXT, "").trim();
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 2000 });
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 6000 });
   } catch (err) {
     console.warn("[AIService] generateUnifiedScript failed:", err.message);
     return fallback();

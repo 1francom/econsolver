@@ -892,9 +892,13 @@ TRANSFORMATION RULES (apply all):
 1.  Add a file-level header comment: # 1. Setup / # 2. Data Loading /
     # 3. Cleaning / # 4. Feature Engineering / # 5. Estimation / # 6. Results
     (adjust section numbers to match what is actually present).
-2.  Reorder statements for logical flow: library/package imports first,
-    data loading second, cleaning third, feature engineering fourth,
-    estimation last. Do NOT change the logic — only reorder.
+2.  PRESERVE OPERATION ORDER. The section scripts arrive in true execution
+    order — that order is authoritative. You may hoist library/package
+    imports to the top and group consecutive statements under section
+    headers, but you must NEVER move an operation before another operation
+    it depends on (e.g. a spatial join or grid assignment before the grid
+    it references, a model plot before its estimation, a transform before
+    the load of its dataset). When in doubt, keep the original sequence.
 3.  Collapse redundant intermediate assignments: if a variable is
     assigned and immediately overwritten, keep only the final value.
 4.  Add an inline comment on every non-obvious transformation
@@ -920,13 +924,20 @@ TRANSFORMATION RULES (apply all):
        cover all steps, keep them. If any step is missing, add it.
     d. Reflect the SE TYPE from the snapshot in the estimation call when
        applicable (e.g. fixest cluster=, plm vcov, statsmodels cov_type).
-    e. If PINNED MODELS or SUBSETS are listed, mention them in a final
-       comment block — do not estimate them unless the section script does.
+    e. If the payload says "REPLICATE: all pinned models", emit every labeled
+       pinned-model estimation block supplied in the MODEL section, preserving
+       each model's specification and source dataset binding. Otherwise emit
+       only the active-model block. SUBSETS remain comment-only unless their
+       estimation code is explicitly supplied.
     f. If a MODEL SOURCE DATASET line is present, the estimation MUST run
        on that dataset's data frame (R/Python: data = df_<name>; Stata:
        'use' that dataset's cleaned data before the estimation command).
        Estimating on any other data frame is a fatal error — the model's
        variables only exist in its source dataset.
+9.  If a STRUCTURE INSTRUCTION block is present in the user payload, honor
+    it for how the script is SECTIONED and PRESENTED (grouping, headers,
+    commentary style). It refines rules 1–7 but never overrides rule 2:
+    dependency order is inviolable regardless of the requested structure.
 
 OUTPUT RULES (mandatory):
 - Return ONLY the script — no markdown fences, no preamble, no explanations.
