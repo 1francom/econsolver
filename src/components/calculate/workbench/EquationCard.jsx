@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 import { cas } from "../../../math/cas/casAdapter.js";
 
-const swatch = { width: 22, height: 20, padding: 0, border: "1px solid #444", background: "transparent", cursor: "pointer", flexShrink: 0 };
+const swatch = C => ({ width: 22, height: 20, padding: 0, border: `1px solid ${C.textMuted}`, background: "transparent", cursor: "pointer", flexShrink: 0 });
 const OPS = [
   { key: "plot", glyph: "▦", title: "Plot curve" },
   { key: "deriv", glyph: "f′", title: "Symbolic derivative" },
@@ -55,7 +55,7 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
             fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "3px 5px" }} />
         {!isConstraint && (
           <input type="color" value={accent} title="Curve color"
-            onChange={(e) => onPatch({ color: e.target.value })} style={swatch} />
+            onChange={(e) => onPatch({ color: e.target.value })} style={swatch(C)} />
         )}
         <span style={{ fontSize: T.code.fontSize, color: C.textDim }}>{isConstraint ? "s.t." : "="}</span>
 
@@ -76,7 +76,7 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
         )}
 
         <button onClick={onRemove} title="Remove card"
-          style={{ color: C.red || "#c86e6e", background: "transparent", border: "none", cursor: "pointer", fontSize: T.body.fontSize }}>×</button>
+          style={{ color: C.red, background: "transparent", border: "none", cursor: "pointer", fontSize: T.body.fontSize }}>×</button>
       </div>
 
       {!isConstraint && (
@@ -116,8 +116,8 @@ export default function EquationCard({ eq, index, view, onPatch, onRemove }) {
                   background: "transparent", color: C.gold, border: `1px solid ${C.gold}` }}>
                 {eq.sense}
               </button>
-              <input type="color" value={eq.optColor || C.red || "#c86e6e"} title="Optimum marker color"
-                onChange={(e) => onPatch({ optColor: e.target.value })} style={swatch} />
+              <input type="color" value={eq.optColor || C.red} title="Optimum marker color"
+                onChange={(e) => onPatch({ optColor: e.target.value })} style={swatch(C)} />
             </>
           )}
 

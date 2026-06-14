@@ -38,6 +38,9 @@ export function generateStataScript(config = {}) {
     distCol       = null,
     treatmentCol  = null,
     offsetCol     = null,
+    seType        = "classical",
+    clusterVar    = null,
+    clusterVar2   = null,
   } = model;
 
   const stem     = filename.replace(/\.[^.]+$/, "");
@@ -85,7 +88,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2 }));
   lines.push("");
 
   return lines.join("\n");
@@ -647,25 +650,39 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
   const xList = buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
 
+  // Stata SE option matching the user's selection (was hardcoded ", robust").
+  // Returns the trailing option string ("" = classical default, no comma).
+  const vce = (() => {
+    switch ((seType || "classical").toLowerCase()) {
+      case "classical": return "";
+      case "hc1": case "hc2": case "hc3": return "robust";
+      case "clustered": return clusterVar ? `vce(cluster ${clusterVar})` : "robust";
+      case "twoway":    return clusterVar ? `vce(cluster ${clusterVar})` : "robust";
+      case "hac":       return "robust";   // reg has no native HAC; use newey for true HAC
+      default:          return "";
+    }
+  })();
+  const opt = vce ? `, ${vce}` : "";   // append only when non-empty
+
   switch (type) {
     case "OLS":
-      lines.push(`reg ${yVar} ${xList}, robust`);
+      lines.push(`reg ${yVar} ${xList}${opt}`);
       lines.push(`estimates store m_ols`);
       break;
 
     case "WLS":
       if (!weightCol) {
         lines.push(`* WARNING: no weight column supplied; falling back to OLS`);
-        lines.push(`reg ${yVar} ${xList}, robust`);
+        lines.push(`reg ${yVar} ${xList}${opt}`);
       } else {
         lines.push(`* Weighted Least Squares (analytic weights: ${weightCol})`);
-        lines.push(`reg ${yVar} ${xList} [aw=${weightCol}], robust`);
+        lines.push(`reg ${yVar} ${xList} [aw=${weightCol}]${opt}`);
       }
       lines.push(`estimates store m_wls`);
       break;
@@ -689,7 +706,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const instr = zVars.join(" ");
       const exog  = wVars.join(" ");
       lines.push(`* Two-Stage Least Squares / IV`);
-      lines.push(`ivregress 2sls ${yVar} ${exog ? `(${endog} = ${instr}) ${exog}` : `(${endog} = ${instr})`}, robust`);
+      lines.push(`ivregress 2sls ${yVar} ${exog ? `(${endog} = ${instr}) ${exog}` : `(${endog} = ${instr})`}${opt}`);
       lines.push(`estimates store m_2sls`);
       lines.push(`* First-stage F-statistic`);
       lines.push(`estat firststage`);
@@ -700,7 +717,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
       lines.push(`* Difference-in-Differences (2×2)`);
       lines.push(`gen did = ${postVar} * ${treatVar}`);
-      lines.push(`reg ${yVar} ${postVar} ${treatVar} did${extra}, robust`);
+      lines.push(`reg ${yVar} ${postVar} ${treatVar} did${extra}${opt}`);
       lines.push(`estimates store m_did`);
       break;
     }

@@ -331,14 +331,14 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                       borderRadius: 2, opacity: isActiveBranch ? 1 : 0,
                     }}
                   >
-                    <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : "#555" }} />
+                    <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : C.textMuted }} />
                     <span style={{
-                      fontSize: T.caption.fontSize, color: isActiveBranch ? C.gold : "#888",
+                      fontSize: T.caption.fontSize, color: isActiveBranch ? C.gold : C.textDim,
                       fontFamily: T.code.fontFamily, letterSpacing: "0.1em", flexShrink: 0,
                     }}>
                       {isActiveBranch ? "⊣ branch" : "⊣"}
                     </span>
-                    <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : "#555" }} />
+                    <div style={{ flex: 1, height: 1, background: isActiveBranch ? C.gold : C.textMuted }} />
                   </div>
                 </div>
               );

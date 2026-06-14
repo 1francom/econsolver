@@ -217,7 +217,7 @@ export default function Workbench({ pid }) {
 
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
         <div style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.26em", textTransform: "uppercase" }}>Equation Workbench</div>
-        <div style={{ fontSize: T.code.fontSize, color: C.textDim || "#888" }}>symbolic-first · solve · plot · differentiate · optimize</div>
+        <div style={{ fontSize: T.code.fontSize, color: C.textDim }}>symbolic-first · solve · plot · differentiate · optimize</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           {[["↓R", "r", C.gold], ["↓Stata", "stata", C.teal], ["↓py", "python", C.blue]].map(([label, lang, color]) => (
             <button key={lang} onClick={() => exportScript(lang)}

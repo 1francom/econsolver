@@ -228,9 +228,9 @@ export default function LoginForm() {
           {error && (
             <div style={{
               fontSize: T.caption.fontSize,
-              color: "#e07070",
-              background: "#e0707015",
-              border: "1px solid #e0707040",
+              color: C.red,
+              background: `${C.red}15`,
+              border: `1px solid ${C.red}40`,
               borderRadius: 3,
               padding: "0.5rem 0.75rem",
             }}>

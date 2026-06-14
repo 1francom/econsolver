@@ -203,6 +203,22 @@ export function SpatialLayerEditor({ layer, onChange, activeRows, activeHeaders,
           </div>
         )}
       </>)}
+
+      {layer.type === "heatmap" && (<>
+        <ColSelect label="Latitude" value={layer.latCol}
+          onChange={v => onChange({ ...layer, latCol: v })} headers={lyHeaders} C={C} allowNone />
+        <ColSelect label="Longitude" value={layer.lonCol}
+          onChange={v => onChange({ ...layer, lonCol: v })} headers={lyHeaders} C={C} allowNone />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <NumInput label="Bandwidth (m)" value={layer.bandwidth ?? 250}
+            onChange={v => onChange({ ...layer, bandwidth: Number(v) })} C={C} min={10} max={10000} step={10} confirm />
+          <NumInput label="Grid cells" value={layer.gridN ?? 45}
+            onChange={v => onChange({ ...layer, gridN: Number(v) })} C={C} min={10} max={120} step={1} confirm />
+        </div>
+        <PalettePicker value={layer.palette} onChange={v => onChange({ ...layer, palette: v })} C={C} />
+        <NumInput label="Opacity" value={layer.opacity ?? 0.72}
+          onChange={v => onChange({ ...layer, opacity: Number(v) })} C={C} min={0} max={1} step={0.05} />
+      </>)}
     </div>
   );
 }

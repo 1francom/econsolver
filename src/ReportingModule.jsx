@@ -18,6 +18,7 @@ import { buildSessionSnapshot } from "./services/AI/sessionSnapshot.js";
 import { useSessionLog } from "./services/session/sessionLog.jsx";
 import { useSessionState } from "./services/session/sessionState.jsx";
 import { generateCleanScript, generateWorkspaceScript, toDfVar } from "./pipeline/exporter.js";
+import { transpileSpatialOp } from "./services/export/spatialScript.js";
 import { planExecutionOrder, detectInterleaving } from "./services/export/timelinePlan.js";
 import { loadProjectPipelines } from "./services/Persistence/indexedDB.js";
 import { generateRScript }     from "./services/export/rScript.js";
@@ -877,6 +878,14 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         cutoff:     spec.cutoff     ?? null,
         bandwidth:  spec.bandwidth  ?? null,
         kernel:     spec.kernel     ?? "triangular",
+        factorVars:       spec.factorVars       ?? [],
+        interactionTerms: spec.interactionTerms ?? [],
+        xVarsRaw:         spec.xVarsRaw          ?? null,
+        wVarsRaw:         spec.wVarsRaw          ?? null,
+        // SE type the user selected — export must report the same SEs as Litux.
+        seType:      spec.seType ?? model.seType ?? "classical",
+        clusterVar:  spec.clusterVar  ?? null,
+        clusterVar2: spec.clusterVar2 ?? null,
       },
     };
     try {
@@ -985,7 +994,13 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           } else if (blk.kind === "explore") {
             out.push(`${comment} ${blk.label} — Explore artifact (pin in Explore to emit plot/stat code)`);
           } else if (blk.kind === "spatial") {
-            out.push(`${comment} ${blk.label} — spatial op (use the Spatial tab map/plot exports)`);
+            const code = (blk.events ?? [])
+              .map(ev => transpileSpatialOp(ev.opType, ev.params, lang, dsMap))
+              .filter(Boolean)
+              .join("\n\n");
+            out.push(code
+              ? `${comment} ${blk.label}\n${code}`
+              : `${comment} ${blk.label} — spatial op (use the Spatial tab map/plot exports)`);
           }
         }
         cleanSc = out.filter(Boolean).join("\n\n");

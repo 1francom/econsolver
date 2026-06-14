@@ -684,6 +684,23 @@ function buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTe
   return parts.join(" + ") || "1";
 }
 
+// fixest `vcov=` argument for a given SE type. Mirrors the SE the user selected
+// in Litux's Inference Options so the exported script reports the SAME standard
+// errors as the platform (was previously hardcoded to "HC1"). Returns an object
+// { arg, note } — `note` flags an approximation (fixest has no native HC2/HC3).
+function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
+  switch ((seType || "classical").toLowerCase()) {
+    case "classical": return { arg: `"iid"`,    note: null };
+    case "hc1":       return { arg: `"hetero"`,  note: null };
+    case "hc2":       return { arg: `"hetero"`,  note: `# Note: fixest "hetero" = HC1; for exact HC2 use sandwich::vcovHC(fit, "HC2")` };
+    case "hc3":       return { arg: `"hetero"`,  note: `# Note: fixest "hetero" = HC1; for exact HC3 use sandwich::vcovHC(fit, "HC3")` };
+    case "clustered": return { arg: clusterVar ? `~${rName(clusterVar)}` : `"hetero"`, note: null };
+    case "twoway":    return { arg: (clusterVar && clusterVar2) ? `~${rName(clusterVar)} + ${rName(clusterVar2)}` : `"hetero"`, note: null };
+    case "hac":       return { arg: `"NW"`,      note: null };
+    default:          return { arg: `"iid"`,     note: null };
+  }
+}
+
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
 function transpileModel(model) {
   const {
@@ -696,7 +713,13 @@ function transpileModel(model) {
     weightCol = null,
     cohortCol, periodCol, controlMode, refPeriod,
     interactionTerms = [], xVarsRaw = null, wVarsRaw = null,
+    seType = "classical", clusterVar = null, clusterVar2 = null,
   } = model;
+
+  // SE the user actually selected — emitted instead of a hardcoded "HC1".
+  const vc = rVcov(seType, { clusterVar, clusterVar2 });
+  // Number of regressors (for the VIF guard — vif() errors on < 2 terms).
+  const nReg = (xVars?.length ?? 0) + (wVars?.length ?? 0) + (interactionTerms?.length ?? 0);
 
   const fvSet = new Set(factorVars);
   const fmtR  = v => fvSet.has(v) ? `factor(${rName(v)})` : rName(v);
@@ -709,12 +732,14 @@ function transpileModel(model) {
     case "OLS":
       return [
         `# ── OLS ──────────────────────────────────────────────────────────────`,
-        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = "HC1")`,
+        ...(vc.note ? [vc.note] : []),
+        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
         ``,
         `# Diagnostics`,
         `fixest::etable(fit)`,
         `lmtest::bptest(lm(${y} ~ ${xStr}, data = df))  # Breusch-Pagan`,
-        `car::vif(lm(${y} ~ ${xStr}, data = df))         # VIF`,
+        // vif() errors on a single-regressor model ("fewer than 2 terms").
+        ...(nReg >= 2 ? [`car::vif(lm(${y} ~ ${xStr}, data = df))         # VIF`] : []),
       ].join("\n");
 
     case "WLS": {
@@ -723,14 +748,16 @@ function transpileModel(model) {
         return [
           `# ── WLS ──────────────────────────────────────────────────────────────`,
           `# WARNING: no weight column supplied; falling back to OLS`,
-          `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = "HC1")`,
+          ...(vc.note ? [vc.note] : []),
+          `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
           `fixest::etable(fit)`,
         ].join("\n");
       }
       return [
         `# ── WLS (weighted least squares) ─────────────────────────────────────`,
         `# Weights: ${w}`,
-        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, vcov = "HC1")`,
+        ...(vc.note ? [vc.note] : []),
+        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, vcov = ${vc.arg})`,
         ``,
         `# Diagnostics`,
         `fixest::etable(fit)`,
@@ -768,11 +795,14 @@ function transpileModel(model) {
       const endog  = xVars.map(fmtR).join(" + ") || "endog_var";
       const ctrls  = wVars.map(fmtR).join(" + ");
       const instrs = zVars.map(rName).join(" + ") || "instrument";
-      const rhs    = ctrls ? `${endog} + ${ctrls}` : endog;
-      const iv_rhs = ctrls ? `${instrs} + ${ctrls}` : instrs;
+      // fixest syntax: y ~ exog_controls | endog ~ EXCLUDED instruments.
+      // The exogenous controls are included as their own instruments
+      // automatically — do NOT repeat them in the instrument list.
+      const iv_rhs = instrs;
       return [
         `# ── 2SLS / IV ────────────────────────────────────────────────────────`,
-        `fit <- fixest::feols(${y} ~ ${ctrls || "1"} | ${endog} ~ ${iv_rhs}, data = df, vcov = "HC1")`,
+        ...(vc.note ? [vc.note] : []),
+        `fit <- fixest::feols(${y} ~ ${ctrls || "1"} | ${endog} ~ ${iv_rhs}, data = df, vcov = ${vc.arg})`,
         ``,
         `# First-stage diagnostics`,
         `fixest::fitstat(fit, ~ ivwald)   # Wald F for instrument strength`,
@@ -788,7 +818,8 @@ function transpileModel(model) {
       return [
         `# ── 2×2 Difference-in-Differences ───────────────────────────────────`,
         `# DiD interaction term: post × treat`,
-        `fit <- fixest::feols(${y} ~ ${rhs}, data = df, vcov = "HC1")`,
+        ...(vc.note ? [vc.note] : []),
+        `fit <- fixest::feols(${y} ~ ${rhs}, data = df, vcov = ${vc.arg})`,
         ``,
         `fixest::etable(fit)`,
         ``,

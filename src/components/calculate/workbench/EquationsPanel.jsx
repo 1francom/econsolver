@@ -50,7 +50,7 @@ export default function EquationsPanel({ equations, view, onAdd, onPatch, onRemo
       )}
 
       {equations.length === 0 && (
-        <div style={{ fontSize: T.code.fontSize, color: C.textDim || "#888", padding: "6px 0" }}>
+        <div style={{ fontSize: T.code.fontSize, color: C.textDim, padding: "6px 0" }}>
           Add an equation or pick a template to begin.
         </div>
       )}

@@ -1,0 +1,77 @@
+// ─── Spatial replication harness ─────────────────────────────────────────────
+// Plan: docs/superpowers/plans/2026-06-14-spatial-replication.md
+// `node src/services/export/__validation__/spatialReplicationValidation.mjs`
+//
+// Every logged spatial opType must produce real R (sf) + Python (geopandas)
+// code — non-empty, no fallback-only comment, no undefined/[object Object].
+
+import { transpileSpatialOp, spatialScriptImports } from "../spatialScript.js";
+
+let pass = 0, fail = 0;
+const check = (n, c, extra) => {
+  if (c) { pass++; console.log("  [pass]", n); }
+  else   { fail++; console.log("  [FAIL]", n, extra != null ? "→ " + extra : ""); }
+};
+
+const GARBAGE = /undefined|\[object Object\]/;
+const DATASETS = {
+  POLY: { name: "barrios", filename: "barrios.csv" },
+  GRID: { name: "grid_500m", filename: "grid.csv" },
+  REF:  { name: "hospitals", filename: "hospitals.csv" },
+};
+
+// Representative params per logged opType (mirrors the appendLog calls).
+const FIX = {
+  spatial_join:        { latCol: "lat", lonCol: "lon", polyDsId: "POLY", wktCol: "geometry", joinCols: ["comuna", "area"], predicate: "within" },
+  distance:            { latCol: "lat", lonCol: "lon", refLat: -34.6, refLon: -58.4, outCol: "dist_center", metric: "haversine" },
+  buffer_assign:       { latCol: "lat", lonCol: "lon", refLat: -34.6, refLon: -58.4, radius: 1000, outCol: "near_center" },
+  nearest_neighbor:    { latCol: "lat", lonCol: "lon", refDsId: "REF", refLatCol: "h_lat", refLonCol: "h_lon", outDist: "nn_dist", outIdx: "nn_idx", metric: "haversine" },
+  crs_transform:       { mode: "point", xCol: "x", yCol: "y", outX: "lon", outY: "lat", source: "EPSG:22185", target: "EPSG:4326" },
+  boundary_distance:   { latCol: "lat", lonCol: "lon", polyDsId: "POLY", wktCol: "geometry", outPrefix: "boundary" },
+  metric_buffer_create:{ latCol: "lat", lonCol: "lon", radius: 500, crs: "EPSG:32721" },
+  metric_buffer_count: { latCol: "lat", lonCol: "lon", radius: 500, gridDsId: "GRID", wktCol: "geometry", outCol: "n_pts" },
+  grid_assign_existing:{ latCol: "lat", lonCol: "lon", outCol: "cell", gridDsId: "GRID", wktCol: "geometry", gridIdCol: "grid_id", extraCols: ["zone"] },
+  aggregate_to_grid:   { mode: "grid", gridDsId: "GRID", wktCol: "geometry", outCol: "mean_price", fn: "mean", valueCol: "price", latCol: "lat", lonCol: "lon" },
+};
+
+console.log("── spatial op → R / Python coverage ──");
+for (const [opType, params] of Object.entries(FIX)) {
+  for (const lang of ["r", "python"]) {
+    const code = transpileSpatialOp(opType, params, lang, DATASETS);
+    const ok = typeof code === "string" && code.trim().length > 0
+      && /[a-z]/.test(code.replace(/^#.*$/gm, "").replace(/^\s*$/gm, ""))  // has real (non-comment) code
+      && !GARBAGE.test(code);
+    check(`${lang}: ${opType}`, ok, code ? code.split("\n").find(l => GARBAGE.test(l)) ?? (ok ? "" : "comment-only") : "null");
+  }
+}
+
+console.log("\n── crs_transform wkt mode ──");
+{
+  const r = transpileSpatialOp("crs_transform", { mode: "wkt", wktCol: "geom", outWkt: "geom_4326", source: "EPSG:22185", target: "EPSG:4326" }, "r", {});
+  check("r: crs_transform wkt mode emits st_transform", /st_transform/.test(r) && !GARBAGE.test(r));
+}
+
+console.log("\n── geocode is skipped (it is a pipeline step) ──");
+check("geocode → null in all languages",
+  transpileSpatialOp("geocode", {}, "r") === null && transpileSpatialOp("geocode", {}, "python") === null);
+
+console.log("\n── Stata emits an honest no-geometry comment ──");
+{
+  const s = transpileSpatialOp("spatial_join", FIX.spatial_join, "stata", DATASETS);
+  check("stata: documented comment, no garbage", /no native geometry/i.test(s) && !GARBAGE.test(s));
+}
+
+console.log("\n── referenced datasets resolve to df_<name> ──");
+{
+  const r = transpileSpatialOp("spatial_join", FIX.spatial_join, "r", DATASETS);
+  check("r: poly dataset resolves to df_barrios", /df_barrios/.test(r), r.split("\n")[2]);
+  const rUnknown = transpileSpatialOp("spatial_join", { ...FIX.spatial_join, polyDsId: "MISSING" }, "r", DATASETS);
+  check("r: unknown dataset gets a placeholder df var", /df_MISSING/.test(rUnknown));
+}
+
+console.log("\n── imports helper ──");
+check("r imports include sf", spatialScriptImports("r").some(l => /library\(sf\)/.test(l)));
+check("python imports include geopandas", spatialScriptImports("python").some(l => /import geopandas/.test(l)));
+
+console.log(`\nspatialReplication: ${pass} passed, ${fail} failed`);
+if (fail > 0) process.exit(1);

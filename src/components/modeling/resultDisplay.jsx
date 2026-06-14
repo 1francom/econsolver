@@ -329,9 +329,9 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
             <button onClick={() => setShowIrr(v => !v)} style={{
               fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
               padding: "1px 6px", borderRadius: 3, cursor: "pointer",
-              border: `1px solid ${irrMode ? "#9e7ec8" : C.border2}`,
-              background: irrMode ? "#9e7ec8" + "22" : "transparent",
-              color: irrMode ? "#9e7ec8" : C.textDim,
+              border: `1px solid ${irrMode ? C.violet : C.border2}`,
+              background: irrMode ? `${C.violet}22` : "transparent",
+              color: irrMode ? C.violet : C.textDim,
               letterSpacing: "0.1em", textTransform: "uppercase",
             }}>
               {irrMode ? "IRR" : "β"}
@@ -404,7 +404,7 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                 padding: "0.8rem 1.1rem 0.8rem 1.4rem", background: C.surface2,
                 borderTop: `1px solid ${C.border}`, borderLeft: `3px solid ${C.gold}`,
                 animation: "fadeUp 0.18s ease", fontSize: T.code.fontSize,
-                color: "#b0a888", lineHeight: 1.8, fontFamily: T.code.fontFamily,
+                color: C.goldDim, lineHeight: 1.8, fontFamily: T.code.fontFamily,
               }}>
                 <span style={{ color: C.goldDim, fontSize: T.caption.fontSize, letterSpacing: "0.15em", textTransform: "uppercase" }}>
                   Economic Interpretation ·{" "}
@@ -779,7 +779,7 @@ export function ExportBar({ yVar, results, model, onReport, replicateConfig, lat
       {showLatex && (
         <div style={{ background: C.surface2, borderTop: `1px solid ${C.border}`, padding: "1rem", animation: "fadeUp 0.18s ease" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: T.caption.fontSize, color: "#5a8a5a", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>LaTeX · {model}</span>
+            <span style={{ fontSize: T.caption.fontSize, color: C.green, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: T.code.fontFamily }}>LaTeX · {model}</span>
             <button
               onClick={() => { navigator.clipboard.writeText(latex); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
               style={{

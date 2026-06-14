@@ -47,7 +47,7 @@ export default function SessionTabs({ sessions, activeId, onSelect, onAdd, onRen
             )}
             {sessions.length > 1 && (
               <span onClick={(e) => { e.stopPropagation(); onClose(s.id); }}
-                style={{ color: C.red || "#c86e6e", fontSize: T.body.fontSize, lineHeight: 1 }}>×</span>
+                style={{ color: C.red, fontSize: T.body.fontSize, lineHeight: 1 }}>×</span>
             )}
           </div>
         );

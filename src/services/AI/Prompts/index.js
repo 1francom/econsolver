@@ -357,12 +357,13 @@ I. LAGGED / LEADING VARIABLES  [metadata tag: lag-var | lead-var]
 
 ━━━ ESTIMATOR TYPE RULES (keyed to "Estimator type:" field) ━━━
 
-J. POISSON / PoissonFE  [Estimator type: Poisson | PoissonFE]
+J. POISSON / PoissonFE / IVPoisson  [Estimator type: Poisson | PoissonFE | IVPoisson]
    Coefficients are on the log-count scale — NEVER interpret as linear marginal effects.
    Always compute exp(β) and report it as the Incidence Rate Ratio (IRR):
    "A one-unit increase in X multiplies the expected count by exp(β) = [IRR],
     i.e. a [IRR−1]×100% change in the expected count."
    For PoissonFE: frame as within-entity variation — "Within the same entity, …"
+   For IVPoisson: interpret the structural count equation as an IRR and discuss instrument relevance and exclusion separately; never describe β as a linear 2SLS marginal effect.
    Do not use R² language; use log-likelihood or deviance if fit statistics are present.
 
 K. SUN–ABRAHAM event study  [Estimator type: SunAbraham]
@@ -428,7 +429,7 @@ R. SYNTHETIC CONTROL  [Estimator type: SyntheticControl]
     – 2SLS / GMM / LIML: Instrument relevance (F > 10) and exclusion restriction.
     – RDD / FuzzyRDD: Bandwidth choice, local validity, continuity assumption.
     – Logit / Probit: ORs vs. AMEs, McFadden R², separation risk.
-    – Poisson / PoissonFE / SunAbraham: IRR interpretation, overdispersion concern.
+    – Poisson / PoissonFE / IVPoisson / SunAbraham: IRR interpretation, overdispersion concern.
     – SyntheticControl: Gap size, placebo test context.
 • Do NOT start with "This study", "The results", or "In this".
 • Do NOT reproduce variable names in ALL-CAPS.
@@ -906,6 +907,25 @@ TRANSFORMATION RULES (apply all):
 5.  Replace Explore/plot section code with a single comment:
     # See exported plots (excluded from replication script)
 6.  Keep all estimation code intact — do NOT simplify or summarise it.
+6b. DO NOT INVENT econometrics. Never add estimation code, diagnostics,
+    instruments, SE specifications, or package installs that are not already
+    present in the supplied sections. Specifically:
+    - Preserve every vcov= / cov_type= / vce() SE argument EXACTLY as supplied.
+      The sections already carry the SE type the user selected — never
+      substitute a different one (e.g. do not change "iid" to "HC1").
+    - For IV/2SLS, do NOT add the exogenous controls into the instrument list.
+      In fixest \`y ~ W | X ~ Z\`, the controls W are instruments for themselves
+      automatically; repeating them after the \`~\` is wrong.
+    - Do NOT add a VIF call for a single-regressor model (car::vif errors with
+      "fewer than 2 terms"). Only keep a VIF call if the section already has one.
+    - Do NOT emit \`install.packages("pandoc")\` — pandoc is a system tool
+      bundled with RStudio, not an installable R package. If a modelsummary
+      output uses .docx and you are unsure pandoc is available, leave the call
+      as supplied and add a one-line comment that .docx export needs pandoc.
+    - Do NOT add an absolute working-directory change (R \`setwd("C:/...")\`,
+      Python \`os.chdir("C:/...")\`, Stata \`cd "C:/..."\`). The load calls use
+      relative filenames — assume the script runs from the data directory. At
+      most add a commented hint like \`# setwd("path/to/data")  # adjust as needed\`.
 7.  At the end, add a brief comment block explaining the main model spec.
 8.  HONOR THE SESSION SNAPSHOT (when provided):
     a. If a SESSION SNAPSHOT block is present, use its DATA LOAD OPTIONS

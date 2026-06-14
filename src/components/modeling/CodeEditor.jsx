@@ -56,6 +56,11 @@ function buildScript(tab, result, allDatasets = {}) {
       interactionTerms:  spec.interactionTerms  ?? [],
       xVarsRaw:          spec.xVarsRaw          ?? null,
       wVarsRaw:          spec.wVarsRaw          ?? null,
+      // SE type the user selected (Inference Options) so exports report the
+      // same standard errors as the platform (was hardcoded HC1/HC3).
+      seType:            spec.seType            ?? "classical",
+      clusterVar:        spec.clusterVar        ?? null,
+      clusterVar2:       spec.clusterVar2       ?? null,
     },
   };
 

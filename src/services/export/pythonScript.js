@@ -39,6 +39,9 @@ export function generatePythonScript(config = {}) {
     distCol       = null,
     treatmentCol  = null,
     offsetCol     = null,
+    seType        = "classical",
+    clusterVar    = null,
+    clusterVar2   = null,
   } = model;
 
   const stem    = filename.replace(/\.[^.]+$/, "");
@@ -109,7 +112,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push("# ── Estimation ─────────────────────────────────────────────────────────────");
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2 }));
   lines.push("");
 
   return lines.join("\n");
@@ -636,17 +639,41 @@ function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
   const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
   const xFormula = allX.map(v => `"${v}"`).join(", ");
   const pyFormStr = buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
 
+  // statsmodels `.fit(...)` covariance argument matching the SE the user selected
+  // in Litux (was hardcoded "HC3"). statsmodels supports HC1/HC2/HC3 natively.
+  const smCov = () => {
+    switch ((seType || "classical").toLowerCase()) {
+      case "classical": return `cov_type="nonrobust"`;
+      case "hc1":       return `cov_type="HC1"`;
+      case "hc2":       return `cov_type="HC2"`;
+      case "hc3":       return `cov_type="HC3"`;
+      case "clustered": return clusterVar ? `cov_type="cluster", cov_kwds={"groups": df["${clusterVar}"]}` : `cov_type="HC1"`;
+      case "twoway":    return (clusterVar && clusterVar2) ? `cov_type="cluster", cov_kwds={"groups": df[["${clusterVar}", "${clusterVar2}"]]}` : `cov_type="HC1"`;
+      case "hac":       return `cov_type="HAC", cov_kwds={"maxlags": 1}`;
+      default:          return `cov_type="nonrobust"`;
+    }
+  };
+  // linearmodels IV2SLS `.fit(...)` covariance argument.
+  const ivCov = () => {
+    switch ((seType || "classical").toLowerCase()) {
+      case "classical": return `cov_type="unadjusted"`;
+      case "clustered": return clusterVar ? `cov_type="clustered", clusters=df["${clusterVar}"]` : `cov_type="robust"`;
+      case "hac":       return `cov_type="kernel"`;
+      default:          return `cov_type="robust"`;   // HC1/HC2/HC3 → robust sandwich
+    }
+  };
+
   switch (type) {
     case "OLS": {
       const formula = `"${yVar} ~ ${pyFormStr}"`;
-      lines.push(`model = smf.ols(${formula}, data=df).fit(cov_type="HC3")`);
+      lines.push(`model = smf.ols(${formula}, data=df).fit(${smCov()})`);
       lines.push(`print(model.summary())`);
       break;
     }
@@ -655,10 +682,10 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const formula = `"${yVar} ~ ${pyFormStr}"`;
       if (!weightCol) {
         lines.push(`# WARNING: no weight column supplied; falling back to OLS`);
-        lines.push(`model = smf.ols(${formula}, data=df).fit(cov_type="HC3")`);
+        lines.push(`model = smf.ols(${formula}, data=df).fit(${smCov()})`);
       } else {
         lines.push(`# Weighted Least Squares (weights: ${weightCol})`);
-        lines.push(`model = smf.wls(${formula}, data=df, weights=df["${weightCol}"]).fit(cov_type="HC3")`);
+        lines.push(`model = smf.wls(${formula}, data=df, weights=df["${weightCol}"]).fit(${smCov()})`);
       }
       lines.push(`print(model.summary())`);
       break;
@@ -701,7 +728,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`endog_vars = df[[${endog}]]`);
         lines.push(`instr_vars = df[[${instr}]]`);
       }
-      lines.push(`model = IV2SLS(dependent, exog_vars, endog_vars, instr_vars).fit(cov_type="robust")`);
+      lines.push(`model = IV2SLS(dependent, exog_vars, endog_vars, instr_vars).fit(${ivCov()})`);
       lines.push(`print(model.summary)`);
       break;
     }
@@ -710,7 +737,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const xExtra = wVars.length ? ` + ${wVars.join(" + ")}` : "";
       lines.push(`# Difference-in-Differences (2×2)`);
       lines.push(`df["did"] = df["${postVar}"] * df["${treatVar}"]`);
-      lines.push(`model = smf.ols("${yVar} ~ ${postVar} + ${treatVar} + did${xExtra}", data=df).fit(cov_type="HC3")`);
+      lines.push(`model = smf.ols("${yVar} ~ ${postVar} + ${treatVar} + did${xExtra}", data=df).fit(${smCov()})`);
       lines.push(`print(model.summary())`);
       lines.push(`print(f"ATT = {model.params['did']:.4f}  SE = {model.bse['did']:.4f}  p = {model.pvalues['did']:.4f}")`);
       break;
