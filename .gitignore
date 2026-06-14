@@ -29,3 +29,15 @@ dist-ssr
 
 # data-discovery raw dumps (may contain PII)
 tools/data-discovery/out/
+
+# Local / generated files that should never be committed
+# per-machine Claude Code settings
+.claude/settings.local.json
+# Supabase CLI scratch (cli-latest etc.)
+supabase/.temp/
+# brainstorming companion scratch files
+.superpowers/
+# Python bytecode caches
+__pycache__/
+# local installers (e.g. GeoGebra under skills)
+*.exe
