@@ -7,6 +7,7 @@ export function mkSLayer(type, idx) {
   if (type === "boundary") return { id, type, visible: true, datasetId: "active", wktCol: "", fillColor: "#d0d0d0", fillOpacity: 0.12, borderColor: "#222222", borderWidth: 0.5 };
   if (type === "grid")     return { id, type, visible: true, datasetId: "active", mode: "latlon", latCol: "", lonCol: "", wktCol: "", boundaryCol: "", cellsize: 500, clipBorder: true, fillColor: col, fillOpacity: 0, borderColor: "#d73027", borderWidth: 0.15, colorByCol: "", colorFillOpacity: 0.55 };
   if (type === "points")   return { id, type, visible: true, datasetId: "active", mode: "latlon", latCol: "", lonCol: "", wktCol: "", colorCol: "", fillColor: col, radius: 4, opacity: 0.78 };
+  if (type === "heatmap")  return { id, type, visible: true, datasetId: "active", latCol: "", lonCol: "", bandwidth: 250, gridN: 45, palette: "teal-gold", fillColor: col, opacity: 0.72 };
   if (type === "line")     return { id, type, visible: true, datasetId: "active", wktCol: "", lineColor: col, lineWeight: 1.5, lineOpacity: 0.85 };
   return { id, type, visible: true };
 }

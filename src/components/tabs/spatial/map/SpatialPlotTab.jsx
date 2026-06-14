@@ -15,6 +15,29 @@ import { buildFoliumPy, buildLeafletR } from "../../../../services/export/mapScr
 import { guessLatCol, guessLonCol } from "../shared/guess.js";
 import { MONO_STACK } from "../../../../theme.js";
 import { useSessionLogOptional } from "../../../../services/session/sessionLog.jsx";
+import { kde2d, transformCoord } from "../../../../math/SpatialEngine.js";
+
+function buildHeatmapCells(data, layer) {
+  if (!layer.latCol || !layer.lonCol) return { cells: [], legend: null };
+  const stride = Math.max(1, Math.ceil(data.length / 5000));
+  const sampled = stride === 1 ? data : data.filter((_, index) => index % stride === 0);
+  const kde = kde2d(sampled, layer.latCol, layer.lonCol, {
+    bandwidth: Number(layer.bandwidth) || undefined,
+    gridN: Number(layer.gridN) || 45,
+  });
+  if (!kde.rows.length) return { cells: [], legend: null };
+  const { getColor, legend } = buildColorScale(kde.rows, "density", layer.palette);
+  const xStep = kde.x.length > 1 ? Math.abs(kde.x[1] - kde.x[0]) : 1;
+  const yStep = kde.y.length > 1 ? Math.abs(kde.y[1] - kde.y[0]) : 1;
+  const cells = kde.rows.map(cell => {
+    const [west] = transformCoord(cell.x - xStep / 2, cell.y, kde.metricCrs, "EPSG:4326");
+    const [east] = transformCoord(cell.x + xStep / 2, cell.y, kde.metricCrs, "EPSG:4326");
+    const [, south] = transformCoord(cell.x, cell.y - yStep / 2, kde.metricCrs, "EPSG:4326");
+    const [, north] = transformCoord(cell.x, cell.y + yStep / 2, kde.metricCrs, "EPSG:4326");
+    return { ...cell, west, east, south, north, fillColor: getColor(cell) };
+  }).filter(cell => [cell.west, cell.east, cell.south, cell.north].every(Number.isFinite));
+  return { cells, legend };
+}
 
 // ── PNG export helpers (Leaflet → canvas) ────────────────────────────────────
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -194,6 +217,18 @@ export function SpatialPlotTab({ rows, headers, availableDatasets, onAddDataset,
           features.push({
             kind: "point", latlng, tooltip,
             options: { radius: ly.radius, fillColor: color, color, weight: 1, opacity, fillOpacity: opacity * 0.78 },
+          });
+        }
+      }
+
+      if (ly.type === "heatmap") {
+        const { cells } = buildHeatmapCells(data, ly);
+        for (const cell of cells) {
+          features.push({
+            kind: "polygon",
+            latlngs: [[cell.south, cell.west], [cell.south, cell.east], [cell.north, cell.east], [cell.north, cell.west]],
+            tooltip: `density: ${cell.density.toExponential(3)}`,
+            options: { fillColor: cell.fillColor, color: cell.fillColor, weight: 0, fillOpacity: ly.opacity ?? 0.72 },
           });
         }
       }
@@ -751,6 +786,18 @@ if(LEGEND){
         }
       }
 
+      if (ly.type === "heatmap") {
+        const { cells } = buildHeatmapCells(lyRows(ly), ly);
+        for (const cell of cells) {
+          L.rectangle([[cell.south, cell.west], [cell.north, cell.east]], {
+            fillColor: cell.fillColor,
+            color: cell.fillColor,
+            weight: 0,
+            fillOpacity: ly.opacity ?? 0.72,
+          }).bindTooltip(`density: ${cell.density.toExponential(3)}`).addTo(group);
+        }
+      }
+
       // ── Line ──────────────────────────────────────────────────────────────
       if (ly.type === "line" && ly.wktCol) {
         for (const row of lyRows(ly)) {
@@ -781,6 +828,7 @@ if(LEGEND){
       const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
       if (ly.type === "grid"   && ly.mode === "wkt" && ly.colorByCol) return buildColorScale(r, ly.colorByCol, ly.palette).legend;
       if (ly.type === "points" && ly.colorCol)                         return buildColorScale(r, ly.colorCol, ly.palette).legend;
+      if (ly.type === "heatmap" && ly.latCol && ly.lonCol)             return buildHeatmapCells(r, ly).legend;
     }
     return null;
   }, [layers, rows, availableDatasets]);
@@ -887,7 +935,7 @@ if(LEGEND){
               }}
             >
               <div style={{
-                width: 7, height: 7, borderRadius: ly.type === "points" ? "50%" : 1, flexShrink: 0,
+                width: 7, height: 7, borderRadius: ly.type === "points" || ly.type === "heatmap" ? "50%" : 1, flexShrink: 0,
                 background: ly.type === "boundary" ? ly.borderColor : ly.type === "grid" ? ly.borderColor : ly.type === "line" ? (ly.lineColor ?? "#6e9ec8") : ly.fillColor,
               }} />
               <span style={{ flex: 1, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: activeId === ly.id ? C.teal : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -898,6 +946,7 @@ if(LEGEND){
                 {ly.type === "line" && ly.wktCol && ` · ${ly.wktCol}`}
                 {ly.type === "points" && ly.mode === "wkt" && ly.wktCol && ` · ${ly.wktCol}`}
                 {ly.type === "points" && ly.mode !== "wkt" && ly.latCol && ` · ${ly.latCol}/${ly.lonCol}`}
+                {ly.type === "heatmap" && ly.latCol && ` · ${ly.latCol}/${ly.lonCol}`}
               </span>
               <button onClick={e => { e.stopPropagation(); updateLayer({ ...ly, visible: !ly.visible }); }}
                 style={{ background: "none", border: "none", cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0 2px", color: ly.visible ? C.textDim : C.textMuted }}
@@ -909,7 +958,7 @@ if(LEGEND){
           ))}
           {/* Add buttons */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
-            {[["boundary","Boundary"], ["grid","Grid"], ["points","Points"], ["line","Line"]].map(([t, lbl]) => (
+            {[["boundary","Boundary"], ["grid","Grid"], ["points","Points"], ["heatmap","Heatmap"], ["line","Line"]].map(([t, lbl]) => (
               <button key={t} onClick={() => addLayer(t)}
                 style={{ padding: "3px 7px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, background: "none", border: `1px dashed ${C.border2}`, color: C.textMuted, cursor: "pointer" }}
               >+{lbl}</button>
