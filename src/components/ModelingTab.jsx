@@ -1668,8 +1668,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       entityCol:  panel?.entityCol ?? null,
       timeCol:    panel?.timeCol   ?? null,
       factorVars: Array.from(factorVars),
+      // SE type selected in Inference Options — exports must report the same SEs.
+      seType,
+      clusterVar,
+      clusterVar2,
     },
-  }), [cleanedData, panel, factorVars]);
+  }), [cleanedData, panel, factorVars, seType, clusterVar, clusterVar2]);
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
   return (

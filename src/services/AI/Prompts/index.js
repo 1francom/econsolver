@@ -906,6 +906,21 @@ TRANSFORMATION RULES (apply all):
 5.  Replace Explore/plot section code with a single comment:
     # See exported plots (excluded from replication script)
 6.  Keep all estimation code intact — do NOT simplify or summarise it.
+6b. DO NOT INVENT econometrics. Never add estimation code, diagnostics,
+    instruments, SE specifications, or package installs that are not already
+    present in the supplied sections. Specifically:
+    - Preserve every vcov= / cov_type= / vce() SE argument EXACTLY as supplied.
+      The sections already carry the SE type the user selected — never
+      substitute a different one (e.g. do not change "iid" to "HC1").
+    - For IV/2SLS, do NOT add the exogenous controls into the instrument list.
+      In fixest \`y ~ W | X ~ Z\`, the controls W are instruments for themselves
+      automatically; repeating them after the \`~\` is wrong.
+    - Do NOT add a VIF call for a single-regressor model (car::vif errors with
+      "fewer than 2 terms"). Only keep a VIF call if the section already has one.
+    - Do NOT emit \`install.packages("pandoc")\` — pandoc is a system tool
+      bundled with RStudio, not an installable R package. If a modelsummary
+      output uses .docx and you are unsure pandoc is available, leave the call
+      as supplied and add a one-line comment that .docx export needs pandoc.
 7.  At the end, add a brief comment block explaining the main model spec.
 8.  HONOR THE SESSION SNAPSHOT (when provided):
     a. If a SESSION SNAPSHOT block is present, use its DATA LOAD OPTIONS

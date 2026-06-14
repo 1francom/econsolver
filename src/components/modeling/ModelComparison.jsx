@@ -373,6 +373,10 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
         cutoff:     m.spec?.cutoff     ?? null,
         bandwidth:  m.spec?.bandwidth  ?? null,
         kernel:     m.spec?.kernel     ?? "triangular",
+        // Per-model SE type so each compared model reports its own SEs.
+        seType:      m.spec?.seType ?? m.seType ?? "classical",
+        clusterVar:  m.spec?.clusterVar  ?? null,
+        clusterVar2: m.spec?.clusterVar2 ?? null,
       },
       label:         m.label         ?? m.type ?? "Model",
       subsetName:    m.subsetName    ?? null,

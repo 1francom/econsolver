@@ -877,6 +877,14 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         cutoff:     spec.cutoff     ?? null,
         bandwidth:  spec.bandwidth  ?? null,
         kernel:     spec.kernel     ?? "triangular",
+        factorVars:       spec.factorVars       ?? [],
+        interactionTerms: spec.interactionTerms ?? [],
+        xVarsRaw:         spec.xVarsRaw          ?? null,
+        wVarsRaw:         spec.wVarsRaw          ?? null,
+        // SE type the user selected — export must report the same SEs as Litux.
+        seType:      spec.seType ?? model.seType ?? "classical",
+        clusterVar:  spec.clusterVar  ?? null,
+        clusterVar2: spec.clusterVar2 ?? null,
       },
     };
     try {
