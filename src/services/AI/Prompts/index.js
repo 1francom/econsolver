@@ -921,6 +921,10 @@ TRANSFORMATION RULES (apply all):
       bundled with RStudio, not an installable R package. If a modelsummary
       output uses .docx and you are unsure pandoc is available, leave the call
       as supplied and add a one-line comment that .docx export needs pandoc.
+    - Do NOT add an absolute working-directory change (R \`setwd("C:/...")\`,
+      Python \`os.chdir("C:/...")\`, Stata \`cd "C:/..."\`). The load calls use
+      relative filenames — assume the script runs from the data directory. At
+      most add a commented hint like \`# setwd("path/to/data")  # adjust as needed\`.
 7.  At the end, add a brief comment block explaining the main model spec.
 8.  HONOR THE SESSION SNAPSHOT (when provided):
     a. If a SESSION SNAPSHOT block is present, use its DATA LOAD OPTIONS
