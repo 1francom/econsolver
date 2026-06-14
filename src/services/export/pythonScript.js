@@ -221,120 +221,261 @@ function transpileStep(step, allDatasets = {}) {
       ].join("\n");
     }
     case "rename":
-      return `df = df.rename(columns={"${params.from}": "${params.to}"})`;
+      return `df = df.rename(columns={${pyStr(step.col)}: ${pyStr(step.newName)}})`;
     case "drop":
-      return `df = df.drop(columns=${JSON.stringify(params.cols ?? [])}, errors="ignore")`;
+      return `df = df.drop(columns=[${pyStr(step.col)}], errors="ignore")`;
     case "filter": {
-      const { col, op, val } = params;
-      const ops = { ">": ">", "<": "<", ">=": ">=", "<=": "<=", "==": "==", "!=": "!=" };
-      const pyOp = ops[op] ?? "==";
-      const v = typeof val === "string" ? `"${val}"` : val;
-      return `df = df[df["${col}"] ${pyOp} ${v}]`;
+      const col = pyStr(step.col);
+      const v = step.value;
+      switch (step.op) {
+        case "notna": return `df = df[df[${col}].notna()]`;
+        case "eq":    return `df = df[df[${col}] == ${pyStr(v)}]`;
+        case "neq":   return `df = df[df[${col}] != ${pyStr(v)}]`;
+        case "gt":    return `df = df[df[${col}] > ${Number(v)}]`;
+        case "lt":    return `df = df[df[${col}] < ${Number(v)}]`;
+        case "gte":   return `df = df[df[${col}] >= ${Number(v)}]`;
+        case "lte":   return `df = df[df[${col}] <= ${Number(v)}]`;
+        default:      return `# filter: unsupported op "${step.op}"`;
+      }
     }
     case "drop_na":
-      if (params.cols?.length) return `df = df.dropna(subset=${JSON.stringify(params.cols)})`;
-      return `df = df.dropna()`;
+      if (step.cols?.length) {
+        return step.how === "all"
+          ? `df = df.dropna(subset=${pyList(step.cols)}, how="all")`
+          : `df = df.dropna(subset=${pyList(step.cols)})`;
+      }
+      return step.how === "all" ? `df = df.dropna(how="all")` : `df = df.dropna()`;
     case "fill_na": {
-      const col = params.col, mode = params.mode, val = params.value;
-      if (mode === "mean")   return `df["${col}"] = df["${col}"].fillna(df["${col}"].mean())`;
-      if (mode === "median") return `df["${col}"] = df["${col}"].fillna(df["${col}"].median())`;
-      if (mode === "mode")   return `df["${col}"] = df["${col}"].fillna(df["${col}"].mode()[0])`;
-      if (mode === "ffill")  return `df["${col}"] = df["${col}"].ffill()`;
-      if (mode === "bfill")  return `df["${col}"] = df["${col}"].bfill()`;
-      const v = typeof val === "string" ? `"${val}"` : val ?? 0;
-      return `df["${col}"] = df["${col}"].fillna(${v})`;
+      const col = pyStr(step.col), c = `df[${col}]`;
+      if (step.strategy === "mean")          return `${c} = ${c}.fillna(${c}.mean())`;
+      if (step.strategy === "median")        return `${c} = ${c}.fillna(${c}.median())`;
+      if (step.strategy === "mode")          return `${c} = ${c}.fillna(${c}.mode()[0])`;
+      if (step.strategy === "forward_fill")  return `${c} = ${c}.ffill()`;
+      if (step.strategy === "backward_fill") return `${c} = ${c}.bfill()`;
+      return `${c} = ${c}.fillna(${pyValue(step.value, "string")})`;
     }
     case "fill_na_grouped": {
-      const { col, groupCol, mode } = params;
-      if (mode === "mean")   return `df["${col}"] = df.groupby("${groupCol}")["${col}"].transform(lambda x: x.fillna(x.mean()))`;
-      if (mode === "median") return `df["${col}"] = df.groupby("${groupCol}")["${col}"].transform(lambda x: x.fillna(x.median()))`;
-      return `df["${col}"] = df.groupby("${groupCol}")["${col}"].transform(lambda x: x.fillna(x.mode()[0] if len(x.mode()) > 0 else np.nan))`;
+      const col = pyStr(step.col), g = pyStr(step.groupCol);
+      const stat = step.strategy === "median" ? "median" : "mean";
+      return `df[${col}] = df.groupby(${g})[${col}].transform(lambda x: x.fillna(x.${stat}()))`;
     }
     case "type_cast": {
-      const t = params.targetType;
-      if (t === "numeric") return `df["${params.col}"] = pd.to_numeric(df["${params.col}"], errors="coerce")`;
-      if (t === "string")  return `df["${params.col}"] = df["${params.col}"].astype(str)`;
-      if (t === "boolean") return `df["${params.col}"] = df["${params.col}"].astype(bool)`;
-      return `df["${params.col}"] = df["${params.col}"].astype("${t}")`;
+      const col = pyStr(step.col), c = `df[${col}]`;
+      if (step.to === "number" || step.to === "number_smart") return `${c} = pd.to_numeric(${c}, errors="coerce")`;
+      if (step.to === "string")  return `${c} = ${c}.astype(str)`;
+      if (step.to === "boolean") return `${c} = ${c}.astype(bool)`;
+      return `${c} = pd.to_numeric(${c}, errors="coerce")`;
     }
-    case "log":
-      return `df["log_${params.col}"] = np.log(df["${params.col}"].clip(lower=1e-10))`;
-    case "sq":
-      return `df["${params.col}_sq"] = df["${params.col}"] ** 2`;
-    case "std":
-      return `df["${params.col}_z"] = (df["${params.col}"] - df["${params.col}"].mean()) / df["${params.col}"].std()`;
+    case "log": {
+      const col = pyStr(step.col), out = pyStr(step.nn || `log_${step.col}`);
+      return `df[${out}] = np.where(df[${col}] > 0, np.log(df[${col}]), np.nan)`;
+    }
+    case "sq": {
+      const col = pyStr(step.col), out = pyStr(step.nn || `${step.col}_sq`);
+      return `df[${out}] = df[${col}] ** 2`;
+    }
+    case "std": {
+      const col = pyStr(step.col), out = pyStr(step.nn || `${step.col}_z`);
+      // Fixed mu/sd captured at step-creation time (matches the app + R script).
+      return `df[${out}] = (df[${col}] - ${Number(step.mu)}) / ${Number(step.sd)}`;
+    }
     case "winz": {
-      const { col, p1, p99 } = params;
-      return `df["${col}"] = df["${col}"].clip(lower=${p1 ?? "df[\"" + col + "\"].quantile(0.01)"}, upper=${p99 ?? "df[\"" + col + "\"].quantile(0.99)"})`;
+      const col = pyStr(step.col), out = pyStr(step.nn && step.nn !== step.col ? step.nn : step.col);
+      return `df[${out}] = df[${col}].clip(lower=${Number(step.lo)}, upper=${Number(step.hi)})`;
     }
     case "dummy":
-      return `df = pd.get_dummies(df, columns=["${params.col}"], prefix="${params.col}", drop_first=True, dtype=int)`;
-    case "lag":
-      if (params.entityCol) {
-        return `df["${params.col}_lag${params.n ?? 1}"] = df.groupby("${params.entityCol}")["${params.col}"].shift(${params.n ?? 1})`;
+      return `df = pd.get_dummies(df, columns=[${pyStr(step.col)}], prefix=${pyStr(step.pfx || step.col)}, drop_first=False, dtype=int)`;
+    case "lag": {
+      const col = pyStr(step.col), out = pyStr(step.nn || `${step.col}_lag${step.n ?? 1}`), n = step.n ?? 1;
+      if (step.ec && step.tc) {
+        return [
+          `df = df.sort_values([${pyStr(step.ec)}, ${pyStr(step.tc)}])`,
+          `df[${out}] = df.groupby(${pyStr(step.ec)})[${col}].shift(${n})`,
+        ].join("\n");
       }
-      return `df["${params.col}_lag${params.n ?? 1}"] = df["${params.col}"].shift(${params.n ?? 1})`;
-    case "lead":
-      if (params.entityCol) {
-        return `df["${params.col}_lead${params.n ?? 1}"] = df.groupby("${params.entityCol}")["${params.col}"].shift(-${params.n ?? 1})`;
+      return `df[${out}] = df[${col}].shift(${n})`;
+    }
+    case "lead": {
+      const col = pyStr(step.col), out = pyStr(step.nn || `${step.col}_lead${step.n ?? 1}`), n = step.n ?? 1;
+      if (step.ec && step.tc) {
+        return [
+          `df = df.sort_values([${pyStr(step.ec)}, ${pyStr(step.tc)}])`,
+          `df[${out}] = df.groupby(${pyStr(step.ec)})[${col}].shift(-${n})`,
+        ].join("\n");
       }
-      return `df["${params.col}_lead${params.n ?? 1}"] = df["${params.col}"].shift(-${params.n ?? 1})`;
-    case "diff":
-      if (params.entityCol) {
-        return `df["${params.col}_d"] = df.groupby("${params.entityCol}")["${params.col}"].diff()`;
+      return `df[${out}] = df[${col}].shift(-${n})`;
+    }
+    case "diff": {
+      const col = pyStr(step.col), out = pyStr(step.nn || `${step.col}_d`);
+      if (step.ec && step.tc) {
+        return [
+          `df = df.sort_values([${pyStr(step.ec)}, ${pyStr(step.tc)}])`,
+          `df[${out}] = df.groupby(${pyStr(step.ec)})[${col}].diff()`,
+        ].join("\n");
       }
-      return `df["${params.col}_d"] = df["${params.col}"].diff()`;
-    case "ix":
-      return `df["${params.col1}_x_${params.col2}"] = df["${params.col1}"] * df["${params.col2}"]`;
-    case "did":
-      return `df["did"] = df["${params.postVar}"] * df["${params.treatVar}"]`;
+      return `df[${out}] = df[${col}].diff()`;
+    }
+    case "ix": {
+      const out = pyStr(step.nn || `${step.c1}_x_${step.c2}`);
+      return `df[${out}] = df[${pyStr(step.c1)}] * df[${pyStr(step.c2)}]`;
+    }
+    case "did": {
+      const out = pyStr(step.nn || "did");
+      return `df[${out}] = df[${pyStr(step.tc)}] * df[${pyStr(step.pc)}]`;
+    }
     case "mutate": {
-      const nn     = step.nn ?? params.newCol ?? "newcol";
-      const pyExpr = jsExprToPython(step.expr ?? params.expr, "df");
-      if (pyExpr) return `df["${nn}"] = ${pyExpr}`;
+      const nn     = step.nn ?? "newcol";
+      const pyExpr = jsExprToPython(step.expr, "df");
+      if (pyExpr) return `df[${pyStr(nn)}] = ${pyExpr}`;
       return [
-        `# mutate: ${nn} = ${step.expr ?? params.expr}`,
+        `# mutate: ${nn} = ${step.expr}`,
         `# NOTE: expression uses JS syntax — translate to Python manually`,
-        `# df["${nn}"] = <pandas expression>`,
+        `# df[${pyStr(nn)}] = <pandas expression>`,
       ].join("\n");
     }
     case "arrange":
-      return `df = df.sort_values("${params.col}", ascending=${params.asc !== false ? "True" : "False"})`;
+      return `df = df.sort_values(${pyStr(step.col)}, ascending=${step.dir === "desc" ? "False" : "True"}).reset_index(drop=True)`;
     case "group_summarize": {
-      const { groupCol, agg } = params;
-      const aggMap = JSON.stringify(agg ?? {}).replace(/"/g, "'");
-      return `df = df.groupby("${groupCol}").agg(${aggMap}).reset_index()`;
+      const aggDict = (step.aggs ?? []).map(a => {
+        const fn = a.fn === "sd" ? "std" : a.fn === "count" ? "size" : a.fn;
+        return `${pyStr(a.nn)}: (${pyStr(a.col)}, "${fn}")`;
+      }).join(", ");
+      return `df = df.groupby(${pyList(step.by ?? [])}, as_index=False).agg(**{${aggDict}})`;
+    }
+    case "group_transform": {
+      const by = step.by ?? [];
+      const col = step.col ?? by[0] ?? "";
+      const out = pyStr(step.nn ?? `${step.fn ?? "mean"}_${col}`);
+      const fn = step.fn ?? "mean";
+      const group = `df.groupby(${pyList(by)})[${pyStr(col)}]`;
+      if (fn === "count") return `df[${out}] = ${group}.transform("size")`;
+      if (fn === "sd")    return `df[${out}] = ${group}.transform("std")`;
+      if (fn === "rank")  return `df[${out}] = ${group}.transform(lambda s: s.rank(method="min"))`;
+      return `df[${out}] = ${group}.transform("${fn}")`;
     }
     case "pivot_longer": {
-      const { idCols, valueName, variableName } = params;
-      const valueCols = params.valueCols ?? [];
-      return `df = df.melt(id_vars=${JSON.stringify(idCols ?? [])}, value_vars=${JSON.stringify(valueCols)}, var_name="${variableName ?? "variable"}", value_name="${valueName ?? "value"}")`;
+      const idArg = (step.idCols?.length) ? `id_vars=${pyList(step.idCols)}, ` : "";
+      return `df = df.melt(${idArg}value_vars=${pyList(step.cols ?? [])}, var_name=${pyStr(step.namesTo ?? "name")}, value_name=${pyStr(step.valuesTo ?? "value")})`;
     }
-    case "date_parse":
-      return `df["${params.col}"] = pd.to_datetime(df["${params.col}"], errors="coerce")`;
-    case "date_extract":
-      return `df["${params.newCol}"] = df["${params.col}"].dt.${params.part ?? "year"}`;
+    case "pivot_wider": {
+      const idCols = pyList(step.idCols ?? []);
+      const valsFrom = Array.isArray(step.valuesFrom) ? step.valuesFrom : [step.valuesFrom].filter(Boolean);
+      const valArg = valsFrom.length === 1 ? pyStr(valsFrom[0]) : pyList(valsFrom);
+      const fill = (step.valuesFill !== undefined && step.valuesFill !== null && step.valuesFill !== "")
+        ? `, fill_value=${Number(step.valuesFill)}` : "";
+      return `df = df.pivot_table(index=${idCols}, columns=${pyStr(step.namesFrom)}, values=${valArg}${fill}, aggfunc="first").reset_index()`;
+    }
+    case "date_extract": {
+      const col = pyStr(step.col);
+      const acc = { year: "year", month: "month", dow: "dayofweek", isweekend: "dayofweek" };
+      const lines = (step.parts ?? []).map(p => {
+        const out = pyStr(step.names?.[p] ?? `${step.col}_${p}`);
+        if (p === "isweekend") return `df[${out}] = (pd.to_datetime(df[${col}]).dt.dayofweek >= 5).astype(int)`;
+        return `df[${out}] = pd.to_datetime(df[${col}]).dt.${acc[p] ?? "year"}`;
+      });
+      return lines.length ? lines.join("\n") : `# date_extract: no parts specified`;
+    }
     case "recode": {
-      const mapStr = JSON.stringify(params.map ?? {});
-      return `df["${params.col}"] = df["${params.col}"].map(${mapStr}).fillna(df["${params.col}"])`;
+      const mapStr = JSON.stringify(step.map ?? {});
+      return `df[${pyStr(step.col)}] = df[${pyStr(step.col)}].replace(${mapStr})`;
+    }
+    case "normalize_cats": {
+      if (!step.map || !Object.keys(step.map).length) return `# normalize_cats: no mapping specified`;
+      return `df[${pyStr(step.col)}] = df[${pyStr(step.col)}].replace(${JSON.stringify(step.map)})`;
     }
     case "trim_outliers":
+      // Fixed bounds captured at step-creation time (matches the app + R script).
+      return `df = df[(df[${pyStr(step.col)}] >= ${Number(step.lo)}) & (df[${pyStr(step.col)}] <= ${Number(step.hi)})].reset_index(drop=True)`;
     case "flag_outliers": {
-      const { col } = params;
-      const out = type === "flag_outliers" ? `df["${col}_outlier"] = ((df["${col}"] < q1 - 1.5 * iqr) | (df["${col}"] > q3 + 1.5 * iqr)).astype(int)` : `df = df[(df["${col}"] >= q1 - 1.5 * iqr) & (df["${col}"] <= q3 + 1.5 * iqr)]`;
+      const col = pyStr(step.col), out = pyStr(step.nn || `${step.col}_outlier`);
+      if (step.method === "zscore") {
+        const thr = Number(step.threshold) || 3;
+        return `df[${out}] = (((df[${col}] - df[${col}].mean()) / df[${col}].std()).abs() > ${thr}).astype(int)`;
+      }
       return [
-        `_q1, _q3 = df["${col}"].quantile([0.25, 0.75])`,
+        `_q1, _q3 = df[${col}].quantile([0.25, 0.75])`,
         `_iqr = _q3 - _q1`,
-        out,
+        `df[${out}] = ((df[${col}] < _q1 - 1.5 * _iqr) | (df[${col}] > _q3 + 1.5 * _iqr)).astype(int)`,
       ].join("\n");
     }
-    case "quickclean":
-      return `df = df.dropna(how="all").drop_duplicates()`;
-    case "normalize_cats":
-      if (params.col) return `df["${params.col}"] = df["${params.col}"].str.strip().str.lower()`;
-      return `# normalize_cats: manual step`;
-    case "extract_regex":
-      return `df["${params.newCol}"] = df["${params.col}"].str.extract(r"${params.regex}")`;
+    case "quickclean": {
+      const col = pyStr(step.col), c = `df[${col}].astype("string").str`;
+      if (step.mode === "upper") return `df[${col}] = ${c}.upper()`;
+      if (step.mode === "title") return `df[${col}] = ${c}.title()`;
+      return `df[${col}] = ${c}.lower()`;
+    }
+    case "clean_strings": {
+      const col = pyStr(step.col);
+      let expr = `df[${col}].astype("string").str.strip().str.replace(r"\\s+", " ", regex=True)`;
+      if (step.case === "lower") expr += ".str.lower()";
+      else if (step.case === "upper") expr += ".str.upper()";
+      else if (step.case === "title") expr += ".str.title()";
+      return `df[${col}] = ${expr}`;
+    }
+    case "extract_regex": {
+      const col = pyStr(step.col), out = pyStr(step.nn || `${step.col}_num`);
+      if (step.regex) return `df[${out}] = pd.to_numeric(df[${col}].astype("string").str.extract(r"${step.regex}")[0], errors="coerce")`;
+      // locale-aware numeric parse: strip thousands sep, normalize decimal mark.
+      if (step.locale === "comma") {
+        return `df[${out}] = pd.to_numeric(df[${col}].astype("string").str.replace(r"[^0-9,.-]", "", regex=True).str.replace(".", "", regex=False).str.replace(",", ".", regex=False), errors="coerce")`;
+      }
+      return `df[${out}] = pd.to_numeric(df[${col}].astype("string").str.replace(r"[^0-9.-]", "", regex=True), errors="coerce")`;
+    }
+    case "factor_interactions": {
+      const cont = pyStr(step.contCol);
+      const pfx = step.prefix || `${step.contCol}_x_`;
+      const lines = (step.dummyCols ?? []).map(d =>
+        `df[${pyStr(pfx + d)}] = df[${cont}] * df[${pyStr(d)}]`);
+      return lines.length ? lines.join("\n") : `# factor_interactions: no dummy columns specified`;
+    }
+    case "if_else": {
+      const out = pyStr(step.nn);
+      const cond = jsExprToPython(step.cond, "df");
+      if (!cond) return `# if_else: ${step.nn} = where(${step.cond}) — translate condition to Python manually`;
+      return `df[${out}] = np.where(${cond}, ${pyValue(step.trueVal, "string")}, ${pyValue(step.falseVal, "string")})`;
+    }
+    case "case_when": {
+      const out = pyStr(step.nn);
+      const conds = [], choices = [];
+      for (const c of (step.cases ?? [])) {
+        const cc = jsExprToPython(c.cond, "df");
+        if (!cc) continue;
+        conds.push(cc); choices.push(pyValue(c.val, "string"));
+      }
+      if (!conds.length) return `# case_when: no valid conditions — translate manually`;
+      return `df[${out}] = np.select([${conds.join(", ")}], [${choices.join(", ")}], default=${pyValue(step.defaultVal, "string")})`;
+    }
+    case "grouped_mutate": {
+      const by = step.by ?? [];
+      const out = pyStr(step.newCol || "grouped");
+      const fn = step.fn ?? "mean";
+      if (!by.length || !step.newCol) return `# grouped_mutate: incomplete config`;
+      if (fn === "expr" && step.expr) {
+        const pyExpr = jsExprToPython(step.expr, "df");
+        return pyExpr
+          ? `df[${out}] = df.groupby(${pyList(by)}).apply(lambda g: ${pyExpr}).reset_index(level=${pyList(by)}, drop=True)`
+          : `# grouped_mutate (expr): translate "${step.expr}" to Python manually`;
+      }
+      const aggFn = fn === "sd" ? "std" : fn === "count" ? "size" : fn;
+      const group = step.col ? `df.groupby(${pyList(by)})[${pyStr(step.col)}]` : `df.groupby(${pyList(by)})[${pyStr(by[0])}]`;
+      return [
+        `# grouped_mutate: ${fn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
+        `df[${out}] = ${group}.transform("${aggFn}")`,
+      ].join("\n");
+    }
+    case "balance_panel": {
+      const ent = pyStr(step.entityCol), tim = pyStr(step.timeCol);
+      const dims = step.slotCol ? `[${ent}, ${tim}, ${pyStr(step.slotCol)}]` : `[${ent}, ${tim}]`;
+      const outcomes = step.outcomeCols ?? [];
+      const lines = [
+        `# Balance panel: complete ${step.entityCol} × ${step.timeCol}${step.slotCol ? ` × ${step.slotCol}` : ""} grid (static cols may need manual carry-forward)`,
+        `_dims = ${dims}`,
+        `_full = pd.MultiIndex.from_product([df[c].unique() for c in _dims], names=_dims)`,
+        `df = df.set_index(_dims).reindex(_full).reset_index()`,
+      ];
+      if (outcomes.length) lines.push(`df[${pyList(outcomes)}] = df[${pyList(outcomes)}].fillna(${Number(step.fillValue) || 0})`);
+      return lines.join("\n");
+    }
     case "distinct": {
       const subset = step.subset ?? params.subset ?? [];
       const keep = step.keep ?? params.keep ?? "first";
@@ -399,17 +540,6 @@ function transpileStep(step, allDatasets = {}) {
       }
       return [...load, `df = df.merge(df_right, how="left", indicator=True).query('_merge == "left_only"').drop(columns="_merge").reset_index(drop=True)`].join("\n");
     }
-    case "group_transform": {
-      const by = step.by ?? params.by ?? [];
-      const col = step.col ?? params.col ?? by[0] ?? "";
-      const out = step.nn ?? params.nn ?? `${step.fn ?? params.fn}_${col}`;
-      const fn = step.fn ?? params.fn ?? "mean";
-      const group = `df.groupby(${pyList(by)})["${col}"]`;
-      if (fn === "count") return `df["${out}"] = ${group}.transform("size")`;
-      if (fn === "sd") return `df["${out}"] = ${group}.transform("std")`;
-      if (fn === "rank") return `df["${out}"] = ${group}.transform(lambda s: s.rank(method="min"))`;
-      return `df["${out}"] = ${group}.transform("${fn}")`;
-    }
     case "vector_assign": {
       const vals = pyList(step.values ?? []);
       const out = step.nn ?? "assigned";
@@ -440,11 +570,6 @@ function transpileStep(step, allDatasets = {}) {
         `# JS: ${jsCode}`,
         `# df["${col}"] = <Python expression>`,
       ].join("\n");
-    }
-    case "factor_interactions": {
-      const { cols } = params;
-      if (cols?.length >= 2) return `df["${cols.join("_x_")}"] = df["${cols[0]}"] * df["${cols[1]}"]`;
-      return `# factor_interactions`;
     }
     case "patch": {
       const col = step.col ?? "column";

@@ -522,6 +522,136 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       ].join("\n");
     }
 
+    case "fill_na_grouped": {
+      const fn = step.strategy === "median" ? "median" : "mean";
+      return [
+        `${dfVar} <- ${dfVar} |>`,
+        `  group_by(${rName(step.groupCol)}) |>`,
+        `  mutate(${col} = ifelse(is.na(${col}), ${fn}(${col}, na.rm = TRUE), ${col})) |>`,
+        `  ungroup()`,
+      ].join("\n");
+    }
+
+    case "trim_outliers":
+      return `${dfVar} <- ${dfVar} |> filter(${col} >= ${Number(step.lo)} & ${col} <= ${Number(step.hi)})`;
+
+    case "flag_outliers": {
+      const out = rName(step.nn || `${step.col}_outlier`);
+      if (step.method === "zscore") {
+        const thr = Number(step.threshold) || 3;
+        return `${dfVar} <- ${dfVar} |> mutate(${out} = as.integer(abs((${col} - mean(${col}, na.rm = TRUE)) / sd(${col}, na.rm = TRUE)) > ${thr}))`;
+      }
+      return [
+        `${dfVar} <- ${dfVar} |> mutate(${out} = as.integer(`,
+        `  ${col} < quantile(${col}, 0.25, na.rm = TRUE) - 1.5 * IQR(${col}, na.rm = TRUE) |`,
+        `  ${col} > quantile(${col}, 0.75, na.rm = TRUE) + 1.5 * IQR(${col}, na.rm = TRUE)`,
+        `))`,
+      ].join("\n");
+    }
+
+    case "extract_regex": {
+      const out = rName(step.nn || `${step.col}_num`);
+      if (step.regex) {
+        return `${dfVar} <- ${dfVar} |> mutate(${out} = as.numeric(stringr::str_match(as.character(${col}), ${rStr(step.regex)})[, 2]))`;
+      }
+      const loc = step.locale === "comma"
+        ? `readr::locale(decimal_mark = ",", grouping_mark = ".")`
+        : step.locale === "dot"
+          ? `readr::locale(decimal_mark = ".", grouping_mark = ",")`
+          : `readr::locale()`;
+      return `${dfVar} <- ${dfVar} |> mutate(${out} = readr::parse_number(as.character(${col}), locale = ${loc}))`;
+    }
+
+    case "factor_interactions": {
+      const cont = rName(step.contCol);
+      const pfx  = step.prefix || `${step.contCol}_x_`;
+      const lines = (step.dummyCols ?? [])
+        .map(d => `  ${rName(pfx + d)} = ${cont} * ${rName(d)}`)
+        .join(",\n");
+      return lines
+        ? `${dfVar} <- ${dfVar} |> mutate(\n${lines}\n)`
+        : `# factor_interactions: no dummy columns specified`;
+    }
+
+    case "clean_strings": {
+      const caseFn = { lower: "tolower", upper: "toupper", title: "stringr::str_to_title" }[step.case];
+      const inner = caseFn
+        ? `${caseFn}(stringr::str_squish(as.character(${col})))`
+        : `stringr::str_squish(as.character(${col}))`;
+      return `${dfVar} <- ${dfVar} |> mutate(${col} = ${inner})`;
+    }
+
+    case "if_else": {
+      const cond = jsExprToR(step.cond);
+      const out  = rName(step.nn);
+      if (!cond) return `# if_else: ${step.nn} = if (${step.cond}) ... — translate condition to R manually`;
+      return `${dfVar} <- ${dfVar} |> mutate(${out} = dplyr::if_else(${cond}, ${rValue(step.trueVal)}, ${rValue(step.falseVal)}))`;
+    }
+
+    case "case_when": {
+      const out = rName(step.nn);
+      const branches = (step.cases ?? [])
+        .map(c => { const cc = jsExprToR(c.cond); return cc ? `    ${cc} ~ ${rValue(c.val)}` : null; })
+        .filter(Boolean)
+        .join(",\n");
+      return branches
+        ? `${dfVar} <- ${dfVar} |> mutate(${out} = dplyr::case_when(\n${branches},\n    TRUE ~ ${rValue(step.defaultVal)}\n  ))`
+        : `# case_when: no valid conditions — translate manually`;
+    }
+
+    case "grouped_mutate": {
+      const by = (step.by ?? []).map(rName).join(", ");
+      const out = rName(step.newCol || "grouped");
+      const fn = step.fn ?? "mean";
+      if (!by || !step.newCol) return `# grouped_mutate: incomplete config`;
+      if (fn === "expr" && step.expr) {
+        const rExpr = jsExprToR(step.expr);
+        return rExpr
+          ? `${dfVar} <- ${dfVar} |> group_by(${by}) |> mutate(${out} = ${rExpr}) |> ungroup()`
+          : `# grouped_mutate (expr): translate "${step.expr}" to R manually`;
+      }
+      const rhs = step.col ? rFn(fn, step.col) : "n()";
+      return [
+        `# grouped_mutate: ${fn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
+        `${dfVar} <- ${dfVar} |> group_by(${by}) |> mutate(${out} = ${rhs}) |> ungroup()`,
+      ].join("\n");
+    }
+
+    case "pivot_wider": {
+      const idCols    = (step.idCols ?? []).map(rName).join(", ");
+      const namesFrom = rStr(step.namesFrom);
+      const valsFrom  = (Array.isArray(step.valuesFrom) ? step.valuesFrom : [step.valuesFrom].filter(Boolean))
+        .map(rStr).join(", ");
+      const opts = [];
+      if (step.namesPrefix) opts.push(`  names_prefix = ${rStr(step.namesPrefix)}`);
+      if (step.valuesFill !== undefined && step.valuesFill !== null && step.valuesFill !== "")
+        opts.push(`  values_fill = ${Number(step.valuesFill)}`);
+      return [
+        `${dfVar} <- ${dfVar} |> tidyr::pivot_wider(`,
+        `  id_cols     = c(${idCols}),`,
+        `  names_from  = ${namesFrom},`,
+        `  values_from = c(${valsFrom})${opts.length ? "," : ""}`,
+        ...opts.map((o, i) => o + (i < opts.length - 1 ? "," : "")),
+        `)`,
+      ].join("\n");
+    }
+
+    case "balance_panel": {
+      const ent  = rName(step.entityCol);
+      const tim  = rName(step.timeCol);
+      const slot = step.slotCol ? `, ${rName(step.slotCol)}` : "";
+      const outcomes = (step.outcomeCols ?? []).map(rName);
+      const fill = Number(step.fillValue) || 0;
+      let line = `${dfVar} <- ${dfVar} |> tidyr::complete(${ent}, ${tim}${slot})`;
+      if (outcomes.length) {
+        line += ` |>\n  tidyr::replace_na(list(${outcomes.map(o => `${o} = ${fill}`).join(", ")}))`;
+      }
+      return [
+        `# Balance panel: complete ${step.entityCol} × ${step.timeCol}${step.slotCol ? ` × ${step.slotCol}` : ""} grid (static cols may need manual carry-forward)`,
+        line,
+      ].join("\n");
+    }
+
     default:
       return `# [unknown step: ${step.type}] ${stepLabel(step)}`;
   }

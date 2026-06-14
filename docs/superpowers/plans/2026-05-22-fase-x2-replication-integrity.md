@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans.
 
 **Track:** C — Cross-cutting hardening
-**Status:** Queued.
+**Status:** Structural half DONE 2026-06-14 (harness `src/services/export/__validation__/replicationIntegrityValidation.mjs`, 269 checks green). Surfaced + fixed a MAJOR bug: Python & Stata pipeline-step transpilers read a dead `params`-nested step schema → every non-grid-edit data-prep step emitted `undefined` operands; migrated both to the flat registry schema, added 11 missing R cases + 6 missing Py/Stata cases, fixed `buildStataVarlist` `rawW` crash. **Remaining (pending Franco's R/Python/Stata runtime):** the actual smoke test — run an exported script in R/statsmodels/Stata and assert coefficients match the UI within 1e-6. See ClaudePlan.md X2 row.
 **Blocks:** Fase X5 (bug bash).
 
 **Goal:** Guarantee that every replication script (R, Python, Stata) emitted by EconSolver executes cleanly in its native runtime and reproduces the same coefficients reported in the EconSolver UI within 1e-6.

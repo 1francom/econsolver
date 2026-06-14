@@ -194,130 +194,251 @@ function transpileStep(step, allDatasets = {}) {
       return `${init}replace ${out} = substr(${out}, 1, ${p} - 1) + ${text} + substr(${out}, ${p}, .)`;
     }
     case "rename":
-      return `rename ${params.from} ${params.to}`;
+      return `rename ${stVar(step.col)} ${stVar(step.newName)}`;
     case "drop":
-      return `drop ${(params.cols ?? []).join(" ")}`;
+      return `drop ${stVar(step.col)}`;
     case "filter": {
-      const { col, op, val } = params;
-      const v = typeof val === "string" ? `"${val}"` : val;
-      return `keep if ${col} ${op ?? "=="} ${v}`;
-    }
-    case "drop_na":
-      if (params.cols?.length) return `drop if missing(${params.cols.join(", ")})`;
-      return `drop if missing(*)`;
-    case "fill_na": {
-      const { col, mode, value } = params;
-      if (mode === "mean")   return `egen _tmp = mean(${col})\nreplace ${col} = _tmp if missing(${col})\ndrop _tmp`;
-      if (mode === "median") return `egen _tmp = median(${col})\nreplace ${col} = _tmp if missing(${col})\ndrop _tmp`;
-      if (mode === "mode") {
-        return [
-          `egen _tmp_grp = group(${col})`,
-          `* Note: mode fill — manually select most frequent value`,
-          `replace ${col} = .  // replace with computed mode`,
-          `drop _tmp_grp`,
-        ].join("\n");
+      const col = stVar(step.col), v = step.value;
+      switch (step.op) {
+        case "notna": return `keep if !missing(${col})`;
+        case "eq":    return `keep if ${col} == ${stValue(v)}`;
+        case "neq":   return `keep if ${col} != ${stValue(v)}`;
+        case "gt":    return `keep if ${col} > ${Number(v)}`;
+        case "lt":    return `keep if ${col} < ${Number(v)}`;
+        case "gte":   return `keep if ${col} >= ${Number(v)}`;
+        case "lte":   return `keep if ${col} <= ${Number(v)}`;
+        default:      return `* filter: unsupported op "${step.op}"`;
       }
-      if (mode === "ffill") return `* forward fill local obs = _N forval i = 2/\`obs' {
-     if missing(${col}[\`i']) replace ${col} = ${col}[\`i'-1] in \`i'
-}
-`;
-      const v = typeof value === "string" ? `"${value}"` : value ?? 0;
-      return `replace ${col} = ${v} if missing(${col})`;
+    }
+    case "drop_na": {
+      const cols = (step.cols ?? []).map(stVar);
+      if (!cols.length) return `* drop_na: specify columns (Stata has no all-column missing drop)`;
+      if (step.how === "all") return `drop if ${cols.map(c => `missing(${c})`).join(" & ")}`;
+      return `drop if missing(${cols.join(", ")})`;
+    }
+    case "fill_na": {
+      const col = stVar(step.col);
+      if (step.strategy === "mean")   return `egen _tmp = mean(${col})\nreplace ${col} = _tmp if missing(${col})\ndrop _tmp`;
+      if (step.strategy === "median") return `egen _tmp = median(${col})\nreplace ${col} = _tmp if missing(${col})\ndrop _tmp`;
+      if (step.strategy === "mode")   return `egen _tmp = mode(${col}), maxmode\nreplace ${col} = _tmp if missing(${col})\ndrop _tmp`;
+      if (step.strategy === "forward_fill")  return `sort _n\nby _n: replace ${col} = ${col}[_n-1] if missing(${col})  /* forward fill — ensure data are sorted as intended */`;
+      if (step.strategy === "backward_fill") return `gsort -_n\nreplace ${col} = ${col}[_n-1] if missing(${col})\nsort _n  /* backward fill */`;
+      return `replace ${col} = ${stValue(step.value)} if missing(${col})`;
     }
     case "fill_na_grouped": {
-      const { col, groupCol, mode } = params;
-      if (mode === "mean")   return `bysort ${groupCol}: egen _tmp = mean(${col})\nreplace ${col} = _tmp if missing(${col})\ndrop _tmp`;
-      if (mode === "median") return `bysort ${groupCol}: egen _tmp = median(${col})\nreplace ${col} = _tmp if missing(${col})\ndrop _tmp`;
-      return `* fill_na_grouped (${mode}) by ${groupCol}: add custom logic`;
+      const col = stVar(step.col), g = stVar(step.groupCol);
+      const fn = step.strategy === "median" ? "median" : "mean";
+      return `bysort ${g}: egen _tmp = ${fn}(${col})\nreplace ${col} = _tmp if missing(${col})\ndrop _tmp`;
     }
     case "type_cast": {
-      const { col, targetType } = params;
-      if (targetType === "numeric") return `destring ${col}, replace force`;
-      if (targetType === "string")  return `tostring ${col}, replace`;
-      return `* type_cast ${col} to ${targetType}`;
+      const col = stVar(step.col);
+      if (step.to === "number" || step.to === "number_smart") return `destring ${col}, replace force`;
+      if (step.to === "string")  return `tostring ${col}, replace force`;
+      if (step.to === "boolean") return `gen byte _b = (${col} != 0 & !missing(${col}))\ndrop ${col}\nrename _b ${col}`;
+      return `destring ${col}, replace force`;
     }
-    case "log":
-      return `gen log_${params.col} = log(${params.col})`;
-    case "sq":
-      return `gen ${params.col}_sq = ${params.col}^2`;
-    case "std":
-      return `egen _mn = mean(${params.col})\negen _sd = sd(${params.col})\ngen ${params.col}_z = (${params.col} - _mn) / _sd\ndrop _mn _sd`;
+    case "log": {
+      const col = stVar(step.col), out = stVar(step.nn || `log_${step.col}`);
+      return `gen ${out} = log(${col})`;
+    }
+    case "sq": {
+      const col = stVar(step.col), out = stVar(step.nn || `${step.col}_sq`);
+      return `gen ${out} = ${col}^2`;
+    }
+    case "std": {
+      const col = stVar(step.col), out = stVar(step.nn || `${step.col}_z`);
+      // Fixed mu/sd captured at step-creation time (matches the app + R script).
+      return `gen ${out} = (${col} - ${Number(step.mu)}) / ${Number(step.sd)}`;
+    }
     case "winz": {
-      const { col, p1, p99 } = params;
-      if (p1 != null && p99 != null) {
-        return `replace ${col} = max(${p1}, min(${p99}, ${col}))`;
-      }
-      return `winsor2 ${col}, cuts(1 99) replace`;
+      const col = stVar(step.col);
+      const out = step.nn && step.nn !== step.col ? stVar(step.nn) : col;
+      const lo = Number(step.lo), hi = Number(step.hi);
+      return out === col
+        ? `replace ${col} = max(${lo}, min(${hi}, ${col}))`
+        : `gen ${out} = max(${lo}, min(${hi}, ${col}))`;
     }
     case "dummy":
-      return `tabulate ${params.col}, generate(${params.col}_)`;
-    case "lag":
-      if (params.entityCol) {
-        return `xtset ${params.entityCol} ${params.timeCol ?? "_t"}\ngen ${params.col}_lag${params.n ?? 1} = L${params.n ?? 1}.${params.col}`;
-      }
-      return `gen ${params.col}_lag${params.n ?? 1} = L${params.n ?? 1}.${params.col}`;
-    case "lead":
-      if (params.entityCol) {
-        return `xtset ${params.entityCol} ${params.timeCol ?? "_t"}\ngen ${params.col}_lead${params.n ?? 1} = F${params.n ?? 1}.${params.col}`;
-      }
-      return `gen ${params.col}_lead${params.n ?? 1} = F${params.n ?? 1}.${params.col}`;
-    case "diff":
-      if (params.entityCol) {
-        return `xtset ${params.entityCol} ${params.timeCol ?? "_t"}\ngen ${params.col}_d = D.${params.col}`;
-      }
-      return `gen ${params.col}_d = D.${params.col}`;
-    case "ix":
-      return `gen ${params.col1}_x_${params.col2} = ${params.col1} * ${params.col2}`;
-    case "did":
-      return `gen did = ${params.postVar} * ${params.treatVar}`;
+      return `tabulate ${stVar(step.col)}, generate(${(step.pfx || step.col)}_)`;
+    case "lag": {
+      const col = stVar(step.col), out = stVar(step.nn || `${step.col}_lag${step.n ?? 1}`), n = step.n ?? 1;
+      if (step.ec && step.tc) return `xtset ${stVar(step.ec)} ${stVar(step.tc)}\ngen ${out} = L${n}.${col}`;
+      return `gen ${out} = ${col}[_n-${n}]`;
+    }
+    case "lead": {
+      const col = stVar(step.col), out = stVar(step.nn || `${step.col}_lead${step.n ?? 1}`), n = step.n ?? 1;
+      if (step.ec && step.tc) return `xtset ${stVar(step.ec)} ${stVar(step.tc)}\ngen ${out} = F${n}.${col}`;
+      return `gen ${out} = ${col}[_n+${n}]`;
+    }
+    case "diff": {
+      const col = stVar(step.col), out = stVar(step.nn || `${step.col}_d`);
+      if (step.ec && step.tc) return `xtset ${stVar(step.ec)} ${stVar(step.tc)}\ngen ${out} = D.${col}`;
+      return `gen ${out} = ${col} - ${col}[_n-1]`;
+    }
+    case "ix": {
+      const out = stVar(step.nn || `${step.c1}_x_${step.c2}`);
+      return `gen ${out} = ${stVar(step.c1)} * ${stVar(step.c2)}`;
+    }
+    case "did": {
+      const out = stVar(step.nn || "did");
+      return `gen ${out} = ${stVar(step.tc)} * ${stVar(step.pc)}`;
+    }
     case "mutate": {
-      const nn     = step.nn ?? params.newCol ?? "newcol";
-      const stExpr = jsExprToStata(step.expr ?? params.expr);
-      if (stExpr) return `gen ${nn} = ${stExpr}`;
+      const nn     = step.nn ?? "newcol";
+      const stExpr = jsExprToStata(step.expr);
+      if (stExpr) return `gen ${stVar(nn)} = ${stExpr}`;
       return [
-        `* mutate: ${nn} = ${step.expr ?? params.expr}`,
+        `* mutate: ${nn} = ${step.expr}`,
         `* NOTE: expression uses JS syntax — translate to Stata manually`,
-        `* gen ${nn} = <Stata expression>`,
+        `* gen ${stVar(nn)} = <Stata expression>`,
       ].join("\n");
     }
     case "arrange":
-      return `sort ${params.col}`;
+      return step.dir === "desc" ? `gsort -${stVar(step.col)}` : `sort ${stVar(step.col)}`;
     case "group_summarize": {
-      const { groupCol, agg = {} } = params;
-      const cmds = Object.entries(agg).map(([col, fn]) => `  egen ${col}_${fn} = ${fn}(${col}), by(${groupCol})`);
-      return [`collapse (${Object.values(agg)[0] ?? "mean"}) ${Object.keys(agg).join(" ")}, by(${groupCol})`, ...cmds].join("\n");
+      const fnMap = { mean: "mean", sum: "sum", count: "count", min: "min", max: "max", sd: "sd", median: "median" };
+      const collapse = (step.aggs ?? []).map(a =>
+        `(${fnMap[a.fn] ?? "mean"}) ${stVar(a.nn)}=${stVar(a.col)}`).join(" ");
+      const by = (step.by ?? []).map(stVar).join(" ");
+      return `collapse ${collapse}, by(${by})`;
     }
-    case "pivot_longer": {
-      const { idCols = [], valueName = "value", variableName = "variable", valueCols = [] } = params;
-      return `reshape long ${valueCols.join(" ")}, i(${idCols.join(" ")}) j(${variableName}) string`;
+    case "group_transform": {
+      const by = step.by ?? [];
+      const col = step.col ?? "";
+      const out = stVar(step.nn ?? `${step.fn ?? "mean"}_${col}`);
+      const fn = step.fn ?? "mean";
+      const egenFn = fn === "count" ? "count" : fn === "sd" ? "sd" : fn === "rank" ? "rank" : fn === "median" ? "median" : fn;
+      return `bysort ${by.map(stVar).join(" ")}: egen ${out} = ${egenFn}(${stVar(col)})`;
     }
-    case "date_parse":
-      return `gen ${params.col}_dt = date(${params.col}, "YMD")`;
-    case "date_extract":
-      return `gen ${params.newCol} = ${params.part ?? "year"}(${params.col}_dt)`;
-    case "recode": {
-      const entries = Object.entries(params.map ?? {});
-      return entries.map(([from, to]) => {
+    case "pivot_longer":
+      return [
+        `* pivot_longer: reshape to long — value columns must share a common stub for native reshape.`,
+        `reshape long ${(step.cols ?? []).map(stVar).join(" ")}, i(${(step.idCols ?? []).map(stVar).join(" ")}) j(${stVar(step.namesTo || "name")}) string`,
+      ].join("\n");
+    case "pivot_wider": {
+      const valsFrom = Array.isArray(step.valuesFrom) ? step.valuesFrom : [step.valuesFrom].filter(Boolean);
+      return [
+        `* pivot_wider: long -> wide`,
+        `reshape wide ${valsFrom.map(stVar).join(" ")}, i(${(step.idCols ?? []).map(stVar).join(" ")}) j(${stVar(step.namesFrom)})`,
+      ].join("\n");
+    }
+    case "date_extract": {
+      const col = stVar(step.col);
+      const lines = (step.parts ?? []).map(p => {
+        const out = stVar(step.names?.[p] ?? `${step.col}_${p}`);
+        if (p === "year")      return `gen ${out} = year(${col})`;
+        if (p === "month")     return `gen ${out} = month(${col})`;
+        if (p === "dow")       return `gen ${out} = dow(${col})`;
+        if (p === "isweekend") return `gen ${out} = inlist(dow(${col}), 0, 6)`;
+        return null;
+      }).filter(Boolean);
+      return lines.length
+        ? [`* date_extract assumes ${col} is a Stata date; use date() to parse a string first`, ...lines].join("\n")
+        : `* date_extract: no parts specified`;
+    }
+    case "recode":
+      return Object.entries(step.map ?? {}).map(([from, to]) => {
         const f = isNaN(Number(from)) ? `"${from}"` : from;
         const t = isNaN(Number(to))   ? `"${to}"`   : to;
-        return `replace ${params.col} = ${t} if ${params.col} == ${f}`;
-      }).join("\n");
-    }
+        return `replace ${stVar(step.col)} = ${t} if ${stVar(step.col)} == ${f}`;
+      }).join("\n") || `* recode: no mapping specified`;
     case "trim_outliers": {
-      const { col } = params;
-      return [`_pctile ${col}, percentiles(25 75)`, `local q1 = r(r1)`, `local q3 = r(r2)`, `local iqr = \`q3' - \`q1'`, `drop if ${col} < \`q1' - 1.5*\`iqr' | ${col} > \`q3' + 1.5*\`iqr'`].join("\n");
+      const col = stVar(step.col);
+      // Fixed bounds captured at step-creation time (matches the app + R script).
+      return `drop if ${col} < ${Number(step.lo)} | ${col} > ${Number(step.hi)}`;
     }
     case "flag_outliers": {
-      const { col } = params;
-      return [`_pctile ${col}, percentiles(25 75)`, `local q1 = r(r1)`, `local q3 = r(r2)`, `local iqr = \`q3' - \`q1'`, `gen ${col}_outlier = (${col} < \`q1' - 1.5*\`iqr') | (${col} > \`q3' + 1.5*\`iqr')`].join("\n");
+      const col = stVar(step.col), out = stVar(step.nn || `${step.col}_outlier`);
+      if (step.method === "zscore") {
+        const thr = Number(step.threshold) || 3;
+        return `egen _mn = mean(${col})\negen _sd = sd(${col})\ngen ${out} = abs((${col} - _mn) / _sd) > ${thr}\ndrop _mn _sd`;
+      }
+      return [
+        `_pctile ${col}, percentiles(25 75)`,
+        `local q1 = r(r1)`,
+        `local q3 = r(r2)`,
+        `local iqr = \`q3' - \`q1'`,
+        `gen ${out} = (${col} < \`q1' - 1.5*\`iqr') | (${col} > \`q3' + 1.5*\`iqr')`,
+      ].join("\n");
     }
-    case "quickclean":
-      return `duplicates drop\ndrop if missing(*)`;
+    case "quickclean": {
+      const col = stVar(step.col);
+      if (step.mode === "upper") return `replace ${col} = upper(${col})`;
+      if (step.mode === "title") return `replace ${col} = proper(${col})`;
+      return `replace ${col} = lower(${col})`;
+    }
+    case "clean_strings": {
+      const col = stVar(step.col);
+      let inner = `itrim(strtrim(${col}))`;
+      if (step.case === "lower") inner = `lower(${inner})`;
+      else if (step.case === "upper") inner = `upper(${inner})`;
+      else if (step.case === "title") inner = `proper(${inner})`;
+      return `replace ${col} = ${inner}`;
+    }
     case "normalize_cats":
-      if (params.col) return `replace ${params.col} = strtrim(lower(${params.col}))`;
-      return `* normalize_cats: manual step`;
-    case "extract_regex":
-      return `* regex extract: gen ${params.newCol} from ${params.col} using pattern "${params.regex}"\n* Use -regexm()- / -regexs()-:\n* gen ${params.newCol} = regexs(1) if regexm(${params.col}, "${params.regex}")`;
+      return Object.entries(step.map ?? {}).map(([from, to]) =>
+        `replace ${stVar(step.col)} = "${to}" if ${stVar(step.col)} == "${from}"`).join("\n")
+        || `* normalize_cats: no mapping specified`;
+    case "extract_regex": {
+      const col = stVar(step.col), out = stVar(step.nn || `${step.col}_num`);
+      if (step.regex) {
+        return [
+          `gen ${out} = real(regexs(1)) if regexm(${col}, "${step.regex}")`,
+        ].join("\n");
+      }
+      // locale-aware numeric parse: strip non-numeric, normalize decimal mark.
+      if (step.locale === "comma") {
+        return [
+          `gen _s = subinstr(${col}, ".", "", .)`,
+          `replace _s = subinstr(_s, ",", ".", .)`,
+          `gen ${out} = real(_s)`,
+          `drop _s`,
+        ].join("\n");
+      }
+      return `gen ${out} = real(subinstr(${col}, ",", "", .))`;
+    }
+    case "factor_interactions": {
+      const cont = stVar(step.contCol);
+      const pfx = step.prefix || `${step.contCol}_x_`;
+      const lines = (step.dummyCols ?? []).map(d => `gen ${stVar(pfx + d)} = ${cont} * ${stVar(d)}`);
+      return lines.length ? lines.join("\n") : `* factor_interactions: no dummy columns specified`;
+    }
+    case "if_else": {
+      const out = stVar(step.nn);
+      const cond = jsExprToStata(step.cond);
+      if (!cond) return `* if_else: ${step.nn} = cond(${step.cond}, ...) — translate condition to Stata manually`;
+      return `gen ${out} = cond(${cond}, ${stValue(step.trueVal)}, ${stValue(step.falseVal)})`;
+    }
+    case "case_when": {
+      const out = stVar(step.nn);
+      const branches = (step.cases ?? [])
+        .map(c => { const cc = jsExprToStata(c.cond); return cc ? `replace ${out} = ${stValue(c.val)} if ${cc}` : null; })
+        .filter(Boolean);
+      if (!branches.length) return `* case_when: no valid conditions — translate manually`;
+      return [`gen ${out} = ${stValue(step.defaultVal)}`, ...branches].join("\n");
+    }
+    case "grouped_mutate": {
+      const by = (step.by ?? []).map(stVar).join(" ");
+      const out = stVar(step.newCol || "grouped");
+      const fn = step.fn ?? "mean";
+      if (!by || !step.newCol) return `* grouped_mutate: incomplete config`;
+      const egenFn = fn === "sd" ? "sd" : fn === "count" ? "count" : fn === "expr" ? "mean" : fn;
+      return [
+        `* grouped_mutate: ${fn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
+        `bysort ${by}: egen ${out} = ${egenFn}(${stVar(step.col || by.split(" ")[0])})`,
+      ].join("\n");
+    }
+    case "balance_panel": {
+      const ent = stVar(step.entityCol), tim = stVar(step.timeCol);
+      const lines = [
+        `* Balance panel: fill ${step.entityCol} × ${step.timeCol} grid (static cols may need manual carry-forward)`,
+        `xtset ${ent} ${tim}`,
+        `tsfill, full`,
+      ];
+      const fill = Number(step.fillValue) || 0;
+      for (const oc of (step.outcomeCols ?? [])) lines.push(`replace ${stVar(oc)} = ${fill} if missing(${stVar(oc)})`);
+      return lines.join("\n");
+    }
     case "distinct": {
       const subset = step.subset ?? params.subset ?? [];
       return `duplicates drop ${subset.length ? subset.join(" ") : ""}, force`;
@@ -410,14 +531,6 @@ function transpileStep(step, allDatasets = {}) {
         `erase "__setop_tmp.dta"`,
       ].join("\n");
     }
-    case "group_transform": {
-      const by = step.by ?? params.by ?? [];
-      const col = step.col ?? params.col ?? "";
-      const out = step.nn ?? params.nn ?? `${step.fn ?? params.fn}_${col}`;
-      const fn = step.fn ?? params.fn ?? "mean";
-      const egenFn = fn === "count" ? "count" : fn === "sd" ? "sd" : fn === "rank" ? "rank" : fn === "median" ? "median" : fn;
-      return `bysort ${by.join(" ")}: egen ${out} = ${egenFn}(${col})`;
-    }
     case "vector_assign": {
       const out = step.nn ?? "assigned";
       const values = step.values ?? [];
@@ -463,11 +576,6 @@ function transpileStep(step, allDatasets = {}) {
         `* JS: ${jsCode}`,
         `* replace ${col} = <Stata expression>`,
       ].join("\n");
-    }
-    case "factor_interactions": {
-      const { cols } = params;
-      if (cols?.length >= 2) return `gen ${cols.join("_x_")} = ${cols[0]} * ${cols[1]}`;
-      return `* factor_interactions`;
     }
     case "patch": {
       const col = step.col ?? "column";
@@ -521,8 +629,8 @@ function transpileStep(step, allDatasets = {}) {
 function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms) {
   const fmtBase  = v => fvSet.has(v) ? `i.${v}` : v;
   const fmtInInt = v => fvSet.has(v) ? `i.${v}` : `c.${v}`;
-  const rawX = xVarsRaw ?? xVars;
-  const rawW = wVarsRaw ?? wVars;
+  const rawX = xVarsRaw ?? xVars ?? [];
+  const rawW = wVarsRaw ?? wVars ?? [];
   const parts = [...rawX, ...rawW].map(fmtBase);
   for (const { var1, var2, type } of (interactionTerms ?? [])) {
     if (!var1 || !var2) continue;
