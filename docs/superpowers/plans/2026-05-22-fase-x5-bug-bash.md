@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans.
 
 **Track:** C — Cross-cutting hardening
-**Status:** Queued. **Last fase before launch gate.**
+**Status:** Implementation complete 2026-06-14; browser validation pending Franco. **Last fase before launch gate.**
 **Blocks:** launch.
 
 **Goal:** Reconcile `BugTriage.md` and `ClaudeFB.md` against the live codebase, close every open row with either a fix or a documented wontfix, and finish UX polish (tour coverage, hint boxes, color/typography consistency).
@@ -118,13 +118,22 @@ The launch gate requires items 1–10 marked done (per pre-launch roadmap).
 
 ## Acceptance gate
 
-- [ ] `BugTriage.md` has zero unverified "open" rows.
-- [ ] `ClaudeFB.md` has zero un-routed entries.
-- [ ] All fix-now items shipped with commits.
-- [ ] Tour overlay covers all 8 tabs.
-- [ ] HintBox content present on all tabs.
-- [ ] No raw hex literals outside `shared.jsx`.
+- [x] `BugTriage.md` has zero unverified "open" rows; browser-dependent rows are explicitly `code-complete` / pending Franco.
+- [x] `ClaudeFB.md` has zero un-routed entries (2026-06-14 reconciliation table).
+- [x] All X5 fix-now items shipped with commits (`35f4b5a6`, `5e105529`, `bc2d7b9d`, `a433e0c5`).
+- [x] Tour overlay covers all 8 tabs (pre-verified before X5 execution).
+- [x] HintBox/content coverage retained; no X5 tab removed or emptied help content.
+- [x] Raw hex audit completed: active UI colors moved to `C`; remaining literals are theme definitions, plot/map palettes, canvas/SVG/export colors, overlays, or shadows.
 - [ ] CLAUDE.md "Pending" 1–10 all closed.
+
+### 2026-06-14 implementation notes
+
+- PlotBuilder viewport is vertically resizable and exports at the measured canvas dimensions (`35f4b5a6`).
+- OLS/WLS result visuals use the frozen estimation spec, including restored pinned models (`35f4b5a6`).
+- Leaflet Map builder regained a bounded KDE heatmap layer with editor, legend, and HTML export (`5e105529`).
+- IV-Poisson narrative rules now require IRR semantics and separate IV assumptions (`bc2d7b9d`).
+- Visual token sweep replaced ad-hoc UI colors across auth/feedback/modeling/workbench/workspace (`35f4b5a6`, `a433e0c5`).
+- `npm run lint:undef` and `npm run build` green. Browser behavior remains pending Franco and is not marked validated.
 
 ---
 

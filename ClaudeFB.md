@@ -364,3 +364,69 @@
 
 - [11:36] · Data
   ⚠️ SECURITY EVENT: XSS injection attempt submitted via feedback form — HTML `<script>` and `<img onerror>` tags in description field. Payload redacted.
+
+---
+
+## 2026-06-14 batch
+
+### Bugs
+
+- [2026-06-14 11:13] · Model
+  2SLS Poisson interpretation wrong
+
+- [2026-06-14 11:20] · Model
+  Coefficient plots and diagnostics change when users add/remove variables for a new estimation; they must remain frozen until re-estimation and reappear correctly when restoring pinned models.
+
+### Other
+
+- [2026-06-14 11:17] · Data
+  Escaped feedback payload `&lt;script&gt;alert(1)&lt;/script&gt;` (security regression probe; stored inert).
+
+---
+
+## 2026-06-14 X5 reconciliation
+
+> Append-only routing audit against current code. “Code-complete” items that need visual/browser confirmation are intentionally not marked validated.
+
+| Feedback | X5 outcome | Evidence / route |
+|---|---|---|
+| Big datasets crash at ~900k rows | routed | Fase X4 code-complete; browser benchmark pending Franco (`plans/2026-05-22-fase-x4-performance.md`). |
+| Malformed CSV row aborts import | fix-later | BugTriage 2026-06-14 Data; resilient-import UX after launch. |
+| Explore graph does not fit / Modeling Plot Builder sizing | fix-now | `35f4b5a6`; browser validation pending Franco. |
+| Anderson-Rubin confidence intervals | verified fixed | `CausalEngine.andersonRubinCI` + `IVResults` weak-IV panel. |
+| Multiple statistical tests | verified fixed | StatWorkspace/SampleTests and inference validation harness. |
+| `.dta` loading/duplicate-column reports | verified fixed | BugTriage 2026-05-13 and 2026-06-01 parser fixes. |
+| Border-grid clipping / grids broken | verified fixed | `clipRectToRings`, grid modes, and existing validation coverage. |
+| Deleted dataset leaves stale variables | verified fixed | DatasetManager fallback selection/reset path. |
+| Grids in static spatial plot | verified fixed | `SpatialGeoPlot` grid layer. |
+| Incorrect p-values | verified fixed | BugTriage 2026-05-21, Franco-confirmed. |
+| Variable selection auto-reestimates | verified fixed | explicit estimate action remains required. |
+| Clear current model | verified fixed | ModelingTab “Clear result”. |
+| Calculate graph from zero / multiple equations | verified fixed | equation workbench and multi-equation canvas. |
+| Plot Builder color mapping | verified fixed | categorical color mapping + palette support. |
+| Monte Carlo single variable | verified fixed | Simulate single-variable mode. |
+| Resampling/bootstrap/sampling mean | verified fixed | `Resampling.js`, StatWorkspace, 81-check inference harness. |
+| R `%in% c(...)` filter syntax | fix-later | BugTriage 2026-06-14 Clean. |
+| RDD `summary(rdrobust)` table | fix-later | BugTriage 2026-06-14 Model. |
+| Estimate without intercept | fix-later | BugTriage 2026-06-14 Model; engine-wide contract change. |
+| Spatial auto-fit | verified fixed | Leaflet `fitBounds`; static plot geographic aspect sizing. |
+| Geometry transformations / show EPSG | verified fixed | dataset CRS metadata + map CRS banner/transform controls. |
+| Spatial filters for plots | fix-later | BugTriage 2026-06-14 Spatial; routed to V4. |
+| XLSX CDN failure / OECD 406 | verified fixed | static `xlsx` import and OECD content negotiation. |
+| Edit/assign column names in Data Viewer | verified fixed | non-destructive `rename` pipeline step exposed by grid editing. |
+| Calculate LaTeX crash | verified fixed | BugTriage 2026-06-02, Franco-confirmed. |
+| Poisson estimator-specific interpretation | verified fixed | generic Poisson rule existed; IV-Poisson gap fixed in `bc2d7b9d`. |
+| Additional R quantile types | wontfix | type-7 is the documented default shared with R; extra types add UX surface without launch value. |
+| Geometry in point plots | verified fixed | WKT point mode in both spatial builders. |
+| Show steps for calculus/optimization | verified fixed | Calculate workbench exposes applied rules and solver output. |
+| Pinned model persistence | verified fixed | IDB `model_buffer` store + project hydration. |
+| Geocoding quality | wontfix | provider-quality limitation; existing Photon path works (BugTriage 2026-06-06). |
+| Derivatives with endogenous functions | verified fixed | symbolic workbench/CAS supports function derivatives. |
+| Editable LaTeX variable labels | fix-later | BugTriage 2026-06-14 Model. |
+| Studentized permutation tests | verified fixed | `Resampling.js` studentized/raw comparison. |
+| Plot Builder resize + PNG aesthetics | fix-now | `35f4b5a6`; browser validation pending Franco. |
+| OLS Y~Yhat / residual-fitted / Q-Q | fix-now | components and wiring verified; frozen-result-state regression fixed in `35f4b5a6`; browser validation pending Franco. |
+| Spatial heatmap | fix-now | Map-layer implementation restored in `5e105529`; browser validation pending Franco. |
+| Feedback XSS probes | verified fixed / wontfix probe | sanitize-on-write already landed; fresh payload is stored escaped, confirming inert output. |
+| IV-Poisson interpreted as linear 2SLS | fix-now | `bc2d7b9d`. |
+| Diagnostics mutate with sidebar / pinned restore | fix-now | `35f4b5a6` freezes OLS/WLS display to `result.spec`; browser validation pending Franco. |
