@@ -699,11 +699,11 @@ function MapCanvas({ layer, rows }) {
     return () => { if (leafMapRef.current) { leafMapRef.current.remove(); leafMapRef.current = null; } };
   }, [L, layer, rows, theme]);
 
-  if (err) return <div style={{ color: "#c47070", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "1.5rem" }}>{err}</div>;
-  if (!L)  return <div style={{ color: "#666", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1.5rem" }}>Loading Leaflet…</div>;
+  if (err) return <div style={{ color: C.red, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "1.5rem" }}>{err}</div>;
+  if (!L)  return <div style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1.5rem" }}>Loading Leaflet…</div>;
   const { aes } = layer;
   if (!aes.x || !aes.y) return (
-    <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: "#666", padding: "2rem", textAlign: "center" }}>
+    <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted, padding: "2rem", textAlign: "center" }}>
       Set <b>lon</b> (x) and <b>lat</b> (y) columns to render the map.
     </div>
   );
@@ -831,8 +831,8 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
       {lbl("span")}
       <input type="range" min={0.1} max={1} step={0.05} value={opts.span ?? 0.75}
         onChange={e => set("span", +e.target.value)}
-        style={{ width: 64, accentColor: "#c8a96e", verticalAlign: "middle" }}/>
-      <span style={{ fontSize: T.caption.fontSize, color: "#c8a96e", fontFamily: T.code.fontFamily }}>{(opts.span ?? 0.75).toFixed(2)}</span>
+        style={{ width: 64, accentColor: C.gold, verticalAlign: "middle" }}/>
+      <span style={{ fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily }}>{(opts.span ?? 0.75).toFixed(2)}</span>
     </>}
     {(opts.method ?? "lm") === "lm" && <>
       {lbl("SE")}
@@ -1559,7 +1559,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
       </div>
 
       {/* ── BOTTOM: plot — all visible layers composited ────────────────────── */}
-      <div ref={plotRef} style={{ flex: 1, padding: "0.65rem", overflow: "hidden", minHeight: 220, position: "relative" }}>
+      <div ref={plotRef} title="Drag the lower-right corner to resize the plot" style={{ flex: "0 0 auto", height: 400, maxHeight: "70vh", padding: "0.65rem", overflow: "hidden", resize: "vertical", minHeight: 220, position: "relative" }}>
         {/* Error badge — outside canvasRef so it is NOT captured in PNG export */}
         {plotRenderError && (
           <div style={{ position: "absolute", top: 10, right: 10, zIndex: 20 }}>

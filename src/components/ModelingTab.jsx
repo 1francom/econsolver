@@ -2264,14 +2264,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           {/* OLS / WLS */}
           {(result?.type === "OLS" || result?.type === "WLS") && (() => {
             const r = result;
+            const resultY = r.spec?.yVar ?? yVar[0];
+            const resultX = r.spec?.xVarsRaw ?? r.spec?.xVars ?? xVars;
+            const resultW = r.spec?.wVarsRaw ?? r.spec?.wVars ?? wVars;
+            const resultRegressors = [...resultX, ...resultW];
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1.2rem", display: "flex", alignItems: "baseline", gap: 10 }}>
                   <span style={{ fontSize: T.caption.fontSize, color: C.green, letterSpacing: "0.24em", textTransform: "uppercase" }}>{r.label} Results</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
-                  <span style={{ fontSize: T.code.fontSize, color: C.textMuted }}>{yVar[0]} ~ {[...xVars, ...wVars].join(" + ")}</span>
+                  <span style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{resultY} ~ {resultRegressors.join(" + ")}</span>
                 </div>
-                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
+                <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={resultY} />
                 <FitBar items={[
                   { label: "R²",     value: r.R2?.toFixed(4)    ?? "—", color: C.green },
                   { label: "Adj. R²",value: r.adjR2?.toFixed(4) ?? "—", color: C.green },
@@ -2282,21 +2286,21 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — 95% Confidence Intervals</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={resultY} df={r.df} />
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Plot & Diagnostics</Lbl>
                 <PlotSelector
                   accentColor={C.green}
-                  defaultId={[...xVars, ...wVars].length > 0 ? `partial_${[...xVars, ...wVars][0]}` : "yhat"}
+                  defaultId={resultRegressors.length > 0 ? `partial_${resultRegressors[0]}` : "yhat"}
                   plots={[
-                    ...[...xVars, ...wVars].map((xc, i) => {
+                    ...resultRegressors.map((xc, i) => {
                       const idx = r.varNames.indexOf(xc);
                       return {
                         id: `partial_${xc}`,
                         label: `Y ~ ${xc}`,
                         node: <PartialPlot
-                          rows={rows} yCol={yVar[0]} xCol={xc}
-                          otherX={[...xVars, ...wVars].filter(x => x !== xc)}
+                          rows={rows} yCol={resultY} xCol={xc}
+                          otherX={resultRegressors.filter(x => x !== xc)}
                           beta_i={idx >= 0 ? r.beta[idx] : null}
                           pVal_i={idx >= 0 ? r.pVals[idx] : null}
                           runOLS={runOLS}
@@ -2305,7 +2309,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       };
                     }),
                     { id: "yhat",  label: "Y vs Ŷ",
-                      node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={yVar[0]} /> },
+                      node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={resultY} /> },
                     { id: "forest", label: "Coefficient plot",
                       node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-ols" filename="ols_coefficients.svg" /> },
                     { id: "resid",  label: "Residuals vs Fitted",
@@ -2318,10 +2322,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginBottom: "1.4rem" }}>
                   *** p &lt; 0.01 · ** p &lt; 0.05 · * p &lt; 0.1 · Standard errors in parentheses
                 </div>
-                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={diagX} model={r.type} />
-                <ExportBar yVar={yVar[0]} results={r} model={r.type}
-                  onReport={() => openReport({ ...r, modelLabel: r.label, yVar: yVar[0], xVars: [...xVars, ...wVars] })}
-                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: yVar[0], xVars, wVars, weightCol: r.spec?.weightCol ?? null } }} />
+                <DiagnosticsPanel resid={r.resid} rows={rows} xCols={resultRegressors} model={r.type} />
+                <ExportBar yVar={resultY} results={r} model={r.type}
+                  onReport={() => openReport({ ...r, modelLabel: r.label, yVar: resultY, xVars: resultRegressors })}
+                  replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: r.type, yVar: resultY, xVars: resultX, wVars: resultW, weightCol: r.spec?.weightCol ?? null } }} />
               </div>
             );
           })()}
@@ -2617,14 +2621,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: T.caption.fontSize, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson GLM Results</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.violet, letterSpacing: "0.24em", textTransform: "uppercase" }}>Poisson GLM Results</span>
                   {r.hasOffset && <Badge label="rate model (offset)" color={C.teal} />}
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
                   {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
                                : <Badge label="⚠ did not converge" color={C.red} />}
                 </div>
                 <FitBar items={[
-                  { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: "#9e7ec8" },
+                  { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: C.violet },
                   { label: "Log-lik", value: r.logLik?.toFixed(3)     ?? "—", color: C.textDim },
                   { label: "AIC",     value: r.AIC?.toFixed(1)         ?? "—", color: C.textDim },
                   { label: "BIC",     value: r.BIC?.toFixed(1)         ?? "—", color: C.textDim },
@@ -2632,7 +2636,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} />
-                <PlotSelector accentColor={"#9e7ec8"} defaultId="forest" plots={[
+                <PlotSelector accentColor={C.violet} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
                     node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
                 ]} />
@@ -2647,9 +2651,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             return (
               <div style={{ animation: "fadeUp 0.22s ease" }}>
                 <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span style={{ fontSize: T.caption.fontSize, color: "#9e7ec8", letterSpacing: "0.24em", textTransform: "uppercase" }}>{isNegBin ? "Negative Binomial FE Results" : "Poisson FE Results"}</span>
+                  <span style={{ fontSize: T.caption.fontSize, color: C.violet, letterSpacing: "0.24em", textTransform: "uppercase" }}>{isNegBin ? "Negative Binomial FE Results" : "Poisson FE Results"}</span>
                   <Badge label={`n = ${r.n}`} color={C.textDim} />
-                  {r.nFE > 1 && <Badge label={`${r.nFE}-way FE`} color="#9e7ec8" />}
+                  {r.nFE > 1 && <Badge label={`${r.nFE}-way FE`} color={C.violet} />}
                   {r.converged ? <Badge label={`✓ converged (${r.iterations} iter)`} color={C.green} />
                                : <Badge label="⚠ did not converge" color={C.red} />}
                   {r.droppedZeroUnits > 0 && <Badge label={`${r.droppedZeroUnits} zero-Y units dropped`} color={C.yellow} />}
@@ -2657,7 +2661,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   {r.droppedSingletons > 0 && <Badge label={`${r.droppedSingletons} singleton levels dropped`} color={C.yellow} />}
                 </div>
                 <FitBar items={[
-                  { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: "#9e7ec8" },
+                  { label: "McF. R²", value: r.mcFaddenR2?.toFixed(4) ?? "—", color: C.violet },
                   { label: "Log-lik", value: r.logLik?.toFixed(3)     ?? "—", color: C.textDim },
                   { label: "AIC",     value: r.AIC?.toFixed(1)         ?? "—", color: C.textDim },
                   { label: "BIC",     value: r.BIC?.toFixed(1)         ?? "—", color: C.textDim },
@@ -2671,8 +2675,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} />
                 {isNegBin && (
-                  <div style={{ marginTop: "1rem", marginBottom: "1rem", padding: "0.85rem 1rem", background: C.surface2, border: `1px solid #9e7ec840`, borderLeft: "3px solid #9e7ec8", borderRadius: 4 }}>
-                    <div style={{ fontSize: T.caption.fontSize, color: "#9e7ec8", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6, fontFamily: T.code.fontFamily }}>
+                  <div style={{ marginTop: "1rem", marginBottom: "1rem", padding: "0.85rem 1rem", background: C.surface2, border: `1px solid ${C.violet}40`, borderLeft: `3px solid ${C.violet}`, borderRadius: 4 }}>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.violet, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6, fontFamily: T.code.fontFamily }}>
                       Dispersion
                     </div>
                     <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
@@ -2724,7 +2728,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     </div>
                   </div>
                 )}
-                <PlotSelector accentColor={"#9e7ec8"} defaultId="forest" plots={[
+                <PlotSelector accentColor={C.violet} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
                     node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={isNegBin ? "forest-negbinfe" : "forest-poissonfe"} filename={isNegBin ? "negbinfe_coefficients.svg" : "poissonfe_coefficients.svg"} /> },
                 ]} />

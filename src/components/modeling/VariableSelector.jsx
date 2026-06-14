@@ -51,12 +51,12 @@ export default function VariableSelector({
     setInteractionTerms?.(prev => prev.map((t, j) => j === i ? { ...t, [key]: val } : t));
 
   const selStyle = {
-    background: "#111", color: C.fg ?? "#e0e0e0", border: `1px solid #333`,
+    background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
     borderRadius: 3, padding: "1px 4px", fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10,
     flex: 1, minWidth: 0, cursor: "pointer",
   };
   const typeBtnStyle = {
-    background: "#1a1a1a", color: C.teal, border: `1px solid ${C.teal}`,
+    background: C.surface, color: C.teal, border: `1px solid ${C.teal}`,
     borderRadius: 3, padding: "1px 6px", fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10,
     cursor: "pointer", flexShrink: 0, minWidth: 22, textAlign: "center",
   };
@@ -113,7 +113,7 @@ export default function VariableSelector({
 
       {/* ── Interactions ── */}
       {showInteractions && (
-        <div style={{ marginTop: 8, padding: "6px 8px", border: `1px solid #222`, borderRadius: 4 }}>
+        <div style={{ marginTop: 8, padding: "6px 8px", border: `1px solid ${C.border}`, borderRadius: 4 }}>
           <div style={{ fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10, color: C.teal, marginBottom: 6, letterSpacing: "0.04em" }}>
             INTERACTIONS
           </div>
@@ -144,19 +144,19 @@ export default function VariableSelector({
               </select>
               <button
                 onClick={() => removeTerm(i)}
-                style={{ ...typeBtnStyle, color: "#888", borderColor: "#333" }}
+                style={{ ...typeBtnStyle, color: C.textDim, borderColor: C.border2 }}
                 title="Remove"
               >✕</button>
             </div>
           ))}
           <button
             onClick={addTerm}
-            style={{ ...typeBtnStyle, color: "#888", borderColor: "#333", padding: "2px 8px", marginTop: 2 }}
+            style={{ ...typeBtnStyle, color: C.textDim, borderColor: C.border2, padding: "2px 8px", marginTop: 2 }}
           >
             + add
           </button>
           {interactionTerms.length > 0 && (
-            <div style={{ fontFamily: mono, fontSize: (T?.caption?.fontSize ?? 10) - 1, color: "#555", marginTop: 6 }}>
+            <div style={{ fontFamily: mono, fontSize: (T?.caption?.fontSize ?? 10) - 1, color: C.textMuted, marginTop: 6 }}>
               * = main effects + interaction · : = interaction only
             </div>
           )}
