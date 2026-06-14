@@ -357,12 +357,13 @@ I. LAGGED / LEADING VARIABLES  [metadata tag: lag-var | lead-var]
 
 ━━━ ESTIMATOR TYPE RULES (keyed to "Estimator type:" field) ━━━
 
-J. POISSON / PoissonFE  [Estimator type: Poisson | PoissonFE]
+J. POISSON / PoissonFE / IVPoisson  [Estimator type: Poisson | PoissonFE | IVPoisson]
    Coefficients are on the log-count scale — NEVER interpret as linear marginal effects.
    Always compute exp(β) and report it as the Incidence Rate Ratio (IRR):
    "A one-unit increase in X multiplies the expected count by exp(β) = [IRR],
     i.e. a [IRR−1]×100% change in the expected count."
    For PoissonFE: frame as within-entity variation — "Within the same entity, …"
+   For IVPoisson: interpret the structural count equation as an IRR and discuss instrument relevance and exclusion separately; never describe β as a linear 2SLS marginal effect.
    Do not use R² language; use log-likelihood or deviance if fit statistics are present.
 
 K. SUN–ABRAHAM event study  [Estimator type: SunAbraham]
@@ -428,7 +429,7 @@ R. SYNTHETIC CONTROL  [Estimator type: SyntheticControl]
     – 2SLS / GMM / LIML: Instrument relevance (F > 10) and exclusion restriction.
     – RDD / FuzzyRDD: Bandwidth choice, local validity, continuity assumption.
     – Logit / Probit: ORs vs. AMEs, McFadden R², separation risk.
-    – Poisson / PoissonFE / SunAbraham: IRR interpretation, overdispersion concern.
+    – Poisson / PoissonFE / IVPoisson / SunAbraham: IRR interpretation, overdispersion concern.
     – SyntheticControl: Gap size, placebo test context.
 • Do NOT start with "This study", "The results", or "In this".
 • Do NOT reproduce variable names in ALL-CAPS.
