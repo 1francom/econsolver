@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans.
 
 **Track:** C — Cross-cutting hardening
-**Status:** Queued.
+**Status:** Implementation complete 2026-06-14; browser validation pending Franco.
 **Blocks:** Fase X5 (bug bash).
 
 **Goal:** Make the 900k-row benchmark project usable. Every tab transition, every estimate, every export under 5 s. DuckDB-Wasm threaded, OPFS persistence working, `suffStatsCache` LRU staying under its memory ceiling, no heap growth over a 100-estimation loop.
@@ -154,12 +154,26 @@ Instrument with a counter that increments on JS-side row iteration; assert count
 
 ## Acceptance gate
 
-- [ ] COOP/COEP headers present in `vercel.json`; `crossOriginIsolated === true`.
+- [ ] COOP/COEP headers present in `vercel.json`; `crossOriginIsolated === true`. (`vercel.json` fixed; deployed-browser assertion pending.)
 - [ ] OPFS warm start ≥ 10× cold start.
 - [ ] All 8 timing scenarios meet P50 + P95 targets.
-- [ ] `suffStatsCache` stays under 50 entries and 10 MB.
+- [x] `suffStatsCache` stays at 50 entries and under 10 MB. Node harness: 431.8 KiB serialized proxy at k=20.
 - [ ] Heap growth over 100 estimations < 100 MB.
 - [ ] No JS-side 900k-row iteration triggered by tab renders.
+
+---
+
+## Implementation result — 2026-06-14
+
+Code-complete, with browser-only gates deliberately left pending:
+
+- `vercel.json`: COOP remains `same-origin`; COEP changed from `credentialless` to `require-corp` per CLAUDE.md rule 4. `credentialless` can create a cross-origin-isolated context where implemented, but MDN browser-compat data lists it from Chrome 96 and Firefox 119 desktop while Safari, Firefox Android, and Opera Android remain unsupported. `require-corp` is therefore the portable target-browser setting. Browser smoke must also confirm every CDN dependency supplies CORS/CORP-compatible responses.
+- OPFS project reopen: dataset registry now persists `opfsCacheKey` + full `rowCount`; project hydration restores a fresh DuckDB table from that key before falling back to the IndexedDB preview. CSV/parsed-data/Parquet loads await the OPFS write, so closing the tab cannot race a fire-and-forget save. Temporary DuckDB connections and registered OPFS buffers are closed/dropped.
+- Node harness: `node src/services/data/__validation__/faseX4PerformanceValidation.mjs` checks COOP/COEP/CSP plus LRU capacity, true recency eviction, and serialized size. Result on 2026-06-14: **10 passed, 0 failed; 431.8 KiB** for 50 realistic k=20 entries.
+- Browser harness: open the deployed app with `?validation=faseX4`; use `window.__validation.faseX4`. Exact OPFS, 20-run timing, and 100-estimation heap procedures are in `src/services/data/__validation__/faseX4BrowserChecklist.md`.
+- `faseX4Benchmarks.json` contains targets only and remains `pending_browser_validation`; no timing or heap values were invented.
+
+Not marked validated until Franco runs the deployed-browser checklist. The optional display-vs-computation audit from Task 6 also remains pending because it is outside the five X4 scope items in the pre-launch spec.
 
 ---
 
