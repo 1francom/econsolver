@@ -8,7 +8,7 @@
 
 /**
  * @param {number} maxEntries  LRU eviction threshold (default 50)
- * @returns cache instance with get/set/invalidate/size
+ * @returns cache instance with get/set/invalidate/size/entries
  */
 export function createSuffStatsCache(maxEntries = 50) {
   const map = new Map();
@@ -34,6 +34,9 @@ export function createSuffStatsCache(maxEntries = 50) {
     },
     size() {
       return map.size;
+    },
+    entries() {
+      return [...map.entries()];
     },
   };
 }

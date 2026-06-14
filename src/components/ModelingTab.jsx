@@ -1638,6 +1638,15 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
       postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol, poissonOffsetCol, poissonExtraFE]);
 
+  useEffect(() => {
+    const harness = window.__validation?.faseX4;
+    if (!harness) return undefined;
+    harness.estimate = estimate;
+    return () => {
+      if (harness.estimate === estimate) delete harness.estimate;
+    };
+  }, [estimate]);
+
   // B2: fire estimate() after xVars state update has settled
   useEffect(() => {
     if (!pendingEstimate) return;
