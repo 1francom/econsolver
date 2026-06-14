@@ -59,26 +59,38 @@ export async function hasCache(file) {
  * @param {File}   file      — original File object (used for cache key only)
  */
 export async function loadFromOPFS(db, tableName, file) {
+  return loadFromOPFSKey(db, tableName, cacheKey(file));
+}
+
+/**
+ * Restore an OPFS Parquet entry when only its durable cache key is available.
+ * This is the project-reopen path: the original browser File no longer exists.
+ */
+export async function loadFromOPFSKey(db, tableName, key) {
   if (!opfsSupported()) return false;
-  const key = cacheKey(file);
+  if (!key) return false;
+  const registeredName = `__opfs_${tableName}_${key}`;
   try {
     const dir = await getCacheDir();
     const fh  = await dir.getFileHandle(key);
     const f   = await fh.getFile();
     const buf = new Uint8Array(await f.arrayBuffer());
 
-    // Register buffer under the same key in DuckDB's virtual FS
-    await db.registerFileBuffer(key, buf);
+    await db.registerFileBuffer(registeredName, buf);
 
-    // Create the table from the registered Parquet file
     const conn = await db.connect();
-    await conn.query(
-      `CREATE OR REPLACE TABLE "${tableName}" AS SELECT * FROM read_parquet('${key}')`
-    );
-    await conn.close();
+    try {
+      await conn.query(
+        `CREATE OR REPLACE TABLE "${tableName}" AS SELECT * FROM read_parquet('${registeredName}')`
+      );
+    } finally {
+      await conn.close();
+      try { await db.dropFile(registeredName); } catch { /* best effort */ }
+    }
     return true;
   } catch (e) {
     console.warn("[parquetCache] loadFromOPFS failed:", e?.message ?? String(e));
+    try { await db.dropFile(registeredName); } catch { /* best effort */ }
     return false;
   }
 }
@@ -93,15 +105,18 @@ export async function loadFromOPFS(db, tableName, file) {
  * @param {File}   file      — original File object (used for cache key only)
  */
 export async function saveToOPFS(db, tableName, file) {
-  if (!opfsSupported()) return;
+  if (!opfsSupported()) return false;
   const key = cacheKey(file);
   // Unique temp filename in DuckDB virtual FS to avoid conflicts during parallel ops
   const tmp = `__es_pexport_${Date.now()}_${Math.random().toString(36).slice(2)}.parquet`;
   try {
     // Write table to DuckDB's in-memory virtual FS as Parquet
     const conn = await db.connect();
-    await conn.query(`COPY "${tableName}" TO '${tmp}' (FORMAT PARQUET)`);
-    await conn.close();
+    try {
+      await conn.query(`COPY "${tableName}" TO '${tmp}' (FORMAT PARQUET)`);
+    } finally {
+      await conn.close();
+    }
 
     // Extract bytes from DuckDB virtual FS
     const buf = await db.copyFileToBuffer(tmp);
@@ -115,10 +130,12 @@ export async function saveToOPFS(db, tableName, file) {
     const wr  = await fh.createWritable();
     await wr.write(buf);
     await wr.close();
+    return true;
   } catch (e) {
     console.warn("[parquetCache] saveToOPFS failed:", e?.message ?? String(e));
     // Best-effort cleanup of DuckDB virtual FS tmp file
     try { await db.dropFile(tmp); } catch { /* ignore */ }
+    return false;
   }
 }
 

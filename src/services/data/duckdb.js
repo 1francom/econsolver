@@ -13,6 +13,7 @@ import * as duckdb from "@duckdb/duckdb-wasm";
 import { tableFromJSON } from "apache-arrow";
 import {
   loadFromOPFS,
+  loadFromOPFSKey,
   saveToOPFS,
   cacheKey as getParquetCacheKey,
 } from "./parquetCache.js";
@@ -60,7 +61,11 @@ async function registerAndCreate(file, tableName, createSQL) {
     duckdb.DuckDBDataProtocol.BROWSER_FILEREADER,
     true
   );
-  await conn.query(createSQL);
+  try {
+    await conn.query(createSQL);
+  } finally {
+    try { await db.dropFile(file.name); } catch { /* best effort */ }
+  }
   const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
   const rowCount = Number(countRes.toArray()[0].n);
   return { conn, tableName, rowCount };
@@ -134,6 +139,24 @@ export async function queryDuckDB(sql) {
  */
 export async function loadParquet(file) {
   const tableName = `parquet_${Date.now()}`;
+  const opfsCacheKey = getParquetCacheKey(file);
+  const { db, conn } = await getDuckDB();
+  const cacheHit = await loadFromOPFS(db, tableName, file);
+  if (cacheHit) {
+    const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
+    const rowCount = Number(countRes.toArray()[0].n);
+    window.__validation?.fase9?.recordHit?.();
+    const { headers, rows } = await queryDuckDB(
+      `SELECT * FROM "${tableName}" LIMIT ${PREVIEW_ROWS}`
+    );
+    return {
+      headers,
+      rows,
+      _duckdb: { tableName, rowCount, truncated: true, cached: true, opfsCacheKey },
+    };
+  }
+
+  window.__validation?.fase9?.recordMiss?.();
   const { tableName: tbl, rowCount } = await registerAndCreate(
     file,
     tableName,
@@ -143,11 +166,35 @@ export async function loadParquet(file) {
   const { headers, rows } = await queryDuckDB(
     `SELECT * FROM "${tbl}" LIMIT ${PREVIEW_ROWS}`
   );
+  const persisted = await saveToOPFS(db, tbl, file);
+  if (!persisted) window.__validation?.fase9?.recordErr?.();
 
   return {
     headers,
     rows, // preview only — full data served via getTablePage / extractAllRows
-    _duckdb: { tableName: tbl, rowCount, truncated: true },
+    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, persisted, opfsCacheKey },
+  };
+}
+
+/** Restore a project dataset from its durable OPFS cache key after a tab reopen. */
+export async function restoreCachedParquet(opfsCacheKey, tablePrefix = "project") {
+  if (!opfsCacheKey) return null;
+  const safePrefix = String(tablePrefix).replace(/[^a-zA-Z0-9_]/g, "_");
+  const tableName = `${safePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const { db, conn } = await getDuckDB();
+  const cacheHit = await loadFromOPFSKey(db, tableName, opfsCacheKey);
+  if (!cacheHit) return null;
+
+  const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
+  const rowCount = Number(countRes.toArray()[0].n);
+  const { headers, rows } = await queryDuckDB(
+    `SELECT * FROM "${tableName}" LIMIT ${PREVIEW_ROWS}`
+  );
+  window.__validation?.fase9?.recordHit?.();
+  return {
+    headers,
+    rows,
+    _duckdb: { tableName, rowCount, truncated: true, cached: true, opfsCacheKey },
   };
 }
 
@@ -189,10 +236,9 @@ export async function loadLargeCSV(file) {
     `CREATE OR REPLACE TABLE "${tableName}" AS SELECT * FROM read_csv('${file.name}', ${delim}header=true, auto_detect=true, nullstr=${NULL_STRINGS})`
   );
 
-  // Fire-and-forget: write Parquet to OPFS for next session — does not block return
-  saveToOPFS(db, tbl, file).catch(() =>
-    window.__validation?.fase9?.recordErr?.()
-  );
+  // Wait for the durable copy so a close/reopen cannot race the OPFS write.
+  const persisted = await saveToOPFS(db, tbl, file);
+  if (!persisted) window.__validation?.fase9?.recordErr?.();
 
   const { headers, rows } = await queryDuckDB(
     `SELECT * FROM "${tbl}" LIMIT ${PREVIEW_ROWS}`
@@ -201,7 +247,7 @@ export async function loadLargeCSV(file) {
   return {
     headers,
     rows, // preview only — full data served via getTablePage / extractAllRows
-    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, opfsCacheKey },
+    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, persisted, opfsCacheKey },
   };
 }
 
@@ -237,9 +283,8 @@ export async function loadLargeParsedData(file, parse, tablePrefix = "data") {
   await conn.insertArrowTable(arrowTable, { name: tableName, create: true });
   const rowCount = parsed.rows.length;
 
-  saveToOPFS(db, tableName, file).catch(() =>
-    window.__validation?.fase9?.recordErr?.()
-  );
+  const persisted = await saveToOPFS(db, tableName, file);
+  if (!persisted) window.__validation?.fase9?.recordErr?.();
 
   const { headers, rows } = await queryDuckDB(
     `SELECT * FROM "${tableName}" LIMIT ${PREVIEW_ROWS}`
@@ -248,6 +293,6 @@ export async function loadLargeParsedData(file, parse, tablePrefix = "data") {
     ...parsed,
     headers,
     rows,
-    _duckdb: { tableName, rowCount, truncated: true, cached: false, opfsCacheKey },
+    _duckdb: { tableName, rowCount, truncated: true, cached: false, persisted, opfsCacheKey },
   };
 }
