@@ -530,11 +530,17 @@ export function applyStep(rows, headers, s, context = {}) {
         groups.get(k)._rows.push(r);
       });
 
+      // Defensive output-name fallback (mirrors group_transform): a malformed
+      // agg with a missing nn must never create an "undefined"-keyed column.
+      const aggName = (a) => a.nn || `${a.fn || "stat"}_${a.col || "x"}`;
+
       R = [];
       for (const { _first, _rows } of groups.values()) {
         const out = {};
         s.by.forEach(b => { out[b] = _first[b]; });
-        (s.aggs || []).forEach(({ col, fn, nn, q }) => {
+        (s.aggs || []).forEach((agg) => {
+          const { col, fn, q } = agg;
+          const nn = aggName(agg);
           const vals = _rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v));
           if (fn === "count") { out[nn] = _rows.length; return; }
           if (!vals.length)  { out[nn] = null; return; }
@@ -567,7 +573,7 @@ export function applyStep(rows, headers, s, context = {}) {
       }
 
       // Rebuild headers: grouping cols + aggregation output cols
-      const newCols = (s.aggs || []).map(a => a.nn);
+      const newCols = (s.aggs || []).map(aggName);
       H = [...s.by, ...newCols.filter(c => !s.by.includes(c))];
       break;
     }

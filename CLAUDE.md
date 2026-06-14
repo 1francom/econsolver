@@ -47,7 +47,7 @@ src/
 │       └── metadataExtractor.js    ← extracts variable metadata for AI context
 │
 ├── pipeline/
-│   ├── runner.js       ← applyStep + runPipeline — 23 step types
+│   ├── runner.js       ← applyStep + runPipeline — 53 step types
 │   ├── validator.js    ← validatePanel, buildInfo
 │   ├── registry.js     ← STEP_REGISTRY (must stay in sync with runner.js)
 │   ├── auditor.js      ← auditPipeline → AuditTrail + markdown
@@ -206,13 +206,13 @@ src/
 | Synthetic Control | SyntheticControlEngine.js | ✓ validated vs R Synth package (weights 2dp, gaps 2dp) — Frank-Wolfe vs ipop; hard benchmarks in engineValidation.js |
 | Sun & Abraham (2021) event study | NonLinearEngine.js (`runSunAbraham`) | ✓ validated vs R fixest::fepois + sunab() (coef 6dp, SE 4dp) — IW per-relative-period aggregation w/ delta-method clustered SE; single-cohort reduces exactly to Poisson TWFE `i(rel)`. Harness: `sunAbrahamRValidation.R` → `sunAbrahamBenchmarks.json` → `sunAbrahamValidation.js`. Clustered SE uses sandwich convention = fixest `ssc(fixef.K="none")`; differs from fixest default `nested` by a known df factor (~1-2%) |
 
-## Pipeline step types (runner.js) — 35 total
-Cleaning: `rename, drop, filter, add_row, set_where, replace, drop_na, fill_na, fill_na_grouped, type_cast, quickclean, recode, normalize_cats, winz, trim_outliers, flag_outliers, extract_regex, ai_tr, distinct`
-Features: `add_column, log, sq, std, dummy, lag, lead, diff, ix, did, date_parse, date_extract, mutate, str_splice, factor_interactions, vector_assign`
-Reshape: `arrange, group_summarize, group_transform, pivot_longer`
-Merge: `join` (`left, inner, right, full, semi, anti`), `append, bind_cols, union, intersect, setdiff`
+## Pipeline step types (runner.js) — 53 total
+Cleaning (21): `rename, drop, filter, add_row, set_where, replace, drop_na, fill_na, type_cast, quickclean, recode, normalize_cats, distinct, winz, ai_tr, patch, fill_na_grouped, trim_outliers, flag_outliers, extract_regex, clean_strings`
+Features (20): `add_column, str_splice, log, sq, std, dummy, lag, lead, diff, ix, did, date_extract, mutate, if_else, case_when, vector_assign, geocode, grouped_mutate, factor_interactions, inject_column`
+Reshape (6): `arrange, group_summarize, group_transform, pivot_longer, pivot_wider, balance_panel`
+Merge (6): `join` (`left, inner, right, full, semi, anti`), `append, bind_cols, union, intersect, setdiff`
 
-**Registry must stay in sync with runner.js at all times.**
+**Registry must stay in sync with runner.js at all times.** This is now enforced by `src/pipeline/__validation__/pipelineReliabilityValidation.mjs` (Fase X1 — `node` it; T5 fails if any registry type lacks a runner case).
 
 ## Key bugs fixed (do not reintroduce)
 - **RDD SE**: use unweighted SSR in `runWLS` for σ² — never weight the SSR.

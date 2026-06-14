@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans.
 
 **Track:** C — Cross-cutting hardening
-**Status:** Queued.
+**Status:** DONE 2026-06-14 — harness `src/pipeline/__validation__/pipelineReliabilityValidation.mjs` (67 checks green). See ClaudePlan.md X1 row for the as-built summary (covers T1/T4/T5/T6 + T2/T3 serialization-equivalent of the IDB round-trip). Surfaced + fixed: 53-not-23 step-type doc drift + `group_summarize` missing-`nn` fallback.
 **Blocks:** Fase X5 (bug bash must see a stable pipeline).
 
 **Goal:** Lock down `src/pipeline/runner.js` so that every one of the 23 step types is correct in isolation, composable in arbitrary order, idempotent across save/reload, and synchronized with `registry.js` and `auditor.js`.
