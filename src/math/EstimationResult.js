@@ -106,6 +106,7 @@ const ESTIMATOR_META = {
   SyntheticControl:{ label: "Synthetic Control",   color: "#c8b46e" },
   CallawayCS:      { label: "Callaway-Sant'Anna DiD", color: "#6ec8b4" },
   SpatialRegression:{ label: "Spatial Regression", color: "#6ec8b4" },
+  IVPoisson:        { label: "IV-Poisson",          color: "#c8a96e" },
 };
 
 const FAMILY_MAP = {
@@ -127,6 +128,7 @@ const FAMILY_MAP = {
   SyntheticControl: "sc",
   CallawayCS: "did",
   SpatialRegression: "spatial",
+  IVPoisson: "iv",
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -203,6 +205,7 @@ function buildFormula(type, spec) {
     case "SyntheticControl": return `${yVar} ~ SC(${treatedUnit ?? "?"}, t₀=${treatTime ?? "?"})`;
     case "CallawayCS": return `${yVar} ~ CS_DiD(g=${spec.treatCol ?? "?"}) | ${spec.entityCol ?? "?"} + ${spec.timeCol ?? "?"}`;
     case "SpatialRegression": return `${spec.spatialModel ?? "SAR"}(${yVar}) ~ ${x}`;
+    case "IVPoisson": return `Poisson(${yVar}) ~ ${x} | ${z}`;
     default:          return `${yVar} ~ ${x}`;
   }
 }
@@ -478,6 +481,29 @@ function wrapGMM(eng, spec) {
     jStat:       eng.jStat       ?? null,
     jPval:       eng.jPval       ?? null,
     jDf:         eng.jDf         ?? null,
+  };
+}
+
+// ─── IV-POISSON ──────────────────────────────────────────────────────────────
+// eng shape: { varNames, beta, se, tStats, pVals, R2, n, df,
+//              jStat, jPval, resid, Yhat, firstStages }
+function wrapIVPoisson(eng, spec) {
+  return {
+    ...base("IVPoisson", spec),
+    varNames:    eng.varNames    ?? [],
+    beta:        clean(eng.beta),
+    se:          clean(eng.se),
+    testStats:   clean(eng.tStats),
+    testStatLabel: "z",
+    pVals:       clean(eng.pVals),
+    R2:          eng.R2          ?? null,
+    n:           eng.n           ?? 0,
+    df:          eng.df          ?? 0,
+    resid:       eng.resid       ?? [],
+    Yhat:        eng.Yhat        ?? [],
+    firstStages: eng.firstStages ?? null,
+    jStat:       eng.jStat       ?? null,
+    jPval:       eng.jPval       ?? null,
   };
 }
 
@@ -899,8 +925,9 @@ export function wrapResult(type, engineOutput, spec, extras = {}) {
     }
     case "Logit":  r = wrapBinary("Logit",  engineOutput, spec); break;
     case "Probit": r = wrapBinary("Probit", engineOutput, spec); break;
-    case "GMM":    r = wrapGMM(engineOutput, spec); break;
-    case "LIML":   r = wrapLIML(engineOutput, spec); break;
+    case "GMM":      r = wrapGMM(engineOutput, spec); break;
+    case "LIML":     r = wrapLIML(engineOutput, spec); break;
+    case "IVPoisson": r = wrapIVPoisson(engineOutput, spec); break;
     case "FuzzyRDD":         r = wrapFuzzyRDD(engineOutput, spec); break;
     case "EventStudy":       r = wrapEventStudy(engineOutput, spec); break;
     case "SunAbraham":       r = wrapSunAbraham(engineOutput, spec); break;
