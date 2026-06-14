@@ -727,6 +727,15 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
 
         if (registry.length) {
           const loaded = await Promise.all(registry.map(async m => {
+            if (m.opfsCacheKey) {
+              try {
+                const { restoreCachedParquet } = await import("./services/data/duckdb.js");
+                const restored = await restoreCachedParquet(m.opfsCacheKey, `project_${m.id}`);
+                if (restored) return { meta: m, raw: restored };
+              } catch (error) {
+                console.warn("[DataStudio] OPFS restore failed, using IndexedDB preview:", error);
+              }
+            }
             const raw = await loadRawData(m.id);
             return raw && raw.rows?.length ? { meta: m, raw } : null;
           }));
@@ -783,6 +792,8 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       crs:      datasetCrs(d),
       headers:  d.rawData?.headers ?? d.headers ?? [],
       loadOpts: d.rawData?._loadOpts ?? d.loadOpts ?? null,
+      opfsCacheKey: d.rawData?._duckdb?.opfsCacheKey ?? null,
+      rowCount: d.rawData?._duckdb?.rowCount ?? d.rawData?.rows?.length ?? 0,
     })));
   }, [datasets, projectPid]);
 

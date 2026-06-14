@@ -17,6 +17,11 @@ if (import.meta.env.DEV) {
   import('./services/AI/__validation__/faseX3Validation.js')
 }
 
+if (new URLSearchParams(window.location.search).get('validation') === 'faseX4') {
+  // Browser-only measurements must also run on the deployed build with real COOP/COEP headers.
+  import('./services/data/__validation__/faseX4BrowserValidation.js')
+}
+
 if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('validation') === 'fase5') {
   import('./services/data/__validation__/fase5Validation.js')
     .then(({ runFase5NumericalValidation }) => runFase5NumericalValidation())

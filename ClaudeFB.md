@@ -349,3 +349,18 @@
 
 - [04:28] · Model
   Y~Y_hat, Residual vs fitted, and Q-Q plot missing for OLS
+
+---
+
+## 2026-06-13 batch
+
+### Bugs
+
+- [11:15] · Spatial
+  Heatmap must be fixed
+
+- [11:33] · Clean
+  ⚠️ SECURITY EVENT: XSS injection attempt submitted via feedback form — JavaScript payload in description field (proof-of-concept alert injection). Payload redacted.
+
+- [11:36] · Data
+  ⚠️ SECURITY EVENT: XSS injection attempt submitted via feedback form — HTML `<script>` and `<img onerror>` tags in description field. Payload redacted.

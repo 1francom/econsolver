@@ -16,6 +16,7 @@ import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 import { generateCleanScript } from "./pipeline/exporter.js";
 import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
+import ExplorePinBar from "./components/explore/ExplorePinBar.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
@@ -1801,12 +1802,18 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // ── Pin-for-replication emitter (Fase 1.3, D5) ──────────────────────────────
   // Every pin records the active QuickFilter so the replicated stat/plot runs
   // on exactly the rows the user was looking at (D8 argument fidelity).
+  // Also stores a local pinnedItems entry for the ExplorePinBar comparison UI.
   const { appendLog } = useSessionLogOptional();
-  const pinExplore = (params, label) => appendLog({
-    module: "explore", opType: "explore_stat",
-    params: { ...params, dataset: filename ?? null, filters: filterConds.length ? filterConds : null },
-    label,
-  });
+  const [pinnedItems, setPinnedItems] = useState([]);
+  const pinExplore = (params, label) => {
+    appendLog({
+      module: "explore", opType: "explore_stat",
+      params: { ...params, dataset: filename ?? null, filters: filterConds.length ? filterConds : null },
+      label,
+    });
+    setPinnedItems(prev => [...prev, { id: Date.now(), kind: params.kind, label, params }]);
+  };
+  const removePin = (id) => setPinnedItems(prev => prev.filter(p => p.id !== id));
 
   function downloadExploreScript(language) {
     const ext    = { r: "R", stata: "do", python: "py" }[language];
@@ -1843,7 +1850,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   }
 
   return(
-    <div style={{display:"flex",height:"100%",minHeight:0,background:C.bg,color:C.text,fontFamily:T.body.fontFamily,overflow:"hidden"}}>
+    <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0,background:C.bg,color:C.text,fontFamily:T.body.fontFamily,overflow:"hidden"}}>
       <div style={{flex:1,minWidth:0,overflowY:"auto",padding:"1.4rem",paddingBottom:"3rem"}}>
         {/* Header */}
         <div style={{marginBottom:"1.2rem",display:"flex",alignItems:"flex-start",gap:12}}>
@@ -1955,6 +1962,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
         {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} datasetName={filename} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
+      <ExplorePinBar items={pinnedItems} info={info} onRemove={removePin} />
     </div>
   );
 }
