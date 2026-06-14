@@ -247,9 +247,9 @@ export default function EstimatorSidebar({
                   if (state === "hidden") return null;
                   const isActive  = family === f.id;
                   const isPlanned = state === "planned";
-                  const chipColor = f.id === "poisson" ? "#9e7ec8"
-                                  : f.id === "logit"   ? "#c8a96e"
-                                  : f.id === "probit"  ? "#c88e6e"
+                  const chipColor = f.id === "poisson" ? C.violet
+                                  : f.id === "logit"   ? C.gold
+                                  : f.id === "probit"  ? C.orange
                                   : C.blue;
                   return (
                     <button
@@ -265,7 +265,7 @@ export default function EstimatorSidebar({
                         letterSpacing: "0.06em",
                         fontFamily: T.code.fontFamily,
                         background: isActive ? `${chipColor}18` : "transparent",
-                        color: isActive ? chipColor : isPlanned ? "#333" : "#666",
+                        color: isActive ? chipColor : isPlanned ? C.border2 : C.textMuted,
                         cursor: isPlanned ? "not-allowed" : "pointer",
                         opacity: isPlanned ? 0.4 : 1,
                         transition: "all 0.1s",
@@ -280,11 +280,11 @@ export default function EstimatorSidebar({
               {family !== "linear" && (
                 <div style={{
                   marginTop: 6, padding: "5px 8px",
-                  background: "#9e7ec810",
-                  border: "1px solid #9e7ec830",
-                  borderLeft: "3px solid #9e7ec8",
+                  background: `${C.violet}10`,
+                  border: `1px solid ${C.violet}30`,
+                  borderLeft: `3px solid ${C.violet}`,
                   borderRadius: 3, fontSize: T.caption.fontSize,
-                  color: "#9e7ec8",
+                  color: C.violet,
                   fontFamily: T.code.fontFamily,
                 }}>
                   {HINT[`${model}_${family}`] ?? `${model} + ${family}`}

@@ -77,7 +77,7 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
             INTERACTIONS REMOVED
           </div>
           {affectedStepLabels.map(l => (
-            <div key={l} style={{ fontSize: T.caption.fontSize, color: "#c47070", paddingLeft: 4 }}>— {l}</div>
+            <div key={l} style={{ fontSize: T.caption.fontSize, color: C.red, paddingLeft: 4 }}>— {l}</div>
           ))}
         </div>
       )}
@@ -88,7 +88,7 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
             DERIVED DATASETS REMOVED
           </div>
           {affectedDsNames.map(n => (
-            <div key={n} style={{ fontSize: T.caption.fontSize, color: "#c47070", paddingLeft: 4 }}>— {n}</div>
+            <div key={n} style={{ fontSize: T.caption.fontSize, color: C.red, paddingLeft: 4 }}>— {n}</div>
           ))}
         </div>
       )}
@@ -755,12 +755,12 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                       title="Remove dataset"
                       style={{
                         background: "transparent", border: "none",
-                        color: isDelPending ? "#c47070" : C.textMuted,
+                        color: isDelPending ? C.red : C.textMuted,
                         cursor: "pointer",
                         fontSize: T.body.fontSize, padding: "0 2px", flexShrink: 0,
                         fontFamily: T.code.fontFamily, lineHeight: 1,
                       }}
-                      onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.color = "#c47070"; }}
+                      onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.color = C.red; }}
                       onMouseLeave={e => {
                         e.stopPropagation();
                         if (pendingDelete?.id !== ds.id) e.currentTarget.style.color = C.textMuted;
@@ -883,12 +883,12 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                           title="Remove interaction"
                           style={{
                             background: "transparent", border: "none",
-                            color: isDelPending ? "#c47070" : C.textMuted,
+                            color: isDelPending ? C.red : C.textMuted,
                             cursor: "pointer",
                             fontSize: T.code.fontSize, padding: "0 2px", flexShrink: 0,
                             fontFamily: T.code.fontFamily, lineHeight: 1,
                           }}
-                          onMouseEnter={e => e.currentTarget.style.color = "#c47070"}
+                          onMouseEnter={e => e.currentTarget.style.color = C.red}
                           onMouseLeave={e => {
                             if (pendingDelete?.id !== g.id) e.currentTarget.style.color = C.textMuted;
                           }}
@@ -1100,12 +1100,12 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                 />
                 Allow recipient to edit
               </label>
-              {shareErr && <div style={{ fontSize: T.caption.fontSize, color: "#e07070" }}>{shareErr}</div>}
+              {shareErr && <div style={{ fontSize: T.caption.fontSize, color: C.red }}>{shareErr}</div>}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button
                   onClick={handleCreateShare}
                   disabled={shareBusy || !shareEmail.trim()}
-                  style={{ padding: "0.42rem 1rem", background: shareBusy || !shareEmail.trim() ? C.surface2 : C.blue, border: "none", borderRadius: 3, color: shareBusy || !shareEmail.trim() ? C.textMuted : "#fff", cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight: 700 }}
+                  style={{ padding: "0.42rem 1rem", background: shareBusy || !shareEmail.trim() ? C.surface2 : C.blue, border: "none", borderRadius: 3, color: shareBusy || !shareEmail.trim() ? C.textMuted : C.bg, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, fontWeight: 700 }}
                 >
                   {shareBusy ? "Creating share…" : "Create share link"}
                 </button>
@@ -1125,7 +1125,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                         onClick={() => handleRevokeShare(s.id)}
                         title="Revoke share"
                         style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: T.code.fontSize, padding: "0 2px" }}
-                        onMouseEnter={e => e.currentTarget.style.color = "#e07070"}
+                        onMouseEnter={e => e.currentTarget.style.color = C.red}
                         onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
                       >×</button>
                     </div>

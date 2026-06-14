@@ -20,7 +20,7 @@ import {
 // ─── SEVERITY PALETTE ─────────────────────────────────────────────────────────
 function makeSEV(C) {
   return {
-    critical: { color: "#e06c75", bg: C.surface,  border: "#e06c7530", icon: "●" },
+    critical: { color: C.red,     bg: C.surface,  border: `${C.red}40`,    icon: "●" },
     high:     { color: C.red,     bg: C.surface,  border: `${C.red}30`,    icon: "▲" },
     medium:   { color: C.yellow,  bg: C.surface,  border: `${C.yellow}30`, icon: "◆" },
     low:      { color: C.blue,    bg: C.surface,  border: `${C.blue}30`,   icon: "○" },

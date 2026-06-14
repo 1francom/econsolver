@@ -35,12 +35,12 @@ export default function ConditionsPanel({ conditions, results, names, onAdd, onP
           + condition
         </button>
         {names?.length > 0 && (
-          <span style={{ fontSize: T.caption.fontSize, color: C.textDim || "#888" }}>names: {names.join(", ")}</span>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textDim }}>names: {names.join(", ")}</span>
         )}
       </div>
 
       {conds.length === 0 && (
-        <div style={{ fontSize: T.caption.fontSize, color: C.textDim || "#888" }}>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textDim }}>
           e.g. <span style={{ color: C.text }}>f = g</span> w.r.t <span style={{ color: C.text }}>K</span>, or <span style={{ color: C.text }}>f' = g'</span> w.r.t <span style={{ color: C.text }}>X1, X2</span>
         </div>
       )}
@@ -69,7 +69,7 @@ export default function ConditionsPanel({ conditions, results, names, onAdd, onP
             {c.enabled !== false && res && (
               <div style={{ fontSize: T.code.fontSize, marginTop: 3, marginLeft: 22 }}>
                 {res.error ? (
-                  <span style={{ color: C.red || "#d08070" }}>{res.error}</span>
+                  <span style={{ color: C.red }}>{res.error}</span>
                 ) : (
                   <span style={{ color: C.textDim }}>
                     {res.results.map((r, i) => (

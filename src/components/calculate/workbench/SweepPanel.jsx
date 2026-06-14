@@ -79,7 +79,7 @@ export default function SweepPanel({ detectedSymbols, params, sweep, onChange })
 }
 
 function row(C, T) {
-  return { display: "flex", alignItems: "center", gap: 6, fontSize: T.caption.fontSize, color: C.textDim || "#888" };
+  return { display: "flex", alignItems: "center", gap: 6, fontSize: T.caption.fontSize, color: C.textDim };
 }
 function num(C, T) {
   return { width: 64, background: C.bg, color: C.text, border: `1px solid ${C.border2}`,

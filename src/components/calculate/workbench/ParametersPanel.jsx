@@ -15,7 +15,7 @@ export default function ParametersPanel({ detectedSymbols, params, choiceVars, o
 
   if (!detectedSymbols.length) {
     return (
-      <div style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textDim || "#888", padding: "8px 0" }}>
+      <div style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textDim, padding: "8px 0" }}>
         Parameters appear here once an equation has free symbols.
       </div>
     );

@@ -149,7 +149,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
     ctx.font = `10px ${T.code.fontFamily}`;
     for (const l of refLines) {
       if (!Number.isFinite(l.value)) continue;
-      const color = l.kind === "v" ? (C.blue || "#6e9ec8") : (C.gold || "#c8a96e");
+      const color = l.kind === "v" ? C.blue : C.gold;
       ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]);
       ctx.beginPath();
       if (l.kind === "v") {
@@ -174,7 +174,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
       ctx.lineWidth = 1.1;
       for (const c of family.curves) {
         const t = span > 0 ? (c.p - family.pMin) / span : 0.5;
-        ctx.strokeStyle = mixHex(C.teal || "#6ec8b4", C.gold || "#c8a96e", t);
+        ctx.strokeStyle = mixHex(C.teal, C.gold, t);
         ctx.globalAlpha = 0.55;
         ctx.beginPath();
         c.points.forEach((p, k) => { const X = sx(p.x), Y = sy(p.y); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
@@ -198,8 +198,8 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
         const ref = r.integral.numeric.ref;
         if (Number.isFinite(ref)) {
           const yb = sy(ref);
-          const green = (C.teal || "#6ec8b4") + "30";
-          const red = (C.red || "#c86e6e") + "30";
+          const green = `${C.teal}30`;
+          const red = `${C.red}30`;
           for (let k = 1; k < pts.length; k++) {
             const p0 = pts[k - 1], p1 = pts[k];
             const d0 = p0.y - ref, d1 = p1.y - ref;
@@ -217,10 +217,10 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
             }
           }
           // Reference baseline.
-          ctx.strokeStyle = C.gold || "#c8a96e"; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+          ctx.strokeStyle = C.gold; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
           ctx.beginPath(); ctx.moveTo(sx(pts[0].x), yb); ctx.lineTo(sx(pts[pts.length - 1].x), yb); ctx.stroke(); ctx.setLineDash([]);
         } else {
-          ctx.fillStyle = (C.gold || "#c8a96e") + "22";
+          ctx.fillStyle = `${C.gold}22`;
           ctx.beginPath(); ctx.moveTo(sx(pts[0].x), sy(0));
           for (const p of pts) ctx.lineTo(sx(p.x), sy(p.y));
           ctx.lineTo(sx(pts[pts.length - 1].x), sy(0)); ctx.closePath(); ctx.fill();
@@ -243,7 +243,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
 
       // Root markers (red circles).
       if (r.solveZero?.numeric?.roots?.length) {
-        ctx.strokeStyle = C.red || "#c86e6e"; ctx.lineWidth = 1.4;
+        ctx.strokeStyle = C.red; ctx.lineWidth = 1.4;
         for (const root of r.solveZero.numeric.roots) {
           ctx.beginPath(); ctx.arc(sx(root), sy(0), 4, 0, Math.PI * 2); ctx.stroke();
         }
@@ -252,7 +252,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
       // Optimum marker (filled red dot) for unconstrained optimize.
       const opt = r.optimize?.numeric;
       if (opt && opt.mode === "unconstrained" && opt.interior !== false && Number.isFinite(opt.x) && Number.isFinite(opt.value)) {
-        ctx.fillStyle = eq.optColor || C.red || "#c86e6e";
+        ctx.fillStyle = eq.optColor || C.red;
         ctx.beginPath(); ctx.arc(sx(opt.x), sy(opt.value), 4.5, 0, Math.PI * 2); ctx.fill();
       }
     });
@@ -262,7 +262,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
     // conditions render a labeled vertical tick at x*. Multi-var systems carry no
     // marker (readout only).
     if (Array.isArray(conditions) && conditions.length) {
-      const blue = C.blue || "#6e9ec8";
+      const blue = C.blue;
       ctx.font = `10px ${T.code.fontFamily}`;
       for (const cond of conditions) {
         if (cond.error || !cond.markKind || !cond.points?.length) continue;
@@ -292,7 +292,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
       for (const c of family.curves) {
         if (seen.has(c.p)) continue;
         const t = span > 0 ? (c.p - family.pMin) / span : 0.5;
-        seen.set(c.p, mixHex(C.teal || "#6ec8b4", C.gold || "#c8a96e", t));
+        seen.set(c.p, mixHex(C.teal, C.gold, t));
       }
       const entries = [...seen.entries()].sort((a, b) => a[0] - b[0]);
       ctx.font = `10px ${T.code.fontFamily}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
@@ -300,7 +300,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
       for (const [p, color] of entries) {
         ctx.strokeStyle = color; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(pad.l + 6, ly); ctx.lineTo(pad.l + 22, ly); ctx.stroke();
-        ctx.fillStyle = C.textDim || "#888";
+        ctx.fillStyle = C.textDim;
         ctx.fillText(`${family.param} = ${p.toFixed(dec)}`, pad.l + 27, ly);
         ly += 14;
       }
@@ -342,7 +342,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
   return (
     <div ref={wrapRef} style={{ width: "100%", fontFamily: T.code.fontFamily, position: "relative" }}>
       {!hasObjective && (
-        <div style={{ fontSize: T.code.fontSize, color: C.textDim || "#888", padding: "6px 0" }}>
+        <div style={{ fontSize: T.code.fontSize, color: C.textDim, padding: "6px 0" }}>
           Add an objective equation with an axis to plot.
         </div>
       )}

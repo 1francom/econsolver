@@ -73,7 +73,7 @@ export default function ResultsPanel({ session, equations, results, backend, esc
         )}
         {canEscalate && (
           <button onClick={onEscalate} disabled={escalating}
-            style={{ fontSize: T.caption.fontSize, background: "transparent", color: escalating ? (C.textDim || "#888") : C.blue,
+            style={{ fontSize: T.caption.fontSize, background: "transparent", color: escalating ? C.textDim : C.blue,
               border: `1px solid ${C.blue}`, borderRadius: 3, padding: "2px 7px", cursor: escalating ? "default" : "pointer",
               letterSpacing: "0.08em", textTransform: "uppercase" }}>
             {escalating ? "loading exact solver…" : "Solve exactly (SymPy)"}
@@ -81,7 +81,7 @@ export default function ResultsPanel({ session, equations, results, backend, esc
         )}
         {hasInterpretable && (
           <button onClick={runInterpret} disabled={aiLoading}
-            style={{ fontSize: T.caption.fontSize, marginLeft: "auto", background: "transparent", color: aiLoading ? (C.textDim || "#888") : C.gold,
+            style={{ fontSize: T.caption.fontSize, marginLeft: "auto", background: "transparent", color: aiLoading ? C.textDim : C.gold,
               border: `1px solid ${C.gold}`, borderRadius: 3, padding: "2px 7px", cursor: aiLoading ? "default" : "pointer",
               letterSpacing: "0.08em", textTransform: "uppercase" }}>
             {aiLoading ? "interpreting…" : "Interpret (AI)"}
@@ -89,10 +89,10 @@ export default function ResultsPanel({ session, equations, results, backend, esc
         )}
       </div>
       {escalateError && (
-        <div style={{ fontSize: T.caption.fontSize, color: C.red || "#c86e6e", marginBottom: 8 }}>Exact solver: {escalateError}</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.red, marginBottom: 8 }}>Exact solver: {escalateError}</div>
       )}
       {aiError && (
-        <div style={{ fontSize: T.caption.fontSize, color: C.red || "#c86e6e", marginBottom: 8 }}>{aiError}</div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.red, marginBottom: 8 }}>{aiError}</div>
       )}
       {aiNarrative && (
         <div style={{ fontSize: T.code.fontSize, lineHeight: 1.5, color: C.text, background: C.surface2,
@@ -148,7 +148,7 @@ export default function ResultsPanel({ session, equations, results, backend, esc
 function NumericReadout({ op, numeric, C }) {
   const { T } = useTheme();
   if (!numeric) return null;
-  const dim = C.textDim || "#888";
+  const dim = C.textDim;
   const fmt = (x) => (Number.isFinite(x) ? x.toFixed(4) : "—");
   if (op === "integral") {
     if (Number.isFinite(numeric.ref)) {
@@ -156,7 +156,7 @@ function NumericReadout({ op, numeric, C }) {
         <span style={{ fontSize: T.code.fontSize, color: dim }}>
           ∫ over [{numeric.a}, {numeric.b}] vs y={numeric.ref}: net = <b style={{ color: C.text }}>{fmt(numeric.value)}</b>
           {" · "}<span style={{ color: C.teal }}>gain {fmt(numeric.gain)}</span>
-          {" · "}<span style={{ color: C.red || "#c86e6e" }}>loss {fmt(numeric.loss)}</span>
+          {" · "}<span style={{ color: C.red }}>loss {fmt(numeric.loss)}</span>
         </span>
       );
     }
@@ -181,7 +181,7 @@ function NumericReadout({ op, numeric, C }) {
       return <span style={{ fontSize: T.code.fontSize, color: dim }}>x* = <b style={{ color: C.text }}>{fmt(numeric.x)}</b>, f(x*) = <b style={{ color: C.text }}>{fmt(numeric.value)}</b> ({numeric.kind})</span>;
     }
     // constrained
-    if (numeric.error) return <span style={{ fontSize: T.code.fontSize, color: C.red || "#c86e6e" }}>{numeric.error}</span>;
+    if (numeric.error) return <span style={{ fontSize: T.code.fontSize, color: C.red }}>{numeric.error}</span>;
     const choices = numeric.choices || {};
     const mults = numeric.multipliers || {};
     return (
