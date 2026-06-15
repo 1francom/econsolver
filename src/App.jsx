@@ -2808,16 +2808,21 @@ export default function App() {
     if (switchDs) studioRef.current?.switchToDataset(id);
   };
 
-  // Stable cleanedData for ModelingTab: prefer pipeline output, fall back to raw
-  // dataset so users can go straight to Model without visiting Clean first.
-  const modelCleanedData = useMemo(() => {
-    const out = tabOutput("model");
-    if (out) return out;
-    const rd = tabRawData("model");
-    if (!rd?.rows?.length) return null;
-    return { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0, _duckdb: rd._duckdb ?? null };
+  // Wrap a raw dataset in the cleanedData shape (empty pipeline = passthrough)
+  // so any module can use a freshly-selected dataset without a prior Clean run.
+  const rawToCleaned = (rd) => (rd?.rows?.length
+    ? { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0, _duckdb: rd._duckdb ?? null }
+    : null);
+
+  // Stable cleanedData per output tab: prefer pipeline output, fall back to the
+  // raw dataset so users can go straight to Explore/Model/Report without first
+  // visiting Clean (a no-step pipeline is just the raw data).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outputs, activeDatasetIds, activeDatasetId, availableDatasets]);
+  const modelCleanedData   = useMemo(() => tabOutput("model")   ?? rawToCleaned(tabRawData("model")),   [outputs, activeDatasetIds, activeDatasetId, availableDatasets]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const exploreCleanedData = useMemo(() => tabOutput("explore") ?? rawToCleaned(tabRawData("explore")), [outputs, activeDatasetIds, activeDatasetId, availableDatasets]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const reportCleanedData  = useMemo(() => tabOutput("report")  ?? rawToCleaned(tabRawData("report")),  [outputs, activeDatasetIds, activeDatasetId, availableDatasets]);
 
   // ── Pipeline output — fired by DataStudio when user clicks "→ Analyze" ───
   const handleComplete = r => {
@@ -2929,7 +2934,7 @@ export default function App() {
               <WorkspaceBar
                 activeTab={activeTab}
                 onTabChange={navigateToTab}
-                hasOutput={!!tabOutput(activeTab)}
+                hasOutput={!!(tabOutput(activeTab) || tabRawData(activeTab)?.rows?.length)}
                 activeDatasetId={tabDsId(activeTab)}
                 pid={pid}
                 onSelectDataset={id => selectDataset(activeTab, id, activeTab === "clean")}
@@ -3004,11 +3009,11 @@ export default function App() {
 
                 {/* EXPLORE */}
                 <div style={{...tabPanel, display: activeTab==="explore" ? "flex" : "none", flexDirection:"column"}}>
-                  {tabOutput("explore")
+                  {exploreCleanedData
                     ? <ExplorerModule
                         key={tabDsId("explore")}
                         pid={tabDsId("explore")}
-                        cleanedData={tabOutput("explore")}
+                        cleanedData={exploreCleanedData}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
                         onSaveDataset={(name, rows, headers, recipe = null) => {
@@ -3089,8 +3094,8 @@ export default function App() {
 
                 {/* REPORT — Phase 9.10 */}
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
-                  {tabOutput("report")
-                    ? <ReportingModule result={activeResult} cleanedData={tabOutput("report")} availableDatasets={availableDatasets} pinnedModels={modelingSession?.pinnedModels ?? []} pid={pid} />
+                  {reportCleanedData
+                    ? <ReportingModule result={activeResult} cleanedData={reportCleanedData} availableDatasets={availableDatasets} pinnedModels={modelingSession?.pinnedModels ?? []} pid={pid} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }
                 </div>
