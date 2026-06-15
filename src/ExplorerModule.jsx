@@ -13,9 +13,11 @@ import { pnorm } from "./math/calcEngine.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
+import { downloadPNG } from "./services/export/plotExporter.js";
 import { generateCleanScript } from "./pipeline/exporter.js";
 import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
+import { getExplorePins, saveExplorePins } from "./services/Persistence/plotHistory.js";
 import ExplorePinBar from "./components/explore/ExplorePinBar.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
@@ -1126,11 +1128,18 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
               {agg.charAt(0).toUpperCase()+agg.slice(1)} of {yCol} by {tCol}
               {grpCol ? ` · grouped by ${grpCol}` : ""}
             </span>
-            <button onClick={handleExport}
-              style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-            >↓ SVG</button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={handleExport}
+                style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+              >↓ SVG</button>
+              <button onClick={() => downloadPNG(document.getElementById(svgId), `trend_${yCol}_by_${tCol}`, "journal")}
+                style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+              >↓ PNG</button>
+            </div>
           </div>
           <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center" }}>
             <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
@@ -1839,6 +1848,22 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // Also stores a local pinnedItems entry for the ExplorePinBar comparison UI.
   const { appendLog } = useSessionLogOptional();
   const [pinnedItems, setPinnedItems] = useState([]);
+  // Persist pins across sessions (IndexedDB, keyed by dataset id like the
+  // PlotBuilder history). ExplorerModule remounts per dataset (key=id), so pid
+  // is stable for this instance; pinsLoaded guards against the initial empty
+  // state clobbering the stored pins before the load resolves.
+  const pinsLoaded = useRef(false);
+  useEffect(() => {
+    if (!pid) { pinsLoaded.current = true; return; }
+    let cancelled = false;
+    getExplorePins(pid)
+      .then(p => { if (!cancelled && Array.isArray(p) && p.length) setPinnedItems(p); })
+      .finally(() => { if (!cancelled) pinsLoaded.current = true; });
+    return () => { cancelled = true; };
+  }, [pid]);
+  useEffect(() => {
+    if (pid && pinsLoaded.current) saveExplorePins(pid, pinnedItems).catch(() => {});
+  }, [pid, pinnedItems]);
   const pinExplore = (params, label) => {
     appendLog({
       module: "explore", opType: "explore_stat",
