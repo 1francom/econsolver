@@ -69,7 +69,65 @@ function pearson(xs,ys){
   return(sx&&sy)?sxy/Math.sqrt(sx*sy):0;
 }
 
+// Aggregate rows into time-series points — SHARED by TimeSeriesTab and the pin
+// Compare so both render identical data. Returns [{ grp, pts:[{t,y}] }].
+function aggregateTimeSeries(rows, tCol, yCol, grpCol, agg) {
+  if (!tCol || !yCol || !rows?.length) return [];
+  const valid = rows.filter(r =>
+    typeof r[tCol] === "number" && isFinite(r[tCol]) &&
+    (agg === "count" || (typeof r[yCol] === "number" && isFinite(r[yCol])))
+  );
+  if (!valid.length) return [];
+  const groups = grpCol ? [...new Set(valid.map(r => String(r[grpCol] ?? "")))] : ["_all_"];
+  return groups.map(grp => {
+    const subset = grpCol ? valid.filter(r => String(r[grpCol] ?? "") === grp) : valid;
+    const byT = {};
+    subset.forEach(r => { const t = r[tCol]; (byT[t] = byT[t] || []).push(agg !== "count" ? r[yCol] : 1); });
+    const pts = Object.entries(byT).map(([t, vals]) => {
+      const tv = parseFloat(t);
+      let y;
+      if (agg === "mean")   y = vals.reduce((s, v) => s + v, 0) / vals.length;
+      if (agg === "sum")    y = vals.reduce((s, v) => s + v, 0);
+      if (agg === "count")  y = vals.length;
+      if (agg === "median") { const s = [...vals].sort((a, b) => a - b); y = s[Math.floor(s.length / 2)]; }
+      return { t: tv, y };
+    }).sort((a, b) => a.t - b.t);
+    return { grp, pts };
+  }).filter(s => s.pts.length > 0);
+}
+
 // ─── SVG CHARTS ───────────────────────────────────────────────────────────────
+// Compact time-series line chart — same COLORS palette as TimeSeriesTab so the
+// pin Compare preview matches the full chart's aesthetics.
+function SvgMiniTimeSeries({ series }) {
+  const { C, T } = useTheme();
+  const COLORS = [C.teal, C.orange, C.violet, C.green, C.red, C.blue, C.gold, C.purple];
+  if (!series?.length) return null;
+  const W = 480, H = 160, PAD = { l: 48, r: 16, t: 10, b: 28 };
+  const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
+  const allT = series.flatMap(s => s.pts.map(p => p.t));
+  const allY = series.flatMap(s => s.pts.map(p => p.y));
+  const tMin = arrMin(allT), tMax = arrMax(allT), yMin = arrMin(allY), yMax = arrMax(allY);
+  const yPad = (yMax - yMin) * 0.1 || 1, yLo = yMin - yPad, yHi = yMax + yPad;
+  const sx = t => PAD.l + ((t - tMin) / (tMax - tMin || 1)) * iW;
+  const sy = v => PAD.t + iH - ((v - yLo) / (yHi - yLo || 1)) * iH;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 600, display: "block", fontFamily: T.code.fontFamily }}>
+      <line x1={PAD.l} y1={PAD.t + iH} x2={PAD.l + iW} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+      {[yHi, yLo].map((v, i) => (
+        <text key={i} x={PAD.l - 4} y={sy(v) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
+          {Math.abs(v) >= 1000 ? v.toExponential(1) : v.toFixed(1)}
+        </text>
+      ))}
+      {series.map((s, si) => {
+        const col = COLORS[si % COLORS.length];
+        const d = s.pts.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.t).toFixed(1)},${sy(p.y).toFixed(1)}`).join(" ");
+        return <path key={s.grp} d={d} fill="none" stroke={col} strokeWidth={2} opacity={0.9} />;
+      })}
+    </svg>
+  );
+}
+
 function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
   const{C,T}=useTheme();color=color??C.gold;
   const W=480,H=160,PAD={l:44,r:16,t:8,b:36};
@@ -559,8 +617,8 @@ function DistributionTab({rows,headers,info,panel,onPin}){
         {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
         {onPin&&<div style={{padding:"0 6px",background:C.surface}}>
           <PinBtn onClick={()=>{
-            if(sub==="hist") onPin({kind:"histogram",col:histCol,bins:nBins,transform:transform==="none"?null:transform},`Histogram: ${histCol} (${nBins} bins${transform!=="none"?", "+transform:""})`);
-            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder},`Bar chart: ${catCol} (order: ${catOrder})`);
+            if(sub==="hist") onPin({kind:"histogram",col:histCol,bins:nBins,transform:transform==="none"?null:transform,color:barColor,fillMode},`Histogram: ${histCol} (${nBins} bins${transform!=="none"?", "+transform:""})`);
+            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder,color:barColor,fillMode},`Bar chart: ${catCol} (order: ${catOrder})`);
             else onPin({kind:"spaghetti",col:spagCol,entityCol:panel?.entityCol,timeCol:panel?.timeCol},`Spaghetti: ${spagCol} by ${panel?.entityCol} over ${panel?.timeCol}`);
           }}/>
         </div>}
@@ -905,45 +963,10 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const adfRes   = useMemo(() => flatY.length > 8 ? adfTest(flatY, 2)          : [], [flatY]);
 
   // ── Aggregate ───────────────────────────────────────────────────────────────
-  const series = useMemo(() => {
-    if (!tCol || !yCol || !rows.length) return [];
-    const valid = rows.filter(r =>
-      typeof r[tCol] === "number" && isFinite(r[tCol]) &&
-      (agg === "count" || (typeof r[yCol] === "number" && isFinite(r[yCol])))
-    );
-    if (!valid.length) return [];
-
-    const groups = grpCol
-      ? [...new Set(valid.map(r => String(r[grpCol] ?? "")))]
-      : ["_all_"];
-
-    return groups.map(grp => {
-      const subset = grpCol ? valid.filter(r => String(r[grpCol] ?? "") === grp) : valid;
-
-      // group by time value
-      const byT = {};
-      subset.forEach(r => {
-        const t = r[tCol];
-        if (!byT[t]) byT[t] = [];
-        if (agg !== "count") byT[t].push(r[yCol]);
-        else byT[t].push(1);
-      });
-
-      const pts = Object.entries(byT)
-        .map(([t, vals]) => {
-          const tv = parseFloat(t);
-          let y;
-          if (agg === "mean")   y = vals.reduce((s, v) => s + v, 0) / vals.length;
-          if (agg === "sum")    y = vals.reduce((s, v) => s + v, 0);
-          if (agg === "count")  y = vals.length;
-          if (agg === "median") { const s = [...vals].sort((a,b)=>a-b); y = s[Math.floor(s.length/2)]; }
-          return { t: tv, y };
-        })
-        .sort((a, b) => a.t - b.t);
-
-      return { grp, pts };
-    }).filter(s => s.pts.length > 0);
-  }, [rows, tCol, yCol, grpCol, agg]);
+  const series = useMemo(
+    () => aggregateTimeSeries(rows, tCol, yCol, grpCol, agg),
+    [rows, tCol, yCol, grpCol, agg]
+  );
 
   // ── SVG ─────────────────────────────────────────────────────────────────────
   const W = 620, H = 300;
@@ -1822,16 +1845,24 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     const p = item?.params || {};
     if (item?.kind === "histogram") {
       let vals = filteredRows.map(r => Number(r[p.col])).filter(Number.isFinite);
-      if (p.transform === "log")  vals = vals.filter(v => v > 0).map(Math.log);
-      else if (p.transform === "sqrt") vals = vals.filter(v => v >= 0).map(Math.sqrt);
-      return <SvgHistogram data={vals} nBins={Number(p.bins) || 20} />;
+      if (p.transform === "log")        vals = vals.filter(v => v > 0).map(Math.log);
+      else if (p.transform === "log10") vals = vals.filter(v => v > 0).map(Math.log10);
+      else if (p.transform === "sqrt")  vals = vals.filter(v => v >= 0).map(Math.sqrt);
+      // Use the color + fill style the user picked when pinning (aesthetic parity).
+      return <SvgHistogram data={vals} color={p.color} nBins={Number(p.bins) || 20} fillMode={p.fillMode ?? "filled"} />;
     }
     if (item?.kind === "barchart") {
       const counts = {};
       filteredRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
       let bars = Object.entries(counts).map(([label, count]) => ({ label, count }));
       if (p.order === "count") bars.sort((a, b) => b.count - a.count);
-      return <SvgBarChart items={bars.slice(0, 15)} />;
+      return <SvgBarChart items={bars.slice(0, 15)} color={p.color} fillMode={p.fillMode ?? "filled"} />;
+    }
+    if (item?.kind === "spaghetti") {
+      return <SvgSpaghetti rows={filteredRows} entityCol={p.entityCol} timeCol={p.timeCol} col={p.col} sampleN={15} />;
+    }
+    if (item?.kind === "timeseries") {
+      return <SvgMiniTimeSeries series={aggregateTimeSeries(filteredRows, p.timeCol, p.yCol, p.groupCol || "", p.agg || "mean")} />;
     }
     if (item?.kind === "correlation") {
       return <CorrHeatmap headers={p.cols ?? []} rows={filteredRows} info={info} />;
