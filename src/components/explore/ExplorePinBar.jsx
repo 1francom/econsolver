@@ -93,36 +93,38 @@ function TableCompare({ items, info }) {
   );
 }
 
-// ── Plot compare: params summary side by side ─────────────────────────────────
-function PlotCompare({ items }) {
+// ── Plot compare: render the actual charts side by side (params as fallback) ──
+function PlotCompare({ items, renderPlot }) {
   const { C, T } = useTheme();
   return (
     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-      {items.map(it => (
-        <div key={it.id} style={{
-          flex: "1 1 220px",
-          background: C.surface,
-          border: `1px solid ${C.border}`,
-          borderLeft: `3px solid ${C.teal}`,
-          borderRadius: 4,
-          padding: "8px 12px",
-        }}>
-          <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal, marginBottom: 3 }}>
-            {KIND_ICON[it.kind] ?? "⬡"} {KIND_LABEL[it.kind] ?? it.kind}
+      {items.map(it => {
+        const chart = renderPlot ? renderPlot(it) : null;
+        return (
+          <div key={it.id} style={{
+            flex: "1 1 320px",
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            borderLeft: `3px solid ${C.teal}`,
+            borderRadius: 4,
+            padding: "8px 12px",
+          }}>
+            <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, marginBottom: 6 }}>
+              {KIND_ICON[it.kind] ?? "⬡"} {it.label}
+            </div>
+            {chart
+              ? <div>{chart}</div>
+              : Object.entries(it.params)
+                  .filter(([k]) => k !== "kind")
+                  .map(([k, v]) => (
+                    <div key={k} style={{ fontFamily: T.code.fontFamily, fontSize: "10px", color: C.textMuted }}>
+                      <span style={{ color: C.textDim }}>{k}:</span>{" "}
+                      {Array.isArray(v) ? v.join(", ") : String(v ?? "—")}
+                    </div>
+                  ))}
           </div>
-          <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, marginBottom: 6 }}>
-            {it.label}
-          </div>
-          {Object.entries(it.params)
-            .filter(([k]) => k !== "kind")
-            .map(([k, v]) => (
-              <div key={k} style={{ fontFamily: T.code.fontFamily, fontSize: "10px", color: C.textMuted }}>
-                <span style={{ color: C.textDim }}>{k}:</span>{" "}
-                {Array.isArray(v) ? v.join(", ") : String(v ?? "—")}
-              </div>
-            ))}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -221,16 +223,32 @@ function PinRow({ label, items, selected, onToggle, onRemove, canCompare, onComp
   );
 }
 
+// Which pinned kinds belong to which Explore subtab — the bar shows only the
+// pins for the subtab you are on (Distributions ⇒ histograms, Summary ⇒ tables,
+// Time Series ⇒ time series), mirroring the per-tab PlotBuilder history.
+const SUBTAB_KINDS = {
+  summary:    ["summary", "overdispersion", "head", "tail"],
+  visuals:    ["histogram", "barchart", "spaghetti"],
+  timeseries: ["timeseries", "acf_pacf", "adf"],
+  corr:       ["correlation"],
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
-export default function ExplorePinBar({ items, info, onRemove }) {
+export default function ExplorePinBar({ items, info, subtab, renderPlot, onRemove }) {
   const { C, T } = useTheme();
   const [selected, setSelected]         = useState([]);
   const [compareKind, setCompareKind]   = useState(null); // "plots" | "tables" | null
 
-  const plots  = items.filter(it => PLOT_KINDS.includes(it.kind));
-  const tables = items.filter(it => TABLE_KINDS.includes(it.kind));
+  // The Plot Builder subtab has its own history bar — don't double up.
+  if (subtab === "plot") return null;
+  // Show only the pins relevant to the active subtab.
+  const scopeKinds = SUBTAB_KINDS[subtab] ?? null;
+  const scoped = scopeKinds ? items.filter(it => scopeKinds.includes(it.kind)) : items;
 
-  if (!items.length) return null;
+  const plots  = scoped.filter(it => PLOT_KINDS.includes(it.kind));
+  const tables = scoped.filter(it => TABLE_KINDS.includes(it.kind));
+
+  if (!scoped.length) return null;
 
   const toggleSelect = (id) => {
     setSelected(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -277,7 +295,7 @@ export default function ExplorePinBar({ items, info, onRemove }) {
           </div>
           {compareKind === "tables"
             ? <TableCompare items={compareItems} info={info} />
-            : <PlotCompare  items={compareItems} />
+            : <PlotCompare  items={compareItems} renderPlot={renderPlot} />
           }
         </div>
       )}

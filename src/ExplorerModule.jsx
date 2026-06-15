@@ -1815,6 +1815,30 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   };
   const removePin = (id) => setPinnedItems(prev => prev.filter(p => p.id !== id));
 
+  // Re-render a pinned descriptive plot from its params + the current rows, so the
+  // ExplorePinBar "Compare" panel shows the actual charts side by side (not just
+  // params). Returns null for kinds without a chart (the bar falls back to text).
+  const renderPinnedPlot = (item) => {
+    const p = item?.params || {};
+    if (item?.kind === "histogram") {
+      let vals = filteredRows.map(r => Number(r[p.col])).filter(Number.isFinite);
+      if (p.transform === "log")  vals = vals.filter(v => v > 0).map(Math.log);
+      else if (p.transform === "sqrt") vals = vals.filter(v => v >= 0).map(Math.sqrt);
+      return <SvgHistogram data={vals} nBins={Number(p.bins) || 20} />;
+    }
+    if (item?.kind === "barchart") {
+      const counts = {};
+      filteredRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
+      let bars = Object.entries(counts).map(([label, count]) => ({ label, count }));
+      if (p.order === "count") bars.sort((a, b) => b.count - a.count);
+      return <SvgBarChart items={bars.slice(0, 15)} />;
+    }
+    if (item?.kind === "correlation") {
+      return <CorrHeatmap headers={p.cols ?? []} rows={filteredRows} info={info} />;
+    }
+    return null;
+  };
+
   function downloadExploreScript(language) {
     const ext    = { r: "R", stata: "do", python: "py" }[language];
     const base   = (filename || "dataset").replace(/\.[^.]+$/, "");
@@ -1962,7 +1986,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
         {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} datasetName={filename} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
-      <ExplorePinBar items={pinnedItems} info={info} onRemove={removePin} />
+      <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
     </div>
   );
 }
