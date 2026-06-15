@@ -1021,6 +1021,23 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         });
         modelSc = modelsToReplicate().map(renderModel).filter(Boolean).join("\n\n");
       }
+      // ── Spatial analyze ops ──────────────────────────────────────────────
+      // Execution mode inlines spatial ops in order. The module/multi-dataset
+      // modes are pipeline-only and would otherwise drop them, so append a
+      // Spatial section translating the logged ops (st_join/buffer/grid/…).
+      if (structureMode !== "execution") {
+        const spatialCode = timeline
+          .filter(ev => ev?.module === "spatial" && ev.opType !== "geocode")
+          .map(ev => {
+            const c = transpileSpatialOp(ev.opType, ev.params, lang, dsMap);
+            return c ? `${comment} ${ev.label ?? ev.opType}\n${c}` : null;
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        if (spatialCode) {
+          cleanSc += `\n\n${comment} ── Spatial operations ───────────────────────────────\n${spatialCode}`;
+        }
+      }
       const dict = cleanedData?.dataDictionary ?? null;
       const structureInstruction =
         structureMode === "custom" && customInstruction.trim()
