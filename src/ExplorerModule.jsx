@@ -111,14 +111,25 @@ function SvgMiniTimeSeries({ series }) {
   const yPad = (yMax - yMin) * 0.1 || 1, yLo = yMin - yPad, yHi = yMax + yPad;
   const sx = t => PAD.l + ((t - tMin) / (tMax - tMin || 1)) * iW;
   const sy = v => PAD.t + iH - ((v - yLo) / (yHi - yLo || 1)) * iH;
+  const fmt = (v) => Math.abs(v) >= 1000 ? v.toExponential(1) : Number.isInteger(v) ? String(v) : v.toFixed(1);
+  const yTicks = [yLo, (yLo + yHi) / 2, yHi];
+  const xTicks = [tMin, (tMin + tMax) / 2, tMax];
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 600, display: "block", fontFamily: T.code.fontFamily }}>
-      <line x1={PAD.l} y1={PAD.t + iH} x2={PAD.l + iW} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
-      {[yHi, yLo].map((v, i) => (
-        <text key={i} x={PAD.l - 4} y={sy(v) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
-          {Math.abs(v) >= 1000 ? v.toExponential(1) : v.toFixed(1)}
-        </text>
+      {/* y axis + grid + ticks */}
+      <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+      {yTicks.map((v, i) => (
+        <g key={`y${i}`}>
+          <line x1={PAD.l} x2={PAD.l + iW} y1={sy(v)} y2={sy(v)} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+          <text x={PAD.l - 5} y={sy(v) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{fmt(v)}</text>
+        </g>
       ))}
+      {/* x axis + ticks */}
+      <line x1={PAD.l} y1={PAD.t + iH} x2={PAD.l + iW} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+      {xTicks.map((t, i) => (
+        <text key={`x${i}`} x={sx(t)} y={PAD.t + iH + 14} textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{fmt(t)}</text>
+      ))}
+      {/* series */}
       {series.map((s, si) => {
         const col = COLORS[si % COLORS.length];
         const d = s.pts.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.t).toFixed(1)},${sy(p.y).toFixed(1)}`).join(" ");

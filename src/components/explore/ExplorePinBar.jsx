@@ -4,11 +4,14 @@
 // Bottom row: pinned summary tables
 // Compare button (2+ same-kind selected) → side-by-side panel above the bar.
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
+import { downloadGridPNG } from "../../services/export/plotExporter.js";
 
 const KIND_ICON = {
   summary:       "⊞",
+  head:          "⊟",
+  tail:          "⊟",
   histogram:     "⬡",
   barchart:      "⬡",
   spaghetti:     "⬡",
@@ -18,6 +21,8 @@ const KIND_ICON = {
 };
 const KIND_LABEL = {
   summary:       "Table",
+  head:          "head",
+  tail:          "tail",
   histogram:     "Hist",
   barchart:      "Bar",
   spaghetti:     "Spaghetti",
@@ -27,7 +32,7 @@ const KIND_LABEL = {
 };
 
 const PLOT_KINDS  = ["histogram","barchart","spaghetti","timeseries","correlation","overdispersion"];
-const TABLE_KINDS = ["summary"];
+const TABLE_KINDS = ["summary","head","tail"];
 
 // ── Comparison panel for summary stats ────────────────────────────────────────
 function TableCompare({ items, info }) {
@@ -238,6 +243,7 @@ export default function ExplorePinBar({ items, info, subtab, renderPlot, onRemov
   const { C, T } = useTheme();
   const [selected, setSelected]         = useState([]);
   const [compareKind, setCompareKind]   = useState(null); // "plots" | "tables" | null
+  const compareRef = useRef(null);
 
   // The Plot Builder subtab has its own history bar — don't double up.
   if (subtab === "plot") return null;
@@ -291,11 +297,26 @@ export default function ExplorePinBar({ items, info, subtab, renderPlot, onRemov
             <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.15em", textTransform: "uppercase" }}>
               {compareKind === "tables" ? "Table compare" : "Plot compare"}
             </span>
-            <button onClick={() => setCompareKind(null)} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>✕ close</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {/* PNG export — plots only (tables don't rasterise cleanly). Grid
+                  layout adapts to the count (3 → 2 over 1, 4 → 2×2, …). */}
+              {compareKind === "plots" && (
+                <button
+                  onClick={() => downloadGridPNG(
+                    Array.from(compareRef.current?.querySelectorAll("svg") ?? []),
+                    `explore_compare_${subtab ?? "plots"}`,
+                  )}
+                  style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 8px" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+                >↓ PNG</button>
+              )}
+              <button onClick={() => setCompareKind(null)} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>✕ close</button>
+            </div>
           </div>
           {compareKind === "tables"
             ? <TableCompare items={compareItems} info={info} />
-            : <PlotCompare  items={compareItems} renderPlot={renderPlot} />
+            : <div ref={compareRef}><PlotCompare items={compareItems} renderPlot={renderPlot} /></div>
           }
         </div>
       )}

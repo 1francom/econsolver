@@ -221,3 +221,63 @@ export async function downloadCombinedPNG(elA, elB, filename = "plot_combined", 
   a.download = filename + ".png";
   a.click();
 }
+
+// ─── DOWNLOAD GRID PNG (N plots in a 2-col grid) ──────────────────────────────
+/**
+ * Composite N SVG elements into a single PNG on a 2-column grid. Rows fill left
+ * to right; a final odd plot is centered (3 → 2 over 1, 4 → 2×2, 5 → 2/2/1, …).
+ * @param {(SVGElement|HTMLElement)[]} els
+ * @param {string} filename
+ * @param {{ cols?:number, gap?:number, scale?:number, preset?:string }} opts
+ */
+export async function downloadGridPNG(els, filename = "compare", { cols = 2, gap = 18, scale = 2, preset = "journal" } = {}) {
+  const svgs = (els || []).map(getSVGElement).filter(Boolean);
+  if (!svgs.length) return;
+
+  const prep = (svg) => {
+    const { width: rawW, height: rawH } = svg.getBoundingClientRect();
+    const w = rawW || 480, h = rawH || 200;
+    const clone = svg.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", String(w));
+    clone.setAttribute("height", String(h));
+    return { src: applyPreset(new XMLSerializer().serializeToString(clone), preset), w, h };
+  };
+  const loadImg = (src) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([src], { type: "image/svg+xml" }));
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("SVG load failed")); };
+    img.src = url;
+  });
+
+  const items = svgs.map(prep);
+  const imgs  = await Promise.all(items.map(it => loadImg(it.src)));
+  const cellW = Math.max(...items.map(i => i.w));
+  const cellH = Math.max(...items.map(i => i.h));
+  const rows  = Math.ceil(items.length / cols);
+  const totalW = cols * cellW + (cols + 1) * gap;
+  const totalH = rows * cellH + (rows + 1) * gap;
+
+  const canvas = document.createElement("canvas");
+  canvas.width  = totalW * scale;
+  canvas.height = totalH * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  ctx.fillStyle = PRESETS[preset]?.bg ?? "#ffffff";
+  ctx.fillRect(0, 0, totalW, totalH);
+
+  items.forEach((it, idx) => {
+    const r = Math.floor(idx / cols), c = idx % cols;
+    const inRow = (r === rows - 1) ? (items.length - r * cols) : cols;
+    const rowPad = (cols - inRow) * (cellW + gap) / 2;   // center a short last row
+    const x = gap + rowPad + c * (cellW + gap) + (cellW - it.w) / 2;
+    const y = gap + r * (cellH + gap) + (cellH - it.h) / 2;
+    ctx.drawImage(imgs[idx], x, y, it.w, it.h);
+  });
+
+  const a = document.createElement("a");
+  a.href     = canvas.toDataURL("image/png");
+  a.download = filename + ".png";
+  a.click();
+}
