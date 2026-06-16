@@ -3052,6 +3052,8 @@ export default function App() {
                         onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
                         onExtract={(colName, values) => studioRef.current?.addInjectColumnStep?.(colName, values)}
                         pid={pid}
+                        datasetId={tabDsId("model")}
+                        onSwitchDataset={(id) => selectDataset("model", id, true)}
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
