@@ -58,6 +58,23 @@ export function remove(id) {
   _persist();
 }
 
+// Rename a pinned model's label (used by ModelBufferBar inline rename).
+export function setLabel(id, label) {
+  _buf = _buf.map(r => r.id === id ? { ...r, label } : r);
+  _persist();
+}
+
+// Reorder the buffer to match `ids` (array of model ids); unknown ids dropped,
+// missing ids kept in their current relative order at the end.
+export function reorder(ids) {
+  const byId = new Map(_buf.map(r => [r.id, r]));
+  const next = [];
+  for (const id of ids) { if (byId.has(id)) { next.push(byId.get(id)); byId.delete(id); } }
+  for (const r of _buf) { if (byId.has(r.id)) next.push(r); }
+  _buf = next;
+  _persist();
+}
+
 export function get(id) {
   return _buf.find(r => r.id === id);
 }

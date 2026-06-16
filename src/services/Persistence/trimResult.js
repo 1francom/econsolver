@@ -10,13 +10,14 @@
 export function trimResult(r) {
   if (!r || typeof r !== "object") return null;
   const {
-    id, type, label, modelLabel, spec, yVar, xVars, zVars, wVars, varNames,
+    id, type, label, modelLabel, datasetId, spec, yVar, xVars, zVars, wVars, varNames,
     beta, se, pVals, tStats, testStats, R2, adjR2, n, df, Fstat, Fpval,
     att, attSE, attP, late, lateSE, lateP, seType, kernel, bandwidth, cutoff,
     runningVar, treatVar, postVar, entityCol, timeCol,
   } = r;
   return {
     id,
+    datasetId: datasetId ?? null,
     type,
     label: label ?? modelLabel,
     spec: spec ?? { yVar, xVars, zVars, wVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel },
