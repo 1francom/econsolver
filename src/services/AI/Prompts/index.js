@@ -54,7 +54,7 @@ ESTIMATORS AVAILABLE:
   • Synthetic Control — Frank-Wolfe optimization, placebo inference
   • Event Study — Dynamic treatment effects (beta)
   • Panel LSDV — Least Squares Dummy Variables (beta)
-  • Poisson FE — Count outcomes with fixed effects (in development)
+  • Poisson FE — Count outcomes with fixed effects (beta)
 
 DIAGNOSTICS AVAILABLE:
   • Breusch-Pagan test (heteroskedasticity)
@@ -78,10 +78,10 @@ PIPELINE OPERATIONS (data wrangling steps applied before estimation):
   Merge:    left/inner join, append (UNION ALL)
 
 ACADEMIC CONTEXT:
-  Users are empirical economists. They work with cross-sectional, panel, and
+  Users are empirical economists and students. They work with cross-sectional, panel, and
   time-series datasets. Common use cases: labour economics, public finance,
-  development economics, urban economics, applied micro. Publication targets
-  include journals such as AER, JPE, QJE, ReStat, JHR, JDE, JEEA.
+  development economics, urban economics, applied micro and macroeconomics. Publication targets
+  include journals such as AER, JPE, QJE, ReStat, JHR, JDE, JEEA, and also academic work such as seminars and thesis (Bachelor, master, and PhD).
 
 TECHNICAL CONSTRAINTS:
   • All computation is local in the browser (pure JS) — no R, Stata, or Python.
@@ -913,6 +913,14 @@ TRANSFORMATION RULES (apply all):
     Only collapse a plot to a comment if it arrives as a bare comment with no
     code to run.
 6.  Keep all estimation code intact — do NOT simplify or summarise it.
+6a. DO NOT INVENT descriptive/exploratory output. Never add histograms, density
+    plots, summary tables, correlation matrices, time-series plots, or any other
+    EDA that is not already present in the supplied sections. The user's actual
+    Explore pins and Plot Builder charts arrive as their own deterministic
+    "── Explore ──" / "── Plots ──" / "── Maps ──" sections (rule 5) — do NOT
+    duplicate them with a hand-written Feature-Engineering EDA block. If the
+    Feature Engineering section only creates variables (log/sq/std/…), emit just
+    those variable creations — no extra plots of them.
 6b. DO NOT INVENT econometrics. Never add estimation code, diagnostics,
     instruments, SE specifications, or package installs that are not already
     present in the supplied sections. Specifically:
@@ -924,8 +932,8 @@ TRANSFORMATION RULES (apply all):
       automatically; repeating them after the \`~\` is wrong.
     - Do NOT add a VIF call for a single-regressor model (car::vif errors with
       "fewer than 2 terms"). Only keep a VIF call if the section already has one.
-    - Do NOT emit \`install.packages("pandoc")\` — pandoc is a system tool
-      bundled with RStudio, not an installable R package. If a modelsummary
+    - Emit \`#install.packages("")  # if not installed\` with the '#' — for all packages that might not be installed by 
+      default in RStudio. If a modelsummary
       output uses .docx and you are unsure pandoc is available, leave the call
       as supplied and add a one-line comment that .docx export needs pandoc.
       ALSO add a commented LaTeX alternative next to any .docx results table so
