@@ -141,9 +141,11 @@ function SvgMiniTimeSeries({ series }) {
   );
 }
 
-function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
+function SvgHistogram({data,color,label="",title="",xLabel="",yLabel="",nBins=20,fillMode="filled"}){
   const{C,T}=useTheme();color=color??C.gold;
-  const W=480,H=160,PAD={l:44,r:16,t:8,b:36};
+  const W=480;
+  const titleH=title?20:0, xLabH=xLabel?16:0, yLabW=yLabel?14:0;
+  const H=160+titleH+xLabH, PAD={l:44+yLabW,r:16,t:8+titleH,b:36+xLabH};
   const iW=W-PAD.l-PAD.r,iH=H-PAD.t-PAD.b;
   if(!data.length)return null;
   const min=arrMin(data),max=arrMax(data);
@@ -154,9 +156,12 @@ function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
   const maxC=Math.max(...counts,1);
   const barW=iW/nBins;
   const yTicks=[0,0.25,0.5,0.75,1].map(f=>Math.round(f*maxC));
+  const bottomLabel=xLabel||label;
   return(
     <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily: T.code.fontFamily}}>
       <rect width={W} height={H} fill="transparent"/>
+      {title&&<text x={W/2} y={14} textAnchor="middle" fill={C.text} fontSize={T.code.fontSize} fontFamily={T.code.fontFamily} fontWeight={600}>{title}</text>}
+      {yLabel&&<text x={11} y={PAD.t+iH/2} textAnchor="middle" transform={`rotate(-90 11 ${PAD.t+iH/2})`} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{yLabel}</text>}
       {/* y grid + ticks */}
       {yTicks.map((t,i)=>{
         const y=PAD.t+iH-(t/maxC)*iH;
@@ -181,23 +186,25 @@ function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
           {Math.abs(v)>=1000?v.toExponential(1):v.toFixed(2)}
         </text>;
       })}
-      {label&&<text x={PAD.l+iW/2} y={H-2} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} textAnchor="middle">{label}</text>}
+      {bottomLabel&&<text x={PAD.l+iW/2} y={H-2} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} textAnchor="middle">{bottomLabel}</text>}
     </svg>
   );
 }
 
 // ─── CATEGORICAL BAR CHART ────────────────────────────────────────────────────
-function SvgBarChart({items,color,fillMode="filled"}){
+function SvgBarChart({items,color,fillMode="filled",title="",xLabel=""}){
   // items: [{label, count}] already sorted
   const{C,T}=useTheme();
   if(!items?.length)return null;
-  const W=480,barH=22,PAD={l:120,r:48,t:8,b:16};
+  const W=480,barH=22,titleH=title?20:0,xLabH=xLabel?16:0,PAD={l:120,r:48,t:8+titleH,b:16+xLabH};
   const H=PAD.t+items.length*barH+PAD.b;
   const maxV=Math.max(...items.map(d=>d.count),1);
   const iW=W-PAD.l-PAD.r;
   return(
     <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily: T.code.fontFamily}}>
       <rect width={W} height={H} fill="transparent"/>
+      {title&&<text x={W/2} y={14} textAnchor="middle" fill={C.text} fontSize={T.code.fontSize} fontFamily={T.code.fontFamily} fontWeight={600}>{title}</text>}
+      {xLabel&&<text x={PAD.l+iW/2} y={H-2} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{xLabel}</text>}
       {items.map((d,i)=>{
         const y=PAD.t+i*barH;
         const bw=Math.max(2,(d.count/maxV)*iW);
@@ -598,6 +605,9 @@ function DistributionTab({rows,headers,info,panel,onPin}){
   const [fillMode,setFillMode]=useState("filled");   // "filled" | "outline"
   const [transform,setTransform]=useState("none");   // "none" | "log" | "log10" | "sqrt"
   const [nBins,setNBins]=useState(20);
+  const [plotTitle,setPlotTitle]=useState("");       // custom labels (blank = auto)
+  const [xLab,setXLab]=useState("");
+  const [yLab,setYLab]=useState("");
   const [catOrder,setCatOrder]=useState("count");    // "count" | "alpha" | "rev"
   const hasPanel=panel?.entityCol&&panel?.timeCol;
   const histRef=useRef(null);
@@ -606,6 +616,20 @@ function DistributionTab({rows,headers,info,panel,onPin}){
     ...(catH.length?[["cat","Categorical"]]:[] ),
     ...(hasPanel?[["spaghetti","Spaghetti"]]:[] ),
   ];
+
+  // Shared labels (title / x / y) — blank fields fall back to auto labels.
+  const labInput=(ph,val,setter)=>(
+    <input value={val} onChange={e=>setter(e.target.value)} placeholder={ph}
+      style={{flex:1,minWidth:80,padding:"0.3rem 0.5rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,outline:"none"}}/>
+  );
+  const labelsRow=(
+    <div style={{display:"flex",gap:6,marginBottom:"0.7rem",alignItems:"center"}}>
+      <span style={{fontSize:T.caption.fontSize,color:C.textMuted,letterSpacing:"0.15em",textTransform:"uppercase",fontFamily:T.code.fontFamily}}>Labels</span>
+      {labInput("Title",plotTitle,setPlotTitle)}
+      {labInput("X axis",xLab,setXLab)}
+      {labInput("Y axis",yLab,setYLab)}
+    </div>
+  );
 
   // transform helper
   function applyTransform(v){
@@ -630,8 +654,9 @@ function DistributionTab({rows,headers,info,panel,onPin}){
         {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
         {onPin&&<div style={{padding:"0 6px",background:C.surface}}>
           <PinBtn onClick={()=>{
-            if(sub==="hist") onPin({kind:"histogram",col:histCol,bins:nBins,transform:transform==="none"?null:transform,color:barColor,fillMode},`Histogram: ${histCol} (${nBins} bins${transform!=="none"?", "+transform:""})`);
-            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder,color:barColor,fillMode},`Bar chart: ${catCol} (order: ${catOrder})`);
+            const labs={title:plotTitle||null,xLabel:xLab||null,yLabel:yLab||null};
+            if(sub==="hist") onPin({kind:"histogram",col:histCol,bins:nBins,transform:transform==="none"?null:transform,color:barColor,fillMode,...labs},`Histogram: ${histCol} (${nBins} bins${transform!=="none"?", "+transform:""})`);
+            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder,color:barColor,fillMode,...labs},`Bar chart: ${catCol} (order: ${catOrder})`);
             else onPin({kind:"spaghetti",col:spagCol,entityCol:panel?.entityCol,timeCol:panel?.timeCol},`Spaghetti: ${spagCol} by ${panel?.entityCol} over ${panel?.timeCol}`);
           }}/>
         </div>}
@@ -723,9 +748,10 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                     </div>
                   ))}
                 </div>
+                {labelsRow}
                 <div ref={histRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
                   <div style={{padding:"0.5rem"}}>
-                    <SvgHistogram data={vals} color={barColor} label={histLabel} nBins={nBins} fillMode={fillMode}/>
+                    <SvgHistogram data={vals} color={barColor} title={plotTitle} xLabel={xLab||histLabel} yLabel={yLab||"Count"} nBins={nBins} fillMode={fillMode}/>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6,padding:"0.3rem 0.65rem",borderTop:`1px solid ${C.border}`,background:C.bg}}>
                     <PlotExportBar getEl={()=>histRef.current?.querySelector("svg")} filename={`histogram_${histCol}`} style={{flex:1,padding:0,background:"transparent",border:"none"}}/>
@@ -797,7 +823,8 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                 <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:8}}>
                   {items.length} categories · n = {rows.filter(r=>r[catCol]!=null).length}
                 </div>
-                <SvgBarChart items={items} color={barColor} fillMode={fillMode}/>
+                {labelsRow}
+                <SvgBarChart items={items} color={barColor} fillMode={fillMode} title={plotTitle} xLabel={xLab||catCol}/>
               </div>
             );
           })()}
@@ -1885,14 +1912,14 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
       else if (p.transform === "log10") vals = vals.filter(v => v > 0).map(Math.log10);
       else if (p.transform === "sqrt")  vals = vals.filter(v => v >= 0).map(Math.sqrt);
       // Use the color + fill style the user picked when pinning (aesthetic parity).
-      return <SvgHistogram data={vals} color={p.color} nBins={Number(p.bins) || 20} fillMode={p.fillMode ?? "filled"} />;
+      return <SvgHistogram data={vals} color={p.color} nBins={Number(p.bins) || 20} fillMode={p.fillMode ?? "filled"} title={p.title ?? ""} xLabel={p.xLabel ?? p.col} yLabel={p.yLabel ?? "Count"} />;
     }
     if (item?.kind === "barchart") {
       const counts = {};
       filteredRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
       let bars = Object.entries(counts).map(([label, count]) => ({ label, count }));
       if (p.order === "count") bars.sort((a, b) => b.count - a.count);
-      return <SvgBarChart items={bars.slice(0, 15)} color={p.color} fillMode={p.fillMode ?? "filled"} />;
+      return <SvgBarChart items={bars.slice(0, 15)} color={p.color} fillMode={p.fillMode ?? "filled"} title={p.title ?? ""} xLabel={p.xLabel ?? p.col} />;
     }
     if (item?.kind === "spaghetti") {
       return <SvgSpaghetti rows={filteredRows} entityCol={p.entityCol} timeCol={p.timeCol} col={p.col} sampleN={15} />;

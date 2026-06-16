@@ -13,6 +13,15 @@
 const rStr  = (s) => `"${String(s ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const pyStr = rStr;
 
+// ggplot labs(...) from optional pinned title/x/y labels (empty → omitted).
+function rLabs(p) {
+  const parts = [];
+  if (p.title)  parts.push(`title = ${rStr(p.title)}`);
+  if (p.xLabel) parts.push(`x = ${rStr(p.xLabel)}`);
+  if (p.yLabel) parts.push(`y = ${rStr(p.yLabel)}`);
+  return parts.length ? ` +\n  ggplot2::labs(${parts.join(", ")})` : "";
+}
+
 // ─── R ────────────────────────────────────────────────────────────────────────
 function rExplore(p, df) {
   const cols = (p.columns ?? p.cols ?? []).map(rStr).join(", ");
@@ -26,11 +35,11 @@ function rExplore(p, df) {
       return `${p.kind}(${df}, ${Number(p.n) || 10})`;
     case "histogram": {
       const x = p.transform === "log" ? `log(${p.col})` : p.transform === "sqrt" ? `sqrt(${p.col})` : p.col;
-      return `ggplot2::ggplot(${df}, ggplot2::aes(x = ${x})) +\n  ggplot2::geom_histogram(bins = ${Number(p.bins) || 30})`;
+      return `ggplot2::ggplot(${df}, ggplot2::aes(x = ${x})) +\n  ggplot2::geom_histogram(bins = ${Number(p.bins) || 30})${rLabs(p)}`;
     }
     case "barchart": {
       const x = p.order === "count" ? `forcats::fct_infreq(${p.col})` : p.col;
-      return `ggplot2::ggplot(${df}, ggplot2::aes(x = ${x})) +\n  ggplot2::geom_bar()`;
+      return `ggplot2::ggplot(${df}, ggplot2::aes(x = ${x})) +\n  ggplot2::geom_bar()${rLabs(p)}`;
     }
     case "spaghetti":
       return `ggplot2::ggplot(${df}, ggplot2::aes(x = ${p.timeCol}, y = ${p.col}, group = ${p.entityCol})) +\n  ggplot2::geom_line(alpha = 0.3)`;
