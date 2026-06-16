@@ -154,6 +154,35 @@ function rSpatial(opType, p, datasets, srcV) {
         `  dplyr::summarise(${agg}, .groups = "drop")`,
       ].join("\n");
     }
+    case "grid_create_map": {
+      // Regenerate the grid IN-SCRIPT (st_make_grid over the boundary/points)
+      // instead of asking the user to export a CSV — the grid is a real saved
+      // dataset (id = gridDsId, WKT "geometry" col), so it resolves to its name.
+      const gridV = dfRef(datasets, p.gridDsId, "grid").v;
+      const cs    = rNum(p.cellSize);
+      const toWkt = (sfcExpr) =>
+        `${gridV} <- data.frame(grid_id = seq_along(${sfcExpr}),\n` +
+        `                       geometry = sf::st_as_text(sf::st_transform(${sfcExpr}, 4326)))`;
+      if (p.mode === "latlon" && p.latCol && p.lonCol) {
+        const sv = dfRef(datasets, p.sourceDatasetId, "ref").v;
+        return [
+          `# Build a ${cs} m grid over the bounding box of ${sv} points (EPSG:32721 -> 4326)`,
+          naFilterR(sv, p.lonCol, p.latCol),
+          `.pts   <- sf::st_transform(sf::st_as_sf(${sv}, coords = c("${p.lonCol}", "${p.latCol}"), crs = 4326), 32721)`,
+          `.cells <- sf::st_make_grid(.pts, cellsize = ${cs}, square = TRUE)`,
+          toWkt(".cells"),
+        ].join("\n");
+      }
+      const bnd  = dfRef(datasets, p.sourceDatasetId, "poly");
+      const clip = p.clipBorder !== false;
+      return [
+        `# Build a ${cs} m grid over ${bnd.v} and ${clip ? "clip to its boundary" : "cover its bounding box"} (EPSG:32721 -> 4326)`,
+        `.bnd   <- sf::st_transform(sf::st_union(sf::st_as_sf(${bnd.v}, wkt = "${p.boundaryCol}", crs = 4326)), 32721)`,
+        `.cells <- sf::st_make_grid(.bnd, cellsize = ${cs}, square = TRUE)`,
+        ...(clip ? [`.cells <- sf::st_intersection(.cells, .bnd)  # clip cells to the boundary`] : []),
+        toWkt(".cells"),
+      ].join("\n");
+    }
     default:
       return null;
   }
@@ -273,6 +302,41 @@ function pySpatial(opType, p, datasets, srcV) {
         `${srcV} = _joined.groupby("index_right")${agg}`,
       ].join("\n");
     }
+    case "grid_create_map": {
+      // Regenerate the grid IN-SCRIPT (box tiling over the boundary/points bbox)
+      // rather than depending on an exported CSV — output a WKT "geometry" column
+      // matching how the other grid ops read it (GeoSeries.from_wkt).
+      const gridV = dfRef(datasets, p.gridDsId, "grid").v;
+      const cs    = pyNum(p.cellSize);
+      const tile  = `_cells = [box(_x, _y, _x + ${cs}, _y + ${cs}) for _x in np.arange(_x0, _x1, ${cs}) for _y in np.arange(_y0, _y1, ${cs})]`;
+      const emit  = `${gridV} = pd.DataFrame({"grid_id": range(1, len(_grid) + 1), "geometry": _grid.to_wkt().values})`;
+      if (p.mode === "latlon" && p.latCol && p.lonCol) {
+        const sv = dfRef(datasets, p.sourceDatasetId, "ref").v;
+        return [
+          `# Build a ${cs} m grid over the bounding box of ${sv} points (EPSG:32721 -> 4326)`,
+          `import numpy as np; from shapely.geometry import box`,
+          naFilterPy(sv, p.lonCol, p.latCol),
+          `_pts = gpd.GeoSeries(gpd.points_from_xy(${sv}["${p.lonCol}"], ${sv}["${p.latCol}"]), crs=4326).to_crs(32721)`,
+          `_x0, _y0, _x1, _y1 = _pts.total_bounds`,
+          tile,
+          `_grid = gpd.GeoSeries(_cells, crs=32721).to_crs(4326)`,
+          emit,
+        ].join("\n");
+      }
+      const sv   = dfRef(datasets, p.sourceDatasetId, "poly").v;
+      const clip = p.clipBorder !== false;
+      return [
+        `# Build a ${cs} m grid over ${sv} and ${clip ? "clip to its boundary" : "cover its bounding box"} (EPSG:32721 -> 4326)`,
+        `import numpy as np; from shapely.geometry import box`,
+        `_bnd = gpd.GeoSeries.from_wkt(${sv}["${p.boundaryCol}"], crs=4326).to_crs(32721).unary_union`,
+        `_x0, _y0, _x1, _y1 = _bnd.bounds`,
+        tile,
+        `_grid = gpd.GeoSeries(_cells, crs=32721)`,
+        ...(clip ? [`_grid = _grid[_grid.intersects(_bnd)].intersection(_bnd)  # clip cells to the boundary`] : []),
+        `_grid = _grid.to_crs(4326)`,
+        emit,
+      ].join("\n");
+    }
     default:
       return null;
   }
@@ -281,6 +345,9 @@ function pySpatial(opType, p, datasets, srcV) {
 // Which referenced (non-point) dataset role an op carries, for the "provide this
 // layer" note when it resolves to a placeholder.
 function targetRefOf(opType, p, datasets) {
+  // grid_create_map's gridDsId is the op's OUTPUT (built in-script), not an input
+  // layer to load — emitting a "export this" note for it would be misleading.
+  if (opType === "grid_create_map") return null;
   const idRole =
     p.gridDsId ? { id: p.gridDsId, role: "grid" } :
     p.polyDsId ? { id: p.polyDsId, role: "poly" } :
@@ -312,7 +379,9 @@ export function transpileSpatialOp(opType, params = {}, language = "r", datasets
   // (rather than emitting a bare `df` or a raw-UUID variable a user can't act on).
   const cmt = "#";
   const notes = [];
-  if (src && src.known === false) {
+  // grid_create_map resolves its source via params.sourceDatasetId inside the
+  // case (not the lat/lon-matched `src`), so the points-bind note doesn't apply.
+  if (src && src.known === false && opType !== "grid_create_map") {
     notes.push(`${cmt} NOTE: bind '${srcV}' to the point dataset this op ran on (the geocoded/lat-lon table) before running.`);
   }
   const tgt = targetRefOf(opType, params, datasets);

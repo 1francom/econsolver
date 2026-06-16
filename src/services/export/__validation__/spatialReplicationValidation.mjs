@@ -32,6 +32,7 @@ const FIX = {
   metric_buffer_count: { latCol: "lat", lonCol: "lon", radius: 500, gridDsId: "GRID", wktCol: "geometry", outCol: "n_pts" },
   grid_assign_existing:{ latCol: "lat", lonCol: "lon", outCol: "cell", gridDsId: "GRID", wktCol: "geometry", gridIdCol: "grid_id", extraCols: ["zone"] },
   aggregate_to_grid:   { mode: "grid", gridDsId: "GRID", wktCol: "geometry", outCol: "mean_price", fn: "mean", valueCol: "price", latCol: "lat", lonCol: "lon" },
+  grid_create_map:     { mode: "generate", sourceDatasetId: "POLY", boundaryCol: "geometry", cellSize: 500, clipBorder: true, gridDsId: "GRID", gridName: "grid_500m", wktCol: "geometry", gridIdCol: "grid_id" },
 };
 
 console.log("── spatial op → R / Python coverage ──");
@@ -82,6 +83,21 @@ console.log("\n── points dataset + NA-coord guard ──");
   check("python: drops NA coords (dropna)", /dropna\(subset=/.test(py));
   const rNoSrc = transpileSpatialOp("aggregate_to_grid", FIX.aggregate_to_grid, "r", DATASETS, { v: "points_df", known: false });
   check("r: unknown points var gets a NOTE", /NOTE: bind 'points_df'/.test(rNoSrc));
+}
+
+console.log("\n── grid_create_map regenerates the grid in-script ──");
+{
+  const r = transpileSpatialOp("grid_create_map", FIX.grid_create_map, "r", DATASETS);
+  check("r: builds grid via st_make_grid over the boundary", /st_make_grid\(/.test(r) && /df_barrios/.test(r));
+  check("r: clips to boundary when clipBorder", /st_intersection\(/.test(r));
+  check("r: output binds to the grid's own name (grid_500m)", /grid_500m <- data\.frame\(grid_id/.test(r));
+  check("r: no 'export this' note (grid is built, not loaded)", !/export it from Litux/.test(r) && !/NOTE: bind/.test(r));
+  const rNoClip = transpileSpatialOp("grid_create_map", { ...FIX.grid_create_map, clipBorder: false }, "r", DATASETS);
+  check("r: skips clip when clipBorder=false", !/st_intersection\(/.test(rNoClip));
+  const rLatlon = transpileSpatialOp("grid_create_map", { mode: "latlon", sourceDatasetId: "REF", latCol: "lat", lonCol: "lon", cellSize: 250, gridDsId: "GRID", gridName: "grid_500m" }, "r", DATASETS);
+  check("r: latlon mode grids the points bbox", /st_make_grid\(\.pts/.test(rLatlon) && /df_hospitals/.test(rLatlon));
+  const py = transpileSpatialOp("grid_create_map", FIX.grid_create_map, "python", DATASETS);
+  check("python: tiles boxes + emits WKT geometry", /shapely\.geometry import box/.test(py) && /to_wkt\(\)/.test(py) && /df_barrios/.test(py));
 }
 
 console.log("\n── imports helper ──");
