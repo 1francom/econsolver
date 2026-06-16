@@ -2656,6 +2656,9 @@ export default function App() {
   // Coach → Clean dispatch: pre-loads the Clean-tab AI command bar with a column
   // + instruction and navigates there. Consumed once by NLCommandBar.
   const [assistantPrefill,   setAssistantPrefill]  = useState(null);
+  // Cross-dataset plot click: switch the Explore dataset, then hand the target
+  // plot id to the remounted ExplorerModule to open it (mirrors assistantPrefill).
+  const [pendingExplorePlot, setPendingExplorePlot] = useState(null); // { datasetId, plotId }
   const [feedbackOpen,       setFeedbackOpen]      = useState(false);
 
   const [availableDatasets,  setAvailableDatasets] = useState([]);
@@ -3028,6 +3031,10 @@ export default function App() {
                     ? <ExplorerModule
                         key={tabDsId("explore")}
                         pid={tabDsId("explore")}
+                        projectPid={pid}
+                        onRequestDataset={(dsId, plotId) => { setPendingExplorePlot({ datasetId: dsId, plotId }); selectDataset("explore", dsId, true); }}
+                        pendingPlot={pendingExplorePlot?.datasetId === tabDsId("explore") ? pendingExplorePlot : null}
+                        onConsumePendingPlot={() => setPendingExplorePlot(null)}
                         cleanedData={exploreCleanedData}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
