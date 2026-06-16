@@ -23,6 +23,7 @@ import { buildGgplot, buildMatplotlibPlot, buildStataPlot } from "./services/exp
 import { buildLeafletR, buildFoliumPy } from "./services/export/mapScript.js";
 import { transpileExploreStat } from "./services/export/exploreStatScript.js";
 import { getPlotHistory, getMapHistory } from "./services/Persistence/plotHistory.js";
+import { getArtifactOrder, saveArtifactOrder, makeArtifactId, orderArtifacts } from "./services/Persistence/artifactOrder.js";
 import { planExecutionOrder, detectInterleaving } from "./services/export/timelinePlan.js";
 import { loadProjectPipelines } from "./services/Persistence/indexedDB.js";
 import { generateRScript }     from "./services/export/rScript.js";
@@ -765,6 +766,8 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   const [structureMode,     setStructureMode]     = useState("module"); // "module" | "execution" | "custom"
   const [customInstruction, setCustomInstruction] = useState("");
   const [replicateMode,     setReplicateMode]     = useState("active"); // "active" | "all"
+  const [artOrder, setArtOrder] = useState([]);
+  const [artList,  setArtList]  = useState([]); // [{ artifactId, label, kind, savedAt }]
 
   const LANGS = [
     { id: "r",      label: "R" },
@@ -916,6 +919,36 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
     const activeKey = modelReplicationKey(result);
     return [result, ...pinnedModels.filter(model => modelReplicationKey(model) !== activeKey)].filter(Boolean);
   }
+
+  // Build the unified artifact list (plots + maps + models) and load the saved
+  // global order so the user can drag it into the order the script emits.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const hp = Array.from(new Set([pid, ...availableDatasets.map(d => d.id)].filter(Boolean)));
+      const plots = (await Promise.all(hp.map(p => getPlotHistory(p).catch(() => [])))).flat();
+      const maps  = (await Promise.all(hp.map(p => getMapHistory(p).catch(() => [])))).flat();
+      const seen = new Set();
+      const items = [];
+      for (const e of plots) { const k = makeArtifactId("plot", e.id); if (!seen.has(k)) { seen.add(k); items.push({ artifactId: k, label: e.name ?? "plot", kind: "plot", savedAt: e.savedAt ?? 0 }); } }
+      for (const e of maps)  { const k = makeArtifactId("map",  e.id); if (!seen.has(k)) { seen.add(k); items.push({ artifactId: k, label: e.name ?? "map",  kind: "map",  savedAt: e.savedAt ?? 0 }); } }
+      for (const m of [result, ...pinnedModels].filter(Boolean)) { const k = makeArtifactId("model", m.id); if (m.id != null && !seen.has(k)) { seen.add(k); items.push({ artifactId: k, label: m.label ?? m.type ?? "model", kind: "model", savedAt: 0 }); } }
+      const ord = await getArtifactOrder(pid).catch(() => []);
+      if (!cancelled) { setArtList(orderArtifacts(items, ord)); setArtOrder(ord); }
+    })();
+    return () => { cancelled = true; };
+  }, [pid, availableDatasets, result, pinnedModels]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const moveArt = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= artList.length) return;
+    const next = [...artList];
+    [next[i], next[j]] = [next[j], next[i]];
+    setArtList(next);
+    const ord = next.map(a => a.artifactId);
+    setArtOrder(ord);
+    if (pid) saveArtifactOrder(pid, ord).catch(() => {});
+  };
 
   async function generate() {
     setLoading(true);
@@ -1133,34 +1166,27 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         const savedPlots = dedupeHistory((await Promise.all(
           histPids.map(async p => (await getPlotHistory(p).catch(() => [])).map(e => ({ ...e, _srcId: p })))
         )).flat());
-        const plotCode = (Array.isArray(savedPlots) ? savedPlots : [])
-          .map(entry => {
-            const entryDf = idToVar(entry._srcId) ?? plotDfVar;
-            const code = lang === "python" ? buildMatplotlibPlot(entry, { dfVar: entryDf })
-                       : lang === "stata"  ? buildStataPlot(entry, { dataVar: entryDf })
-                       :                     buildGgplot(entry, { dfVar: entryDf });
-            return code ? `${comment} Plot: ${entry.name ?? "untitled"}\n${code}` : null;
-          })
-          .filter(Boolean)
-          .join("\n\n");
-        if (plotCode) {
-          visualSections += `\n\n${comment} ── Plots ────────────────────────────────────────────`
-            + `\n${comment} (model-derived plots referencing fitted/residual columns need the model run first)\n${plotCode}`;
-        }
-
         const savedMaps = dedupeHistory((await Promise.all(histPids.map(p => getMapHistory(p).catch(() => [])))).flat());
-        const mapCode = (Array.isArray(savedMaps) ? savedMaps : [])
-          .map(entry => {
-            let code;
-            if (lang === "python") code = buildFoliumPy(entry, { datasets: availableDatasets });
-            else if (lang === "stata") code = `${comment} Map "${entry.name ?? ""}" — Stata has no leaflet; reproduce in R (leaflet) or Python (folium)`;
-            else code = buildLeafletR(entry, { datasets: availableDatasets });
-            return code ? `${comment} Map: ${entry.name ?? "untitled"}\n${code}` : null;
-          })
-          .filter(Boolean)
-          .join("\n\n");
-        if (mapCode) {
-          visualSections += `\n\n${comment} ── Maps ─────────────────────────────────────────────\n${mapCode}`;
+        const order = await getArtifactOrder(pid).catch(() => []);
+        const plotArts = (savedPlots ?? []).map(e => ({ kind: "plot", artifactId: makeArtifactId("plot", e.id), savedAt: e.savedAt ?? 0, entry: e }));
+        const mapArts  = (savedMaps  ?? []).map(e => ({ kind: "map",  artifactId: makeArtifactId("map",  e.id), savedAt: e.savedAt ?? 0, entry: e }));
+        const visualArts = orderArtifacts([...plotArts, ...mapArts], order);
+        const orderedVisualCode = visualArts.map(a => {
+          if (a.kind === "plot") {
+            const entryDf = idToVar(a.entry._srcId ?? a.entry.datasetId) ?? plotDfVar;
+            const code = lang === "python" ? buildMatplotlibPlot(a.entry, { dfVar: entryDf })
+                       : lang === "stata"  ? buildStataPlot(a.entry, { dataVar: entryDf })
+                       :                     buildGgplot(a.entry, { dfVar: entryDf });
+            return code ? `${comment} Plot: ${a.entry.name ?? "untitled"}\n${code}` : null;
+          }
+          let code;
+          if (lang === "python") code = buildFoliumPy(a.entry, { datasets: availableDatasets });
+          else if (lang === "stata") code = `${comment} Map "${a.entry.name ?? ""}" — Stata has no leaflet; reproduce in R (leaflet) or Python (folium)`;
+          else code = buildLeafletR(a.entry, { datasets: availableDatasets });
+          return code ? `${comment} Map: ${a.entry.name ?? "untitled"}\n${code}` : null;
+        }).filter(Boolean).join("\n\n");
+        if (orderedVisualCode) {
+          visualSections += `\n\n${comment} ── Saved visuals (in your chosen order) ─────────────\n${orderedVisualCode}`;
         }
       } catch { /* histories are best-effort; never block script generation */ }
       const dict = cleanedData?.dataDictionary ?? null;
@@ -1327,6 +1353,26 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
               ))}
             </div>
           </div>
+
+          {artList.length > 0 && (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: "0.9rem" }}>
+              <div style={{ padding: "0.4rem 0.7rem", borderBottom: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+                Saved artifacts — script order
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {artList.map((a, i) => (
+                  <div key={a.artifactId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.28rem 0.7rem", borderBottom: i < artList.length - 1 ? `1px solid ${C.border}` : "none" }}>
+                    <span style={{ width: 44, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: a.kind === "model" ? C.gold : a.kind === "map" ? C.blue : C.teal }}>{a.kind}</span>
+                    <span style={{ flex: 1, minWidth: 0, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{a.label}</span>
+                    <button onClick={() => moveArt(i, -1)} disabled={i === 0} title="Move up"
+                      style={{ background: "none", border: "none", color: i === 0 ? C.border : C.textMuted, cursor: i === 0 ? "default" : "pointer", fontSize: T.code.fontSize, padding: 0 }}>▲</button>
+                    <button onClick={() => moveArt(i, 1)} disabled={i === artList.length - 1} title="Move down"
+                      style={{ background: "none", border: "none", color: i === artList.length - 1 ? C.border : C.textMuted, cursor: i === artList.length - 1 ? "default" : "pointer", fontSize: T.code.fontSize, padding: 0 }}>▼</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Language selector */}
           <div style={{ display: "flex", gap: 4, marginBottom: "1rem" }}>
