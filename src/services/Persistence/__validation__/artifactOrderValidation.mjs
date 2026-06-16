@@ -21,4 +21,10 @@ assert.deepEqual(
   ["map:m1", "model:x", "plot:p1"]
 );
 
+// undefined order (realistic cold-start value) → same as empty
+assert.deepEqual(
+  orderArtifacts(arts, undefined).map(a => a.artifactId),
+  ["map:m1", "model:x", "plot:p1"]
+);
+
 console.log("artifactOrder OK");

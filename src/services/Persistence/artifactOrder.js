@@ -6,6 +6,8 @@
 import { openDB } from "./indexedDB.js";
 
 // "plot" + "ph_x4" → "plot:ph_x4"
+// @param {"plot"|"map"|"model"} type — the closed artifact-type set; `type`
+//   must not itself contain ":" or parseArtifactId would mis-split the result.
 export function makeArtifactId(type, id) {
   return `${type}:${id}`;
 }
@@ -49,7 +51,8 @@ export async function saveArtifactOrder(pid, order) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(STORE, "readwrite");
-    t.objectStore(STORE).put({ id: `artifactOrder_${pid}`, order, ts: Date.now() });
+    const req = t.objectStore(STORE).put({ id: `artifactOrder_${pid}`, order, ts: Date.now() });
+    req.onerror = e => reject(e.target.error);
     t.oncomplete = () => resolve();
     t.onerror = e => reject(e.target.error);
   });
