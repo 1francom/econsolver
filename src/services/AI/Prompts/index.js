@@ -904,8 +904,14 @@ TRANSFORMATION RULES (apply all):
     assigned and immediately overwritten, keep only the final value.
 4.  Add an inline comment on every non-obvious transformation
     (e.g. "# Winsorise at 1st/99th percentile to limit outlier influence").
-5.  Replace Explore/plot section code with a single comment:
-    # See exported plots (excluded from replication script)
+5.  KEEP, VERBATIM, any section whose header is "── Spatial operations ──",
+    "── Explore (descriptive plots & stats) ──", "── Plots ──", or
+    "── Maps ──". These are real deterministic replication code (sf/geopandas
+    spatial joins, ggplot2/matplotlib charts, leaflet/folium maps) — emit them
+    exactly as supplied under their own section headers. Do NOT replace them
+    with a "see exported plots" comment and do NOT drop them as exploratory.
+    Only collapse a plot to a comment if it arrives as a bare comment with no
+    code to run.
 6.  Keep all estimation code intact — do NOT simplify or summarise it.
 6b. DO NOT INVENT econometrics. Never add estimation code, diagnostics,
     instruments, SE specifications, or package installs that are not already

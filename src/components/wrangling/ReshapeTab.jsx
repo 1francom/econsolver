@@ -2,49 +2,6 @@
 import { useState, useMemo } from "react";
 import { useTheme, Lbl, Tabs, Btn } from "./shared.jsx";
 
-function GroupTransformSection({ headers, onAdd, C }) {
-  const { T } = useTheme();
-  const [by, setBy]   = useState([]);
-  const [col, setCol] = useState("");
-  const [fn, setFn]   = useState("mean");
-  const [nn, setNn]   = useState("");
-  const toggle = h => setBy(s => s.includes(h) ? s.filter(x=>x!==h) : [...s, h]);
-  const auto = `${fn}_${col}_by_${by.join("_")}`;
-  return (
-    <div style={{marginBottom:"1.2rem"}}>
-      <Lbl color={C.gold}>Group transform - broadcast a group stat back to every row</Lbl>
-      <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:6}}>
-        Like group_by() |&gt; mutate(): adds a column, keeps all rows.
-      </div>
-      <Lbl color={C.gold}>Group by</Lbl>
-      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
-        {headers.map(h=>(
-          <button key={h} onClick={()=>toggle(h)}
-            style={{padding:"0.2rem 0.5rem",border:`1px solid ${by.includes(h)?C.gold:C.border2}`,
-              background:by.includes(h)?`${C.gold}18`:"transparent",color:by.includes(h)?C.gold:C.textDim,
-              borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{h}</button>
-        ))}
-      </div>
-      <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-        <select value={col} onChange={e=>setCol(e.target.value)}
-          style={{padding:"0.3rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize}}>
-          <option value="">- column -</option>
-          {headers.map(h=><option key={h} value={h}>{h}</option>)}
-        </select>
-        <select value={fn} onChange={e=>setFn(e.target.value)}
-          style={{padding:"0.3rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize}}>
-          {["mean","sum","sd","min","max","count","median","rank"].map(f=><option key={f} value={f}>{f}</option>)}
-        </select>
-        <input value={nn} onChange={e=>setNn(e.target.value)} placeholder={auto}
-          style={{flex:1,minWidth:120,padding:"0.3rem 0.5rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"}}/>
-      </div>
-      <Btn onClick={()=>onAdd({type:"group_transform",by,col,fn,nn:nn||auto,
-        desc:`group_transform ${fn}(${col}) by ${by.join(", ")} -> ${nn||auto}`})}
-        color={C.gold} v="solid" dis={!col||!by.length} ch="Add group transform ->"/>
-    </div>
-  );
-}
-
 // ─── RESHAPE TAB ──────────────────────────────────────────────────────────────
 // pivot_longer (wide→long) + sort rows.
 // Group & Summarize lives in ExplorerModule for non-destructive descriptive stats.
@@ -74,9 +31,6 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
   // ── arrange state ─────────────────────────────────────────────────────────
   const [arrCols,   setArrCols]   = useState([]);     // [{col, dir}] sort keys
 
-  // group_summarize state
-  const [sumByCols, setSumByCols] = useState([]);
-  const [sumAggs,   setSumAggs]   = useState([]);
 
   // ── pivot helpers ─────────────────────────────────────────────────────────
   // Simple mode
@@ -139,23 +93,6 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
   const wideRowCount = useMemo(() => (
     new Set(rows.map(r => JSON.stringify(wideEffectiveIdCols.map(id => r[id] ?? null)))).size
   ), [rows, wideEffectiveIdCols]);
-  const sumNumCols = headers.filter(h => info[h]?.isNum);
-  const SUM_FN_OPTS = [
-    ["mean","Mean"],["median","Median"],["sum","Sum"],
-    ["count","Count"],["min","Min"],["max","Max"],["sd","Std dev"],
-    ["quantile","Quantile (p...)"],
-  ];
-
-  function sumAggName(agg) {
-    if (!agg.col) return "";
-    if (agg.fn === "quantile") {
-      let q = Number(agg.q ?? 0.9);
-      if (!Number.isFinite(q)) q = 0.9;
-      return `${agg.col}_p${Math.round(Math.min(1, Math.max(0, q)) * 100)}`;
-    }
-    return `${agg.fn}_${agg.col}`;
-  }
-
   function togglePivCol(h) {
     setPivCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
   }
@@ -174,26 +111,6 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
     setWideIdCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
   }
 
-  function toggleSumByCol(h) {
-    setSumByCols(p => p.includes(h) ? p.filter(x => x !== h) : [...p, h]);
-  }
-  function addSumAgg(col = "", fn = "mean") {
-    const agg = { col, fn, q: fn === "quantile" ? 0.9 : undefined };
-    setSumAggs(a => [...a, { ...agg, nn: sumAggName(agg) }]);
-  }
-  function updSumAgg(i, patch) {
-    setSumAggs(a => a.map((x, j) => {
-      if (j !== i) return x;
-      const oldAuto = sumAggName(x);
-      const updated = { ...x, ...patch };
-      if (updated.fn === "quantile" && updated.q == null) updated.q = 0.9;
-      if ((!x.nn || x.nn === oldAuto) && (patch.col !== undefined || patch.fn !== undefined || patch.q !== undefined)) {
-        updated.nn = sumAggName(updated);
-      }
-      return updated;
-    }));
-  }
-  function rmSumAgg(i) { setSumAggs(a => a.filter((_, j) => j !== i)); }
 
   function doPivot() {
     if (pivMode === "multi") {
@@ -236,29 +153,10 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
     setWideValuesFill("0"); setWideNamesPrefix("");
   }
 
-  function doSummarizeStep() {
-    const validAggs = sumAggs.filter(a => a.col && a.fn && a.nn.trim())
-      .map(a => ({
-        col: a.col,
-        fn: a.fn,
-        nn: a.nn.trim(),
-        ...(a.fn === "quantile" ? { q: Number.isFinite(Number(a.q)) ? Math.min(1, Math.max(0, Number(a.q))) : 0.9 } : {}),
-      }));
-    if (!sumByCols.length || !validAggs.length) return;
-    onAdd({
-      type: "group_summarize",
-      by: sumByCols,
-      aggs: validAggs,
-      desc: `Group summarize by [${sumByCols.join(", ")}] (${validAggs.length} aggs)`,
-    });
-    setSumByCols([]); setSumAggs([]);
-  }
-
   const canPivot = pivMode === "multi"
     ? pivGroups.some(g => g.prefix.trim() && g.colName.trim()) && keyName.trim()
     : pivCols.length > 0 && namesTo.trim() && valuesTo.trim();
   const canWider = Boolean(wideNamesFrom && wideValuesFrom);
-  const canSummarize = sumByCols.length > 0 && sumAggs.some(a => a.col && a.fn && a.nn.trim());
 
   const inS = { padding:"0.38rem 0.6rem", background:C.surface2,
     border:`1px solid ${C.border2}`, borderRadius:3, color:C.text,
@@ -266,7 +164,7 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
 
   return (
     <div>
-      <Tabs tabs={[["pivot","⟲ Pivot longer"],["arrange","↕ Sort rows"],["summarize","⊞ Summarize"]]}
+      <Tabs tabs={[["pivot","⟲ Pivot longer"],["arrange","↕ Sort rows"]]}
         active={sub} set={setSub} accent={C.teal} sm/>
 
       {/* ══════════════ PIVOT LONGER ══════════════════════════════════════ */}
@@ -581,123 +479,6 @@ function ReshapeTab({ rows, headers, info, onAdd }) {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {sub === "summarize" && (
-        <div>
-          <div style={{padding:"0.65rem 1rem",background:C.surface,
-            border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.gold}`,
-            borderRadius:4,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
-            Collapse rows to one row per group and compute summary statistics.
-          </div>
-
-          <GroupTransformSection headers={headers} onAdd={onAdd} C={C}/>
-
-          <Lbl color={C.gold}>Group by</Lbl>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem",
-            maxHeight:120,overflowY:"auto",padding:"0.5rem",
-            background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
-            {headers.map(h => {
-              const sel = sumByCols.includes(h);
-              return (
-                <button key={h} onClick={() => toggleSumByCol(h)} style={{
-                  padding:"0.25rem 0.6rem",
-                  border:`1px solid ${sel ? C.gold : C.border2}`,
-                  background: sel ? `${C.gold}18` : "transparent",
-                  color: sel ? C.gold : info[h]?.isNum ? C.blue : C.textDim,
-                  borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,
-                  transition:"all 0.1s",
-                }}>
-                  {sel ? "✓ " : ""}{h}
-                </button>
-              );
-            })}
-          </div>
-
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.6rem"}}>
-            <Lbl mb={0} color={C.blue}>Aggregations</Lbl>
-            <button onClick={()=>addSumAgg()} style={{
-              padding:"0.2rem 0.55rem",border:`1px solid ${C.blue}`,
-              background:`${C.blue}10`,color:C.blue,borderRadius:2,
-              cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>+ add row</button>
-          </div>
-
-          {sumNumCols.length > 0 && (
-            <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:"0.8rem"}}>
-              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,alignSelf:"center",marginRight:2}}>quick add:</span>
-              {sumNumCols.map(h => (
-                <button key={h} onClick={()=>addSumAgg(h,"mean")}
-                  style={{padding:"0.18rem 0.5rem",border:`1px solid ${C.border2}`,
-                    background:"transparent",color:C.textDim,borderRadius:2,
-                    cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
-                  + {h}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {sumAggs.length === 0 && (
-            <div style={{padding:"0.65rem 1rem",background:C.surface,
-              border:`1px dashed ${C.border2}`,borderRadius:4,
-              fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"1rem"}}>
-              Add at least one aggregation.
-            </div>
-          )}
-
-          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:"1.2rem"}}>
-            {sumAggs.map((agg, i) => (
-              <div key={i} style={{display:"grid",
-                gridTemplateColumns:agg.fn==="quantile" ? "1fr 140px 95px 1fr auto" : "1fr 140px 1fr auto",
-                gap:6,alignItems:"end",padding:"0.5rem 0.65rem",
-                background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
-                <div>
-                  <Lbl color={C.teal}>Column</Lbl>
-                  <select value={agg.col} onChange={e=>updSumAgg(i,{col:e.target.value})}
-                    style={{...inS,width:"100%",boxSizing:"border-box"}}>
-                    <option value="">- column -</option>
-                    {sumNumCols.map(h=><option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <Lbl color={C.violet}>Function</Lbl>
-                  <select value={agg.fn} onChange={e=>{
-                    const fn = e.target.value;
-                    updSumAgg(i,{fn,...(fn==="quantile" && agg.q == null ? {q:0.9} : {})});
-                  }} style={{...inS,width:"100%",boxSizing:"border-box"}}>
-                    {SUM_FN_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                  </select>
-                </div>
-                {agg.fn === "quantile" && (
-                  <div>
-                    <Lbl color={C.gold}>Percentile</Lbl>
-                    <input type="number" min="0" max="100" step="1"
-                      value={Math.round((agg.q ?? 0.9) * 100)}
-                      onChange={e=>{
-                        const raw = Number(e.target.value);
-                        const pct = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 90;
-                        updSumAgg(i,{q:pct/100});
-                      }}
-                      style={{...inS,width:"100%",boxSizing:"border-box"}}/>
-                  </div>
-                )}
-                <div>
-                  <Lbl color={C.textDim}>Output</Lbl>
-                  <input value={agg.nn}
-                    onChange={e=>setSumAggs(a=>a.map((x,j)=>j!==i?x:{...x,nn:e.target.value}))}
-                    placeholder={sumAggName(agg) || "output_col"}
-                    style={{...inS,width:"100%",boxSizing:"border-box"}}/>
-                </div>
-                <button onClick={()=>rmSumAgg(i)} style={{
-                  background:"transparent",border:`1px solid ${C.border2}`,
-                  borderRadius:2,color:C.textMuted,cursor:"pointer",
-                  fontSize: T.code.fontSize,padding:"0.34rem 0.5rem"}}>×</button>
-              </div>
-            ))}
-          </div>
-
-          <Btn onClick={doSummarizeStep} color={C.gold} v="solid"
-            dis={!canSummarize} ch="Summarize ->"/>
         </div>
       )}
 
