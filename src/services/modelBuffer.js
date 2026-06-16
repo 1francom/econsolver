@@ -5,6 +5,8 @@
 // API:
 //   add(result)       → string  — adds result (FIFO eviction at 8), returns its id
 //   remove(id)                  — removes by id
+//   setLabel(id,label)          — renames a pinned model's label
+//   reorder(ids)                — reorders buffer to match id array
 //   get(id)           → result | undefined
 //   getAll()          → EstimationResult[]
 //   clear()
