@@ -66,7 +66,22 @@ console.log("\n── referenced datasets resolve to df_<name> ──");
   const r = transpileSpatialOp("spatial_join", FIX.spatial_join, "r", DATASETS);
   check("r: poly dataset resolves to df_barrios", /df_barrios/.test(r), r.split("\n")[2]);
   const rUnknown = transpileSpatialOp("spatial_join", { ...FIX.spatial_join, polyDsId: "MISSING" }, "r", DATASETS);
-  check("r: unknown dataset gets a placeholder df var", /df_MISSING/.test(rUnknown));
+  // Unknown refs must resolve to a READABLE, role-based placeholder (never a raw
+  // id) + a "provide this dataset" NOTE — not df_MISSING / df_<uuid>.
+  check("r: unknown dataset gets a readable placeholder + note",
+    /\bpolygons\b/.test(rUnknown) && /NOTE:/.test(rUnknown) && !/MISSING/.test(rUnknown), rUnknown.split("\n")[0]);
+}
+
+console.log("\n── points dataset + NA-coord guard ──");
+{
+  const src = { v: "df_schools", known: true };
+  const r = transpileSpatialOp("aggregate_to_grid", FIX.aggregate_to_grid, "r", DATASETS, src);
+  check("r: binds resolved points var (no bare df)", /df_schools/.test(r) && !/\bsf::st_as_sf\(df,/.test(r), r.split("\n")[1]);
+  check("r: drops NA coords before st_as_sf", /is\.na\(/.test(r) && r.indexOf("is.na(") < r.indexOf("st_as_sf"));
+  const py = transpileSpatialOp("aggregate_to_grid", FIX.aggregate_to_grid, "python", DATASETS, src);
+  check("python: drops NA coords (dropna)", /dropna\(subset=/.test(py));
+  const rNoSrc = transpileSpatialOp("aggregate_to_grid", FIX.aggregate_to_grid, "r", DATASETS, { v: "points_df", known: false });
+  check("r: unknown points var gets a NOTE", /NOTE: bind 'points_df'/.test(rNoSrc));
 }
 
 console.log("\n── imports helper ──");

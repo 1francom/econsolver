@@ -947,6 +947,28 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         dsMap[ds.id] = { name: ds.name ?? ds.filename, filename: ds.filename };
       }
 
+      // ── Per-item source-dataset resolvers ──────────────────────────────────
+      // Every visual/spatial artifact must bind to ITS OWN source dataset, never
+      // the Report-active dataset (that bug made every pin/plot read off
+      // `df_spatial_result`). Resolve by id (plot/map history key, spatial ref),
+      // by filename (explore pin records `params.dataset`), or — for spatial
+      // points, whose source dataset is not logged — by matching the op's lat/lon
+      // columns against each loaded dataset's headers.
+      const idToVar   = (id) => { const d = dsMap[id]; return d ? toDfVar(d.name ?? d.filename) : null; };
+      const fileToVar = (fn) => {
+        if (!fn) return null;
+        const d = availableDatasets.find(x => x.filename === fn || x.name === fn);
+        return d ? toDfVar(d.name ?? d.filename) : toDfVar(String(fn).replace(/\.[^.]+$/, ""));
+      };
+      const pointsSrcFor = (p) => {
+        const c1 = p?.latCol ?? p?.yCol, c2 = p?.lonCol ?? p?.xCol;
+        if (c1 && c2) {
+          const d = availableDatasets.find(x => Array.isArray(x.headers) && x.headers.includes(c1) && x.headers.includes(c2));
+          if (d) return { v: toDfVar(d.name ?? d.filename), known: true };
+        }
+        return { v: "points_df", known: false };
+      };
+
       // Render one estimation block, bound to the model's source df (not the
       // Report-active dataset). Shared by the module and execution paths.
       const renderModel = (model, index) => {
@@ -1000,9 +1022,9 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             out.push(m ? renderModel(m, modelIdx++)
                        : `${comment} ${blk.label} — model not pinned; pin it in the Model tab to replicate`);
           } else if (blk.kind === "explore") {
-            const exDf = toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
             const code = (blk.events ?? [])
               .map(ev => {
+                const exDf = fileToVar(ev.params?.dataset) ?? toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
                 const c = transpileExploreStat(ev.params, lang, exDf);
                 return c ? `${comment} ${ev.label ?? ev.params?.kind}\n${c}` : null;
               })
@@ -1011,7 +1033,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             out.push(code || `${comment} ${blk.label} — Explore artifact (no code translation)`);
           } else if (blk.kind === "spatial") {
             const code = (blk.events ?? [])
-              .map(ev => transpileSpatialOp(ev.opType, ev.params, lang, dsMap))
+              .map(ev => transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params)))
               .filter(Boolean)
               .join("\n\n");
             out.push(code
@@ -1045,7 +1067,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         const spatialCode = timeline
           .filter(ev => ev?.module === "spatial" && ev.opType !== "geocode")
           .map(ev => {
-            const c = transpileSpatialOp(ev.opType, ev.params, lang, dsMap);
+            const c = transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params));
             return c ? `${comment} ${ev.label ?? ev.opType}\n${c}` : null;
           })
           .filter(Boolean)
@@ -1054,10 +1076,12 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           visualSections += `\n\n${comment} ── Spatial operations ───────────────────────────────\n${spatialCode}`;
         }
         // Explore pins (Summary / Distributions / Time Series / Correlation).
-        const exDf = toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
+        // Each pin binds to ITS OWN source dataset (params.dataset = the filename
+        // active when pinned), not the Report-active dataset.
         const exploreCode = timeline
           .filter(ev => ev?.module === "explore" && ev.opType === "explore_stat")
           .map(ev => {
+            const exDf = fileToVar(ev.params?.dataset) ?? toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
             const c = transpileExploreStat(ev.params, lang, exDf);
             return c ? `${comment} ${ev.label ?? ev.params?.kind}\n${c}` : null;
           })
@@ -1078,12 +1102,18 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         // dataset id plus the project pid and aggregate, else the histories read
         // empty and Plots/Maps never appear.
         const histPids = Array.from(new Set([pid, ...availableDatasets.map(d => d.id)].filter(Boolean)));
-        const savedPlots = (await Promise.all(histPids.map(p => getPlotHistory(p).catch(() => [])))).flat();
+        // Tag each entry with the dataset id it was saved under so the plot binds
+        // to its own source dataset (not the Report-active one). flat() would
+        // otherwise lose that association.
+        const savedPlots = (await Promise.all(
+          histPids.map(async p => (await getPlotHistory(p).catch(() => [])).map(e => ({ ...e, _srcId: p })))
+        )).flat();
         const plotCode = (Array.isArray(savedPlots) ? savedPlots : [])
           .map(entry => {
-            const code = lang === "python" ? buildMatplotlibPlot(entry, { dfVar: plotDfVar })
-                       : lang === "stata"  ? buildStataPlot(entry, { dataVar: plotDfVar })
-                       :                     buildGgplot(entry, { dfVar: plotDfVar });
+            const entryDf = idToVar(entry._srcId) ?? plotDfVar;
+            const code = lang === "python" ? buildMatplotlibPlot(entry, { dfVar: entryDf })
+                       : lang === "stata"  ? buildStataPlot(entry, { dataVar: entryDf })
+                       :                     buildGgplot(entry, { dfVar: entryDf });
             return code ? `${comment} Plot: ${entry.name ?? "untitled"}\n${code}` : null;
           })
           .filter(Boolean)
