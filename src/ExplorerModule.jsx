@@ -1844,8 +1844,9 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
 }
 
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
-export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset, pid}) {
+export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset, pid, projectPid, onRequestDataset, pendingPlot, onConsumePendingPlot}) {
   const{C,T}=useTheme();
+  const histPid = projectPid ?? pid;
   const {headers, cleanRows:previewRows, panelIndex:panel, filename, pipeline = []} = cleanedData;
   // DuckDB-backed datasets ship only a 500-row preview in cleanRows; pull the FULL
   // table for computation (summary stats, distributions, correlation, plots). The
@@ -1881,16 +1882,16 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // state clobbering the stored pins before the load resolves.
   const pinsLoaded = useRef(false);
   useEffect(() => {
-    if (!pid) { pinsLoaded.current = true; return; }
+    if (!histPid) { pinsLoaded.current = true; return; }
     let cancelled = false;
-    getExplorePins(pid)
+    getExplorePins(histPid)
       .then(p => { if (!cancelled && Array.isArray(p) && p.length) setPinnedItems(p); })
       .finally(() => { if (!cancelled) pinsLoaded.current = true; });
     return () => { cancelled = true; };
-  }, [pid]);
+  }, [histPid]);
   useEffect(() => {
-    if (pid && pinsLoaded.current) saveExplorePins(pid, pinnedItems).catch(() => {});
-  }, [pid, pinnedItems]);
+    if (histPid && pinsLoaded.current) saveExplorePins(histPid, pinnedItems).catch(() => {});
+  }, [histPid, pinnedItems]);
   const pinExplore = (params, label) => {
     appendLog({
       module: "explore", opType: "explore_stat",
@@ -2078,7 +2079,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} datasetName={filename} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
       <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
     </div>
