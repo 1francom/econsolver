@@ -1241,8 +1241,12 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     const i = plotHistory.findIndex(e => e.id === initialPendingPlotId);
     if (i >= 0) {
       const entry = plotHistory[i];
-      if (!entry.datasetId || entry.datasetId === datasetId) { loadPlotEntry(entry); setHistIdx(i); setHistOpen(true); }
-      onConsumePendingPlot?.();
+      // Only consume the pending token once the plot is actually loaded; if the
+      // dataset hasn't propagated yet, leave it so the effect re-runs on match.
+      if (!entry.datasetId || entry.datasetId === datasetId) {
+        loadPlotEntry(entry); setHistIdx(i); setHistOpen(true);
+        onConsumePendingPlot?.();
+      }
     }
   }, [initialPendingPlotId, plotHistory, datasetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1335,19 +1339,23 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   }, [histPid]);
 
   const renamePlot = useCallback((id, name) => {
-    const next = plotHistory.map(e => e.id === id ? { ...e, name } : e);
-    setPlotHistory(next);
-    if (histPid) savePlotHistory(histPid, next).catch(() => {});
-  }, [plotHistory, histPid]);
+    setPlotHistory(prev => {
+      const next = prev.map(e => e.id === id ? { ...e, name } : e);
+      if (histPid) savePlotHistory(histPid, next).catch(() => {});
+      return next;
+    });
+  }, [histPid]);
 
   const movePlot = useCallback((i, dir) => {
-    const j = i + dir;
-    if (j < 0 || j >= plotHistory.length) return;
-    const next = [...plotHistory];
-    [next[i], next[j]] = [next[j], next[i]];
-    setPlotHistory(next);
-    if (histPid) savePlotHistory(histPid, next).catch(() => {});
-  }, [plotHistory, histPid]);
+    setPlotHistory(prev => {
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      if (histPid) savePlotHistory(histPid, next).catch(() => {});
+      return next;
+    });
+  }, [histPid]);
 
   const toggleCompare = useCallback((id) => {
     setCompareIds(prev => {
