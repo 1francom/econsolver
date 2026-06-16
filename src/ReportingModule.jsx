@@ -961,6 +961,10 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         return `${comment} Model ${index + 1}: ${label}\n${block}`;
       };
 
+      // Visual / spatial sections are deterministic replication code; they are
+      // appended to the FINAL script AFTER the AI returns (never sent through it)
+      // so the model can never drop or rewrite them.
+      let visualSections = "";
       let cleanSc;
       let modelSc;
       if (structureMode === "execution" && timeline.length) {
@@ -1047,7 +1051,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           .filter(Boolean)
           .join("\n\n");
         if (spatialCode) {
-          cleanSc += `\n\n${comment} ── Spatial operations ───────────────────────────────\n${spatialCode}`;
+          visualSections += `\n\n${comment} ── Spatial operations ───────────────────────────────\n${spatialCode}`;
         }
         // Explore pins (Summary / Distributions / Time Series / Correlation).
         const exDf = toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
@@ -1060,7 +1064,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           .filter(Boolean)
           .join("\n\n");
         if (exploreCode) {
-          cleanSc += `\n\n${comment} ── Explore (descriptive plots & stats) ──────────────\n${exploreCode}`;
+          visualSections += `\n\n${comment} ── Explore (descriptive plots & stats) ──────────────\n${exploreCode}`;
         }
       }
       // ── Saved plots (PlotBuilder) + maps (leaflet) ───────────────────────
@@ -1069,7 +1073,12 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
       // reproduces the visuals too — not just data prep + estimation.
       try {
         const plotDfVar = toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
-        const savedPlots = pid ? (await getPlotHistory(pid).catch(() => [])) : [];
+        // PlotBuilder / SpatialPlotTab persist history keyed by the DATASET id
+        // (their `pid` prop is tabDsId), NOT the project pid — so query every
+        // dataset id plus the project pid and aggregate, else the histories read
+        // empty and Plots/Maps never appear.
+        const histPids = Array.from(new Set([pid, ...availableDatasets.map(d => d.id)].filter(Boolean)));
+        const savedPlots = (await Promise.all(histPids.map(p => getPlotHistory(p).catch(() => [])))).flat();
         const plotCode = (Array.isArray(savedPlots) ? savedPlots : [])
           .map(entry => {
             const code = lang === "python" ? buildMatplotlibPlot(entry, { dfVar: plotDfVar })
@@ -1080,11 +1089,11 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           .filter(Boolean)
           .join("\n\n");
         if (plotCode) {
-          cleanSc += `\n\n${comment} ── Plots ────────────────────────────────────────────`
+          visualSections += `\n\n${comment} ── Plots ────────────────────────────────────────────`
             + `\n${comment} (model-derived plots referencing fitted/residual columns need the model run first)\n${plotCode}`;
         }
 
-        const savedMaps = pid ? (await getMapHistory(pid).catch(() => [])) : [];
+        const savedMaps = (await Promise.all(histPids.map(p => getMapHistory(p).catch(() => [])))).flat();
         const mapCode = (Array.isArray(savedMaps) ? savedMaps : [])
           .map(entry => {
             let code;
@@ -1096,7 +1105,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           .filter(Boolean)
           .join("\n\n");
         if (mapCode) {
-          cleanSc += `\n\n${comment} ── Maps ─────────────────────────────────────────────\n${mapCode}`;
+          visualSections += `\n\n${comment} ── Maps ─────────────────────────────────────────────\n${mapCode}`;
         }
       } catch { /* histories are best-effort; never block script generation */ }
       const dict = cleanedData?.dataDictionary ?? null;
@@ -1117,7 +1126,10 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         ? `This session contains ${manualEdits} manual cell edit(s) ("patch" steps keyed on internal row ids __row_id/__ri that do NOT exist in the raw file) on the following dataset(s): ${editedNames.map(n => `"${n}"`).join(", ")}. Do NOT emit row-id-based patch assignments. Instead, in the Data Loading section add a prominent comment telling the user to load the exported cleaned dataset(s) ${cleanedFiles} (downloadable from Litux) for an exact replication.`
         : null;
       const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot, userInstruction, manualEditNote });
-      setScript(out);
+      // Append the deterministic Spatial / Explore / Plots / Maps sections AFTER
+      // the AI so they are guaranteed in the final script (the model can't drop
+      // or rewrite them).
+      setScript(visualSections ? `${out}\n${visualSections}` : out);
     } catch (e) {
       setError(e.message ?? "Generation failed.");
     } finally {
