@@ -63,6 +63,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const [panel,            setPanel]            = useState(null);
   const [dataDictionary,   setDataDictionary]   = useState(null);
   const [tab,              setTab]              = useState(() => sessionStorage.getItem(`litux:wrangle_tab:${pid}`) || "clean");
+  const [reshapeSub,       setReshapeSub]       = useState("reshape"); // "reshape" | "joins"
   // Persist active sub-tab so refresh restores to the same wrangling view.
   useEffect(() => { sessionStorage.setItem(`litux:wrangle_tab:${pid}`, tab); }, [tab, pid]);
   const [idbReady,         setIdbReady]         = useState(false);
@@ -698,16 +699,16 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         )}
         {tab === "reshape" && (
           <div>
-            <div style={{marginBottom:"0.75rem",fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>
-              Reshape
-            </div>
-            <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
-            <div style={{margin:"1.2rem 0 0.75rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.2rem"}}>
-              <div style={{marginBottom:"0.75rem",fontSize: T.caption.fontSize,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily}}>
-                Merge
-              </div>
-              <MergeTab rows={rows} headers={headers} filename={filename}
-                allDatasets={allDatasets} onAdd={addStep}/>
+            <Tabs tabs={[["reshape","⟲ Reshape"],["joins","⊞ Joins"]]}
+              active={reshapeSub} set={setReshapeSub} accent={C.teal} sm/>
+            <div style={{marginTop:"1rem"}}>
+              {reshapeSub === "reshape" && (
+                <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
+              )}
+              {reshapeSub === "joins" && (
+                <MergeTab rows={rows} headers={headers} filename={filename}
+                  allDatasets={allDatasets} onAdd={addStep}/>
+              )}
             </div>
           </div>
         )}
