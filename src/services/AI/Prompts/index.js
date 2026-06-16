@@ -922,6 +922,9 @@ TRANSFORMATION RULES (apply all):
       bundled with RStudio, not an installable R package. If a modelsummary
       output uses .docx and you are unsure pandoc is available, leave the call
       as supplied and add a one-line comment that .docx export needs pandoc.
+      ALSO add a commented LaTeX alternative next to any .docx results table so
+      the user can switch without pandoc, e.g.
+      \`# output = "results.tex"   # LaTeX table (no pandoc needed)\`.
     - Do NOT add an absolute working-directory change (R \`setwd("C:/...")\`,
       Python \`os.chdir("C:/...")\`, Stata \`cd "C:/..."\`). The load calls use
       relative filenames — assume the script runs from the data directory. At

@@ -4,11 +4,14 @@
 // Bottom row: pinned summary tables
 // Compare button (2+ same-kind selected) → side-by-side panel above the bar.
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
+import { downloadGridPNG } from "../../services/export/plotExporter.js";
 
 const KIND_ICON = {
   summary:       "⊞",
+  head:          "⊟",
+  tail:          "⊟",
   histogram:     "⬡",
   barchart:      "⬡",
   spaghetti:     "⬡",
@@ -18,6 +21,8 @@ const KIND_ICON = {
 };
 const KIND_LABEL = {
   summary:       "Table",
+  head:          "head",
+  tail:          "tail",
   histogram:     "Hist",
   barchart:      "Bar",
   spaghetti:     "Spaghetti",
@@ -27,7 +32,7 @@ const KIND_LABEL = {
 };
 
 const PLOT_KINDS  = ["histogram","barchart","spaghetti","timeseries","correlation","overdispersion"];
-const TABLE_KINDS = ["summary"];
+const TABLE_KINDS = ["summary","head","tail"];
 
 // ── Comparison panel for summary stats ────────────────────────────────────────
 function TableCompare({ items, info }) {
@@ -93,36 +98,38 @@ function TableCompare({ items, info }) {
   );
 }
 
-// ── Plot compare: params summary side by side ─────────────────────────────────
-function PlotCompare({ items }) {
+// ── Plot compare: render the actual charts side by side (params as fallback) ──
+function PlotCompare({ items, renderPlot }) {
   const { C, T } = useTheme();
   return (
     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-      {items.map(it => (
-        <div key={it.id} style={{
-          flex: "1 1 220px",
-          background: C.surface,
-          border: `1px solid ${C.border}`,
-          borderLeft: `3px solid ${C.teal}`,
-          borderRadius: 4,
-          padding: "8px 12px",
-        }}>
-          <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal, marginBottom: 3 }}>
-            {KIND_ICON[it.kind] ?? "⬡"} {KIND_LABEL[it.kind] ?? it.kind}
+      {items.map(it => {
+        const chart = renderPlot ? renderPlot(it) : null;
+        return (
+          <div key={it.id} style={{
+            flex: "1 1 320px",
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            borderLeft: `3px solid ${C.teal}`,
+            borderRadius: 4,
+            padding: "8px 12px",
+          }}>
+            <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, marginBottom: 6 }}>
+              {KIND_ICON[it.kind] ?? "⬡"} {it.label}
+            </div>
+            {chart
+              ? <div>{chart}</div>
+              : Object.entries(it.params)
+                  .filter(([k]) => k !== "kind")
+                  .map(([k, v]) => (
+                    <div key={k} style={{ fontFamily: T.code.fontFamily, fontSize: "10px", color: C.textMuted }}>
+                      <span style={{ color: C.textDim }}>{k}:</span>{" "}
+                      {Array.isArray(v) ? v.join(", ") : String(v ?? "—")}
+                    </div>
+                  ))}
           </div>
-          <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, marginBottom: 6 }}>
-            {it.label}
-          </div>
-          {Object.entries(it.params)
-            .filter(([k]) => k !== "kind")
-            .map(([k, v]) => (
-              <div key={k} style={{ fontFamily: T.code.fontFamily, fontSize: "10px", color: C.textMuted }}>
-                <span style={{ color: C.textDim }}>{k}:</span>{" "}
-                {Array.isArray(v) ? v.join(", ") : String(v ?? "—")}
-              </div>
-            ))}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -221,16 +228,33 @@ function PinRow({ label, items, selected, onToggle, onRemove, canCompare, onComp
   );
 }
 
+// Which pinned kinds belong to which Explore subtab — the bar shows only the
+// pins for the subtab you are on (Distributions ⇒ histograms, Summary ⇒ tables,
+// Time Series ⇒ time series), mirroring the per-tab PlotBuilder history.
+const SUBTAB_KINDS = {
+  summary:    ["summary", "overdispersion", "head", "tail"],
+  visuals:    ["histogram", "barchart", "spaghetti"],
+  timeseries: ["timeseries", "acf_pacf", "adf"],
+  corr:       ["correlation"],
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
-export default function ExplorePinBar({ items, info, onRemove }) {
+export default function ExplorePinBar({ items, info, subtab, renderPlot, onRemove }) {
   const { C, T } = useTheme();
   const [selected, setSelected]         = useState([]);
   const [compareKind, setCompareKind]   = useState(null); // "plots" | "tables" | null
+  const compareRef = useRef(null);
 
-  const plots  = items.filter(it => PLOT_KINDS.includes(it.kind));
-  const tables = items.filter(it => TABLE_KINDS.includes(it.kind));
+  // The Plot Builder subtab has its own history bar — don't double up.
+  if (subtab === "plot") return null;
+  // Show only the pins relevant to the active subtab.
+  const scopeKinds = SUBTAB_KINDS[subtab] ?? null;
+  const scoped = scopeKinds ? items.filter(it => scopeKinds.includes(it.kind)) : items;
 
-  if (!items.length) return null;
+  const plots  = scoped.filter(it => PLOT_KINDS.includes(it.kind));
+  const tables = scoped.filter(it => TABLE_KINDS.includes(it.kind));
+
+  if (!scoped.length) return null;
 
   const toggleSelect = (id) => {
     setSelected(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -273,11 +297,26 @@ export default function ExplorePinBar({ items, info, onRemove }) {
             <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.15em", textTransform: "uppercase" }}>
               {compareKind === "tables" ? "Table compare" : "Plot compare"}
             </span>
-            <button onClick={() => setCompareKind(null)} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>✕ close</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {/* PNG export — plots only (tables don't rasterise cleanly). Grid
+                  layout adapts to the count (3 → 2 over 1, 4 → 2×2, …). */}
+              {compareKind === "plots" && (
+                <button
+                  onClick={() => downloadGridPNG(
+                    Array.from(compareRef.current?.querySelectorAll("svg") ?? []),
+                    `explore_compare_${subtab ?? "plots"}`,
+                  )}
+                  style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 8px" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+                >↓ PNG</button>
+              )}
+              <button onClick={() => setCompareKind(null)} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>✕ close</button>
+            </div>
           </div>
           {compareKind === "tables"
             ? <TableCompare items={compareItems} info={info} />
-            : <PlotCompare  items={compareItems} />
+            : <div ref={compareRef}><PlotCompare items={compareItems} renderPlot={renderPlot} /></div>
           }
         </div>
       )}

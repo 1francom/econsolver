@@ -13,9 +13,11 @@ import { pnorm } from "./math/calcEngine.js";
 import PlotBuilder from "./components/PlotBuilder.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
+import { downloadPNG } from "./services/export/plotExporter.js";
 import { generateCleanScript } from "./pipeline/exporter.js";
 import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
+import { getExplorePins, saveExplorePins } from "./services/Persistence/plotHistory.js";
 import ExplorePinBar from "./components/explore/ExplorePinBar.jsx";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
@@ -69,10 +71,81 @@ function pearson(xs,ys){
   return(sx&&sy)?sxy/Math.sqrt(sx*sy):0;
 }
 
+// Aggregate rows into time-series points — SHARED by TimeSeriesTab and the pin
+// Compare so both render identical data. Returns [{ grp, pts:[{t,y}] }].
+function aggregateTimeSeries(rows, tCol, yCol, grpCol, agg) {
+  if (!tCol || !yCol || !rows?.length) return [];
+  const valid = rows.filter(r =>
+    typeof r[tCol] === "number" && isFinite(r[tCol]) &&
+    (agg === "count" || (typeof r[yCol] === "number" && isFinite(r[yCol])))
+  );
+  if (!valid.length) return [];
+  const groups = grpCol ? [...new Set(valid.map(r => String(r[grpCol] ?? "")))] : ["_all_"];
+  return groups.map(grp => {
+    const subset = grpCol ? valid.filter(r => String(r[grpCol] ?? "") === grp) : valid;
+    const byT = {};
+    subset.forEach(r => { const t = r[tCol]; (byT[t] = byT[t] || []).push(agg !== "count" ? r[yCol] : 1); });
+    const pts = Object.entries(byT).map(([t, vals]) => {
+      const tv = parseFloat(t);
+      let y;
+      if (agg === "mean")   y = vals.reduce((s, v) => s + v, 0) / vals.length;
+      if (agg === "sum")    y = vals.reduce((s, v) => s + v, 0);
+      if (agg === "count")  y = vals.length;
+      if (agg === "median") { const s = [...vals].sort((a, b) => a - b); y = s[Math.floor(s.length / 2)]; }
+      return { t: tv, y };
+    }).sort((a, b) => a.t - b.t);
+    return { grp, pts };
+  }).filter(s => s.pts.length > 0);
+}
+
 // ─── SVG CHARTS ───────────────────────────────────────────────────────────────
-function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
+// Compact time-series line chart — same COLORS palette as TimeSeriesTab so the
+// pin Compare preview matches the full chart's aesthetics.
+function SvgMiniTimeSeries({ series }) {
+  const { C, T } = useTheme();
+  const COLORS = [C.teal, C.orange, C.violet, C.green, C.red, C.blue, C.gold, C.purple];
+  if (!series?.length) return null;
+  const W = 480, H = 160, PAD = { l: 48, r: 16, t: 10, b: 28 };
+  const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
+  const allT = series.flatMap(s => s.pts.map(p => p.t));
+  const allY = series.flatMap(s => s.pts.map(p => p.y));
+  const tMin = arrMin(allT), tMax = arrMax(allT), yMin = arrMin(allY), yMax = arrMax(allY);
+  const yPad = (yMax - yMin) * 0.1 || 1, yLo = yMin - yPad, yHi = yMax + yPad;
+  const sx = t => PAD.l + ((t - tMin) / (tMax - tMin || 1)) * iW;
+  const sy = v => PAD.t + iH - ((v - yLo) / (yHi - yLo || 1)) * iH;
+  const fmt = (v) => Math.abs(v) >= 1000 ? v.toExponential(1) : Number.isInteger(v) ? String(v) : v.toFixed(1);
+  const yTicks = [yLo, (yLo + yHi) / 2, yHi];
+  const xTicks = [tMin, (tMin + tMax) / 2, tMax];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 600, display: "block", fontFamily: T.code.fontFamily }}>
+      {/* y axis + grid + ticks */}
+      <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+      {yTicks.map((v, i) => (
+        <g key={`y${i}`}>
+          <line x1={PAD.l} x2={PAD.l + iW} y1={sy(v)} y2={sy(v)} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4} />
+          <text x={PAD.l - 5} y={sy(v) + 3} textAnchor="end" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{fmt(v)}</text>
+        </g>
+      ))}
+      {/* x axis + ticks */}
+      <line x1={PAD.l} y1={PAD.t + iH} x2={PAD.l + iW} y2={PAD.t + iH} stroke={C.border2} strokeWidth={1} />
+      {xTicks.map((t, i) => (
+        <text key={`x${i}`} x={sx(t)} y={PAD.t + iH + 14} textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{fmt(t)}</text>
+      ))}
+      {/* series */}
+      {series.map((s, si) => {
+        const col = COLORS[si % COLORS.length];
+        const d = s.pts.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.t).toFixed(1)},${sy(p.y).toFixed(1)}`).join(" ");
+        return <path key={s.grp} d={d} fill="none" stroke={col} strokeWidth={2} opacity={0.9} />;
+      })}
+    </svg>
+  );
+}
+
+function SvgHistogram({data,color,label="",title="",xLabel="",yLabel="",nBins=20,fillMode="filled"}){
   const{C,T}=useTheme();color=color??C.gold;
-  const W=480,H=160,PAD={l:44,r:16,t:8,b:36};
+  const W=480;
+  const titleH=title?20:0, xLabH=xLabel?16:0, yLabW=yLabel?14:0;
+  const H=160+titleH+xLabH, PAD={l:44+yLabW,r:16,t:8+titleH,b:36+xLabH};
   const iW=W-PAD.l-PAD.r,iH=H-PAD.t-PAD.b;
   if(!data.length)return null;
   const min=arrMin(data),max=arrMax(data);
@@ -83,9 +156,12 @@ function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
   const maxC=Math.max(...counts,1);
   const barW=iW/nBins;
   const yTicks=[0,0.25,0.5,0.75,1].map(f=>Math.round(f*maxC));
+  const bottomLabel=xLabel||label;
   return(
     <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily: T.code.fontFamily}}>
       <rect width={W} height={H} fill="transparent"/>
+      {title&&<text x={W/2} y={14} textAnchor="middle" fill={C.text} fontSize={T.code.fontSize} fontFamily={T.code.fontFamily} fontWeight={600}>{title}</text>}
+      {yLabel&&<text x={11} y={PAD.t+iH/2} textAnchor="middle" transform={`rotate(-90 11 ${PAD.t+iH/2})`} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{yLabel}</text>}
       {/* y grid + ticks */}
       {yTicks.map((t,i)=>{
         const y=PAD.t+iH-(t/maxC)*iH;
@@ -110,23 +186,25 @@ function SvgHistogram({data,color,label="",nBins=20,fillMode="filled"}){
           {Math.abs(v)>=1000?v.toExponential(1):v.toFixed(2)}
         </text>;
       })}
-      {label&&<text x={PAD.l+iW/2} y={H-2} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} textAnchor="middle">{label}</text>}
+      {bottomLabel&&<text x={PAD.l+iW/2} y={H-2} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily} textAnchor="middle">{bottomLabel}</text>}
     </svg>
   );
 }
 
 // ─── CATEGORICAL BAR CHART ────────────────────────────────────────────────────
-function SvgBarChart({items,color,fillMode="filled"}){
+function SvgBarChart({items,color,fillMode="filled",title="",xLabel=""}){
   // items: [{label, count}] already sorted
   const{C,T}=useTheme();
   if(!items?.length)return null;
-  const W=480,barH=22,PAD={l:120,r:48,t:8,b:16};
+  const W=480,barH=22,titleH=title?20:0,xLabH=xLabel?16:0,PAD={l:120,r:48,t:8+titleH,b:16+xLabH};
   const H=PAD.t+items.length*barH+PAD.b;
   const maxV=Math.max(...items.map(d=>d.count),1);
   const iW=W-PAD.l-PAD.r;
   return(
     <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily: T.code.fontFamily}}>
       <rect width={W} height={H} fill="transparent"/>
+      {title&&<text x={W/2} y={14} textAnchor="middle" fill={C.text} fontSize={T.code.fontSize} fontFamily={T.code.fontFamily} fontWeight={600}>{title}</text>}
+      {xLabel&&<text x={PAD.l+iW/2} y={H-2} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{xLabel}</text>}
       {items.map((d,i)=>{
         const y=PAD.t+i*barH;
         const bw=Math.max(2,(d.count/maxV)*iW);
@@ -527,6 +605,9 @@ function DistributionTab({rows,headers,info,panel,onPin}){
   const [fillMode,setFillMode]=useState("filled");   // "filled" | "outline"
   const [transform,setTransform]=useState("none");   // "none" | "log" | "log10" | "sqrt"
   const [nBins,setNBins]=useState(20);
+  const [plotTitle,setPlotTitle]=useState("");       // custom labels (blank = auto)
+  const [xLab,setXLab]=useState("");
+  const [yLab,setYLab]=useState("");
   const [catOrder,setCatOrder]=useState("count");    // "count" | "alpha" | "rev"
   const hasPanel=panel?.entityCol&&panel?.timeCol;
   const histRef=useRef(null);
@@ -535,6 +616,20 @@ function DistributionTab({rows,headers,info,panel,onPin}){
     ...(catH.length?[["cat","Categorical"]]:[] ),
     ...(hasPanel?[["spaghetti","Spaghetti"]]:[] ),
   ];
+
+  // Shared labels (title / x / y) — blank fields fall back to auto labels.
+  const labInput=(ph,val,setter)=>(
+    <input value={val} onChange={e=>setter(e.target.value)} placeholder={ph}
+      style={{flex:1,minWidth:80,padding:"0.3rem 0.5rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,outline:"none"}}/>
+  );
+  const labelsRow=(
+    <div style={{display:"flex",gap:6,marginBottom:"0.7rem",alignItems:"center"}}>
+      <span style={{fontSize:T.caption.fontSize,color:C.textMuted,letterSpacing:"0.15em",textTransform:"uppercase",fontFamily:T.code.fontFamily}}>Labels</span>
+      {labInput("Title",plotTitle,setPlotTitle)}
+      {labInput("X axis",xLab,setXLab)}
+      {labInput("Y axis",yLab,setYLab)}
+    </div>
+  );
 
   // transform helper
   function applyTransform(v){
@@ -559,8 +654,9 @@ function DistributionTab({rows,headers,info,panel,onPin}){
         {subTabs.map(([k,l])=><button key={k} onClick={()=>setSub(k)} style={{flex:1,padding:"0.42rem 0.5rem",background:sub===k?`${C.teal}18`:C.surface,border:"none",color:sub===k?C.teal:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,borderBottom:sub===k?`2px solid ${C.teal}`:"2px solid transparent",transition:"all 0.12s"}}>{l}</button>)}
         {onPin&&<div style={{padding:"0 6px",background:C.surface}}>
           <PinBtn onClick={()=>{
-            if(sub==="hist") onPin({kind:"histogram",col:histCol,bins:nBins,transform:transform==="none"?null:transform},`Histogram: ${histCol} (${nBins} bins${transform!=="none"?", "+transform:""})`);
-            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder},`Bar chart: ${catCol} (order: ${catOrder})`);
+            const labs={title:plotTitle||null,xLabel:xLab||null,yLabel:yLab||null};
+            if(sub==="hist") onPin({kind:"histogram",col:histCol,bins:nBins,transform:transform==="none"?null:transform,color:barColor,fillMode,...labs},`Histogram: ${histCol} (${nBins} bins${transform!=="none"?", "+transform:""})`);
+            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder,color:barColor,fillMode,...labs},`Bar chart: ${catCol} (order: ${catOrder})`);
             else onPin({kind:"spaghetti",col:spagCol,entityCol:panel?.entityCol,timeCol:panel?.timeCol},`Spaghetti: ${spagCol} by ${panel?.entityCol} over ${panel?.timeCol}`);
           }}/>
         </div>}
@@ -652,9 +748,10 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                     </div>
                   ))}
                 </div>
+                {labelsRow}
                 <div ref={histRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
                   <div style={{padding:"0.5rem"}}>
-                    <SvgHistogram data={vals} color={barColor} label={histLabel} nBins={nBins} fillMode={fillMode}/>
+                    <SvgHistogram data={vals} color={barColor} title={plotTitle} xLabel={xLab||histLabel} yLabel={yLab||"Count"} nBins={nBins} fillMode={fillMode}/>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6,padding:"0.3rem 0.65rem",borderTop:`1px solid ${C.border}`,background:C.bg}}>
                     <PlotExportBar getEl={()=>histRef.current?.querySelector("svg")} filename={`histogram_${histCol}`} style={{flex:1,padding:0,background:"transparent",border:"none"}}/>
@@ -726,7 +823,8 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                 <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:8}}>
                   {items.length} categories · n = {rows.filter(r=>r[catCol]!=null).length}
                 </div>
-                <SvgBarChart items={items} color={barColor} fillMode={fillMode}/>
+                {labelsRow}
+                <SvgBarChart items={items} color={barColor} fillMode={fillMode} title={plotTitle} xLabel={xLab||catCol}/>
               </div>
             );
           })()}
@@ -905,45 +1003,10 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const adfRes   = useMemo(() => flatY.length > 8 ? adfTest(flatY, 2)          : [], [flatY]);
 
   // ── Aggregate ───────────────────────────────────────────────────────────────
-  const series = useMemo(() => {
-    if (!tCol || !yCol || !rows.length) return [];
-    const valid = rows.filter(r =>
-      typeof r[tCol] === "number" && isFinite(r[tCol]) &&
-      (agg === "count" || (typeof r[yCol] === "number" && isFinite(r[yCol])))
-    );
-    if (!valid.length) return [];
-
-    const groups = grpCol
-      ? [...new Set(valid.map(r => String(r[grpCol] ?? "")))]
-      : ["_all_"];
-
-    return groups.map(grp => {
-      const subset = grpCol ? valid.filter(r => String(r[grpCol] ?? "") === grp) : valid;
-
-      // group by time value
-      const byT = {};
-      subset.forEach(r => {
-        const t = r[tCol];
-        if (!byT[t]) byT[t] = [];
-        if (agg !== "count") byT[t].push(r[yCol]);
-        else byT[t].push(1);
-      });
-
-      const pts = Object.entries(byT)
-        .map(([t, vals]) => {
-          const tv = parseFloat(t);
-          let y;
-          if (agg === "mean")   y = vals.reduce((s, v) => s + v, 0) / vals.length;
-          if (agg === "sum")    y = vals.reduce((s, v) => s + v, 0);
-          if (agg === "count")  y = vals.length;
-          if (agg === "median") { const s = [...vals].sort((a,b)=>a-b); y = s[Math.floor(s.length/2)]; }
-          return { t: tv, y };
-        })
-        .sort((a, b) => a.t - b.t);
-
-      return { grp, pts };
-    }).filter(s => s.pts.length > 0);
-  }, [rows, tCol, yCol, grpCol, agg]);
+  const series = useMemo(
+    () => aggregateTimeSeries(rows, tCol, yCol, grpCol, agg),
+    [rows, tCol, yCol, grpCol, agg]
+  );
 
   // ── SVG ─────────────────────────────────────────────────────────────────────
   const W = 620, H = 300;
@@ -1092,11 +1155,18 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
               {agg.charAt(0).toUpperCase()+agg.slice(1)} of {yCol} by {tCol}
               {grpCol ? ` · grouped by ${grpCol}` : ""}
             </span>
-            <button onClick={handleExport}
-              style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-            >↓ SVG</button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={handleExport}
+                style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+              >↓ SVG</button>
+              <button onClick={() => downloadPNG(document.getElementById(svgId), `trend_${yCol}_by_${tCol}`, "journal")}
+                style={{ padding: "0.2rem 0.6rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
+              >↓ PNG</button>
+            </div>
           </div>
           <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center" }}>
             <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
@@ -1805,6 +1875,22 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // Also stores a local pinnedItems entry for the ExplorePinBar comparison UI.
   const { appendLog } = useSessionLogOptional();
   const [pinnedItems, setPinnedItems] = useState([]);
+  // Persist pins across sessions (IndexedDB, keyed by dataset id like the
+  // PlotBuilder history). ExplorerModule remounts per dataset (key=id), so pid
+  // is stable for this instance; pinsLoaded guards against the initial empty
+  // state clobbering the stored pins before the load resolves.
+  const pinsLoaded = useRef(false);
+  useEffect(() => {
+    if (!pid) { pinsLoaded.current = true; return; }
+    let cancelled = false;
+    getExplorePins(pid)
+      .then(p => { if (!cancelled && Array.isArray(p) && p.length) setPinnedItems(p); })
+      .finally(() => { if (!cancelled) pinsLoaded.current = true; });
+    return () => { cancelled = true; };
+  }, [pid]);
+  useEffect(() => {
+    if (pid && pinsLoaded.current) saveExplorePins(pid, pinnedItems).catch(() => {});
+  }, [pid, pinnedItems]);
   const pinExplore = (params, label) => {
     appendLog({
       module: "explore", opType: "explore_stat",
@@ -1814,6 +1900,38 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     setPinnedItems(prev => [...prev, { id: Date.now(), kind: params.kind, label, params }]);
   };
   const removePin = (id) => setPinnedItems(prev => prev.filter(p => p.id !== id));
+
+  // Re-render a pinned descriptive plot from its params + the current rows, so the
+  // ExplorePinBar "Compare" panel shows the actual charts side by side (not just
+  // params). Returns null for kinds without a chart (the bar falls back to text).
+  const renderPinnedPlot = (item) => {
+    const p = item?.params || {};
+    if (item?.kind === "histogram") {
+      let vals = filteredRows.map(r => Number(r[p.col])).filter(Number.isFinite);
+      if (p.transform === "log")        vals = vals.filter(v => v > 0).map(Math.log);
+      else if (p.transform === "log10") vals = vals.filter(v => v > 0).map(Math.log10);
+      else if (p.transform === "sqrt")  vals = vals.filter(v => v >= 0).map(Math.sqrt);
+      // Use the color + fill style the user picked when pinning (aesthetic parity).
+      return <SvgHistogram data={vals} color={p.color} nBins={Number(p.bins) || 20} fillMode={p.fillMode ?? "filled"} title={p.title ?? ""} xLabel={p.xLabel ?? p.col} yLabel={p.yLabel ?? "Count"} />;
+    }
+    if (item?.kind === "barchart") {
+      const counts = {};
+      filteredRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
+      let bars = Object.entries(counts).map(([label, count]) => ({ label, count }));
+      if (p.order === "count") bars.sort((a, b) => b.count - a.count);
+      return <SvgBarChart items={bars.slice(0, 15)} color={p.color} fillMode={p.fillMode ?? "filled"} title={p.title ?? ""} xLabel={p.xLabel ?? p.col} />;
+    }
+    if (item?.kind === "spaghetti") {
+      return <SvgSpaghetti rows={filteredRows} entityCol={p.entityCol} timeCol={p.timeCol} col={p.col} sampleN={15} />;
+    }
+    if (item?.kind === "timeseries") {
+      return <SvgMiniTimeSeries series={aggregateTimeSeries(filteredRows, p.timeCol, p.yCol, p.groupCol || "", p.agg || "mean")} />;
+    }
+    if (item?.kind === "correlation") {
+      return <CorrHeatmap headers={p.cols ?? []} rows={filteredRows} info={info} />;
+    }
+    return null;
+  };
 
   function downloadExploreScript(language) {
     const ext    = { r: "R", stata: "do", python: "py" }[language];
@@ -1962,7 +2080,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
         {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} datasetName={filename} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
-      <ExplorePinBar items={pinnedItems} info={info} onRemove={removePin} />
+      <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
     </div>
   );
 }

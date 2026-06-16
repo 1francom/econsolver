@@ -47,6 +47,28 @@ export async function saveMapHistory(pid, history) {
   });
 }
 
+export async function getExplorePins(pid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE, "readonly");
+    const s   = t.objectStore(STORE);
+    const req = s.get(`explorePins_${pid}`);
+    req.onsuccess = () => resolve(req.result?.pins ?? []);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+export async function saveExplorePins(pid, pins) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t   = db.transaction(STORE, "readwrite");
+    const s   = t.objectStore(STORE);
+    s.put({ id: `explorePins_${pid}`, pins, ts: Date.now() });
+    t.oncomplete = () => resolve();
+    t.onerror    = e => reject(e.target.error);
+  });
+}
+
 export async function getGeoPlotConfig(pid) {
   const db = await openDB();
   return new Promise((resolve, reject) => {

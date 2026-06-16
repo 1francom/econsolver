@@ -19,6 +19,10 @@ import { useSessionLog } from "./services/session/sessionLog.jsx";
 import { useSessionState } from "./services/session/sessionState.jsx";
 import { generateCleanScript, generateWorkspaceScript, toDfVar } from "./pipeline/exporter.js";
 import { transpileSpatialOp } from "./services/export/spatialScript.js";
+import { buildGgplot, buildMatplotlibPlot, buildStataPlot } from "./services/export/plotScript.js";
+import { buildLeafletR, buildFoliumPy } from "./services/export/mapScript.js";
+import { transpileExploreStat } from "./services/export/exploreStatScript.js";
+import { getPlotHistory, getMapHistory } from "./services/Persistence/plotHistory.js";
 import { planExecutionOrder, detectInterleaving } from "./services/export/timelinePlan.js";
 import { loadProjectPipelines } from "./services/Persistence/indexedDB.js";
 import { generateRScript }     from "./services/export/rScript.js";
@@ -992,7 +996,15 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             out.push(m ? renderModel(m, modelIdx++)
                        : `${comment} ${blk.label} — model not pinned; pin it in the Model tab to replicate`);
           } else if (blk.kind === "explore") {
-            out.push(`${comment} ${blk.label} — Explore artifact (pin in Explore to emit plot/stat code)`);
+            const exDf = toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
+            const code = (blk.events ?? [])
+              .map(ev => {
+                const c = transpileExploreStat(ev.params, lang, exDf);
+                return c ? `${comment} ${ev.label ?? ev.params?.kind}\n${c}` : null;
+              })
+              .filter(Boolean)
+              .join("\n\n");
+            out.push(code || `${comment} ${blk.label} — Explore artifact (no code translation)`);
           } else if (blk.kind === "spatial") {
             const code = (blk.events ?? [])
               .map(ev => transpileSpatialOp(ev.opType, ev.params, lang, dsMap))
@@ -1021,6 +1033,72 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         });
         modelSc = modelsToReplicate().map(renderModel).filter(Boolean).join("\n\n");
       }
+      // ── Spatial analyze ops ──────────────────────────────────────────────
+      // Execution mode inlines spatial ops in order. The module/multi-dataset
+      // modes are pipeline-only and would otherwise drop them, so append a
+      // Spatial section translating the logged ops (st_join/buffer/grid/…).
+      if (structureMode !== "execution") {
+        const spatialCode = timeline
+          .filter(ev => ev?.module === "spatial" && ev.opType !== "geocode")
+          .map(ev => {
+            const c = transpileSpatialOp(ev.opType, ev.params, lang, dsMap);
+            return c ? `${comment} ${ev.label ?? ev.opType}\n${c}` : null;
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        if (spatialCode) {
+          cleanSc += `\n\n${comment} ── Spatial operations ───────────────────────────────\n${spatialCode}`;
+        }
+        // Explore pins (Summary / Distributions / Time Series / Correlation).
+        const exDf = toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
+        const exploreCode = timeline
+          .filter(ev => ev?.module === "explore" && ev.opType === "explore_stat")
+          .map(ev => {
+            const c = transpileExploreStat(ev.params, lang, exDf);
+            return c ? `${comment} ${ev.label ?? ev.params?.kind}\n${c}` : null;
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        if (exploreCode) {
+          cleanSc += `\n\n${comment} ── Explore (descriptive plots & stats) ──────────────\n${exploreCode}`;
+        }
+      }
+      // ── Saved plots (PlotBuilder) + maps (leaflet) ───────────────────────
+      // Persisted per project (plotHistory) with their own Track P translators.
+      // Weave them in as Plots / Maps sections (all modes) so the unified script
+      // reproduces the visuals too — not just data prep + estimation.
+      try {
+        const plotDfVar = toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
+        const savedPlots = pid ? (await getPlotHistory(pid).catch(() => [])) : [];
+        const plotCode = (Array.isArray(savedPlots) ? savedPlots : [])
+          .map(entry => {
+            const code = lang === "python" ? buildMatplotlibPlot(entry, { dfVar: plotDfVar })
+                       : lang === "stata"  ? buildStataPlot(entry, { dataVar: plotDfVar })
+                       :                     buildGgplot(entry, { dfVar: plotDfVar });
+            return code ? `${comment} Plot: ${entry.name ?? "untitled"}\n${code}` : null;
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        if (plotCode) {
+          cleanSc += `\n\n${comment} ── Plots ────────────────────────────────────────────`
+            + `\n${comment} (model-derived plots referencing fitted/residual columns need the model run first)\n${plotCode}`;
+        }
+
+        const savedMaps = pid ? (await getMapHistory(pid).catch(() => [])) : [];
+        const mapCode = (Array.isArray(savedMaps) ? savedMaps : [])
+          .map(entry => {
+            let code;
+            if (lang === "python") code = buildFoliumPy(entry, { datasets: availableDatasets });
+            else if (lang === "stata") code = `${comment} Map "${entry.name ?? ""}" — Stata has no leaflet; reproduce in R (leaflet) or Python (folium)`;
+            else code = buildLeafletR(entry, { datasets: availableDatasets });
+            return code ? `${comment} Map: ${entry.name ?? "untitled"}\n${code}` : null;
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        if (mapCode) {
+          cleanSc += `\n\n${comment} ── Maps ─────────────────────────────────────────────\n${mapCode}`;
+        }
+      } catch { /* histories are best-effort; never block script generation */ }
       const dict = cleanedData?.dataDictionary ?? null;
       const structureInstruction =
         structureMode === "custom" && customInstruction.trim()
