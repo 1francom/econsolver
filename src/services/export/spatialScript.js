@@ -160,27 +160,33 @@ function rSpatial(opType, p, datasets, srcV) {
       // dataset (id = gridDsId, WKT "geometry" col), so it resolves to its name.
       const gridV = dfRef(datasets, p.gridDsId, "grid").v;
       const cs    = rNum(p.cellSize);
+      // Emit grid cells as a grid_id + WKT-geometry data.frame (back in 4326).
       const toWkt = (sfcExpr) =>
         `${gridV} <- data.frame(grid_id = seq_along(${sfcExpr}),\n` +
         `                       geometry = sf::st_as_text(sf::st_transform(${sfcExpr}, 4326)))`;
       if (p.mode === "latlon" && p.latCol && p.lonCol) {
         const sv = dfRef(datasets, p.sourceDatasetId, "ref").v;
         return [
-          `# Build a ${cs} m grid over the bounding box of ${sv} points (EPSG:32721 -> 4326)`,
+          `# Build a ${cs} m grid over the bounding box of ${sv} points (project to EPSG:32721 for metric cells)`,
           naFilterR(sv, p.lonCol, p.latCol),
-          `.pts   <- sf::st_transform(sf::st_as_sf(${sv}, coords = c("${p.lonCol}", "${p.latCol}"), crs = 4326), 32721)`,
-          `.cells <- sf::st_make_grid(.pts, cellsize = ${cs}, square = TRUE)`,
-          toWkt(".cells"),
+          `grid_pts  <- sf::st_transform(sf::st_as_sf(${sv}, coords = c("${p.lonCol}", "${p.latCol}"), crs = 4326), 32721)`,
+          `grid_geom <- sf::st_make_grid(grid_pts, cellsize = ${cs}, square = TRUE)`,
+          toWkt("grid_geom"),
         ].join("\n");
       }
       const bnd  = dfRef(datasets, p.sourceDatasetId, "poly");
       const clip = p.clipBorder !== false;
+      // Project to EPSG:32721 BEFORE union/validate so every polygon op runs in
+      // planar GEOS — s2 is geographic-only, so this sidesteps the s2 error
+      // "Loop is not valid: Edge ... is degenerate (duplicate vertex)" that real
+      // boundary polygons trigger on st_union. st_make_valid repairs the polygon.
       return [
-        `# Build a ${cs} m grid over ${bnd.v} and ${clip ? "clip to its boundary" : "cover its bounding box"} (EPSG:32721 -> 4326)`,
-        `.bnd   <- sf::st_transform(sf::st_union(sf::st_as_sf(${bnd.v}, wkt = "${p.boundaryCol}", crs = 4326)), 32721)`,
-        `.cells <- sf::st_make_grid(.bnd, cellsize = ${cs}, square = TRUE)`,
-        ...(clip ? [`.cells <- sf::st_intersection(.cells, .bnd)  # clip cells to the boundary`] : []),
-        toWkt(".cells"),
+        `# Build a ${cs} m grid over ${bnd.v} and ${clip ? "clip to its boundary" : "cover its bounding box"}`,
+        `# (project to EPSG:32721 first so polygon ops are planar/GEOS; st_make_valid repairs the boundary)`,
+        `grid_bnd  <- sf::st_union(sf::st_make_valid(sf::st_transform(sf::st_as_sf(${bnd.v}, wkt = "${p.boundaryCol}", crs = 4326), 32721)))`,
+        `grid_geom <- sf::st_make_grid(grid_bnd, cellsize = ${cs}, square = TRUE)`,
+        ...(clip ? [`grid_geom <- sf::st_intersection(grid_geom, grid_bnd)  # clip cells to the boundary`] : []),
+        toWkt("grid_geom"),
       ].join("\n");
     }
     default:
@@ -328,7 +334,9 @@ function pySpatial(opType, p, datasets, srcV) {
       return [
         `# Build a ${cs} m grid over ${sv} and ${clip ? "clip to its boundary" : "cover its bounding box"} (EPSG:32721 -> 4326)`,
         `import numpy as np; from shapely.geometry import box`,
-        `_bnd = gpd.GeoSeries.from_wkt(${sv}["${p.boundaryCol}"], crs=4326).to_crs(32721).unary_union`,
+        // .make_valid() repairs duplicate/degenerate vertices before union (the
+        // geopandas analogue of the s2 boundary-validity fix on the R side).
+        `_bnd = gpd.GeoSeries.from_wkt(${sv}["${p.boundaryCol}"], crs=4326).to_crs(32721).make_valid().unary_union`,
         `_x0, _y0, _x1, _y1 = _bnd.bounds`,
         tile,
         `_grid = gpd.GeoSeries(_cells, crs=32721)`,
@@ -357,7 +365,7 @@ function targetRefOf(opType, p, datasets) {
 }
 
 // ─── Public ───────────────────────────────────────────────────────────────────
-export function transpileSpatialOp(opType, params = {}, language = "r", datasets = {}, src = null) {
+export function transpileSpatialOp(opType, params = {}, language = "r", datasets = {}, src = null, builtGridIds = null) {
   // geocode is a real pipeline step (translated by the step transpilers); skip.
   if (opType === "geocode") return null;
 
@@ -384,8 +392,12 @@ export function transpileSpatialOp(opType, params = {}, language = "r", datasets
   if (src && src.known === false && opType !== "grid_create_map") {
     notes.push(`${cmt} NOTE: bind '${srcV}' to the point dataset this op ran on (the geocoded/lat-lon table) before running.`);
   }
-  const tgt = targetRefOf(opType, params, datasets);
-  if (tgt && tgt.known === false) {
+  const tgt   = targetRefOf(opType, params, datasets);
+  const tgtId = params.gridDsId ?? params.polyDsId ?? params.refDsId;
+  // Skip the "export this layer" note when the grid is BUILT earlier in the same
+  // script by a grid_create_map op — it is regenerated, not loaded.
+  const builtInScript = builtGridIds && tgtId && builtGridIds.has(tgtId);
+  if (tgt && tgt.known === false && !builtInScript) {
     notes.push(`${cmt} NOTE: '${tgt.v}' was built inside Litux and has no source file — export it from Litux as ${tgt.v}.csv (e.g. the schools-per-grid layer) and load it first.`);
   }
   return notes.length ? `${notes.join("\n")}\n${code}` : code;

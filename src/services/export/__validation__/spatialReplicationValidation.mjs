@@ -89,15 +89,24 @@ console.log("\n── grid_create_map regenerates the grid in-script ──");
 {
   const r = transpileSpatialOp("grid_create_map", FIX.grid_create_map, "r", DATASETS);
   check("r: builds grid via st_make_grid over the boundary", /st_make_grid\(/.test(r) && /df_barrios/.test(r));
+  check("r: projects to 32721 + st_make_valid before union (s2 fix)",
+    /st_make_valid\(/.test(r) && r.indexOf("32721") < r.indexOf("st_union") && r.indexOf("st_make_valid") < r.indexOf("st_union"));
+  check("r: no dot-prefixed variable names", !/(^|[^\w.])\.(bnd|cells|pts)\b/.test(r) && /grid_bnd|grid_geom/.test(r));
   check("r: clips to boundary when clipBorder", /st_intersection\(/.test(r));
   check("r: output binds to the grid's own name (grid_500m)", /grid_500m <- data\.frame\(grid_id/.test(r));
   check("r: no 'export this' note (grid is built, not loaded)", !/export it from Litux/.test(r) && !/NOTE: bind/.test(r));
   const rNoClip = transpileSpatialOp("grid_create_map", { ...FIX.grid_create_map, clipBorder: false }, "r", DATASETS);
   check("r: skips clip when clipBorder=false", !/st_intersection\(/.test(rNoClip));
   const rLatlon = transpileSpatialOp("grid_create_map", { mode: "latlon", sourceDatasetId: "REF", latCol: "lat", lonCol: "lon", cellSize: 250, gridDsId: "GRID", gridName: "grid_500m" }, "r", DATASETS);
-  check("r: latlon mode grids the points bbox", /st_make_grid\(\.pts/.test(rLatlon) && /df_hospitals/.test(rLatlon));
+  check("r: latlon mode grids the points bbox", /st_make_grid\(grid_pts/.test(rLatlon) && /df_hospitals/.test(rLatlon));
   const py = transpileSpatialOp("grid_create_map", FIX.grid_create_map, "python", DATASETS);
-  check("python: tiles boxes + emits WKT geometry", /shapely\.geometry import box/.test(py) && /to_wkt\(\)/.test(py) && /df_barrios/.test(py));
+  check("python: tiles boxes + make_valid + WKT geometry", /shapely\.geometry import box/.test(py) && /make_valid\(\)/.test(py) && /to_wkt\(\)/.test(py) && /df_barrios/.test(py));
+
+  // A consumer op (aggregate_to_grid) referencing an in-script-built grid must
+  // NOT get the "export this grid" note.
+  const builtGridIds = new Set(["MISSING"]);
+  const agg = transpileSpatialOp("aggregate_to_grid", { ...FIX.aggregate_to_grid, gridDsId: "MISSING" }, "r", DATASETS, { v: "df_schools", known: true }, builtGridIds);
+  check("r: built-in-script grid suppresses the export note", !/export it from Litux/.test(agg));
 }
 
 console.log("\n── imports helper ──");

@@ -968,6 +968,12 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         }
         return { v: "points_df", known: false };
       };
+      // Grids constructed in-script (grid_create_map) — consumer ops that
+      // reference these must NOT get an "export this grid" note (it's rebuilt).
+      const builtGridIds = new Set(
+        timeline.filter(ev => ev?.module === "spatial" && ev.opType === "grid_create_map")
+                .map(ev => ev.params?.gridDsId).filter(Boolean)
+      );
 
       // Render one estimation block, bound to the model's source df (not the
       // Report-active dataset). Shared by the module and execution paths.
@@ -1032,9 +1038,10 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
               .join("\n\n");
             out.push(code || `${comment} ${blk.label} — Explore artifact (no code translation)`);
           } else if (blk.kind === "spatial") {
+            const seen = new Set();
             const code = (blk.events ?? [])
-              .map(ev => transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params)))
-              .filter(Boolean)
+              .map(ev => transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params), builtGridIds))
+              .filter(c => c && !seen.has(c) && seen.add(c))  // drop repeated identical ops
               .join("\n\n");
             out.push(code
               ? `${comment} ${blk.label}\n${code}`
@@ -1064,13 +1071,20 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
       // modes are pipeline-only and would otherwise drop them, so append a
       // Spatial section translating the logged ops (st_join/buffer/grid/…).
       if (structureMode !== "execution") {
+        const seenSpatial = new Set();
         const spatialCode = timeline
           .filter(ev => ev?.module === "spatial" && ev.opType !== "geocode")
           .map(ev => {
-            const c = transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params));
+            const c = transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params), builtGridIds);
             return c ? `${comment} ${ev.label ?? ev.opType}\n${c}` : null;
           })
-          .filter(Boolean)
+          // Drop repeated identical spatial ops (e.g. the user re-ran the same
+          // grid build 3×) — keyed on the generated code, ignoring the label.
+          .filter(block => {
+            if (!block) return false;
+            const key = block.replace(/^#.*\n/, "");
+            return !seenSpatial.has(key) && seenSpatial.add(key);
+          })
           .join("\n\n");
         if (spatialCode) {
           visualSections += `\n\n${comment} ── Spatial operations ───────────────────────────────\n${spatialCode}`;
@@ -1105,9 +1119,20 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         // Tag each entry with the dataset id it was saved under so the plot binds
         // to its own source dataset (not the Report-active one). flat() would
         // otherwise lose that association.
-        const savedPlots = (await Promise.all(
+        // Dedupe history entries: the same saved plot/map can surface under more
+        // than one histPid (saved under a dataset id AND re-listed under the
+        // project pid), producing the duplicate "Map 1 ×2" Franco saw. Key on a
+        // stable id, falling back to name + serialized config.
+        const dedupeHistory = (arr) => {
+          const seen = new Set();
+          return arr.filter(e => {
+            const k = e?.id ?? `${e?.name ?? ""}|${JSON.stringify(e?.layers ?? e?.geoms ?? e?.config ?? "")}`;
+            return !seen.has(k) && seen.add(k);
+          });
+        };
+        const savedPlots = dedupeHistory((await Promise.all(
           histPids.map(async p => (await getPlotHistory(p).catch(() => [])).map(e => ({ ...e, _srcId: p })))
-        )).flat();
+        )).flat());
         const plotCode = (Array.isArray(savedPlots) ? savedPlots : [])
           .map(entry => {
             const entryDf = idToVar(entry._srcId) ?? plotDfVar;
@@ -1123,7 +1148,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             + `\n${comment} (model-derived plots referencing fitted/residual columns need the model run first)\n${plotCode}`;
         }
 
-        const savedMaps = (await Promise.all(histPids.map(p => getMapHistory(p).catch(() => [])))).flat();
+        const savedMaps = dedupeHistory((await Promise.all(histPids.map(p => getMapHistory(p).catch(() => [])))).flat());
         const mapCode = (Array.isArray(savedMaps) ? savedMaps : [])
           .map(entry => {
             let code;

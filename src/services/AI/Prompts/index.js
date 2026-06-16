@@ -900,8 +900,19 @@ TRANSFORMATION RULES (apply all):
     it depends on (e.g. a spatial join or grid assignment before the grid
     it references, a model plot before its estimation, a transform before
     the load of its dataset). When in doubt, keep the original sequence.
+2a. FRONT-LOAD DATA PREPARATION. The user may have interleaved estimation and
+    wrangling (e.g. pinned a model, then created more variables). Do NOT mirror
+    that back-and-forth literally — it reads as chaos. Group ALL data loading,
+    cleaning, variable creation, and derived datasets FIRST (in dependency
+    order), then the estimation section(s), then results. A model must NEVER
+    appear before the code that creates a variable it uses; if the literal
+    order would place a model first, move the variable-creation up so every
+    model's inputs already exist. Interleave prep with a model ONLY when a later
+    model genuinely depends on prep produced by a still-later step.
 3.  Collapse redundant intermediate assignments: if a variable is
-    assigned and immediately overwritten, keep only the final value.
+    assigned and immediately overwritten, keep only the final value. Likewise,
+    if the SAME transformation/derivation/spatial op is repeated verbatim later
+    (the user re-ran it), keep a single copy in its correct position.
 4.  Add an inline comment on every non-obvious transformation
     (e.g. "# Winsorise at 1st/99th percentile to limit outlier influence").
 5.  KEEP, VERBATIM, any section whose header is "── Spatial operations ──",
@@ -912,6 +923,19 @@ TRANSFORMATION RULES (apply all):
     with a "see exported plots" comment and do NOT drop them as exploratory.
     Only collapse a plot to a comment if it arrives as a bare comment with no
     code to run.
+5a. SPATIAL sections specifically (sf / geopandas):
+    - Do NOT rewrite the grid-construction code. It deliberately PROJECTS to
+      EPSG:32721 and calls sf::st_make_valid() (R) / .make_valid() (Python)
+      BEFORE st_union/unary_union. This is required: s2 is geographic-only, so
+      doing the union in lon/lat on a real boundary throws "Loop is not valid:
+      Edge … is degenerate (duplicate vertex)". Keep the projection-first +
+      make_valid order exactly; never move the union back to crs = 4326.
+    - A grid (or any layer) built by an in-script spatial block is regenerated
+      there — do NOT add a read_csv/read_excel/import for it, and do NOT add an
+      "export from Litux" note for it.
+    - If the SAME spatial-operation block appears more than once (the user
+      re-ran an identical grid/join), keep only ONE copy — collapse the repeats.
+    - Keep all sf/leaflet calls verbatim; do not "simplify" geometry handling.
 6.  Keep all estimation code intact — do NOT simplify or summarise it.
 6a. DO NOT INVENT descriptive/exploratory output. Never add histograms, density
     plots, summary tables, correlation matrices, time-series plots, or any other
@@ -989,6 +1013,11 @@ OUTPUT RULES (mandatory):
 - Use the target language's native comment character.
 - Variable names must match those in the input sections exactly.
 - If a section is absent (empty string), skip it silently.
+- NEVER truncate a statement. Every plot/stat/estimation call you emit must be
+  COMPLETE and runnable — no half-written ggplot()/geom_*()/labs()/feols() left
+  dangling, no line that ends mid-call. If you are running out of room, drop
+  WHOLE trailing blocks (and note it with a single comment) rather than emitting
+  a partial, unparseable statement. A truncated call breaks the entire script.
 `;
 
 // ─── PROMPT: INTERPRET MARGINAL EFFECTS ──────────────────────────────────────
