@@ -89,6 +89,16 @@ function toLoadFile(ds) {
   return f.startsWith("<") || /\.[A-Za-z0-9]+$/.test(f) ? f : `${f}.csv`;
 }
 
+// A dataset produced INSIDE Litux (a spatial grid/result, or another in-app save)
+// has no source file — its name/filename carries no extension. These are rebuilt
+// by the deterministic "Spatial operations" section, so the workspace skeleton
+// must NOT emit a read_csv/import for them (it would reference a file that does
+// not exist and double-define the dataset).
+function isInAppDataset(ds) {
+  const f = ds.filename ?? ds.name ?? "";
+  return !/^</.test(String(f)) && !/\.[A-Za-z0-9]+$/.test(String(f));
+}
+
 // ─── SINGLE-DATASET SCRIPT ────────────────────────────────────────────────────
 
 /**
@@ -257,7 +267,11 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
-      lines.push(buildRLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
+      if (isInAppDataset(ds)) {
+        lines.push(`# ${df} is produced inside Litux (e.g. a spatial grid/result) — regenerated in the Spatial operations section; not loaded from a file.`);
+      } else {
+        lines.push(buildRLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
+      }
       // Skip cross-dataset (join/append) local steps — they are hoisted to the
       // globalPipeline section below and emitted there against the CLEANED right
       // df. Emitting them here too would double the join (Gap C resolution).
@@ -318,6 +332,11 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`* ${"─".repeat(60)}`);
       lines.push(`* Dataset: ${ds.name}`);
       lines.push(`* ${"─".repeat(60)}`);
+      if (isInAppDataset(ds)) {
+        lines.push(`* ${ds.name} is produced inside Litux (spatial grid/result) — reproduce it in R/Python; Stata has no geometry stack.`);
+        lines.push(``);
+        continue;
+      }
       lines.push(buildStataLoadLine(file, ds.loadOpts ?? null));
       // Skip cross-dataset (join/append) local steps — they are hoisted to the
       // globalPipeline section below and emitted there against the CLEANED right
@@ -377,7 +396,11 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
-      lines.push(buildPyLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
+      if (isInAppDataset(ds)) {
+        lines.push(`# ${df} is produced inside Litux (e.g. a spatial grid/result) — regenerated in the Spatial operations section; not loaded from a file.`);
+      } else {
+        lines.push(buildPyLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
+      }
       // Skip cross-dataset (join/append) local steps — they are hoisted to the
       // globalPipeline section below and emitted there against the CLEANED right
       // df. Emitting them here too would double the join (Gap C resolution).
