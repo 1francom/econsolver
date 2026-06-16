@@ -610,6 +610,18 @@ if(LEGEND){
     if (pid) await saveMapHistory(pid, next);
   }
 
+  async function moveNamedMap(dir) {
+    if (savedMapId === null) return;
+    const i = mapHistory.findIndex(entry => entry.id === savedMapId);
+    if (i < 0) return;
+    const j = i + dir;
+    if (j < 0 || j >= mapHistory.length) return;
+    const next = [...mapHistory];
+    [next[i], next[j]] = [next[j], next[i]];
+    setMapHistory(next);
+    if (pid) await saveMapHistory(pid, next);
+  }
+
   function copyMapScript(language) {
     if (layers.length === 0) return;
     const entry = currentMapEntry();
@@ -1015,6 +1027,18 @@ if(LEGEND){
                   <option value="">Saved maps...</option>
                   {mapHistory.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </select>
+                <button onClick={() => moveNamedMap(-1)} disabled={savedMapId === null} title="Move selected map up"
+                  style={{ padding: "3px 7px", borderRadius: 3, background: "none", border: `1px solid ${C.border2}`,
+                    color: savedMapId === null ? C.border : C.textMuted, fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize, cursor: savedMapId === null ? "not-allowed" : "pointer" }}>
+                  ▲
+                </button>
+                <button onClick={() => moveNamedMap(1)} disabled={savedMapId === null} title="Move selected map down"
+                  style={{ padding: "3px 7px", borderRadius: 3, background: "none", border: `1px solid ${C.border2}`,
+                    color: savedMapId === null ? C.border : C.textMuted, fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize, cursor: savedMapId === null ? "not-allowed" : "pointer" }}>
+                  ▼
+                </button>
                 <button onClick={deleteNamedMap} disabled={savedMapId === null} title="Delete selected saved map"
                   style={{ padding: "3px 7px", borderRadius: 3, background: "none", border: `1px solid ${C.border2}`,
                     color: savedMapId === null ? C.border : C.textMuted, fontFamily: T.code.fontFamily,
