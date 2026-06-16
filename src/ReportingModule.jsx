@@ -915,10 +915,23 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   }
 
   function modelsToReplicate() {
-    if (replicateMode !== "all") return result ? [result] : [];
-    const activeKey = modelReplicationKey(result);
-    return [result, ...pinnedModels.filter(model => modelReplicationKey(model) !== activeKey)].filter(Boolean);
+    let base;
+    if (replicateMode !== "all") base = result ? [result] : [];
+    else {
+      const activeKey = modelReplicationKey(result);
+      base = [result, ...pinnedModels.filter(model => modelReplicationKey(model) !== activeKey)].filter(Boolean);
+    }
+    // Honor the global artifact order (panel) so reordering a model moves it in
+    // the script too. Models absent from the order keep their natural position.
+    if (!artOrder.length) return base;
+    const rank = (m) => { const i = artOrder.indexOf(makeArtifactId("model", m.id)); return i < 0 ? Infinity : i; };
+    return base.map((m, i) => [m, i]).sort((a, b) => (rank(a[0]) - rank(b[0])) || (a[1] - b[1])).map(([m]) => m);
   }
+
+  // Stable primitive keys for the artifact-list effect deps — avoids a re-fetch
+  // loop if a parent ever passes a new array ref each render.
+  const _dsKey = availableDatasets.map(d => d.id).join(",");
+  const _pmKey = pinnedModels.map(m => m.id).join(",");
 
   // Build the unified artifact list (plots + maps + models) and load the saved
   // global order so the user can drag it into the order the script emits.
@@ -937,7 +950,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
       if (!cancelled) { setArtList(orderArtifacts(items, ord)); setArtOrder(ord); }
     })();
     return () => { cancelled = true; };
-  }, [pid, availableDatasets, result, pinnedModels]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pid, _dsKey, _pmKey, result?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const moveArt = (i, dir) => {
     const j = i + dir;
@@ -1167,7 +1180,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           histPids.map(async p => (await getPlotHistory(p).catch(() => [])).map(e => ({ ...e, _srcId: p })))
         )).flat());
         const savedMaps = dedupeHistory((await Promise.all(histPids.map(p => getMapHistory(p).catch(() => [])))).flat());
-        const order = await getArtifactOrder(pid).catch(() => []);
+        const order = artOrder; // use the in-state order the panel shows (no extra IDB read / race)
         const plotArts = (savedPlots ?? []).map(e => ({ kind: "plot", artifactId: makeArtifactId("plot", e.id), savedAt: e.savedAt ?? 0, entry: e }));
         const mapArts  = (savedMaps  ?? []).map(e => ({ kind: "map",  artifactId: makeArtifactId("map",  e.id), savedAt: e.savedAt ?? 0, entry: e }));
         const visualArts = orderArtifacts([...plotArts, ...mapArts], order);
