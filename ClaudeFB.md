@@ -430,3 +430,12 @@
 | Feedback XSS probes | verified fixed / wontfix probe | sanitize-on-write already landed; fresh payload is stored escaped, confirming inert output. |
 | IV-Poisson interpreted as linear 2SLS | fix-now | `bc2d7b9d`. |
 | Diagnostics mutate with sidebar / pinned restore | fix-now | `35f4b5a6` freezes OLS/WLS display to `result.spec`; browser validation pending Franco. |
+
+---
+
+## 2026-06-17 batch
+
+### Bugs
+
+- [08:51] · Model
+  Pipeline only applies if dataset is also selected in Clean Module

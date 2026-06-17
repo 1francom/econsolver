@@ -52,3 +52,4 @@
 | 2026-06-14 | Model | User cannot estimate supported regression families without an intercept | medium | math | `src/components/modeling/ModelConfiguration.jsx`, `src/math/LinearEngine.js` | fix-later — requires engine-wide spec/export compatibility, not a pre-launch UI toggle. |
 | 2026-06-14 | Spatial | Plot builder has no spatial row-filter control scoped to a layer | low | ux | `src/components/tabs/spatial/plot/` | fix-later — route to V4 plots after launch. |
 | 2026-06-14 | Model | LaTeX coefficient table display names cannot be edited independently of source columns | low | ux | `src/components/modeling/resultDisplay.jsx` | fix-later — post-launch reporting metadata feature. |
+| 2026-06-16 | Model | Pipeline only applies if dataset is also selected in Clean Module | high | pipeline | `src/WranglingModule.jsx`, `src/components/ModelingTab.jsx` | open |
