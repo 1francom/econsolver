@@ -29,6 +29,7 @@ import CalculateTab     from './components/tabs/CalculateTab.jsx';
 import SimulateTab      from './components/tabs/SimulateTab.jsx';
 import SpatialTab       from './components/tabs/SpatialTab.jsx';
 import ReportingModule  from './ReportingModule.jsx';
+import * as modelBuffer from "./services/modelBuffer.js";
 import { TourOverlay, TOUR_STEPS } from "./components/HelpSystem.jsx";
 
 const LS_KEY = "econ_wrangle_v2";
@@ -2655,6 +2656,9 @@ export default function App() {
   // Coach → Clean dispatch: pre-loads the Clean-tab AI command bar with a column
   // + instruction and navigates there. Consumed once by NLCommandBar.
   const [assistantPrefill,   setAssistantPrefill]  = useState(null);
+  // Cross-dataset plot click: switch the Explore dataset, then hand the target
+  // plot id to the remounted ExplorerModule to open it (mirrors assistantPrefill).
+  const [pendingExplorePlot, setPendingExplorePlot] = useState(null); // { datasetId, plotId }
   const [feedbackOpen,       setFeedbackOpen]      = useState(false);
 
   const [availableDatasets,  setAvailableDatasets] = useState([]);
@@ -2697,6 +2701,19 @@ export default function App() {
       sessionStorage.removeItem(NAV_KEY);
     }
   }, [screen, pid, activeTab, projectName, filename, activeDatasetId]);
+
+  // Load this project's pinned-model buffer at the App level so Report (and its
+  // lock) see saved models WITHOUT requiring a Model-tab visit (refresh bug).
+  // ModelingTab shares the same modelBuffer singleton and keeps App in sync via
+  // onSessionStateChange, so this only seeds the initial state.
+  useEffect(() => {
+    if (!pid) return;
+    let cancelled = false;
+    modelBuffer.setProject(pid).then(() => {
+      if (!cancelled) setModelingSession(s => ({ ...s, pinnedModels: modelBuffer.getAll() }));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [pid]);
 
   // ── Navigation history — tracks {screen, tab} entries for ← back button ──
   const navHistory = useRef([]);                  // stack of past states
@@ -2935,6 +2952,7 @@ export default function App() {
                 activeTab={activeTab}
                 onTabChange={navigateToTab}
                 hasOutput={!!(tabOutput(activeTab) || tabRawData(activeTab)?.rows?.length)}
+                reportUnlocked={(modelingSession?.pinnedModels?.length ?? 0) > 0}
                 activeDatasetId={tabDsId(activeTab)}
                 pid={pid}
                 onSelectDataset={id => selectDataset(activeTab, id, activeTab === "clean")}
@@ -3013,6 +3031,10 @@ export default function App() {
                     ? <ExplorerModule
                         key={tabDsId("explore")}
                         pid={tabDsId("explore")}
+                        projectPid={pid}
+                        onRequestDataset={(dsId, plotId) => { setPendingExplorePlot({ datasetId: dsId, plotId }); selectDataset("explore", dsId, true); }}
+                        pendingPlot={pendingExplorePlot?.datasetId === tabDsId("explore") ? pendingExplorePlot : null}
+                        onConsumePendingPlot={() => setPendingExplorePlot(null)}
                         cleanedData={exploreCleanedData}
                         onBack={()=>navigateToTab("clean")}
                         onProceed={()=>navigateToTab("model")}
@@ -3037,6 +3059,8 @@ export default function App() {
                         onCoachQuestion={q=>{ setSidebarOpen(true); setCoachPrefill({q,seq:++coachSeqRef.current}); }}
                         onExtract={(colName, values) => studioRef.current?.addInjectColumnStep?.(colName, values)}
                         pid={pid}
+                        datasetId={tabDsId("model")}
+                        onSwitchDataset={(id) => selectDataset("model", id, true)}
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
@@ -3094,7 +3118,7 @@ export default function App() {
 
                 {/* REPORT — Phase 9.10 */}
                 <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
-                  {reportCleanedData
+                  {(reportCleanedData || (modelingSession?.pinnedModels?.length ?? 0) > 0)
                     ? <ReportingModule result={activeResult} cleanedData={reportCleanedData} availableDatasets={availableDatasets} pinnedModels={modelingSession?.pinnedModels ?? []} pid={pid} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }

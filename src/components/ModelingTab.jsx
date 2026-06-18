@@ -203,7 +203,7 @@ function ModelHistory({ history, onRestore, onClear }) {
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onSessionStateChange, onCoachQuestion, onExtract, pid }) {
+export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onSessionStateChange, onCoachQuestion, onExtract, pid, datasetId, onSwitchDataset }) {
   const { C, T } = useTheme();
   // Execution-timeline emitter (Fase 1.2) — no-op when outside the provider.
   const { appendLog } = useSessionLogOptional();
@@ -589,8 +589,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     if (dispatch?.result?.spec)      Object.assign(dispatch.result.spec,      specExtras);
     if (dispatch?.result?.fe?.spec)  Object.assign(dispatch.result.fe.spec,   specExtras);
     if (dispatch?.result?.fd?.spec)  Object.assign(dispatch.result.fd.spec,   specExtras);
+    const _dsTag = datasetId ?? null;
+    if (dispatch?.result)     dispatch.result.datasetId    = _dsTag;
+    if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
+    if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
     return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -3313,6 +3317,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         <ModelBufferBar
           models={pinnedModels}
           activeId={activeBufferId}
+          datasetNames={Object.fromEntries((availableDatasets || []).map(d => [d.id, d.name ?? d.filename]))}
+          currentDatasetId={datasetId}
           onRestore={(id) => {
             const r = modelBuffer.get(id);
             if (r) { setResult(r); setActiveBufferId(id); }
@@ -3322,6 +3328,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (activeBufferId === id) setActiveBufferId(null);
             setBufferVersion(v => v + 1);
           }}
+          onRename={(id, label) => { modelBuffer.setLabel(id, label); setBufferVersion(v => v + 1); }}
+          onReorder={(ids) => { modelBuffer.reorder(ids); setBufferVersion(v => v + 1); }}
+          onSwitchDataset={(id) => { if (id && id !== datasetId) onSwitchDataset?.(id); }}
           onCompare={() => setCompareOpen(true)}
         />
         </div>{/* closes RIGHT outer column wrapper */}

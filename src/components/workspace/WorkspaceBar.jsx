@@ -23,7 +23,7 @@ const TABS = [
   { id: "report",    label: "Report",    icon: "⊟", requiresOutput: true  },
 ];
 
-export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback }) {
+export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, reportUnlocked, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback }) {
   const { C, T, theme, setTheme } = useTheme();
   const { guest, exitGuest } = useAuth();
   const [showAppearance, setShowAppearance] = useState(false);
@@ -52,7 +52,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, active
       <div style={{ display: "flex", alignItems: "stretch", paddingLeft: "0.25rem", overflow: "hidden", flex: 1 }}>
         {TABS.map(tab => {
           const isActive = tab.id === activeTab;
-          const isLocked = tab.requiresOutput && !hasOutput;
+          const isLocked = tab.requiresOutput && !hasOutput && !(tab.id === "report" && reportUnlocked);
 
           return (
             <button

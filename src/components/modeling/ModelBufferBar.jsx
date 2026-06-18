@@ -8,6 +8,7 @@
 //   onRemove(id)                       — X → remove from buffer
 //   onCompare()                        — opens comparison panel (enabled when 2+)
 
+import { useState } from "react";
 import { useTheme } from "./shared.jsx";
 
 function safeR2(r) {
@@ -36,11 +37,20 @@ const typeColor = C => ({
   Probit: C.violet,
 });
 
-export default function ModelBufferBar({ models, activeId, onRestore, onRemove, onCompare }) {
+export default function ModelBufferBar({ models, activeId, datasetNames = {}, currentDatasetId, onRestore, onRemove, onRename, onReorder, onSwitchDataset, onCompare }) {
   const { C, T } = useTheme();
+  const [editId, setEditId] = useState(null);
+  const [editVal, setEditVal] = useState("");
   if (!models?.length) return null;
 
   const canCompare = models.length >= 2;
+  const move = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= models.length) return;
+    const ids = models.map(m => m.id);
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    onReorder?.(ids);
+  };
 
   return (
     <div style={{
@@ -56,12 +66,14 @@ export default function ModelBufferBar({ models, activeId, onRestore, onRemove, 
       </div>
 
       {/* Model cards */}
-      {models.map(r => {
+      {models.map((r, i) => {
         const isActive = r.id === activeId;
         const clr = typeColor(C)[r.type] ?? C.teal;
         const stat = keyStatLabel(r);
         const label = r.label ?? r.type ?? "Model";
         const n = r.n ?? "?";
+        const dsId = r.datasetId;
+        const dsName = datasetNames[dsId];
         return (
           <div
             key={r.id}
@@ -73,28 +85,41 @@ export default function ModelBufferBar({ models, activeId, onRestore, onRemove, 
               borderLeft: `3px solid ${clr}`,
               borderRadius: 3,
               background: isActive ? `${clr}14` : C.bg,
-              cursor: "pointer",
-              transition: "all 0.12s",
+              cursor: "pointer", transition: "all 0.12s",
             }}
           >
-            <span style={{ fontSize: T.caption.fontSize, color: clr, fontFamily: T.code.fontFamily, letterSpacing: "0.05em" }}>
-              {label}
-            </span>
+            <button onClick={e => { e.stopPropagation(); move(i, -1); }} title="Move left"
+              style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", fontSize: T.caption.fontSize, padding: 0, lineHeight: 1 }}>◀</button>
+            {editId === r.id ? (
+              <input
+                autoFocus value={editVal}
+                onClick={e => e.stopPropagation()}
+                onChange={e => setEditVal(e.target.value)}
+                onBlur={() => { onRename?.(r.id, editVal.trim() || label); setEditId(null); }}
+                onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditId(null); }}
+                style={{ width: 90, background: C.surface2, border: `1px solid ${clr}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1px 4px" }}
+              />
+            ) : (
+              <span
+                onDoubleClick={e => { e.stopPropagation(); setEditId(r.id); setEditVal(label); }}
+                title="Double-click to rename"
+                style={{ fontSize: T.caption.fontSize, color: clr, fontFamily: T.code.fontFamily, letterSpacing: "0.05em" }}>
+                {label}
+              </span>
+            )}
             <span style={{ fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
               ·n={n}{stat ? `·${stat}` : ""}
             </span>
-            {/* Remove button */}
-            <button
-              onClick={e => { e.stopPropagation(); onRemove(r.id); }}
-              style={{
-                background: "none", border: "none", cursor: "pointer",
-                color: C.textMuted, fontSize: T.code.fontSize, padding: "0 2px",
-                lineHeight: 1, marginLeft: 2,
-              }}
-              title="Remove from buffer"
-            >
-              ×
-            </button>
+            {dsName && dsId !== currentDatasetId && (
+              <button onClick={e => { e.stopPropagation(); onSwitchDataset?.(dsId); }} title={`Switch to ${dsName}`}
+                style={{ background: `${C.blue}18`, border: `1px solid ${C.blue}55`, borderRadius: 3, color: C.blue, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0 4px", lineHeight: 1.4 }}>
+                ⇄ {dsName}
+              </button>
+            )}
+            <button onClick={e => { e.stopPropagation(); move(i, 1); }} title="Move right"
+              style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", fontSize: T.caption.fontSize, padding: 0, lineHeight: 1 }}>▶</button>
+            <button onClick={e => { e.stopPropagation(); onRemove(r.id); }} title="Remove from buffer"
+              style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, fontSize: T.code.fontSize, padding: "0 2px", lineHeight: 1, marginLeft: 2 }}>×</button>
           </div>
         );
       })}

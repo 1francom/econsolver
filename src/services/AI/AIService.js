@@ -1282,7 +1282,9 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
 
   try {
     const taskPrompt = UNIFIED_SCRIPT_PROMPT.replace(SHARED_CONTEXT, "").trim();
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 6000 });
+    // 8000 (was 6000): long multi-dataset + spatial + plots sessions were hitting
+    // the cap and truncating the final statement mid-call.
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 8000 });
   } catch (err) {
     console.warn("[AIService] generateUnifiedScript failed:", err.message);
     return fallback();

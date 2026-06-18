@@ -1003,47 +1003,58 @@ function LayerEditorInline({ layer, onChange, headers }) {
 }
 
 // ─── PLOT HISTORY CARD ────────────────────────────────────────────────────────
-function PlotHistoryCard({ entry, isCompared, onLoad, onDelete, onCompare, C: Cp }) {
+function PlotHistoryCard({ entry, index, count, isCompared, onLoad, onRename, onMove, onDelete, onCompare, C: Cp, datasetName, foreign }) {
   const { T } = useTheme();
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(entry.name || "");
   const geomNames = [...new Set(entry.layers.map(l => l.geom))].slice(0, 3).join(", ");
   return (
     <div
       onClick={onLoad}
       style={{
-        flexShrink: 0, width: 140, cursor: "pointer", borderRadius: 4, padding: "6px 8px",
+        flexShrink: 0, width: 150, cursor: "pointer", borderRadius: 4, padding: "6px 8px",
         background: isCompared ? "rgba(110,200,180,0.08)" : Cp.bg,
         border: `1px solid ${isCompared ? Cp.teal : Cp.border}`,
         display: "flex", flexDirection: "column", gap: 4, position: "relative",
       }}>
-      {/* Color dots */}
       <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
         {entry.layers.slice(0, 5).map((l, i) => (
-          <span key={i} style={{
-            width: 8, height: 8, borderRadius: "50%", background: l.fill, flexShrink: 0, display: "inline-block",
-          }} />
+          <span key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: l.fill, flexShrink: 0, display: "inline-block" }} />
         ))}
       </div>
-      {/* Geom names */}
       <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.textMuted, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
         {geomNames || "empty"}
       </div>
-      {/* Title */}
-      <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.text, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 }}>
-        {entry.name}
-      </div>
-      {/* Compare checkbox + delete */}
+      {editing ? (
+        <input autoFocus value={val}
+          onClick={e => e.stopPropagation()}
+          onChange={e => setVal(e.target.value)}
+          onBlur={() => { onRename?.(val.trim() || entry.name); setEditing(false); }}
+          onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditing(false); }}
+          style={{ width: "100%", background: Cp.surface2, border: `1px solid ${Cp.teal}`, borderRadius: 3, color: Cp.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1px 4px" }} />
+      ) : (
+        <div onDoubleClick={e => { e.stopPropagation(); setEditing(true); setVal(entry.name || ""); }}
+          title="Double-click to rename"
+          style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.text, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 }}>
+          {entry.name}
+        </div>
+      )}
+      {foreign && datasetName && (
+        <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.blue, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+          ⇄ {datasetName}
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+        <button onClick={e => { e.stopPropagation(); onMove?.(-1); }} disabled={index === 0} title="Move left"
+          style={{ background: "none", border: "none", color: index === 0 ? Cp.border : Cp.textMuted, cursor: index === 0 ? "default" : "pointer", fontSize: T.caption.fontSize, padding: 0, lineHeight: 1 }}>◀</button>
+        <button onClick={e => { e.stopPropagation(); onMove?.(1); }} disabled={index === count - 1} title="Move right"
+          style={{ background: "none", border: "none", color: index === count - 1 ? Cp.border : Cp.textMuted, cursor: index === count - 1 ? "default" : "pointer", fontSize: T.caption.fontSize, padding: 0, lineHeight: 1 }}>▶</button>
         <label onClick={e => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }}>
-          <input type="checkbox" checked={isCompared} onChange={onCompare}
-            style={{ accentColor: Cp.teal, cursor: "pointer", width: 10, height: 10 }} />
-          <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.textMuted }}>compare</span>
+          <input type="checkbox" checked={isCompared} onChange={onCompare} style={{ accentColor: Cp.teal, cursor: "pointer", width: 10, height: 10 }} />
+          <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: Cp.textMuted }}>cmp</span>
         </label>
-        <button
-          onClick={e => { e.stopPropagation(); onDelete(); }}
-          style={{
-            marginLeft: "auto", background: "none", border: "none", color: Cp.textMuted,
-            cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0 2px", lineHeight: 1,
-          }}>×</button>
+        <button onClick={e => { e.stopPropagation(); onDelete(); }}
+          style={{ marginLeft: "auto", background: "none", border: "none", color: Cp.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0 2px", lineHeight: 1 }}>×</button>
       </div>
     </div>
   );
@@ -1118,8 +1129,9 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
 // scriptPreamble(language) optionally prepends model-context replication code.
 // datasetName: source dataset name → R/Python df identifier (df_<name>) in copied
 // scripts so the export matches the unified-script convention. Defaults to "df".
-export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid, scriptPreamble, datasetName }) {
+export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid, projectPid, datasetId, onRequestDataset, initialPendingPlotId, onConsumePendingPlot, scriptPreamble, datasetName }) {
   const { C, T, prefs } = useTheme();
+  const histPid = projectPid ?? pid; // history is project-scoped; falls back to pid
   const [layers,      setLayers]      = useState(initialLayers);
   const [activeId,    setActiveId]    = useState(initialLayers[0]?.id ?? null);
   const [title,       setTitle]       = useState("");
@@ -1173,11 +1185,26 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setScheme(PREF_TO_PRESET[prefs?.plotPalette] || "");
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load plot history from IndexedDB on mount / pid change
+  // Load project-scoped plot history; one-time best-effort merge of legacy
+  // per-dataset entries (old plotHistory_<datasetId>) so nothing is lost.
   useEffect(() => {
-    if (!pid) return;
-    getPlotHistory(pid).then(h => setPlotHistory(h ?? [])).catch(() => {});
-  }, [pid]);
+    if (!histPid) return;
+    let cancelled = false;
+    (async () => {
+      const proj = await getPlotHistory(histPid).catch(() => []);
+      let merged = Array.isArray(proj) ? proj : [];
+      if (datasetId && datasetId !== histPid) {
+        const legacy = await getPlotHistory(datasetId).catch(() => []);
+        const have = new Set(merged.map(e => e.id));
+        const adopt = (legacy ?? [])
+          .filter(e => !have.has(e.id))
+          .map(e => ({ ...e, datasetId: e.datasetId ?? datasetId, datasetName: e.datasetName ?? datasetName }));
+        if (adopt.length) { merged = [...merged, ...adopt]; savePlotHistory(histPid, merged).catch(() => {}); }
+      }
+      if (!cancelled) setPlotHistory(merged);
+    })();
+    return () => { cancelled = true; };
+  }, [histPid, datasetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard nav: Alt+← / Alt+→
   useEffect(() => {
@@ -1207,6 +1234,22 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setYCatOrder(entry.yCatOrder || "");
   }, []);
 
+  // After App switches datasets to honor a cross-dataset plot click, open the
+  // requested plot once this dataset's history is present.
+  useEffect(() => {
+    if (!initialPendingPlotId || !plotHistory.length) return;
+    const i = plotHistory.findIndex(e => e.id === initialPendingPlotId);
+    if (i >= 0) {
+      const entry = plotHistory[i];
+      // Only consume the pending token once the plot is actually loaded; if the
+      // dataset hasn't propagated yet, leave it so the effect re-runs on match.
+      if (!entry.datasetId || entry.datasetId === datasetId) {
+        loadPlotEntry(entry); setHistIdx(i); setHistOpen(true);
+        onConsumePendingPlot?.();
+      }
+    }
+  }, [initialPendingPlotId, plotHistory, datasetId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const currentPlotEntry = useCallback(() => {
     const scaleState = { xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder };
     return {
@@ -1230,14 +1273,16 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
         id:      "ph_" + Math.random().toString(36).slice(2, 8),
         name:    `Plot ${plotHistory.length + 1}`,
         ...current,
+        datasetId:   datasetId ?? null,
+        datasetName: datasetName ?? null,
         savedAt: Date.now(),
       };
       next = [...plotHistory, entry];
       setHistOpen(true);
     }
     setPlotHistory(next);
-    if (pid) savePlotHistory(pid, next).catch(() => {});
-  }, [plotHistory, histIdx, layers.length, currentPlotEntry, pid]);
+    if (histPid) savePlotHistory(histPid, next).catch(() => {});
+  }, [plotHistory, histIdx, layers.length, currentPlotEntry, histPid, datasetId, datasetName]);
 
   const copyPlotScript = useCallback(() => {
     if (layers.length === 0) return;
@@ -1281,7 +1326,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setPlotHistory(prev => {
       const idx  = prev.findIndex(e => e.id === id);
       const next = prev.filter(e => e.id !== id);
-      if (pid) savePlotHistory(pid, next).catch(() => {});
+      if (histPid) savePlotHistory(histPid, next).catch(() => {});
       setHistIdx(hi => {
         if (hi === null) return null;
         if (idx < hi)  return hi - 1;
@@ -1291,7 +1336,26 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
       setCompareIds(c => { const s = new Set(c); s.delete(id); return s; });
       return next;
     });
-  }, [pid]);
+  }, [histPid]);
+
+  const renamePlot = useCallback((id, name) => {
+    setPlotHistory(prev => {
+      const next = prev.map(e => e.id === id ? { ...e, name } : e);
+      if (histPid) savePlotHistory(histPid, next).catch(() => {});
+      return next;
+    });
+  }, [histPid]);
+
+  const movePlot = useCallback((i, dir) => {
+    setPlotHistory(prev => {
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      if (histPid) savePlotHistory(histPid, next).catch(() => {});
+      return next;
+    });
+  }, [histPid]);
 
   const toggleCompare = useCallback((id) => {
     setCompareIds(prev => {
@@ -1649,9 +1713,18 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 <PlotHistoryCard
                   key={entry.id}
                   entry={entry}
+                  index={i}
+                  count={plotHistory.length}
                   isCompared={compareIds.has(entry.id)}
                   C={C}
-                  onLoad={() => { loadPlotEntry(entry); setHistIdx(i); }}
+                  datasetName={entry.datasetName}
+                  foreign={!!(entry.datasetId && datasetId && entry.datasetId !== datasetId)}
+                  onLoad={() => {
+                    if (entry.datasetId && datasetId && entry.datasetId !== datasetId) onRequestDataset?.(entry.datasetId, entry.id);
+                    else { loadPlotEntry(entry); setHistIdx(i); }
+                  }}
+                  onRename={(name) => renamePlot(entry.id, name)}
+                  onMove={(dir) => movePlot(i, dir)}
                   onDelete={() => deleteFromHistory(entry.id)}
                   onCompare={() => toggleCompare(entry.id)}
                 />

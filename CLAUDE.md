@@ -86,7 +86,8 @@ src/
 │   │   └── replicationBundle.js  ← ZIP bundle (R + Stata + Python scripts + data); buildMultiSubsetBundle() + downloadMultiSubsetBundle()
 │   ├── Persistence/
 │   │   ├── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage; coach_chats store; v9 model_buffer + spatial_maps stores (save/load/delete per project; cascade on deleteProject)
-│   │   └── trimResult.js         ← shared comparison-sufficient EstimationResult projection (modelBuffer + sessionSnapshot)
+│   │   ├── trimResult.js         ← shared comparison-sufficient EstimationResult projection (modelBuffer + sessionSnapshot)
+│   │   └── artifactOrder.js      ← project-scoped global order across saved plots/maps/models (getArtifactOrder/saveArtifactOrder + makeArtifactId/parseArtifactId/orderArtifacts)
 │   ├── sync/                     ← opt-in E2EE cloud sync: crypto.js only for WebCrypto, syncEngine.js/supabaseClient.js only for Supabase egress
 │   └── modelBuffer.js            ← model buffer state management
 │
