@@ -67,6 +67,7 @@ const CFG = {
   diff:          { col: "wage", ec: "id", tc: "t", nn: "dwage" },
   ix:            { c1: "wage", c2: "educ", nn: "wage_x_educ" },
   did:           { tc: "treat", pc: "post", nn: "did" },
+  date_parse:    { col: "date", nn: "date_iso", fmt: "auto" },
   date_extract:  { col: "date", parts: ["year", "month"], names: {} },
   mutate:        { nn: "ratio", expr: "wage / educ" },
   if_else:       { nn: "adult", cond: "educ >= 16", trueVal: "1", falseVal: "0" },

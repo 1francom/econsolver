@@ -368,6 +368,11 @@ function transpileStep(step, allDatasets = {}) {
         ? `, fill_value=${Number(step.valuesFill)}` : "";
       return `df = df.pivot_table(index=${idCols}, columns=${pyStr(step.namesFrom)}, values=${valArg}${fill}, aggfunc="first").reset_index()`;
     }
+    case "date_parse": {
+      const col = pyStr(step.col);
+      const out = (step.nn && step.nn !== step.col) ? pyStr(step.nn) : col;
+      return `df[${out}] = pd.to_datetime(df[${col}], errors="coerce")`;
+    }
     case "date_extract": {
       const col = pyStr(step.col);
       const acc = { year: "year", month: "month", dow: "dayofweek", isweekend: "dayofweek" };
