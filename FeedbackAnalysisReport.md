@@ -79,7 +79,7 @@
 
 ---
 
-## Features
+## Performance
 
 ### Explore · 2026-05-19
 
@@ -137,7 +137,13 @@
 
 ---
 
-## UX / Design
+### Model · 2026-05-21
+**Feedback:** Add for RDD a summary table as in R with summary() — Call: rdrobust Sharp RD estimates using local polynomial regression
+**File:** `src/math/CausalEngine.js` (`runSharpRDD` return value, lines ~553–579); `src/components/modeling/ModelPlots.jsx` (RDD results render)
+**Suggestion:** `runSharpRDD` already returns bandwidth, kernel, polynomial order, LATE, SE, CI, and `nLeft`/`nRight`. Add a `summaryTable` plain-object field to the result that mirrors the rdrobust format: estimator, method, kernel, bandwidth, N (left/right), point estimate, SE, z-stat, p-value, 95% CI. Render it as a compact monospaced table in `ModelPlots.jsx` (or a new `RDDResults.jsx`) when `result.type === "SharpRDD"`. The actual `runCol` and `treatCol` values should be substituted for the generic "running − c" / "D (treatment)" display labels — these are already on the result object.
+**Invariants:** No React imports in `src/math/CausalEngine.js`. The `summaryTable` is a plain JS object assembled in the engine; rendering is the UI layer's responsibility only.
+
+---
 
 ### Model · 2026-05-21
 
