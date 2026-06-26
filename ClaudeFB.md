@@ -448,3 +448,15 @@
 
 - [08:43] · Calculate
   Add limits
+
+---
+
+## 2026-06-26 batch
+
+### Bugs
+
+- [08:53] · Data
+  Parse error: crime_panel_final_r_300.rds — not a valid R data file (.rds), unrecognised serialisation header.
+
+- [08:53] · Data
+  Parse error: grid_enriched_500.rds — not a valid R data file (.rds), unrecognised serialisation header.
