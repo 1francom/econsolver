@@ -325,6 +325,12 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     case "did":
       return `${dfVar} <- ${dfVar} |> mutate(${nn} = ${rName(step.tc)} * ${rName(step.pc)})`;
 
+    case "date_parse": {
+      // Normalise a raw date column into a real Date; new column when nn differs.
+      const outCol = (step.nn && step.nn !== step.col) ? rName(step.nn) : col;
+      return `${dfVar} <- ${dfVar} |> mutate(${outCol} = lubridate::parse_date_time(${col}, orders = c("ymd", "dmy", "mdy")))`;
+    }
+
     case "date_extract": {
       const parts = step.parts ?? [];
       const lines = parts.map(p => {

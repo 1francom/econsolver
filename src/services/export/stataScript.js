@@ -325,6 +325,17 @@ function transpileStep(step, allDatasets = {}) {
         `reshape wide ${valsFrom.map(stVar).join(" ")}, i(${(step.idCols ?? []).map(stVar).join(" ")}) j(${stVar(step.namesFrom)})`,
       ].join("\n");
     }
+    case "date_parse": {
+      const col = stVar(step.col);
+      const out = (step.nn && step.nn !== step.col) ? stVar(step.nn) : col;
+      return [
+        `* date_parse: parse string ${col} into a Stata %td date → ${out}`,
+        `gen _tmp_dp = date(${col}, "YMD")`,
+        `gen ${out} = _tmp_dp`,
+        `drop _tmp_dp`,
+        `format ${out} %td`,
+      ].join("\n");
+    }
     case "date_extract": {
       const col = stVar(step.col);
       const lines = (step.parts ?? []).map(p => {

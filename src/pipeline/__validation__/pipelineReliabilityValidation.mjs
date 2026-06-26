@@ -76,6 +76,7 @@ const SMOKE = {
   diff:          { col: "wage", ec: "id", tc: "t", nn: "dwage" },
   ix:            { c1: "wage", c2: "educ", nn: "wage_x_educ" },
   did:           { tc: "treat", pc: "post", nn: "did" },
+  date_parse:    { col: "date", fmt: "auto" },
   date_extract:  { col: "date", parts: ["year", "month"], names: {} },
   vector_assign: { nn: "grp", values: "x,y", mode: "recycle" },
   arrange:       { col: "wage", dir: "desc" },
@@ -114,6 +115,24 @@ section("T5 · registry ↔ runner sync");
   const missingInRunner = STEP_TYPES.filter(t => !runnerCases.has(t));
   check(`every registry type (${STEP_TYPES.length}) has a runner case`,
     missingInRunner.length === 0, missingInRunner.join(", "));
+
+  // Reverse direction (importability): every runner case that is a real
+  // pipeline step must ALSO be a registered type. A step the runner executes —
+  // and that the exporter writes into pipeline.json — must round-trip through
+  // ImportPipelineButton, which rejects any step whose type ∉ STEP_TYPES.
+  // (date_parse regressed exactly here: in the runner but absent from the
+  // registry → exported pipelines were un-importable.) The exemption set holds
+  // filter-predicate operator literals, which share the `case "x":` shape but
+  // are nested-switch values, not top-level step types.
+  const RUNNER_NON_STEP_CASES = new Set([
+    "between", "contains", "empty", "ends", "equals",
+    "gt", "lt", "not_equals", "notempty", "starts",
+  ]);
+  const registrySet = new Set(STEP_TYPES);
+  const missingInRegistry = [...runnerCases].filter(
+    t => !registrySet.has(t) && !RUNNER_NON_STEP_CASES.has(t));
+  check("every runner step case is a registry type (importable)",
+    missingInRegistry.length === 0, missingInRegistry.join(", "));
 
   // Registry must not contain dupes.
   const dupes = STEP_TYPES.filter((t, i) => STEP_TYPES.indexOf(t) !== i);

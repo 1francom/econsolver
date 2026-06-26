@@ -439,3 +439,12 @@
 
 - [08:51] · Model
   Pipeline only applies if dataset is also selected in Clean Module
+
+---
+
+## 2026-06-19 batch
+
+### Features
+
+- [08:43] · Calculate
+  Add limits

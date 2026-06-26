@@ -443,6 +443,28 @@ export const STEP_REGISTRY = [
   },
 
   {
+    type: "date_parse",
+    label: "Parse date",
+    category: "features",
+    description: "Normalise a raw date column (numeric/string YYYYMMDD, YYMMDD, or a separated DD/MM/YYYY-style value) into an ISO 'YYYY-MM-DD' string — in place, or into a new column.",
+    schema: [
+      { key: "col", type: "col",  label: "Date column" },
+      { key: "nn",  type: "text", label: "Output column (blank = in place)" },
+      { key: "fmt", type: "select", label: "Input format", options: [
+        { value: "auto",     label: "Auto-detect" },
+        { value: "YYYYMMDD", label: "YYYYMMDD (20200115)" },
+        { value: "DDMMYYYY", label: "DDMMYYYY (15012020)" },
+        { value: "MMDDYYYY", label: "MMDDYYYY (01152020)" },
+        { value: "YYMMDD",   label: "YYMMDD (911202)" },
+        { value: "DDMMYY",   label: "DDMMYY (021291)" },
+        { value: "MMDDYY",   label: "MMDDYY (120291)" },
+      ] },
+    ],
+    toLabel: s => `date_parse ${s.col}${s.nn && s.nn !== s.col ? ` → ${s.nn}` : ""} (${s.fmt || "auto"})`,
+    defaultStep: () => ({ type: "date_parse", col: "", nn: "", fmt: "auto" }),
+  },
+
+  {
     type: "date_extract",
     label: "Extract date parts",
     category: "features",
