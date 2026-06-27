@@ -40,7 +40,6 @@ import { getSession } from "../auth/authService.js";
 const API_URL       = "https://api.anthropic.com/v1/messages";
 const MODEL         = "claude-sonnet-4-6";        // orchestrator: narratives, cleaning, comparison
 const MODEL_FAST    = "claude-haiku-4-5-20251001"; // unit inference — cheap, fast
-const MODEL_ADVISOR = "claude-sonnet-4-6";         // specialist: focused technical sub-questions
 const MAX_TOK       = 700;
 
 // Static app capability map — built once, sent as a cached block to the coach.
@@ -913,13 +912,6 @@ function _serializeModelContext(result, dataDictionary) {
   return lines.join("\n");
 }
 
-function _specialistSnapshotLine(snapshot) {
-  if (!snapshot) return "";
-  const steps  = snapshot.pipeline?.length ? `${snapshot.pipeline.length} pipeline steps` : "no pipeline";
-  const se     = snapshot.inferenceOpts?.seType ? `, SE=${snapshot.inferenceOpts.seType}` : "";
-  const pinned = snapshot.pinnedModels?.length ? `, ${snapshot.pinnedModels.length} pinned models` : "";
-  return `\nSESSION: ${steps}${se}${pinned}.`;
-}
 
 export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, snapshot = null, signal = undefined, onText = undefined }) {
   if (!question?.trim()) return "";
@@ -931,29 +923,15 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
   const contextPrefix = `MODEL CONTEXT:\n${modelContext}${metaCtx}${snapshotBlk}\n\n────────────────────────────\n`;
 
   try {
-    // ── Step 1: Opus specialist — focused technical sub-question (≤250 tokens) ─
-    // Opus answers only the hardest methodological/identification part of the question.
-    // Short prompt + short answer → cheap. Sonnet uses this insight to write better.
-    const opusInsight = await callClaude({
-      system: "You are a specialist econometrician advising a PhD researcher. Given the research context below, identify and answer the single most important technical or methodological concern in the question. Focus on identification strategy, causal assumptions, instrument validity, or statistical interpretation. Be direct and specific. Maximum 3 sentences.",
-      user:   `RESEARCH CONTEXT:\n${modelContext}${_specialistSnapshotLine(snapshot)}\n\nRESEARCHER QUESTION: ${question.trim()}`,
-      maxTokens: 250,
-      model: MODEL_ADVISOR,
-    }).catch(() => null); // non-fatal — Sonnet proceeds without it if Opus fails
-
-    // ── Step 2: Sonnet orchestrates full research advice ──────────────────────
-    // Incorporates Opus's specialist insight as a grounding block.
     const apiMessages = [];
-    history.forEach((turn, idx) => {
-      // content may be a string (text-only) or array (multipart with images)
+    history.forEach((turn) => {
       const content = turn.content ?? turn.text;
       apiMessages.push({ role: turn.role, content });
     });
 
-    const specialistBlock = opusInsight ? `[Specialist insight: ${opusInsight}]\n\n` : "";
     const textContent = apiMessages.length === 0
-      ? specialistBlock + contextPrefix + question.trim()
-      : specialistBlock + question.trim();
+      ? contextPrefix + question.trim()
+      : question.trim();
 
     // Build last user message — multipart if images present
     const newContent = images.length > 0
