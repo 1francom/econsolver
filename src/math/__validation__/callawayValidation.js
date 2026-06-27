@@ -27,8 +27,9 @@ const TOL_ATT = 1e-4;   // ATT coefficients: 4 decimal places (OR estimator)
 const TOL_SE  = 1e-4;   // Standard errors: 4 decimal places
 
 // ─── HELPER ──────────────────────────────────────────────────────────────────
-function near(a, b, tol) {
-  if (!Number.isFinite(a) && !Number.isFinite(b)) return true;
+function near(a, b, tol = 1e-4) {
+  if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  if (!Number.isFinite(a) && !Number.isFinite(b)) return a === b;
   return Math.abs(a - b) <= tol;
 }
 
@@ -284,6 +285,12 @@ export function suiteControlSetFallback() {
   return { pass, fail: results.length - pass, total: results.length };
 }
 
+// ─── LCG HELPER ──────────────────────────────────────────────────────────────
+function makeLCG(seed) {
+  let s = seed >>> 0;
+  return () => { s = (1664525 * s + 1013904223) >>> 0; return s / 0xFFFFFFFF; };
+}
+
 // ─── MPDTA-LIKE SYNTHETIC DATASET ────────────────────────────────────────────
 // The mpdta dataset is 2500 rows (500 counties × 5 years: 2003–2007).
 // Cohorts: never-treated (first.treat=0), 2004, 2006, 2007.
@@ -312,42 +319,41 @@ function makeMpdtaLike() {
   const seed = 42;
 
   // Deterministic pseudo-random (LCG)
-  let rng = seed;
-  function rand() {
-    rng = (rng * 1664525 + 1013904223) & 0xffffffff;
-    return (rng >>> 0) / 0xffffffff * 2 - 1;  // in [-1, 1]
+  const rand = makeLCG(seed);
+  function randScaled() {
+    return rand() * 2 - 1;  // in [-1, 1]
   }
 
   // Cohort 2004: units 1–4
   for (let uid = 1; uid <= 4; uid++) {
-    const alpha = rand() * 0.2;
+    const alpha = randScaled() * 0.2;
     for (const year of years) {
       const treated = year >= 2004 ? 1 : 0;
       const tau     = treated ? 0.5 : 0;
       const gamma   = year === 2003 ? 0 : year === 2004 ? 0.05 : year === 2005 ? 0.08 : 0.12;
-      const y       = 5.0 + alpha + gamma + tau + rand() * 0.01;
+      const y       = 5.0 + alpha + gamma + tau + randScaled() * 0.01;
       rows.push({ county: uid, year, lemp: y, first_treat: 2004 });
     }
   }
 
   // Cohort 2006: units 5–8
   for (let uid = 5; uid <= 8; uid++) {
-    const alpha = rand() * 0.2;
+    const alpha = randScaled() * 0.2;
     for (const year of years) {
       const treated = year >= 2006 ? 1 : 0;
       const tau     = treated ? 0.3 : 0;
       const gamma   = year === 2003 ? 0 : year === 2004 ? 0.05 : year === 2005 ? 0.08 : 0.12;
-      const y       = 5.0 + alpha + gamma + tau + rand() * 0.01;
+      const y       = 5.0 + alpha + gamma + tau + randScaled() * 0.01;
       rows.push({ county: uid, year, lemp: y, first_treat: 2006 });
     }
   }
 
   // Never-treated: units 9–12 (first_treat = 0)
   for (let uid = 9; uid <= 12; uid++) {
-    const alpha = rand() * 0.2;
+    const alpha = randScaled() * 0.2;
     for (const year of years) {
       const gamma = year === 2003 ? 0 : year === 2004 ? 0.05 : year === 2005 ? 0.08 : 0.12;
-      const y     = 5.0 + alpha + gamma + rand() * 0.01;
+      const y     = 5.0 + alpha + gamma + randScaled() * 0.01;
       rows.push({ county: uid, year, lemp: y, first_treat: 0 });
     }
   }
@@ -515,22 +521,21 @@ function suiteSingleCohort() {
   // Only one treated cohort — CS should still work
   const years = [2003, 2004, 2005];
   const rows = [];
-  let rng = 99;
-  function rand() {
-    rng = (rng * 1664525 + 1013904223) & 0xffffffff;
-    return (rng >>> 0) / 0xffffffff * 0.04 - 0.02;
+  const rand = makeLCG(99);
+  function randScaled() {
+    return rand() * 0.04 - 0.02;
   }
   // 4 treated units (g=2004), 4 control units
   for (let uid = 1; uid <= 4; uid++) {
-    const a = rand();
+    const a = randScaled();
     for (const y of years) {
-      rows.push({ id: uid, t: y, y: 5 + a + (y >= 2004 ? 0.5 : 0) + rand(), g: 2004 });
+      rows.push({ id: uid, t: y, y: 5 + a + (y >= 2004 ? 0.5 : 0) + randScaled(), g: 2004 });
     }
   }
   for (let uid = 5; uid <= 8; uid++) {
-    const a = rand();
+    const a = randScaled();
     for (const y of years) {
-      rows.push({ id: uid, t: y, y: 5 + a + rand(), g: 0 });
+      rows.push({ id: uid, t: y, y: 5 + a + randScaled(), g: 0 });
     }
   }
 
@@ -549,40 +554,7 @@ function suiteSingleCohort() {
   return { pass, fail };
 }
 
-// ─── R FIXTURE SUITE (mpdta) ──────────────────────────────────────────────────
-// NOTE: These fixtures are from the actual R `did` package output on mpdta.
-// Run callawayRValidation.R and replace the values below with the printed output.
-//
-// PLACEHOLDER values — replace with actual R output:
-//   Rscript src/math/__validation__/callawayRValidation.R
-//
-// The R output for mpdta (nevertreated, est_method="reg", aggte type="dynamic"):
-//   rel  att       se
-//   -3   0.030015  0.013449
-//   -2  -0.000369  0.013236
-//   -1  -0.023427  0.015212
-//    0  -0.019319  0.015826
-//    1  -0.045556  0.016296
-//    2  -0.145926  0.025245
-//   Overall ATT (simple): -0.0323  SE = 0.0136
-//
-// NOTE: The OR estimator on mpdta produces slightly negative ATTs on employment
-// because treated counties (those adopting minimum wage increases) experienced
-// slower employment growth than never-treated controls — a known finding.
-const R_FIXTURES_MPDTA = {
-  // These are approximate; run the R script for exact 6dp values.
-  // Values from R did 2.1.0, aggte(type="dynamic"), est_method="reg"
-  eventStudy: [
-    { rel: -3, att:  0.030015, se: 0.013449 },
-    { rel: -2, att: -0.000369, se: 0.013236 },
-    { rel: -1, att: -0.023427, se: 0.015212 },
-    { rel:  0, att: -0.019319, se: 0.015826 },
-    { rel:  1, att: -0.045556, se: 0.016296 },
-    { rel:  2, att: -0.145926, se: 0.025245 },
-  ],
-  overallATT: -0.032341,
-  overallSE:  0.013617,
-};
+// TODO: add R fixture comparison suite once mpdta rows are wired (callawayRValidation.R)
 
 // ─── RUNNER ──────────────────────────────────────────────────────────────────
 export function runCallawayCSValidation() {
@@ -629,12 +601,11 @@ export function runCallawayCSValidation() {
     (allOk ? " ✓ ALL GREEN" : " ✗ FAILURES DETECTED")
   );
 
-  // Expose fixture for manual R comparison
+  // Expose results for validation harness
   if (typeof window !== "undefined") {
     window.__validation = window.__validation ?? {};
     window.__validation.callawayCS = {
       suites: results,
-      rFixtures: R_FIXTURES_MPDTA,
       note: "Run callawayRValidation.R to get exact mpdta fixtures, then compare with runCallawayCS on the mpdta dataset loaded in the browser.",
     };
   }

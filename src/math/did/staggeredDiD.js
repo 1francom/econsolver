@@ -9,27 +9,9 @@
 // Task 3 will add:
 //   - aggregate: 4 aggregation schemes (simple, dynamic, group, calendar)
 
-/**
- * Enumerate all estimable (g,t,b) cells for staggered DiD.
- *
- * For each cohort g, we build:
- *   1. Pre-period cells: compare (g,t,b) where t < g and b < t
- *   2. Post-period cells: compare (g,t,b) where t >= g (with anticipation) and b < g
- *
- * Base period selection (b) depends on basePeriod:
- *   - "varying": each (g,t) pair chooses b = max{s ∈ tlist | s < t}
- *   - "universal": fixed b per cohort = max{s ∈ tlist | s < g*}, shared across all t
- *
- * @param {{ tlist: number[], glist: number[], anticipation: number, basePeriod: "varying"|"universal" }} opts
- * @returns {Array<{g, t, b, e, isPre, isRef}>}
- *   - g: cohort (treatment time)
- *   - t: observation time
- *   - b: base period (comparison time)
- *   - e: relative time = t - g
- *   - isPre: boolean, true if t < gStar (pre-treatment period)
- *   - isRef: boolean, true if this is the universal reference cell
- */
-export function enumerateCells({ tlist, glist, anticipation = 0, basePeriod = "varying" }) {
+// Enumerate all estimable (g,t,b) cells for staggered DiD.
+export function enumerateCells({ tlist: _tlist, glist, anticipation = 0, basePeriod = "varying" }) {
+  const tlist = [..._tlist].sort((a, b) => a - b);
   const cells = [];
 
   for (const g of glist) {
@@ -99,54 +81,34 @@ export function enumerateCells({ tlist, glist, anticipation = 0, basePeriod = "v
   return cells;
 }
 
-/**
- * Select the control set (unit IDs) for a specific (g,t,b) cell.
- *
- * The control group excludes:
- *   1. The focal cohort g itself (units treated at time g)
- *   2. Units treated after the current period (depending on controlGroup type)
- *
- * Control group types:
- *   - "nevertreated": only units with G = Infinity (never treated)
- *                     If none exist, falls back to "not-yet-treated" with warning
- *   - "notyettreated": units with G > max(t, b) OR G = Infinity,
- *                      excluding the focal cohort g
- *
- * @param {{ units: Map<string,number>, g: number, t: number, b: number, controlGroup: string }} opts
- * @returns {{ eids: string[], warning?: string }}
- */
+// Select the control set (unit IDs) for a specific (g,t,b) cell.
 export function controlSet({ units, g, t, b, controlGroup }) {
   const laterPeriod = Math.max(t, b);
-  let eids = [];
-  let warning;
 
-  if (controlGroup === "nevertreated") {
-    // Collect only never-treated units (G = Infinity)
-    eids = [...units.entries()]
-      .filter(([, G]) => G === Infinity)
-      .map(([eid]) => eid);
-
-    // Fallback if no never-treated units available
-    if (eids.length === 0) {
-      warning = "No never-treated units found; falling back to not-yet-treated control group.";
-      eids = [...units.entries()]
-        .filter(([, G]) => G > laterPeriod && G !== g)
-        .map(([eid]) => eid);
-    }
-  } else {
-    // "notyettreated" or default: units treated after the latest period, excluding focal cohort
-    eids = [...units.entries()]
+  function notYetTreatedEids() {
+    return [...units.entries()]
       .filter(([, G]) => G > laterPeriod && G !== g)
       .map(([eid]) => eid);
   }
 
-  return { eids, warning };
+  if (controlGroup === "nevertreated") {
+    const eids = [...units.entries()]
+      .filter(([, G]) => G === Infinity)
+      .map(([eid]) => eid);
+    if (eids.length === 0) {
+      return {
+        eids: notYetTreatedEids(),
+        warning: "No never-treated units found; falling back to not-yet-treated control group.",
+      };
+    }
+    return { eids };
+  }
+
+  return { eids: notYetTreatedEids() };
 }
 
-/**
- * Aggregate ATT(g,t) cells into higher-level estimates.
- * Not yet implemented — Task 3.
- */
+// Aggregate ATT(g,t) cells into higher-level estimates.
+// Not yet implemented — Task 3.
 export function aggregate() {
   throw new Error("aggregate not yet implemented — Task 3");
 }
