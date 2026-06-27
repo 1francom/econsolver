@@ -304,6 +304,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [csCompGroup, setCsCompGroup] = useState("nevertreated");
   const [csRelMin,    setCsRelMin]    = useState("");
   const [csRelMax,    setCsRelMax]    = useState("");
+  const [csDefaultView, setCsDefaultView] = useState("group"); // "group" | "dynamic"
   const [spatialModel, setSpatialModel] = useState("SAR");
   const [spatialWeightsMode, setSpatialWeightsMode] = useState("inline");
   const [spatialGeomCol, setSpatialGeomCol] = useState("");
@@ -534,7 +535,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     [metadataReport, result, modelSpec]
   );
 
-  const handleModelSelect = useCallback((id) => {
+  const handleModelSelect = useCallback((id, group) => {
     setModel(id);
     setResult(null);
     setErr(null);
@@ -543,6 +544,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       const support = FAMILY_SUPPORT[id] ?? {};
       return (prev === "linear" || support[prev] === "available") ? prev : "linear";
     });
+    if (id === "CallawayCS") {
+      setCsDefaultView(group === "Event Study" ? "dynamic" : "group");
+    }
   }, []);
 
   const toggleFactor = useCallback((col) => {
