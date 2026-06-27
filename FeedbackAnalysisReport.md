@@ -18,7 +18,9 @@
 **Suggestion:** The `validateFileMagic` function at line 371 checks `.rds` magic bytes against only `0x58 0x0A` (XDR), `0x41 0x0A` (ASCII), and `0x42 0x0A` (native binary). R's default `saveRDS()` call uses `compress=TRUE`, producing gzip output whose magic is `0x1F 0x8B`. This guard fires before `parseRDS` is even called, so gzip-compressed .rds files are rejected unconditionally — even though `rds.js:456–458` already handles gzip decompression correctly. Fix: add `|| (b[0] === 0x1F && b[1] === 0x8B)` to the condition at line 371 so gzip files pass pre-validation and reach `parseRDS`. Additionally, R supports bzip2 (`0x42 0x5A`) and xz (`0xFD 0x37`) compression; since `DecompressionStream` cannot handle those in the browser, detect them at this boundary and throw a user-friendly error explaining how to re-save with `compress="gzip"` or `compress=FALSE`.
 **Invariants:** None — fix is entirely within `DataStudio.jsx`; no math or pipeline files touched.
 
----
+**File:** `src/components/ModelingTab.jsx`, `src/components/modeling/ResidualPlots.jsx`, `src/components/modeling/DiagnosticsPanel.jsx`
+
+**Status:** Code-complete in commit `35f4b5a6` (OLS/WLS display frozen to `result.spec` so sidebar edits cannot mutate it). **Browser validation by Franco is pending** — this item cannot be closed until confirmed in the live app.
 
 ### [high] · Model · 2026-06-14
 **Feedback:** `Coefficient plots and diagnostics change when users add/remove variables for a new estimation; they must remain frozen until re-estimation and reappear correctly when restoring pinned models.`
@@ -68,7 +70,11 @@
 **Suggestion:** Fase X4 code-complete; browser benchmark still pending Franco. Franco should load the 21 MB / 900k-row CSV fixture in the deployed Vercel build and confirm: (1) file imports without crash, (2) the DuckDB ⚡ badge appears in the Wrangling header, (3) tab-transition lag is ≤2 s. If crashes persist, the likely culprit is JS object allocation during preview materialisation — ensure the 500-row preview query uses `USING SAMPLE 500 ROWS` rather than pulling the full Arrow table into JS objects.
 **Invariants:** The full 900k rows must remain in DuckDB. Pipeline steps (filter, log, z-score, lag) must execute on the full table via `duckdbRunner.js`. Never truncate `rawData` before passing to `runner.js`.
 
----
+**File:** `src/components/wrangling/CleanTab.jsx` (FilterBuilder), `src/services/exprEvalService.js`
+
+**Status:** Triaged as fix-later (post-launch expression-language compatibility).
+
+**Suggestion:** In `exprEvalService.js`, add a pre-processing step that rewrites `col %in% c("a", "b")` to `["a","b"].includes(col)` before passing the expression to the evaluator. Also update `FilterBuilder`'s condition-row UI to include a new `is in` operator that emits this pattern from a multi-select input, so users who do not know R syntax can still build set-membership filters.
 
 ## UX / Design
 
@@ -110,7 +116,7 @@
 **Suggestion:** Triaged as fix-later (route to V4 after launch). When implemented, add a collapsible "Filter rows" panel per layer in `GeoLayerConfig.jsx` (similar to CleanTab's `FilterBuilder`). On change, filter `layer.rows` via `exprEvalService.js` before passing to the layer renderer. This keeps the filter ephemeral and display-only — it never writes a pipeline step or mutates `rawData`.
 **Invariants:** Display-only filter; must NOT write a pipeline step or touch `rawData`.
 
----
+**Feedback:** Add for RDD a summary table as in R with `summary(rdrobust(...))` — showing Call, Kernel, Bandwidth, Effective N, RD Estimate, Robust SE, z-value, p-value.
 
 ## Features
 
