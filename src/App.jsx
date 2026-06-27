@@ -1239,8 +1239,8 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
       {/* Overview panel */}
       {view === "overview" && !hasData && (
         /* ── No data state: show a centered load prompt ── */
-        <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem"}}>
-          <div style={{maxWidth:460,width:"100%",display:"flex",flexDirection:"column",gap:20}}>
+        <div style={{flex:1,minHeight:0,overflowY:"auto",display:"flex",flexDirection:"column",alignItems:"center",padding:"2rem"}}>
+          <div style={{maxWidth:460,width:"100%",display:"flex",flexDirection:"column",gap:20,margin:"auto"}}>
             <div>
               <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.22em",textTransform:"uppercase",marginBottom:8}}>
                 Data · Load dataset
