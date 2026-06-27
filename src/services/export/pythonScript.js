@@ -1074,6 +1074,51 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "CallawayCS": {
+      // Callaway-Sant'Anna (2021) staggered DiD via csdid package
+      const csY = yVar;
+      const { xVars: csXVars = [], csCompGroup = "nevertreated",
+              csEstMethod = "dr", csAnticipation = 0 } = model;
+
+      // Build xformla: if xVars empty or ["~1"], use ~1; else ~ X1 + X2 + ...
+      const xformlaRhs = (csXVars && csXVars.length && !csXVars.includes("~1"))
+        ? csXVars.join(" + ")
+        : "1";
+      const xformla = `~${xformlaRhs}`;
+
+      lines.push(`# Callaway-Sant'Anna (2021) Staggered DiD`);
+      lines.push(`# pip install csdid`);
+      lines.push(`from csdid import att_gt, aggte`);
+      lines.push(``);
+      lines.push(`result = att_gt(`);
+      lines.push(`    yname      = "${csY}",`);
+      lines.push(`    gname      = "${treatVar}",`);
+      lines.push(`    idname     = "${entityCol}",`);
+      lines.push(`    tname      = "${timeCol}",`);
+      lines.push(`    xformla    = "${xformla}",`);
+      lines.push(`    data       = df,`);
+      lines.push(`    control_group = "${csCompGroup}",`);
+      lines.push(`    base_period   = "varying",`);
+      lines.push(`    anticipation  = ${csAnticipation},`);
+      lines.push(`    est_method    = "${csEstMethod}"`);
+      lines.push(`)`);
+      lines.push(``);
+      lines.push(`print(result.summary())`);
+      lines.push(``);
+      lines.push(`# Aggregations by cohort (group)`);
+      lines.push(`aggte(result, type="group")`);
+      lines.push(``);
+      lines.push(`# Aggregations by event (relative period)`);
+      lines.push(`aggte(result, type="dynamic")`);
+      lines.push(``);
+      lines.push(`# Calendar time aggregation`);
+      lines.push(`aggte(result, type="calendar")`);
+      lines.push(``);
+      lines.push(`# Simple overall ATT`);
+      lines.push(`aggte(result, type="simple")`);
+      break;
+    }
+
     default:
       lines.push(`# Model type "${type}" — add estimation code here`);
   }
