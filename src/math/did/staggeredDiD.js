@@ -131,13 +131,13 @@ function percentile(arr, p) {
 }
 
 function iqrScale(arr) {
-  return (percentile(arr, 75) - percentile(arr, 25)) / (2 * 1.3489795);
+  return (percentile(arr, 75) - percentile(arr, 25)) / 1.3489795;
 }
 
 function analyticSE(inf, n) {
   let s2 = 0;
   for (let i = 0; i < n; i++) s2 += inf[i] * inf[i];
-  return Math.sqrt(s2 / n) / Math.sqrt(n);
+  return Math.sqrt(s2) / n;
 }
 
 function normalCDF(z) {
