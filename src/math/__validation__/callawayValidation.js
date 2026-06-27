@@ -517,8 +517,6 @@ function suiteSingleCohort() {
   return { pass, fail };
 }
 
-// TODO: add R fixture comparison suite once mpdta rows are wired (callawayRValidation.R)
-
 // ═══ TASK 3: AGGREGATION ══════════════════════════════════════════════════════
 
 /**
@@ -553,6 +551,61 @@ export function suiteAggregation() {
 
   results.forEach(r => console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`));
   return { pass: results.filter(r=>r.pass).length, fail: results.filter(r=>!r.pass).length, total: results.length };
+}
+
+// ── R-fixture comparison suite ────────────────────────────────────────────────
+// Franco: run callawayRValidation.R → generates callawayBenchmarks.json
+// Paste path to JSON here or load dynamically.
+// Tolerance: 6dp on ATT, 4dp on analytic SE, structural check on bootstrap critVal.
+export async function suiteRFixtures() {
+  let fixtures;
+  try {
+    // eslint-disable-next-line
+    const mod = await import("./callawayBenchmarks.json", { assert: { type: "json" } });
+    fixtures = mod.default;
+  } catch {
+    console.warn("callawayBenchmarks.json not found — run callawayRValidation.R first");
+    return { pass: 0, total: 0, skip: true };
+  }
+
+  const results = [];
+  for (const [key, fix] of Object.entries(fixtures)) {
+    const [ctrl, base, meth] = key.split("_");
+    const res = runCallawayCS(
+      // Use the same synthetic DGP rows as suiteSyntheticDGP
+      makeSyntheticRows(),
+      { yCol: "y", entityCol: "id", timeCol: "t", treatCol: "g",
+        xCols: [], estMethod: meth, basePeriod: base, compGroup: ctrl,
+        anticipation: 0, inference: { method: "analytic", nBoot: 0, seed: 42 } }
+    );
+
+    // Compare simple overall ATT and SE
+    const jsSimple = res.aggregations?.simple;
+    const rSimple  = fix.simple;
+    const okAtt = Math.abs(jsSimple?.overall - rSimple?.att) < 1e-4;
+    const okSE  = Math.abs(jsSimple?.se - rSimple?.se) < 1e-3;
+    results.push({ key, jsAtt: jsSimple?.overall, rAtt: rSimple?.att, okAtt, okSE });
+  }
+
+  results.forEach(r => console.log(
+    (r.okAtt && r.okSE ? "✓" : "✗") + ` ${r.key}: att=${r.jsAtt?.toFixed(4)} R=${r.rAtt?.toFixed(4)}`
+  ));
+  return { pass: results.filter(r => r.okAtt && r.okSE).length, total: results.length };
+}
+
+function makeSyntheticRows() {
+  const rows = [];
+  const years = [2003, 2004, 2005, 2006];
+  for (let u = 1; u <= 4; u++) {
+    for (const t of years) rows.push({ id: `A${u}`, t, g: 2004, y: 10 + u * 0.1 + (t >= 2004 ? 0.5 : 0) });
+  }
+  for (let u = 1; u <= 4; u++) {
+    for (const t of years) rows.push({ id: `B${u}`, t, g: 2006, y: 10 + u * 0.1 + (t >= 2006 ? 0.3 : 0) });
+  }
+  for (let u = 1; u <= 4; u++) {
+    for (const t of years) rows.push({ id: `C${u}`, t, g: 0, y: 10 + u * 0.1 });
+  }
+  return rows;
 }
 
 // ─── RUNNER ──────────────────────────────────────────────────────────────────

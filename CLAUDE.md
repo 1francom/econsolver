@@ -206,6 +206,7 @@ src/
 | Poisson FE | NonLinearEngine.js | ✓ |
 | Synthetic Control | SyntheticControlEngine.js | ✓ validated vs R Synth package (weights 2dp, gaps 2dp) — Frank-Wolfe vs ipop; hard benchmarks in engineValidation.js |
 | Sun & Abraham (2021) event study | NonLinearEngine.js (`runSunAbraham`) | ✓ validated vs R fixest::fepois + sunab() (coef 6dp, SE 4dp) — IW per-relative-period aggregation w/ delta-method clustered SE; single-cohort reduces exactly to Poisson TWFE `i(rel)`. Harness: `sunAbrahamRValidation.R` → `sunAbrahamBenchmarks.json` → `sunAbrahamValidation.js`. Clustered SE uses sandwich convention = fixest `ssc(fixef.K="none")`; differs from fixest default `nested` by a known df factor (~1-2%) |
+| Callaway & Sant'Anna (2021) staggered DiD | CallawayEngine.js (orchestrator), src/math/did/drdid.js, src/math/did/staggeredDiD.js | ✓ implemented; R validation pending Franco (run callawayRValidation.R → callawayBenchmarks.json) |
 
 ## Pipeline step types (runner.js) — 53 total
 Cleaning (21): `rename, drop, filter, add_row, set_where, replace, drop_na, fill_na, type_cast, quickclean, recode, normalize_cats, distinct, winz, ai_tr, patch, fill_na_grouped, trim_outliers, flag_outliers, extract_regex, clean_strings`
