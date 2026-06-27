@@ -3,3 +3,4 @@
 // enumerateCells, controlSet, aggregate will be added by later tasks.
 
 export { compute2x2 } from "./drdid.js";
+export { enumerateCells, controlSet, aggregate } from "./staggeredDiD.js";

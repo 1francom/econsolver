@@ -15,8 +15,12 @@
 // Usage (browser console — after build):
 //   import { runCallawayCSValidation } from "./__validation__/callawayValidation.js";
 //   console.table(runCallawayCSValidation());
+//
+// Task 2 suites (enumeration and control-set selection):
+//   import { suiteBasePeriod, suiteControlSet } from "./__validation__/callawayValidation.js";
 
 import { runCallawayCS } from "../CallawayEngine.js";
+import { enumerateCells, controlSet } from "../did/staggeredDiD.js";
 
 // ─── TOLERANCE CONSTANTS ─────────────────────────────────────────────────────
 const TOL_ATT = 1e-4;   // ATT coefficients: 4 decimal places (OR estimator)
@@ -36,6 +40,248 @@ function check(label, got, want, tol = TOL_ATT) {
     );
   }
   return ok;
+}
+
+// ═══ TASK 2: BASE-PERIOD + CONTROL-SET ENUMERATION ════════════════════════════
+
+/**
+ * SUITE T2A: Base-period enumeration with varying base
+ * Test that enumerateCells produces correct (g,t,b,e) tuples.
+ */
+export function suiteBasePeriodVarying() {
+  const results = [];
+
+  // Test case: tlist=[1,2,3,4], glist=[2,3,4], anticipation=0, basePeriod="varying"
+  const cellsV = enumerateCells({
+    tlist: [1, 2, 3, 4],
+    glist: [2, 3, 4],
+    anticipation: 0,
+    basePeriod: "varying",
+  });
+
+  // Cohort g=2: gStar=2, bUniversal=1 (largest < 2)
+  //   t=1: skip (t < gStar but no prior period)
+  //   t=2: post-period, b=1 (bUniversal), e=0
+  //   t=3: post-period, b=1 (bUniversal), e=1
+  //   t=4: post-period, b=1 (bUniversal), e=2
+  const g2 = cellsV.filter(c => c.g === 2);
+  results.push({
+    label: "g=2 has 3 post-period cells (t=2,3,4)",
+    pass: g2.length === 3 && g2.every(c => c.b === 1),
+  });
+
+  // Cohort g=3: gStar=3, bUniversal=2 (largest < 3)
+  //   t=1: pre-period, no earlier t → skip
+  //   t=2: pre-period, b=1 (largest < 2), e=-1
+  //   t=3: post-period, b=2 (bUniversal), e=0
+  //   t=4: post-period, b=2 (bUniversal), e=1
+  const g3 = cellsV.filter(c => c.g === 3);
+  results.push({
+    label: "g=3 has 1 pre-cell (t=2, b=1, e=-1)",
+    pass: g3.some(c => c.t === 2 && c.b === 1 && c.e === -1 && c.isPre),
+  });
+  results.push({
+    label: "g=3 has post-cells with b=2",
+    pass: g3.filter(c => !c.isPre).every(c => c.b === 2),
+  });
+
+  // Cohort g=4: gStar=4, bUniversal=3 (largest < 4)
+  //   t=1: pre, no prior
+  //   t=2: pre, b=1
+  //   t=3: pre, b=2, e=-1
+  //   t=4: post, b=3, e=0
+  const g4 = cellsV.filter(c => c.g === 4);
+  results.push({
+    label: "g=4 has 2 pre-cells (t=2,3 with b=1,2)",
+    pass: g4.filter(c => c.isPre).length === 2,
+  });
+
+  results.forEach(r =>
+    console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`)
+  );
+  const pass = results.filter(r => r.pass).length;
+  return { pass, fail: results.length - pass, total: results.length };
+}
+
+/**
+ * SUITE T2B: Base-period enumeration with universal base
+ * Test that all (g,t) pairs use the same base bUniversal per cohort.
+ */
+export function suiteBasePeriodUniversal() {
+  const results = [];
+
+  const cellsU = enumerateCells({
+    tlist: [1, 2, 3, 4],
+    glist: [2, 3, 4],
+    anticipation: 0,
+    basePeriod: "universal",
+  });
+
+  // Cohort g=2: bUniversal=1, reference cell (t=1, b=1, e=-1, isRef=true)
+  const g2 = cellsU.filter(c => c.g === 2);
+  results.push({
+    label: "g=2 has reference cell at t=1, b=1, isRef=true",
+    pass: g2.some(c => c.t === 1 && c.b === 1 && c.isRef),
+  });
+  results.push({
+    label: "g=2 all non-ref cells use b=1",
+    pass: g2.filter(c => !c.isRef).every(c => c.b === 1),
+  });
+
+  // Cohort g=3: bUniversal=2, reference cell (t=2, b=2, isRef=true)
+  const g3 = cellsU.filter(c => c.g === 3);
+  results.push({
+    label: "g=3 has reference cell at t=2, b=2, isRef=true",
+    pass: g3.some(c => c.t === 2 && c.b === 2 && c.isRef),
+  });
+  results.push({
+    label: "g=3 all cells use b=2",
+    pass: g3.every(c => c.b === 2),
+  });
+
+  // Cohort g=4: bUniversal=3, reference cell (t=3, b=3, isRef=true)
+  const g4 = cellsU.filter(c => c.g === 4);
+  results.push({
+    label: "g=4 has reference cell at t=3, b=3, isRef=true",
+    pass: g4.some(c => c.t === 3 && c.b === 3 && c.isRef),
+  });
+
+  results.forEach(r =>
+    console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`)
+  );
+  const pass = results.filter(r => r.pass).length;
+  return { pass, fail: results.length - pass, total: results.length };
+}
+
+/**
+ * SUITE T2C: Control set selection — never-treated
+ */
+export function suiteControlSetNeverTreated() {
+  const results = [];
+
+  // units: A,B=never (G=Infinity), C=cohort 3, D=cohort 5
+  const units = new Map([
+    ["A", Infinity],
+    ["B", Infinity],
+    ["C", 3],
+    ["D", 5],
+  ]);
+
+  // For cell (g=3, t=4, b=2): nevertreated control group
+  const { eids: neverG3 } = controlSet({
+    units,
+    g: 3,
+    t: 4,
+    b: 2,
+    controlGroup: "nevertreated",
+  });
+
+  results.push({
+    label: "nevertreated returns only never-treated (A, B)",
+    pass: neverG3.length === 2 && neverG3.includes("A") && neverG3.includes("B"),
+  });
+
+  results.push({
+    label: "nevertreated excludes C (focal cohort) and D (treated at 5)",
+    pass: !neverG3.includes("C") && !neverG3.includes("D"),
+  });
+
+  results.forEach(r =>
+    console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`)
+  );
+  const pass = results.filter(r => r.pass).length;
+  return { pass, fail: results.length - pass, total: results.length };
+}
+
+/**
+ * SUITE T2D: Control set selection — not-yet-treated
+ */
+export function suiteControlSetNotYetTreated() {
+  const results = [];
+
+  const units = new Map([
+    ["A", Infinity],
+    ["B", Infinity],
+    ["C", 3],
+    ["D", 5],
+  ]);
+
+  // For cell (g=3, t=4, b=2): notyettreated control group
+  // laterPeriod = max(4, 2) = 4
+  // Include: G > 4 OR G = Infinity, and G ≠ 3
+  const { eids: notyet } = controlSet({
+    units,
+    g: 3,
+    t: 4,
+    b: 2,
+    controlGroup: "notyettreated",
+  });
+
+  results.push({
+    label: "notyettreated includes A, B (never-treated)",
+    pass: notyet.includes("A") && notyet.includes("B"),
+  });
+
+  results.push({
+    label: "notyettreated includes D (G=5 > 4)",
+    pass: notyet.includes("D"),
+  });
+
+  results.push({
+    label: "notyettreated excludes C (focal cohort g=3)",
+    pass: !notyet.includes("C"),
+  });
+
+  results.push({
+    label: "notyettreated has 3 units (A, B, D)",
+    pass: notyet.length === 3,
+  });
+
+  results.forEach(r =>
+    console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`)
+  );
+  const pass = results.filter(r => r.pass).length;
+  return { pass, fail: results.length - pass, total: results.length };
+}
+
+/**
+ * SUITE T2E: Control set fallback (no never-treated units)
+ */
+export function suiteControlSetFallback() {
+  const results = [];
+
+  // Only treated and nobody never-treated
+  const units = new Map([
+    ["A", 2],
+    ["B", 3],
+    ["C", 4],
+  ]);
+
+  const { eids, warning } = controlSet({
+    units,
+    g: 2,
+    t: 4,
+    b: 3,
+    controlGroup: "nevertreated",
+  });
+
+  results.push({
+    label: "nevertreated with no never-treated units falls back and returns warning",
+    pass: warning !== undefined && warning.includes("falling back"),
+  });
+
+  // Should fall back to notyettreated: G > max(4,3)=4 and G ≠ 2
+  // Units: A=2 (focal), B=3 (<4), C=4 (=4) → none qualify
+  results.push({
+    label: "fallback returns empty list when no units satisfy not-yet-treated",
+    pass: eids.length === 0,
+  });
+
+  results.forEach(r =>
+    console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`)
+  );
+  const pass = results.filter(r => r.pass).length;
+  return { pass, fail: results.length - pass, total: results.length };
 }
 
 // ─── MPDTA-LIKE SYNTHETIC DATASET ────────────────────────────────────────────
@@ -341,6 +587,13 @@ const R_FIXTURES_MPDTA = {
 // ─── RUNNER ──────────────────────────────────────────────────────────────────
 export function runCallawayCSValidation() {
   const suites = [
+    // Task 2: Enumeration + Control Set
+    { name: "T2A: Base-period varying (enumerateCells)", fn: suiteBasePeriodVarying },
+    { name: "T2B: Base-period universal (enumerateCells)", fn: suiteBasePeriodUniversal },
+    { name: "T2C: Control set never-treated", fn: suiteControlSetNeverTreated },
+    { name: "T2D: Control set not-yet-treated", fn: suiteControlSetNotYetTreated },
+    { name: "T2E: Control set fallback", fn: suiteControlSetFallback },
+    // Task 4+: Full engine tests
     { name: "Synthetic DGP (OR estimator, never-treated)",  fn: suiteSyntheticDGP },
     { name: "Not-yet-treated comparison group",             fn: suiteNotYetTreated },
     { name: "Event-window trimming [−1, +1]",              fn: suiteEventWindow   },
