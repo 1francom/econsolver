@@ -824,31 +824,54 @@ function wrapSyntheticControl(eng, spec) {
 //              n, nGroups, nPeriods, nUnits, df,
 //              eventCoeffs:[{k,beta,se,z,p,isRef}], attGT, cohorts, compGroup }
 function wrapCallawayCS(eng, spec) {
+  if (eng.error) return { ...base("CallawayCS", spec), error: eng.error };
+  const view = spec?.csDefaultView === "dynamic" ? "dynamic" : "group";
+  const agg  = eng.aggregations ?? {};
+  const es   = agg.dynamic?.byE ?? [];
+
+  function twoSidedZ(z) {
+    if (!isFinite(z)) return NaN;
+    const t = 1 / (1 + 0.2316419 * Math.abs(z));
+    const p = ((1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * z * z)) *
+              t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+    return 2 * Math.min(p, 1 - p);
+  }
+
+  const attBanner = agg[view]?.overall ?? null;
+  const seBanner  = agg[view]?.se      ?? null;
+
   return {
     ...base("CallawayCS", spec),
-    varNames:       eng.varNames       ?? [],
-    beta:           clean(eng.beta),
-    se:             clean(eng.se),
-    testStats:      clean(eng.zStats),
-    testStatLabel:  "z",
-    pVals:          clean(eng.pVals),
-    n:              eng.n              ?? 0,
-    df:             eng.df             ?? 0,
-    units:          eng.nUnits         ?? null,
-    att:            eng.att            ?? null,
-    attSE:          eng.attSE          ?? null,
-    attT:           eng.attSE && eng.att != null ? eng.att / eng.attSE : null,
-    attP:           eng.attP           ?? null,
-    resid:          [],
-    Yhat:           [],
-    // CS-specific
-    eventCoeffs:    eng.eventCoeffs    ?? [],
-    attGT:          eng.attGT          ?? [],
-    csNGroups:      eng.nGroups        ?? null,
-    csCohorts:      eng.cohorts        ?? [],
-    csCompGroup:    eng.compGroup      ?? "nevertreated",
-    converged:      true,
-    iterations:     null,
+    // Coefficient table = dynamic event-study series (for CoeffTable + export)
+    varNames:      es.map(d => `e=${d.e}`),
+    beta:          es.map(d => d.att  ?? null),
+    se:            es.map(d => d.se   ?? null),
+    testStats:     es.map(d => d.se ? d.att / d.se : null),
+    testStatLabel: "z",
+    pVals:         es.map(d => d.se ? twoSidedZ(d.att / d.se) : null),
+    n:      eng.n      ?? 0,
+    df:     eng.n      ?? 0,
+    units:  eng.nUnits ?? null,
+    // Banner ATT (from csDefaultView aggregation)
+    att:    attBanner,
+    attSE:  seBanner,
+    attT:   seBanner ? attBanner / seBanner : null,
+    attP:   seBanner ? twoSidedZ(attBanner / seBanner) : null,
+    resid: [], Yhat: [],
+    // Full CS contract for tabbed results panel + export
+    aggregations:   eng.aggregations  ?? null,
+    attgt:          eng.attgt         ?? [],
+    csCohorts:      eng.cohorts       ?? [],
+    csNGroups:      (eng.cohorts      ?? []).length || null,
+    csCompGroup:    eng.controlGroup  ?? "nevertreated",
+    csBasePeriod:   eng.basePeriod    ?? "varying",
+    csEstMethod:    eng.estMethod     ?? "dr",
+    csAnticipation: eng.anticipation  ?? 0,
+    csInference:    eng.inference     ?? null,
+    csDefaultView:  view,
+    ptestWald:      eng.ptestWald     ?? null,
+    warnings:       eng.warnings      ?? [],
+    converged: true, iterations: null,
   };
 }
 
