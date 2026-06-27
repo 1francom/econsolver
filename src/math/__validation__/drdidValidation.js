@@ -58,8 +58,9 @@ export function runDrdidValidation() {
     window.__validation = window.__validation ?? {};
     window.__validation.drdid = {
       rows,
-      pass: rows.filter(r => r.okAtt && r.okSE).length,
+      pass: rows.filter(r => r.okAtt === true && r.okSE === true).length,
       total: rows.length,
+      noFixture: rows.filter(r => r.okAtt === null || r.okSE === null).length,
     };
   }
   return rows;

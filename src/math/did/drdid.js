@@ -94,6 +94,11 @@ export function compute2x2({ deltaY, D, X, estMethod = "dr", weights }) {
   const n = deltaY.length;
   const k = X[0].length;
 
+  // Validate that X has leading-1 intercept (DRDID convention)
+  if (!X.length || X[0][0] !== 1) {
+    return { att: NaN, inf: new Float64Array(n), warning: "compute2x2: X rows must start with intercept column (value 1)." };
+  }
+
   // Default weights
   const W = weights ? weights.slice() : new Array(n).fill(1);
 
