@@ -2,434 +2,330 @@
 // Callaway & Sant'Anna (2021) Staggered DiD estimator.
 // Pure JS. No React. No imports from UI layers.
 //
-// Outcome-regression (OR) estimator:
-//   ATT(g,t) = E[Y_t − Y_{g−1} | G=g] − E[Y_t − Y_{g−1} | C]
-//
-// where C = never-treated (G=∞) or not-yet-treated (G>t) as fallback.
-//
-// Aggregated event-study:
-//   θ_l = Σ_g w_{g,l} · ATT(g, g+l)
-// with influence-function SE (sandwich) and delta-method aggregation.
-//
 // Reference: Callaway & Sant'Anna (2021), Journal of Econometrics.
-// Validated against R `did` package (att_gt + aggte(type="dynamic")).
+// Rewrite: uses compute2x2, enumerateCells, controlSet, aggregate building blocks.
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-
-/** Two-tailed normal p-value */
-function normPVal(z) {
-  // Abramowitz & Stegun approximation
-  const t = 1 / (1 + 0.2316419 * Math.abs(z));
-  const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-  const phi = (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * z * z);
-  const p1 = phi * poly;
-  return 2 * Math.min(p1, 1 - p1);
-}
-
-/** Mean of numeric array (ignores NaN/null) */
-function mean(arr) {
-  const valid = arr.filter(v => v != null && Number.isFinite(v));
-  if (!valid.length) return NaN;
-  return valid.reduce((s, v) => s + v, 0) / valid.length;
-}
-
-// ─── MAIN ENGINE ─────────────────────────────────────────────────────────────
+import { compute2x2 }                       from "./did/drdid.js";
+import { enumerateCells, controlSet, aggregate } from "./did/staggeredDiD.js";
 
 /**
  * runCallawayCS — Callaway-Sant'Anna (2021) staggered DiD.
  *
- * @param {Object[]} rows        Panel data rows.
- * @param {Object}   cols        { yCol, entityCol, timeCol, treatCol }
- *   yCol       — outcome column (numeric)
- *   entityCol  — unit identifier column
- *   timeCol    — time period column (numeric)
- *   treatCol   — first-treatment-period column (numeric; 0 or Infinity/null = never-treated)
- *                If omitted, will be derived from a binary treatment column named treatBinCol.
- *   treatBinCol — (optional) column with binary 0/1 treatment; used to derive first-treat period.
- *   compGroup  — "nevertreated" (default) | "notyettreated"
- *   relMin     — min relative period to include in event-study (default: -Infinity)
- *   relMax     — max relative period to include in event-study (default: +Infinity)
- * @param {Object}   seOpts      SE options (passed through; IF-based SE always used).
- * @returns {Object}             Engine output consumed by wrapResult("CallawayCS", ...)
+ * @param {Object[]} rows         Panel data rows.
+ * @param {Object}   opts
+ *   yCol        — outcome column (numeric)
+ *   entityCol   — unit identifier column
+ *   timeCol     — time period column (numeric)
+ *   treatCol    — first-treatment-period column (numeric; 0 or missing = never-treated)
+ *   treatBinCol — (optional) binary 0/1 column; used to derive first-treat period
+ *   xCols       — (optional) array of covariate column names (base-period values)
+ *   compGroup   — "nevertreated" (default) | "notyettreated"
+ *   basePeriod  — "varying" (default) | "universal"
+ *   estMethod   — "dr" (default) | "reg" | "ipw"
+ *   anticipation — number of anticipation periods (default 0)
+ *   relMin      — min relative period to include (default -Infinity)
+ *   relMax      — max relative period to include (default +Infinity)
+ *   inference   — { method: "analytic"|"bootstrap", nBoot, seed }
+ * @param {Object}   seOpts       SE options (reserved for future survey-weight support).
+ * @returns {Object}
  */
 export function runCallawayCS(
   rows,
-  { yCol, entityCol, timeCol, treatCol, treatBinCol,
-    compGroup = "nevertreated", relMin = -Infinity, relMax = Infinity },
+  {
+    yCol,
+    entityCol,
+    timeCol,
+    treatCol,
+    treatBinCol,
+    xCols = [],
+    compGroup    = "nevertreated",
+    basePeriod   = "varying",
+    estMethod    = "dr",
+    anticipation = 0,
+    relMin       = -Infinity,
+    relMax       =  Infinity,
+    inference    = { method: "bootstrap", nBoot: 999, seed: 42 },
+  },
   seOpts = {}
 ) {
-  if (!rows || !rows.length)
-    return { error: "No data rows provided." };
+  // ── 0. Basic validation ─────────────────────────────────────────────────────
+  if (!rows || !rows.length) return { error: "No data rows provided." };
   if (!yCol)      return { error: "Outcome column (yCol) required." };
   if (!entityCol) return { error: "Entity column (entityCol) required." };
   if (!timeCol)   return { error: "Time column (timeCol) required." };
 
-  // ── 1. Resolve first-treatment-period per entity ──────────────────────────
-  // treatCol should contain the first period each entity was treated.
-  // 0, null, undefined, NaN, or Infinity = never-treated.
+  // ── Size guard ──────────────────────────────────────────────────────────────
+  if (rows.length > 200000) {
+    return { error: `Dataset too large for CS estimator (${rows.length} rows). Aggregate to unit-period panel first.` };
+  }
 
-  const neverSentinel = Infinity;
+  const warnings = [];
 
-  // Build entity → firstTreat map
-  const entityFirstTreat = new Map();
+  // ── 1. Resolve treatment timing ─────────────────────────────────────────────
+  // Build eid → G (first treatment period, or Infinity = never-treated)
+  const entityG = new Map();
 
-  if (treatCol) {
-    // Direct first-treatment column (e.g. `first.treat` in mpdta)
-    const seenEntities = new Set();
+  if (treatBinCol) {
+    // Derive from binary column: min(t) where row[treatBinCol] is truthy
+    const minTreatT = new Map();
     for (const r of rows) {
       const eid = r[entityCol];
       if (eid == null) continue;
-      if (seenEntities.has(eid)) continue;
-      seenEntities.add(eid);
-      const ft = r[treatCol];
-      const ftNum = (ft == null || ft === "" || !isFinite(Number(ft)) || Number(ft) === 0)
-        ? neverSentinel
-        : Number(ft);
-      entityFirstTreat.set(eid, ftNum);
-    }
-  } else if (treatBinCol) {
-    // Derive first-treat from binary column: minimum t where treat=1
-    const entityTreatPeriods = new Map();
-    for (const r of rows) {
-      const eid = r[entityCol];
-      if (eid == null) continue;
-      const d = Number(r[treatBinCol]);
-      const t = Number(r[timeCol]);
-      if (d === 1 && isFinite(t)) {
-        const prev = entityTreatPeriods.get(eid);
-        if (prev == null || t < prev) entityTreatPeriods.set(eid, t);
+      if (r[treatBinCol] == 1 || r[treatBinCol] === true) {
+        const t = Number(r[timeCol]);
+        if (!isFinite(t)) continue;
+        const prev = minTreatT.get(eid);
+        if (prev === undefined || t < prev) minTreatT.set(eid, t);
       }
     }
-    // Entities with no treated periods → never-treated
-    const allEntities = new Set(rows.map(r => r[entityCol]).filter(e => e != null));
-    for (const eid of allEntities) {
-      entityFirstTreat.set(eid, entityTreatPeriods.get(eid) ?? neverSentinel);
+    const allEids = new Set(rows.map(r => r[entityCol]).filter(e => e != null));
+    for (const eid of allEids) {
+      entityG.set(eid, minTreatT.has(eid) ? minTreatT.get(eid) : Infinity);
+    }
+  } else if (treatCol) {
+    // Direct first-treatment column
+    const seen = new Set();
+    for (const r of rows) {
+      const eid = r[entityCol];
+      if (eid == null || seen.has(eid)) continue;
+      seen.add(eid);
+      const ft = r[treatCol];
+      const ftNum = (ft == null || ft === "" || !isFinite(Number(ft)) || Number(ft) === 0)
+        ? Infinity
+        : Number(ft);
+      entityG.set(eid, ftNum);
     }
   } else {
     return { error: "Provide treatCol (first-treatment-period column) or treatBinCol (binary 0/1 column)." };
   }
 
-  // ── 2. Filter valid rows ──────────────────────────────────────────────────
-  const valid = rows.filter(r => {
-    const y = r[yCol];
-    const t = r[timeCol];
+  // ── 2. Build tlist + balance panel ─────────────────────────────────────────
+  const tlistFull = [...new Set(rows.map(r => Number(r[timeCol])).filter(t => isFinite(t)))].sort((a, b) => a - b);
+  const T = tlistFull.length;
+
+  // Count unique times per entity (for balance check)
+  const entityTimes = new Map();
+  for (const r of rows) {
     const eid = r[entityCol];
-    return (
-      y != null && Number.isFinite(Number(y)) &&
-      t != null && Number.isFinite(Number(t)) &&
-      eid != null && entityFirstTreat.has(eid)
-    );
+    if (!entityG.has(eid)) continue;
+    const t = Number(r[timeCol]);
+    if (!isFinite(t)) continue;
+    if (!entityTimes.has(eid)) entityTimes.set(eid, new Set());
+    entityTimes.get(eid).add(t);
+  }
+
+  // Drop entities not present in ALL time periods
+  const balancedEids = new Set();
+  let droppedUnbalanced = 0;
+  for (const [eid, times] of entityTimes) {
+    if (times.size === T) {
+      balancedEids.add(eid);
+    } else {
+      droppedUnbalanced++;
+      entityG.delete(eid);
+    }
+  }
+  if (droppedUnbalanced > 0) {
+    warnings.push(`Dropped ${droppedUnbalanced} unbalanced units (not present in all time periods).`);
+  }
+
+  const tlist = tlistFull; // already sorted
+
+  // ── 3. Build unit universe ──────────────────────────────────────────────────
+  // units: Map<eid, G>
+  // Drop cohort treated in first observed period (not identified)
+  const firstT = tlist[0];
+  let droppedFirstCohort = 0;
+  for (const [eid, g] of entityG) {
+    if (g === firstT) {
+      entityG.delete(eid);
+      droppedFirstCohort++;
+    }
+  }
+  if (droppedFirstCohort > 0) {
+    warnings.push(`Cohort g=${firstT} (treated in first observed period) is not identified and was dropped.`);
+  }
+
+  const units = entityG; // Map<eid, G>
+  const nUnits = units.size;
+
+  if (nUnits === 0) return { error: "No valid units after filtering." };
+
+  // Treated cohorts (finite G, not first period)
+  const treatedGValues = [...units.values()].filter(g => isFinite(g));
+  if (!treatedGValues.length) return { error: "No treated units found. Ensure treatCol contains finite treatment periods." };
+
+  const nTreated = treatedGValues.length;
+  const glist = [...new Set(treatedGValues)].sort((a, b) => a - b);
+
+  // P(G=g) over treated units only
+  const groupProb = new Map();
+  for (const g of glist) {
+    const cnt = treatedGValues.filter(gg => gg === g).length;
+    groupProb.set(g, cnt / nTreated);
+  }
+
+  // ── 4. Build row index: Map<eid, Map<t, row>> ───────────────────────────────
+  const rowIndex = new Map();
+  for (const r of rows) {
+    const eid = r[entityCol];
+    if (!units.has(eid)) continue;
+    const t = Number(r[timeCol]);
+    if (!isFinite(t)) continue;
+    if (!rowIndex.has(eid)) rowIndex.set(eid, new Map());
+    rowIndex.get(eid).set(t, r);
+  }
+
+  // eid → index in [0, nUnits-1] for influence function arrays
+  const eidIndex = new Map();
+  let idx = 0;
+  for (const eid of units.keys()) eidIndex.set(eid, idx++);
+
+  // ── 5. Enumerate cells ──────────────────────────────────────────────────────
+  const cells = enumerateCells({ tlist, glist, anticipation, basePeriod });
+
+  // ── 6. Compute ATT(g,t) for each non-ref cell ──────────────────────────────
+  const cells2x2 = [];
+
+  for (const cell of cells) {
+    // Ref cells: push zero cell (needed for aggregate's pre-period Wald test)
+    if (cell.isRef) {
+      cells2x2.push({
+        g: cell.g, t: cell.t, b: cell.b, e: cell.e,
+        isPre: cell.isPre, isRef: true,
+        att: 0,
+        inf: new Float64Array(nUnits),
+        n_g: 0,
+      });
+      continue;
+    }
+
+    // a. Select control set
+    const { eids: controlEids, warning: ctrlWarn } = controlSet({
+      units, g: cell.g, t: cell.t, b: cell.b, controlGroup: compGroup,
+    });
+    if (ctrlWarn) warnings.push(ctrlWarn);
+    if (controlEids.length === 0) {
+      warnings.push(`No control units for ATT(${cell.g},${cell.t}) — cell skipped.`);
+      continue;
+    }
+
+    // b. Treated units for this cohort
+    const treatedEids = [...units.entries()]
+      .filter(([, G]) => G === cell.g)
+      .map(([eid]) => eid);
+
+    if (treatedEids.length === 0) continue;
+
+    // c. Build sample: ΔY, D, X — one row per unit in treated+control
+    const sampleEids = [];
+    const deltaY     = [];
+    const D          = [];
+    const X          = [];
+
+    const addUnit = (eid, isTreated) => {
+      const eMap = rowIndex.get(eid);
+      if (!eMap) return false;
+      const rowT = eMap.get(cell.t);
+      const rowB = eMap.get(cell.b);
+      if (!rowT || !rowB) return false;
+      const yT = Number(rowT[yCol]);
+      const yB = Number(rowB[yCol]);
+      if (!isFinite(yT) || !isFinite(yB)) return false;
+      sampleEids.push(eid);
+      deltaY.push(yT - yB);
+      D.push(isTreated ? 1 : 0);
+      // X: [1, ...xCols] from base period
+      const xRow = [1, ...xCols.map(c => Number(rowB[c] ?? 0))];
+      X.push(xRow);
+      return true;
+    };
+
+    let skipped = 0;
+    for (const eid of treatedEids) {
+      if (!addUnit(eid, true)) skipped++;
+    }
+    for (const eid of controlEids) {
+      if (!addUnit(eid, false)) skipped++;
+    }
+
+    const nSample = sampleEids.length;
+    if (nSample === 0) {
+      warnings.push(`ATT(${cell.g},${cell.t}): no valid obs after missing-row drop — cell skipped.`);
+      continue;
+    }
+
+    const totalExpected = treatedEids.length + controlEids.length;
+    if (skipped > 0.1 * totalExpected) {
+      warnings.push(`ATT(${cell.g},${cell.t}): ${skipped} of ${totalExpected} units dropped due to missing rows.`);
+    }
+
+    // Count how many treated units made it into the sample
+    const n_g_sample = sampleEids.filter((eid, i) => D[i] === 1).length;
+    if (n_g_sample < xCols.length + 5) {
+      warnings.push(`ATT(${cell.g},${cell.t}): small treated group (n_g=${n_g_sample}, covariates=${xCols.length}).`);
+    }
+
+    // d. Compute 2×2 ATT
+    const weights = new Array(nSample).fill(1);
+    const { att, inf: rawInf, warning: estWarn } = compute2x2({ deltaY, D, X, estMethod, weights });
+    if (estWarn) warnings.push(`ATT(${cell.g},${cell.t}): ${estWarn}`);
+
+    // e. Map influence function from sample length → nUnits length
+    const cellInf = new Float64Array(nUnits);
+    for (let si = 0; si < nSample; si++) {
+      const eid = sampleEids[si];
+      const ui = eidIndex.get(eid);
+      if (ui !== undefined) cellInf[ui] = rawInf[si];
+    }
+
+    cells2x2.push({
+      g: cell.g, t: cell.t, b: cell.b, e: cell.e,
+      isPre: cell.isPre, isRef: false,
+      att,
+      inf: cellInf,
+      n_g: n_g_sample,
+    });
+  }
+
+  if (!cells2x2.some(c => !c.isRef)) {
+    return { error: "Could not compute any ATT(g,t) — check that treated and control units share baseline and post periods." };
+  }
+
+  // ── 7. Filter attgt to relMin..relMax ───────────────────────────────────────
+  const attgt = cells2x2.filter(c => !c.isRef && c.e >= relMin && c.e <= relMax);
+
+  // ── 8. Aggregate ────────────────────────────────────────────────────────────
+  const { aggregations, inference: infResult, ptestWald } = aggregate({
+    cells2x2,
+    groupProb,
+    n: nUnits,
+    inference,
   });
 
-  if (valid.length < 4)
-    return { error: "Too few valid observations (need at least 4)." };
-
-  const n = valid.length;
-
-  // Augment rows with firstTreat and numeric fields
-  const data = valid.map(r => ({
-    eid:   r[entityCol],
-    t:     Number(r[timeCol]),
-    y:     Number(r[yCol]),
-    g:     entityFirstTreat.get(r[entityCol]),  // first treated period (Infinity = never)
-  }));
-
-  // ── 3. Sorted unique arrays ───────────────────────────────────────────────
-  const allTimes = [...new Set(data.map(r => r.t))].sort((a, b) => a - b);
-
-  // Cohorts: unique non-Infinity first-treat periods
-  const cohorts = [...new Set(data.map(r => r.g).filter(g => isFinite(g)))].sort((a, b) => a - b);
-
-  if (!cohorts.length)
-    return { error: "No treated units found. Ensure treatCol contains finite treatment periods." };
-
-  const nGroups = cohorts.length;
-  const nPeriods = allTimes.length;
-
-  // ── 4. Index data by entity for fast lookup ───────────────────────────────
-  // entityData[eid] = Map<t, y>
-  const entityData = new Map();
-  for (const r of data) {
-    if (!entityData.has(r.eid)) entityData.set(r.eid, new Map());
-    entityData.get(r.eid).set(r.t, r.y);
-  }
-
-  // Unique entities per cohort and never-treated
-  const cohortEntities   = new Map();  // g → [eid]
-  const neverTreatedEids = [];
-  const allEntitySet = new Map();  // eid → g
-  for (const r of data) {
-    allEntitySet.set(r.eid, r.g);
-  }
-  for (const [eid, g] of allEntitySet) {
-    if (!isFinite(g)) {
-      neverTreatedEids.push(eid);
-    } else {
-      if (!cohortEntities.has(g)) cohortEntities.set(g, []);
-      if (!cohortEntities.get(g).includes(eid)) cohortEntities.get(g).push(eid);
-    }
-  }
-
-  const hasNeverTreated = neverTreatedEids.length > 0;
-
-  // ── 5. Compute ATT(g,t) for each (cohort g, time t ≥ g) ──────────────────
-  // Also compute for t = g−1 (used as a reference check) and pre-periods.
-
-  const attGT = [];  // { g, t, att, se, psi: [n], n_g, n_c }
-
-  // We compute influence functions for every (g,t) pair, including pre-periods,
-  // so the event-study aggregation can form pre-trend estimates.
-
-  const allRelPeriods = new Set();
-
-  for (const g of cohorts) {
-    const gEids = cohortEntities.get(g) ?? [];
-    if (!gEids.length) continue;
-
-    const gMinus1 = allTimes[allTimes.indexOf(
-      allTimes.reduce((prev, curr) => Math.abs(curr - (g - 1)) < Math.abs(prev - (g - 1)) ? curr : prev)
-    )];
-    // Actual baseline: last pre-treatment period (t < g)
-    const prePeriods = allTimes.filter(t => t < g);
-    if (!prePeriods.length) continue;  // cohort has no pre-period
-    const baselineT = prePeriods[prePeriods.length - 1];  // g−1 (or nearest)
-
-    for (const t of allTimes) {
-      const rel = t - g;
-      if (rel < relMin || rel > relMax) continue;
-      allRelPeriods.add(rel);
-
-      // Control group for this (g,t)
-      let controlEids;
-      if (compGroup === "nevertreated") {
-        if (hasNeverTreated) {
-          controlEids = neverTreatedEids;
-        } else {
-          // Fallback to not-yet-treated when no pure never-treated exist
-          controlEids = [...allEntitySet.entries()]
-            .filter(([eid, gg]) => isFinite(gg) && gg > t)
-            .map(([eid]) => eid);
-        }
-      } else {
-        // not-yet-treated: G > t (not yet treated at time t)
-        controlEids = [...allEntitySet.entries()]
-          .filter(([eid, gg]) => !isFinite(gg) || gg > t)
-          .map(([eid]) => eid)
-          .filter(eid => !gEids.includes(eid));  // exclude current cohort
-      }
-
-      if (!controlEids.length) continue;
-
-      // ΔY_{it} = Y_{it} − Y_{i,baselineT} for treated group
-      const treatedChanges = gEids
-        .map(eid => {
-          const yT       = entityData.get(eid)?.get(t);
-          const yBase    = entityData.get(eid)?.get(baselineT);
-          if (yT == null || yBase == null) return null;
-          return Number(yT) - Number(yBase);
-        })
-        .filter(v => v != null && isFinite(v));
-
-      if (!treatedChanges.length) continue;
-
-      // ΔY_{it} for control group
-      const controlChanges = controlEids
-        .map(eid => {
-          const yT    = entityData.get(eid)?.get(t);
-          const yBase = entityData.get(eid)?.get(baselineT);
-          if (yT == null || yBase == null) return null;
-          return Number(yT) - Number(yBase);
-        })
-        .filter(v => v != null && isFinite(v));
-
-      if (!controlChanges.length) continue;
-
-      const n_g  = treatedChanges.length;
-      const n_c  = controlChanges.length;
-
-      const meanTreated = mean(treatedChanges);
-      const meanControl = mean(controlChanges);
-      const att = meanTreated - meanControl;
-
-      // ── 5a. Influence function ────────────────────────────────────────────
-      // Full sample influence function for ATT(g,t):
-      //   ψ_{g,t,i} for each i in the full sample
-      //
-      // For treated-group obs i (G_i = g):
-      //   ψ_i = (1/n_g/p_g) * ((ΔY_i − att) − (meanControl − meanControl))
-      //   simplified: ψ_i = (1/p_g) * (ΔY_i − meanTreated)   (centred version)
-      //
-      // Callaway-Sant'Anna IF (equation (3.1) in paper):
-      //   ψ_{g,t,i} =  (1(G_i=g)/P(G=g)) * (ΔY_i - att)
-      //              - (1(C_i)  /P(C))    * (ΔY_i - meanControl)
-      //
-      // Since both terms sum to 0 across their respective groups,
-      // the IF centred on 0 gives variance (1/n²)Σψ².
-
-      const nEntities = allEntitySet.size;
-      const p_g = n_g / nEntities;
-      const p_c = n_c / nEntities;
-
-      // Build entity → ΔY map for this (g,t) pair for treated and control
-      const treatedChangeMap = new Map();
-      gEids.forEach(eid => {
-        const yT    = entityData.get(eid)?.get(t);
-        const yBase = entityData.get(eid)?.get(baselineT);
-        if (yT != null && yBase != null && isFinite(Number(yT)) && isFinite(Number(yBase)))
-          treatedChangeMap.set(eid, Number(yT) - Number(yBase));
-      });
-
-      const controlChangeMap = new Map();
-      controlEids.forEach(eid => {
-        const yT    = entityData.get(eid)?.get(t);
-        const yBase = entityData.get(eid)?.get(baselineT);
-        if (yT != null && yBase != null && isFinite(Number(yT)) && isFinite(Number(yBase)))
-          controlChangeMap.set(eid, Number(yT) - Number(yBase));
-      });
-
-      // Influence values per entity in the full entity universe
-      const allEids = [...allEntitySet.keys()];
-      const psi = allEids.map(eid => {
-        const g_i = allEntitySet.get(eid);
-        let val = 0;
-        if (g_i === g && treatedChangeMap.has(eid)) {
-          // Treated group contribution
-          val += (treatedChangeMap.get(eid) - att) / (p_g * allEids.length);
-        }
-        if (controlChangeMap.has(eid)) {
-          // Control group contribution (subtracted)
-          val -= (controlChangeMap.get(eid) - meanControl) / (p_c * allEids.length);
-        }
-        return val;
-      });
-
-      // Variance of ATT(g,t) = sum(ψ²) (already scaled by 1/n² via allEids.length)
-      const sumPsi2 = psi.reduce((s, v) => s + v * v, 0);
-      const varAtt  = sumPsi2;   // Var = Σ ψ_i²  (ψ already scaled)
-      const seAtt   = Math.sqrt(Math.max(varAtt, 0));
-
-      attGT.push({ g, t, att, se: seAtt, psi, n_g, n_c });
-    }
-  }
-
-  if (!attGT.length)
-    return { error: "Could not compute any ATT(g,t) — check that treated and control units share baseline and post periods." };
-
-  // ── 6. Event-study aggregation θ_l = Σ_g w_{g,l} · ATT(g, g+l) ──────────
-  const relPeriodsSorted = [...allRelPeriods].sort((a, b) => a - b);
-
-  // Filter to only relative periods with at least one valid ATT(g,t)
-  const validRelPeriods = relPeriodsSorted.filter(l =>
-    attGT.some(e => e.t - e.g === l)
-  );
-
-  const eventStudyCoeffs = [];
-
-  for (const l of validRelPeriods) {
-    // All ATT(g,t) with t − g = l
-    const relevant = attGT.filter(e => e.t - e.g === l);
-    if (!relevant.length) continue;
-
-    const totalTreated = relevant.reduce((s, e) => s + e.n_g, 0);
-    if (totalTreated === 0) continue;
-
-    const weights = relevant.map(e => e.n_g / totalTreated);
-    const theta_l = relevant.reduce((s, e, i) => s + weights[i] * e.att, 0);
-
-    // Delta-method SE for θ_l = Σ_g w_{g,l} · ATT(g, g+l)
-    // The IF for θ_l is ψ_{θ_l,i} = Σ_g w_{g,l} · ψ_{g,t,i}  (with t=g+l)
-    // Var(θ_l) = Σ_i (ψ_{θ_l,i})²
-
-    // Sum the IF vectors weighted by cohort shares
-    const allEids = [...allEntitySet.keys()];
-    const nE = allEids.length;
-    const psiAgg = new Array(nE).fill(0);
-    relevant.forEach((e, j) => {
-      e.psi.forEach((psi_i, i) => {
-        psiAgg[i] += weights[j] * psi_i;
-      });
-    });
-
-    const varAgg = psiAgg.reduce((s, v) => s + v * v, 0);
-    const seAgg  = Math.sqrt(Math.max(varAgg, 0));
-    const z      = seAgg > 0 ? theta_l / seAgg : 0;
-    const p      = normPVal(z);
-
-    eventStudyCoeffs.push({
-      k:    l,
-      beta: theta_l,
-      se:   seAgg,
-      z,
-      p,
-      isRef: l === -1,  // normalisation period (not dropped here, but flagged)
-    });
-  }
-
-  // ── 7. Overall ATT = weighted average over all post-treatment (g,t) pairs ─
-  const postPairs = attGT.filter(e => e.t >= e.g);
-  const totalPostTreated = postPairs.reduce((s, e) => s + e.n_g, 0);
-
-  let att = NaN, attSE = NaN, attP = NaN;
-
-  if (postPairs.length && totalPostTreated > 0) {
-    const wPost = postPairs.map(e => e.n_g / totalPostTreated);
-    att = postPairs.reduce((s, e, i) => s + wPost[i] * e.att, 0);
-
-    // Aggregate IF for overall ATT
-    const allEids = [...allEntitySet.keys()];
-    const psiOverall = new Array(allEids.length).fill(0);
-    postPairs.forEach((e, j) => {
-      e.psi.forEach((psi_i, i) => {
-        psiOverall[i] += wPost[j] * psi_i;
-      });
-    });
-    const varOverall = psiOverall.reduce((s, v) => s + v * v, 0);
-    attSE = Math.sqrt(Math.max(varOverall, 0));
-    const zOverall = attSE > 0 ? att / attSE : 0;
-    attP = normPVal(zOverall);
-  }
-
-  // ── 8. Format output in EstimationResult shape ────────────────────────────
-  const varNames  = eventStudyCoeffs.map(e => `rel_${e.k >= 0 ? e.k : e.k}`);
-  const beta      = eventStudyCoeffs.map(e => e.beta);
-  const se        = eventStudyCoeffs.map(e => e.se);
-  const zStats    = eventStudyCoeffs.map(e => e.z);
-  const pVals     = eventStudyCoeffs.map(e => e.p);
-
-  // Count of entities with valid outcome data
-  const nUnits  = [...allEntitySet.keys()].length;
-
+  // ── 9. Return result contract ────────────────────────────────────────────────
   return {
-    // Coefficient block (event-study ATTs by relative period)
-    varNames,
-    beta,
-    se,
-    zStats,
-    pVals,
-    // Overall ATT
-    att,
-    attSE,
-    attP,
-    // Sample info
-    n,
-    nGroups,
-    nPeriods,
+    type: "CallawayCS",
+    attgt: attgt.map(c => ({
+      g:     c.g,
+      t:     c.t,
+      e:     c.e,
+      att:   c.att,
+      se:    Math.sqrt(c.inf.reduce((s, v) => s + v * v, 0)) / nUnits,
+      isPre: c.isPre,
+      n_g:   c.n_g,
+    })),
+    aggregations,
+    cohorts: glist,
+    periods: tlist,
     nUnits,
-    df: n - nGroups,
-    // Engine-specific
-    eventCoeffs: eventStudyCoeffs,  // { k, beta, se, z, p, isRef }
-    attGT,                           // raw ATT(g,t) table (for diagnostics)
-    cohorts,
-    compGroup,
-    // Metadata for wrapResult
-    type:      "CallawayCS",
-    converged: true,
-    warnings:  [],
-    resid:     [],
-    Yhat:      [],
-    R2:        null,
-    adjR2:     null,
-    Fstat:     null,
-    Fpval:     null,
+    n: rows.length,
+    controlGroup: compGroup,
+    basePeriod,
+    estMethod,
+    anticipation,
+    inference: infResult,
+    ptestWald,
+    warnings,
   };
 }

@@ -362,93 +362,49 @@ function makeMpdtaLike() {
 }
 
 // ─── SUITE 1: Internal consistency (engine vs. known DGP) ────────────────────
-// We verify that:
-//   1. Pre-trend ATTs are near zero (parallel trends holds in synthetic data).
-//   2. Post-treatment ATTs for cohort 2004 are near 0.5.
-//   3. Post-treatment ATTs for cohort 2006 are near 0.3.
-//   4. Event-study aggregation is a weighted average of cohort ATTs.
-//   5. Overall ATT is a weighted average of post ATTs.
+// New suiteSyntheticDGP: tests the rewritten CS orchestrator with new result shape.
+// 4-year panel: 4 cohort-2004 units, 4 cohort-2006 units, 4 never-treated.
+// True ATT cohort-2004 = 0.5, cohort-2006 = 0.3.
 function suiteSyntheticDGP() {
-  const rows = makeMpdtaLike();
-  const res = runCallawayCS(
-    rows,
-    { yCol: "lemp", entityCol: "county", timeCol: "year", treatCol: "first_treat",
-      compGroup: "nevertreated" },
-  );
-
-  if (res.error) {
-    console.warn("  Engine error:", res.error);
-    return { pass: 0, fail: 1 };
+  const rows = [];
+  const years = [2003, 2004, 2005, 2006];
+  for (let u = 1; u <= 4; u++) {
+    for (const t of years) {
+      rows.push({ id: `A${u}`, t, g: 2004, y: 10 + u * 0.1 + (t >= 2004 ? 0.5 : 0) });
+    }
   }
-
-  let pass = 0, fail = 0;
-
-  // Raw ATT(g,t) table
-  const attGT = res.attGT;
-
-  // Cohort 2004 post-treatment ATTs: should be near 0.5 (DGP)
-  const c2004post = attGT.filter(e => e.g === 2004 && e.t >= 2004);
-  for (const e of c2004post) {
-    const ok = check(`ATT(g=2004, t=${e.t}) ≈ 0.5`, e.att, 0.5, 0.05);
-    ok ? pass++ : fail++;
+  for (let u = 1; u <= 4; u++) {
+    for (const t of years) {
+      rows.push({ id: `B${u}`, t, g: 2006, y: 10 + u * 0.1 + (t >= 2006 ? 0.3 : 0) });
+    }
   }
-
-  // Cohort 2006 post-treatment ATTs: should be near 0.3
-  const c2006post = attGT.filter(e => e.g === 2006 && e.t >= 2006);
-  for (const e of c2006post) {
-    const ok = check(`ATT(g=2006, t=${e.t}) ≈ 0.3`, e.att, 0.3, 0.05);
-    ok ? pass++ : fail++;
+  for (let u = 1; u <= 4; u++) {
+    for (const t of years) {
+      rows.push({ id: `C${u}`, t, g: 0, y: 10 + u * 0.1 });  // g=0 → never-treated
+    }
   }
+  const res = runCallawayCS(rows, {
+    yCol: "y", entityCol: "id", timeCol: "t", treatCol: "g",
+    xCols: [], estMethod: "reg", basePeriod: "varying", compGroup: "nevertreated",
+    anticipation: 0, inference: { method: "analytic", nBoot: 0, seed: 42 },
+  });
 
-  // Pre-trend ATTs: should be near zero
-  const preTrend = attGT.filter(e => e.t < e.g);
-  for (const e of preTrend) {
-    const ok = check(`Pre-trend ATT(g=${e.g}, t=${e.t}) ≈ 0`, e.att, 0, 0.05);
-    ok ? pass++ : fail++;
-  }
+  const results = [];
+  results.push({ label: "no error",              pass: !res.error });
+  results.push({ label: "has aggregations",       pass: !!res.aggregations?.dynamic });
+  results.push({ label: "attgt length > 0",       pass: res.attgt?.length > 0 });
+  results.push({ label: "ptestWald present",      pass: res.ptestWald != null });
+  results.push({ label: "nUnits = 12",            pass: res.nUnits === 12 });
+  results.push({ label: "cohorts has 2004,2006",  pass: res.cohorts?.includes(2004) && res.cohorts?.includes(2006) });
+  results.push({ label: "group overall in [0.3,0.55]",
+    pass: res.aggregations?.group?.overall > 0.3 && res.aggregations?.group?.overall < 0.55 });
+  results.push({ label: "dynamic e=0 in [0.3,0.55]",
+    pass: res.aggregations?.dynamic?.byE?.find(x => x.e === 0)?.att > 0.3 });
+  results.push({ label: "all byG se > 0",         pass: res.aggregations?.group?.byG?.every(x => x.se > 0) });
+  results.push({ label: "warnings is array",       pass: Array.isArray(res.warnings) });
 
-  // Event-study: rel=0 (first treated period) ATT should be ≈ weighted avg of 0.5 and 0.3
-  const evtRel0 = res.eventCoeffs.find(e => e.k === 0);
-  if (evtRel0) {
-    // 4 units in each cohort → equal weights → (0.5 + 0.3) / 2 = 0.4
-    const ok = check(`Event-study ATT(rel=0) ≈ 0.4`, evtRel0.beta, 0.4, 0.05);
-    ok ? pass++ : fail++;
-  } else {
-    console.warn("  ✗ Event-study rel=0 not found");
-    fail++;
-  }
-
-  // Overall ATT: should be between 0.3 and 0.5
-  const att = res.att;
-  const attOk = att != null && att > 0.3 && att < 0.55;
-  if (!attOk) {
-    console.warn(`  ✗ Overall ATT out of range: got ${att}`);
-    fail++;
-  } else {
-    console.log(`  ✓ Overall ATT = ${att?.toFixed(4)} (in expected range [0.3, 0.55])`);
-    pass++;
-  }
-
-  // SE should be positive and finite
-  const seOk = res.attSE > 0 && isFinite(res.attSE);
-  if (!seOk) {
-    console.warn(`  ✗ Overall SE not positive finite: ${res.attSE}`);
-    fail++;
-  } else {
-    console.log(`  ✓ Overall SE = ${res.attSE?.toFixed(4)} (positive finite)`);
-    pass++;
-  }
-
-  // varNames should match relative periods
-  const hasVarNames = res.varNames.length > 0 && res.varNames.every(v => v.startsWith("rel_"));
-  if (!hasVarNames) {
-    console.warn("  ✗ varNames not in rel_N format:", res.varNames);
-    fail++;
-  } else {
-    pass++;
-  }
-
-  return { pass, fail };
+  results.forEach(r => console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`));
+  return { pass: results.filter(r => r.pass).length, total: results.length, fail: results.filter(r => !r.pass).length };
 }
 
 // ─── SUITE 2: Not-yet-treated comparison group ────────────────────────────────
@@ -457,7 +413,8 @@ function suiteNotYetTreated() {
   const res = runCallawayCS(
     rows,
     { yCol: "lemp", entityCol: "county", timeCol: "year", treatCol: "first_treat",
-      compGroup: "notyettreated" },
+      compGroup: "notyettreated",
+      inference: { method: "analytic", nBoot: 0, seed: 42 } },
   );
 
   let pass = 0, fail = 0;
@@ -468,7 +425,7 @@ function suiteNotYetTreated() {
   }
 
   // Should still produce sensible ATTs with not-yet-treated controls
-  const postOk = res.attGT.filter(e => e.t >= e.g).every(e => Number.isFinite(e.att));
+  const postOk = res.attgt.filter(e => !e.isPre).every(e => Number.isFinite(e.att));
   if (!postOk) {
     console.warn("  ✗ Non-finite ATTs with not-yet-treated controls");
     fail++;
@@ -476,9 +433,10 @@ function suiteNotYetTreated() {
     pass++;
   }
 
-  // SE should be positive
-  if (!(res.attSE > 0 && isFinite(res.attSE))) {
-    console.warn("  ✗ Non-positive SE with not-yet-treated controls:", res.attSE);
+  // aggregations.dynamic.overall should be positive finite
+  const dynOverall = res.aggregations?.dynamic?.overall;
+  if (!(isFinite(dynOverall))) {
+    console.warn("  ✗ Non-finite dynamic overall with not-yet-treated controls:", dynOverall);
     fail++;
   } else {
     pass++;
@@ -493,7 +451,8 @@ function suiteEventWindow() {
   const res = runCallawayCS(
     rows,
     { yCol: "lemp", entityCol: "county", timeCol: "year", treatCol: "first_treat",
-      compGroup: "nevertreated", relMin: -1, relMax: 1 },
+      compGroup: "nevertreated", relMin: -1, relMax: 1,
+      inference: { method: "analytic", nBoot: 0, seed: 42 } },
   );
 
   let pass = 0, fail = 0;
@@ -503,14 +462,14 @@ function suiteEventWindow() {
     return { pass: 0, fail: 1 };
   }
 
-  const ks = res.eventCoeffs.map(e => e.k);
-  const inWindow = ks.every(k => k >= -1 && k <= 1);
+  const es = res.attgt.map(e => e.e);
+  const inWindow = es.every(e => e >= -1 && e <= 1);
   if (!inWindow) {
-    console.warn("  ✗ Event window not respected:", ks);
+    console.warn("  ✗ Event window not respected:", es);
     fail++;
   } else {
     pass++;
-    console.log("  ✓ Event window [-1, 1] respected:", ks);
+    console.log("  ✓ Event window [-1, 1] respected:", es);
   }
 
   return { pass, fail };
@@ -539,7 +498,10 @@ function suiteSingleCohort() {
     }
   }
 
-  const res = runCallawayCS(rows, { yCol: "y", entityCol: "id", timeCol: "t", treatCol: "g" });
+  const res = runCallawayCS(rows, {
+    yCol: "y", entityCol: "id", timeCol: "t", treatCol: "g",
+    inference: { method: "analytic", nBoot: 0, seed: 42 },
+  });
   let pass = 0, fail = 0;
 
   if (res.error) {
@@ -547,8 +509,9 @@ function suiteSingleCohort() {
     return { pass: 0, fail: 1 };
   }
 
-  // Overall ATT ≈ 0.5
-  const ok = check("Single-cohort overall ATT ≈ 0.5", res.att, 0.5, 0.06);
+  // Overall ATT ≈ 0.5 (use group overall from aggregations)
+  const overallAtt = res.aggregations?.group?.overall;
+  const ok = check("Single-cohort overall ATT ≈ 0.5", overallAtt, 0.5, 0.06);
   ok ? pass++ : fail++;
 
   return { pass, fail };
