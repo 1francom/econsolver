@@ -174,6 +174,9 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
     if (res.status === 403 && errBody?.error === "premium_required") {
       throw new Error("PREMIUM_REQUIRED");
     }
+    if (res.status === 402 && errBody?.error === "insufficient_credits") {
+      throw new Error("INSUFFICIENT_CREDITS");
+    }
     if (res.status === 401) {
       throw new Error("Session expired — please sign in again.");
     }
@@ -244,6 +247,7 @@ export async function streamClaude({ system, messages, maxTokens = MAX_TOK, mode
     let errBody;
     try { errBody = await res.json(); } catch { errBody = { error: res.statusText }; }
     if (res.status === 403 && errBody?.error === "premium_required") throw new Error("PREMIUM_REQUIRED");
+    if (res.status === 402 && errBody?.error === "insufficient_credits") throw new Error("INSUFFICIENT_CREDITS");
     if (res.status === 401) throw new Error("Session expired — please sign in again.");
     throw new Error(`API error ${res.status}: ${errBody?.error ?? res.statusText}`);
   }

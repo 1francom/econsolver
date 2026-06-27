@@ -62,6 +62,28 @@ export async function getTier(userId) {
   return data?.tier ?? "free";
 }
 
+// Fetch tier + credits in a single round-trip.
+export async function getProfile(userId) {
+  if (!supabase || !userId) return { tier: "free", credits: null };
+  const { data } = await supabase
+    .from("profiles")
+    .select("tier, credits")
+    .eq("id", userId)
+    .single();
+  return { tier: data?.tier ?? "free", credits: data?.credits ?? null };
+}
+
+// Re-fetch the current user's credit balance.
+export async function getCredits(userId) {
+  if (!supabase || !userId) return null;
+  const { data } = await supabase
+    .from("profiles")
+    .select("credits")
+    .eq("id", userId)
+    .single();
+  return data?.credits ?? null;
+}
+
 export function onAuthStateChange(callback) {
   if (!supabase) return () => {};
   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {

@@ -273,7 +273,7 @@ function ThinkingBubble() {
   );
 }
 
-const PREMIUM_TIERS = new Set(["premium", "pro"]);
+const PROXY_ENABLED = import.meta.env.VITE_AI_PROXY_ENABLED === "true";
 
 function makeConversation() {
   const now = Date.now();
@@ -308,8 +308,11 @@ function stripForStorage(conversations) {
 
 export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData, modelResult, prefillMessage = null, pid = null, pinnedModels = [], subsets = null, inferenceOpts = null, onDispatchToAssistant = null }) {
   const { C, T } = useTheme();
-  const { tier, session } = useAuth();
-  const isPremium = !import.meta.env.VITE_AI_PROXY_ENABLED || import.meta.env.VITE_AI_PROXY_ENABLED !== "true" || PREMIUM_TIERS.has(tier);
+  const { tier, session, credits, refreshCredits } = useAuth();
+  // In proxy mode, any authenticated user can use AI — gated by credits, not tier.
+  // In dev mode (proxy off), allow all (direct key usage).
+  const hasAccess = !PROXY_ENABLED || !!session;
+  const outOfCredits = PROXY_ENABLED && !!session && credits !== null && credits === 0;
   const sessionState = useSessionState();
   // Full session snapshot for the coach (pipeline, pinned models, subsets, inference).
   // sessionLog is intentionally omitted: the second AIContextSidebar mount lives
@@ -557,9 +560,13 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
     } catch (err) {
       setLoading(false);
       const msg = err.message === "PREMIUM_REQUIRED"
-        ? "Your account doesn't have premium access. Upgrade to use the AI Coach."
+        ? "Your account doesn't have access to AI features. Sign in to use the AI Coach."
+        : err.message === "INSUFFICIENT_CREDITS"
+        ? "You've used all your credits for this month. Credits reset automatically every 30 days."
         : `Error: ${err.message}`;
       updateActive(msgs => [...msgs, { role: "assistant", text: msg }]);
+    } finally {
+      if (PROXY_ENABLED && session) refreshCredits();
     }
   }
 
@@ -572,8 +579,8 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
 
   if (!isOpen) return null;
 
-  // ── Premium gate ────────────────────────────────────────────────────────────
-  if (!isPremium) return (
+  // ── Auth gate (no session in proxy mode) ───────────────────────────────────
+  if (!hasAccess) return (
     <>
       <div onClick={onClose}
         style={{ position: "fixed", inset: 0, zIndex: 199, background: "rgba(0,0,0,0.35)" }} />
@@ -588,7 +595,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
           Premium Feature
         </div>
         <div style={{ fontSize: T.code.fontSize, fontFamily: T.code.fontFamily, color: C.textMuted, textAlign: "center", lineHeight: 1.7, maxWidth: 280 }}>
-          The AI Research Coach is available on the Premium plan.{!session && " Sign in to access your account."}
+          Sign in to use the AI Research Coach.
         </div>
         <button onClick={onClose}
           style={{ marginTop: 8, padding: "0.45rem 1rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer" }}>
@@ -634,8 +641,19 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
               )}
             </div>
           </div>
+          {PROXY_ENABLED && credits !== null && (
+            <div title="Credits remaining this month" style={{
+              fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
+              color: credits === 0 ? C.red : credits < 6 ? C.gold : C.teal,
+              border: `1px solid ${credits === 0 ? C.red : credits < 6 ? C.gold : C.border2}`,
+              borderRadius: 3, padding: "0.2rem 0.45rem", marginLeft: "auto", marginRight: 8,
+              letterSpacing: "0.05em",
+            }}>
+              ✦ {credits}
+            </div>
+          )}
           <button onClick={() => setShowChats(s => !s)}
-            style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0.25rem 0.5rem", marginLeft: "auto", marginRight: 8 }}>
+            style={{ background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "0.25rem 0.5rem", marginLeft: PROXY_ENABLED && credits !== null ? 0 : "auto", marginRight: 8 }}>
             ☰ Chats ({conversations.length})
           </button>
           <button onClick={onClose}
@@ -724,6 +742,11 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
           borderTop: `1px solid ${C.border}`, padding: "0.65rem 1rem",
           display: "flex", flexDirection: "column", gap: 6, flexShrink: 0,
         }}>
+          {outOfCredits && (
+            <div style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.gold, background: `${C.gold}18`, border: `1px solid ${C.gold}44`, borderRadius: 3, padding: "0.4rem 0.65rem", lineHeight: 1.5 }}>
+              You've used all your credits this month. They reset every 30 days.
+            </div>
+          )}
 
           {/* Pending image thumbnails */}
           {pendingImages.length > 0 && (
@@ -754,7 +777,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); safeSubmit(); } }}
             onPaste={handlePaste}
-            disabled={loading}
+            disabled={loading || outOfCredits}
             placeholder="Ask anything… paste an image with Ctrl+V"
             rows={1}
             style={{
@@ -770,7 +793,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
           />
           <button
             onClick={loading ? () => abortRef.current?.abort() : () => safeSubmit()}
-            disabled={!loading && !input.trim() && pendingImages.length === 0}
+            disabled={outOfCredits || (!loading && !input.trim() && pendingImages.length === 0)}
             style={{
               padding: "0.45rem 0.85rem", borderRadius: 3, flexShrink: 0,
               background: loading ? C.red : ((input.trim() || pendingImages.length > 0) ? C.violet : "transparent"),
