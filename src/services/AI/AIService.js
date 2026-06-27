@@ -949,7 +949,25 @@ function _buildDatasetsContext(cleanedData, allDatasets = []) {
   return "\n\nDATASET CONTEXT:\n" + parts.join("\n") + "\n────────────────────────────";
 }
 
-export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, snapshot = null, cleanedData = null, allDatasets = [], signal = undefined, onText = undefined }) {
+function _buildPlotsContext(savedPlots = []) {
+  if (!savedPlots.length) return "";
+  const entries = [];
+  savedPlots.slice(0, 10).forEach(p => {
+    const geoms = [...new Set((p.layers ?? []).map(l => l.geom).filter(Boolean))].join(", ") || "?";
+    const aes   = (p.layers ?? []).find(l => l.aes)?.aes ?? {};
+    const parts = [];
+    if (aes.x)     parts.push(`x=${aes.x}`);
+    if (aes.y)     parts.push(`y=${aes.y}`);
+    if (aes.color) parts.push(`color=${aes.color}`);
+    if (aes.fill)  parts.push(`fill=${aes.fill}`);
+    const desc = parts.length ? `: ${parts.join(", ")}` : "";
+    entries.push(`  • "${p.name || p.title || "untitled"}" — ${geoms}${desc}`);
+  });
+  if (!entries.length) return "";
+  return "\n\nSAVED PLOTS:\n" + entries.join("\n") + "\n────────────────────────────";
+}
+
+export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, snapshot = null, cleanedData = null, allDatasets = [], savedPlots = [], signal = undefined, onText = undefined }) {
   if (!question?.trim()) return "";
 
   const modelContext  = _serializeModelContext(modelResult, dataDictionary);
@@ -958,6 +976,7 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
   const snapshotBlk   = snapshot ? "\nSESSION CONTEXT:\n" + serializeSnapshot(snapshot) + "\n" : "";
   const contextPrefix = `MODEL CONTEXT:\n${modelContext}${metaCtx}${snapshotBlk}\n\n────────────────────────────\n`;
   const datasetsBlock = _buildDatasetsContext(cleanedData, allDatasets);
+  const plotsBlock    = _buildPlotsContext(savedPlots);
 
   try {
     const apiMessages = [];
@@ -966,11 +985,10 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
       apiMessages.push({ role: turn.role, content });
     });
 
-    // datasetsBlock is injected on every turn so the coach always has the
-    // current column list even when datasets are added mid-conversation.
+    // datasetsBlock + plotsBlock injected on every turn so coach always has current state.
     const textContent = apiMessages.length === 0
-      ? contextPrefix + datasetsBlock + "\n\n" + question.trim()
-      : datasetsBlock + "\n\n" + question.trim();
+      ? contextPrefix + datasetsBlock + plotsBlock + "\n\n" + question.trim()
+      : datasetsBlock + plotsBlock + "\n\n" + question.trim();
 
     // Build last user message — multipart if images present
     const newContent = images.length > 0

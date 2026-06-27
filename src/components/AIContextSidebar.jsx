@@ -12,6 +12,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { researchCoach, coachDispatch } from "../services/AI/AIService.js";
 import { loadCoachChats, saveCoachChats } from "../services/Persistence/indexedDB.js";
+import { getPlotHistory } from "../services/Persistence/plotHistory.js";
 import { buildMetadataReport } from "../core/validation/metadataExtractor.js";
 import { useSessionState } from "../services/session/sessionState.jsx";
 import { buildSessionSnapshot } from "../services/AI/sessionSnapshot.js";
@@ -336,6 +337,11 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
   const inputRef   = useRef(null);
   const abortRef   = useRef(null);
   const loadedPidRef = useRef(null);   // pid that the in-state conversations belong to
+  const [savedPlots, setSavedPlots] = useState([]);
+  useEffect(() => {
+    if (!pid) return;
+    getPlotHistory(pid).then(setSavedPlots).catch(() => {});
+  }, [pid, isOpen]); // reload each time the sidebar opens so fresh plots are visible
 
   function updateActive(mutateMessages) {
     setConversations(prev => prev.map(c => {
@@ -497,6 +503,7 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         snapshot,
         cleanedData,
         allDatasets: Object.values(sessionState?.datasets ?? {}),
+        savedPlots,
         signal: controller.signal,
         onText: (piece) => {
           updateActive(msgs => {
