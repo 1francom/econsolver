@@ -2,7 +2,7 @@
 // Provides { user, session, loading } to the entire app.
 // Initialises from the persisted Supabase session on mount.
 import { createContext, useContext, useEffect, useState } from "react";
-import { getSession, onAuthStateChange, getTier } from "./authService.js";
+import { getSession, onAuthStateChange, getProfile, getCredits } from "./authService.js";
 import { setCurrentUser } from "../Persistence/indexedDB.js";
 import { clearSession, listCloudProjects } from "../sync/syncEngine.js";
 import { consumeGuestParam, isGuest, enterGuest as enterGuestStore, exitGuest as exitGuestStore } from "./guestMode.js";
@@ -13,6 +13,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined); // undefined = still loading
   const [user,    setUser]    = useState(null);
   const [tier,    setTier]    = useState("free");
+  const [credits, setCredits] = useState(null);
   // Guest mode lets the app render with no account. Initialised synchronously on
   // first render so there is no flash of the login screen when arriving via ?guest=1.
   const [guest,   setGuest]   = useState(() => {
@@ -43,13 +44,16 @@ export function AuthProvider({ children }) {
     if (!u) {
       clearSession();
       setTier("free");
+      setCredits(null);
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("econsolver:cloud-logout"));
       }
       return;
     }
 
-    setTier(await getTier(u.id));
+    const profile = await getProfile(u.id);
+    setTier(profile.tier);
+    setCredits(profile.credits);
     try {
       const projects = await listCloudProjects();
       if (projects.length && typeof window !== "undefined") {
@@ -74,8 +78,14 @@ export function AuthProvider({ children }) {
 
   const loading = session === undefined;
 
+  async function refreshCredits() {
+    if (!user) return;
+    const cr = await getCredits(user.id);
+    setCredits(cr);
+  }
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, tier, guest, enterGuest, exitGuest }}>
+    <AuthContext.Provider value={{ user, session, loading, tier, credits, setCredits, refreshCredits, guest, enterGuest, exitGuest }}>
       {children}
     </AuthContext.Provider>
   );

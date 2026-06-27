@@ -1,77 +1,94 @@
-# ─── ECON STUDIO · Callaway-Sant'Anna validation vs R `did` package ──────────
-# Generates benchmark fixtures for callawayValidation.js.
-#
-# Run in R ≥ 4.1:
-#   install.packages("did")
-#   Rscript callawayRValidation.R
-#
-# Expected output: 6 dp coefficients, 4 dp SE, matching JS engine within tolerances.
+# Franco runs: Rscript src/math/__validation__/callawayRValidation.R
+# Requires: install.packages(c("did", "dplyr", "jsonlite"))
+library(did); library(dplyr); library(jsonlite)
 
-library(did)
-set.seed(42)
+# DGP matching the JS suiteSyntheticDGP: 4-year panel, cohorts 2004 and 2006
+# Using a deterministic DGP (no random noise) so JS/R match exactly
+n_per_cohort <- 4
+years <- 2003:2006
 
-# ─── 1. mpdta dataset (built-in to `did` package) ─────────────────────────────
-# Multi-period DiD: county-level log employment (lemp) over 2003–2007.
-# Treated counties in 2004, 2006, 2007 (staggered).
-data(mpdta)
-
-cat("=== mpdta dataset ===\n")
-cat("dim:", nrow(mpdta), "×", ncol(mpdta), "\n")
-cat("columns:", paste(names(mpdta), collapse=", "), "\n")
-cat("unique years:", paste(sort(unique(mpdta$year)), collapse=", "), "\n")
-cat("unique first.treat:", paste(sort(unique(mpdta$first.treat)), collapse=", "), "\n\n")
-
-# ─── 2. att_gt: group-time ATTs ───────────────────────────────────────────────
-out <- att_gt(
-  yname        = "lemp",
-  gname        = "first.treat",
-  idname       = "countyreal",
-  tname        = "year",
-  data         = mpdta,
-  control_group = "nevertreated",
-  est_method   = "reg",        # outcome-regression (matches our OR estimator)
-  panel        = TRUE,
-  allow_unbalanced_panel = FALSE,
-  print_details = FALSE,
-)
-
-cat("=== att_gt results ===\n")
-att_df <- data.frame(
-  g   = out$group,
-  t   = out$t,
-  att = round(out$att, 6),
-  se  = round(out$se, 6)
-)
-print(att_df)
-cat("\n")
-
-# ─── 3. aggte: dynamic / event-study aggregation ──────────────────────────────
-agg <- aggte(out, type = "dynamic", na.rm = TRUE)
-
-cat("=== aggte(dynamic) — event-study ATTs by relative period ===\n")
-evt_df <- data.frame(
-  rel_period = agg$egt,
-  att        = round(agg$att.egt, 6),
-  se         = round(agg$se.egt,  6)
-)
-print(evt_df)
-cat("\n")
-
-# ─── 4. Overall ATT ───────────────────────────────────────────────────────────
-agg_simple <- aggte(out, type = "simple", na.rm = TRUE)
-cat("=== Overall ATT (simple aggregate) ===\n")
-cat("ATT  =", round(agg_simple$overall.att, 6), "\n")
-cat("SE   =", round(agg_simple$overall.se,  6), "\n")
-cat("p    =", round(2 * pnorm(-abs(agg_simple$overall.att / agg_simple$overall.se)), 4), "\n\n")
-
-# ─── 5. Print JSON-ready fixture for callawayValidation.js ────────────────────
-cat("=== JSON fixture (paste into callawayValidation.js) ===\n")
-cat("eventStudy: [\n")
-for (i in seq_along(agg$egt)) {
-  comma <- if (i < length(agg$egt)) "," else ""
-  cat(sprintf('  { rel: %d, att: %.6f, se: %.6f }%s\n',
-              agg$egt[i], agg$att.egt[i], agg$se.egt[i], comma))
+make_panel <- function() {
+  rows <- list()
+  # Cohort 2004: ATT = 0.5
+  for (u in 1:n_per_cohort) {
+    for (t in years) {
+      rows[[length(rows)+1]] <- list(
+        id = paste0("A", u), t = t, g = 2004,
+        y  = 10 + u * 0.1 + ifelse(t >= 2004, 0.5, 0)
+      )
+    }
+  }
+  # Cohort 2006: ATT = 0.3
+  for (u in 1:n_per_cohort) {
+    for (t in years) {
+      rows[[length(rows)+1]] <- list(
+        id = paste0("B", u), t = t, g = 2006,
+        y  = 10 + u * 0.1 + ifelse(t >= 2006, 0.3, 0)
+      )
+    }
+  }
+  # Never-treated (g=0)
+  for (u in 1:n_per_cohort) {
+    for (t in years) {
+      rows[[length(rows)+1]] <- list(
+        id = paste0("C", u), t = t, g = 0,
+        y  = 10 + u * 0.1
+      )
+    }
+  }
+  bind_rows(rows)
 }
-cat("],\n")
-cat(sprintf('overallATT: %.6f,\n', agg_simple$overall.att))
-cat(sprintf('overallSE:  %.6f,\n', agg_simple$overall.se))
+
+df <- make_panel()
+
+run_cs <- function(ctrl, base, meth) {
+  out <- att_gt(
+    yname        = "y",
+    gname        = "g",
+    idname       = "id",
+    tname        = "t",
+    xformla      = ~1,
+    data         = df,
+    control_group = ctrl,
+    base_period  = base,
+    est_method   = meth,
+    bstrap       = FALSE,
+    cband        = FALSE
+  )
+  agg_dyn <- aggte(out, type = "dynamic", na.rm = TRUE)
+  agg_grp <- aggte(out, type = "group",   na.rm = TRUE)
+  agg_cal <- aggte(out, type = "calendar", na.rm = TRUE)
+  agg_sim <- aggte(out, type = "simple",  na.rm = TRUE)
+  list(
+    attgt    = data.frame(g = out$group, t = out$t, att = out$att, se = out$se),
+    dynamic  = list(
+      overall = list(att = agg_dyn$overall.att, se = agg_dyn$overall.se),
+      byE     = data.frame(e = agg_dyn$egt, att = agg_dyn$att.egt, se = agg_dyn$se.egt)
+    ),
+    group    = list(
+      overall = list(att = agg_grp$overall.att, se = agg_grp$overall.se),
+      byG     = data.frame(g = agg_grp$egt, att = agg_grp$att.egt, se = agg_grp$se.egt)
+    ),
+    calendar = list(
+      overall = list(att = agg_cal$overall.att, se = agg_cal$overall.se),
+      byT     = data.frame(t = agg_cal$egt, att = agg_cal$att.egt, se = agg_cal$se.egt)
+    ),
+    simple   = list(att = agg_sim$overall.att, se = agg_sim$overall.se)
+  )
+}
+
+fixtures <- list()
+for (ctrl in c("nevertreated", "notyettreated")) {
+  for (base in c("varying", "universal")) {
+    for (meth in c("dr", "reg")) {
+      key <- paste(ctrl, base, meth, sep = "_")
+      cat("Running", key, "...\n")
+      fixtures[[key]] <- run_cs(ctrl, base, meth)
+    }
+  }
+}
+
+write_json(fixtures, "src/math/__validation__/callawayBenchmarks.json",
+           digits = 8, pretty = TRUE)
+cat("Done. did version:", as.character(packageVersion("did")), "\n")
+cat("Fixtures written to callawayBenchmarks.json\n")

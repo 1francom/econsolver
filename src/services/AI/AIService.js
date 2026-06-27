@@ -40,7 +40,7 @@ import { getSession } from "../auth/authService.js";
 const API_URL       = "https://api.anthropic.com/v1/messages";
 const MODEL         = "claude-sonnet-4-6";        // orchestrator: narratives, cleaning, comparison
 const MODEL_FAST    = "claude-haiku-4-5-20251001"; // unit inference — cheap, fast
-const MODEL_ADVISOR = "claude-opus-4-7";           // specialist: focused technical sub-questions
+const MODEL_ADVISOR = "claude-sonnet-4-6";         // specialist: focused technical sub-questions
 const MAX_TOK       = 700;
 
 // Static app capability map — built once, sent as a cached block to the coach.
@@ -174,6 +174,9 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
     if (res.status === 403 && errBody?.error === "premium_required") {
       throw new Error("PREMIUM_REQUIRED");
     }
+    if (res.status === 402 && errBody?.error === "insufficient_credits") {
+      throw new Error("INSUFFICIENT_CREDITS");
+    }
     if (res.status === 401) {
       throw new Error("Session expired — please sign in again.");
     }
@@ -244,6 +247,7 @@ export async function streamClaude({ system, messages, maxTokens = MAX_TOK, mode
     let errBody;
     try { errBody = await res.json(); } catch { errBody = { error: res.statusText }; }
     if (res.status === 403 && errBody?.error === "premium_required") throw new Error("PREMIUM_REQUIRED");
+    if (res.status === 402 && errBody?.error === "insufficient_credits") throw new Error("INSUFFICIENT_CREDITS");
     if (res.status === 401) throw new Error("Session expired — please sign in again.");
     throw new Error(`API error ${res.status}: ${errBody?.error ?? res.statusText}`);
   }
@@ -1284,7 +1288,7 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
     const taskPrompt = UNIFIED_SCRIPT_PROMPT.replace(SHARED_CONTEXT, "").trim();
     // 8000 (was 6000): long multi-dataset + spatial + plots sessions were hitting
     // the cap and truncating the final statement mid-call.
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 8000 });
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 8000, model: "claude-opus-4-8" });
   } catch (err) {
     console.warn("[AIService] generateUnifiedScript failed:", err.message);
     return fallback();

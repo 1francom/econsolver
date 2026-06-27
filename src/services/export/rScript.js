@@ -1221,6 +1221,52 @@ function transpileModel(model) {
       ].join("\n");
     }
 
+    case "CallawayCS": {
+      // Callaway-Sant'Anna (2021) staggered DiD
+      // Extract spec fields (from model.spec in the wrapped result)
+      const { yVar: csY, treatCol, entityCol: csE, timeCol: csT, xVars: csXVars = [],
+              compGroup = "nevertreated", csEstMethod = "dr", csAnticipation = 0 } = model;
+
+      // Build xformla: if xVars empty or ["~1"], use ~1; else ~ X1 + X2 + ...
+      const xformlaRhs = (csXVars && csXVars.length && !csXVars.includes("~1"))
+        ? csXVars.map(rName).join(" + ")
+        : "1";
+      const xformla = `~${xformlaRhs}`;
+
+      return [
+        `# ── Callaway-Sant'Anna (2021) Staggered DiD ──────────────────────────`,
+        `# Install: install.packages("did")`,
+        `library(did)`,
+        ``,
+        `out <- att_gt(`,
+        `  yname        = ${rStr(csY)},`,
+        `  gname        = ${rStr(treatCol)},`,
+        `  idname       = ${rStr(csE)},`,
+        `  tname        = ${rStr(csT)},`,
+        `  xformla      = ${xformla},`,
+        `  data         = df,`,
+        `  control_group = ${rStr(compGroup)},`,
+        `  base_period  = "varying",`,
+        `  anticipation = ${csAnticipation},`,
+        `  est_method   = ${rStr(csEstMethod)}`,
+        `)`,
+        ``,
+        `summary(out)`,
+        ``,
+        `# Aggregated ATTs by cohort (group)`,
+        `aggte(out, type = "group")`,
+        ``,
+        `# Aggregated ATTs by event (relative period)`,
+        `aggte(out, type = "dynamic")`,
+        ``,
+        `# Calendar time aggregation`,
+        `aggte(out, type = "calendar")`,
+        ``,
+        `# Simple overall ATT`,
+        `aggte(out, type = "simple")`,
+      ].join("\n");
+    }
+
     default:
       return `# Unknown model type: ${type}`;
   }

@@ -44,7 +44,7 @@ export const APP_CAPABILITY_MAP = {
                  "Explorer": "summary stats, distributions",
                  "Plot Builder": "layered charts (point/line/bar/histogram/density)" } },
   Model:     { purpose: "Estimate econometric models", subtabs: {
-                 "Estimator": "pick a model (OLS, FE, IV/2SLS, RDD, DiD, Logit/Probit, GMM, SC)",
+                 "Estimator": "pick a model — Linear (OLS), Panel (FE/FD/LSDV), DiD (2×2 DiD, TWFE DiD, CS DiD, Sun-Abraham), Event Study (Classical TWFE, CS DiD, Sun-Abraham), IV/2SLS, RDD, GMM, Synthetic Control",
                  "Variables": "choose Y, X, instruments, weights",
                  "Inference Options": "SE type — classical / HC1-3 / clustered / two-way / HAC",
                  "Diagnostics": "heteroskedasticity, autocorrelation, normality tests",

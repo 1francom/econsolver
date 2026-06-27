@@ -982,6 +982,42 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
     }
 
+    case "CallawayCS": {
+      // Callaway-Sant'Anna (2021) staggered DiD via csdid package
+      const csY = yVar;
+      const { xVars: csXVars = [], csCompGroup = "nevertreated",
+              csEstMethod = "dr", csAnticipation = 0 } = model;
+
+      // Map est_method to Stata csdid method names
+      const methodMap = { dr: "dripw", reg: "drimp", ipw: "ipw" };
+      const csdidMethod = methodMap[csEstMethod] || "dripw";
+
+      // Build covariates flag: if xVars non-empty, add them after csdid Y
+      const xvarsLine = (csXVars && csXVars.length && !csXVars.includes("~1"))
+        ? `* Add covariates\ncsdid ${csY} ${csXVars.map(stVar).join(" ")}`
+        : `csdid ${csY}`;
+
+      // Build notyet flag
+      const notyet_flag = csCompGroup === "notyettreated" ? " notyet" : "";
+
+      // Build pre flag for anticipation
+      const pre_flag = csAnticipation > 0 ? ` pre(${csAnticipation})` : "";
+
+      lines.push(`* Callaway-Sant'Anna (2021) Staggered DiD`);
+      lines.push(`* Install: net install csdid, from(https://friosavila.github.io/stpackages)`);
+      lines.push(``);
+      lines.push(xvarsLine);
+      lines.push(`  ivar(${entityCol}) time(${timeCol}) gvar(${treatVar})${notyet_flag} ///`);
+      lines.push(`  method(${csdidMethod})${pre_flag}`);
+      lines.push(``);
+      lines.push(`* Aggregations`);
+      lines.push(`estat simple`);
+      lines.push(`estat dynamic`);
+      lines.push(`estat group`);
+      lines.push(`estat calendar`);
+      break;
+    }
+
     default:
       lines.push(`* Model type "${type}" — add estimation command here`);
   }

@@ -1,7 +1,9 @@
 // ─── api/anthropic.js — Vercel Serverless Function ───────────────────────────
 // Server-side proxy for Anthropic API.
 // • Validates the user's Supabase JWT.
-// • Checks profiles.tier — rejects non-premium users with 403.
+// • Atomically deducts credits via spend_credits() RPC before forwarding.
+//   Cost: 0 for Haiku, 15 for replication (max_tokens >= 5000), 2 otherwise.
+//   Returns 402 {error:"insufficient_credits"} when balance is zero.
 // • Forwards the request to Anthropic using the server-side API key.
 //
 // Required Vercel environment variables (set in dashboard, NOT in .env):
@@ -16,7 +18,16 @@ import { createClient } from "@supabase/supabase-js";
 export const maxDuration = 60;
 
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
-const PREMIUM_TIERS = new Set(["premium", "pro"]);
+
+// Credit cost per API call, based on model + expected output size.
+// Haiku calls are cheap enough to be free; large-output calls (script
+// replication, max_tokens >= 5000) cost 15; everything else costs 2.
+function creditCost(body) {
+  const model = body?.model ?? "";
+  if (model.includes("haiku")) return 0;
+  if ((body?.max_tokens ?? 0) >= 5000) return 15;
+  return 2;
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -30,9 +41,9 @@ export default async function handler(req, res) {
   }
   const token = authHeader.slice(7);
 
-  // ── 2. Validate JWT + tier check ────────────────────────────────────────────
-  // createClient with the user's JWT as the auth header: all queries run in
-  // the user's RLS context — no service role key needed.
+  // ── 2. Validate JWT ────────────────────────────────────────────────────────
+  // createClient with the user's JWT as the auth header: all queries (incl.
+  // spend_credits RPC) run in the user's RLS context — no service role needed.
   const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_ANON_KEY,
@@ -44,33 +55,33 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Invalid or expired session" });
   }
 
-  const { data: profile, error: profileErr } = await supabase
-    .from("profiles")
-    .select("tier")
-    .eq("id", user.id)
-    .single();
-
-  if (profileErr) {
-    console.error("[proxy] profiles query error:", profileErr.message);
-    return res.status(500).json({ error: "Could not verify account tier" });
-  }
-
-  if (!PREMIUM_TIERS.has(profile?.tier)) {
-    return res.status(403).json({ error: "premium_required" });
-  }
-
-  // ── 3. Forward to Anthropic ─────────────────────────────────────────────────
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.error("[proxy] ANTHROPIC_API_KEY not set in Vercel env");
-    return res.status(500).json({ error: "Server misconfiguration" });
-  }
-
+  // ── 3. Deduct credits (atomic, server-side) ────────────────────────────────
   let body;
   try {
     body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
   } catch {
     return res.status(400).json({ error: "Invalid JSON body" });
+  }
+
+  const cost = creditCost(body);
+  let creditsRemaining = null;
+  if (cost > 0) {
+    const { data: remaining, error: creditErr } = await supabase.rpc("spend_credits", { p_amount: cost });
+    if (creditErr) {
+      console.error("[proxy] spend_credits error:", creditErr.message);
+      return res.status(500).json({ error: "Credit check failed" });
+    }
+    if (remaining === -1) {
+      return res.status(402).json({ error: "insufficient_credits" });
+    }
+    creditsRemaining = remaining;
+  }
+
+  // ── 4. Forward to Anthropic ─────────────────────────────────────────────────
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.error("[proxy] ANTHROPIC_API_KEY not set in Vercel env");
+    return res.status(500).json({ error: "Server misconfiguration" });
   }
 
   let anthropicRes;
@@ -96,6 +107,7 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type",  "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection",    "keep-alive");
+    if (creditsRemaining !== null) res.setHeader("X-Credits-Remaining", creditsRemaining);
     if (!anthropicRes.ok || !anthropicRes.body) {
       const errText = await anthropicRes.text();
       res.end(errText);
@@ -116,5 +128,6 @@ export default async function handler(req, res) {
   }
 
   const data = await anthropicRes.json();
+  if (creditsRemaining !== null) res.setHeader("X-Credits-Remaining", creditsRemaining);
   return res.status(anthropicRes.status).json(data);
 }

@@ -104,6 +104,7 @@ import {
 import {
   PanelResults, TwoSLSResults, GMMResults, LIMLResults, FuzzyRDDResults,
 } from "./modeling/results/index.js";
+import { GroupTimePlot, EventStudyDynamicPlot, GroupAggPlot, CalendarAggPlot } from "./modeling/plots/didPlots.jsx";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 // Pure (no-React) helpers extracted to ./modeling/helpers.js: buildModelAvail,
@@ -113,6 +114,192 @@ import {
   buildModelAvail, buildModelHint, resolveEstimator,
 } from "./modeling/helpers.js";
 import { dispatchEstimation } from "./modeling/runners/estimationDispatch.js";
+
+// ─── CS RESULTS PANEL (Callaway-Sant'Anna) ────────────────────────────────────
+// Tabbed result panel for CallawayCS estimation. Separated from the IIFE
+// in the render tree so it can hold its own tab state via useState.
+function CSResultsPanel({
+  r, critVal, tabOrder, tabLabels,
+  overallAtt, overallSE, overallP, ci95lo, ci95hi,
+  ptest, yVar, dict, rows, onReport,
+}) {
+  const { C, T } = useTheme();
+  const [activeTab, setActiveTab] = useState(tabOrder[0]);
+
+  const attgt   = r.attgt ?? [];
+  const byE     = r.aggregations?.dynamic?.byE ?? [];
+  const byG     = r.aggregations?.group?.byG ?? [];
+  const byT     = r.aggregations?.calendar?.byT ?? [];
+
+  return (
+    <div style={{ animation: "fadeUp 0.22s ease" }}>
+      {/* ── Header badges row ── */}
+      <div style={{ marginBottom: "0.8rem", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>
+          Callaway-Sant'Anna DiD
+        </span>
+        {r.n     != null && <Badge label={`n = ${r.n}`}           color={C.textDim} />}
+        {r.units != null && <Badge label={`N = ${r.units}`}       color={C.textDim} />}
+        {r.csNGroups != null && <Badge label={`${r.csNGroups} cohorts`} color={C.textDim} />}
+        <Badge
+          label={r.csCompGroup === "nevertreated" ? "Never-treated" : "Not-yet-treated"}
+          color={C.blue}
+        />
+        {r.csEstMethod && <Badge label={r.csEstMethod.toUpperCase()} color={C.textDim} />}
+        {r.csBasePeriod && <Badge label={`base: ${r.csBasePeriod}`} color={C.textDim} />}
+      </div>
+
+      {/* ── Overall ATT banner ── */}
+      {overallAtt != null && (
+        <div style={{
+          padding: "0.65rem 1rem", marginBottom: "0.8rem",
+          background: C.surface2,
+          border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`,
+          borderRadius: 4, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily,
+        }}>
+          <span style={{ color: C.textMuted }}>Overall ATT: </span>
+          <span style={{ color: overallAtt >= 0 ? C.teal : "#e05c5c" }}>
+            {overallAtt >= 0 ? "+" : ""}{overallAtt.toFixed(4)}
+          </span>
+          {overallSE != null && (
+            <span style={{ color: C.textMuted }}>
+              {" "}± {(critVal * overallSE).toFixed(4)}{" "}
+              (95% CI [{ci95lo}, {ci95hi}])
+            </span>
+          )}
+          {overallP != null && (
+            <>
+              <span style={{ color: C.textMuted }}> · p = {overallP < 0.001 ? "<0.001" : overallP.toFixed(4)}</span>
+              <span style={{ marginLeft: 6, color: C.gold }}>
+                {overallP < 0.01 ? "***" : overallP < 0.05 ? "**" : overallP < 0.1 ? "*" : ""}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Wald pre-trend test ── */}
+      {ptest && (
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.body.fontFamily, marginBottom: "0.6rem" }}>
+          Parallel trends: χ²({ptest.df ?? "?"}) = {ptest.stat?.toFixed(3) ?? "—"},
+          p = {ptest.p != null ? (ptest.p < 0.001 ? "<0.001" : ptest.p.toFixed(4)) : "—"}
+        </div>
+      )}
+
+      {/* ── Warnings ── */}
+      {r.warnings?.length > 0 && r.warnings.map((w, i) => (
+        <div key={i} style={{
+          padding: "0.4rem 0.7rem", marginBottom: 6,
+          background: `${C.gold}10`, border: `1px solid ${C.gold}40`,
+          borderRadius: 3, fontSize: T.caption.fontSize, color: C.gold,
+          fontFamily: T.body.fontFamily,
+        }}>
+          ⚠ {w}
+        </div>
+      ))}
+
+      {/* ── Tab strip ── */}
+      <div style={{
+        display: "flex", overflowX: "auto",
+        background: C.surface, borderBottom: `1px solid ${C.border}`,
+        marginBottom: 0, borderRadius: "4px 4px 0 0",
+      }}>
+        {tabOrder.map(id => {
+          const isActive = id === activeTab;
+          return (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              style={{
+                flexShrink: 0,
+                padding: "0.4rem 0.8rem",
+                background: isActive ? `${C.teal}12` : "transparent",
+                border: "none",
+                borderBottom: isActive ? `2px solid ${C.teal}` : "2px solid transparent",
+                color: isActive ? C.teal : C.textMuted,
+                cursor: "pointer", fontFamily: T.code.fontFamily,
+                fontSize: T.caption.fontSize, letterSpacing: "0.08em",
+                transition: "all 0.12s", whiteSpace: "nowrap",
+              }}
+            >
+              {tabLabels[id]}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Tab panels ── */}
+      <div style={{
+        border: `1px solid ${C.border}`, borderTop: "none",
+        borderRadius: "0 0 4px 4px", padding: "0.8rem",
+        background: C.bg, marginBottom: "1rem",
+        minHeight: 120,
+      }}>
+        {activeTab === "group-time" && (
+          <GroupTimePlot attgt={attgt} critVal={critVal} />
+        )}
+        {activeTab === "dynamic" && (
+          <EventStudyDynamicPlot byE={byE} critVal={critVal} />
+        )}
+        {activeTab === "group-agg" && (
+          <GroupAggPlot byG={byG} critVal={critVal} />
+        )}
+        {activeTab === "calendar" && (
+          <CalendarAggPlot byT={byT} critVal={critVal} />
+        )}
+        {activeTab === "table" && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{
+              width: "100%", borderCollapse: "collapse",
+              fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
+            }}>
+              <thead>
+                <tr>
+                  {["g", "t", "e", "ATT", "SE", "pre/post"].map(h => (
+                    <th key={h} style={{
+                      textAlign: "right", padding: "3px 8px",
+                      borderBottom: `1px solid ${C.border}`,
+                      color: C.textMuted, letterSpacing: "0.1em",
+                    }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {attgt.map((c, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.border}10` }}>
+                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.teal }}>{c.g}</td>
+                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.text }}>{c.t}</td>
+                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.textDim }}>
+                      {c.e != null ? c.e : (c.t != null && c.g != null ? c.t - c.g : "—")}
+                    </td>
+                    <td style={{ textAlign: "right", padding: "2px 8px", color: c.att >= 0 ? C.teal : "#e05c5c" }}>
+                      {c.att?.toFixed(4) ?? "—"}
+                    </td>
+                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.textDim }}>
+                      {c.se?.toFixed(4) ?? "—"}
+                    </td>
+                    <td style={{ textAlign: "right", padding: "2px 8px", color: c.isPre ? "#e05c5c" : C.teal }}>
+                      {c.isPre ? "pre" : "post"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Export bar ── */}
+      <ExportBar
+        yVar={yVar} results={r} model="CallawayCS"
+        onReport={onReport}
+        replicateConfig={null}
+      />
+    </div>
+  );
+}
 
 // ─── B5: SESSION MODEL HISTORY ────────────────────────────────────────────────
 function ModelHistory({ history, onRestore, onClear }) {
@@ -304,6 +491,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [csCompGroup, setCsCompGroup] = useState("nevertreated");
   const [csRelMin,    setCsRelMin]    = useState("");
   const [csRelMax,    setCsRelMax]    = useState("");
+  const [csDefaultView, setCsDefaultView] = useState("group"); // "group" | "dynamic"
+  const [csXCols,      setCsXCols]      = useState([]);
+  const [csEstMethod,  setCsEstMethod]  = useState("dr");
+  const [csBasePeriod, setCsBasePeriod] = useState("varying");
+  const [csAnticipation, setCsAnticipation] = useState("0");
+  const [csInfMethod,  setCsInfMethod]  = useState("bootstrap");
+  const [csNBoot,      setCsNBoot]      = useState("999");
+  const [csSeed,       setCsSeed]       = useState("42");
   const [spatialModel, setSpatialModel] = useState("SAR");
   const [spatialWeightsMode, setSpatialWeightsMode] = useState("inline");
   const [spatialGeomCol, setSpatialGeomCol] = useState("");
@@ -534,7 +729,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     [metadataReport, result, modelSpec]
   );
 
-  const handleModelSelect = useCallback((id) => {
+  const handleModelSelect = useCallback((id, group) => {
     setModel(id);
     setResult(null);
     setErr(null);
@@ -543,6 +738,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       const support = FAMILY_SUPPORT[id] ?? {};
       return (prev === "linear" || support[prev] === "available") ? prev : "linear";
     });
+    if (id === "CallawayCS") {
+      setCsDefaultView(group === "Event Study" ? "dynamic" : "group");
+    }
   }, []);
 
   const toggleFactor = useCallback((col) => {
@@ -576,6 +774,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       poissonEntityCol, poissonOffsetCol, poissonExtraFE,
       cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
       csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
+      csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView,
       spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
       resolveSpatialWeights,
     });
@@ -594,7 +793,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
     if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
     return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -1830,6 +2029,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             csCompGroup={csCompGroup}       setCsCompGroup={setCsCompGroup}
             csRelMin={csRelMin}             setCsRelMin={setCsRelMin}
             csRelMax={csRelMax}             setCsRelMax={setCsRelMax}
+            csXCols={csXCols}               setCsXCols={setCsXCols}
+            csEstMethod={csEstMethod}       setCsEstMethod={setCsEstMethod}
+            csBasePeriod={csBasePeriod}     setCsBasePeriod={setCsBasePeriod}
+            csAnticipation={csAnticipation} setCsAnticipation={setCsAnticipation}
+            csInfMethod={csInfMethod}       setCsInfMethod={setCsInfMethod}
+            csNBoot={csNBoot}               setCsNBoot={setCsNBoot}
+            csSeed={csSeed}                 setCsSeed={setCsSeed}
             spatialModel={spatialModel}     setSpatialModel={setSpatialModel}
             spatialWeightsMode={spatialWeightsMode} setSpatialWeightsMode={setSpatialWeightsMode}
             spatialGeomCol={spatialGeomCol} setSpatialGeomCol={setSpatialGeomCol}
@@ -2552,40 +2758,52 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           {/* Callaway & Sant'Anna (2021) staggered DiD */}
           {result?.type === "CallawayCS" && (() => {
             const r = result;
+            const critVal = r.csInference?.critVal ?? 1.96;
+            // Default tab order depends on csDefaultView
+            const defaultView = r.csDefaultView ?? csDefaultView ?? "group";
+            const tabOrder = defaultView === "dynamic"
+              ? ["dynamic", "group-time", "group-agg", "calendar", "table"]
+              : ["group-time", "dynamic", "group-agg", "calendar", "table"];
+            const tabLabels = {
+              "group-time": "Group-time",
+              "dynamic":    "Dynamic",
+              "group-agg":  "Group agg.",
+              "calendar":   "Calendar",
+              "table":      "Table",
+            };
+
+            // Overall ATT from the active aggregation view, or fall back to r.att
+            const activeAgg = r.aggregations?.[defaultView === "dynamic" ? "dynamic" : "group"];
+            const overallAtt  = activeAgg?.att  ?? r.att;
+            const overallSE   = activeAgg?.se   ?? r.attSE;
+            const overallP    = activeAgg?.p     ?? r.attP;
+
+            // Formatted CI
+            const ci95lo = overallAtt != null && overallSE != null
+              ? (overallAtt - critVal * overallSE).toFixed(4) : null;
+            const ci95hi = overallAtt != null && overallSE != null
+              ? (overallAtt + critVal * overallSE).toFixed(4) : null;
+
+            // Wald pre-trend test
+            const ptest = r.ptestWald;
+
             return (
-              <div style={{ animation: "fadeUp 0.22s ease" }}>
-                <div style={{ marginBottom: "1rem", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em", textTransform: "uppercase" }}>Callaway-Sant'Anna DiD</span>
-                  <Badge label={`n = ${r.n}`} color={C.textDim} />
-                  {r.csNGroups != null && <Badge label={`${r.csNGroups} cohorts`} color={C.textDim} />}
-                  {r.units != null && <Badge label={`${r.units} units`} color={C.textDim} />}
-                  <Badge label={r.csCompGroup === "nevertreated" ? "Never-treated control" : "Not-yet-treated control"} color={C.blue} />
-                </div>
-                {r.att != null && (
-                  <div style={{ padding: "0.7rem 1rem", marginBottom: "1rem", background: C.surface2, border: `1px solid ${C.teal}30`, borderLeft: `3px solid ${C.teal}`, borderRadius: 4, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
-                    <span style={{ color: C.textMuted }}>Overall ATT: </span>
-                    <span style={{ color: r.att >= 0 ? C.teal : C.red }}>{r.att >= 0 ? "+" : ""}{r.att.toFixed(4)}</span>
-                    <span style={{ color: C.textMuted }}> (SE = {r.attSE?.toFixed(4) ?? "—"})</span>
-                    <span style={{ color: C.textMuted }}> · p = {r.attP < 0.001 ? "<0.001" : r.attP?.toFixed(4) ?? "—"}</span>
-                    <span style={{ marginLeft: 6, color: C.gold }}>{r.attP < 0.01 ? "***" : r.attP < 0.05 ? "**" : r.attP < 0.1 ? "*" : ""}</span>
-                  </div>
-                )}
-                <FitBar items={[
-                  { label: "Overall ATT", value: r.att?.toFixed(4) ?? "—", color: C.teal },
-                  { label: "SE",          value: r.attSE?.toFixed(4) ?? "—", color: C.textDim },
-                  { label: "p-value",     value: r.attP != null ? (r.attP < 0.001 ? "<0.001" : r.attP.toFixed(4)) : "—", color: r.attP < 0.05 ? C.gold : C.textDim },
-                  { label: "n",           value: r.n, color: C.text },
-                  { label: "cohorts",     value: r.csNGroups ?? "—", color: C.textDim },
-                ]} />
-                <Lbl color={C.textMuted}>Event-Study ATT Plot (by relative period)</Lbl>
-                <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
-                <Lbl color={C.textMuted}>Event-Study Coefficient Table</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel="z" />
-                <ExportBar yVar={yVar[0]} results={r} model="CallawayCS"
-                  onReport={() => openReport({ ...r, modelLabel: "Callaway-Sant'Anna DiD", yVar: yVar[0], xVars: [] })}
-                  replicateConfig={null}
-                />
-              </div>
+              <CSResultsPanel
+                r={r}
+                critVal={critVal}
+                tabOrder={tabOrder}
+                tabLabels={tabLabels}
+                overallAtt={overallAtt}
+                overallSE={overallSE}
+                overallP={overallP}
+                ci95lo={ci95lo}
+                ci95hi={ci95hi}
+                ptest={ptest}
+                yVar={yVar[0]}
+                dict={dict}
+                rows={rows}
+                onReport={() => openReport({ ...r, modelLabel: "Callaway-Sant'Anna DiD", yVar: yVar[0], xVars: [] })}
+              />
             );
           })()}
 

@@ -3,7 +3,7 @@
 // Pure presentation: receives model state, emits onSelect.
 // Props:
 //   model         {string}   – currently selected model ID
-//   onSelect      {fn}       – (id) => void
+//   onSelect      {fn}       – (id, group) => void
 //   modelAvail    {object}   – { OLS: true, FE: false, … }
 //   modelHint     {object}   – tooltip text per model when disabled
 //   panel         {object|null} – panelIndex from cleanedData
@@ -19,15 +19,18 @@ import { useTheme, Section, InfoBox } from "./shared.jsx";
 export const MODELS = [
   // Linear
   { id: "OLS",              label: "OLS",              group: "Linear",    desc: "Ordinary Least Squares",                                               color: "#7ab896" },
-  // Panel
+  // Panel (pure panel estimators — no DiD/event-study)
   { id: "FE",               label: "FE",               group: "Panel",     desc: "Fixed Effects (within estimator) — panel required",                    color: "#6e9ec8" },
   { id: "FD",               label: "FD",               group: "Panel",     desc: "First Differences — unique (i,t) pairs required",                      color: "#6e9ec8" },
   { id: "LSDV",             label: "LSDV",             group: "Panel",     desc: "Least Squares Dummy Variables — panel required",                        color: "#6e9ec8" },
-  { id: "TWFE",             label: "TWFE DiD",         group: "Panel",     desc: "Two-Way Fixed Effects DiD — panel required",                            color: "#6ec8b4" },
-  { id: "EventStudy",       label: "Event Study",      group: "Panel",     desc: "Dynamic DiD / event study — panel required",                            color: "#6ec8b4" },
-  { id: "CallawayCS",       label: "CS DiD",           group: "Panel",     desc: "Callaway & Sant'Anna (2021) staggered DiD — panel required",            color: "#6ec8b4" },
   // DiD
   { id: "DiD",              label: "DiD 2×2",          group: "DiD",       desc: "Classic Difference-in-Differences",                                     color: "#6ec8b4" },
+  { id: "TWFE",             label: "TWFE DiD",         groups: ["DiD"],    desc: "Two-Way Fixed Effects DiD — panel required",                            color: "#6ec8b4" },
+  { id: "CallawayCS",       label: "CS DiD (2021)",    groups: ["DiD", "Event Study"], desc: "Callaway & Sant'Anna (2021) staggered DiD — panel required", color: "#6ec8b4" },
+  { id: "SunAbraham",       label: "Sun-Abraham (2021)", groups: ["DiD", "Event Study"], desc: "Sun & Abraham (2021) interaction-weighted staggered DiD",  color: "#6ec8b4" },
+  { id: "CHDiD",            label: "Staggered DiD (CH)", groups: ["DiD"], planned: true, desc: "Callaway-Heckman (planned)", color: "#6ec8b4" },
+  // Event Study
+  { id: "EventStudy",       label: "Classical (TWFE)", groups: ["Event Study"], desc: "Dynamic DiD / event study — panel required",                       color: "#6ec8b4" },
   // IV
   { id: "2SLS",             label: "2SLS / IV",        group: "IV",        desc: "Two-Stage Least Squares",                                               color: "#c8a96e" },
   { id: "GMM",              label: "Two-Step GMM",     group: "IV",        desc: "Efficient GMM — HC-robust Ω̂ + J-test",                                  color: "#c8a96e" },
@@ -39,13 +42,13 @@ export const MODELS = [
   // Spatial econometrics
   { id: "SpatialRegression", label: "Spatial Reg.",    group: "Spatial",   desc: "SLX, SAR, SEM, and SDM with a spatial weights matrix",                 color: "#6ec8b4" },
   // Synthetic
-  { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)",  color: "#6e9ec8" },
+  { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)", color: "#6e9ec8" },
   // Count outcomes
   { id: "NegBinFE",        label: "Negative Binomial FE", group: "Count outcomes", desc: "NB2 with absorbed fixed effects and overdispersion", color: "#9e7ec8" },
 ];
 
 // ordered group list (controls render order)
-const GROUP_ORDER = ["Linear", "Panel", "Count outcomes", "DiD", "IV", "RD", "Spatial", "Synthetic"];
+const GROUP_ORDER = ["Linear", "Panel", "DiD", "Event Study", "Count outcomes", "IV", "RD", "Spatial", "Synthetic"];
 
 // Outcome families each strategy supports.
 // "linear" is always implied. Only non-linear entries listed.
@@ -88,10 +91,10 @@ export default function EstimatorSidebar({
 
   const selected = MODELS.find(m => m.id === model) ?? MODELS[0];
 
-  // Group models by group key
+  // Group models by group key — supports multi-group entries via `groups[]`
   const grouped = GROUP_ORDER.map(g => ({
     group: g,
-    items: MODELS.filter(m => m.group === g),
+    items: MODELS.filter(m => (m.groups ?? [m.group]).includes(g)),
   }));
 
   return (
@@ -160,15 +163,17 @@ export default function EstimatorSidebar({
 
                   {/* Estimator rows */}
                   {items.map(m => {
-                    const avail  = modelAvail[m.id] !== false;
+                    const avail  = !m.planned && modelAvail[m.id] !== false;
                     const isSelected = model === m.id;
-                    const hint   = modelHint?.[m.id] ?? "";
+                    const hint   = m.planned ? "Planned — not yet implemented"
+                                 : !avail    ? (modelHint?.[m.id] ?? "")
+                                 : m.desc;
                     return (
                       <button
-                        key={m.id}
-                        disabled={!avail}
-                        title={!avail ? hint : m.desc}
-                        onClick={() => { onSelect(m.id); setOpen(false); }}
+                        key={`${group}:${m.id}`}
+                        disabled={!avail || m.planned}
+                        title={hint}
+                        onClick={() => { if (!m.planned && avail) { onSelect(m.id, group); setOpen(false); } }}
                         style={{
                           width: "100%",
                           display: "flex",
@@ -180,14 +185,14 @@ export default function EstimatorSidebar({
                           border: "none",
                           borderLeft: `3px solid ${isSelected ? m.color : "transparent"}`,
                           borderBottom: `1px solid ${C.border}`,
-                          color: !avail ? C.textMuted : isSelected ? m.color : C.textDim,
-                          cursor: !avail ? "not-allowed" : "pointer",
+                          color: m.planned ? C.textMuted : !avail ? C.textMuted : isSelected ? m.color : C.textDim,
+                          cursor: m.planned ? "not-allowed" : !avail ? "not-allowed" : "pointer",
                           fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
                           textAlign: "left",
-                          opacity: !avail ? 0.45 : 1,
+                          opacity: m.planned ? 0.4 : !avail ? 0.45 : 1,
                           transition: "background 0.1s",
                         }}
-                        onMouseEnter={e => { if (avail && !isSelected) e.currentTarget.style.background = `${C.border}50`; }}
+                        onMouseEnter={e => { if (avail && !isSelected && !m.planned) e.currentTarget.style.background = `${C.border}50`; }}
                         onMouseLeave={e => { e.currentTarget.style.background = isSelected ? `${m.color}14` : "transparent"; }}
                       >
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>

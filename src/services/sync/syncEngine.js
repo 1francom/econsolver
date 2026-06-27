@@ -356,9 +356,35 @@ async function forcePushProject(pid, { version = null } = {}) {
   return { version: nextVersion, uploaded: uploads.length };
 }
 
+const SYNC_LIMITS = { free: 3, pro: 25, premium: 100 };
+
 export async function enableCloud(pid, passphrase) {
   const userId = await getCurrentUserId();
   if (!userId) throw new Error("Sign in before publishing to cloud.");
+
+  // ── Tier limit check ────────────────────────────────────────────────────────
+  const supabaseCheck = getSyncSupabase();
+  const { data: prof } = await supabaseCheck.from("profiles").select("tier").eq("id", userId).single();
+  const tier  = prof?.tier ?? "free";
+  const limit = SYNC_LIMITS[tier] ?? SYNC_LIMITS.free;
+
+  // Only enforce the limit for new cloud entries — re-enabling an existing pid
+  // is just an update (the upsert will hit the existing row), so don't block it.
+  const { data: alreadySynced } = await supabaseCheck
+    .from("synced_projects").select("pid").eq("user_id", userId).eq("pid", pid).maybeSingle();
+
+  if (!alreadySynced) {
+    const { count } = await supabaseCheck
+      .from("synced_projects").select("pid", { count: "exact", head: true }).eq("user_id", userId);
+    if ((count ?? 0) >= limit) {
+      const tierLabel = tier === "free" ? "Free" : tier === "pro" ? "Pro" : "Premium";
+      throw new Error(
+        `Cloud sync limit reached (${tierLabel} plan: ${limit} project${limit === 1 ? "" : "s"}). ` +
+        `Remove a project from cloud to add another, or upgrade your plan.`
+      );
+    }
+  }
+  // ────────────────────────────────────────────────────────────────────────────
 
   const existingCloud = await getAnyCloudRow();
   const salt = existingCloud?.salt ?? randomSaltB64();

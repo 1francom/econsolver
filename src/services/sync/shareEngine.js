@@ -199,10 +199,30 @@ async function writeBundle(targetPid, bundle) {
  * Owner creates a share for a project.
  * Returns { shareId, token, shareUrl } — owner copies/sends the URL.
  */
+const SHARE_LIMITS = { free: 1, pro: 5, premium: 20 };
+
 export async function createShare(pid, recipientEmail, canEdit = false) {
   const supabase = getSyncSupabase();
   const userId   = await getCurrentUserId();
   if (!userId) throw new Error("Sign in before sharing.");
+
+  // ── Tier limit check ────────────────────────────────────────────────────────
+  const { data: prof } = await supabase.from("profiles").select("tier").eq("id", userId).single();
+  const tier  = prof?.tier ?? "free";
+  const limit = SHARE_LIMITS[tier] ?? SHARE_LIMITS.free;
+
+  const { count } = await supabase
+    .from("project_shares").select("id", { count: "exact", head: true })
+    .eq("owner_id", userId).eq("pid", pid);
+
+  if ((count ?? 0) >= limit) {
+    const tierLabel = tier === "free" ? "Free" : tier === "pro" ? "Pro" : "Premium";
+    throw new Error(
+      `Share limit reached (${tierLabel} plan: ${limit} share${limit === 1 ? "" : "s"} per project). ` +
+      `Revoke an existing share or upgrade your plan.`
+    );
+  }
+  // ────────────────────────────────────────────────────────────────────────────
 
   const token  = randomToken();
   const salt   = randomSaltB64();

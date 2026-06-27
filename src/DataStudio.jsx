@@ -367,8 +367,10 @@ async function validateFileMagic(file) {
     if (b[0] !== 0x3C && !(b[0] >= 108 && b[0] <= 121))
       throw new Error(`"${file.name}" is not a valid Stata .dta file — unrecognised file header.`);
   } else if (ext === "rds") {
-    // R serialisation: 'X\n' (XDR), 'A\n' (ASCII), or 'B\n' (binary)
-    if (!((b[0] === 0x58 || b[0] === 0x41 || b[0] === 0x42) && b[1] === 0x0A))
+    // R serialisation: 'X\n' (XDR), 'A\n' (ASCII), 'B\n' (binary), or gzip (1F 8B) — default compress=TRUE
+    const isRDSMagic = ((b[0] === 0x58 || b[0] === 0x41 || b[0] === 0x42) && b[1] === 0x0A)
+                    || (b[0] === 0x1F && b[1] === 0x8B);
+    if (!isRDSMagic)
       throw new Error(`"${file.name}" is not a valid R data file (.rds) — unrecognised serialisation header.`);
   }
 }

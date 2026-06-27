@@ -206,6 +206,7 @@ src/
 | Poisson FE | NonLinearEngine.js | ✓ |
 | Synthetic Control | SyntheticControlEngine.js | ✓ validated vs R Synth package (weights 2dp, gaps 2dp) — Frank-Wolfe vs ipop; hard benchmarks in engineValidation.js |
 | Sun & Abraham (2021) event study | NonLinearEngine.js (`runSunAbraham`) | ✓ validated vs R fixest::fepois + sunab() (coef 6dp, SE 4dp) — IW per-relative-period aggregation w/ delta-method clustered SE; single-cohort reduces exactly to Poisson TWFE `i(rel)`. Harness: `sunAbrahamRValidation.R` → `sunAbrahamBenchmarks.json` → `sunAbrahamValidation.js`. Clustered SE uses sandwich convention = fixest `ssc(fixef.K="none")`; differs from fixest default `nested` by a known df factor (~1-2%) |
+| Callaway & Sant'Anna (2021) staggered DiD | CallawayEngine.js (orchestrator), src/math/did/drdid.js, src/math/did/staggeredDiD.js | ✓ implemented; R validation pending Franco (run callawayRValidation.R → callawayBenchmarks.json) |
 
 ## Pipeline step types (runner.js) — 53 total
 Cleaning (21): `rename, drop, filter, add_row, set_where, replace, drop_na, fill_na, type_cast, quickclean, recode, normalize_cats, distinct, winz, ai_tr, patch, fill_na_grouped, trim_outliers, flag_outliers, extract_regex, clean_strings`
@@ -226,11 +227,18 @@ Merge (6): `join` (`left, inner, right, full, semi, anti`), `append, bind_cols, 
 - **Stale closure in estimate() for SC/EventStudy/LSDV**: `treatedUnit`, `synthTreatTime`, `treatTimeCol`, `kPre`, `kPost`, `lsdvTimeFE` were missing from `estimate` useCallback dep array — estimation always saw initial empty state.
 
 ## AI service details
-- Model for narratives: `claude-sonnet-4-20250514`
-- Model for unit inference: `claude-haiku-4-5-20251001` (fast, cheap)
+- **Model routing** (never bypass without a reason):
+  - `claude-haiku-4-5-20251001` (`MODEL_FAST`) — unit inference, NL-to-pipeline dispatch. 0 credits.
+  - `claude-sonnet-4-6` (`MODEL`, `MODEL_ADVISOR`) — narratives, coach, cleaning, comparison, coach dispatch check. 2 credits.
+  - `claude-opus-4-8` — script replication only (`maxTokens=8000` call in `generateUnifiedScript`). 15 credits.
 - All prompts live in `services/AI/Prompts/index.js`
-- `SHARED_CONTEXT` (~800 tokens) is the cached block — always > 1024 tokens combined with any task prompt
-- `callClaude({ system, user, maxTokens })` strips `SHARED_CONTEXT` from exported prompts before sending (it adds it as the cached block automatically)
+- `SHARED_CONTEXT` (~2200 tokens) is the cached block — sized to clear the 2048-token Haiku cache minimum
+- `callClaude({ system, user, maxTokens, model? })` prepends `SHARED_CONTEXT` as a cached system block automatically
+- Proxy (`api/anthropic.js`) deducts credits atomically via `spend_credits()` RPC before forwarding to Anthropic:
+  - 0 credits: Haiku model
+  - 15 credits: `max_tokens >= 5000` (replication)
+  - 2 credits: everything else
+  - Returns HTTP 402 `{error:"insufficient_credits"}` → `AIService` throws `INSUFFICIENT_CREDITS`
 
 ## Pending (ordered by priority)
 
@@ -253,6 +261,15 @@ Fase 8 supplement (2026-05-21): the Fase 3a/3c robust-SE guards above are lifted
 8. ~~**Phase 8 — Modeling UI Overhaul**~~ — `EstimatorSidebar.jsx` grouped dropdown, `InferenceOptions.jsx`, `CodeEditor.jsx` all implemented.
 9. ~~**Multi-subset workflow H1–H4**~~ — `SubsetManager.jsx` (named subsets + filter UI), wired into `ModelingTab.jsx` with `runAllSubsets` → auto-pins results to model buffer with subset labels.
 10. ~~**PlotBuilder G1+G2+G8+G11**~~ — `PlotBuilder.jsx` (Observable Plot 0.6 CDN, layer system, point/line/bar/histogram/density, aesthetic mappings, labels panel, dark theme). Wired into ExplorerModule as "◈ Plot Builder" tab.
+
+~~**Litux Credits system + tier limits (2026-06-27)**~~ — ✓ complete.
+- Supabase: `profiles.credits` (int, default 30) + `profiles.credits_reset_at` (timestamptz). Migration `add_credits_system` seeds existing users (Free=30, Pro=200, Premium=1000). `spend_credits(p_amount integer)` SECURITY DEFINER RPC: locks row, auto-resets monthly by tier, deducts atomically, returns remaining or -1.
+- `api/anthropic.js`: tier gate removed — all authenticated users can call AI. Credit cost (Haiku=0, standard=2, replication=15) deducted server-side before forwarding. 402 `insufficient_credits` on empty balance.
+- `authService.js`: `getProfile(userId)` (tier+credits in one query), `getCredits(userId)`.
+- `AuthContext.jsx`: `credits`, `setCredits`, `refreshCredits` exposed app-wide.
+- `AIContextSidebar.jsx`: `✦ N` badge in header (teal→gold→red), yellow out-of-credits banner, disabled input at 0, credits refreshed from Supabase after every send. Gate changed from tier-based to session-based (any signed-in user can open coach).
+- Sync limits in `enableCloud()`: Free=3, Pro=25, Premium=100 projects. Re-enabling an existing pid is exempt (upsert path). Human-readable error surfaced in `syncError` UI label.
+- Share limits in `createShare()`: Free=1, Pro=5, Premium=20 shares per project. Human-readable error surfaced in `shareErr` UI label.
 
 ## Reserved (post-MVP)
 - `math/ml/` — DML, Lasso, Ridge, Forest
