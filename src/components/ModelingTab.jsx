@@ -305,6 +305,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [csRelMin,    setCsRelMin]    = useState("");
   const [csRelMax,    setCsRelMax]    = useState("");
   const [csDefaultView, setCsDefaultView] = useState("group"); // "group" | "dynamic"
+  const [csXCols,      setCsXCols]      = useState([]);
+  const [csEstMethod,  setCsEstMethod]  = useState("dr");
+  const [csBasePeriod, setCsBasePeriod] = useState("varying");
+  const [csAnticipation, setCsAnticipation] = useState("0");
+  const [csInfMethod,  setCsInfMethod]  = useState("bootstrap");
+  const [csNBoot,      setCsNBoot]      = useState("999");
+  const [csSeed,       setCsSeed]       = useState("42");
   const [spatialModel, setSpatialModel] = useState("SAR");
   const [spatialWeightsMode, setSpatialWeightsMode] = useState("inline");
   const [spatialGeomCol, setSpatialGeomCol] = useState("");
@@ -580,6 +587,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       poissonEntityCol, poissonOffsetCol, poissonExtraFE,
       cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
       csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
+      csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView,
       spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
       resolveSpatialWeights,
     });
@@ -598,7 +606,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
     if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
     return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
   const runSpecCurve = useCallback(() => {
@@ -1834,6 +1842,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             csCompGroup={csCompGroup}       setCsCompGroup={setCsCompGroup}
             csRelMin={csRelMin}             setCsRelMin={setCsRelMin}
             csRelMax={csRelMax}             setCsRelMax={setCsRelMax}
+            csXCols={csXCols}               setCsXCols={setCsXCols}
+            csEstMethod={csEstMethod}       setCsEstMethod={setCsEstMethod}
+            csBasePeriod={csBasePeriod}     setCsBasePeriod={setCsBasePeriod}
+            csAnticipation={csAnticipation} setCsAnticipation={setCsAnticipation}
+            csInfMethod={csInfMethod}       setCsInfMethod={setCsInfMethod}
+            csNBoot={csNBoot}               setCsNBoot={setCsNBoot}
+            csSeed={csSeed}                 setCsSeed={setCsSeed}
             spatialModel={spatialModel}     setSpatialModel={setSpatialModel}
             spatialWeightsMode={spatialWeightsMode} setSpatialWeightsMode={setSpatialWeightsMode}
             spatialGeomCol={spatialGeomCol} setSpatialGeomCol={setSpatialGeomCol}

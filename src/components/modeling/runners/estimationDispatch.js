@@ -28,6 +28,7 @@ export function dispatchEstimation(dataRows, ctx) {
     poissonEntityCol, poissonOffsetCol, poissonExtraFE,
     cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
     csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
+    csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView,
     spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
     resolveSpatialWeights,
   } = ctx;
@@ -295,31 +296,28 @@ export function dispatchEstimation(dataRows, ctx) {
 
     } else if (effModel === "CallawayCS") {
       const tcol = csTreatCol[0];
-      if (!tcol) return { error: "Select the First-Treatment-Period column in the configuration panel below." };
+      if (!tcol) return { error: "Select the First-Treatment-Period column." };
       const ecol = panel?.entityCol || csEntityCol[0];
-      if (!ecol) return { error: "Select an Entity column or declare a panel structure in Wrangling." };
+      if (!ecol) return { error: "Select an Entity column or declare a panel structure." };
       const timeColCS = panel?.timeCol || csTimeCol[0];
-      if (!timeColCS) return { error: "Select a Time column or declare a panel structure in Wrangling." };
-      const relMinNum = csRelMin !== "" ? Number(csRelMin) : -Infinity;
-      const relMaxNum = csRelMax !== "" ? Number(csRelMax) :  Infinity;
-      const res = runCallawayCS(
-        dataRows,
-        {
-          yCol: y, entityCol: ecol, timeCol: timeColCS,
-          treatCol: tcol,
-          compGroup: csCompGroup,
-          relMin: isFinite(relMinNum) ? relMinNum : -Infinity,
-          relMax: isFinite(relMaxNum) ? relMaxNum :  Infinity,
-        },
-        seOpts,
-      );
+      if (!timeColCS) return { error: "Select a Time column or declare a panel structure." };
+      const res = runCallawayCS(dataRows, {
+        yCol: y, entityCol: ecol, timeCol: timeColCS, treatCol: tcol,
+        xCols: csXCols ?? [],
+        compGroup: csCompGroup,
+        basePeriod: csBasePeriod ?? "varying",
+        estMethod: csEstMethod ?? "dr",
+        anticipation: Number(csAnticipation) || 0,
+        relMin: isFinite(Number(csRelMin)) ? Number(csRelMin) : -Infinity,
+        relMax: isFinite(Number(csRelMax)) ? Number(csRelMax) :  Infinity,
+        inference: { method: csInfMethod ?? "bootstrap", nBoot: Number(csNBoot) || 999, seed: Number(csSeed) || 42 },
+      }, seOpts);
       if (!res || res.error) return { error: res?.error ?? "Callaway-Sant'Anna estimation failed." };
       return {
         result: wrapResult("CallawayCS", res, {
-          yVar: y, xVars: [], wVars: expW,
-          entityCol: ecol, timeCol: timeColCS,
-          treatCol: tcol,
-          compGroup: csCompGroup,
+          yVar: y, xVars: csXCols ?? [], wVars: expW,
+          entityCol: ecol, timeCol: timeColCS, treatCol: tcol,
+          compGroup: csCompGroup, csDefaultView: csDefaultView ?? "group",
         }),
         panelFE: null, panelFD: null,
       };

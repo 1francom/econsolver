@@ -430,6 +430,13 @@ function CallawayCSConfig({
   csCompGroup, setCsCompGroup,
   csRelMin, setCsRelMin,
   csRelMax, setCsRelMax,
+  csXCols, setCsXCols,
+  csEstMethod, setCsEstMethod,
+  csBasePeriod, setCsBasePeriod,
+  csAnticipation, setCsAnticipation,
+  csInfMethod, setCsInfMethod,
+  csNBoot, setCsNBoot,
+  csSeed, setCsSeed,
 }) {
   const { C, T } = useTheme();
   const cols = headers ?? numericCols;
@@ -517,6 +524,92 @@ function CallawayCSConfig({
         <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
           Leave blank to include all observed periods.
         </div>
+      </Section>
+
+      {/* Covariates (optional) */}
+      <VarPanel
+        title="Covariates X (optional)"
+        color={C.blue}
+        vars={numericCols.filter(c => !yVar.includes(c) && !(csTreatCol ?? []).includes(c))}
+        selected={csXCols ?? []}
+        onToggle={v => setCsXCols && setCsXCols(v)}
+        multi={true}
+        info="Pre-treatment covariates for doubly-robust / regression / IPW adjustment. Same as `xformla` in R did package."
+      />
+
+      {/* Estimator method */}
+      <Section title="Estimator Method" color={C.teal}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["dr", "reg", "ipw"].map(m => (
+            <Chip key={m} label={m} selected={(csEstMethod ?? "dr") === m} color={C.teal} onClick={() => setCsEstMethod && setCsEstMethod(m)} />
+          ))}
+        </div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
+          dr = doubly-robust (recommended), reg = outcome regression, ipw = inverse probability weighting.
+        </div>
+      </Section>
+
+      {/* Base period */}
+      <Section title="Base Period" color={C.teal}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["varying", "universal"].map(b => (
+            <Chip key={b} label={b} selected={(csBasePeriod ?? "varying") === b} color={C.teal} onClick={() => setCsBasePeriod && setCsBasePeriod(b)} />
+          ))}
+        </div>
+        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 4 }}>
+          varying = period before treatment for each cohort (recommended). universal = single common pre-period.
+        </div>
+      </Section>
+
+      {/* Anticipation */}
+      <Section title="Anticipation (δ)" color={C.teal}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={csAnticipation ?? "0"}
+            onChange={e => setCsAnticipation && setCsAnticipation(e.target.value)}
+            style={inputStyle(C, T)}
+          />
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
+            periods of anticipation (default 0)
+          </span>
+        </div>
+      </Section>
+
+      {/* Inference */}
+      <Section title="Inference" color={C.teal}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["bootstrap", "analytic"].map(inf => (
+            <Chip key={inf} label={inf} selected={(csInfMethod ?? "bootstrap") === inf} color={C.teal} onClick={() => setCsInfMethod && setCsInfMethod(inf)} />
+          ))}
+        </div>
+        {(csInfMethod ?? "bootstrap") === "bootstrap" && (
+          <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>nBoot</span>
+              <input
+                type="number"
+                min={99}
+                step={100}
+                value={csNBoot ?? "999"}
+                onChange={e => setCsNBoot && setCsNBoot(e.target.value)}
+                style={{ ...inputStyle(C, T), width: 70 }}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>seed</span>
+              <input
+                type="number"
+                min={0}
+                value={csSeed ?? "42"}
+                onChange={e => setCsSeed && setCsSeed(e.target.value)}
+                style={{ ...inputStyle(C, T), width: 70 }}
+              />
+            </div>
+          </div>
+        )}
       </Section>
     </>
   );
@@ -774,6 +867,13 @@ export default function ModelConfiguration({
   csCompGroup,    setCsCompGroup,
   csRelMin,       setCsRelMin,
   csRelMax,       setCsRelMax,
+  csXCols,        setCsXCols,
+  csEstMethod,    setCsEstMethod,
+  csBasePeriod,   setCsBasePeriod,
+  csAnticipation, setCsAnticipation,
+  csInfMethod,    setCsInfMethod,
+  csNBoot,        setCsNBoot,
+  csSeed,         setCsSeed,
   spatialModel, setSpatialModel,
   spatialWeightsMode, setSpatialWeightsMode,
   spatialGeomCol, setSpatialGeomCol,
@@ -874,11 +974,21 @@ export default function ModelConfiguration({
   }
 
   if (model === "CallawayCS") {
-    return <CallawayCSConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} csTreatCol={csTreatCol} setCsTreatCol={setCsTreatCol} csEntityCol={csEntityCol} setCsEntityCol={setCsEntityCol} csTimeCol={csTimeCol} setCsTimeCol={setCsTimeCol} csCompGroup={csCompGroup} setCsCompGroup={setCsCompGroup} csRelMin={csRelMin} setCsRelMin={setCsRelMin} csRelMax={csRelMax} setCsRelMax={setCsRelMax} />;
-  }
-
-  if (model === "CallawayCS") {
-    return <CallawayCSConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} csTreatCol={csTreatCol} setCsTreatCol={setCsTreatCol} csEntityCol={csEntityCol} setCsEntityCol={setCsEntityCol} csTimeCol={csTimeCol} setCsTimeCol={setCsTimeCol} csCompGroup={csCompGroup} setCsCompGroup={setCsCompGroup} csRelMin={csRelMin} setCsRelMin={setCsRelMin} csRelMax={csRelMax} setCsRelMax={setCsRelMax} />;
+    return <CallawayCSConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel}
+      csTreatCol={csTreatCol} setCsTreatCol={setCsTreatCol}
+      csEntityCol={csEntityCol} setCsEntityCol={setCsEntityCol}
+      csTimeCol={csTimeCol} setCsTimeCol={setCsTimeCol}
+      csCompGroup={csCompGroup} setCsCompGroup={setCsCompGroup}
+      csRelMin={csRelMin} setCsRelMin={setCsRelMin}
+      csRelMax={csRelMax} setCsRelMax={setCsRelMax}
+      csXCols={csXCols} setCsXCols={setCsXCols}
+      csEstMethod={csEstMethod} setCsEstMethod={setCsEstMethod}
+      csBasePeriod={csBasePeriod} setCsBasePeriod={setCsBasePeriod}
+      csAnticipation={csAnticipation} setCsAnticipation={setCsAnticipation}
+      csInfMethod={csInfMethod} setCsInfMethod={setCsInfMethod}
+      csNBoot={csNBoot} setCsNBoot={setCsNBoot}
+      csSeed={csSeed} setCsSeed={setCsSeed}
+    />;
   }
 
   if (model === "LSDV") {
