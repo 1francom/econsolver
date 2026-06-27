@@ -912,8 +912,44 @@ function _serializeModelContext(result, dataDictionary) {
   return lines.join("\n");
 }
 
+// Build a compact dataset-context block sent on every coach turn.
+// cleanedData: the active dataset object (has .headers, .cleanRows, .name)
+// allDatasets: DatasetMeta[] from sessionState — { id, name, headers, rowCount, colCount }
+function _buildDatasetsContext(cleanedData, allDatasets = []) {
+  const parts = [];
 
-export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, snapshot = null, signal = undefined, onText = undefined }) {
+  if (cleanedData?.headers?.length) {
+    const N    = cleanedData.cleanRows?.length ?? "?";
+    const name = cleanedData.name ?? "dataset";
+    parts.push(`ACTIVE DATASET: "${name}" — N=${N}, ${cleanedData.headers.length} columns`);
+    parts.push(`Columns: ${cleanedData.headers.join(", ")}`);
+
+    const rows = (cleanedData.cleanRows ?? []).slice(0, 3);
+    if (rows.length) {
+      const header = cleanedData.headers.join(" | ");
+      const body   = rows.map(r =>
+        cleanedData.headers.map(h => {
+          const v = r[h];
+          return v == null ? "" : typeof v === "number" ? +v.toFixed(4) : String(v).slice(0, 12);
+        }).join(" | ")
+      ).join("\n  ");
+      parts.push(`head(3):\n  ${header}\n  ${body}`);
+    }
+  }
+
+  const others = allDatasets.filter(d => d.headers?.length && d.id !== cleanedData?.id);
+  if (others.length) {
+    parts.push("OTHER LOADED DATASETS:");
+    others.forEach(d => {
+      parts.push(`  • "${d.name}" — N=${d.rowCount ?? "?"}, cols: ${d.headers.join(", ")}`);
+    });
+  }
+
+  if (!parts.length) return "";
+  return "\n\nDATASET CONTEXT:\n" + parts.join("\n") + "\n────────────────────────────";
+}
+
+export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, snapshot = null, cleanedData = null, allDatasets = [], signal = undefined, onText = undefined }) {
   if (!question?.trim()) return "";
 
   const modelContext  = _serializeModelContext(modelResult, dataDictionary);
@@ -921,6 +957,7 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
   const metaCtx       = metadataReport ? "\n" + buildMetadataContext(metadataReport) : "";
   const snapshotBlk   = snapshot ? "\nSESSION CONTEXT:\n" + serializeSnapshot(snapshot) + "\n" : "";
   const contextPrefix = `MODEL CONTEXT:\n${modelContext}${metaCtx}${snapshotBlk}\n\n────────────────────────────\n`;
+  const datasetsBlock = _buildDatasetsContext(cleanedData, allDatasets);
 
   try {
     const apiMessages = [];
@@ -929,9 +966,11 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
       apiMessages.push({ role: turn.role, content });
     });
 
+    // datasetsBlock is injected on every turn so the coach always has the
+    // current column list even when datasets are added mid-conversation.
     const textContent = apiMessages.length === 0
-      ? contextPrefix + question.trim()
-      : question.trim();
+      ? contextPrefix + datasetsBlock + "\n\n" + question.trim()
+      : datasetsBlock + "\n\n" + question.trim();
 
     // Build last user message — multipart if images present
     const newContent = images.length > 0

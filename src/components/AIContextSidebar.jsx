@@ -495,6 +495,8 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         dataDictionary: cleanedData?.dataDictionary ?? null,
         metadataReport,
         snapshot,
+        cleanedData,
+        allDatasets: Object.values(sessionState?.datasets ?? {}),
         signal: controller.signal,
         onText: (piece) => {
           updateActive(msgs => {
