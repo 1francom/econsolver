@@ -20,7 +20,7 @@
 //   import { suiteBasePeriod, suiteControlSet } from "./__validation__/callawayValidation.js";
 
 import { runCallawayCS } from "../CallawayEngine.js";
-import { enumerateCells, controlSet } from "../did/staggeredDiD.js";
+import { enumerateCells, controlSet, aggregate } from "../did/staggeredDiD.js";
 
 // ─── TOLERANCE CONSTANTS ─────────────────────────────────────────────────────
 const TOL_ATT = 1e-4;   // ATT coefficients: 4 decimal places (OR estimator)
@@ -556,6 +556,42 @@ function suiteSingleCohort() {
 
 // TODO: add R fixture comparison suite once mpdta rows are wired (callawayRValidation.R)
 
+// ═══ TASK 3: AGGREGATION ══════════════════════════════════════════════════════
+
+/**
+ * SUITE T3: aggregate() — 4 aggregation schemes + analytic SE + Wald pre-test
+ */
+export function suiteAggregation() {
+  const nUnits = 4;
+  function makeInf(att, treatedIdx, n) {
+    const inf = new Float64Array(n);
+    treatedIdx.forEach(i => { inf[i] = att / treatedIdx.length; });
+    return inf;
+  }
+  const cells2x2 = [
+    { g:2, t:2, e:0,  isPre:false, isRef:false, att:0.5, inf: makeInf(0.5,[0,1],nUnits) },
+    { g:2, t:3, e:1,  isPre:false, isRef:false, att:0.5, inf: makeInf(0.5,[0,1],nUnits) },
+    { g:2, t:1, e:-1, isPre:true,  isRef:false, att:0.0, inf: new Float64Array(nUnits) },
+  ];
+  const groupProb = new Map([[2, 1.0]]);
+  const res = aggregate({ cells2x2, groupProb, n: nUnits,
+    inference: { method:"analytic", nBoot:0, seed:42 } });
+
+  const results = [];
+  results.push({ label:"dynamic e=0 att≈0.5",    pass: Math.abs(res.aggregations.dynamic.byE.find(x=>x.e===0)?.att - 0.5) < 0.01 });
+  results.push({ label:"dynamic overall≈0.5",    pass: Math.abs(res.aggregations.dynamic.overall - 0.5) < 0.01 });
+  results.push({ label:"group overall≈0.5",      pass: Math.abs(res.aggregations.group.overall - 0.5) < 0.01 });
+  results.push({ label:"simple overall≈0.5",     pass: Math.abs(res.aggregations.simple.overall - 0.5) < 0.01 });
+  results.push({ label:"calendar overall≈0.5",   pass: Math.abs(res.aggregations.calendar.overall - 0.5) < 0.01 });
+  results.push({ label:"critVal=1.96 (analytic)", pass: Math.abs(res.inference.critVal - 1.959964) < 0.001 });
+  results.push({ label:"ptestWald p>0.5 (pre=0)", pass: res.ptestWald?.p > 0.5 });
+  results.push({ label:"dynamic e=-1 present in byE", pass: res.aggregations.dynamic.byE.some(x=>x.e===-1) });
+  results.push({ label:"all byE se>0", pass: res.aggregations.dynamic.byE.every(x=>x.se>0) });
+
+  results.forEach(r => console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`));
+  return { pass: results.filter(r=>r.pass).length, fail: results.filter(r=>!r.pass).length, total: results.length };
+}
+
 // ─── RUNNER ──────────────────────────────────────────────────────────────────
 export function runCallawayCSValidation() {
   const suites = [
@@ -565,6 +601,8 @@ export function runCallawayCSValidation() {
     { name: "T2C: Control set never-treated", fn: suiteControlSetNeverTreated },
     { name: "T2D: Control set not-yet-treated", fn: suiteControlSetNotYetTreated },
     { name: "T2E: Control set fallback", fn: suiteControlSetFallback },
+    // Task 3: Aggregation
+    { name: "T3: aggregate() — 4 schemes + analytic SE + Wald pre-test", fn: suiteAggregation },
     // Task 4+: Full engine tests
     { name: "Synthetic DGP (OR estimator, never-treated)",  fn: suiteSyntheticDGP },
     { name: "Not-yet-treated comparison group",             fn: suiteNotYetTreated },
