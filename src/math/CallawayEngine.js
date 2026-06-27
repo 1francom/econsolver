@@ -8,27 +8,7 @@
 import { compute2x2 }                       from "./did/drdid.js";
 import { enumerateCells, controlSet, aggregate } from "./did/staggeredDiD.js";
 
-/**
- * runCallawayCS — Callaway-Sant'Anna (2021) staggered DiD.
- *
- * @param {Object[]} rows         Panel data rows.
- * @param {Object}   opts
- *   yCol        — outcome column (numeric)
- *   entityCol   — unit identifier column
- *   timeCol     — time period column (numeric)
- *   treatCol    — first-treatment-period column (numeric; 0 or missing = never-treated)
- *   treatBinCol — (optional) binary 0/1 column; used to derive first-treat period
- *   xCols       — (optional) array of covariate column names (base-period values)
- *   compGroup   — "nevertreated" (default) | "notyettreated"
- *   basePeriod  — "varying" (default) | "universal"
- *   estMethod   — "dr" (default) | "reg" | "ipw"
- *   anticipation — number of anticipation periods (default 0)
- *   relMin      — min relative period to include (default -Infinity)
- *   relMax      — max relative period to include (default +Infinity)
- *   inference   — { method: "analytic"|"bootstrap", nBoot, seed }
- * @param {Object}   seOpts       SE options (reserved for future survey-weight support).
- * @returns {Object}
- */
+// Callaway-Sant'Anna (2021) staggered DiD estimator
 export function runCallawayCS(
   rows,
   {
@@ -155,14 +135,16 @@ export function runCallawayCS(
   const treatedGValues = [...units.values()].filter(g => isFinite(g));
   if (!treatedGValues.length) return { error: "No treated units found. Ensure treatCol contains finite treatment periods." };
 
-  const nTreated = treatedGValues.length;
   const glist = [...new Set(treatedGValues)].sort((a, b) => a - b);
 
-  // P(G=g) over treated units only
+  // P(G=g) over full panel (CS 2021: includes never-treated controls)
+  const gCounts = new Map();
+  for (const g of treatedGValues) {
+    gCounts.set(g, (gCounts.get(g) ?? 0) + 1);
+  }
   const groupProb = new Map();
   for (const g of glist) {
-    const cnt = treatedGValues.filter(gg => gg === g).length;
-    groupProb.set(g, cnt / nTreated);
+    groupProb.set(g, (gCounts.get(g) ?? 0) / nUnits);
   }
 
   // ── 4. Build row index: Map<eid, Map<t, row>> ───────────────────────────────
@@ -196,6 +178,7 @@ export function runCallawayCS(
         att: 0,
         inf: new Float64Array(nUnits),
         n_g: 0,
+        n_sample: 0,
       });
       continue;
     }
@@ -285,6 +268,7 @@ export function runCallawayCS(
       att,
       inf: cellInf,
       n_g: n_g_sample,
+      n_sample: nSample,
     });
   }
 
@@ -311,7 +295,7 @@ export function runCallawayCS(
       t:     c.t,
       e:     c.e,
       att:   c.att,
-      se:    Math.sqrt(c.inf.reduce((s, v) => s + v * v, 0)) / nUnits,
+      se:    Math.sqrt(c.inf.reduce((s, v) => s + v * v, 0)) / c.n_sample,
       isPre: c.isPre,
       n_g:   c.n_g,
     })),
