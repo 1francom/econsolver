@@ -592,9 +592,9 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
   if (!hasAccess) return (
     <>
       <div onClick={onClose}
-        style={{ position: "fixed", inset: 0, zIndex: 199, background: "rgba(0,0,0,0.35)" }} />
+        style={{ position: "fixed", inset: 0, zIndex: 1999, background: "rgba(0,0,0,0.35)" }} />
       <div style={{
-        position: "fixed", top: 38, right: 0, bottom: 0, zIndex: 200,
+        position: "fixed", top: 38, right: 0, bottom: 0, zIndex: 2000,
         width: "min(420px, 92vw)", background: C.bg, borderLeft: `1px solid ${C.border}`,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         gap: 16, padding: "2rem", boxShadow: "-8px 0 32px rgba(0,0,0,0.6)",
@@ -620,11 +620,11 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
 
       {/* Backdrop */}
       <div onClick={onClose}
-        style={{ position: "fixed", inset: 0, zIndex: 199, background: "rgba(0,0,0,0.35)" }} />
+        style={{ position: "fixed", inset: 0, zIndex: 1999, background: "rgba(0,0,0,0.35)" }} />
 
       {/* Sidebar panel */}
       <div style={{
-        position: "fixed", top: 38, right: 0, bottom: 0, zIndex: 200,
+        position: "fixed", top: 38, right: 0, bottom: 0, zIndex: 2000,
         width: "min(420px, 92vw)",
         background: C.bg, borderLeft: `1px solid ${C.border}`,
         display: "flex", flexDirection: "column",
