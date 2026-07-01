@@ -246,6 +246,124 @@ function stVar(c) { return c.replace(/`/g, ""); }
 
 function pyCol(c) { return `"${String(c).replace(/"/g, '\\"')}"`; }
 function pyStr(s) { return `"${String(s).replace(/"/g, '\\"')}"`; }
+function pyList(arr) { return `[${(arr ?? []).map(pyStr).join(", ")}]`; }
+
+function pyValue(v, dtype = null) {
+  if (v === null || v === undefined) return "None";
+  if (dtype === "number" || typeof v === "number") {
+    const n = Number(v);
+    return isFinite(n) ? String(n) : "None";
+  }
+  return pyStr(v);
+}
+
+function pyWhere(where) {
+  if (!where?.col || !where?.op) return "pd.Series(True, index=df.index)";
+  const c = pyStr(where.col);
+  const v = where.value;
+  switch (where.op) {
+    case "equals":     return `(df[${c}].astype("string") == ${pyStr(v ?? "")})`;
+    case "not_equals": return `(df[${c}].astype("string") != ${pyStr(v ?? "")})`;
+    case "contains":   return `df[${c}].astype("string").str.contains(${pyStr(v ?? "")}, regex=False, na=False)`;
+    case "starts":     return `df[${c}].astype("string").str.startswith(${pyStr(v ?? "")}, na=False)`;
+    case "ends":       return `df[${c}].astype("string").str.endswith(${pyStr(v ?? "")}, na=False)`;
+    case "gt":         return `(pd.to_numeric(df[${c}], errors="coerce") > ${Number(v)})`;
+    case "lt":         return `(pd.to_numeric(df[${c}], errors="coerce") < ${Number(v)})`;
+    case "between": {
+      const lo = Number(Array.isArray(v) ? v[0] : v);
+      const hi = Number(Array.isArray(v) ? v[1] : v);
+      return `pd.to_numeric(df[${c}], errors="coerce").between(${lo}, ${hi})`;
+    }
+    case "empty":    return `(df[${c}].isna() | (df[${c}].astype("string") == ""))`;
+    case "notempty": return `(df[${c}].notna() & (df[${c}].astype("string") != ""))`;
+    default: return "pd.Series(True, index=df.index)";
+  }
+}
+
+// ─── R SCALAR / CONDITION HELPERS ────────────────────────────────────────────
+
+function rValue(v, dtype = null) {
+  if (v === null || v === undefined) return "NA";
+  if (dtype === "number" || typeof v === "number") {
+    const n = Number(v);
+    return isFinite(n) ? String(n) : "NA";
+  }
+  return rStr(v);
+}
+
+function rWhere(where) {
+  if (!where?.col || !where?.op) return "TRUE";
+  const c = rName(where.col);
+  const v = where.value;
+  switch (where.op) {
+    case "equals":     return `${c} == ${rValue(v)}`;
+    case "not_equals": return `${c} != ${rValue(v)}`;
+    case "contains":   return `stringr::str_detect(as.character(${c}), stringr::fixed(${rStr(v ?? "")}))`;
+    case "starts":     return `stringr::str_starts(as.character(${c}), ${rStr(v ?? "")})`;
+    case "ends":       return `stringr::str_ends(as.character(${c}), ${rStr(v ?? "")})`;
+    case "gt":         return `${c} > ${Number(v)}`;
+    case "lt":         return `${c} < ${Number(v)}`;
+    case "between": {
+      const lo = Number(Array.isArray(v) ? v[0] : v);
+      const hi = Number(Array.isArray(v) ? v[1] : v);
+      return `${c} >= ${lo} & ${c} <= ${hi}`;
+    }
+    case "empty":    return `is.na(${c}) | as.character(${c}) == ""`;
+    case "notempty": return `!is.na(${c}) & as.character(${c}) != ""`;
+    default: return "TRUE";
+  }
+}
+
+function rFn(fn, col) {
+  const c = rName(col);
+  const map = {
+    mean:   `mean(${c}, na.rm = TRUE)`,
+    sum:    `sum(${c}, na.rm = TRUE)`,
+    sd:     `sd(${c}, na.rm = TRUE)`,
+    min:    `min(${c}, na.rm = TRUE)`,
+    max:    `max(${c}, na.rm = TRUE)`,
+    median: `median(${c}, na.rm = TRUE)`,
+    rank:   `dplyr::min_rank(${c})`,
+  };
+  return map[fn] ?? `mean(${c}, na.rm = TRUE)`;
+}
+
+// ─── STATA SCALAR / CONDITION HELPERS ────────────────────────────────────────
+
+function stStr(s) { return `"${String(s ?? "").replace(/"/g, `""`)}"`;  }
+
+function stValue(v, dtype = null) {
+  if (v === null || v === undefined) return ".";
+  if (dtype === "number" || typeof v === "number") {
+    const n = Number(v);
+    return isFinite(n) ? String(n) : ".";
+  }
+  return stStr(v);
+}
+
+function stWhere(where) {
+  if (!where?.col || !where?.op) return "1";
+  const c = stVar(where.col);
+  const v = where.value;
+  switch (where.op) {
+    case "equals":     return `${c} == ${stValue(v)}`;
+    case "not_equals": return `${c} != ${stValue(v)}`;
+    case "contains":   return `strpos(${c}, ${stStr(v ?? "")}) > 0`;
+    case "starts":     return `substr(${c}, 1, length(${stStr(v ?? "")})) == ${stStr(v ?? "")}`;
+    case "ends":       return `substr(${c}, -length(${stStr(v ?? "")}), .) == ${stStr(v ?? "")}`;
+    case "gt":         return `${c} > ${Number(v)}`;
+    case "lt":         return `${c} < ${Number(v)}`;
+    case "between": {
+      const lo = Number(Array.isArray(v) ? v[0] : v);
+      const hi = Number(Array.isArray(v) ? v[1] : v);
+      return `${c} >= ${lo} & ${c} <= ${hi}`;
+    }
+    case "empty":    return `missing(${c}) | ${c} == ""`;
+    case "notempty": return `!missing(${c}) & ${c} != ""`;
+    default: return "1";
+  }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // toR
@@ -559,6 +677,207 @@ export function toR(step, df = "df", allDatasets = {}) {
         `# Append dataset: "${rightName}"`,
         `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
         `${df} <- dplyr::bind_rows(${df}, right_df)`,
+      ].join("\n");
+    }
+
+
+    case "add_column":
+      return `${df} <- ${df} |> mutate(${rName(step.nn)} = ${rValue(step.fill, step.dtype)})`;
+
+    case "add_row": {
+      const count = Math.max(1, Number(step.count) || 1);
+      const assigns = Object.entries(step.values || {})
+        .map(([k, v]) => `__new_rows[[${rStr(k)}]] <- ${rValue(v)}`);
+      return [
+        `# add_row: append ${count} synthetic row(s); unspecified columns remain NA`,
+        `__new_rows <- ${df}[rep(NA_integer_, ${count}), , drop = FALSE]`,
+        ...assigns,
+        `${df} <- dplyr::bind_rows(${df}, __new_rows)`,
+        `rm(__new_rows)`,
+      ].join("\n");
+    }
+
+    case "set_where": {
+      const setVal = step.action === "clear" ? "NA" : rValue(step.value, step.dtype);
+      return `${df} <- ${df} |> mutate(${rName(step.col)} = ifelse(${rWhere(step.where)}, ${setVal}, ${rName(step.col)}))`;
+    }
+
+    case "replace": {
+      const mode = step.match?.mode || "exact";
+      const find = step.match?.find ?? "";
+      const out  = rName(step.nn || step.col);
+      const src  = rName(step.col);
+      if (mode === "exact")
+        return `${df} <- ${df} |> mutate(${out} = dplyr::if_else(${src} == ${rValue(find)}, ${rValue(step.replaceWith)}, ${src}))`;
+      const pattern = mode === "contains" ? `stringr::fixed(${rStr(find)})` : rStr(find);
+      return `${df} <- ${df} |> mutate(${out} = stringr::str_replace_all(as.character(${src}), ${pattern}, ${rValue(step.replaceWith)}))`;
+    }
+
+    case "str_splice": {
+      const rSrc  = rName(step.col);
+      const rOut  = rName(step.nn || step.col);
+      const pos   = Number(step.position) || 1;
+      const cnt   = Math.max(0, Number(step.count) || 0);
+      const text  = rStr(step.text ?? "");
+      const pExpr = `ifelse(${pos} < 0, pmax(1, nchar(x) + ${pos} + 1), ${pos})`;
+      const body  = step.mode === "delete"
+        ? `stringr::str_c(stringr::str_sub(x, 1, p - 1), stringr::str_sub(x, p + ${cnt}))`
+        : step.mode === "overwrite"
+          ? `stringr::str_c(stringr::str_sub(x, 1, p - 1), ${text}, stringr::str_sub(x, p + ${cnt}))`
+          : `stringr::str_c(stringr::str_sub(x, 1, p - 1), ${text}, stringr::str_sub(x, p))`;
+      return [
+        `${df} <- ${df} |> mutate(${rOut} = {`,
+        `  x <- as.character(${rSrc})`,
+        `  p <- pmin(pmax(${pExpr}, 1), nchar(x) + 1)`,
+        `  ${body}`,
+        `})`,
+      ].join("\n");
+    }
+
+    case "distinct": {
+      const rSubset = (step.subset ?? []).map(rName).join(", ");
+      return `${df} <- ${df} |> distinct(${rSubset || "."}${rSubset ? ", " : ""}.keep_all = TRUE)`;
+    }
+
+    case "group_transform": {
+      const rBy  = (step.by ?? []).map(rName).join(", ");
+      const rOut = rName(step.nn ?? `${step.fn}_${step.col}`);
+      const rRhs = step.fn === "count" ? "n()" : rFn(step.fn, step.col);
+      return `${df} <- ${df} |> group_by(${rBy}) |> mutate(${rOut} = ${rRhs}) |> ungroup()`;
+    }
+
+    case "bind_cols": {
+      const bcRightName = safeDatasetName(step.rightId, allDatasets);
+      return [
+        `# Bind columns from dataset: "${bcRightName}"`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        `${df} <- dplyr::bind_cols(${df}, right_df)`,
+      ].join("\n");
+    }
+
+    case "union":
+    case "intersect":
+    case "setdiff": {
+      const soRightName = safeDatasetName(step.rightId, allDatasets);
+      return [
+        `# ${step.type}: "${soRightName}"`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        `${df} <- ${step.type}(${df}, right_df)`,
+      ].join("\n");
+    }
+
+    case "vector_assign": {
+      const vaVals = rVec(step.values ?? []);
+      const vaOut  = rName(step.nn ?? "assigned");
+      const vaSeed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      if (step.mode === "recycle")
+        return `${df}$${vaOut} <- rep_len(${vaVals}, nrow(${df}))`;
+      if (step.mode === "conditional") {
+        const vaLines = (step.rules || []).map(r => `    ${r.expr} ~ ${rStr(r.value)}`).join(",\n");
+        return `${df}$${vaOut} <- with(${df}, dplyr::case_when(\n${vaLines}${vaLines ? ",\n" : ""}    TRUE ~ ${rStr(step.elseValue ?? "")}\n))`;
+      }
+      const vaProb = step.weights ? `, prob = c(${step.weights.join(", ")})` : "";
+      return `# NOTE: EconSolver uses a seeded mulberry32 RNG; values differ, distribution matches\nset.seed(${vaSeed}); ${df}$${vaOut} <- sample(${vaVals}, nrow(${df}), replace = TRUE${vaProb})`;
+    }
+
+    case "patch":
+      return `# manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
+
+    case "inject_column": {
+      const icVals = (step.values ?? []).map(v => (v == null ? "NA" : Number(v).toFixed(8))).join(", ");
+      return [
+        `# inject_column: "${step.colName}" — extracted from model output`,
+        `${df}[["${rName(step.colName)}"]] <- c(${icVals})`,
+      ].join("\n");
+    }
+
+    case "clean_strings": {
+      const csFn = { lower: "tolower", upper: "toupper", title: "stringr::str_to_title" }[step.case];
+      const csIn = csFn
+        ? `${csFn}(stringr::str_squish(as.character(${col})))`
+        : `stringr::str_squish(as.character(${col}))`;
+      return `${df} <- ${df} |> mutate(${col} = ${csIn})`;
+    }
+
+    case "if_else": {
+      const ieCond = jsExprToR(step.cond);
+      const ieOut  = rName(step.nn);
+      if (!ieCond) return `# if_else: ${step.nn} = if (${step.cond}) ... — translate condition to R manually`;
+      return `${df} <- ${df} |> mutate(${ieOut} = dplyr::if_else(${ieCond}, ${rValue(step.trueVal)}, ${rValue(step.falseVal)}))`;
+    }
+
+    case "case_when": {
+      const cwOut  = rName(step.nn);
+      const cwBrs  = (step.cases ?? [])
+        .map(c => { const cc = jsExprToR(c.cond); return cc ? `    ${cc} ~ ${rValue(c.val)}` : null; })
+        .filter(Boolean).join(",\n");
+      return cwBrs
+        ? `${df} <- ${df} |> mutate(${cwOut} = dplyr::case_when(\n${cwBrs},\n    TRUE ~ ${rValue(step.defaultVal)}\n  ))`
+        : `# case_when: no valid conditions — translate manually`;
+    }
+
+    case "grouped_mutate": {
+      const gmBy  = (step.by ?? []).map(rName).join(", ");
+      const gmOut = rName(step.newCol || "grouped");
+      const gmFn  = step.fn ?? "mean";
+      if (!gmBy || !step.newCol) return `# grouped_mutate: incomplete config`;
+      if (gmFn === "expr" && step.expr) {
+        const gmExpr = jsExprToR(step.expr);
+        return gmExpr
+          ? `${df} <- ${df} |> group_by(${gmBy}) |> mutate(${gmOut} = ${gmExpr}) |> ungroup()`
+          : `# grouped_mutate (expr): translate "${step.expr}" to R manually`;
+      }
+      const gmRhs = step.col ? rFn(gmFn, step.col) : "n()";
+      return [
+        `# grouped_mutate: ${gmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
+        `${df} <- ${df} |> group_by(${gmBy}) |> mutate(${gmOut} = ${gmRhs}) |> ungroup()`,
+      ].join("\n");
+    }
+
+    case "pivot_wider": {
+      const pwIds  = (step.idCols ?? []).map(rName).join(", ");
+      const pwFrom = rStr(step.namesFrom);
+      const pwVals = (Array.isArray(step.valuesFrom) ? step.valuesFrom : [step.valuesFrom].filter(Boolean)).map(rStr).join(", ");
+      const pwOpts = [];
+      if (step.namesPrefix) pwOpts.push(`  names_prefix = ${rStr(step.namesPrefix)}`);
+      if (step.valuesFill != null && step.valuesFill !== "") pwOpts.push(`  values_fill = ${Number(step.valuesFill)}`);
+      return [
+        `${df} <- ${df} |> tidyr::pivot_wider(`,
+        `  id_cols     = c(${pwIds}),`,
+        `  names_from  = ${pwFrom},`,
+        `  values_from = c(${pwVals})${pwOpts.length ? "," : ""}`,
+        ...pwOpts.map((o, i) => o + (i < pwOpts.length - 1 ? "," : "")),
+        `)`,
+      ].join("\n");
+    }
+
+    case "balance_panel": {
+      const bpEnt  = rName(step.entityCol);
+      const bpTim  = rName(step.timeCol);
+      const bpSlot = step.slotCol ? `, ${rName(step.slotCol)}` : "";
+      const bpOuts = (step.outcomeCols ?? []).map(rName);
+      const bpFill = Number(step.fillValue) || 0;
+      let bpLine   = `${df} <- ${df} |> tidyr::complete(${bpEnt}, ${bpTim}${bpSlot})`;
+      if (bpOuts.length)
+        bpLine += ` |>\n  tidyr::replace_na(list(${bpOuts.map(o => `${o} = ${bpFill}`).join(", ")}))`;
+      return [
+        `# Balance panel: complete ${step.entityCol} × ${step.timeCol}${step.slotCol ? ` × ${step.slotCol}` : ""} grid`,
+        bpLine,
+      ].join("\n");
+    }
+
+    case "geocode": {
+      const gcAddr = rName(step.addressCol ?? "address");
+      const gcLat  = rName(step.latCol ?? "lat");
+      const gcLon  = rName(step.lonCol ?? "lon");
+      return [
+        `# Geocode: ${gcAddr} -> ${gcLat} / ${gcLon}`,
+        `# Requires tidygeocoder: install.packages("tidygeocoder")`,
+        `library(tidygeocoder)`,
+        `${df} <- ${df} |>`,
+        `  geocode(address = ${gcAddr}, method = "osm",`,
+        `          lat = ${gcLat}, long = ${gcLon},`,
+        `          full_results = FALSE, quiet = TRUE)`,
       ].join("\n");
     }
 
@@ -893,6 +1212,241 @@ export function toStata(step, df = "df", allDatasets = {}) {
       ].join("\n");
     }
 
+
+    case "add_column": {
+      const stAcOut = stVar(step.nn);
+      if (step.dtype === "number") return `gen double ${stAcOut} = ${stValue(step.fill, "number")}`;
+      return `gen strL ${stAcOut} = ${stValue(step.fill)}`;
+    }
+
+    case "add_row": {
+      const stArCount   = Math.max(1, Number(step.count) || 1);
+      const stArAssigns = Object.entries(step.values || {})
+        .map(([k, v_]) => `replace ${stVar(k)} = ${stValue(v_)} in \`i'`);
+      return [
+        `* add_row: append ${stArCount} synthetic row(s); unspecified columns remain missing`,
+        `local __oldN = _N`,
+        `set obs \`= _N + ${stArCount}'`,
+        `forvalues i = \`= \`__oldN' + 1'/\`=_N' {`,
+        ...stArAssigns.map(x => `  ${x}`),
+        `}`,
+      ].join("\n");
+    }
+
+    case "set_where": {
+      const stSwTarget = stVar(step.col);
+      if (step.action === "clear") {
+        return [
+          `capture confirm string variable ${stSwTarget}`,
+          `if !_rc replace ${stSwTarget} = "" if ${stWhere(step.where)}`,
+          `else replace ${stSwTarget} = . if ${stWhere(step.where)}`,
+        ].join("\n");
+      }
+      return `replace ${stSwTarget} = ${stValue(step.value, step.dtype)} if ${stWhere(step.where)}`;
+    }
+
+    case "replace": {
+      const stRSrc  = stVar(step.col);
+      const stROut  = stVar(step.nn || step.col);
+      const stRMode = step.match?.mode || "exact";
+      const stRFind = step.match?.find ?? "";
+      const stRRepl = step.replaceWith ?? "";
+      const stRInit = step.nn ? `capture confirm string variable ${stRSrc}\nif !_rc gen strL ${stROut} = ${stRSrc}\nelse gen double ${stROut} = ${stRSrc}\n` : "";
+      if (stRMode === "exact")    return `${stRInit}replace ${stROut} = ${stValue(stRRepl)} if ${stROut} == ${stValue(stRFind)}`;
+      if (stRMode === "contains") return `${stRInit}replace ${stROut} = subinstr(${stROut}, ${stStr(stRFind)}, ${stStr(stRRepl)}, .)`;
+      return `${stRInit}replace ${stROut} = regexr(${stROut}, ${stStr(stRFind)}, ${stStr(stRRepl)})`;
+    }
+
+    case "str_splice": {
+      const stSsSrc  = stVar(step.col);
+      const stSsOut  = stVar(step.nn || step.col);
+      const stSsPos  = Number(step.position) || 1;
+      const stSsCnt  = Math.max(0, Number(step.count) || 0);
+      const stSsText = stStr(step.text ?? "");
+      const stSsInit = step.nn
+        ? `gen strL ${stSsOut} = string(${stSsSrc})\n`
+        : `capture confirm string variable ${stSsOut}\nif _rc tostring ${stSsOut}, replace force\n`;
+      const stSsP    = `cond(${stSsPos} < 0, max(1, length(${stSsOut}) + ${stSsPos} + 1), ${stSsPos})`;
+      if (step.mode === "delete")    return `${stSsInit}replace ${stSsOut} = substr(${stSsOut}, 1, ${stSsP} - 1) + substr(${stSsOut}, ${stSsP} + ${stSsCnt}, .)`;
+      if (step.mode === "overwrite") return `${stSsInit}replace ${stSsOut} = substr(${stSsOut}, 1, ${stSsP} - 1) + ${stSsText} + substr(${stSsOut}, ${stSsP} + ${stSsCnt}, .)`;
+      return `${stSsInit}replace ${stSsOut} = substr(${stSsOut}, 1, ${stSsP} - 1) + ${stSsText} + substr(${stSsOut}, ${stSsP}, .)`;
+    }
+
+    case "distinct": {
+      const stDiSub = (step.subset ?? []).map(stVar).join(" ");
+      return `duplicates drop ${stDiSub}, force`;
+    }
+
+    case "group_transform": {
+      const stGtBy   = (step.by ?? []).map(stVar).join(" ");
+      const stGtOut  = stVar(step.nn ?? `${step.fn ?? "mean"}_${step.col}`);
+      const stGtFn   = step.fn ?? "mean";
+      const stGtEgen = stGtFn === "count" ? "count" : stGtFn === "sd" ? "sd" : stGtFn === "rank" ? "rank" : stGtFn === "median" ? "median" : stGtFn;
+      return `bysort ${stGtBy}: egen ${stGtOut} = ${stGtEgen}(${stVar(step.col ?? (step.by ?? [])[0] ?? "")})`;
+    }
+
+    case "pivot_wider": {
+      const stPwVals = Array.isArray(step.valuesFrom) ? step.valuesFrom : [step.valuesFrom].filter(Boolean);
+      return [
+        `* pivot_wider: long -> wide`,
+        `reshape wide ${stPwVals.map(stVar).join(" ")}, i(${(step.idCols ?? []).map(stVar).join(" ")}) j(${stVar(step.namesFrom)})`,
+      ].join("\n");
+    }
+
+    case "bind_cols": {
+      return [
+        `* bind_cols: align by row order`,
+        `gen long __row_order = _n`,
+        `preserve`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
+        `  gen long __row_order = _n`,
+        `  save "__bind_cols_tmp.dta", replace`,
+        `restore`,
+        `merge 1:1 __row_order using "__bind_cols_tmp.dta", keep(match) nogen suffixes("" "${step.suffix ?? "_r"}")`,
+        `drop __row_order`,
+        `erase "__bind_cols_tmp.dta"`,
+      ].join("\n");
+    }
+
+    case "union": {
+      return [
+        `* union: append right dataset, then drop full-row duplicates`,
+        `preserve`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
+        `  save "__union_tmp.dta", replace`,
+        `restore`,
+        `append using "__union_tmp.dta"`,
+        `duplicates drop, force`,
+        `erase "__union_tmp.dta"`,
+      ].join("\n");
+    }
+
+    case "intersect":
+    case "setdiff": {
+      const stSoKeep = step.type === "intersect" ? "keep(match)" : "keep(master)";
+      return [
+        `* ${step.type}: merge on shared columns`,
+        `preserve`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
+        `  save "__setop_tmp.dta", replace`,
+        `restore`,
+        `merge m:1 /* shared keys */ using "__setop_tmp.dta", ${stSoKeep} nogen`,
+        `erase "__setop_tmp.dta"`,
+      ].join("\n");
+    }
+
+    case "vector_assign": {
+      const stVaOut    = stVar(step.nn ?? "assigned");
+      const stVaValues = step.values ?? [];
+      const stVaSeed   = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      if (step.mode === "recycle") {
+        return [
+          `gen strL ${stVaOut} = ""`,
+          `local vals "${stVaValues.join(" ")}"`,
+          `forvalues i = 1/\`=_N' {`,
+          `  local k = mod(\`i' - 1, ${stVaValues.length || 1}) + 1`,
+          `  replace ${stVaOut} = word("\`vals'", \`k') in \`i'`,
+          `}`,
+        ].join("\n");
+      }
+      if (step.mode === "conditional") {
+        return [
+          `gen strL ${stVaOut} = "${step.elseValue ?? ""}"`,
+          ...(step.rules || []).map(r => `replace ${stVaOut} = "${r.value}" if ${r.expr}`),
+        ].join("\n");
+      }
+      return [
+        `* NOTE: EconSolver uses a seeded mulberry32 RNG; exported values differ but the distribution matches`,
+        `set seed ${stVaSeed}`,
+        `gen double __u = runiform()`,
+        `gen strL ${stVaOut} = ""`,
+        `* assign ${stVaValues.join("/")} by equal or weighted bins`,
+        `drop __u`,
+      ].join("\n");
+    }
+
+    case "clean_strings": {
+      const stCsCol = stVar(step.col);
+      let stCsIn    = `itrim(strtrim(${stCsCol}))`;
+      if (step.case === "lower")      stCsIn = `lower(${stCsIn})`;
+      else if (step.case === "upper") stCsIn = `upper(${stCsIn})`;
+      else if (step.case === "title") stCsIn = `proper(${stCsIn})`;
+      return `replace ${stCsCol} = ${stCsIn}`;
+    }
+
+    case "if_else": {
+      const stIeOut  = stVar(step.nn);
+      const stIeCond = jsExprToStata(step.cond);
+      if (!stIeCond) return `* if_else: ${step.nn} = cond(${step.cond}, ...) — translate condition to Stata manually`;
+      return `gen ${stIeOut} = cond(${stIeCond}, ${stValue(step.trueVal)}, ${stValue(step.falseVal)})`;
+    }
+
+    case "case_when": {
+      const stCwOut = stVar(step.nn);
+      const stCwBrs = (step.cases ?? [])
+        .map(c => { const cc = jsExprToStata(c.cond); return cc ? `replace ${stCwOut} = ${stValue(c.val)} if ${cc}` : null; })
+        .filter(Boolean);
+      if (!stCwBrs.length) return `* case_when: no valid conditions — translate manually`;
+      return [`gen ${stCwOut} = ${stValue(step.defaultVal)}`, ...stCwBrs].join("\n");
+    }
+
+    case "grouped_mutate": {
+      const stGmBy   = (step.by ?? []).map(stVar).join(" ");
+      const stGmOut  = stVar(step.newCol || "grouped");
+      const stGmFn   = step.fn ?? "mean";
+      if (!stGmBy || !step.newCol) return `* grouped_mutate: incomplete config`;
+      const stGmEgen = stGmFn === "sd" ? "sd" : stGmFn === "count" ? "count" : stGmFn === "expr" ? "mean" : stGmFn;
+      return [
+        `* grouped_mutate: ${stGmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
+        `bysort ${stGmBy}: egen ${stGmOut} = ${stGmEgen}(${stVar(step.col || (step.by ?? [])[0] || "")})`,
+      ].join("\n");
+    }
+
+    case "balance_panel": {
+      const stBpEnt  = stVar(step.entityCol);
+      const stBpTim  = stVar(step.timeCol);
+      const stBpFill = Number(step.fillValue) || 0;
+      const stBpLines = [
+        `* Balance panel: fill ${step.entityCol} x ${step.timeCol} grid`,
+        `xtset ${stBpEnt} ${stBpTim}`,
+        `tsfill, full`,
+      ];
+      for (const oc of (step.outcomeCols ?? []))
+        stBpLines.push(`replace ${stVar(oc)} = ${stBpFill} if missing(${stVar(oc)})`);
+      return stBpLines.join("\n");
+    }
+
+    case "patch":
+      return `* manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
+
+    case "inject_column": {
+      const stIcVals    = (step.values ?? []).map(v => (v == null ? "." : Number(v).toFixed(8)));
+      const stIcMatName = String(step.colName ?? "").replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32);
+      return [
+        `* inject_column: "${step.colName}" — extracted from model output`,
+        `matrix ${stIcMatName} = (${stIcVals.join(" \\ ")})`,
+        `svmat ${stIcMatName}, name(${step.colName})`,
+        `rename ${step.colName}1 ${step.colName}`,
+      ].join("\n");
+    }
+
+    case "geocode": {
+      const stGcAddr = step.addressCol ?? "address";
+      const stGcLat  = step.latCol ?? "lat";
+      const stGcLon  = step.lonCol ?? "lon";
+      return [
+        `* Geocode: ${stGcAddr} -> ${stGcLat} / ${stGcLon}`,
+        `* Stata has no native geocoding — export addresses, geocode externally, merge back.`,
+        `preserve`,
+        `keep ${stGcAddr}`,
+        `duplicates drop`,
+        `export delimited using "addresses_to_geocode.csv", replace`,
+        `restore`,
+        `* After external geocoding:`,
+        `* merge m:1 ${stGcAddr} using "geocoded_coords.dta", keep(master match) nogenerate`,
+      ].join("\n");
+    }
+
     default:
       return `* [unknown step: ${step.type}]`;
   }
@@ -1176,6 +1730,220 @@ export function toPython(step, df = "df", allDatasets = {}) {
         `# Append dataset: "${rightName}"`,
         `right_df = ${pyRightLoad(step.rightId, allDatasets)}`,
         `${df} = pd.concat([${df}, right_df], ignore_index=True)`,
+      ].join("\n");
+    }
+
+
+    case "add_column":
+      return `${df}[${pyStr(step.nn)}] = ${pyValue(step.fill, step.dtype)}`;
+
+    case "add_row": {
+      const pyArCount  = Math.max(1, Number(step.count) || 1);
+      const pyArValues = JSON.stringify(step.values || {});
+      return [
+        `# add_row: append ${pyArCount} synthetic row(s); unspecified columns become NaN`,
+        `_new_rows = pd.DataFrame([${pyArValues}] * ${pyArCount})`,
+        `${df} = pd.concat([${df}, _new_rows], ignore_index=True)`,
+      ].join("\n");
+    }
+
+    case "set_where":
+      return `${df}.loc[${pyWhere(step.where)}, ${pyStr(step.col)}] = ${step.action === "clear" ? "None" : pyValue(step.value, step.dtype)}`;
+
+    case "replace": {
+      const pyRSrc  = pyStr(step.col);
+      const pyROut  = pyStr(step.nn || step.col);
+      const pyRMode = step.match?.mode || "exact";
+      const pyRFind = step.match?.find ?? "";
+      const pyRRepl = step.replaceWith ?? "";
+      if (pyRMode === "exact") {
+        return [
+          ...(step.nn ? [`${df}[${pyROut}] = ${df}[${pyRSrc}]`] : []),
+          `${df}[${pyROut}] = ${df}[${pyROut}].replace(${pyStr(pyRFind)}, ${pyStr(pyRRepl)})`,
+        ].join("\n");
+      }
+      return [
+        ...(step.nn ? [`${df}[${pyROut}] = ${df}[${pyRSrc}]`] : []),
+        `${df}[${pyROut}] = ${df}[${pyROut}].astype("string").str.replace(${pyStr(pyRFind)}, ${pyStr(pyRRepl)}, regex=${pyRMode === "regex" ? "True" : "False"})`,
+      ].join("\n");
+    }
+
+    case "str_splice": {
+      const pySsSrc = pyStr(step.col);
+      const pySsOut = pyStr(step.nn || step.col);
+      return [
+        `def _litux_splice(v, position, mode, text="", count=0):`,
+        `    if pd.isna(v): return v`,
+        `    s = str(v)`,
+        `    pos = len(s) if position is None else int(position)`,
+        `    pos = max(0, min((len(s) + pos + 1) - 1 if pos < 0 else pos - 1, len(s)))`,
+        `    n = max(0, int(count or 0))`,
+        `    if mode == "insert": return s[:pos] + text + s[pos:]`,
+        `    if mode == "delete": return s[:pos] + s[pos+n:]`,
+        `    if mode == "overwrite": return s[:pos] + text + s[pos+n:]`,
+        `    return s`,
+        `${df}[${pySsOut}] = ${df}[${pySsSrc}].apply(lambda v: _litux_splice(v, ${Number(step.position) || 1}, ${pyStr(step.mode || "insert")}, ${pyStr(step.text ?? "")}, ${Number(step.count) || 0}))`,
+      ].join("\n");
+    }
+
+    case "distinct": {
+      const pyDiSub = step.subset ?? [];
+      const pyDiArg = pyDiSub.length ? `subset=${pyList(pyDiSub)}, ` : "";
+      return `${df} = ${df}.drop_duplicates(${pyDiArg}keep="first").reset_index(drop=True)`;
+    }
+
+    case "group_transform": {
+      const pyGtBy  = step.by ?? [];
+      const pyGtCol = step.col ?? (pyGtBy[0] ?? "");
+      const pyGtOut = pyStr(step.nn ?? `${step.fn ?? "mean"}_${pyGtCol}`);
+      const pyGtFn  = step.fn ?? "mean";
+      const pyGtGrp = `${df}.groupby(${pyList(pyGtBy)})[${pyStr(pyGtCol)}]`;
+      if (pyGtFn === "count")  return `${df}[${pyGtOut}] = ${pyGtGrp}.transform("size")`;
+      if (pyGtFn === "sd")     return `${df}[${pyGtOut}] = ${pyGtGrp}.transform("std")`;
+      if (pyGtFn === "rank")   return `${df}[${pyGtOut}] = ${pyGtGrp}.transform(lambda s: s.rank(method="min"))`;
+      return `${df}[${pyGtOut}] = ${pyGtGrp}.transform("${pyGtFn}")`;
+    }
+
+    case "bind_cols": {
+      const pyBcName = safeDatasetName(step.rightId, allDatasets);
+      return [
+        `# bind_cols: align rows by current order from right dataset "${pyBcName}"`,
+        `right_df = ${pyRightLoad(step.rightId, allDatasets)}`,
+        `${df} = pd.concat([${df}.reset_index(drop=True), right_df.reset_index(drop=True)], axis=1)`,
+      ].join("\n");
+    }
+
+    case "union":
+    case "intersect":
+    case "setdiff": {
+      const pySoName = safeDatasetName(step.rightId, allDatasets);
+      const pySoLoad = [
+        `# ${step.type}: compare with right dataset "${pySoName}"`,
+        `right_df = ${pyRightLoad(step.rightId, allDatasets)}`,
+      ];
+      if (step.type === "union")
+        return [...pySoLoad, `${df} = pd.concat([${df}, right_df], ignore_index=True).drop_duplicates().reset_index(drop=True)`].join("\n");
+      if (step.type === "intersect")
+        return [...pySoLoad, `${df} = ${df}.merge(right_df, how="inner").drop_duplicates().reset_index(drop=True)`].join("\n");
+      return [...pySoLoad, `${df} = ${df}.merge(right_df, how="left", indicator=True).query('_merge == "left_only"').drop(columns="_merge").reset_index(drop=True)`].join("\n");
+    }
+
+    case "vector_assign": {
+      const pyVaVals = pyList(step.values ?? []);
+      const pyVaOut  = step.nn ?? "assigned";
+      const pyVaSeed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      if (step.mode === "recycle") return `${df}["${pyVaOut}"] = np.resize(${pyVaVals}, len(${df}))`;
+      if (step.mode === "conditional") {
+        const pyVaConds   = (step.rules || []).map(r => `${df}.eval(${pyStr(r.expr)})`).join(", ");
+        const pyVaChoices = (step.rules || []).map(r => pyStr(r.value)).join(", ");
+        return `${df}["${pyVaOut}"] = np.select([${pyVaConds}], [${pyVaChoices}], default=${pyStr(step.elseValue ?? "")})`;
+      }
+      const pyVaWts = Array.isArray(step.weights) ? step.weights.join(", ") : "";
+      const pyVaP   = pyVaWts ? `, p=np.array([${pyVaWts}]) / np.sum([${pyVaWts}])` : "";
+      return `# NOTE: EconSolver uses a seeded mulberry32 RNG; exported values differ but the distribution matches\n${df}["${pyVaOut}"] = np.random.default_rng(${pyVaSeed}).choice(${pyVaVals}, size=len(${df})${pyVaP})`;
+    }
+
+    case "clean_strings": {
+      const pyCsCol = pyStr(step.col);
+      let pyCsExpr  = `${df}[${pyCsCol}].astype("string").str.strip().str.replace(r"\\s+", " ", regex=True)`;
+      if (step.case === "lower")      pyCsExpr += ".str.lower()";
+      else if (step.case === "upper") pyCsExpr += ".str.upper()";
+      else if (step.case === "title") pyCsExpr += ".str.title()";
+      return `${df}[${pyCsCol}] = ${pyCsExpr}`;
+    }
+
+    case "if_else": {
+      const pyIeOut  = pyStr(step.nn);
+      const pyIeCond = jsExprToPython(step.cond, df);
+      if (!pyIeCond) return `# if_else: ${step.nn} = where(${step.cond}) — translate condition to Python manually`;
+      return `${df}[${pyIeOut}] = np.where(${pyIeCond}, ${pyValue(step.trueVal, "string")}, ${pyValue(step.falseVal, "string")})`;
+    }
+
+    case "case_when": {
+      const pyCwOut     = pyStr(step.nn);
+      const pyCwConds   = [], pyCwChoices = [];
+      for (const c of (step.cases ?? [])) {
+        const cc = jsExprToPython(c.cond, df);
+        if (!cc) continue;
+        pyCwConds.push(cc); pyCwChoices.push(pyValue(c.val, "string"));
+      }
+      if (!pyCwConds.length) return `# case_when: no valid conditions — translate manually`;
+      return `${df}[${pyCwOut}] = np.select([${pyCwConds.join(", ")}], [${pyCwChoices.join(", ")}], default=${pyValue(step.defaultVal, "string")})`;
+    }
+
+    case "grouped_mutate": {
+      const pyGmBy  = step.by ?? [];
+      const pyGmOut = pyStr(step.newCol || "grouped");
+      const pyGmFn  = step.fn ?? "mean";
+      if (!pyGmBy.length || !step.newCol) return `# grouped_mutate: incomplete config`;
+      if (pyGmFn === "expr" && step.expr) {
+        const pyGmExpr = jsExprToPython(step.expr, df);
+        return pyGmExpr
+          ? `${df}[${pyGmOut}] = ${df}.groupby(${pyList(pyGmBy)}).apply(lambda g: ${pyGmExpr}).reset_index(level=${pyList(pyGmBy)}, drop=True)`
+          : `# grouped_mutate (expr): translate "${step.expr}" to Python manually`;
+      }
+      const pyGmAgg = pyGmFn === "sd" ? "std" : pyGmFn === "count" ? "size" : pyGmFn;
+      const pyGmGrp = step.col
+        ? `${df}.groupby(${pyList(pyGmBy)})[${pyStr(step.col)}]`
+        : `${df}.groupby(${pyList(pyGmBy)})[${pyStr(pyGmBy[0])}]`;
+      return [
+        `# grouped_mutate: ${pyGmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
+        `${df}[${pyGmOut}] = ${pyGmGrp}.transform("${pyGmAgg}")`,
+      ].join("\n");
+    }
+
+    case "pivot_wider": {
+      const pyPwIds  = pyList(step.idCols ?? []);
+      const pyPwVals = Array.isArray(step.valuesFrom) ? step.valuesFrom : [step.valuesFrom].filter(Boolean);
+      const pyPwVal  = pyPwVals.length === 1 ? pyStr(pyPwVals[0]) : pyList(pyPwVals);
+      const pyPwFill = (step.valuesFill != null && step.valuesFill !== "") ? `, fill_value=${Number(step.valuesFill)}` : "";
+      return `${df} = ${df}.pivot_table(index=${pyPwIds}, columns=${pyStr(step.namesFrom)}, values=${pyPwVal}${pyPwFill}, aggfunc="first").reset_index()`;
+    }
+
+    case "balance_panel": {
+      const pyBpEnt  = pyStr(step.entityCol);
+      const pyBpTim  = pyStr(step.timeCol);
+      const pyBpDims = step.slotCol ? `[${pyBpEnt}, ${pyBpTim}, ${pyStr(step.slotCol)}]` : `[${pyBpEnt}, ${pyBpTim}]`;
+      const pyBpOuts = step.outcomeCols ?? [];
+      const pyBpLines = [
+        `# Balance panel: complete ${step.entityCol} x ${step.timeCol}${step.slotCol ? ` x ${step.slotCol}` : ""} grid`,
+        `_dims = ${pyBpDims}`,
+        `_full = pd.MultiIndex.from_product([${df}[c].unique() for c in _dims], names=_dims)`,
+        `${df} = ${df}.set_index(_dims).reindex(_full).reset_index()`,
+      ];
+      if (pyBpOuts.length)
+        pyBpLines.push(`${df}[${pyList(pyBpOuts)}] = ${df}[${pyList(pyBpOuts)}].fillna(${Number(step.fillValue) || 0})`);
+      return pyBpLines.join("\n");
+    }
+
+    case "patch":
+      return `# manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
+
+    case "inject_column": {
+      const pyIcVals = (step.values ?? []).map(v => (v == null ? "np.nan" : Number(v).toFixed(8))).join(", ");
+      return [
+        `# inject_column: "${step.colName}" — extracted from model output`,
+        `${df}["${step.colName}"] = np.array([${pyIcVals}])`,
+      ].join("\n");
+    }
+
+    case "geocode": {
+      const pyGcAddr = step.addressCol ?? "address";
+      const pyGcLat  = step.latCol ?? "lat";
+      const pyGcLon  = step.lonCol ?? "lon";
+      return [
+        `# Geocode: ${pyGcAddr} -> ${pyGcLat} / ${pyGcLon}`,
+        `# pip install geopy`,
+        `from geopy.geocoders import Nominatim`,
+        `from geopy.extra.rate_limiter import RateLimiter`,
+        `_geolocator = Nominatim(user_agent="econsolver_replication")`,
+        `_geocode    = RateLimiter(_geolocator.geocode, min_delay_seconds=1)`,
+        `def _get_coords(address):`,
+        `    loc = _geocode(str(address))`,
+        `    return (loc.latitude, loc.longitude) if loc else (None, None)`,
+        `${df}[["${pyGcLat}", "${pyGcLon}"]] = ${df}["${pyGcAddr}"].apply(`,
+        `    lambda a: pd.Series(_get_coords(a))`,
+        `)`,
       ].join("\n");
     }
 

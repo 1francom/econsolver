@@ -12,6 +12,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { researchCoach, coachDispatch } from "../services/AI/AIService.js";
 import { loadCoachChats, saveCoachChats } from "../services/Persistence/indexedDB.js";
+import { getPlotHistory } from "../services/Persistence/plotHistory.js";
 import { buildMetadataReport } from "../core/validation/metadataExtractor.js";
 import { useSessionState } from "../services/session/sessionState.jsx";
 import { buildSessionSnapshot } from "../services/AI/sessionSnapshot.js";
@@ -336,6 +337,11 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
   const inputRef   = useRef(null);
   const abortRef   = useRef(null);
   const loadedPidRef = useRef(null);   // pid that the in-state conversations belong to
+  const [savedPlots, setSavedPlots] = useState([]);
+  useEffect(() => {
+    if (!pid) return;
+    getPlotHistory(pid).then(setSavedPlots).catch(() => {});
+  }, [pid, isOpen]); // reload each time the sidebar opens so fresh plots are visible
 
   function updateActive(mutateMessages) {
     setConversations(prev => prev.map(c => {
@@ -495,6 +501,9 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         dataDictionary: cleanedData?.dataDictionary ?? null,
         metadataReport,
         snapshot,
+        cleanedData,
+        allDatasets: Object.values(sessionState?.datasets ?? {}),
+        savedPlots,
         signal: controller.signal,
         onText: (piece) => {
           updateActive(msgs => {
@@ -583,9 +592,9 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
   if (!hasAccess) return (
     <>
       <div onClick={onClose}
-        style={{ position: "fixed", inset: 0, zIndex: 199, background: "rgba(0,0,0,0.35)" }} />
+        style={{ position: "fixed", inset: 0, zIndex: 1999, background: "rgba(0,0,0,0.35)" }} />
       <div style={{
-        position: "fixed", top: 38, right: 0, bottom: 0, zIndex: 200,
+        position: "fixed", top: 38, right: 0, bottom: 0, zIndex: 2000,
         width: "min(420px, 92vw)", background: C.bg, borderLeft: `1px solid ${C.border}`,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         gap: 16, padding: "2rem", boxShadow: "-8px 0 32px rgba(0,0,0,0.6)",
@@ -611,11 +620,11 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
 
       {/* Backdrop */}
       <div onClick={onClose}
-        style={{ position: "fixed", inset: 0, zIndex: 199, background: "rgba(0,0,0,0.35)" }} />
+        style={{ position: "fixed", inset: 0, zIndex: 1999, background: "rgba(0,0,0,0.35)" }} />
 
       {/* Sidebar panel */}
       <div style={{
-        position: "fixed", top: 38, right: 0, bottom: 0, zIndex: 200,
+        position: "fixed", top: 38, right: 0, bottom: 0, zIndex: 2000,
         width: "min(420px, 92vw)",
         background: C.bg, borderLeft: `1px solid ${C.border}`,
         display: "flex", flexDirection: "column",

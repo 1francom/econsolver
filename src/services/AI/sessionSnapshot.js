@@ -192,6 +192,20 @@ export function serializeSnapshot(snapshot) {
     snapshot.pinnedModels.forEach((m, i) => {
       const source = m.spec?.filename ? ` [source: ${m.spec.filename}]` : "";
       lines.push(`  (${i + 1}) ${m.label ?? m.type}: ${m.spec?.yVar ?? "?"} ~ ${(m.spec?.xVars ?? []).join(" + ") || "?"}${source}`);
+      const fitParts = [];
+      if (m.n    != null) fitParts.push(`N=${m.n}`);
+      if (m.R2   != null) fitParts.push(`R²=${m.R2.toFixed(3)}`);
+      if (m.adjR2 != null) fitParts.push(`adj.R²=${m.adjR2.toFixed(3)}`);
+      if (fitParts.length) lines.push(`    Fit: ${fitParts.join(", ")}`);
+      if (m.varNames?.length && m.beta?.length) {
+        m.varNames.forEach((v, j) => {
+          const b = m.beta[j], se = m.se?.[j], p = m.pVals?.[j];
+          if (b == null) return;
+          const stars = p != null ? (p < 0.01 ? "***" : p < 0.05 ? "**" : p < 0.1 ? "*" : "") : "";
+          const seStr = se != null ? ` (SE=${se.toFixed(4)})` : "";
+          lines.push(`    ${v}: β=${b.toFixed(4)}${seStr}${stars}`);
+        });
+      }
     });
   }
 
