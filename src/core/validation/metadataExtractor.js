@@ -285,7 +285,13 @@ export function buildMetadataReport(headers, rows, panelIndex = null) {
     .map(col => buildColMetadata(sample, col))
     .filter(Boolean);
 
-  const highCorrelations = findHighCorrelations(sample, numericHeaders);
+  // Panel entity/time identifiers are structural, not modeled covariates —
+  // their correlation with other columns (e.g. entity id vs. treatment cohort
+  // in a staggered-cohort panel) is expected and not an actionable collinearity signal.
+  const corrHeaders = panelIndex?.entityCol || panelIndex?.timeCol
+    ? numericHeaders.filter(h => h !== panelIndex.entityCol && h !== panelIndex.timeCol)
+    : numericHeaders;
+  const highCorrelations = findHighCorrelations(sample, corrHeaders);
 
   return { temporal, panelQuality, columns, highCorrelations };
 }
