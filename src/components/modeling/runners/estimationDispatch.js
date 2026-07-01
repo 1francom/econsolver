@@ -308,8 +308,8 @@ export function dispatchEstimation(dataRows, ctx) {
         basePeriod: csBasePeriod ?? "varying",
         estMethod: csEstMethod ?? "dr",
         anticipation: Number(csAnticipation) || 0,
-        relMin: isFinite(Number(csRelMin)) ? Number(csRelMin) : -Infinity,
-        relMax: isFinite(Number(csRelMax)) ? Number(csRelMax) :  Infinity,
+        relMin: (csRelMin !== "" && csRelMin != null && isFinite(Number(csRelMin))) ? Number(csRelMin) : -Infinity,
+        relMax: (csRelMax !== "" && csRelMax != null && isFinite(Number(csRelMax))) ? Number(csRelMax) :  Infinity,
         inference: { method: csInfMethod ?? "bootstrap", nBoot: Number(csNBoot) || 999, seed: Number(csSeed) || 42 },
       }, seOpts);
       if (!res || res.error) return { error: res?.error ?? "Callaway-Sant'Anna estimation failed." };

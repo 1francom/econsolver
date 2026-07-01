@@ -311,7 +311,10 @@ export function aggregate({ cells2x2, groupProb, n, inference }) {
       stat *= n;
       ptestWald = { stat, df: m, p: chiSqP(stat, m) };
     } catch {
-      ptestWald = { stat: NaN, df: m, p: NaN };
+      // Sigma is singular — typically because pre-period ATTs have (near-)zero
+      // sampling variance (e.g. no residual variation across units). The test
+      // is not computable, not "0/0"; surface that distinction to the caller.
+      ptestWald = { stat: NaN, df: m, p: NaN, unavailable: true };
     }
   }
 
