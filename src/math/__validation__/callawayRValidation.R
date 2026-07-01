@@ -4,7 +4,7 @@ library(did); library(dplyr); library(jsonlite)
 
 # DGP matching the JS suiteSyntheticDGP: 4-year panel, cohorts 2004 and 2006
 # Using a deterministic DGP (no random noise) so JS/R match exactly
-n_per_cohort <- 4
+n_per_cohort <- 5
 years <- 2003:2006
 
 make_panel <- function() {
@@ -40,6 +40,7 @@ make_panel <- function() {
 }
 
 df <- make_panel()
+df$id <- as.numeric(factor(df$id))
 
 run_cs <- function(ctrl, base, meth) {
   out <- att_gt(
