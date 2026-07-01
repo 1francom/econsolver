@@ -40,7 +40,18 @@ export function GroupTimePlot({ attgt = [], critVal = 1.96 }) {
   const W_FACET = 200;
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8, fontFamily: T.body.fontFamily, fontSize: 9, color: C.textMuted }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#e05c5c", display: "inline-block" }} />
+          pre-treatment
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#6ec8b4", display: "inline-block" }} />
+          post
+        </span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
       {cohorts.map(g => {
         const cells = attgt.filter(c => c.g === g).sort((a, b) => a.t - b.t);
         const tMin = arrMin(cells.map(c => c.t));
@@ -112,6 +123,7 @@ export function GroupTimePlot({ attgt = [], critVal = 1.96 }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -193,6 +205,17 @@ export function EventStudyDynamicPlot({ byE = [], critVal = 1.96 }) {
             </text>
           </g>
         ))}
+        {/* Legend */}
+        <g>
+          <circle cx={fw - PAD.right - 130} cy={16} r={3.5} fill="#e05c5c" />
+          <text x={fw - PAD.right - 122} y={19} fontSize={9} fill={C.textMuted} fontFamily={T.body.fontFamily}>
+            pre-treatment
+          </text>
+          <circle cx={fw - PAD.right - 40} cy={16} r={3.5} fill="#6ec8b4" />
+          <text x={fw - PAD.right - 32} y={19} fontSize={9} fill={C.textMuted} fontFamily={T.body.fontFamily}>
+            post
+          </text>
+        </g>
         {/* Axis labels */}
         <text
           x={fw / 2} y={H - 5}
@@ -225,7 +248,8 @@ export function GroupAggPlot({ byG = [], critVal = 1.96 }) {
   if (!byG.length) return <div ref={ref} style={{ width: "100%" }} />;
 
   const rowH = 32;
-  const H = byG.length * rowH + 50;
+  const axisH = 36; // room for tick marks + tick labels + axis title
+  const H = byG.length * rowH + 25 + axisH;
   const attBounds = byG.flatMap(x => [x.att - critVal * x.se, x.att + critVal * x.se]);
   const xMin = Math.min(0, arrMin(attBounds)) - 0.05;
   const xMax = Math.max(0, arrMax(attBounds)) + 0.05;
@@ -234,15 +258,34 @@ export function GroupAggPlot({ byG = [], critVal = 1.96 }) {
   const xScale = v => PAD.left + (v - xMin) / xRange * (fw - PAD.left - PAD.right);
   const yScale = i => 25 + i * rowH;
   const xZero = xScale(0);
+  const rowsEnd = 25 + byG.length * rowH;
+
+  const xTicks = [xMin, 0, xMax].filter((v, i, arr) => arr.findIndex(x => Math.abs(x - v) < 1e-9) === i);
 
   return (
     <div ref={ref} style={{ width: "100%", marginTop: 8 }}>
       <svg width={fw} height={H} style={{ display: "block" }}>
         {/* Zero line */}
         <line
-          x1={xZero} x2={xZero} y1={15} y2={H - 20}
+          x1={xZero} x2={xZero} y1={15} y2={rowsEnd}
           stroke={C.textMuted} strokeWidth={0.5} strokeDasharray="3,3"
         />
+        {/* X-axis ticks */}
+        {xTicks.map((v, i) => (
+          <g key={i}>
+            <line
+              x1={xScale(v)} x2={xScale(v)}
+              y1={rowsEnd} y2={rowsEnd + 4}
+              stroke={C.textMuted} strokeWidth={0.5}
+            />
+            <text
+              x={xScale(v)} y={rowsEnd + 15}
+              textAnchor="middle" fontSize={9} fill={C.textMuted}
+            >
+              {v.toFixed(2)}
+            </text>
+          </g>
+        ))}
         {/* Rows */}
         {byG.map((x, i) => {
           const cy = yScale(i);
