@@ -460,3 +460,12 @@
 
 - [08:53] · Data
   Parse error: grid_enriched_500.rds — not a valid R data file (.rds), unrecognised serialisation header.
+
+---
+
+## 2026-07-01 batch
+
+### Features
+
+- [10:12] · Clean
+  Add confirmation buttons for all critical functions like clearing all the datasets, clearing all the pipeline, signing out, etc.
