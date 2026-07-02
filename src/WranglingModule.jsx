@@ -103,7 +103,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   // Initial state: raw rows, no cloning — pipeline runs after first paint.
   // All applyStep handlers use .map() and never mutate rawData.rows in-place,
   // so passing the reference directly is safe.
-  const [processed,    setProcessed]    = useState({ rows: rawData.rows, headers: rawData.headers });
+  const [processed,    setProcessed]    = useState({ rows: rawData.rows, headers: rawData.headers, _duckdb: rawData._duckdb ?? null });
   const [isProcessing, setIsProcessing] = useState(false);
   const [elapsedMs,    setElapsedMs]    = useState(0);
   const timerRef = useRef(null);
@@ -129,16 +129,19 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     if (rawData._duckdb?.tableName) {
       // Large dataset loaded via DuckDB — run pipeline as SQL (non-blocking)
       import("./pipeline/duckdbRunner.js").then(({ runPipelineDuck }) =>
-        import("./services/data/duckdb.js").then(({ getDuckDB }) =>
+        import("./services/data/duckdb.js").then(({ getDuckDB, extractAllRows }) =>
           getDuckDB().then(({ conn }) =>
             runPipelineDuck(rawData._duckdb.tableName, rawData.headers, pipeline, conn)
               .then(done)
               .catch(e => {
                 console.error("[WranglingModule] DuckDB pipeline failed, falling to JS:", e);
-                // JS fallback — still deferred so spinner renders first
-                setTimeout(() => {
-                  if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
-                }, 0);
+                // JS fallback — rawData.rows is only a 500-row preview for DuckDB
+                // datasets, so pull the full table before running the JS pipeline.
+                extractAllRows(rawData._duckdb.tableName)
+                  .catch(() => rawData.rows)
+                  .then(fullRows => {
+                    if (!cancelled) done(runPipeline(fullRows, rawData.headers, pipeline, context));
+                  });
               })
           )
         )
@@ -418,11 +421,13 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
             balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
         : null,
+      // Full-table pointer — without this, ModelingTab sees only the 500-row
+      // preview after "→ Analyze" and estimates on it (onReady already sends it).
+      _duckdb: processed._duckdb ?? null,
       changeLog: pipeline.map(s => ({
         type: s.type, description: s.desc,
         col: s.col || s.c1 || s.nn || "", map: s.map || null,
       })),
-      pipeline,
       branchPointIndex,
       context,
     });
