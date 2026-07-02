@@ -10,6 +10,8 @@
 
 import { useRef, useEffect, useState } from "react";
 import { useTheme } from "../shared.jsx";
+import PlotExportBar from "../../shared/PlotExportBar.jsx";
+import { downloadGridPNG } from "../../../services/export/plotExporter.js";
 
 const PAD = { top: 34, right: 24, bottom: 54, left: 68 };
 
@@ -60,6 +62,7 @@ function useWidth(ref) {
 // attgt: Array<{ g, t, att, se, isPre }>
 export function GroupTimePlot({ attgt = [], critVal = 1.96 }) {
   const { C, T } = useTheme();
+  const gridRef = useRef(null);
   const cohorts = [...new Set(attgt.map(c => c.g))].sort((a, b) => a - b);
   if (!cohorts.length) return null;
 
@@ -67,8 +70,9 @@ export function GroupTimePlot({ attgt = [], critVal = 1.96 }) {
   const W_FACET = 300;
 
   return (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10, fontFamily: T.body.fontFamily, fontSize: 12, color: C.textMuted }}>
+    <div ref={gridRef} style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, fontFamily: T.body.fontFamily, fontSize: 12, color: C.textMuted }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#e05c5c", display: "inline-block" }} />
           pre-treatment
@@ -77,6 +81,18 @@ export function GroupTimePlot({ attgt = [], critVal = 1.96 }) {
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#6ec8b4", display: "inline-block" }} />
           post
         </span>
+      </div>
+        <button
+          onClick={() => downloadGridPNG(Array.from(gridRef.current?.querySelectorAll("svg") ?? []), "callaway_group_time")}
+          title="Download all cohort panels as PNG"
+          style={{
+            background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3,
+            color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily,
+            fontSize: T.caption.fontSize, padding: "3px 8px", flexShrink: 0,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
+        >↓ PNG</button>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
       {cohorts.map(g => {
@@ -257,6 +273,7 @@ export function EventStudyDynamicPlot({ byE = [], critVal = 1.96 }) {
           ATT
         </text>
       </svg>
+      <PlotExportBar getEl={() => ref.current} filename="callaway_dynamic" />
     </div>
   );
 }
@@ -343,6 +360,7 @@ export function GroupAggPlot({ byG = [], critVal = 1.96 }) {
           ATT
         </text>
       </svg>
+      <PlotExportBar getEl={() => ref.current} filename="callaway_group_agg" />
     </div>
   );
 }
@@ -427,6 +445,7 @@ export function CalendarAggPlot({ byT = [], critVal = 1.96 }) {
           Calendar period
         </text>
       </svg>
+      <PlotExportBar getEl={() => ref.current} filename="callaway_calendar" />
     </div>
   );
 }

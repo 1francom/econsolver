@@ -105,6 +105,7 @@ import {
   PanelResults, TwoSLSResults, GMMResults, LIMLResults, FuzzyRDDResults,
 } from "./modeling/results/index.js";
 import { GroupTimePlot, EventStudyDynamicPlot, GroupAggPlot, CalendarAggPlot } from "./modeling/plots/didPlots.jsx";
+import { buildAttgtLatex, attgtPValue } from "../services/export/latexTable.js";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 // Pure (no-React) helpers extracted to ./modeling/helpers.js: buildModelAvail,
@@ -131,19 +132,7 @@ function CSResultsPanel({
   const byG     = r.aggregations?.group?.byG ?? [];
   const byT     = r.aggregations?.calendar?.byT ?? [];
 
-  const rowP = (att, se) => {
-    if (att == null || se == null) return null;
-    // se === 0 with a non-zero ATT means zero sampling variance around a real
-    // effect (degenerate cell) — that's p ≈ 0, not "undefined". Only att ≈ 0 too
-    // (no effect, no variance) is truly indeterminate — matches the parallel-trends note.
-    if (se === 0) return Math.abs(att) < 1e-9 ? null : 0;
-    const z = Math.abs(att / se);
-    if (!isFinite(z)) return null;
-    const t = 1 / (1 + 0.2316419 * z);
-    const dens = (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * z * z);
-    const p = dens * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-    return Math.min(2 * p, 1);
-  };
+  const rowP = attgtPValue;
   const stars = p => p == null ? "" : p < 0.01 ? "***" : p < 0.05 ? "**" : p < 0.1 ? "*" : "";
 
   return (
@@ -329,6 +318,7 @@ function CSResultsPanel({
         yVar={yVar} results={r} model="CallawayCS"
         onReport={onReport}
         replicateConfig={null}
+        latexBuilder={(yv) => buildAttgtLatex(attgt, critVal, yv)}
       />
     </div>
   );
