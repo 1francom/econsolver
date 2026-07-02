@@ -14,8 +14,9 @@ import { ResidualVsFitted, QQPlot } from "../ResidualPlots.jsx";
 export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}, openReport, baseReplicateConfig }) {
   const { C, T } = useTheme();
   const [tab, setTab] = useState("second");
-  // canonical: second-stage fields are at root; firstStages sub-array is engine-shaped
-  const { firstStages } = result;
+  // canonical: second-stage fields are at root; firstStages sub-array is engine-shaped.
+  // Pinned models restored from IndexedDB are trimmed — firstStages may be absent.
+  const firstStages = result.firstStages ?? [];
   const second = result;
   const safeR = v => (v != null && isFinite(v)) ? v.toFixed(4) : "—";
 

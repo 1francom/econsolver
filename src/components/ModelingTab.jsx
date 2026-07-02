@@ -818,16 +818,31 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     return dispatch;
   }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
 
+  // ── DuckDB full-table pull ────────────────────────────────────────────────
+  // For DuckDB-backed datasets `rows` is only a 500-row preview — every JS
+  // estimation path must extract the full table first (matches estimate()).
+  const getFullRows = useCallback(async () => {
+    const duckTable = cleanedData?._duckdb?.tableName;
+    const rowCount  = cleanedData?._duckdb?.rowCount ?? 0;
+    if (duckTable && (rows?.length ?? 0) < (rowCount || Infinity)) {
+      const me = await measure(() => extractAllRows(duckTable));
+      logEstimate({ path: "js", phase: "extract", n: rowCount, msTotal: me.ms });
+      return me.result;
+    }
+    return rows;
+  }, [cleanedData, rows]);
+
   // ── H8: runSpecCurve (after _runEstimation to avoid TDZ) ─────────────────────
-  const runSpecCurve = useCallback(() => {
+  const runSpecCurve = useCallback(async () => {
     const { col, op, start, end, step, coefVar } = specConfig;
     if (!col || !coefVar || start === "" || end === "" || step === "") return;
     const s = Math.abs(Number(step)) || 1;
     const pts = [];
     setSpecRunning(true);
     try {
+      const baseRows = await getFullRows();
       for (let t = Number(start); t <= Number(end) + 1e-9; t += s) {
-        const filtered = (rows ?? []).filter(row => {
+        const filtered = (baseRows ?? []).filter(row => {
           const v = Number(row[col]);
           switch (op) {
             case ">=": return !isNaN(v) && v >= t;
@@ -852,20 +867,21 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       setSpecRunning(false);
     }
     setSpecRows(pts);
-  }, [specConfig, rows, _runEstimation]);
+  }, [specConfig, getFullRows, _runEstimation]);
 
   // ── RUN ALL SUBSETS ───────────────────────────────────────────────────────────
-  const runAllSubsets = useCallback(() => {
+  const runAllSubsets = useCallback(async () => {
     if (!subsets.length) return;
     setRunning(true);
     try {
+      const baseRows = await getFullRows();
       const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
       const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
 
       // Full sample (with per-subset steps applied if a branch point is set)
       const fullRows = hasSubsetSteps
-        ? (runPipeline(rows, headers, perSubsetSteps, pipelineCtx)?.rows ?? rows)
-        : rows;
+        ? (runPipeline(baseRows, headers, perSubsetSteps, pipelineCtx)?.rows ?? baseRows)
+        : baseRows;
       const fullOut = _runEstimation(fullRows);
       if (!fullOut.error && fullOut.result) {
         const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample", subsetFilters: [] };
@@ -875,7 +891,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
       // Each named subset
       for (const s of subsets) {
-        const filtered = applySubsetFilter(rows, s.filters);
+        const filtered = applySubsetFilter(baseRows, s.filters);
         const subsetRows = hasSubsetSteps
           ? (runPipeline(filtered, headers, perSubsetSteps, pipelineCtx)?.rows ?? filtered)
           : filtered;
@@ -889,7 +905,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } finally {
       setRunning(false);
     }
-  }, [subsets, rows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
+  }, [subsets, getFullRows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
 
   // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
   const estimate = useCallback(async () => {
@@ -1842,12 +1858,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
       // ── Standard path: extract full rows into JS, run engine ───────────────
       // For DuckDB datasets, `rows` is only a 500-row preview.
-      let estimationRows = rows;
-      if (duckTable && rows.length < (rowCount || Infinity)) {
-        const me = await measure(() => extractAllRows(duckTable));
-        estimationRows = me.result;
-        logEstimate({ path: "js", phase: "extract", n: rowCount, msTotal: me.ms });
-      }
+      const estimationRows = await getFullRows();
       const mj = await measure(async () => _runEstimation(estimationRows));
       const out = mj.result;
       logEstimate({
@@ -1862,7 +1873,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     } finally {
       setRunning(false);
     }
-  }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation,
+  }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation, getFullRows,
       model, family, yVar, xVars, wVars, zVars, weightVar, factorVars, seType,
       clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
       postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol, poissonOffsetCol, poissonExtraFE]);
