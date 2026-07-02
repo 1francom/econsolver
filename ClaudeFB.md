@@ -456,10 +456,10 @@
 ### Bugs
 
 - [08:53] · Data
-  Parse error: crime_panel_final_r_300.rds — not a valid R data file (.rds), unrecognised serialisation header.
+  ~~Parse error: crime_panel_final_r_300.rds — not a valid R data file (.rds), unrecognised serialisation header.~~ ✓ DONE (Franco-confirmed 2026-07-02)
 
 - [08:53] · Data
-  Parse error: grid_enriched_500.rds — not a valid R data file (.rds), unrecognised serialisation header.
+  ~~Parse error: grid_enriched_500.rds — not a valid R data file (.rds), unrecognised serialisation header.~~ ✓ DONE (Franco-confirmed 2026-07-02)
 
 ---
 
