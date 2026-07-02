@@ -456,7 +456,16 @@
 ### Bugs
 
 - [08:53] · Data
-  Parse error: crime_panel_final_r_300.rds — not a valid R data file (.rds), unrecognised serialisation header.
+  ~~Parse error: crime_panel_final_r_300.rds — not a valid R data file (.rds), unrecognised serialisation header.~~ ✓ DONE (Franco-confirmed 2026-07-02)
 
 - [08:53] · Data
-  Parse error: grid_enriched_500.rds — not a valid R data file (.rds), unrecognised serialisation header.
+  ~~Parse error: grid_enriched_500.rds — not a valid R data file (.rds), unrecognised serialisation header.~~ ✓ DONE (Franco-confirmed 2026-07-02)
+
+---
+
+## 2026-07-01 batch
+
+### Features
+
+- [10:12] · Clean
+  Add confirmation buttons for all critical functions like clearing all the datasets, clearing all the pipeline, signing out, etc.

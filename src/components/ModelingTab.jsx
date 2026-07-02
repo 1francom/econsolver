@@ -105,6 +105,7 @@ import {
   PanelResults, TwoSLSResults, GMMResults, LIMLResults, FuzzyRDDResults,
 } from "./modeling/results/index.js";
 import { GroupTimePlot, EventStudyDynamicPlot, GroupAggPlot, CalendarAggPlot } from "./modeling/plots/didPlots.jsx";
+import { buildAttgtLatex, attgtPValue } from "../services/export/latexTable.js";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 // Pure (no-React) helpers extracted to ./modeling/helpers.js: buildModelAvail,
@@ -131,15 +132,7 @@ function CSResultsPanel({
   const byG     = r.aggregations?.group?.byG ?? [];
   const byT     = r.aggregations?.calendar?.byT ?? [];
 
-  const rowP = (att, se) => {
-    if (!se) return null;
-    const z = Math.abs(att / se);
-    if (!isFinite(z)) return null;
-    const t = 1 / (1 + 0.2316419 * z);
-    const dens = (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * z * z);
-    const p = dens * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-    return Math.min(2 * p, 1);
-  };
+  const rowP = attgtPValue;
   const stars = p => p == null ? "" : p < 0.01 ? "***" : p < 0.05 ? "**" : p < 0.1 ? "*" : "";
 
   return (
@@ -268,15 +261,15 @@ function CSResultsPanel({
           <div style={{ overflowX: "auto" }}>
             <table style={{
               width: "100%", borderCollapse: "collapse",
-              fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
+              fontSize: 13, fontFamily: T.code.fontFamily,
             }}>
               <thead>
                 <tr>
                   {["g", "t", "e", "ATT", "SE", "95% CI", "p", "pre/post"].map(h => (
                     <th key={h} style={{
-                      textAlign: "right", padding: "3px 8px",
+                      textAlign: "right", padding: "8px 14px",
                       borderBottom: `1px solid ${C.border}`,
-                      color: C.textMuted, letterSpacing: "0.1em",
+                      color: C.textMuted, letterSpacing: "0.1em", fontSize: 12,
                     }}>
                       {h}
                     </th>
@@ -288,27 +281,27 @@ function CSResultsPanel({
                   const p = rowP(c.att, c.se);
                   return (
                   <tr key={i} style={{ borderBottom: `1px solid ${C.border}10` }}>
-                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.teal }}>{c.g}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.text }}>{c.t}</td>
-                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.textDim }}>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: C.teal }}>{c.g}</td>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: C.text }}>{c.t}</td>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: C.textDim }}>
                       {c.e != null ? c.e : (c.t != null && c.g != null ? c.t - c.g : "—")}
                     </td>
-                    <td style={{ textAlign: "right", padding: "2px 8px", color: c.att >= 0 ? C.teal : "#e05c5c" }}>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: c.att >= 0 ? C.teal : "#e05c5c" }}>
                       {c.att?.toFixed(4) ?? "—"}
                     </td>
-                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.textDim }}>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: C.textDim }}>
                       {c.se?.toFixed(4) ?? "—"}
                     </td>
-                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.textDim }}>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: C.textDim }}>
                       {c.att != null && c.se != null
                         ? `[${(c.att - critVal * c.se).toFixed(3)}, ${(c.att + critVal * c.se).toFixed(3)}]`
                         : "—"}
                     </td>
-                    <td style={{ textAlign: "right", padding: "2px 8px", color: C.textDim }}>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: C.textDim }}>
                       {p != null ? (p < 0.001 ? "<0.001" : p.toFixed(4)) : "—"}
-                      <span style={{ marginLeft: 4, color: C.gold }}>{stars(p)}</span>
+                      <span style={{ marginLeft: 5, color: C.gold }}>{stars(p)}</span>
                     </td>
-                    <td style={{ textAlign: "right", padding: "2px 8px", color: c.isPre ? "#e05c5c" : C.teal }}>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: c.isPre ? "#e05c5c" : C.teal }}>
                       {c.isPre ? "pre" : "post"}
                     </td>
                   </tr>
@@ -325,6 +318,7 @@ function CSResultsPanel({
         yVar={yVar} results={r} model="CallawayCS"
         onReport={onReport}
         replicateConfig={null}
+        latexBuilder={(yv) => buildAttgtLatex(attgt, critVal, yv)}
       />
     </div>
   );

@@ -225,6 +225,7 @@ Merge (6): `join` (`left, inner, right, full, semi, anti`), `append, bind_cols, 
 - **Fuzzy groups**: numeric variants like "comuna 1" vs "comuna 2" must never be grouped regardless of Levenshtein distance.
 - **SyntheticControl crash on predictor click**: `setXVars` was not destructured in `ModelConfiguration` props — passed as `undefined` to `SyntheticControlConfig`, crashing on any variable toggle.
 - **Stale closure in estimate() for SC/EventStudy/LSDV**: `treatedUnit`, `synthTreatTime`, `treatTimeCol`, `kPre`, `kPost`, `lsdvTimeFE` were missing from `estimate` useCallback dep array — estimation always saw initial empty state.
+- **CSP `connect-src` must include every CDN origin fetched at runtime, not just `script-src`**: DuckDB-Wasm's worker `fetch()`es its `.wasm` binary from jsDelivr at init time — that's governed by `connect-src`, not `script-src`. `cdn.jsdelivr.net` was allowlisted in `script-src`/`style-src`/`font-src` (P3 CSP hardening, 2026-05-26) but never added to `connect-src`, silently breaking DuckDB init — and therefore any file load >10MB — on the deployed (Vercel) site only, since `vercel.json` headers don't apply to local dev. Fixed 2026-07-02. When adding a new CDN dependency, check whether it's `<script>`-loaded (script-src) or `fetch()`-loaded at runtime (connect-src) — most WASM/worker libraries need both.
 
 ## AI service details
 - **Model routing** (never bypass without a reason):
