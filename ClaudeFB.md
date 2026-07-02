@@ -469,3 +469,12 @@
 
 - [10:12] · Clean
   Add confirmation buttons for all critical functions like clearing all the datasets, clearing all the pipeline, signing out, etc.
+
+---
+
+## 2026-07-02 batch
+
+### Bugs
+
+- [08:41] · Model
+  When using DuckDB, the number of observations reported in model output uses the 500-row browser preview, not the full raw row count — affects n, degrees of freedom, t-statistics, F-statistics, and p-values.
