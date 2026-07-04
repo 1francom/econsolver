@@ -478,3 +478,12 @@
 
 - [08:41] · Model
   When using DuckDB, the number of observations reported in model output uses the 500-row browser preview, not the full raw row count — affects n, degrees of freedom, t-statistics, F-statistics, and p-values.
+
+---
+
+## 2026-07-04 batch
+
+### Features
+
+- [12:37] · Calculate
+  Allow plotting constants in the graph (e.g. draw a horizontal line for a constant value alongside function curves)
