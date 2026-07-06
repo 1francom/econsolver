@@ -2114,7 +2114,7 @@ function Dashboard({onNew, onLoad}) {
             border:`1px solid ${C.border2}`,
             borderRadius:5, padding:"1.2rem 1.4rem",
             background:C.goldFaint, cursor:"pointer",
-            display:"flex", alignItems:"center", gap:14,
+            display:"flex", alignItems:"center", gap:14, flexShrink:0,
             transition:"background 0.15s, border-color 0.15s",
           }}
           onMouseEnter={e=>{e.currentTarget.style.background=C.surface3;e.currentTarget.style.borderColor=C.goldDim;}}
@@ -2134,7 +2134,7 @@ function Dashboard({onNew, onLoad}) {
           <div style={{
             border:`1px solid ${C.border}`,
             borderRadius:5, overflow:"hidden",
-            display:"flex", flexDirection:"column", maxHeight:"60vh",
+            display:"flex", flexDirection:"column", maxHeight:"60vh", flexShrink:0,
           }}>
             {/* Project header */}
             <div style={{
@@ -2287,7 +2287,7 @@ function Dashboard({onNew, onLoad}) {
         {/* ── Cloud projects card ── */}
         <div style={{
           border:`1px solid ${C.border}`,
-          borderRadius:5, overflow:"hidden",
+          borderRadius:5, overflow:"hidden", flexShrink:0,
         }}>
           {/* Header */}
           <div style={{
@@ -2498,7 +2498,7 @@ function Dashboard({onNew, onLoad}) {
             border:`1px solid ${C.blue}`,
             borderRadius:5, padding:"0.85rem 1rem",
             background:`${C.blue}0d`,
-            display:"flex", flexDirection:"column", gap:8,
+            display:"flex", flexDirection:"column", gap:8, flexShrink:0,
           }}>
             <div style={{fontSize: T.code.fontSize,color:C.blue}}>↓ Incoming shared project</div>
             <div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>Someone shared a project with you via link. Import it to your dashboard?</div>
@@ -2521,12 +2521,13 @@ function Dashboard({onNew, onLoad}) {
 
         {/* ── Shared with me card ── */}
         {user && sharedWithMe.length > 0 && (
-          <div style={{border:`1px solid ${C.border}`,borderRadius:5,overflow:"hidden"}}>
-            <div style={{padding:"0.7rem 1rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+          <div style={{border:`1px solid ${C.border}`,borderRadius:5,overflow:"hidden",flexShrink:0,display:"flex",flexDirection:"column"}}>
+            <div style={{padding:"0.7rem 1rem",background:C.surface2,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
               <span style={{fontSize: T.body.fontSize,color:C.blue}}>⇄</span>
               <span style={{fontSize: T.code.fontSize,color:C.text}}>Shared with me</span>
+              <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:"auto"}}>{sharedWithMe.length}</span>
             </div>
-            <div style={{padding:"0.7rem 1rem",display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{padding:"0.7rem 1rem",display:"flex",flexDirection:"column",gap:6,maxHeight:300,overflowY:"auto"}}>
               {shareErr && <div style={{fontSize: T.caption.fontSize,color:C.red,marginBottom:2}}>{shareErr}</div>}
               {sharedWithMe.map(s => {
                 const isLocal = projects.some(p => p.pid === s.pid);
@@ -2565,7 +2566,7 @@ function Dashboard({onNew, onLoad}) {
           padding:"0.65rem 0.85rem",
           background:C.surface,
           border:`1px solid ${C.border}`,
-          borderRadius:4,
+          borderRadius:4, flexShrink:0,
           fontSize: T.caption.fontSize, color:C.textMuted,
           display:"flex", gap:8, alignItems:"center", flexWrap:"wrap",
         }}>

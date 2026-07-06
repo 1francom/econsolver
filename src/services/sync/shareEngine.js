@@ -281,6 +281,9 @@ export async function listMyShares(pid) {
 
 /**
  * List all shares addressed to the current user's account email.
+ * The owner RLS policy also exposes the user's own outgoing shares through
+ * this query, so filter to rows whose recipient is actually this account —
+ * otherwise every share you create shows up in your own "Shared with me".
  */
 export async function listSharedWithMe() {
   const supabase = getSyncSupabase();
@@ -289,7 +292,10 @@ export async function listSharedWithMe() {
     .select("id,pid,name,recipient_email,can_edit,token,version,created_at,owner_id")
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return data ?? [];
+
+  const { data: auth } = await supabase.auth.getUser();
+  const myEmail = auth?.user?.email?.trim().toLowerCase();
+  return (data ?? []).filter(s => s.recipient_email === myEmail);
 }
 
 /**
@@ -316,13 +322,24 @@ export async function pullShare(token) {
   const ok = await checkVerifier(encKey, { ct: verifierObj.ct, iv: verifierObj.iv });
   if (!ok) throw new Error("Share key verification failed.");
 
-  // Download + decrypt artifact index
-  const idxCt    = await downloadArtifact(supabase, token, "__index__");
-  const idxBytes = await decryptBytes(encKey, idxCt, verifierObj.indexIv);
-  const index    = decode(idxBytes);
-
-  // Decrypt full bundle
-  const bundle = await decryptBundle(supabase, token, encKey, index);
+  // Download + decrypt artifact index + full bundle.
+  // Supabase Storage reports "Object not found" both for missing files AND
+  // for reads denied by RLS, so translate it into something actionable.
+  let index, bundle;
+  try {
+    const idxCt    = await downloadArtifact(supabase, token, "__index__");
+    const idxBytes = await decryptBytes(encKey, idxCt, verifierObj.indexIv);
+    index  = decode(idxBytes);
+    bundle = await decryptBundle(supabase, token, encKey, index);
+  } catch (e) {
+    if (/object not found|not_found|404/i.test(e?.message ?? "")) {
+      throw new Error(
+        "Share files could not be downloaded. Your account email must exactly match " +
+        "the address the share was sent to. If it does, ask the owner to revoke and re-share."
+      );
+    }
+    throw e;
+  }
 
   // Save locally — use original pid (will overwrite if already present)
   const targetPid = row.pid;
