@@ -6,6 +6,7 @@
 import { useState } from "react";
 import DatasetManager from "./DatasetManager.jsx";
 import AppearancePanel from "./AppearancePanel.jsx";
+import ConfirmPopover from "../shared/ConfirmPopover.jsx";
 import { useTheme } from "../../ThemeContext.jsx";
 import { signOut } from "../../services/auth/authService.js";
 import { useAuth } from "../../services/auth/AuthContext.jsx";
@@ -27,6 +28,8 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
   const { C, T, theme, setTheme } = useTheme();
   const { guest, exitGuest } = useAuth();
   const [showAppearance, setShowAppearance] = useState(false);
+  const [confirmClearLocal, setConfirmClearLocal] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
 
   return (
     <div style={{
@@ -197,58 +200,78 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
       </div>
 
       {/* ── Clear all local data ── */}
-      <button
-        onClick={async () => {
-          if (!window.confirm("Clear ALL local data?\n\nThis deletes every dataset, pipeline, and project stored in this browser. This cannot be undone.")) return;
-          await clearAllLocalData();
-          window.location.reload();
-        }}
-        title="Clear all local data"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 32,
-          flexShrink: 0,
-          background: "transparent",
-          border: "none",
-          borderLeft: `1px solid ${C.border}`,
-          color: C.textMuted,
-          cursor: "pointer",
-          fontSize: T.body.fontSize,
-          fontFamily: T.code.fontFamily,
-          transition: "color 0.12s",
-        }}
-        onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
-        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
-      >
-        ⊘
-      </button>
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        <button
+          onClick={() => setConfirmClearLocal(v => !v)}
+          title="Clear all local data"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 32,
+            flexShrink: 0,
+            background: "transparent",
+            border: "none",
+            borderLeft: `1px solid ${C.border}`,
+            color: confirmClearLocal ? C.red : C.textMuted,
+            cursor: "pointer",
+            fontSize: T.body.fontSize,
+            fontFamily: T.code.fontFamily,
+            transition: "color 0.12s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
+          onMouseLeave={e => { e.currentTarget.style.color = confirmClearLocal ? C.red : C.textMuted; }}
+        >
+          ⊘
+        </button>
+        {confirmClearLocal && (
+          <ConfirmPopover
+            message="Clear ALL local data? This deletes every dataset, pipeline, and project stored in this browser. This cannot be undone."
+            confirmLabel="Clear all"
+            onCancel={() => setConfirmClearLocal(false)}
+            onConfirm={async () => {
+              setConfirmClearLocal(false);
+              await clearAllLocalData();
+              window.location.reload();
+            }}
+          />
+        )}
+      </div>
 
       {/* ── Sign out / exit guest ── */}
-      <button
-        onClick={() => { if (guest) exitGuest(); else signOut(); }}
-        title={guest ? "Exit guest mode" : "Sign out"}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 32,
-          flexShrink: 0,
-          background: "transparent",
-          border: "none",
-          borderLeft: `1px solid ${C.border}`,
-          color: C.textMuted,
-          cursor: "pointer",
-          fontSize: T.code.fontSize,
-          fontFamily: T.code.fontFamily,
-          transition: "color 0.12s",
-        }}
-        onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
-        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
-      >
-        ⏻
-      </button>
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        <button
+          onClick={() => setConfirmSignOut(v => !v)}
+          title={guest ? "Exit guest mode" : "Sign out"}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 32,
+            flexShrink: 0,
+            background: "transparent",
+            border: "none",
+            borderLeft: `1px solid ${C.border}`,
+            color: confirmSignOut ? C.red : C.textMuted,
+            cursor: "pointer",
+            fontSize: T.code.fontSize,
+            fontFamily: T.code.fontFamily,
+            transition: "color 0.12s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
+          onMouseLeave={e => { e.currentTarget.style.color = confirmSignOut ? C.red : C.textMuted; }}
+        >
+          ⏻
+        </button>
+        {confirmSignOut && (
+          <ConfirmPopover
+            message={guest ? "Exit guest mode? Any unsaved local work stays on this device, but the session state resets." : "Sign out of your account?"}
+            confirmLabel={guest ? "Exit" : "Sign out"}
+            onCancel={() => setConfirmSignOut(false)}
+            onConfirm={() => { setConfirmSignOut(false); if (guest) exitGuest(); else signOut(); }}
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -467,5 +467,23 @@
 
 ### Features
 
-- [10:12] · Clean
-  Add confirmation buttons for all critical functions like clearing all the datasets, clearing all the pipeline, signing out, etc.
+- ~~[10:12] · Clean
+  Add confirmation buttons for all critical functions like clearing all the datasets, clearing all the pipeline, signing out, etc.~~ ✓ code-complete 2026-07-06 — new `ConfirmPopover` component wired to 6 previously-unconfirmed destructive actions (clear all local data, sign out ×2, delete project, clear all projects, clear all pipeline steps, clear all cell edits). Browser validation pending Franco.
+
+---
+
+## 2026-07-02 batch
+
+### Bugs
+
+- ~~[08:41] · Model
+  When using DuckDB, the number of observations reported in model output uses the 500-row browser preview, not the full raw row count — affects n, degrees of freedom, t-statistics, F-statistics, and p-values.~~ ✓ DONE (`c9c5bd3e`, #100) — WranglingModule's proceed() ("→ Analyze") omitted `_duckdb` from the `onComplete` payload, so ModelingTab estimated on the 500-row preview instead of the full table.
+
+---
+
+## 2026-07-04 batch
+
+### Features
+
+- [12:37] · Calculate
+  Allow plotting constants in the graph (e.g. draw a horizontal line for a constant value alongside function curves)

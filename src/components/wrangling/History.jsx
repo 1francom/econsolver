@@ -71,6 +71,8 @@ function UndoBtn({ label, title, onClick, enabled }) {
 function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete }) {
   const { C, T } = useTheme();
   const [patchOpen, setPatchOpen] = useState(false);
+  const [confirmClearAll,     setConfirmClearAll]     = useState(false);
+  const [confirmClearPatches, setConfirmClearPatches] = useState(false);
   if (!pipeline.length && !canUndo && !canRedo) return null;
 
   // Separate patch (cell edit) steps from regular pipeline steps
@@ -97,13 +99,13 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
         <UndoBtn label="↪" title="Redo"            onClick={onRedo} enabled={canRedo} />
 
         <button
-          onClick={onClear}
+          onClick={() => setConfirmClearAll(v => !v)}
           disabled={pipeline.length === 0}
           title="Clear all pipeline steps"
           style={{
             marginLeft: 2,
             fontSize: T.caption.fontSize, background: "transparent", border: "none",
-            color: pipeline.length ? C.textMuted : C.border,
+            color: confirmClearAll ? C.red : pipeline.length ? C.textMuted : C.border,
             cursor: pipeline.length ? "pointer" : "default",
             fontFamily: T.code.fontFamily, padding: "2px 4px",
             opacity: pipeline.length ? 1 : 0.4,
@@ -112,6 +114,43 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
           clear all
         </button>
       </div>
+
+      {/* ── Inline confirm for "clear all pipeline steps" ── */}
+      {confirmClearAll && (
+        <div style={{
+          padding: "0.55rem 1rem",
+          background: `${C.red}15`,
+          borderBottom: `1px solid ${C.red}40`,
+          flexShrink: 0,
+        }}>
+          <div style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginBottom: 6 }}>
+            Remove all {pipeline.length} pipeline step{pipeline.length !== 1 ? "s" : ""}? (Undoable with ↩ until you navigate away.)
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button
+              onClick={() => { setConfirmClearAll(false); onClear(); }}
+              style={{
+                padding: "0.25rem 0.6rem", background: `${C.red}30`,
+                border: `1px solid ${C.red}`, borderRadius: 3,
+                color: C.red, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                fontWeight: 700,
+              }}
+            >
+              Clear all
+            </button>
+            <button
+              onClick={() => setConfirmClearAll(false)}
+              style={{
+                padding: "0.25rem 0.6rem", background: "transparent",
+                border: `1px solid ${C.border2}`, borderRadius: 3,
+                color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Step list ── */}
       <div style={{ flex: 1, overflowY: "auto", padding: "0.6rem 1rem" }}>
@@ -159,11 +198,11 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                   </span>
                   {onClearPatches && (
                     <button
-                      onClick={e => { e.stopPropagation(); onClearPatches(); }}
+                      onClick={e => { e.stopPropagation(); setConfirmClearPatches(v => !v); }}
                       title="Remove all cell edits"
                       style={{
                         background: "transparent", border: "none",
-                        color: C.textMuted, cursor: "pointer",
+                        color: confirmClearPatches ? C.red : C.textMuted, cursor: "pointer",
                         fontSize: T.caption.fontSize, padding: "0 2px", flexShrink: 0,
                         fontFamily: T.code.fontFamily,
                       }}
@@ -172,6 +211,40 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
                     </button>
                   )}
                 </div>
+                {/* Inline confirm for "clear all cell edits" */}
+                {confirmClearPatches && (
+                  <div style={{
+                    padding: "0.5rem", background: `${C.red}15`,
+                    border: `1px solid ${C.red}40`, borderTop: "none",
+                  }}>
+                    <div style={{ fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily, marginBottom: 6 }}>
+                      Remove all {patches.length} cell edit{patches.length !== 1 ? "s" : ""}? (Undoable with ↩.)
+                    </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button
+                        onClick={() => { setConfirmClearPatches(false); onClearPatches(); }}
+                        style={{
+                          padding: "0.25rem 0.6rem", background: `${C.red}30`,
+                          border: `1px solid ${C.red}`, borderRadius: 3,
+                          color: C.red, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                          fontWeight: 700,
+                        }}
+                      >
+                        Clear all
+                      </button>
+                      <button
+                        onClick={() => setConfirmClearPatches(false)}
+                        style={{
+                          padding: "0.25rem 0.6rem", background: "transparent",
+                          border: `1px solid ${C.border2}`, borderRadius: 3,
+                          color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {/* Expanded list */}
                 {patchOpen && (
                   <div style={{

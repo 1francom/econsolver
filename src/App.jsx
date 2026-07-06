@@ -8,6 +8,7 @@ import ExplorerModule from "./ExplorerModule.jsx";
 import ModelingTab from './components/ModelingTab.jsx';
 import AIContextSidebar from './components/AIContextSidebar.jsx';
 import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
+import ConfirmPopover from './components/shared/ConfirmPopover.jsx';
 import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
@@ -1505,7 +1506,9 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
               {[
                 {label:"↓ World Bank data", color:C.teal, action:()=>setWbOpen(true)},
                 {label:"↓ OECD data",       color:C.blue, action:()=>setOecdOpen(true)},
-                {label:"↓ Observatorio (femicidios)", color:C.gold, action:()=>setObsOpen(true)},
+                // Observatorio (femicidios) hidden from UI 2026-07-02 — scraper-style
+                // fetchers need a general in-app story before exposing to users.
+                // Re-add: {label:"↓ Observatorio (femicidios)", color:C.gold, action:()=>setObsOpen(true)},
               ].map(({label,color,action})=>(
                 <button key={label} onClick={action} style={{
                   padding:"0.4rem 0.65rem",background:"transparent",
@@ -1676,6 +1679,9 @@ function Dashboard({onNew, onLoad}) {
   const [renameVal,   setRenameVal]   = useState("");
   const [editingDesc, setEditingDesc] = useState(null);  // pid with open desc editor
   const [descVal,     setDescVal]     = useState("");
+  const [confirmDeletePid,  setConfirmDeletePid]  = useState(null);  // pid pending delete confirmation
+  const [confirmClearAll,   setConfirmClearAll]   = useState(false);
+  const [confirmSignOut,    setConfirmSignOut]    = useState(false);
 
   // ── Cloud sync state ────────────────────────────────────────────────────────
   const [cloudProjects, setCloudProjects] = useState([]);
@@ -2018,20 +2024,30 @@ function Dashboard({onNew, onLoad}) {
                 </div>
 
                 {/* Delete */}
-                <button
-                  onClick={e => handleDelete(p.pid, e)}
-                  title="Delete project"
-                  style={{
-                    background:"transparent", border:"none",
-                    color:C.textMuted, cursor:"pointer",
-                    fontSize: T.body.fontSize, padding:"0 2px", flexShrink:0, marginTop:1,
-                    transition:"color 0.1s",
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.color = C.red}
-                  onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
-                >
-                  ×
-                </button>
+                <div style={{ position:"relative", flexShrink:0 }}>
+                  <button
+                    onClick={e => { e.stopPropagation(); setConfirmDeletePid(p.pid); }}
+                    title="Delete project"
+                    style={{
+                      background:"transparent", border:"none",
+                      color:C.textMuted, cursor:"pointer",
+                      fontSize: T.body.fontSize, padding:"0 2px", marginTop:1,
+                      transition:"color 0.1s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = C.red}
+                    onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                  >
+                    ×
+                  </button>
+                  {confirmDeletePid === p.pid && (
+                    <ConfirmPopover
+                      message={`Delete "${p.name || p.filename || "Unnamed"}"? This removes the project and its pipeline from this browser. This cannot be undone.`}
+                      confirmLabel="Delete"
+                      onCancel={() => setConfirmDeletePid(null)}
+                      onConfirm={e => { setConfirmDeletePid(null); handleDelete(p.pid, e); }}
+                    />
+                  )}
+                </div>
               </div>
             );
           })}
@@ -2043,20 +2059,30 @@ function Dashboard({onNew, onLoad}) {
             padding:"0.6rem 1rem",
             borderTop:`1px solid ${C.border}`,
             flexShrink:0,
+            position:"relative",
           }}>
             <button
-              onClick={handleClearAll}
+              onClick={() => setConfirmClearAll(v => !v)}
               style={{
                 background:"transparent", border:"none",
-                color:C.textMuted, cursor:"pointer",
+                color: confirmClearAll ? C.red : C.textMuted, cursor:"pointer",
                 fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 transition:"color 0.1s",
               }}
               onMouseEnter={e=>e.currentTarget.style.color=C.red}
-              onMouseLeave={e=>e.currentTarget.style.color=C.textMuted}
+              onMouseLeave={e=>e.currentTarget.style.color = confirmClearAll ? C.red : C.textMuted}
             >
               Clear all projects
             </button>
+            {confirmClearAll && (
+              <ConfirmPopover
+                message="Clear ALL projects? This deletes every project and pipeline stored in this browser. This cannot be undone."
+                confirmLabel="Clear all"
+                align="left"
+                onCancel={() => setConfirmClearAll(false)}
+                onConfirm={() => { setConfirmClearAll(false); handleClearAll(); }}
+              />
+            )}
           </div>
         )}
       </div>
@@ -2278,26 +2304,36 @@ function Dashboard({onNew, onLoad}) {
                 <span style={{fontSize: T.caption.fontSize, color:C.textMuted}}>
                   {user ? user.email : "Guest session"}
                 </span>
-                <button
-                  onClick={() => { if (guest) exitGuest(); else signOut(); }}
-                  title={guest ? "Exit guest mode" : "Sign out"}
-                  style={{
-                    background:"transparent",
-                    border:`1px solid ${C.border2}`,
-                    borderRadius:3,
-                    color:C.textMuted,
-                    cursor:"pointer",
-                    fontFamily: T.code.fontFamily,
-                    fontSize: T.caption.fontSize,
-                    letterSpacing:"0.06em",
-                    padding:"0.2rem 0.6rem",
-                    transition:"all 0.15s",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.red; e.currentTarget.style.color = C.red; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
-                >
-                  {guest ? "Exit" : "Sign out"}
-                </button>
+                <div style={{ position:"relative" }}>
+                  <button
+                    onClick={() => setConfirmSignOut(v => !v)}
+                    title={guest ? "Exit guest mode" : "Sign out"}
+                    style={{
+                      background:"transparent",
+                      border:`1px solid ${confirmSignOut ? C.red : C.border2}`,
+                      borderRadius:3,
+                      color: confirmSignOut ? C.red : C.textMuted,
+                      cursor:"pointer",
+                      fontFamily: T.code.fontFamily,
+                      fontSize: T.caption.fontSize,
+                      letterSpacing:"0.06em",
+                      padding:"0.2rem 0.6rem",
+                      transition:"all 0.15s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = C.red; e.currentTarget.style.color = C.red; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = confirmSignOut ? C.red : C.border2; e.currentTarget.style.color = confirmSignOut ? C.red : C.textMuted; }}
+                  >
+                    {guest ? "Exit" : "Sign out"}
+                  </button>
+                  {confirmSignOut && (
+                    <ConfirmPopover
+                      message={guest ? "Exit guest mode? Any unsaved local work stays on this device, but the session state resets." : "Sign out of your account?"}
+                      confirmLabel={guest ? "Exit" : "Sign out"}
+                      onCancel={() => setConfirmSignOut(false)}
+                      onConfirm={() => { setConfirmSignOut(false); if (guest) exitGuest(); else signOut(); }}
+                    />
+                  )}
+                </div>
               </div>
             )}
           </div>
