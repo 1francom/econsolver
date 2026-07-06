@@ -200,7 +200,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
       </div>
 
       {/* ── Clear all local data ── */}
-      <div style={{ position: "relative", flexShrink: 0 }}>
+      <div style={{ position: "relative", flexShrink: 0, display: "flex", alignItems: "stretch" }}>
         <button
           onClick={() => setConfirmClearLocal(v => !v)}
           title="Clear all local data"
@@ -209,6 +209,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             alignItems: "center",
             justifyContent: "center",
             width: 32,
+            height: "100%",
             flexShrink: 0,
             background: "transparent",
             border: "none",
@@ -239,7 +240,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
       </div>
 
       {/* ── Sign out / exit guest ── */}
-      <div style={{ position: "relative", flexShrink: 0 }}>
+      <div style={{ position: "relative", flexShrink: 0, display: "flex", alignItems: "stretch" }}>
         <button
           onClick={() => setConfirmSignOut(v => !v)}
           title={guest ? "Exit guest mode" : "Sign out"}
@@ -248,6 +249,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             alignItems: "center",
             justifyContent: "center",
             width: 32,
+            height: "100%",
             flexShrink: 0,
             background: "transparent",
             border: "none",
