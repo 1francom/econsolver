@@ -467,5 +467,5 @@
 
 ### Features
 
-- [10:12] · Clean
-  Add confirmation buttons for all critical functions like clearing all the datasets, clearing all the pipeline, signing out, etc.
+- ~~[10:12] · Clean
+  Add confirmation buttons for all critical functions like clearing all the datasets, clearing all the pipeline, signing out, etc.~~ ✓ code-complete 2026-07-06 — new `ConfirmPopover` component wired to 6 previously-unconfirmed destructive actions (clear all local data, sign out ×2, delete project, clear all projects, clear all pipeline steps, clear all cell edits). Browser validation pending Franco.
