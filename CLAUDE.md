@@ -19,17 +19,43 @@ src/
 ├── math/
 │   ├── index.js                    ← single barrel export for all engines
 │   ├── LinearEngine.js             ← OLS, WLS, matrix algebra, diagnostics, export helpers
+│   ├── WLSEngine.js                ← standalone WLS (survey weights); runWLSFromSuffStats (DuckDB path)
 │   ├── PanelEngine.js              ← FE, FD, TWFE, 2x2 DiD, EventStudy, LSDV
+│   ├── PanelSuffStatsEngine.js     ← FE/FD/TWFE from SQL sufficient statistics (DuckDB path)
 │   ├── CausalEngine.js             ← 2SLS/IV, Sharp RDD, Fuzzy RDD, McCrary density test, IK bandwidth
-│   ├── NonLinearEngine.js          ← Logit/Probit, IRLS/Newton-Raphson MLE, McFadden R², MEM, PoissonFE
-│   ├── GMMEngine.js                ← GMM, LIML
+│   ├── IV2SLSEngine.js             ← 2SLS from suff-stats (DuckDB path); run2SLSFromSuffStats
+│   ├── RDDSuffStatsEngine.js       ← sharp+fuzzy RDD via triangular-kernel WLS suff-stats (DuckDB path)
+│   ├── NonLinearEngine.js          ← Logit/Probit, IRLS/Newton-Raphson MLE, McFadden R², MEM, PoissonFE, runSunAbraham (Sun & Abraham 2021)
+│   ├── IRLSSuffStatsEngine.js      ← Logit/Probit/Poisson from SQL suff-stats (DuckDB path)
+│   ├── GMMEngine.js                ← GMM, LIML (limlKappa2x2/limlKappaPower)
+│   ├── GMMSuffStatsEngine.js       ← GMM (two-step efficient) from suff-stats (DuckDB path)
+│   ├── LIMLSuffStatsEngine.js      ← LIML from suff-stats (DuckDB path)
 │   ├── SyntheticControlEngine.js   ← Frank-Wolfe synthetic control, placebo inference
+│   ├── CallawayEngine.js           ← Callaway & Sant'Anna (2021) staggered DiD orchestrator
+│   ├── did/
+│   │   ├── index.js                ← staggered-DiD barrel
+│   │   ├── drdid.js                ← doubly-robust DiD (C&S building block)
+│   │   └── staggeredDiD.js         ← ATT(g,t) aggregation
 │   ├── SpatialEngine.js            ← haversine/euclidean, buffer assign, grid assign (rect+H3), spatial join, nearest-neighbor
+│   ├── SpatialRegressionEngine.js  ← spatial regression (SAR/SEM); spatial weight matrices
+│   ├── SpatialRDDEngine.js         ← spatial RDD
 │   ├── timeSeries.js               ← time series utilities
 │   ├── ModelHypothesis.js          ← post-estimation coefficient/effect hypothesis tests + R/Python/Stata snippet generator
 │   ├── SampleTests.js              ← pre-model sample tests: one-sample mean t, variance χ², generic parameter t/z
+│   ├── QTE.js                      ← quantile treatment effects
 │   ├── EstimationResult.js         ← shared result type for all engines
-│   └── __validation__/
+│   ├── rng.js                      ← seedable random number generator
+│   ├── dgpDraw.js                  ← DGP draws for Monte Carlo (Simulate tab)
+│   ├── Resampling.js               ← bootstrap / resampling
+│   ├── diagnoseFit.js              ← model fit diagnostics
+│   ├── calcEngine.js               ← calculator engine (Calculate tab)
+│   ├── symbolicDiff.js             ← symbolic differentiation
+│   ├── symbolicSolve.js            ← symbolic equation solving
+│   ├── cas/                        ← computer-algebra-system layer (Equation Workbench)
+│   │   ├── casAdapter.js           ← pluggable CAS adapter
+│   │   ├── nerdamerBackend.js      ← Nerdamer backend
+│   │   └── sympyBackend.js         ← SymPy backend
+│   └── __validation__/             ← per-engine R harness: *RValidation.R + *Benchmarks.json + *Validation.js (window.__validation.*)
 │       ├── README.md
 │       └── engineValidation.js     ← systematic R comparison harness
 │
@@ -41,30 +67,42 @@ src/
 │   │   └── multicollinearity.js    ← VIF, condition number
 │   ├── inference/
 │   │   └── robustSE.js             ← HC0/HC1/HC2/HC3, clustered, two-way CGM, Newey-West HAC
-│   └── validation/
-│       ├── dataQuality.js          ← missing patterns, outlier flags, type consistency
-│       ├── coachingTriggers.js     ← triggers for ResearchCoach suggestions
-│       └── metadataExtractor.js    ← extracts variable metadata for AI context
+│   ├── validation/
+│   │   ├── dataQuality.js          ← missing patterns, outlier flags, type consistency
+│   │   ├── coachingTriggers.js     ← triggers for ResearchCoach suggestions
+│   │   └── metadataExtractor.js    ← extracts variable metadata for AI context
+│   └── generate/
+│       └── vectorAssign.js         ← vector_assign step logic (pure)
 │
 ├── pipeline/
 │   ├── runner.js       ← applyStep + runPipeline — 53 step types
 │   ├── validator.js    ← validatePanel, buildInfo
 │   ├── registry.js     ← STEP_REGISTRY (must stay in sync with runner.js)
 │   ├── auditor.js      ← auditPipeline → AuditTrail + markdown
-│   └── stepValidator.js ← validateAISteps (registry-checked validation of AI-emitted steps)
+│   ├── stepValidator.js ← validateAISteps (registry-checked validation of AI-emitted steps)
+│   ├── stepTranslators.js ← per-step translation helpers (real filename autodetect for join/append, used by export)
+│   ├── exporter.js     ← pipeline export helpers (toDfVar, etc.)
+│   ├── duckdbRunner.js ← translates pipeline steps → SQL; falls back to JS for unsupported steps
+│   ├── expressionHelpers.js ← helpers for user expressions (mutate/if_else/case_when)
+│   └── exprGuard.js    ← security sandbox for user-written expressions
 │
 ├── services/
 │   ├── AI/
-│   │   ├── AIService.js          ← callClaude (exported), inferVariableUnits, interpretRegression, nlToPipeline
+│   │   ├── AIService.js          ← callClaude (exported), inferVariableUnits, interpretRegression, nlToPipeline, generateUnifiedScript
 │   │   ├── appCapabilityMap.js   ← serializeAllowedSteps (NL step catalogue) + APP_CAPABILITY_MAP/serializeCapabilityMap (app structure for the coach)
+│   │   ├── sessionSnapshot.js    ← buildSessionSnapshot/serializeSnapshot/loadOptsToScriptHint (session context for Report-AI)
 │   │   ├── LocalAI.js            ← local/offline AI fallback
 │   │   └── Prompts/
 │   │       └── index.js          ← SHARED_CONTEXT, INFER_UNITS_PROMPT, INTERPRET_REGRESSION_PROMPT,
 │   │                                WRANGLING_TRANSFORM_PROMPT, WRANGLING_QUERY_PROMPT,
-│   │                                CLEANING_SUGGESTIONS_PROMPT, NL_TO_PIPELINE_PROMPT
+│   │                                CLEANING_SUGGESTIONS_PROMPT, NL_TO_PIPELINE_PROMPT, UNIFIED_SCRIPT_PROMPT
 │   ├── session/
 │   │   ├── sessionState.jsx      ← React Context dataset registry (SessionStateProvider, useSessionState)
 │   │   └── sessionLog.jsx        ← React Context cross-module operation log (SessionLogProvider, useSessionLog)
+│   ├── auth/
+│   │   ├── AuthContext.jsx       ← app-wide auth context (credits, tier, refreshCredits)
+│   │   ├── authService.js        ← getProfile / getCredits (Supabase)
+│   │   └── guestMode.js          ← guest (no-login) mode
 │   ├── Privacy/
 │   │   ├── index.js              ← privacy module barrel export
 │   │   ├── anonymizer.js         ← data anonymization utilities
@@ -72,23 +110,60 @@ src/
 │   │   ├── privacyFilter.js      ← filter sensitive data before AI calls
 │   │   └── PrivacyConfigPanel.jsx ← privacy settings UI
 │   ├── data/
+│   │   ├── duckdb.js             ← DuckDB-Wasm singleton (jsDelivr CDN, lazy init)
+│   │   ├── duckdbDispatch.js     ← shouldUseSQLPath routing (n≥50k, k≤100, SE-type gating, operand-presence checks)
+│   │   ├── dispatchConfig.js     ← dispatch thresholds/config
+│   │   ├── duckdbOLS.js          ← buildOLSSuffStats (X'X/X'Y/Y'Y in SQL) + suffStatsCache
+│   │   ├── duckdbFactors.js      ← expandFactors (CASE WHEN dummies)
+│   │   ├── duckdbResiduals.js    ← lazy residual sampling (USING SAMPLE)
+│   │   ├── duckdbDiagnostics.js  ← BP/DW/JB/White/Breusch-Godfrey via CTEs
+│   │   ├── duckdbClusterSE.js    ← cluster + two-way (CGM) meat in SQL
+│   │   ├── duckdbHACSE.js        ← Newey-West Bartlett-kernel meat in SQL
+│   │   ├── duckdbIV.js           ← buildIVSuffStats (2SLS)
+│   │   ├── duckdbIVRobustSE.js   ← IV HC/cluster/twoway/HAC meats
+│   │   ├── duckdbIRLSRobustSE.js ← IRLS score-residual robust meat
+│   │   ├── duckdbLIML.js         ← buildLIMLSuffStats
+│   │   ├── duckdbGMMOmega.js     ← GMM Ω̂ matrix in SQL
+│   │   ├── duckdbRDD.js          ← RDD sharp+fuzzy suff-stats
+│   │   ├── duckdbRDDBandwidth.js ← IK bandwidth moments in SQL
+│   │   ├── duckdbRDDMcCrary.js   ← McCrary density bins in SQL
+│   │   ├── duckdbDiDSynthetic.js ← DiD interaction + Event Study horizon/bin SQL payloads
 │   │   ├── parsers/
 │   │   │   ├── stata.js          ← .dta parser via readstat-wasm
 │   │   │   ├── rds.js            ← XDR binary R serialization reader (data.frame, tibble, named list)
 │   │   │   └── shapefile.js      ← dBase III DBF parser + SHP geometry WKT
 │   │   └── fetchers/
 │   │       ├── worldBank.js      ← World Bank API fetcher
-│   │       └── oecd.js           ← OECD API fetcher
+│   │       ├── oecd.js           ← OECD API fetcher
+│   │       └── observatorio.js   ← Observatorio dynamic data interceptor/fetcher
 │   ├── export/
 │   │   ├── rScript.js            ← pipeline + model → R script (fixest/modelsummary); generateSubsetRScript() for multi-subset lapply export
 │   │   ├── stataScript.js        ← pipeline + model → Stata do-file; generateSubsetStataScript() with preserve/restore blocks
 │   │   ├── pythonScript.js       ← pipeline + model → Python script; generateSubsetPythonScript() dict+comprehension pattern
+│   │   ├── loadLine.js           ← buildR/Py/StataLoadLine — correct data-load call honoring loadOpts (delimiter, Excel sheet, read_stata)
+│   │   ├── latexTable.js         ← LaTeX Stargazer table from ModelComparison
+│   │   ├── plotScript.js         ← PlotBuilder → replication code
+│   │   ├── modelPlotScript.js    ← model plots → replication code
+│   │   ├── plotExporter.js       ← plot → PNG/SVG export
+│   │   ├── mapScript.js          ← spatial map → replication code
+│   │   ├── spatialScript.js      ← spatial analysis → replication code
+│   │   ├── exploreStatScript.js  ← descriptive stats → replication code
+│   │   ├── statInferenceScript.js ← inferential stats → replication code
+│   │   ├── timelinePlan.js       ← operation-timeline plan
 │   │   └── replicationBundle.js  ← ZIP bundle (R + Stata + Python scripts + data); buildMultiSubsetBundle() + downloadMultiSubsetBundle()
 │   ├── Persistence/
 │   │   ├── indexedDB.js          ← loadPipeline, savePipeline, saveRawData, migrateFromLocalStorage; coach_chats store; v9 model_buffer + spatial_maps stores (save/load/delete per project; cascade on deleteProject)
 │   │   ├── trimResult.js         ← shared comparison-sufficient EstimationResult projection (modelBuffer + sessionSnapshot)
-│   │   └── artifactOrder.js      ← project-scoped global order across saved plots/maps/models (getArtifactOrder/saveArtifactOrder + makeArtifactId/parseArtifactId/orderArtifacts)
-│   ├── sync/                     ← opt-in E2EE cloud sync: crypto.js only for WebCrypto, syncEngine.js/supabaseClient.js only for Supabase egress
+│   │   ├── artifactOrder.js      ← project-scoped global order across saved plots/maps/models (getArtifactOrder/saveArtifactOrder + makeArtifactId/parseArtifactId/orderArtifacts)
+│   │   ├── plotHistory.js        ← saved-plot history store
+│   │   └── timeline.js           ← artifact/operation timeline
+│   ├── sync/                     ← opt-in E2EE cloud sync
+│   │   ├── crypto.js             ← WebCrypto only (client-side E2EE; server never sees plaintext)
+│   │   ├── syncEngine.js         ← sync orchestration
+│   │   ├── supabaseClient.js     ← Supabase client (sole Supabase egress for sync)
+│   │   ├── conflict.js           ← conflict resolution
+│   │   └── shareEngine.js        ← project sharing (per-tier limits)
+│   ├── exprEvalService.js        ← expression evaluation service (wrangling/calc)
 │   └── modelBuffer.js            ← model buffer state management
 │
 ├── components/
@@ -100,13 +175,17 @@ src/
 │   │   ├── CleanTab.jsx          ← NormalizePanel, FilterBuilder, FillNaSection
 │   │   ├── PanelTab.jsx          ← heatmap + panel declaration
 │   │   ├── FeatureTab.jsx        ← transforms: log, sq, z-score, winsorize, lag/lead, dates; Formatting tab (Numbers+Strings merged)
+│   │   ├── FormatTab.jsx         ← number + string formatting
 │   │   ├── ReshapeTab.jsx        ← pivot_longer, group_summarize
 │   │   ├── DictionaryTab.jsx     ← AI inference + manual edit
 │   │   ├── MergeTab.jsx          ← LEFT/INNER JOIN + APPEND
 │   │   ├── DataQualityReport.jsx
 │   │   ├── NLCommandBar.jsx      ← AI command bar: NL → validated pipeline steps (preview/apply); mounted by WranglingModule
+│   │   ├── VectorAssignForm.jsx  ← vector_assign step UI
+│   │   ├── ImportPipelineButton.jsx ← import a pipeline.json
 │   │   ├── WorldBankFetcher.jsx  ← World Bank data fetch UI
 │   │   ├── OECDFetcher.jsx       ← OECD data fetch UI
+│   │   ├── ObservatorioFetcher.jsx ← Observatorio data fetch UI
 │   │   └── SubsetManager.jsx     ← multi-subset workflow UI
 │   │
 │   ├── modeling/
@@ -122,14 +201,27 @@ src/
 │   │   ├── ResearchCoach.jsx     ← AI-driven research coaching suggestions
 │   │   ├── InferenceOptions.jsx  ← collapsible SE type selector (chips + cluster/lag inputs)
 │   │   ├── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
-│   │   └── CoefficientTestPanel.jsx ← post-estimation hypothesis test on a pinned model's coefficients (below Predict from Model)
+│   │   ├── CoefficientTestPanel.jsx ← post-estimation hypothesis test on a pinned model's coefficients (below Predict from Model)
+│   │   ├── ExtractPanel.jsx      ← result-extraction panel
+│   │   ├── resultDisplay.jsx     ← estimation-result render
+│   │   ├── helpers.js            ← modeling helpers
+│   │   ├── plots/
+│   │   │   └── didPlots.jsx      ← DiD-specific plots
+│   │   ├── results/             ← per-family result renders
+│   │   │   ├── index.js          ← barrel
+│   │   │   ├── IVResults.jsx
+│   │   │   ├── PanelResults.jsx
+│   │   │   └── FuzzyRDDResults.jsx
+│   │   └── runners/
+│   │       └── estimationDispatch.js ← chooses engine / DuckDB vs JS path
 │   │
 │   ├── tabs/
 │   │   ├── CalculateTab.jsx      ← calculator tab; HintBox with calculator tips
 │   │   ├── SimulateTab.jsx       ← simulate tab; DGP builder + Monte Carlo; embeds StatWorkspace + SampleTestPanel (simulated-data tests)
 │   │   ├── statsim/
 │   │   │   ├── StatWorkspace.jsx ← variables/computed/resampling/probability/distributions (embedded in SimulateTab)
-│   │   │   └── SampleTestPanel.jsx ← shared collapsible pre-model test UI (mean/variance/parameter) over numeric columns
+│   │   │   ├── SampleTestPanel.jsx ← shared collapsible pre-model test UI (mean/variance/parameter) over numeric columns
+│   │   │   └── QTEPanel.jsx      ← quantile treatment effects UI
 │   │   ├── SpatialTab.jsx        ← spatial analytics tab root shell only (245 lines): Analyze/Map/Plot tab router + pendingRows/OutputPanel save state
 │   │   └── spatial/
 │   │       ├── shared/
@@ -151,6 +243,8 @@ src/
 │   │       │   ├── NearestNeighborSection.jsx
 │   │       │   ├── GeocodeSection.jsx
 │   │       │   ├── BoundaryDistanceSection.jsx
+│   │       │   ├── ArealInterpolateSection.jsx
+│   │       │   ├── BufferExposureSection.jsx
 │   │       │   ├── OutputPanel.jsx ← save-bar for pendingRows
 │   │       │   └── _parked/      ← defined-but-never-rendered orphans (kept, unimported)
 │   │       │       ├── SpatialMapSection.jsx
@@ -167,9 +261,31 @@ src/
 │   │           ├── GeoLayerConfig.jsx
 │   │           ├── geo.js        ← loadGeoPlt (CDN singleton), geoBbox, GEO_COLORS, mkGeoLayer
 │   │           └── legend.js     ← GEO_MARGIN, appendSvgLegend
+│   ├── calculate/
+│   │   └── workbench/           ← Equation Workbench (symbolic equation builder with interactive canvas)
+│   │       ├── Workbench.jsx     ← root
+│   │       ├── WorkbenchCanvas.jsx / LocusCanvas.jsx / canvasAxes.js ← canvas + axes
+│   │       ├── EquationsPanel.jsx / EquationCard.jsx ← equation list + cards
+│   │       ├── ParametersPanel.jsx / ConditionsPanel.jsx / SweepPanel.jsx ← params, conditions, sweeps
+│   │       ├── ResultsPanel.jsx / ViewControls.jsx / SessionTabs.jsx ← results, controls, tabs
+│   │       ├── operations.js / templates.js ← operations + templates
+│   │       ├── workbenchStore.js ← state store
+│   │       ├── exportScript.js   ← workbench → script export
+│   │       └── katexLoader.js    ← KaTeX loader (formula render)
+│   ├── explore/
+│   │   └── ExplorePinBar.jsx     ← pin bar in the explorer
+│   ├── auth/
+│   │   ├── AuthGate.jsx          ← auth gate wrapper
+│   │   └── LoginForm.jsx         ← login form
+│   ├── feedback/
+│   │   └── FeedbackModal.jsx     ← user feedback modal (feeds Supabase)
+│   ├── shared/
+│   │   ├── ConfirmPopover.jsx    ← reusable confirm popover
+│   │   └── PlotExportBar.jsx     ← reusable plot-export bar
 │   ├── workspace/
 │   │   ├── WorkspaceBar.jsx      ← 7-tab nav bar (Data/Clean/Explore/Model/Simulate/Calculate/Report) + DatasetManager toggle + ? tour button
-│   │   └── DatasetManager.jsx    ← collapsible D·N dataset button + dropdown panel showing all session datasets
+│   │   ├── DatasetManager.jsx    ← collapsible D·N dataset button + dropdown panel showing all session datasets
+│   │   └── AppearancePanel.jsx   ← appearance/theme panel
 │   ├── AIContextSidebar.jsx      ← AI context panel (sidebar)
 │   ├── HelpSystem.jsx            ← HintBox (collapsible per-module tips) + TOUR_STEPS registry (9 steps) + TourOverlay (floating tour card, bottom-right)
 │   ├── ModelingTab.jsx           ← modeling tab root; estimate useCallback dep array includes SC/EventStudy/LSDV state
@@ -178,11 +294,27 @@ src/
 │       └── AuditTrail.jsx        ← surfaces auditor.js output, pipeline audit UI
 │
 ├── EconometricsEngine.js  ← legacy engine shim
+├── ThemeContext.jsx       ← React theme context (light/dark)
 ├── WranglingModule.jsx    ← root orchestrator, pipeline state, tab router
 ├── ReportingModule.jsx    ← LaTeX Stargazer, forest plots, AI narrative
 ├── ExplorerModule.jsx     ← dataset explorer; G11: "◈ Plot Builder" tab renders PlotBuilder in free mode
 ├── App.jsx                ← top-level router
 └── DataStudio.jsx         ← project shell (pid-scoped, IndexedDB)
+```
+
+## Backend & deploy (non-client-side surfaces)
+```
+api/
+└── anthropic.js           ← Anthropic proxy; deducts credits via spend_credits() RPC before forwarding (Haiku=0, standard=2, replication=15); 402 on empty balance
+supabase/
+├── config.toml
+├── migrations/*.sql       ← synced_projects; RLS initplan + FK index fixes; credits system (profiles.credits, spend_credits RPC)
+└── functions/             ← edge functions: claude-proxy, Proxy-Claude-Litux, oecd-proxy (CORS), collect-feedback
+public/
+├── favicon.svg, icons.svg
+└── preloaded/*.csv        ← demo datasets, one per estimator (OLS/2SLS/DiD/Panel/TWFE/RDD/fuzzy-RDD/GMM/synthetic-control/comunas/crime-panel)
+scripts/lint-undef.mjs     ← custom undefined-identifier linter (npm run lint:undef)
+vercel.json                ← CSP (connect-src must include every runtime-fetched CDN) + COOP/COEP (SharedArrayBuffer for DuckDB threads)
 ```
 
 ## Estimators implemented
