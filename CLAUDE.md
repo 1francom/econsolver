@@ -13,6 +13,22 @@ Stack: React + Vite + JavaScript. No external UI libraries. Styling via inline s
 - **IndexedDB, not localStorage**: persistence is in `services/persistence/indexedDB.js`. localStorage is deprecated for pipeline/data storage.
 - **SE type is always passed explicitly to engines — never hardcoded inside engine functions**: every engine accepts an optional `seType` argument (`"classical" | "HC1" | "HC2" | "HC3" | "clustered" | "twoway" | "HAC"`). The default is `"classical"` for backward compatibility. Engines must not assume a SE variant internally.
 
+## Reading roadmap — how to navigate this repo end-to-end
+Don't read alphabetically. Follow the data flow, which is also the user flow:
+
+1. **Invariants first** — the 6 rules above. Everything else is a consequence of them.
+2. **App shell / boot** — `index.html` → `src/App.jsx` → `src/DataStudio.jsx` (project = `pid`, IndexedDB, remount-per-project).
+3. **The pipeline (the heart)** — `src/pipeline/runner.js` + `registry.js`. 53 steps replayed on `rawData`, never mutating in place. Understand `applyStep`/`runPipeline` and you understand ~70% of the product.
+4. **Math engines** — `src/math/`, pure JS, zero UI, each validated vs R. Enter via `index.js` (barrel) then `LinearEngine.js` (OLS is the base).
+5. **Acceleration layer** — `src/services/data/duckdb*.js`. For n≥50k, computation is pushed to SQL sufficient-statistics instead of materializing JS arrays. A parallel "fast path" to the `math/` engines.
+6. **Tab UI** — `src/components/`. Each `WorkspaceBar` tab (Data/Clean/Explore/Model/Simulate/Calculate/Report + Spatial) is a subtree. Enter via `WranglingModule.jsx` and `ModelingTab.jsx`.
+7. **AI** — `src/services/AI/`. Everything goes through `AIService.js` (sole egress). Prompts in `Prompts/index.js`, capability catalogue in `appCapabilityMap.js`.
+8. **Export / replication** — `src/services/export/`. Turns pipeline+model into runnable R/Python/Stata scripts (what makes output "publication-ready").
+9. **Persistence & sync** — `services/Persistence/` (local IndexedDB) and `services/sync/` (opt-in E2EE cloud).
+10. **Backend** — `api/anthropic.js` (credit proxy) and `supabase/` (auth, RPCs, edge functions). The only non-client-side surface.
+
+**Golden rule for navigation:** the math/data layer (`math/`, `core/`, `pipeline/`, `services/data|export|Persistence`) is pure, testable JS; the React layer (`components/`, root `.jsx` modules) is presentation only. The boundary is hard — respect it.
+
 ## File structure (current state)
 ```
 src/
