@@ -153,7 +153,7 @@ function PanelTab({rows,headers,panel,setPanel,onAdd}){
         </div>
       </div>
       <div style={{display:"flex",gap:8}}>
-        <Btn onClick={()=>{const feCols=[ec,tc,...extraFe].filter(Boolean);setPanel({entityCol:ec,timeCol:tc,feCols,interactionCols,validation:v});}} color={C.gold} v="solid" dis={!ec||!tc} ch={panel?"Update panel index":"Set panel index"}/>
+        <Btn onClick={()=>{const feCols=[...new Set([ec,tc,...extraFe].filter(Boolean))];setPanel({entityCol:ec,timeCol:tc,feCols,interactionCols,validation:v});}} color={C.gold} v="solid" dis={!ec||!tc} ch={panel?"Update panel index":"Set panel index"}/>
         {panel&&<Btn onClick={()=>setPanel(null)} color={C.red} ch="Clear"/>}
       </div>
       {panel&&<div style={{marginTop:"1rem",padding:"0.5rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
