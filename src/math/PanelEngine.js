@@ -7,6 +7,7 @@ import {
   runOLS, pValue, fCDF, stars,
 } from "./LinearEngine.js";
 import { computeRobustSE } from "../core/inference/robustSE.js";
+import { demeanByFE, feDegreesOfFreedom } from "./PanelWithinEngine.js";
 
 // ─── INTERNAL HELPERS ────────────────────────────────────────────────────────
 
@@ -31,47 +32,36 @@ function prepPanel(rows, yCol, xCols, unitCol, timeCol) {
   return { valid, units, times };
 }
 
-// ─── FIXED EFFECTS (WITHIN) ──────────────────────────────────────────────────
-export function runFE(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
-  const { valid, units } = prepPanel(rows, yCol, xCols, unitCol, timeCol);
-  if (valid.length < xCols.length + 3 || units.length < 2)
+// ─── FIXED EFFECTS (WITHIN), N-WAY ───────────────────────────────────────────
+// feCols: array of FE column names, length ≥ 1 (e.g. ["state"] or ["state","year"]
+// or ["state","year","industry"] or an interaction-materialized column name).
+// Uses demeanByFE (alternating-projection within transform) so D≥2 is the exact
+// two-/N-way projection, not a single-pass approximation. For D=1 (and balanced
+// D=2) it is numerically identical to the classic hand-written within transform.
+export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
+  const D = feCols.length;
+  if (D < 1) return { error: "Fixed Effects estimation requires at least one FE column." };
+
+  const valid = rows.filter(r =>
+    typeof r[yCol] === "number" && isFinite(r[yCol]) &&
+    feCols.every(c => r[c] != null) &&
+    xCols.every(x => typeof r[x] === "number" && isFinite(r[x]))
+  );
+  const nLevelsCheck = feCols.map(c => new Set(valid.map(r => r[c])).size);
+  if (valid.length < xCols.length + 3 || nLevelsCheck[0] < 2)
     return { error: "Insufficient observations or units for Fixed Effects estimation." };
 
   const allCols = [yCol, ...xCols];
-
-  // Unit means (for within-transformation)
-  const unitMeans = {};
-  units.forEach(u => {
-    const sub = valid.filter(r => r[unitCol] === u);
-    unitMeans[u] = {};
-    allCols.forEach(c => {
-      unitMeans[u][c] = sub.reduce((s, r) => s + r[c], 0) / sub.length;
-    });
-  });
-
-  // Grand means (re-centre after demeaning to preserve intercept in OLS)
-  const grandMeans = {};
-  allCols.forEach(c => {
-    grandMeans[c] = valid.reduce((s, r) => s + r[c], 0) / valid.length;
-  });
-
-  // Within-demean
-  const demeaned = valid.map(r => {
-    const d = { ...r };
-    allCols.forEach(c => {
-      d[`__dm_${c}`] = r[c] - unitMeans[r[unitCol]][c] + grandMeans[c];
-    });
-    return d;
-  });
+  const { demeaned, nLevels } = demeanByFE(valid, feCols, allCols);
 
   const dmY = `__dm_${yCol}`;
   const dmX = xCols.map(c => `__dm_${c}`);
   const res = runOLS(demeaned, dmY, dmX);
   if (!res) return { error: "Within-group OLS failed — singular matrix after demeaning." };
 
-  const df_fe = valid.length - units.length - xCols.length;
+  const df_fe = feDegreesOfFreedom(valid.length, xCols.length, nLevels);
   if (df_fe <= 0)
-    return { error: "Degrees of freedom ≤ 0 after demeaning — add more observations or reduce regressors." };
+    return { error: "Degrees of freedom ≤ 0 after demeaning — add more observations, fewer FE dimensions, or reduce regressors." };
 
   const s2_fe = res.SSR / df_fe;
   const Xmat  = demeaned.map(r => [1, ...dmX.map(x => r[x])]);
@@ -92,6 +82,58 @@ export function runFE(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
   const SST_w   = dmYvals.reduce((s, v) => s + (v - dmYmean) ** 2, 0);
   const R2_within = 1 - res.SSR / SST_w;
 
+  return {
+    beta:     res.beta.slice(1),
+    se:       corrSE.slice(1),
+    tStats:   corrT.slice(1),
+    pVals:    corrP.slice(1),
+    varNames: xCols,
+    R2_within,
+    n:    valid.length,
+    feCols,
+    nLevels,          // level count per FE dimension, in feCols order
+    df:   df_fe,
+    SSR:  res.SSR,
+    s2:   s2_fe,
+    resid: res.resid,
+    Yhat:  res.Yhat,
+    Fstat: res.Fstat,
+    Fpval: res.Fpval,
+  };
+}
+
+// ─── FIXED EFFECTS (WITHIN), single-way ──────────────────────────────────────
+// Backward-compatible 2-arg wrapper — every existing caller keeps working.
+// Old runFE demeaned by unitCol ONLY (single-way within) yet required a non-null
+// timeCol via prepPanel; that valid-set requirement is preserved here so output
+// is numerically identical to the pre-generalization implementation. It also
+// re-computes the single-way extras the UI consumes: units count, R²-between
+// (OLS on unit means), and entity intercepts α̂_i.
+export function runFE(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
+  // Match old prepPanel filter: y & x numeric, unitCol non-null, timeCol non-null.
+  const valid = rows.filter(r =>
+    typeof r[yCol] === "number" && isFinite(r[yCol]) &&
+    r[unitCol] != null && (timeCol == null || r[timeCol] != null) &&
+    xCols.every(x => typeof r[x] === "number" && isFinite(r[x]))
+  );
+
+  const out = runFEMulti(valid, yCol, xCols, unitCol ? [unitCol] : [], seOpts);
+  if (out.error) return out;
+
+  const allCols = [yCol, ...xCols];
+  const units = [...new Set(valid.map(r => r[unitCol]))];
+
+  // Unit means (for R²-between + entity intercepts)
+  const unitMeans = {};
+  units.forEach(u => {
+    const sub = valid.filter(r => r[unitCol] === u);
+    unitMeans[u] = {};
+    allCols.forEach(c => {
+      unitMeans[u][c] = sub.reduce((s, r) => s + r[c], 0) / sub.length;
+    });
+  });
+  const grandY = valid.reduce((s, r) => s + r[yCol], 0) / valid.length;
+
   // R² between (OLS on unit means)
   const unitRows = units.map(u => {
     const row = { __by: unitMeans[u][yCol] };
@@ -100,37 +142,32 @@ export function runFE(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
   });
   const bRes = runOLS(unitRows, "__by", xCols.map(c => `__bx_${c}`));
 
-  // Entity intercepts α̂_i
+  // Entity intercepts α̂_i  (out.beta holds slope coefficients, no intercept)
   const alphas = {};
   units.forEach(u => {
-    let fitted = grandMeans[yCol];
-    xCols.forEach((c, i) => { fitted += res.beta[i + 1] * unitMeans[u][c]; });
-    alphas[u] = unitMeans[u][yCol] - (fitted - grandMeans[yCol]);
+    let fitted = grandY;
+    xCols.forEach((c, i) => { fitted += out.beta[i] * unitMeans[u][c]; });
+    alphas[u] = unitMeans[u][yCol] - (fitted - grandY);
   });
 
   return {
-    beta:     res.beta.slice(1),
-    se:       corrSE.slice(1),
-    tStats:   corrT.slice(1),
-    pVals:    corrP.slice(1),
-    varNames: xCols,
-    R2_within,
-    R2_between: bRes?.R2 ?? null,
-    n:    valid.length,
+    ...out,
     units: units.length,
-    df:   df_fe,
-    SSR:  res.SSR,
-    s2:   s2_fe,
-    resid: res.resid,
-    Yhat:  res.Yhat,
+    R2_between: bRes?.R2 ?? null,
     alphas,
-    Fstat: res.Fstat,
-    Fpval: res.Fpval,
   };
 }
 
 // ─── FIRST DIFFERENCES ───────────────────────────────────────────────────────
-export function runFD(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
+// First-differencing is intrinsically a two-column operation: one panel-unit
+// dimension to group by and one time dimension to order & difference within.
+// It is NOT a group-mean demeaning operation, so it does not use demeanByFE.
+// `feCols` is accepted for signature parity with the other *Multi estimators:
+// feCols[0] = unit, feCols[1] = time. Any further FE dimensions are not
+// meaningful for first differencing and are ignored.
+export function runFDMulti(rows, yCol, xCols, feCols, seOpts = {}) {
+  const unitCol = feCols[0];
+  const timeCol = feCols[1];
   const { valid, units } = prepPanel(rows, yCol, xCols, unitCol, timeCol);
   if (valid.length < xCols.length + 3 || units.length < 2) return null;
 
@@ -162,6 +199,11 @@ export function runFD(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
   const res = runOLS(diffRows, fdY, fdX, seOpts);
   if (!res) return null;
 
+  // FD absorbs no explicit FE dummies (differencing removes the unit FE): the
+  // only absorbed parameter is the intercept, so feDegreesOfFreedom(n, k, [])
+  // === n − k − 1 === runOLS's own df. Value is unchanged from the original.
+  const df = feDegreesOfFreedom(diffRows.length, xCols.length, []);
+
   return {
     beta:     res.beta.slice(1),
     se:       res.se.slice(1),
@@ -172,13 +214,18 @@ export function runFD(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
     adjR2: res.adjR2,
     n:    diffRows.length,
     units: units.length,
-    df:   res.df,
+    df,
     SSR:  res.SSR,
     resid: res.resid,
     Yhat:  res.Yhat,
     Fstat: res.Fstat,
     Fpval: res.Fpval,
   };
+}
+
+// Backward-compatible wrapper — every existing caller keeps working.
+export function runFD(rows, yCol, xCols, unitCol, timeCol, seOpts = {}) {
+  return runFDMulti(rows, yCol, xCols, [unitCol, timeCol].filter(Boolean), seOpts);
 }
 
 // ─── DiD 2×2 ─────────────────────────────────────────────────────────────────
@@ -231,9 +278,12 @@ export function run2x2DiD(rows, yCol, postCol, treatCol, controls = [], seOpts =
  * @param {number}   windowPre   - number of pre-periods (e.g. 3 → k = -3,-2,-1)
  * @param {number}   windowPost  - number of post-periods (e.g. 4 → k = 0,1,2,3)
  * @param {string[]} controls    - additional control columns
+ * @param {string[]} feCols      - fixed-effect columns to absorb (default [unitCol, timeCol]).
+ *   timeCol is always required for the event-time construction regardless of the FE set;
+ *   pass extra dims here (e.g. [unitCol, timeCol, "industry"]) to absorb additional N-way FE.
  * @param {object}   seOpts      - SE options passed to computeRobustSE
  */
-export function runEventStudy(
+export function runEventStudyMulti(
   rows,
   yCol,
   unitCol,
@@ -242,8 +292,10 @@ export function runEventStudy(
   windowPre,
   windowPost,
   controls = [],
+  feCols = null,
   seOpts = {}
 ) {
+  const fe = (feCols && feCols.length) ? feCols : [unitCol, timeCol];
   // ── 1. Filter valid rows ──────────────────────────────────────────────────
   const valid = rows.filter(r =>
     typeof r[yCol]     === "number" && isFinite(r[yCol]) &&
@@ -304,59 +356,47 @@ export function runEventStudy(
     return d;
   });
 
-  // ── 5. Double-demean for unit + time FE ───────────────────────────────────
-  // Columns that need demeaning: yCol + all event dummies + bin dummies + controls
+  // ── 5. N-way demean for the FE set (default unit + time) ───────────────────
+  // Columns that need demeaning: yCol + all event dummies + bin dummies + controls.
+  // demeanByFE does the exact alternating-projection within transform; for the
+  // default 2-way balanced case it reduces to the classic single-pass double demean.
   const eventDummyCols = kValues.map(dummyName);
   const binCols        = [PRE_BIN, POST_BIN];
   const varCols        = [yCol, ...eventDummyCols, ...binCols, ...controls];
 
-  const grandMeans = {}, unitMeans = {}, timeMeans = {};
-
-  varCols.forEach(c => {
-    grandMeans[c] = withDummies.reduce((s, r) => s + (r[c] ?? 0), 0) / withDummies.length;
+  // Coerce any missing varCol values to 0 (matches the original `?? 0` semantics)
+  // so demeanByFE never sees a null. Dummies default to 0; y/controls are pre-filtered.
+  const cleanRows = withDummies.map(r => {
+    const o = { ...r };
+    varCols.forEach(c => { o[c] = r[c] ?? 0; });
+    return o;
   });
-  units.forEach(u => {
-    const sub = withDummies.filter(r => r[unitCol] === u);
-    unitMeans[u] = {};
-    varCols.forEach(c => {
-      unitMeans[u][c] = sub.reduce((s, r) => s + (r[c] ?? 0), 0) / sub.length;
-    });
-  });
-  times.forEach(t => {
-    const sub = withDummies.filter(r => r[timeCol] === t);
-    timeMeans[t] = {};
-    varCols.forEach(c => {
-      timeMeans[t][c] = sub.reduce((s, r) => s + (r[c] ?? 0), 0) / sub.length;
-    });
-  });
-
-  const demeaned = withDummies.map(r => {
-    const d = { [unitCol]: r[unitCol], [timeCol]: r[timeCol] };
-    if (seOpts?.clusterVar)  d[seOpts.clusterVar]  = r[seOpts.clusterVar];
-    if (seOpts?.clusterVar2) d[seOpts.clusterVar2] = r[seOpts.clusterVar2];
-    if (seOpts?.timeVar)     d[seOpts.timeVar]     = r[seOpts.timeVar];
-    varCols.forEach(c => {
-      d[c] = (r[c] ?? 0)
-        - (unitMeans[r[unitCol]][c] ?? 0)
-        - (timeMeans[r[timeCol]][c] ?? 0)
-        + grandMeans[c];
-    });
-    return d;
-  });
+  const { demeaned, nLevels, grandMeans } = demeanByFE(cleanRows, fe, varCols);
+  // Recenter D≥2 columns to mean zero to match the original double-demean's
+  // intercept convention (see runTWFEDiDMulti for the rationale). Slopes unaffected.
+  demeaned.forEach(r => { varCols.forEach(c => { r[`__dm_${c}`] -= grandMeans[c]; }); });
 
   // ── 6. OLS on demeaned data ───────────────────────────────────────────────
   const regressors = [...eventDummyCols, ...binCols, ...controls];
-  const res = runOLS(demeaned, yCol, regressors);
+  const dmY = `__dm_${yCol}`;
+  const dmRegressors = regressors.map(c => `__dm_${c}`);
+  const res = runOLS(demeaned, dmY, dmRegressors);
   if (!res) return { error: "Event Study OLS failed — singular matrix after demeaning." };
 
   // ── 7. Correct SE for FE df ───────────────────────────────────────────────
+  // Preserve the original Event Study df convention: absorbed FE params counted as
+  // (Σ levels − (D − 1)) — i.e. Lu + Lt − 1 for the default 2-way case — PLUS a
+  // separately-counted intercept (the trailing "− 1"). This differs by 1 from the
+  // generic feDegreesOfFreedom() (which folds the intercept into the FE count); the
+  // original formula is retained deliberately to keep results numerically identical.
   const k_total  = regressors.length + 1; // include intercept
-  const df_fe    = valid.length - (units.length + times.length - 1) - regressors.length - 1;
+  const absorbedFE = nLevels.reduce((s, L) => s + L, 0) - (nLevels.length - 1);
+  const df_fe    = valid.length - absorbedFE - regressors.length - 1;
   if (df_fe <= 0)
     return { error: "Degrees of freedom ≤ 0 — reduce window or add more observations." };
   const s2_fe    = res.SSR / df_fe;
 
-  const Xmat    = demeaned.map(r => [1, ...regressors.map(c => r[c])]);
+  const Xmat    = demeaned.map(r => [1, ...dmRegressors.map(c => r[c])]);
   const Xt      = transpose(Xmat);
   const XtXinv  = matInv(matMul(Xt, Xmat));
   const classicalSE = XtXinv
@@ -417,7 +457,7 @@ export function runEventStudy(
   // ── 10. Assemble output ───────────────────────────────────────────────────
   const varNames = ["(Intercept)", ...regressors];
   const R2_denom = (() => {
-    const yVals  = demeaned.map(r => r[yCol]);
+    const yVals  = demeaned.map(r => r[dmY]);
     const yMean  = yVals.reduce((a, b) => a + b, 0) / yVals.length;
     return yVals.reduce((s, v) => s + (v - yMean) ** 2, 0);
   })();
@@ -448,6 +488,16 @@ export function runEventStudy(
   };
 }
 
+// Backward-compatible wrapper — default FE set is unit + time (the original behaviour).
+export function runEventStudy(
+  rows, yCol, unitCol, timeCol, treatTimeCol, windowPre, windowPost, controls = [], seOpts = {}
+) {
+  return runEventStudyMulti(
+    rows, yCol, unitCol, timeCol, treatTimeCol, windowPre, windowPost, controls,
+    [unitCol, timeCol], seOpts
+  );
+}
+
 // ─── LSDV (Least Squares Dummy Variables) ────────────────────────────────────
 /**
  * Estimates Fixed Effects by explicitly including unit dummy variables in OLS.
@@ -461,87 +511,73 @@ export function runEventStudy(
  * @param {object}   opts    - { timeFE: bool (default false) }
  * @param {object}   seOpts  - SE options passed to runOLS / computeRobustSE
  */
-export function runLSDV(rows, yCol, xCols, unitCol, timeCol, opts = {}, seOpts = {}) {
-  const timeFE = opts.timeFE ?? false;
+// N-way LSDV: one dummy block per FE dimension (first level of each dim dropped as
+// reference). LSDV is the explicit-dummy method by definition, so it does NOT use
+// demeanByFE. Entity intercepts α̂ are reconstructed from the FIRST FE dimension.
+// For D=1 and D=2 this is numerically identical to the original unit/timeFE LSDV.
+export function runLSDVMulti(rows, yCol, xCols, feCols, seOpts = {}) {
+  const D = feCols.length;
+  if (D < 1) return { error: "LSDV requires at least one FE column." };
 
-  // ── 1. Filter valid rows ──────────────────────────────────────────────────
+  // Sort a dimension's levels: numeric asc when every level is a finite number,
+  // else String asc. (For integer panels this reproduces the original ordering.)
+  const sortLevels = (lv) => {
+    const allNum = lv.every(v => typeof v === "number" && isFinite(v));
+    return allNum
+      ? [...lv].sort((a, b) => a - b)
+      : [...lv].sort((a, b) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
+  };
+
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
-    r[unitCol] != null && r[timeCol] != null &&
+    feCols.every(c => r[c] != null) &&
     xCols.every(c => typeof r[c] === "number" && isFinite(r[c]))
   );
 
-  const units = [...new Set(valid.map(r => r[unitCol]))].sort((a, b) =>
-    String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0
-  );
-  const times = [...new Set(valid.map(r => r[timeCol]))].sort((a, b) => a - b);
+  const feLevels = feCols.map(c => sortLevels([...new Set(valid.map(r => r[c]))]));
+  const nLevels  = feLevels.map(lv => lv.length);
 
-  if (valid.length < xCols.length + units.length + (timeFE ? times.length : 0) + 2)
+  // Guard matches the original heuristic: n ≥ k_reg + Σ(levels) + 2.
+  if (valid.length < xCols.length + nLevels.reduce((s, L) => s + L, 0) + 2)
     return { error: "Insufficient observations for LSDV estimation." };
-  if (units.length < 2)
+  if (nLevels[0] < 2)
     return { error: "LSDV requires at least 2 units." };
 
-  // ── 2. Reference categories ───────────────────────────────────────────────
-  const refUnit = units[0];
-  const refTime = timeFE ? times[0] : null;
-
-  // ── 3. Build augmented rows with dummy columns ────────────────────────────
-  const unitDummyCols = units.slice(1).map(u => `__unit_${u}`);
-  const timeDummyCols = timeFE ? times.slice(1).map(t => `__time_${t}`) : [];
-
+  // ── Build augmented rows with dummy columns (reference = first level per dim) ──
   const augRows = valid.map(r => {
-    const d = { ...r };
-    // Unit dummies (reference = first unit, omitted)
-    units.slice(1).forEach(u => {
-      d[`__unit_${u}`] = r[unitCol] === u ? 1 : 0;
-    });
-    // Time dummies (reference = first time period, omitted)
-    if (timeFE) {
-      times.slice(1).forEach(t => {
-        d[`__time_${t}`] = r[timeCol] === t ? 1 : 0;
+    const o = { ...r };
+    feCols.forEach((c, d) => {
+      feLevels[d].slice(1).forEach(lv => {
+        o[`__fe${d}_${lv}`] = r[c] === lv ? 1 : 0;
       });
-    }
-    return d;
+    });
+    return o;
   });
 
-  // ── 4. Run OLS on augmented data ──────────────────────────────────────────
-  const allXCols = [...xCols, ...unitDummyCols, ...timeDummyCols];
+  const allDummyCols = feCols.flatMap((c, d) => feLevels[d].slice(1).map(lv => `__fe${d}_${lv}`));
+  const allXCols = [...xCols, ...allDummyCols];
   const res = runOLS(augRows, yCol, allXCols, seOpts);
   if (!res) return { error: "LSDV OLS failed — singular matrix (possible perfect multicollinearity)." };
 
-  // ── 5. Correct df ─────────────────────────────────────────────────────────
-  // k = 1 (intercept) + xCols.length + (units-1) + (if timeFE, times-1)
-  const k = 1 + xCols.length + (units.length - 1) + (timeFE ? times.length - 1 : 0);
-  const df = valid.length - k;
+  // df = n − [1 intercept + k_reg + Σ(L_d − 1)] — feDegreesOfFreedom reproduces this exactly.
+  const df = feDegreesOfFreedom(valid.length, xCols.length, nLevels);
   if (df <= 0)
     return { error: "Degrees of freedom ≤ 0 — reduce regressors or add more observations." };
-
-  // Recompute s2 with corrected df (runOLS uses n - k_internal which may differ if
-  // allXCols includes dummies already counted — in practice they are identical here,
-  // but be explicit for clarity)
   const s2 = res.SSR / df;
 
-  // ── 6. Build readable varNames ────────────────────────────────────────────
-  // res.varNames from runOLS = ["(Intercept)", ...allXCols]
-  const readableNames = [
-    "(Intercept)",
-    ...xCols,
-    ...units.slice(1).map(u => `unit:${u}`),
-    ...(timeFE ? times.slice(1).map(t => `time:${t}`) : []),
-  ];
+  // Readable varNames: generic `${col}:${level}` per dummy.
+  const dummyLabels = feCols.flatMap((c, d) => feLevels[d].slice(1).map(lv => `${c}:${lv}`));
+  const readableNames = ["(Intercept)", ...xCols, ...dummyLabels];
 
-  // ── 7. Extract entity intercepts α̂_i ─────────────────────────────────────
-  // beta[0] = intercept = α for reference unit
-  // For unit u at position i among non-reference units:
-  //   α_u = beta[0] + beta[xCols.length + 1 + i]
+  // Entity intercepts α̂ from the FIRST FE dimension (its dummies lead the block).
+  //   beta[0] = intercept = α for the reference level; other levels add their dummy.
   const alphas = {};
-  alphas[refUnit] = res.beta[0];
-  units.slice(1).forEach((u, i) => {
-    const dummyIdx = 1 + xCols.length + i; // 1-based index into beta (after intercept)
-    alphas[u] = res.beta[0] + res.beta[dummyIdx];
+  alphas[feLevels[0][0]] = res.beta[0];
+  feLevels[0].slice(1).forEach((lv, i) => {
+    const dummyIdx = 1 + xCols.length + i; // dim-0 dummies come first among the dummy block
+    alphas[lv] = res.beta[0] + res.beta[dummyIdx];
   });
 
-  // ── 8. Assemble output ────────────────────────────────────────────────────
   return {
     beta:     res.beta,
     se:       res.se,
@@ -559,16 +595,56 @@ export function runLSDV(rows, yCol, xCols, unitCol, timeCol, opts = {}, seOpts =
     resid: res.resid,
     Yhat:  res.Yhat,
     alphas,
-    units,
-    times,
-    timeFE,
-    refUnit,
-    refTime,
+    feCols,
+    feLevels,    // sorted levels per FE dim (reference = feLevels[d][0])
+    nLevels,
   };
 }
 
-// ─── TWFE DiD (Two-Way Fixed Effects) ────────────────────────────────────────
-export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = [], seOpts = {}) {
+// Backward-compatible wrapper — unit FE (+ optional time FE via opts.timeFE).
+// Preserves the original valid-set (timeCol required non-null even when timeFE is off)
+// and the legacy output shape (units/times/timeFE/refUnit/refTime + "unit:"/"time:" labels).
+export function runLSDV(rows, yCol, xCols, unitCol, timeCol, opts = {}, seOpts = {}) {
+  const timeFE = opts.timeFE ?? false;
+  // Original LSDV dropped rows with a null timeCol regardless of timeFE.
+  const src = timeCol != null ? rows.filter(r => r[timeCol] != null) : rows;
+  const feCols = timeFE ? [unitCol, timeCol] : [unitCol];
+
+  const out = runLSDVMulti(src, yCol, xCols, feCols, seOpts);
+  if (out.error) return out;
+
+  const units = out.feLevels[0];
+  const times = timeFE
+    ? out.feLevels[1]
+    : [...new Set(
+        src.filter(r =>
+          typeof r[yCol] === "number" && isFinite(r[yCol]) &&
+          r[unitCol] != null &&
+          xCols.every(c => typeof r[c] === "number" && isFinite(r[c]))
+        ).map(r => r[timeCol])
+      )].sort((a, b) => a - b);
+  const refUnit = units[0];
+  const refTime = timeFE ? out.feLevels[1][0] : null;
+
+  // Legacy varNames used literal "unit:"/"time:" prefixes rather than column names.
+  const varNames = [
+    "(Intercept)",
+    ...xCols,
+    ...units.slice(1).map(u => `unit:${u}`),
+    ...(timeFE ? times.slice(1).map(t => `time:${t}`) : []),
+  ];
+
+  return { ...out, varNames, units, times, timeFE, refUnit, refTime };
+}
+
+// ─── TWFE DiD (Two-Way / N-Way Fixed Effects) ────────────────────────────────
+// `feCols` is the fixed-effect set to absorb (default [unitCol, timeCol]). unitCol
+// and timeCol remain explicit because they drive the parallel-trends visual
+// (ever-treated grouping + per-period means) regardless of the FE set. Demeaning
+// uses demeanByFE (exact N-way projection); for the default 2-way balanced case it
+// reduces to the classic single-pass double demean.
+export function runTWFEDiDMulti(rows, yCol, unitCol, timeCol, treatCol, controls = [], feCols = null, seOpts = {}) {
+  const fe = (feCols && feCols.length) ? feCols : [unitCol, timeCol];
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     r[unitCol] != null && r[timeCol] != null
@@ -579,50 +655,32 @@ export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = []
   const times = [...new Set(valid.map(r => r[timeCol]))].sort((a, b) => a - b);
   if (units.length < 2 || times.length < 2) return null;
 
-  // Compute grand, unit, and time means for double-demeaning
+  // N-way demean of [y, treat, ...controls] (matches original `?? 0` coercion).
   const varCols = [yCol, treatCol, ...controls];
-  const grandMeans = {}, unitMeans = {}, timeMeans = {};
+  const cleanRows = valid.map(r => {
+    const o = { ...r };
+    varCols.forEach(c => { o[c] = r[c] ?? 0; });
+    return o;
+  });
+  const { demeaned, nLevels, grandMeans } = demeanByFE(cleanRows, fe, varCols);
+  // demeanByFE re-centers to the grand mean (matching the D=1 within convention).
+  // The original double-demean recentered D≥2 columns to mean zero; subtract the
+  // grand mean back out so the intercept row is numerically identical to the
+  // original TWFE. (Slopes/ATT are location-invariant and unaffected either way.)
+  demeaned.forEach(r => { varCols.forEach(c => { r[`__dm_${c}`] -= grandMeans[c]; }); });
 
-  varCols.forEach(c => {
-    grandMeans[c] = valid.reduce((s, r) => s + (r[c] ?? 0), 0) / valid.length;
-  });
-  units.forEach(u => {
-    const sub = valid.filter(r => r[unitCol] === u);
-    unitMeans[u] = {};
-    varCols.forEach(c => {
-      unitMeans[u][c] = sub.reduce((s, r) => s + (r[c] ?? 0), 0) / sub.length;
-    });
-  });
-  times.forEach(t => {
-    const sub = valid.filter(r => r[timeCol] === t);
-    timeMeans[t] = {};
-    varCols.forEach(c => {
-      timeMeans[t][c] = sub.reduce((s, r) => s + (r[c] ?? 0), 0) / sub.length;
-    });
-  });
-
-  const demeaned = valid.map(r => {
-    const d = { [unitCol]: r[unitCol], [timeCol]: r[timeCol] };
-    if (seOpts?.clusterVar)  d[seOpts.clusterVar]  = r[seOpts.clusterVar];
-    if (seOpts?.clusterVar2) d[seOpts.clusterVar2] = r[seOpts.clusterVar2];
-    if (seOpts?.timeVar)     d[seOpts.timeVar]     = r[seOpts.timeVar];
-    varCols.forEach(c => {
-      d[c] = (r[c] ?? 0)
-        - (unitMeans[r[unitCol]][c] ?? 0)
-        - (timeMeans[r[timeCol]][c] ?? 0)
-        + grandMeans[c];
-    });
-    return d;
-  });
-
-  const res = runOLS(demeaned, yCol, [treatCol, ...controls]);
+  const dmY = `__dm_${yCol}`;
+  const dmTreat = `__dm_${treatCol}`;
+  const dmControls = controls.map(c => `__dm_${c}`);
+  const res = runOLS(demeaned, dmY, [dmTreat, ...dmControls]);
   if (!res) return null;
 
-  // Correct df: remove unit + time FE from denominator
-  const df_fe = valid.length - (units.length + times.length - 1) - controls.length - 1;
+  // df: remove absorbed FE. feDegreesOfFreedom(n, kReg=1+controls, nLevels) reduces
+  // to the original n − (Lu+Lt−1) − controls − 1 for the default two-way case.
+  const df_fe = feDegreesOfFreedom(valid.length, 1 + controls.length, nLevels);
   const s2_fe = res.SSR / Math.max(1, df_fe);
 
-  const Xmat  = demeaned.map(r => [1, r[treatCol], ...controls.map(c => r[c])]);
+  const Xmat  = demeaned.map(r => [1, r[dmTreat], ...dmControls.map(c => r[c])]);
   const Xt    = transpose(Xmat);
   const XtXinv = matInv(matMul(Xt, Xmat));
   const classicalSE = XtXinv
@@ -669,4 +727,9 @@ export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = []
     units: units.length, times: times.length,
     eventMeans, timesArr: times,
   };
+}
+
+// Backward-compatible wrapper — default FE set is unit + time (the original behaviour).
+export function runTWFEDiD(rows, yCol, unitCol, timeCol, treatCol, controls = [], seOpts = {}) {
+  return runTWFEDiDMulti(rows, yCol, unitCol, timeCol, treatCol, controls, [unitCol, timeCol], seOpts);
 }
