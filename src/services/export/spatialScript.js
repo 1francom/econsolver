@@ -134,7 +134,7 @@ function rSpatial(opType, p, datasets, srcV) {
         `# Assign each point to its grid cell (existing grid layer)`,
         naFilterR(srcV, lon, lat),
         `pts_sf  <- ${ptsSf}`,
-        `grid_sf <- sf::st_as_sf(${grid.v}, wkt = "${p.wktCol}", crs = 4326)`,
+        `grid_sf <- sf::st_make_valid(sf::st_as_sf(${grid.v}, wkt = "${p.wktCol}", crs = 4326))  # repair any degenerate/duplicate-vertex rings before the join`,
         `${srcV} <- sf::st_drop_geometry(sf::st_join(pts_sf, grid_sf[c(${keep})], join = sf::st_within))`,
       ].join("\n");
     }
@@ -147,7 +147,7 @@ function rSpatial(opType, p, datasets, srcV) {
         `# Aggregate point values to grid cells (${p.fn})`,
         naFilterR(srcV, lon, lat),
         `pts_sf  <- ${ptsSf}`,
-        `grid_sf <- sf::st_as_sf(${grid.v}, wkt = "${p.wktCol}", crs = 4326)`,
+        `grid_sf <- sf::st_make_valid(sf::st_as_sf(${grid.v}, wkt = "${p.wktCol}", crs = 4326))  # repair any degenerate/duplicate-vertex rings before the join`,
         `${srcV} <- sf::st_join(pts_sf, grid_sf, join = sf::st_within) |>`,
         `  sf::st_drop_geometry() |>`,
         `  dplyr::group_by(dplyr::across(dplyr::starts_with("grid"))) |>`,
@@ -291,6 +291,7 @@ function pySpatial(opType, p, datasets, srcV) {
         naFilterPy(srcV, lon, lat),
         `_pts  = ${ptsGdf}`,
         `_grid = gpd.GeoDataFrame(${grid.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${grid.v}["${p.wktCol}"]), crs=4326)`,
+        `_grid["geometry"] = _grid.make_valid()  # repair any degenerate/duplicate-vertex rings before the join`,
         `${srcV} = gpd.sjoin(_pts, _grid[[${keep}, "geometry"]], predicate="within").drop(columns=["geometry", "index_right"], errors="ignore")`,
       ].join("\n");
     }
@@ -304,6 +305,7 @@ function pySpatial(opType, p, datasets, srcV) {
         naFilterPy(srcV, lon, lat),
         `_pts  = ${ptsGdf}`,
         `_grid = gpd.GeoDataFrame(${grid.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${grid.v}["${p.wktCol}"]), crs=4326)`,
+        `_grid["geometry"] = _grid.make_valid()  # repair any degenerate/duplicate-vertex rings before the join`,
         `_joined = gpd.sjoin(_pts, _grid, predicate="within")`,
         `${srcV} = _joined.groupby("index_right")${agg}`,
       ].join("\n");
