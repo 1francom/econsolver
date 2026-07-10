@@ -19,10 +19,12 @@
  * @param {object} [opts]
  * @param {number} [opts.tol=1e-10] - convergence tolerance on max abs group mean
  * @param {number} [opts.maxIter=5000] - max alternating passes for D≥2
- * @returns {{ demeaned: object[], nLevels: number[], grandMeans: Record<string, number> }}
+ * @returns {{ demeaned: object[], nLevels: number[], grandMeans: Record<string, number>, converged: boolean }}
  *   demeaned rows carry `__dm_<col>` for every valueCol, RE-CENTERED at the grand mean
  *   (so an OLS with intercept on the demeaned columns recovers the correct β, matching
  *   the existing PanelEngine.js convention of "subtract group mean, add back grand mean").
+ *   `converged` is true if the alternating-projection loop broke below `tol` (or D===1,
+ *   which is always an exact single pass); false if it exhausted `maxIter` without converging.
  */
 export function demeanByFE(rows, feCols, valueCols, opts = {}) {
   const { tol = 1e-10, maxIter = 5000 } = opts;
@@ -82,9 +84,19 @@ export function demeanByFE(rows, feCols, valueCols, opts = {}) {
     return maxMean;
   };
 
-  if (D === 1) passOnce();
-  else {
-    for (let it = 0; it < maxIter; it++) if (passOnce() < tol) break;
+  let converged = true;
+  let lastMaxMean = 0;
+  if (D === 1) {
+    passOnce();
+  } else {
+    converged = false;
+    for (let it = 0; it < maxIter; it++) {
+      lastMaxMean = passOnce();
+      if (lastMaxMean < tol) { converged = true; break; }
+    }
+    if (!converged) {
+      console.warn(`demeanByFE: did not converge after ${maxIter} iterations (max mean ${lastMaxMean} > tol ${tol})`);
+    }
   }
 
   const demeaned = rows.map((r, i) => {
@@ -93,7 +105,7 @@ export function demeanByFE(rows, feCols, valueCols, opts = {}) {
     return d;
   });
 
-  return { demeaned, nLevels, grandMeans };
+  return { demeaned, nLevels, grandMeans, converged };
 }
 
 /**
@@ -112,6 +124,6 @@ export function demeanByFE(rows, feCols, valueCols, opts = {}) {
  * degrees of freedom for both cases.
  */
 export function feDegreesOfFreedom(n, kReg, nLevels) {
-  const absorbed = nLevels.reduce((s, L, d) => s + (d === 0 ? L - 1 : L - 1), 0) + 1; // +1 grand intercept
+  const absorbed = nLevels.reduce((s, L) => s + (L - 1), 0) + 1; // +1 grand intercept
   return n - kReg - absorbed;
 }
