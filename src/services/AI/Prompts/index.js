@@ -915,10 +915,10 @@ TRANSFORMATION RULES (apply all):
     transformation/derivation/spatial op is repeated verbatim later (the user
     re-ran it), keep a single copy in its correct position.
 3a. NEVER apply rule 3 to a step that changes the ROW SET or GROUPING of a
-    data frame (filter, drop_na, distinct, slice, subset, group_by, a `filter()`
+    data frame (filter, drop_na, distinct, slice, subset, group_by, a filter()
     inserted between two pipeline steps, etc.), even when it reassigns the same
-    variable name the very next line (e.g. `df <- df |> filter(...)` immediately
-    followed by `df <- df |> group_by(...) |> mutate(...)`). That filter is not
+    variable name the very next line (e.g. \`df <- df |> filter(...)\` immediately
+    followed by \`df <- df |> group_by(...) |> mutate(...)\`). That filter is not
     a discarded intermediate — every later step depends on the ROWS it kept.
     Dropping it silently changes the statistics of every downstream mutate,
     summary, and model. When two consecutive assignments to the same variable
