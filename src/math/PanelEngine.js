@@ -32,6 +32,60 @@ function prepPanel(rows, yCol, xCols, unitCol, timeCol) {
   return { valid, units, times };
 }
 
+/**
+ * Single-pass additive within-transform, reproducing the ORIGINAL pre-N-way
+ * double-demean EXACTLY for D ≤ 2:  ṽ = v − Σ_d mean_d(v) + (D−1)·grandMean(v).
+ *
+ * For D = 1 this is the classic within (v − groupMean); for D = 2 it is the
+ * historical double-demean (v − unitMean − timeMean + grandMean). It is
+ * DELIBERATELY the old algorithm — on UNBALANCED panels it is NOT the exact
+ * alternating-projection that demeanByFE computes for D ≥ 2, but it is what
+ * runTWFEDiD / runEventStudy shipped (and were R-validated with), so it must be
+ * preserved byte-for-byte for the D ≤ 2 case. Callers use demeanByFE (exact
+ * iterative projection) only for genuinely new D ≥ 3 requests.
+ *
+ * Column names are written unprefixed (matching the old code), so downstream OLS
+ * reads y/regressors by their original names. `keepCols` + SE cols are copied
+ * through verbatim for cluster/time-based robust SE.
+ */
+function singlePassWithin(rows, fe, varCols, seOpts = {}, keepCols = []) {
+  const D = fe.length;
+  const grandMeans = {};
+  varCols.forEach(c => {
+    grandMeans[c] = rows.reduce((s, r) => s + (r[c] ?? 0), 0) / rows.length;
+  });
+  // Per-dimension level means (keyed by level value; iteration order irrelevant).
+  const dimMeans = fe.map(fc => {
+    const mm = {};
+    [...new Set(rows.map(r => r[fc]))].forEach(lv => {
+      const sub = rows.filter(r => r[fc] === lv);
+      mm[lv] = {};
+      varCols.forEach(c => {
+        mm[lv][c] = sub.reduce((s, r) => s + (r[c] ?? 0), 0) / sub.length;
+      });
+    });
+    return mm;
+  });
+  const demeaned = rows.map(r => {
+    const d = {};
+    keepCols.forEach(kc => { if (kc != null) d[kc] = r[kc]; });
+    if (seOpts?.clusterVar)  d[seOpts.clusterVar]  = r[seOpts.clusterVar];
+    if (seOpts?.clusterVar2) d[seOpts.clusterVar2] = r[seOpts.clusterVar2];
+    if (seOpts?.timeVar)     d[seOpts.timeVar]     = r[seOpts.timeVar];
+    varCols.forEach(c => {
+      // Evaluate in the same left-to-right order as the original expression so the
+      // result is bit-identical: ((v − mean0) − mean1) + (D−1)·grand.
+      let v = (r[c] ?? 0);
+      fe.forEach((fc, di) => { v -= (dimMeans[di][r[fc]][c] ?? 0); });
+      v += (D - 1) * grandMeans[c];
+      d[c] = v;
+    });
+    return d;
+  });
+  const nLevels = fe.map(fc => new Set(rows.map(r => r[fc])).size);
+  return { demeaned, grandMeans, nLevels };
+}
+
 // ─── FIXED EFFECTS (WITHIN), N-WAY ───────────────────────────────────────────
 // feCols: array of FE column names, length ≥ 1 (e.g. ["state"] or ["state","year"]
 // or ["state","year","industry"] or an interaction-materialized column name).
@@ -363,34 +417,43 @@ export function runEventStudyMulti(
   const eventDummyCols = kValues.map(dummyName);
   const binCols        = [PRE_BIN, POST_BIN];
   const varCols        = [yCol, ...eventDummyCols, ...binCols, ...controls];
+  const regressors     = [...eventDummyCols, ...binCols, ...controls];
 
-  // Coerce any missing varCol values to 0 (matches the original `?? 0` semantics)
-  // so demeanByFE never sees a null. Dummies default to 0; y/controls are pre-filtered.
-  const cleanRows = withDummies.map(r => {
-    const o = { ...r };
-    varCols.forEach(c => { o[c] = r[c] ?? 0; });
-    return o;
-  });
-  const { demeaned, nLevels, grandMeans } = demeanByFE(cleanRows, fe, varCols);
-  // Recenter D≥2 columns to mean zero to match the original double-demean's
-  // intercept convention (see runTWFEDiDMulti for the rationale). Slopes unaffected.
-  demeaned.forEach(r => { varCols.forEach(c => { r[`__dm_${c}`] -= grandMeans[c]; }); });
+  let demeaned, dmY, dmRegressors, absorbedFE;
+  if (fe.length <= 2) {
+    // D ≤ 2: reproduce the ORIGINAL single-pass double-demean EXACTLY (byte-identical
+    // on balanced AND unbalanced panels) — the historically R-validated path. NOT
+    // routed through demeanByFE (whose iterative projection differs on unbalanced
+    // data). Means/demeaning run over `withDummies`, matching the old code exactly.
+    const dm = singlePassWithin(withDummies, fe, varCols, seOpts, [unitCol, timeCol]);
+    demeaned = dm.demeaned;
+    dmY = yCol;
+    dmRegressors = regressors;
+    absorbedFE = dm.nLevels.reduce((s, L) => s + L, 0) - (fe.length - 1);
+  } else {
+    // D ≥ 3: new N-way functionality — exact alternating-projection within transform.
+    // Coerce missing varCol values to 0 (matches `?? 0`) so demeanByFE never sees null.
+    const cleanRows = withDummies.map(r => {
+      const o = { ...r };
+      varCols.forEach(c => { o[c] = r[c] ?? 0; });
+      return o;
+    });
+    const { demeaned: dm, nLevels, grandMeans } = demeanByFE(cleanRows, fe, varCols);
+    dm.forEach(r => { varCols.forEach(c => { r[`__dm_${c}`] -= grandMeans[c]; }); });
+    demeaned = dm;
+    dmY = `__dm_${yCol}`;
+    dmRegressors = regressors.map(c => `__dm_${c}`);
+    absorbedFE = nLevels.reduce((s, L) => s + L, 0) - (nLevels.length - 1);
+  }
 
   // ── 6. OLS on demeaned data ───────────────────────────────────────────────
-  const regressors = [...eventDummyCols, ...binCols, ...controls];
-  const dmY = `__dm_${yCol}`;
-  const dmRegressors = regressors.map(c => `__dm_${c}`);
   const res = runOLS(demeaned, dmY, dmRegressors);
   if (!res) return { error: "Event Study OLS failed — singular matrix after demeaning." };
 
   // ── 7. Correct SE for FE df ───────────────────────────────────────────────
-  // Preserve the original Event Study df convention: absorbed FE params counted as
-  // (Σ levels − (D − 1)) — i.e. Lu + Lt − 1 for the default 2-way case — PLUS a
-  // separately-counted intercept (the trailing "− 1"). This differs by 1 from the
-  // generic feDegreesOfFreedom() (which folds the intercept into the FE count); the
-  // original formula is retained deliberately to keep results numerically identical.
+  // Original Event Study df: n − (ΣL_d − (D−1)) − regressors − 1  (= n − (Lu+Lt−1) −
+  // regressors − 1 for the default 2-way case; intercept counted separately).
   const k_total  = regressors.length + 1; // include intercept
-  const absorbedFE = nLevels.reduce((s, L) => s + L, 0) - (nLevels.length - 1);
   const df_fe    = valid.length - absorbedFE - regressors.length - 1;
   if (df_fe <= 0)
     return { error: "Degrees of freedom ≤ 0 — reduce window or add more observations." };
@@ -655,29 +718,40 @@ export function runTWFEDiDMulti(rows, yCol, unitCol, timeCol, treatCol, controls
   const times = [...new Set(valid.map(r => r[timeCol]))].sort((a, b) => a - b);
   if (units.length < 2 || times.length < 2) return null;
 
-  // N-way demean of [y, treat, ...controls] (matches original `?? 0` coercion).
   const varCols = [yCol, treatCol, ...controls];
-  const cleanRows = valid.map(r => {
-    const o = { ...r };
-    varCols.forEach(c => { o[c] = r[c] ?? 0; });
-    return o;
-  });
-  const { demeaned, nLevels, grandMeans } = demeanByFE(cleanRows, fe, varCols);
-  // demeanByFE re-centers to the grand mean (matching the D=1 within convention).
-  // The original double-demean recentered D≥2 columns to mean zero; subtract the
-  // grand mean back out so the intercept row is numerically identical to the
-  // original TWFE. (Slopes/ATT are location-invariant and unaffected either way.)
-  demeaned.forEach(r => { varCols.forEach(c => { r[`__dm_${c}`] -= grandMeans[c]; }); });
+  let demeaned, df_fe, dmY, dmTreat, dmControls;
+  if (fe.length <= 2) {
+    // D ≤ 2: reproduce the ORIGINAL single-pass double-demean EXACTLY (byte-identical
+    // on balanced AND unbalanced panels) — this is the historically R-validated path.
+    // NOT routed through demeanByFE, whose iterative projection differs on unbalanced
+    // data. Column names stay unprefixed, matching the old runTWFEDiD.
+    const dm = singlePassWithin(valid, fe, varCols, seOpts, [unitCol, timeCol]);
+    demeaned = dm.demeaned;
+    dmY = yCol; dmTreat = treatCol; dmControls = controls;
+    // Original df: n − (ΣL_d − (D−1)) − controls − 1  (= n − (Lu+Lt−1) − controls − 1).
+    const absorbedFE = dm.nLevels.reduce((s, L) => s + L, 0) - (fe.length - 1);
+    df_fe = valid.length - absorbedFE - controls.length - 1;
+  } else {
+    // D ≥ 3: new N-way functionality — exact alternating-projection within transform.
+    const cleanRows = valid.map(r => {
+      const o = { ...r };
+      varCols.forEach(c => { o[c] = r[c] ?? 0; });
+      return o;
+    });
+    const { demeaned: dm, nLevels, grandMeans } = demeanByFE(cleanRows, fe, varCols);
+    // demeanByFE re-centers to the grand mean (matching the D=1 within convention).
+    // Subtract the grand mean back out so the intercept row matches the within scale.
+    dm.forEach(r => { varCols.forEach(c => { r[`__dm_${c}`] -= grandMeans[c]; }); });
+    demeaned = dm;
+    dmY = `__dm_${yCol}`;
+    dmTreat = `__dm_${treatCol}`;
+    dmControls = controls.map(c => `__dm_${c}`);
+    df_fe = feDegreesOfFreedom(valid.length, 1 + controls.length, nLevels);
+  }
 
-  const dmY = `__dm_${yCol}`;
-  const dmTreat = `__dm_${treatCol}`;
-  const dmControls = controls.map(c => `__dm_${c}`);
   const res = runOLS(demeaned, dmY, [dmTreat, ...dmControls]);
   if (!res) return null;
 
-  // df: remove absorbed FE. feDegreesOfFreedom(n, kReg=1+controls, nLevels) reduces
-  // to the original n − (Lu+Lt−1) − controls − 1 for the default two-way case.
-  const df_fe = feDegreesOfFreedom(valid.length, 1 + controls.length, nLevels);
   const s2_fe = res.SSR / Math.max(1, df_fe);
 
   const Xmat  = demeaned.map(r => [1, r[dmTreat], ...dmControls.map(c => r[c])]);
