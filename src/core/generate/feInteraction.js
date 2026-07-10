@@ -17,7 +17,7 @@ export function materializeFEInteraction(rows, sourceCols, outCol) {
   const name = outCol || sourceCols.join("×");
   const withInteraction = rows.map(r => ({
     ...r,
-    [name]: sourceCols.map(c => String(r[c] ?? " NA")).join(""),
+    [name]: sourceCols.map(c => String(r[c] ?? " NA")).join("\x01"),
   }));
   return { rows: withInteraction, outCol: name };
 }
