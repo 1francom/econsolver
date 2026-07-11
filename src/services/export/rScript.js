@@ -770,10 +770,14 @@ function transpileModel(model) {
       ].join("\n");
     }
 
-    case "FE":
+    case "FE": {
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity-only.
+      // Fallback preserves the pre-existing entity-only default byte-for-byte.
+      const feColsFE = feCols?.length ? feCols : [entityCol].filter(Boolean);
+      const feClauseFE = feColsFE.map(rName).join(" + ");
       return [
         `# ── Fixed Effects (within estimator) ────────────────────────────────`,
-        `fit_fe <- fixest::feols(${y} ~ ${xStr} | ${rName(entityCol)}, data = df, vcov = ~${rName(entityCol)})`,
+        `fit_fe <- fixest::feols(${y} ~ ${xStr} | ${feClauseFE}, data = df, vcov = ~${rName(entityCol)})`,
         `fit_fd <- plm::plm(${y} ~ ${xStr}, data = df,`,
         `  index = c(${rStr(entityCol)}, ${rStr(timeCol)}),`,
         `  model = "fd")`,
@@ -786,6 +790,7 @@ function transpileModel(model) {
         `  model = "random")`,
         `plm::phtest(fit_fe |> plm::as.plm(), fit_re)`,
       ].join("\n");
+    }
 
     case "FD":
       return [
@@ -839,9 +844,13 @@ function transpileModel(model) {
       const ec    = rName(entityCol);
       const tc    = rName(timeCol);
       const ctrls = wVars.length ? " + " + wVars.map(fmtR).join(" + ") : "";
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
+      // Fallback preserves the pre-existing entity+time default byte-for-byte.
+      const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
+      const feClauseTWFE = feColsTWFE.map(rName).join(" + ");
       return [
         `# ── Two-Way Fixed Effects DiD ────────────────────────────────────────`,
-        `fit <- fixest::feols(${y} ~ ${treat}${ctrls} | ${ec} + ${tc},`,
+        `fit <- fixest::feols(${y} ~ ${treat}${ctrls} | ${feClauseTWFE},`,
         `  data = df, vcov = ~${ec})`,
         ``,
         `fixest::etable(fit)`,

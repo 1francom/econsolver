@@ -697,11 +697,23 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     }
 
     case "FE": {
-      lines.push(`# Fixed Effects (within estimator)`);
-      lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
-      lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
-      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
-      lines.push(`print(model.summary)`);
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity-only.
+      // Fallback preserves the pre-existing entity-only default byte-for-byte.
+      const feColsFE = feCols?.length ? feCols : [entityCol].filter(Boolean);
+      if (feColsFE.length <= 2) {
+        lines.push(`# Fixed Effects (within estimator)`);
+        lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+        lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
+        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
+        lines.push(`print(model.summary)`);
+      } else {
+        lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
+        lines.push(`# For a 3rd+ FE dimension, absorb via one-hot dummies through statsmodels instead:`);
+        lines.push(`import statsmodels.formula.api as smf`);
+        const dummyTerms = feColsFE.map(c => `C(${c})`).join(" + ");
+        lines.push(`model = smf.ols("${yVar} ~ ${pyFormStr} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
+        lines.push(`print(model.summary())`);
+      }
       break;
     }
 
@@ -749,12 +761,25 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     }
 
     case "TWFE": {
-      lines.push(`# Two-Way Fixed Effects DiD`);
-      lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
+      // Fallback preserves the pre-existing entity+time default byte-for-byte.
+      const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       const extraX = wVars.length ? `, ${wVars.map(v=>`"${v}"`).join(", ")}` : "";
-      lines.push(`exog = sm.add_constant(df_panel[["${treatVar}"${extraX}]])`);
-      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
-      lines.push(`print(model.summary)`);
+      if (feColsTWFE.length <= 2) {
+        lines.push(`# Two-Way Fixed Effects DiD`);
+        lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+        lines.push(`exog = sm.add_constant(df_panel[["${treatVar}"${extraX}]])`);
+        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
+        lines.push(`print(model.summary)`);
+      } else {
+        lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
+        lines.push(`# For a 3rd+ FE dimension, absorb via one-hot dummies through statsmodels instead:`);
+        lines.push(`import statsmodels.formula.api as smf`);
+        const dummyTerms = feColsTWFE.map(c => `C(${c})`).join(" + ");
+        const extraTerms = wVars.length ? ` + ${wVars.join(" + ")}` : "";
+        lines.push(`model = smf.ols("${yVar} ~ ${treatVar}${extraTerms} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
+        lines.push(`print(model.summary())`);
+      }
       break;
     }
 

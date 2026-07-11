@@ -698,12 +698,23 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`estimates store m_wls`);
       break;
 
-    case "FE":
-      lines.push(`* Fixed Effects (within)`);
-      lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
-      lines.push(`estimates store m_fe`);
+    case "FE": {
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity-only.
+      // Fallback preserves the pre-existing entity-only default byte-for-byte.
+      const feColsFE = feCols?.length ? feCols : [entityCol].filter(Boolean);
+      if (feColsFE.length <= 2) {
+        lines.push(`* Fixed Effects (within)`);
+        lines.push(`xtset ${entityCol} ${timeCol}`);
+        lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
+        lines.push(`estimates store m_fe`);
+      } else {
+        lines.push(`* Fixed Effects (within) — N-way absorption via reghdfe`);
+        lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsFE.join(" ")}) vce(cluster ${entityCol})`);
+        lines.push(`estimates store m_fe`);
+      }
       break;
+    }
 
     case "FD":
       lines.push(`* First Differences`);
@@ -735,9 +746,12 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "TWFE": {
       const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
+      // Fallback preserves the pre-existing entity+time default byte-for-byte.
+      const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       lines.push(`* Two-Way Fixed Effects DiD`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${entityCol} ${timeCol}) vce(cluster ${entityCol})`);
+      lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${feColsTWFE.join(" ")}) vce(cluster ${entityCol})`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
       lines.push(`estimates store m_twfe`);
       break;
