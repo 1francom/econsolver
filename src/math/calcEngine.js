@@ -8,6 +8,7 @@
 //   solveSystem(fns, x0, tol, maxIter)           — Newton-Raphson for n×n systems
 //   derivative(fn, x, h)                         — central-difference first derivative
 //   nthDerivative(fn, x, n, h)                   — recursive higher-order derivative
+//   limit(fn, a, opts)                           — numeric limit via sequence convergence
 //   gradient(fn, xVec, h)                        — multivariate partial derivatives
 //   predict(beta, xVec, XtXinv, s2, df)          — ŷ ± 95% CI
 //   evalExpression(expr, scope)                  — safe expression evaluator
@@ -210,6 +211,93 @@ export function nthDerivative(fn, x, n, h = 1e-4) {
   if (n === 1) return derivative(fn, x, h);
   const f1 = gx => nthDerivative(fn, gx, n - 1, h);
   return (f1(x + h) - f1(x - h)) / (2 * h);
+}
+
+// ─── NUMERIC LIMIT ───────────────────────────────────────────────────────────
+/**
+ * Numeric limit lim(x→a) f(x) via sequence convergence (heuristic — same
+ * precision spirit as the central-difference `derivative` above).
+ *
+ * @param {Function} fn — plain number → number function (never a string)
+ * @param {number}   a  — finite number, Infinity, or -Infinity
+ * @param {Object}   opts — { h0 = 0.1, tol = 1e-4 }
+ * @returns {{ a, exists, val, leftVal, rightVal, note }}
+ *   val is the limit when exists === true; leftVal/rightVal are the last
+ *   converged/attempted values of each one-sided sequence (identical when a
+ *   is infinite — there is only one sequence at infinity).
+ */
+export function limit(fn, a, opts = {}) {
+  const h0  = opts.h0  ?? 0.1;
+  const tol = opts.tol ?? 1e-4;
+  const K = 8; // k = 0..7
+
+  // Relative difference with a unit floor so limits of exactly 0 converge.
+  const relDiff = (p, q) => Math.abs(q - p) / Math.max(Math.abs(q), Math.abs(p), 1);
+
+  // Evaluate fn over the sample points, skipping throws / NaN / ±Infinity —
+  // a single bad sample point must not kill convergence detection.
+  const sample = (xs) => {
+    const vals = [];
+    for (const x of xs) {
+      let y;
+      try { y = fn(x); } catch { continue; }
+      if (typeof y !== "number" || !isFinite(y)) continue;
+      vals.push(y);
+    }
+    return vals;
+  };
+
+  // Classify a sequence from its last 3 terms: converged / diverges / oscillates.
+  const classify = (vals) => {
+    if (vals.length < 3) return { status: "none", limitVal: null, lastVal: vals.length ? vals[vals.length - 1] : null };
+    const [v1, v2, v3] = vals.slice(-3);
+    if (relDiff(v1, v2) < tol && relDiff(v2, v3) < tol)
+      return { status: "converged", limitVal: v3, lastVal: v3 };
+    // Diverging: |f| growing without bound — monotone magnitude growth AND at
+    // least an order of magnitude gained (rules out bounded oscillation like
+    // sin(1/x) whose last samples happen to be increasing).
+    if (Math.abs(v3) > Math.abs(v2) && Math.abs(v2) > Math.abs(v1) && Math.abs(v3) >= 10 * Math.abs(v1))
+      return { status: "diverges", limitVal: v3 > 0 ? Infinity : -Infinity, lastVal: v3 };
+    return { status: "oscillates", limitVal: null, lastVal: v3 };
+  };
+
+  let L, R;
+  if (!isFinite(a)) {
+    // Single sequence at ±infinity: x_k = sign(a) · 10^(k+1)
+    const sgn = a > 0 ? 1 : -1;
+    const xs = Array.from({ length: K }, (_, k) => sgn * 10 ** (k + 1));
+    L = R = classify(sample(xs));
+  } else {
+    // Shrinking-h sequences from below and above: h_k = h0 / 10^k
+    const hs = Array.from({ length: K }, (_, k) => h0 / 10 ** k);
+    L = classify(sample(hs.map(h => a - h)));
+    R = classify(sample(hs.map(h => a + h)));
+  }
+
+  if (L.status === "converged" && R.status === "converged") {
+    if (relDiff(L.limitVal, R.limitVal) < tol) {
+      return { a, exists: true, val: (L.limitVal + R.limitVal) / 2,
+               leftVal: L.limitVal, rightVal: R.limitVal, note: "converges" };
+    }
+    return { a, exists: false, val: null,
+             leftVal: L.limitVal, rightVal: R.limitVal, note: "left/right disagree" };
+  }
+
+  // At least one side failed to converge.
+  const describe = (s) =>
+    s.status === "diverges" ? `diverges to ${s.limitVal > 0 ? "+Infinity" : "-Infinity"}`
+    : s.status === "none"   ? "could not be evaluated"
+    : "oscillates / does not converge";
+  let note;
+  if (L === R) {
+    note = describe(L); // infinite a — single sequence
+  } else {
+    const parts = [];
+    if (L.status !== "converged") parts.push(`left ${describe(L)}`);
+    if (R.status !== "converged") parts.push(`right ${describe(R)}`);
+    note = parts.join("; ");
+  }
+  return { a, exists: false, val: null, leftVal: L.lastVal, rightVal: R.lastVal, note };
 }
 
 export function gradient(fn, xVec, h = 1e-6) {

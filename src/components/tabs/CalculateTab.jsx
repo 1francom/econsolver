@@ -15,12 +15,13 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { HintBox } from "../HelpSystem.jsx";
-import { evalExpression, buildScope, solveRootAuto, solveSystem, derivative, nthDerivative, integrate,
+import { evalExpression, buildScope, solveRootAuto, solveSystem, derivative, nthDerivative, integrate, limit,
   dnorm, pnorm, qnorm, dt, pt, qt, dbinom, pbinom, dpois, ppois, dchisq, pchisq, qchisq,
 } from "../../math/calcEngine.js";
 import { bootstrapMean, subsampleMean, permutationTwoSampleMean } from "../../math/Resampling.js";
 import { symbolicDiff, latexName } from "../../math/symbolicDiff.js";
 import { solveAlgebraicEquation } from "../../math/symbolicSolve.js";
+import { assertSafeExpr } from "../../pipeline/exprGuard.js";
 import { useTheme } from "../../ThemeContext.jsx";
 import Workbench from "../calculate/workbench/Workbench.jsx";
 import { useSessionLog } from "../../services/session/sessionLog.jsx";
@@ -1166,7 +1167,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
   function focusField(setter) { activeFieldRef.current = setter; }
 
   // ── Active tool + grapher ─────────────────────────────────────────────────
-  const [activeTool,   setActiveTool]  = useState("solver"); // "solver"|"derivative"|"symbolic"|"algebra"|"integral"
+  const [activeTool,   setActiveTool]  = useState("solver"); // "solver"|"derivative"|"symbolic"|"algebra"|"integral"|"limit"
   const [probOpen,     setProbOpen]    = useState(false);
 
   // ── Equation solver ────────────────────────────────────────────────────────
@@ -1197,6 +1198,12 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
   const [dPoint,       setDPoint]      = useState("2");
   const [dOrder,       setDOrder]      = useState("1");
   const [dResult,      setDResult]     = useState(null);
+
+  // ── Limit ────────────────────────────────────────────────────────────────
+  const [lExpr,        setLExpr]       = useState("sin(x)/x");
+  const [lVar,         setLVar]        = useState("x");
+  const [lPoint,       setLPoint]      = useState("0");
+  const [lResult,      setLResult]     = useState(null);
 
   // ── Integral ─────────────────────────────────────────────────────────────
   const [intExpr,      setIntExpr]     = useState("x**2");
@@ -1394,6 +1401,29 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
     } catch (e) { setDResult({ error: `Expression error: ${e.message}` }); }
   }
 
+  // ── Limit ─────────────────────────────────────────────────────────────────
+  function parseLimitPoint(raw) {
+    const s = raw.trim().toLowerCase();
+    if (s === "inf" || s === "infinity" || s === "+inf" || s === "+infinity") return Infinity;
+    if (s === "-inf" || s === "-infinity") return -Infinity;
+    const n = parseFloat(raw);
+    return isFinite(n) ? n : null; // null = invalid, same signal dPoint's isFinite check uses
+  }
+
+  function runLimit() {
+    try {
+      const a = parseLimitPoint(lPoint);
+      if (a === null) { setLResult({ error: "Point must be a number, or inf / -inf." }); return; }
+      const varName = lVar.trim() || "x";
+      // Same compilation technique as runDerivative, guarded by the shared
+      // expression denylist (exprGuard is the single source of truth — §10.1).
+      assertSafeExpr(lExpr);
+      const fn = new Function(varName, ...Object.keys(scope), `"use strict"; return (${lExpr});`);
+      const wrappedFn = x => fn(x, ...Object.values(scope));
+      setLResult({ ...limit(wrappedFn, a), varName });
+    } catch (e) { setLResult({ error: `Expression error: ${e.message}` }); }
+  }
+
   // Inline-editable variable row
   function VarRow({ v }) {
     const ev = evaluatedVars.find(x => x.id === v.id) ?? v;
@@ -1553,7 +1583,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
 
         {/* Tool selector strip */}
         <div style={{ display: "flex", background: C.surface2 }}>
-          {[["solver","= Solve"],["derivative","∂ Derive"],["symbolic","f′ Symb."],["algebra","Σ Algebra"],["integral","∫ Integrate"]].map(([id, label]) => (
+          {[["solver","= Solve"],["derivative","∂ Derive"],["symbolic","f′ Symb."],["algebra","Σ Algebra"],["integral","∫ Integrate"],["limit","lim Limit"]].map(([id, label]) => (
             <button key={id} onClick={() => setActiveTool(id)}
               style={{ flex: 1, padding: "0.5rem 0.35rem", background: "transparent", border: "none",
                 borderBottom: activeTool === id ? `2px solid ${C.teal}` : `2px solid ${C.border}`,
@@ -2123,6 +2153,45 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
                     <span style={{ color: C.textMuted }}> f({intVar.trim() || "x"}) d{intVar.trim() || "x"} = </span>
                     <span style={{ color: C.blue, fontSize: T.body.fontSize }}>{fmt(intResult.value, 8)}</span>
                   </div>
+                </ResultBox>
+            )}
+          </div>
+        )}
+
+        {activeTool === "limit" && (
+          <div style={{ padding: "0.85rem", background: C.surface, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted, whiteSpace: "nowrap" }}>f( </span>
+              <input value={lVar} onChange={e => setLVar(e.target.value)} placeholder="x" style={{ ...fieldStyle(C, T), width: 60 }} />
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.textMuted, whiteSpace: "nowrap" }}> ) =</span>
+              <input value={lExpr} onChange={e => setLExpr(e.target.value)} placeholder="sin(x)/x"
+                onFocus={() => focusField(setLExpr)}
+                style={{ ...fieldStyle(C, T), flex: 1, minWidth: 180 }} />
+              <EquationPicker savedEqs={savedEqs} onLoad={setLExpr} />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>as {lVar.trim() || "x"} →</span>
+              <input value={lPoint} onChange={e => setLPoint(e.target.value)} placeholder="0, inf, -inf" style={{ ...fieldStyle(C, T), width: 90 }} />
+              <Btn ch="Compute" v="solid" color={C.teal} sm onClick={runLimit} />
+            </div>
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
+              Other variables in scope: {Object.keys(scope).filter(k => k !== lVar.trim()).join(", ") || "none"}
+            </div>
+            {lResult && (lResult.error ? <ErrBox msg={lResult.error} />
+              : <ResultBox color={lResult.exists ? C.teal : C.gold}>
+                  <div>
+                    <span style={{ color: C.textMuted }}>lim({lResult.varName} → {lResult.a === Infinity ? "∞" : lResult.a === -Infinity ? "−∞" : lResult.a}) f({lResult.varName}) = </span>
+                    {lResult.exists
+                      ? <span style={{ color: C.teal }}>{fmt(lResult.val, 8)}</span>
+                      : <span style={{ color: C.gold }}>does not exist</span>}
+                  </div>
+                  {!lResult.exists && lResult.leftVal != null && lResult.rightVal != null && (
+                    <div>
+                      <span style={{ color: C.textMuted }}>left → </span><span style={{ color: C.text }}>{fmt(lResult.leftVal, 6)}</span>
+                      <span style={{ color: C.textMuted }}> · right → </span><span style={{ color: C.text }}>{fmt(lResult.rightVal, 6)}</span>
+                    </div>
+                  )}
+                  <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 4 }}>{lResult.note} · numerical (sequence convergence)</div>
                 </ResultBox>
             )}
           </div>

@@ -3,7 +3,7 @@
 **Date:** 2026-07-02
 **Owner:** Franco Medero
 **Executor:** Claude Fable 5
-**Status:** OPEN — awaiting Franco's spec review before implementation plan
+**Status:** CODE-COMPLETE 2026-07-08 — browser-validation pending Franco
 **Source:** ClaudeFB.md, 2026-06-19 batch, Features — "Add limits" (single line, no detail; scope clarified via brainstorming with Franco 2026-07-02)
 
 > **Read this first (executing agent):** you did not see the design conversation.
