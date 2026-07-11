@@ -710,6 +710,9 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       } else {
         lines.push(`* Fixed Effects (within) — N-way absorption via reghdfe`);
         lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
+        lines.push(`* NOTE: clusters on the first FE column (entityCol) by convention, matching the`);
+        lines.push(`* existing TWFE reghdfe export — does not yet thread the model's actual seType/`);
+        lines.push(`* clusterVar selection through this fallback path.`);
         lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsFE.join(" ")}) vce(cluster ${entityCol})`);
         lines.push(`estimates store m_fe`);
       }

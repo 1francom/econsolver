@@ -711,6 +711,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`# For a 3rd+ FE dimension, absorb via one-hot dummies through statsmodels instead:`);
         lines.push(`import statsmodels.formula.api as smf`);
         const dummyTerms = feColsFE.map(c => `C(${c})`).join(" + ");
+        lines.push(`# drop the global intercept: multiple C(col) absorptions already span the`);
+        lines.push(`# level space between them, so keeping a separate intercept would double-count`);
         lines.push(`model = smf.ols("${yVar} ~ ${pyFormStr} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
         lines.push(`print(model.summary())`);
       }
