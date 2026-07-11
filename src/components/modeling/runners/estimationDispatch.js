@@ -6,11 +6,11 @@
 // the historical stale-closure guards are unchanged; this file is just the body.
 
 import {
-  runOLS, runWLS, run2SLS, runFE, runFD, runSharpRDD,
-  run2x2DiD, runTWFEDiD, ikBandwidth,
+  runOLS, runWLS, run2SLS, runFE, runFEMulti, runFDMulti, runSharpRDD,
+  run2x2DiD, runTWFEDiDMulti, ikBandwidth,
   runLogit, runProbit,
   runGMM, runLIML, runIVPoisson,
-  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runNegBinFE,
+  runFuzzyRDD, runEventStudyMulti, runLSDV, runLSDVMulti, runPoisson, runPoissonFE, runPoissonFEMulti, runNegBinFE,
   runSunAbraham, runSyntheticControl, runCallawayCS,
   runSpatialRDD, runSpatialRegressionFromRows,
   wrapResult, diagnoseFit,
@@ -25,6 +25,7 @@ export function dispatchEstimation(dataRows, ctx) {
     zVars, postVar, treatVar,
     runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
     treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE,
+    feCols: ctxFeCols,
     poissonEntityCol, poissonOffsetCol, poissonExtraFE,
     cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
     csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
@@ -54,18 +55,30 @@ export function dispatchEstimation(dataRows, ctx) {
     } else if (effModel === "FE") {
       if (!allX.length) return { error: "Select at least one regressor." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      const feRaw = runFE(dataRows, y, allX, ec, tc, seOpts);
+      // Plain FE's legacy default is ENTITY-ONLY demeaning (runFE(ec,tc) only ever
+      // demeaned by ec — tc was just a validity filter). runFE's wrapper also adds
+      // units/R2_between/alphas fields the UI (PanelResults "Units" badge, entity
+      // FE display) reads, which runFEMulti's raw output does not have. So: keep
+      // calling the legacy wrapper for the untouched entity-only default (byte-
+      // identical output, badges intact); only route through runFEMulti directly
+      // once the user has actually picked a different/larger FE set via the picker.
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec].filter(Boolean);
+      const isLegacyDefault = feCols.length === 1 && feCols[0] === ec;
+      const feRaw = isLegacyDefault
+        ? runFE(dataRows, y, allX, ec, tc, seOpts)
+        : runFEMulti(dataRows, y, allX, feCols, seOpts);
       if (!feRaw || feRaw.error) return { error: feRaw?.error ?? "Fixed Effects estimation failed." };
-      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc };
+      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols };
       const feRes = wrapResult("FE", feRaw, panelSpec);
       return { result: { type: "FE", fe: feRes, fd: null }, panelFE: feRes, panelFD: null };
 
     } else if (effModel === "FD") {
       if (!allX.length) return { error: "Select at least one regressor." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      const fdRaw = runFD(dataRows, y, allX, ec, tc, seOpts);
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec, tc].filter(Boolean);
+      const fdRaw = runFDMulti(dataRows, y, allX, feCols, seOpts);
       if (!fdRaw || fdRaw.error) return { error: fdRaw?.error ?? "First Differences estimation failed." };
-      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc };
+      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols };
       const fdRes = wrapResult("FD", fdRaw, panelSpec);
       return { result: { type: "FD", fe: null, fd: fdRes }, panelFE: null, panelFD: fdRes };
 
@@ -85,9 +98,10 @@ export function dispatchEstimation(dataRows, ctx) {
     } else if (effModel === "TWFE") {
       if (!treatVar[0]) return { error: "Select the treatment indicator column." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      const res = runTWFEDiD(dataRows, y, ec, tc, treatVar[0], expW, seOpts);
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec, tc].filter(Boolean);
+      const res = runTWFEDiDMulti(dataRows, y, ec, tc, treatVar[0], expW, feCols, seOpts);
       if (!res) return { error: "TWFE DiD failed. Check panel structure and treatment variable." };
-      return { result: wrapResult("TWFE", res, { yVar: y, wVars: expW, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }), panelFE: null, panelFD: null };
+      return { result: wrapResult("TWFE", res, { yVar: y, wVars: expW, entityCol: ec, timeCol: tc, treatVar: treatVar[0], feCols }), panelFE: null, panelFD: null };
 
     } else if (effModel === "RDD") {
       if (!runningVar[0]) return { error: "Select a running variable." };
@@ -147,18 +161,32 @@ export function dispatchEstimation(dataRows, ctx) {
     } else if (effModel === "LSDV") {
       if (!allX.length) return { error: "Select at least one regressor (X)." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      const res = runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts);
+      // LSDV's own "include time FE" toggle (lsdvTimeFE) predates the N-way picker
+      // and must keep working: when off, time is dropped from the FE set even if
+      // it's present in ctxFeCols/panel.feCols (default = [entityCol, timeCol]).
+      const baseFeCols = ctxFeCols?.length ? ctxFeCols : [ec, tc].filter(Boolean);
+      const feCols = lsdvTimeFE ? baseFeCols : baseFeCols.filter(c => c !== tc);
+      // runLSDV's legacy wrapper adds units/times/timeFE/refUnit/refTime + the
+      // "unit:"/"time:" varNames labels the UI reads (Panel LSDV badges). Its
+      // output is byte-identical to runLSDVMulti for the entity-only / entity+time
+      // sets, so keep using it whenever the picker hasn't added extra dims;
+      // only route through runLSDVMulti directly for genuine 3+-way LSDV.
+      const extraDims = feCols.filter(c => c !== ec && c !== tc);
+      const res = extraDims.length === 0
+        ? runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts)
+        : runLSDVMulti(dataRows, y, allX, feCols, seOpts);
       if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };
-      return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc }), panelFE: null, panelFD: null };
+      return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols }), panelFE: null, panelFD: null };
 
     } else if (effModel === "EventStudy") {
       if (!treatTimeCol[0]) return { error: "Select the treatment time column (period when each unit was first treated)." };
       const ec = panel.entityCol, tc = panel.timeCol;
       const pre  = Math.max(1, kPre  || 3);
       const post = Math.max(1, kPost || 3);
-      const res = runEventStudy(dataRows, y, ec, tc, treatTimeCol[0], pre, post, expW, seOpts);
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec, tc].filter(Boolean);
+      const res = runEventStudyMulti(dataRows, y, ec, tc, treatTimeCol[0], pre, post, expW, feCols, seOpts);
       if (!res || res.error) return { error: res?.error ?? "Event Study failed. Check panel structure and treatment time column." };
-      return { result: wrapResult("EventStudy", res, { yVar: y, xVars: expX, wVars: expW, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }), panelFE: null, panelFD: null };
+      return { result: wrapResult("EventStudy", res, { yVar: y, xVars: expX, wVars: expW, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0], feCols }), panelFE: null, panelFD: null };
 
     } else if (effModel === "FuzzyRDD") {
       if (!treatVar[0])   return { error: "Select the treatment receipt column (D: actual 0/1 take-up)." };

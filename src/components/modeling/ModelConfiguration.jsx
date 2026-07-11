@@ -57,6 +57,32 @@ function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }
   );
 }
 
+// ─── N-way FE picker ──────────────────────────────────────────────────────────
+// Multi-select FE dimension picker. Defaults to `defaultFeCols` (normally
+// panel.feCols from the PanelTab declaration; the plain "FE" estimator passes
+// [entityCol] only, since that estimator historically demeans by entity alone —
+// see estimationDispatch.js) but lets the user narrow/reorder for THIS
+// estimation only — does not mutate the stored panel declaration.
+function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCols }) {
+  const { C } = useTheme();
+  if (!panel?.feCols?.length) return null;
+  const dflt = defaultFeCols ?? panel.feCols;
+  const effective = selectedFeCols ?? dflt;
+  const toggle = col => setSelectedFeCols(
+    effective.includes(col) ? effective.filter(c => c !== col) : [...effective, col]
+  );
+  return (
+    <Section title="Fixed Effects" color={C.teal}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {panel.feCols.map(col => (
+          <Chip key={col} label={col} selected={effective.includes(col)} onClick={() => toggle(col)} color={C.teal} />
+        ))}
+      </div>
+    </Section>
+  );
+}
+export { FEColumnPicker };
+
 // ─── DiD 2×2: Treated + Post + Controls ──────────────────────────────────────
 function DiDConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, setPostVar, wVars, setWVars }) {
   const { C, T } = useTheme();
@@ -850,6 +876,7 @@ export default function ModelConfiguration({
   kPre,           setKPre,
   kPost,          setKPost,
   lsdvTimeFE,     setLsdvTimeFE,
+  selectedFeCols, setSelectedFeCols,
   treatedUnit,    setTreatedUnit,
   synthTreatTime, setSynthTreatTime,
   poissonEntityCol, setPoissonEntityCol,
@@ -921,15 +948,18 @@ export default function ModelConfiguration({
 
   if (model === "TWFE") {
     return (
-      <TWFEConfig
-        numericCols={numericCols}
-        yVar={yVar}
-        treatVar={treatVar}
-        setTreatVar={setTreatVar}
-        postVar={postVar}
-        wVars={wVars}
-        setWVars={setWVars}
-      />
+      <>
+        <TWFEConfig
+          numericCols={numericCols}
+          yVar={yVar}
+          treatVar={treatVar}
+          setTreatVar={setTreatVar}
+          postVar={postVar}
+          wVars={wVars}
+          setWVars={setWVars}
+        />
+        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} />
+      </>
     );
   }
 
@@ -970,7 +1000,12 @@ export default function ModelConfiguration({
     if (family === "poisson") {
       return <SunAbrahamConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} cohortCol={cohortCol} setCohortCol={setCohortCol} periodCol={periodCol} setPeriodCol={setPeriodCol} saUnitCol={saUnitCol} setSaUnitCol={setSaUnitCol} saControlMode={saControlMode} setSaControlMode={setSaControlMode} saRefPeriod={saRefPeriod} setSaRefPeriod={setSaRefPeriod} wVars={wVars} setWVars={setWVars} />;
     }
-    return <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />;
+    return (
+      <>
+        <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />
+        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} />
+      </>
+    );
   }
 
   if (model === "CallawayCS") {
@@ -992,7 +1027,12 @@ export default function ModelConfiguration({
   }
 
   if (model === "LSDV") {
-    return <LSDVConfig lsdvTimeFE={lsdvTimeFE} setLsdvTimeFE={setLsdvTimeFE} />;
+    return (
+      <>
+        <LSDVConfig lsdvTimeFE={lsdvTimeFE} setLsdvTimeFE={setLsdvTimeFE} />
+        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} />
+      </>
+    );
   }
 
   if (model === "SyntheticControl") {
@@ -1114,6 +1154,25 @@ export default function ModelConfiguration({
     );
   }
 
-  // OLS / FE / FD: no model-specific configuration beyond variable selection
+  if (model === "FE" && family !== "poisson") {
+    // Plain FE historically demeans by ENTITY ONLY (validated vs R
+    // fixest::feols(y ~ x | unit)) — default the picker to entity-only so an
+    // untouched picker reproduces that exact behavior; the user opts in to
+    // additional dims (e.g. time ⇒ two-way) by checking more chips.
+    return (
+      <FEColumnPicker
+        panel={panel}
+        selectedFeCols={selectedFeCols}
+        setSelectedFeCols={setSelectedFeCols}
+        defaultFeCols={panel?.entityCol ? [panel.entityCol] : []}
+      />
+    );
+  }
+
+  if (model === "FD") {
+    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} />;
+  }
+
+  // OLS: no model-specific configuration beyond variable selection
   return null;
 }

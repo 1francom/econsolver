@@ -496,6 +496,20 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [kPre,           setKPre]           = useState(3);
   const [kPost,          setKPost]          = useState(3);
   const [lsdvTimeFE,     setLsdvTimeFE]     = useState(false);
+  // N-way FE column picker (Task 5) — null = use panel.feCols as-is (the common
+  // entity+time-only case). Non-null = user has narrowed/reordered the FE set
+  // for THIS estimation only; never mutates the stored panel declaration.
+  const [selectedFeCols, setSelectedFeCols] = useState(null);
+  // Plain "FE" (linear, within estimator) historically demeans by ENTITY ONLY
+  // (validated vs R fixest::feols(y ~ x | unit) — see engineValidation.js). Its
+  // untouched default must stay entity-only, NOT panel.feCols (which includes
+  // time), or every existing FE regression would silently become two-way FE.
+  // FD/TWFE/EventStudy/LSDV already defaulted to the full [entity,time] set
+  // pre-generalization, so panel.feCols is the correct untouched default there.
+  const feColsDefault = (model === "FE" && family !== "poisson")
+    ? [panel?.entityCol].filter(Boolean)
+    : (panel?.feCols ?? [panel?.entityCol, panel?.timeCol].filter(Boolean));
+  const effectiveFeCols = selectedFeCols ?? feColsDefault;
   const [treatedUnit,    setTreatedUnit]    = useState("");
   const [synthTreatTime, setSynthTreatTime] = useState("");
   const [poissonEntityCol, setPoissonEntityCol] = useState("");
@@ -794,6 +808,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       zVars, postVar, treatVar,
       runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
       treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE,
+      feCols: effectiveFeCols,
       poissonEntityCol, poissonOffsetCol, poissonExtraFE,
       cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
       csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
@@ -816,7 +831,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
     if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
     return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, effectiveFeCols, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── DuckDB full-table pull ────────────────────────────────────────────────
   // For DuckDB-backed datasets `rows` is only a 500-row preview — every JS
@@ -949,6 +964,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           : (effModel === "PoissonFE" ? (panel?.entityCol || poissonEntityCol || null) : null),
         timeCol:       ["FD", "TWFE", "EventStudy"].includes(effModel) ? (panel?.timeCol ?? null)
           : (seTypeNorm === "HAC" ? (panel?.timeCol ?? null) : null),
+        feCols:        effectiveFeCols,
         postCol:       postVar[0] || null,
         treatCol:      treatVar[0] || null,
         treatTimeCol:  treatTimeCol[0] || null,
@@ -1480,6 +1496,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (!unitCol) throw new Error("Panel SQL path: entityCol missing — fallback to JS");
             if ((effModel === "FD" || effModel === "TWFE" || effModel === "EventStudy") && !timeCol)
               throw new Error(`Panel ${effModel} SQL path: timeCol missing — fallback to JS`);
+            // buildWithinSuffStats hardcodes unitCol (+ timeCol for FD/TWFE/EventStudy)
+            // — it does not yet accept an arbitrary feCols set (Task 6). So the SQL
+            // fast path is only valid when the picker is untouched, i.e. effectiveFeCols
+            // matches the estimator's own legacy default exactly (FE: [entity] only;
+            // FD/TWFE/EventStudy: [entity, time]). Any narrower/wider/reordered
+            // selection — including a plain 2-dim pick for "FE" — must fall back to
+            // JS (runFEMulti/etc.), which does honor the full feCols array.
+            const legacyFeCols = effModel === "FE" ? [unitCol].filter(Boolean) : [unitCol, timeCol].filter(Boolean);
+            const feColsMatchLegacy = effectiveFeCols.length === legacyFeCols.length
+              && effectiveFeCols.every((c, i) => c === legacyFeCols[i]);
+            if (!feColsMatchLegacy)
+              throw new Error(`Panel ${effModel} SQL path: custom FE set (${effectiveFeCols.join(",")}) not yet supported — fallback to JS`);
             // HAC on FE requires a time column for Driscoll-Kraay cross-sectional aggregation
             if (seTypeNorm === "HAC" && !timeCol)
               throw new Error("HAC standard errors require a time column. Set one in the Panel tab.");
@@ -1876,7 +1904,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation, getFullRows,
       model, family, yVar, xVars, wVars, zVars, weightVar, factorVars, seType,
       clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
-      postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol, poissonOffsetCol, poissonExtraFE]);
+      postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol, poissonOffsetCol, poissonExtraFE, effectiveFeCols]);
 
   useEffect(() => {
     const harness = window.__validation?.faseX4;
@@ -2047,6 +2075,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             kPre={kPre}                     setKPre={setKPre}
             kPost={kPost}                   setKPost={setKPost}
             lsdvTimeFE={lsdvTimeFE}         setLsdvTimeFE={setLsdvTimeFE}
+            selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols}
             treatedUnit={treatedUnit}       setTreatedUnit={setTreatedUnit}
             synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime}
             poissonEntityCol={poissonEntityCol} setPoissonEntityCol={setPoissonEntityCol}

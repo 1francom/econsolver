@@ -36,11 +36,16 @@ export { runIRLSFromSuffStats, applyRobustSEToIRLSResult } from "./IRLSSuffStats
 // ── Panel estimators ──────────────────────────────────────────────────────────
 export {
   runFE,
+  runFEMulti,
   runFD,
+  runFDMulti,
   run2x2DiD,
   runTWFEDiD,
+  runTWFEDiDMulti,
   runEventStudy,
+  runEventStudyMulti,
   runLSDV,
+  runLSDVMulti,
 } from "./PanelEngine.js";
 
 // ── Panel sufficient-statistics solvers (FE/FD via DuckDB within-transform) ───
