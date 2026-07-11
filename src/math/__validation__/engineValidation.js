@@ -1157,34 +1157,47 @@ function validateSyntheticControl() {
 
 // Minimal CSV parser (handles R's write.csv default quoting of factor/string
 // columns like `state_year`; numeric columns are left unquoted by R).
+// Returns {value, quoted} pairs per cell so the caller can tell whether a
+// field was quoted in the source CSV — quoting-awareness matters because
+// R's write.csv quotes factor/character columns (e.g. state_year labels
+// like "1.1", "2.6" from interaction(state, year), default sep="."), and a
+// quoted cell must NEVER be numerically coerced even if it happens to look
+// like a number, or two distinct R factor levels can collide onto the same
+// JS float (e.g. a future double-digit fixture where "1.1" and "11.1" don't
+// collide as strings but would if blindly parsed as numbers under a
+// different digit-width scenario).
 function _splitCsvLine(line) {
   const out = [];
-  let cur = "", inQuotes = false;
+  let cur = "", inQuotes = false, wasQuoted = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (inQuotes) {
       if (ch === '"') {
         if (line[i + 1] === '"') { cur += '"'; i++; } else inQuotes = false;
       } else cur += ch;
-    } else if (ch === '"') inQuotes = true;
-    else if (ch === ",") { out.push(cur); cur = ""; }
+    } else if (ch === '"') { inQuotes = true; wasQuoted = true; }
+    else if (ch === ",") { out.push({ value: cur, quoted: wasQuoted }); cur = ""; wasQuoted = false; }
     else cur += ch;
   }
-  out.push(cur);
+  out.push({ value: cur, quoted: wasQuoted });
   return out;
 }
 
 function _readPanelNwayFeCsv(path) {
   const txt = readFileSync(path, "utf8").trim();
   const lines = txt.split(/\r?\n/);
-  const header = _splitCsvLine(lines[0]);
+  const header = _splitCsvLine(lines[0]).map(cell => cell.value);
   return lines.slice(1).map(line => {
     const cells = _splitCsvLine(line);
     const r = {};
     header.forEach((h, i) => {
-      const raw = cells[i];
+      const { value: raw, quoted } = cells[i] ?? { value: "", quoted: false };
+      // Quoted CSV fields (R's write.csv quotes factor/character columns)
+      // are never numerically coerced, regardless of what they look like —
+      // this is what keeps state_year as a string.
+      if (quoted) { r[h] = raw; return; }
       const num = raw === "" ? NaN : Number(raw);
-      r[h] = isFinite(num) ? num : raw;   // numeric columns coerce; state_year stays string
+      r[h] = isFinite(num) ? num : raw;
     });
     return r;
   });
@@ -1209,6 +1222,22 @@ function validatePanelNwayFe() {
 
   const bench = JSON.parse(readFileSync(benchPath, "utf8"));
   const rows  = _readPanelNwayFeCsv(fixturePath);
+
+  // Defensive assertion: state_year MUST parse as a string. If a future
+  // parser regression numerically coerces it, two distinct R factor levels
+  // could silently collide onto the same JS float, merging FE groups fixest
+  // treats as separate — exactly the bug the nested-FE test below exists to
+  // catch. Fail loudly here rather than let it surface as a silent,
+  // plausible-looking df/coef mismatch downstream.
+  if (rows.length > 0 && typeof rows[0].state_year !== "string") {
+    throw new Error(
+      "panelNwayFe: CSV parser regression — state_year parsed as " +
+      `${typeof rows[0].state_year} (value=${rows[0].state_year}), expected string. ` +
+      "This means quoted CSV fields are being numerically coerced again, which can " +
+      "silently collide distinct R factor levels. Fix _readPanelNwayFeCsv/_splitCsvLine " +
+      "before trusting any result from this suite."
+    );
+  }
 
   // ── (a) 2 independent (non-nested) FE dims: state + industry ───────────────
   const r2 = runFEMulti(rows, "y", ["x1", "x2"], ["state", "industry"], {});
