@@ -46,6 +46,7 @@ export {
   runEventStudyMulti,
   runLSDV,
   runLSDVMulti,
+  isLegacyFeSet,
 } from "./PanelEngine.js";
 
 // ── Panel sufficient-statistics solvers (FE/FD via DuckDB within-transform) ───

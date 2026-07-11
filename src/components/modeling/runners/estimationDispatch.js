@@ -6,7 +6,7 @@
 // the historical stale-closure guards are unchanged; this file is just the body.
 
 import {
-  runOLS, runWLS, run2SLS, runFE, runFEMulti, runFDMulti, runSharpRDD,
+  runOLS, runWLS, run2SLS, runFE, runFEMulti, runFDMulti, runSharpRDD, isLegacyFeSet,
   run2x2DiD, runTWFEDiDMulti, ikBandwidth,
   runLogit, runProbit,
   runGMM, runLIML, runIVPoisson,
@@ -63,7 +63,7 @@ export function dispatchEstimation(dataRows, ctx) {
       // identical output, badges intact); only route through runFEMulti directly
       // once the user has actually picked a different/larger FE set via the picker.
       const feCols = ctxFeCols?.length ? ctxFeCols : [ec].filter(Boolean);
-      const isLegacyDefault = feCols.length === 1 && feCols[0] === ec;
+      const isLegacyDefault = isLegacyFeSet(feCols, [ec].filter(Boolean));
       const feRaw = isLegacyDefault
         ? runFE(dataRows, y, allX, ec, tc, seOpts)
         : runFEMulti(dataRows, y, allX, feCols, seOpts);
@@ -171,8 +171,12 @@ export function dispatchEstimation(dataRows, ctx) {
       // output is byte-identical to runLSDVMulti for the entity-only / entity+time
       // sets, so keep using it whenever the picker hasn't added extra dims;
       // only route through runLSDVMulti directly for genuine 3+-way LSDV.
-      const extraDims = feCols.filter(c => c !== ec && c !== tc);
-      const res = extraDims.length === 0
+      // legacyCols reflects the lsdvTimeFE toggle: with time FE off, tc is
+      // already stripped from feCols above, so the legacy-default set to
+      // compare against is entity-only, not entity+time.
+      const legacyLSDVCols = lsdvTimeFE ? [ec, tc].filter(Boolean) : [ec].filter(Boolean);
+      const isLegacyLSDV = isLegacyFeSet(feCols, legacyLSDVCols);
+      const res = isLegacyLSDV
         ? runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts)
         : runLSDVMulti(dataRows, y, allX, feCols, seOpts);
       if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };

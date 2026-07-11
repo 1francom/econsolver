@@ -20,6 +20,7 @@ import {
   runSharpRDDFromSuffStats, runFuzzyRDDFromSuffStats,
   wrapResult,
   firstStageFFromSuffStats,
+  isLegacyFeSet,
 } from "../math/index.js";
 import { predict }              from "../math/calcEngine.js";
 import { extractAllRows }       from "../services/data/duckdb.js";
@@ -1504,8 +1505,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             // selection — including a plain 2-dim pick for "FE" — must fall back to
             // JS (runFEMulti/etc.), which does honor the full feCols array.
             const legacyFeCols = effModel === "FE" ? [unitCol].filter(Boolean) : [unitCol, timeCol].filter(Boolean);
-            const feColsMatchLegacy = effectiveFeCols.length === legacyFeCols.length
-              && effectiveFeCols.every((c, i) => c === legacyFeCols[i]);
+            const feColsMatchLegacy = isLegacyFeSet(effectiveFeCols, legacyFeCols);
             if (!feColsMatchLegacy)
               throw new Error(`Panel ${effModel} SQL path: custom FE set (${effectiveFeCols.join(",")}) not yet supported — fallback to JS`);
             // HAC on FE requires a time column for Driscoll-Kraay cross-sectional aggregation

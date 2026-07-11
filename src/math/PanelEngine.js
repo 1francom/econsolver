@@ -9,6 +9,25 @@ import {
 import { computeRobustSE } from "../core/inference/robustSE.js";
 import { demeanByFE, feDegreesOfFreedom } from "./PanelWithinEngine.js";
 
+/**
+ * Order-insensitive check: does `feCols` represent the same FE set as
+ * `legacyCols` (e.g. [entityCol] for FE, [entityCol, timeCol] for
+ * FD/TWFE/EventStudy/LSDV)?
+ *
+ * The N-way FEColumnPicker UI can reorder the array without changing its
+ * set — e.g. unchecking then rechecking entityCol in a TWFE default of
+ * [entityCol, timeCol] produces [timeCol, entityCol]. That must still count
+ * as "the legacy default" (byte-identical legacy wrapper output, SQL fast
+ * path eligible), not "custom". This is the single shared check — every
+ * call site that decides legacy-vs-custom FE selection must use it, so the
+ * definition of "legacy default" can't drift across estimators.
+ */
+export function isLegacyFeSet(feCols, legacyCols) {
+  if (feCols.length !== legacyCols.length) return false;
+  const a = [...feCols].sort(), b = [...legacyCols].sort();
+  return a.every((c, i) => c === b[i]);
+}
+
 // ─── INTERNAL HELPERS ────────────────────────────────────────────────────────
 
 /**
