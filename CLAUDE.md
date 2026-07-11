@@ -191,6 +191,7 @@ src/
 | OLS | LinearEngine.js | ✓ validated vs R (6 decimal places) |
 | WLS (survey weights) | LinearEngine.js | ✓ runWLS — (X'WX)⁻¹X'WY, unweighted SSR for σ² |
 | FE (within) | PanelEngine.js | ✓ validated vs R fixest::feols (6dp coef, 4dp SE) — hard benchmarks in engineValidation.js |
+| N-way FE (3+ dimensions, incl. nested e.g. state × state×year) | PanelEngine.js (`runFEMulti`/`runTWFEDiDMulti`, alternating-projection `demeanByFE` in `PanelWithinEngine.js`) | ⚠ PENDING R validation — R harness written (`src/math/__validation__/panelNwayFeRValidation.R`), Franco needs to run it (no R on this dev machine) and commit `panelNwayFeBenchmarks.json`/`panelNwayFeFixture.csv`; `engineValidation.js` has a defensive comparison suite that currently skips cleanly (files not found) and will run for real once supplied. Known open risk: `feDegreesOfFreedom()`'s additive df formula may overcount absorbed parameters for nested FE dimensions (e.g. state + state×year) vs fixest's rank-based correction — the R nested-pair fixture is designed to surface this. |
 | FD (first differences) | PanelEngine.js | ✓ |
 | TWFE (generic two-way FE OLS) | PanelSuffStatsEngine.js | ✓ SQL fast path — classical/HC0/HC1/HC2/HC3/clustered/HAC via Fase 4b |
 | TWFE DiD | PanelEngine.js | ✓ |
