@@ -16,6 +16,7 @@ import {
   wrapResult, diagnoseFit,
 } from "../../../math/index.js";
 import { applyFactors, expandInteractions, resolveEstimator } from "../helpers.js";
+import { materializeFEInteraction } from "../../../core/generate/feInteraction.js";
 
 export function dispatchEstimation(dataRows, ctx) {
   const {
@@ -25,7 +26,6 @@ export function dispatchEstimation(dataRows, ctx) {
     zVars, postVar, treatVar,
     runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
     treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE,
-    feCols: ctxFeCols,
     poissonEntityCol, poissonOffsetCol, poissonExtraFE,
     cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
     csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
@@ -33,6 +33,9 @@ export function dispatchEstimation(dataRows, ctx) {
     spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
     resolveSpatialWeights,
   } = ctx;
+  // `let` (not part of the const destructure above) because the FE-interaction
+  // block below may rewrite the effective FE set for this estimation.
+  let ctxFeCols = ctx.feCols;
 
   const y = yVar[0];
   if (!y) return { error: "Select a dependent variable (Y)." };
@@ -42,6 +45,37 @@ export function dispatchEstimation(dataRows, ctx) {
   const { rows: _r1, vars: expX } = applyFactors(ixRows, ixX, factorVars);
   const { rows: expRows, vars: expW } = applyFactors(_r1, ixW, factorVars);
   dataRows = expRows; // parameter reassignment: safe in JS
+
+  // ── FE interaction materialization (PanelTab "FE interaction" picker) ───────
+  // When the user crossed exactly two columns into one combined fixed effect
+  // (panel.interactionCols, e.g. state × year), realize that composite key as an
+  // in-memory column here and swap it into the FE set BEFORE estimation. Local
+  // scope only — materializeFEInteraction shallow-copies rows and never touches
+  // rawData or injects a pipeline step (non-destructive-pipeline invariant).
+  //
+  // DESIGN CHOICE — REPLACE the two raw source columns with their interaction,
+  // do NOT keep both. A state×year fixed effect fully nests both the state and
+  // the year main effects (each (state,year) cell is its own dummy), so
+  // absorbing state×year AND state AND year would be perfectly collinear: the
+  // raw state/year dummies are redundant and would over-count absorbed
+  // parameters (inflating df / breaking rank). This mirrors R replacing
+  // factor(state) + factor(year) with factor(state):factor(year) in a fully
+  // nested design. Any OTHER FE dims the user picked (e.g. a separate "region"
+  // via the Additional FE dimensions picker) that are not part of the
+  // interaction pair are left untouched.
+  //
+  // No-op guarantee: when panel.interactionCols is empty/undefined this branch
+  // is skipped entirely — dataRows and ctxFeCols pass through unchanged, so the
+  // byte-identical-for-common-case behavior (Tasks 4/5) is preserved.
+  const interactionCols = panel?.interactionCols;
+  if (Array.isArray(interactionCols) && interactionCols.length === 2) {
+    const mat = materializeFEInteraction(dataRows, interactionCols);
+    dataRows = mat.rows;
+    if (Array.isArray(ctxFeCols)) {
+      ctxFeCols = [...ctxFeCols.filter(c => !interactionCols.includes(c)), mat.outCol];
+    }
+  }
+
   const effModel = resolveEstimator(model, family, !!weightVar[0]);
   try {
     const allX = [...expX, ...expW];

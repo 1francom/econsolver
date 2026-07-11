@@ -979,7 +979,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         fuzzyTreatCol: treatVar[0] || null,
       };
 
-      if (effModel !== "SpatialRegression" && !interactionTerms.length && shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(effModel))) {
+      // An FE interaction (panel.interactionCols, e.g. state × year) is
+      // materialized as a composite FE column only on the JS path
+      // (estimationDispatch → materializeFEInteraction). The SQL suff-stats
+      // builders hardcode entity/time and cannot absorb the crossed key, so —
+      // exactly like a regressor interactionTerms — force the JS fallback here
+      // rather than silently estimating without the interaction.
+      const hasFeInteraction = panel?.interactionCols?.length === 2;
+      if (effModel !== "SpatialRegression" && !interactionTerms.length && !hasFeInteraction && shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(effModel))) {
         try {
           if (effModel === "2SLS") {
             // ── 2SLS SQL branch (Fase 3a + Fase 8 robust-SE backfill) ──
