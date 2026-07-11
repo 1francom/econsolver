@@ -792,19 +792,36 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
 
     case "LSDV": {
-      lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
-      lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`* Within (FE) — numerically equivalent to LSDV`);
-      lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
-      lines.push(`estimates store m_lsdv`);
-      lines.push(``);
-      lines.push(`* Recover alpha_i (entity fixed effects) via areg`);
-      lines.push(`areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
-      lines.push(`predict _alpha_i, dresiduals`);
-      lines.push(`label var _alpha_i "Entity fixed effect (LSDV alpha_i)"`);
-      lines.push(`* List unique entity FEs`);
-      lines.push(`bysort ${entityCol}: keep if _n == 1`);
-      lines.push(`list ${entityCol} _alpha_i, sep(0)`);
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity(+time).
+      // Fallback preserves the pre-existing entity(+time) default byte-for-byte.
+      const feColsLSDV = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
+      if (feColsLSDV.length <= 2) {
+        lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
+        lines.push(`xtset ${entityCol} ${timeCol}`);
+        lines.push(`* Within (FE) — numerically equivalent to LSDV`);
+        lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
+        lines.push(`estimates store m_lsdv`);
+        lines.push(``);
+        lines.push(`* Recover alpha_i (entity fixed effects) via areg`);
+        lines.push(`areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
+        lines.push(`predict _alpha_i, dresiduals`);
+        lines.push(`label var _alpha_i "Entity fixed effect (LSDV alpha_i)"`);
+        lines.push(`* List unique entity FEs`);
+        lines.push(`bysort ${entityCol}: keep if _n == 1`);
+        lines.push(`list ${entityCol} _alpha_i, sep(0)`);
+      } else {
+        lines.push(`* Panel LSDV — N-way absorption via reghdfe`);
+        lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.join(" ")}) vce(cluster ${entityCol})`);
+        lines.push(`estimates store m_lsdv`);
+        lines.push(``);
+        lines.push(`* Recover alpha_i per FE dimension via reghdfe's savefe (var=newname) syntax`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.map(c => `${c}=fe_${c}`).join(" ")}) vce(cluster ${entityCol})`);
+        lines.push(`label var fe_${entityCol} "Entity fixed effect (LSDV alpha_i)"`);
+        lines.push(`* List unique entity FEs`);
+        lines.push(`bysort ${entityCol}: keep if _n == 1`);
+        lines.push(`list ${entityCol} fe_${entityCol}, sep(0)`);
+      }
       break;
     }
 
@@ -854,13 +871,18 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "EventStudy": {
       const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
+      // reghdfe natively absorbs any number of dimensions, so no <=2-dim branching is
+      // needed here (unlike PanelOLS/xtreg in the Python/Stata FE and LSDV cases).
+      // Fallback preserves the pre-existing entity+time default byte-for-byte.
+      const feColsES = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       lines.push(`* Event Study — relative-time dummies`);
       lines.push(`* Replace treat_time with the variable holding each unit's treatment period`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
       lines.push(`gen rel_time = ${timeCol} - treat_time`);
       lines.push(`* Estimate with unit + time FE, ref = -1`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
-      lines.push(`reghdfe ${yVar} ib(-1).rel_time${extra}, absorb(${entityCol} ${timeCol}) vce(cluster ${entityCol})`);
+      lines.push(`reghdfe ${yVar} ib(-1).rel_time${extra}, absorb(${feColsES.join(" ")}) vce(cluster ${entityCol})`);
       lines.push(`estimates store m_eventstudy`);
       lines.push(`* Plot coefficients`);
       lines.push(`coefplot m_eventstudy, keep(*rel_time*) vertical yline(0) xline(# replace with ref period index)`);

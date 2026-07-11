@@ -830,16 +830,35 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     }
 
     case "LSDV": {
-      lines.push(`# Panel LSDV (numerically equivalent to within/FE)`);
-      lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
-      lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
-      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True${timeCol ? ", time_effects=True" : ""}).fit(cov_type="clustered", cluster_entity=True)`);
-      lines.push(`print(model.summary)`);
-      lines.push(``);
-      lines.push(`# Recover entity fixed effects (LSDV alpha_i)`);
-      lines.push(`entity_fe = model.estimated_effects`);
-      lines.push(`print("Entity fixed effects (first 20):")`);
-      lines.push(`print(entity_fe.groupby(level="${entityCol}").first().head(20))`);
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity(+time).
+      // Fallback preserves the pre-existing entity(+time) default byte-for-byte.
+      const feColsLSDV = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
+      if (feColsLSDV.length <= 2) {
+        lines.push(`# Panel LSDV (numerically equivalent to within/FE)`);
+        lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+        lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
+        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True${timeCol ? ", time_effects=True" : ""}).fit(cov_type="clustered", cluster_entity=True)`);
+        lines.push(`print(model.summary)`);
+        lines.push(``);
+        lines.push(`# Recover entity fixed effects (LSDV alpha_i)`);
+        lines.push(`entity_fe = model.estimated_effects`);
+        lines.push(`print("Entity fixed effects (first 20):")`);
+        lines.push(`print(entity_fe.groupby(level="${entityCol}").first().head(20))`);
+      } else {
+        lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
+        lines.push(`# For a 3rd+ FE dimension, absorb via one-hot dummies through statsmodels instead:`);
+        lines.push(`import statsmodels.formula.api as smf`);
+        const dummyTerms = feColsLSDV.map(c => `C(${c})`).join(" + ");
+        lines.push(`# drop the global intercept: multiple C(col) absorptions already span the`);
+        lines.push(`# level space between them, so keeping a separate intercept would double-count`);
+        lines.push(`model = smf.ols("${yVar} ~ ${pyFormStr} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
+        lines.push(`print(model.summary())`);
+        lines.push(``);
+        lines.push(`# Recover entity fixed effects (LSDV alpha_i) — explicit dummy coefficients for "${entityCol}"`);
+        lines.push(`entity_fe = model.params.filter(like="C(${entityCol})")`);
+        lines.push(`print("Entity fixed effects (first 20):")`);
+        lines.push(`print(entity_fe.head(20))`);
+      }
       break;
     }
 
@@ -913,21 +932,40 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "EventStudy": {
       const extraCols = wVars.map(v => `"${v}"`).join(", ");
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
+      // Fallback preserves the pre-existing entity+time default byte-for-byte.
+      const feColsES = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       lines.push(`# Event Study — relative-time dummies`);
       lines.push(`# Replace 'treat_time' with the column holding each unit's treatment period`);
       lines.push(`df["rel_time"] = df["${timeCol}"] - df["treat_time"]`);
       lines.push(`df["rel_time"] = df["rel_time"].clip(-5, 5)  # truncate distant periods`);
-      lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
-      lines.push(`rel_dummies = pd.get_dummies(df_panel["rel_time"], prefix="rt", drop_first=False)`);
-      lines.push(`rel_dummies = rel_dummies.drop(columns=["rt_-1"], errors="ignore")  # ref = -1`);
-      if (wVars.length) {
-        lines.push(`exog = sm.add_constant(pd.concat([rel_dummies, df_panel[[${extraCols}]]], axis=1))`);
+      if (feColsES.length <= 2) {
+        lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+        lines.push(`rel_dummies = pd.get_dummies(df_panel["rel_time"], prefix="rt", drop_first=False)`);
+        lines.push(`rel_dummies = rel_dummies.drop(columns=["rt_-1"], errors="ignore")  # ref = -1`);
+        if (wVars.length) {
+          lines.push(`exog = sm.add_constant(pd.concat([rel_dummies, df_panel[[${extraCols}]]], axis=1))`);
+        } else {
+          lines.push(`exog = sm.add_constant(rel_dummies)`);
+        }
+        lines.push(`from linearmodels.panel import PanelOLS`);
+        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
+        lines.push(`print(model.summary)`);
       } else {
-        lines.push(`exog = sm.add_constant(rel_dummies)`);
+        lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
+        lines.push(`# For a 3rd+ FE dimension, absorb via one-hot dummies through statsmodels instead:`);
+        lines.push(`import statsmodels.formula.api as smf`);
+        lines.push(`rel_dummies = pd.get_dummies(df["rel_time"], prefix="rt", drop_first=False)`);
+        lines.push(`rel_dummies = rel_dummies.drop(columns=["rt_-1"], errors="ignore")  # ref = -1`);
+        lines.push(`df = pd.concat([df, rel_dummies], axis=1)`);
+        lines.push(`rt_terms = " + ".join(rel_dummies.columns)`);
+        const dummyTerms = feColsES.map(c => `C(${c})`).join(" + ");
+        const extraTerms = wVars.length ? ` + ${wVars.join(" + ")}` : "";
+        lines.push(`# drop the global intercept: multiple C(col) absorptions already span the`);
+        lines.push(`# level space between them, so keeping a separate intercept would double-count`);
+        lines.push(`model = smf.ols(f"${yVar} ~ {rt_terms}${extraTerms} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
+        lines.push(`print(model.summary())`);
       }
-      lines.push(`from linearmodels.panel import PanelOLS`);
-      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
-      lines.push(`print(model.summary)`);
       break;
     }
 
