@@ -593,6 +593,67 @@ export function runEventStudy(
  * @param {object}   opts    - { timeFE: bool (default false) }
  * @param {object}   seOpts  - SE options passed to runOLS / computeRobustSE
  */
+// ─── SINGULARITY DIAGNOSTIC ───────────────────────────────────────────────────
+// Best-effort: when an LSDV design matrix is singular, find the two columns
+// with the highest absolute pairwise correlation, so the error message can
+// name a concrete likely culprit instead of just "singular matrix". This is a
+// pairwise heuristic only — it won't catch a genuine 3+-column linear
+// combination (e.g. a regressor that's invariant within an FE group only
+// collectively, not correlated with any single dummy) — but pairwise
+// near-collinearity (a redundant nested FE dummy, or the same column entered
+// twice) is the most common real-world cause, so it's worth surfacing when
+// found; returns null rather than a misleading guess when it isn't.
+function findNearCollinearPair(rows, cols) {
+  const n = rows.length;
+  const vals  = cols.map(c => rows.map(r => r[c]));
+  const means = vals.map(v => v.reduce((s, x) => s + x, 0) / n);
+  const sds   = vals.map((v, i) => Math.sqrt(v.reduce((s, x) => s + (x - means[i]) ** 2, 0) / n));
+  let best = null;
+  for (let i = 0; i < cols.length; i++) {
+    if (sds[i] < 1e-12) continue; // zero-variance column — not a pairwise-correlation case
+    for (let j = i + 1; j < cols.length; j++) {
+      if (sds[j] < 1e-12) continue;
+      let cov = 0;
+      for (let k = 0; k < n; k++) cov += (vals[i][k] - means[i]) * (vals[j][k] - means[j]);
+      cov /= n;
+      const r = cov / (sds[i] * sds[j]);
+      if (!best || Math.abs(r) > Math.abs(best.r)) best = { a: cols[i], b: cols[j], r };
+    }
+  }
+  return best && Math.abs(best.r) > 0.995 ? best : null;
+}
+
+// A regressor with (near) zero variance WITHIN every FE group is exactly
+// collinear with that FE block's dummies once absorbed (its between-group
+// variation is fully soaked up by the FE, leaving nothing to identify a
+// coefficient from). This is the classic real-world LSDV singularity cause —
+// e.g. a variable that's constant per (state, industry) cell but the model
+// tries to absorb state×industry — and is NOT a pairwise correlation with any
+// single dummy, so findNearCollinearPair alone won't catch it.
+function findInvariantRegressor(rows, xCols, feCols) {
+  const groups = new Map();
+  for (const r of rows) {
+    const key = feCols.map(c => r[c]).join("\x02");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  for (const xc of xCols) {
+    const vals = rows.map(r => r[xc]);
+    const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+    const totalSS = vals.reduce((s, v) => s + (v - mean) ** 2, 0);
+    if (totalSS < 1e-12) continue; // constant overall — a different (also real) problem
+    let withinSS = 0;
+    for (const g of groups.values()) {
+      if (g.length < 2) continue;
+      const gv = g.map(r => r[xc]);
+      const gm = gv.reduce((s, v) => s + v, 0) / gv.length;
+      withinSS += gv.reduce((s, v) => s + (v - gm) ** 2, 0);
+    }
+    if (withinSS / totalSS < 1e-6) return xc;
+  }
+  return null;
+}
+
 // N-way LSDV: one dummy block per FE dimension (first level of each dim dropped as
 // reference). LSDV is the explicit-dummy method by definition, so it does NOT use
 // demeanByFE. Entity intercepts α̂ are reconstructed from the FIRST FE dimension.
@@ -639,7 +700,17 @@ export function runLSDVMulti(rows, yCol, xCols, feCols, seOpts = {}) {
   const allDummyCols = feCols.flatMap((c, d) => feLevels[d].slice(1).map(lv => `__fe${d}_${lv}`));
   const allXCols = [...xCols, ...allDummyCols];
   const res = runOLS(augRows, yCol, allXCols, seOpts);
-  if (!res) return { error: "LSDV OLS failed — singular matrix (possible perfect multicollinearity)." };
+  if (!res) {
+    const invariantX = findInvariantRegressor(valid, xCols, feCols);
+    const culprit = invariantX ? null : findNearCollinearPair(augRows, allXCols);
+    let msg = "LSDV OLS failed — singular matrix (possible perfect multicollinearity).";
+    if (invariantX) {
+      msg += ` Regressor "${invariantX}" has essentially no variation WITHIN each ${feCols.join("×")} group — once that FE is absorbed, there's nothing left to identify its coefficient from. Check whether "${invariantX}" actually varies across observations that share the same ${feCols.join(", ")} combination in your data.`;
+    } else if (culprit) {
+      msg += ` "${culprit.a}" and "${culprit.b}" are near-perfectly correlated (r=${culprit.r.toFixed(4)}) — likely one is fully redundant given the other. Check whether "${culprit.a}" varies independently of "${culprit.b}" in your data.`;
+    }
+    return { error: msg };
+  }
 
   // df = n − [1 intercept + k_reg + Σ(L_d − 1)] — feDegreesOfFreedom reproduces this exactly.
   const df = feDegreesOfFreedom(valid.length, xCols.length, nLevels);
