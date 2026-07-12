@@ -718,8 +718,14 @@ export function runLSDVMulti(rows, yCol, xCols, feCols, seOpts = {}) {
     return { error: "Degrees of freedom ≤ 0 — reduce regressors or add more observations." };
   const s2 = res.SSR / df;
 
-  // Readable varNames: generic `${col}:${level}` per dummy.
-  const dummyLabels = feCols.flatMap((c, d) => feLevels[d].slice(1).map(lv => `${c}:${lv}`));
+  // Readable varNames: generic `${col}:${level}` per dummy. A level value that
+  // came from a materialized FE interaction (feInteraction.js) carries an
+  // internal `\x01` separator between its source values (collision-safety —
+  // see that file) — invisible-by-design internally, but must never leak into
+  // a human-facing label (renders as a replacement-character box). Swap it
+  // for a readable ", " here, at the one place these levels become display text.
+  const humanizeLevel = v => (typeof v === "string" && v.includes("\x01")) ? v.split("\x01").join(", ") : v;
+  const dummyLabels = feCols.flatMap((c, d) => feLevels[d].slice(1).map(lv => `${c}:${humanizeLevel(lv)}`));
   const readableNames = ["(Intercept)", ...xCols, ...dummyLabels];
 
   // Entity intercepts α̂ from the FIRST FE dimension (its dummies lead the block).
