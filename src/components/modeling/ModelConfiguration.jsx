@@ -71,7 +71,19 @@ function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCol
   // but no feCols array. Fall back to those rather than hiding the whole
   // section, so this control is always visible whenever ANY panel is
   // declared (same expectation as the always-visible Standard Errors panel).
-  const availableFeCols = panel?.feCols?.length ? panel.feCols : [panel?.entityCol, panel?.timeCol].filter(Boolean);
+  const rawFeCols = panel?.feCols?.length ? panel.feCols : [panel?.entityCol, panel?.timeCol].filter(Boolean);
+  // An FE interaction (Panel tab) is unconditionally materialized in place of
+  // its two raw source columns whenever panel.interactionCols is set
+  // (estimationDispatch.js) — it is not currently a per-estimation toggle.
+  // Show the combined chip (locked/always-selected) instead of the two raw
+  // source chips, so the picker reflects what's actually estimated rather
+  // than dangling raw columns that no longer correspond to reality.
+  const interactionCols = panel?.interactionCols;
+  const hasInteraction = Array.isArray(interactionCols) && interactionCols.length === 2;
+  const interactionLabel = hasInteraction ? interactionCols.join("×") : null;
+  const availableFeCols = hasInteraction
+    ? [...rawFeCols.filter(c => !interactionCols.includes(c)), interactionLabel]
+    : rawFeCols;
   if (!availableFeCols.length) return null;
   const dflt = defaultFeCols ?? availableFeCols;
   const effective = selectedFeCols ?? dflt;
@@ -81,7 +93,10 @@ function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCol
   return (
     <Section title="Fixed Effects" color={C.teal}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {availableFeCols.map(col => (
+        {availableFeCols.map(col => col === interactionLabel ? (
+          <Chip key={col} label={col} selected color={C.gold} disabled
+            title="FE interaction — always absorbed while configured in the Panel tab. Clear it there to remove it." />
+        ) : (
           <Chip key={col} label={col} selected={effective.includes(col)} onClick={() => toggle(col)} color={C.teal} />
         ))}
       </div>
