@@ -82,10 +82,13 @@ export function dispatchEstimation(dataRows, ctx) {
   if (interactionLabel && Array.isArray(ctxFeCols) && ctxFeCols.includes(interactionLabel)) {
     const mat = materializeFEInteraction(dataRows, interactionCols);
     dataRows = mat.rows;
-    // Defensive: strip either raw source column in case both the label and a
-    // raw column ended up selected together (shouldn't happen given the
-    // picker's mutual exclusion, but absorbing both would be collinear).
-    ctxFeCols = [...ctxFeCols.filter(c => !interactionCols.includes(c)), mat.outCol];
+    // ctxFeCols already contains interactionLabel (that's the branch guard
+    // above) — strip it too, alongside either raw source column, before
+    // appending the freshly-materialized mat.outCol (always === interactionLabel
+    // per feInteraction.js's default naming). Without this, the label ends up
+    // duplicated (e.g. ["year","state×industry","state×industry"]), which is
+    // trivially self-collinear and breaks LSDV/OLS with a singular matrix.
+    ctxFeCols = [...ctxFeCols.filter(c => !interactionCols.includes(c) && c !== interactionLabel), mat.outCol];
   }
 
   const effModel = resolveEstimator(model, family, !!weightVar[0]);
