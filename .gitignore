@@ -41,3 +41,4 @@ supabase/.temp/
 __pycache__/
 # local installers (e.g. GeoGebra under skills)
 *.exe
+src/math/__validation__/.Rhistory
