@@ -65,8 +65,15 @@ function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }
 // estimation only — does not mutate the stored panel declaration.
 function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCols }) {
   const { C } = useTheme();
-  if (!panel?.feCols?.length) return null;
-  const dflt = defaultFeCols ?? panel.feCols;
+  // panel.feCols is only populated once the user clicks "Set/Update panel
+  // index" in the Panel tab after this feature landed — a panel declared
+  // before that (or re-visited without re-clicking) has entityCol/timeCol
+  // but no feCols array. Fall back to those rather than hiding the whole
+  // section, so this control is always visible whenever ANY panel is
+  // declared (same expectation as the always-visible Standard Errors panel).
+  const availableFeCols = panel?.feCols?.length ? panel.feCols : [panel?.entityCol, panel?.timeCol].filter(Boolean);
+  if (!availableFeCols.length) return null;
+  const dflt = defaultFeCols ?? availableFeCols;
   const effective = selectedFeCols ?? dflt;
   const toggle = col => setSelectedFeCols(
     effective.includes(col) ? effective.filter(c => c !== col) : [...effective, col]
@@ -74,10 +81,15 @@ function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCol
   return (
     <Section title="Fixed Effects" color={C.teal}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {panel.feCols.map(col => (
+        {availableFeCols.map(col => (
           <Chip key={col} label={col} selected={effective.includes(col)} onClick={() => toggle(col)} color={C.teal} />
         ))}
       </div>
+      {!panel?.feCols?.length && (
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+          Showing entity/time only — visit the Panel tab and click "Update panel index" to add more FE dimensions or an interaction here.
+        </div>
+      )}
     </Section>
   );
 }
