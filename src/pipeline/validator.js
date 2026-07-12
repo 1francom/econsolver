@@ -20,7 +20,11 @@
 //   attrition       number            — share of t0 entities absent at tN
 //   at0             number            — entity count at first period
 //   atN             number            — entity count at last period
-export function validatePanel(rows, ec, tc) {
+export function validatePanel(rows, ec, tc, extraFeCols = []) {
+  // extraFeCols: additional FE dimensions beyond entity/time (e.g. ["industry"]
+  // or a materialized interaction column name). Diagnostics (balance/attrition/
+  // heatmap) still key on (ec, tc) only — extra dims don't have a 2D heatmap
+  // representation, so they're validated separately below.
   if (!ec || !tc) return null;
 
   const entities = [...new Set(rows.map(r => r[ec]))].sort((a, b) => String(a).localeCompare(String(b)));
@@ -54,6 +58,11 @@ export function validatePanel(rows, ec, tc) {
     if (m.length > 0) gaps.push({ e, m });
   });
 
+  const extraLevelCounts = extraFeCols.map(col => ({
+    col,
+    levels: new Set(rows.map(r => r[col]).filter(v => v != null)).size,
+  }));
+
   return {
     entities, times,
     balance: allHave ? "strongly_balanced" : "unbalanced",
@@ -62,6 +71,7 @@ export function validatePanel(rows, ec, tc) {
     blockFD: dups.length > 0,
     pres,
     attrition, at0, atN,
+    extraLevelCounts,
   };
 }
 

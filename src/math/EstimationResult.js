@@ -201,7 +201,7 @@ function buildFormula(type, spec) {
     case "NegBinFE":  return `NegBin(${yVar}) ~ ${x} | ${(feCols && feCols.length ? feCols : [entityCol ?? "?"]).join(" + ")}`;
     case "EventStudy": return `${yVar} ~ event(${kPre ?? "-K"}…${kPost ?? "+K"}) | ${entityCol ?? "?"} + ${timeCol ?? "?"}`;
     case "SunAbraham": return `Poisson(${yVar}) ~ sunab(${spec.cohortCol ?? "cohort"}, ${spec.periodCol ?? "period"})${xVars.length ? " + " + x : ""}${feCols && feCols.length ? " | " + feCols.join(" + ") : ""}`;
-    case "LSDV":      return `${yVar} ~ ${x} + α_i${spec.lsdvTimeFE ? " + γ_t" : ""}`;
+    case "LSDV":      return `${yVar} ~ ${x} | ${(feCols && feCols.length ? feCols : [entityCol ?? "?"]).join(" + ")}`;
     case "SyntheticControl": return `${yVar} ~ SC(${treatedUnit ?? "?"}, t₀=${treatTime ?? "?"})`;
     case "CallawayCS": return `${yVar} ~ CS_DiD(g=${spec.treatCol ?? "?"}) | ${spec.entityCol ?? "?"} + ${spec.timeCol ?? "?"}`;
     case "SpatialRegression": return `${spec.spatialModel ?? "SAR"}(${yVar}) ~ ${x}`;
