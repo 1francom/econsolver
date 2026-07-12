@@ -442,19 +442,6 @@ function SunAbrahamConfig({
   );
 }
 
-// ─── LSDV: Time FE toggle ─────────────────────────────────────────────────────
-function LSDVConfig({ lsdvTimeFE, setLsdvTimeFE }) {
-  const { C, T } = useTheme();
-  return (
-    <Section title="Time Fixed Effects" color={C.blue}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <Chip label="Entity FE only" selected={!lsdvTimeFE} color={C.blue} onClick={() => setLsdvTimeFE(false)} />
-        <Chip label="Entity + Time FE" selected={lsdvTimeFE} color={C.blue} onClick={() => setLsdvTimeFE(true)} />
-      </div>
-    </Section>
-  );
-}
-
 // ─── SyntheticControl: treated unit + treat time + predictors ─────────────────
 function SyntheticControlConfig({ numericCols, yVar, treatedUnit, setTreatedUnit, synthTreatTime, setSynthTreatTime, xVars, setXVars, rows, panel }) {
   const { C, T } = useTheme();
@@ -916,7 +903,6 @@ export default function ModelConfiguration({
   treatTimeCol,   setTreatTimeCol,
   kPre,           setKPre,
   kPost,          setKPost,
-  lsdvTimeFE,     setLsdvTimeFE,
   selectedFeCols, setSelectedFeCols,
   treatedUnit,    setTreatedUnit,
   synthTreatTime, setSynthTreatTime,
@@ -1068,12 +1054,11 @@ export default function ModelConfiguration({
   }
 
   if (model === "LSDV") {
-    return (
-      <>
-        <LSDVConfig lsdvTimeFE={lsdvTimeFE} setLsdvTimeFE={setLsdvTimeFE} />
-        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} />
-      </>
-    );
+    // Historically defaulted to entity-only (no separate "Time Fixed Effects"
+    // toggle anymore — the Fixed Effects picker below is now the sole,
+    // authoritative source for which dimensions LSDV absorbs, same as
+    // FE/TWFE/EventStudy).
+    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={[panel?.entityCol].filter(Boolean)} />;
   }
 
   if (model === "SyntheticControl") {

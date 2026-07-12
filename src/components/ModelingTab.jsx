@@ -496,18 +496,20 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [treatTimeCol,   setTreatTimeCol]   = useState([]);
   const [kPre,           setKPre]           = useState(3);
   const [kPost,          setKPost]          = useState(3);
-  const [lsdvTimeFE,     setLsdvTimeFE]     = useState(false);
   // N-way FE column picker (Task 5) — null = use panel.feCols as-is (the common
   // entity+time-only case). Non-null = user has narrowed/reordered the FE set
   // for THIS estimation only; never mutates the stored panel declaration.
   const [selectedFeCols, setSelectedFeCols] = useState(null);
   // Plain "FE" (linear, within estimator) historically demeans by ENTITY ONLY
-  // (validated vs R fixest::feols(y ~ x | unit) — see engineValidation.js). Its
-  // untouched default must stay entity-only, NOT panel.feCols (which includes
-  // time), or every existing FE regression would silently become two-way FE.
-  // FD/TWFE/EventStudy/LSDV already defaulted to the full [entity,time] set
+  // (validated vs R fixest::feols(y ~ x | unit) — see engineValidation.js).
+  // LSDV also historically defaulted to entity-only (its old separate "Time
+  // Fixed Effects" toggle defaulted off — that toggle is gone now, the Fixed
+  // Effects picker is the sole source of truth). Both must stay entity-only,
+  // NOT panel.feCols (which includes time), or every existing FE/LSDV
+  // regression would silently pick up time FE it never had.
+  // FD/TWFE/EventStudy already defaulted to the full [entity,time] set
   // pre-generalization, so panel.feCols is the correct untouched default there.
-  const feColsDefaultRaw = (model === "FE" && family !== "poisson")
+  const feColsDefaultRaw = ((model === "FE" && family !== "poisson") || model === "LSDV")
     ? [panel?.entityCol].filter(Boolean)
     : (panel?.feCols ?? [panel?.entityCol, panel?.timeCol].filter(Boolean));
   // Default to the interaction ACTIVE (matches this feature's original always-on
@@ -818,7 +820,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       model, family, weightVar, seOpts, seType, panel,
       zVars, postVar, treatVar,
       runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
-      treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE,
+      treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost,
       feCols: effectiveFeCols,
       poissonEntityCol, poissonOffsetCol, poissonExtraFE,
       cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
@@ -842,7 +844,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
     if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
     return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE, effectiveFeCols, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── DuckDB full-table pull ────────────────────────────────────────────────
   // For DuckDB-backed datasets `rows` is only a 500-row preview — every JS
@@ -2096,7 +2098,6 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             treatTimeCol={treatTimeCol}     setTreatTimeCol={setTreatTimeCol}
             kPre={kPre}                     setKPre={setKPre}
             kPost={kPost}                   setKPost={setKPost}
-            lsdvTimeFE={lsdvTimeFE}         setLsdvTimeFE={setLsdvTimeFE}
             selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols}
             treatedUnit={treatedUnit}       setTreatedUnit={setTreatedUnit}
             synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime}

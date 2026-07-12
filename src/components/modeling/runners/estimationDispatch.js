@@ -25,7 +25,7 @@ export function dispatchEstimation(dataRows, ctx) {
     model, family, weightVar, seOpts, seType, panel,
     zVars, postVar, treatVar,
     runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
-    treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE,
+    treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost,
     poissonEntityCol, poissonOffsetCol, poissonExtraFE,
     cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
     csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
@@ -207,23 +207,22 @@ export function dispatchEstimation(dataRows, ctx) {
     } else if (effModel === "LSDV") {
       if (!allX.length) return { error: "Select at least one regressor (X)." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      // LSDV's own "include time FE" toggle (lsdvTimeFE) predates the N-way picker
-      // and must keep working: when off, time is dropped from the FE set even if
-      // it's present in ctxFeCols/panel.feCols (default = [entityCol, timeCol]).
-      const baseFeCols = ctxFeCols?.length ? ctxFeCols : [ec, tc].filter(Boolean);
-      const feCols = lsdvTimeFE ? baseFeCols : baseFeCols.filter(c => c !== tc);
+      // The Fixed Effects picker (ModelConfiguration.jsx's FEColumnPicker) is the
+      // sole source of truth for which dimensions LSDV absorbs — the old separate
+      // "Time Fixed Effects" toggle (lsdvTimeFE) is gone; whether time is included
+      // is now just whether tc is present in the resolved FE set, same as every
+      // other N-way-capable estimator.
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec].filter(Boolean);
+      const timeFEForLegacy = feCols.includes(tc);
       // runLSDV's legacy wrapper adds units/times/timeFE/refUnit/refTime + the
       // "unit:"/"time:" varNames labels the UI reads (Panel LSDV badges). Its
       // output is byte-identical to runLSDVMulti for the entity-only / entity+time
-      // sets, so keep using it whenever the picker hasn't added extra dims;
-      // only route through runLSDVMulti directly for genuine 3+-way LSDV.
-      // legacyCols reflects the lsdvTimeFE toggle: with time FE off, tc is
-      // already stripped from feCols above, so the legacy-default set to
-      // compare against is entity-only, not entity+time.
-      const legacyLSDVCols = lsdvTimeFE ? [ec, tc].filter(Boolean) : [ec].filter(Boolean);
+      // sets, so keep using it whenever the resolved set is exactly one of those;
+      // only route through runLSDVMulti directly for genuine 3+-way/custom LSDV.
+      const legacyLSDVCols = timeFEForLegacy ? [ec, tc].filter(Boolean) : [ec].filter(Boolean);
       const isLegacyLSDV = isLegacyFeSet(feCols, legacyLSDVCols);
       const res = isLegacyLSDV
-        ? runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts)
+        ? runLSDV(dataRows, y, allX, ec, tc, { timeFE: timeFEForLegacy }, seOpts)
         : runLSDVMulti(dataRows, y, allX, feCols, seOpts);
       if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };
       return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols }), panelFE: null, panelFD: null };
