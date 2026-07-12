@@ -2098,7 +2098,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             treatTimeCol={treatTimeCol}     setTreatTimeCol={setTreatTimeCol}
             kPre={kPre}                     setKPre={setKPre}
             kPost={kPost}                   setKPost={setKPost}
-            selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols}
+            selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} feColsDefault={feColsDefault}
             treatedUnit={treatedUnit}       setTreatedUnit={setTreatedUnit}
             synthTreatTime={synthTreatTime} setSynthTreatTime={setSynthTreatTime}
             poissonEntityCol={poissonEntityCol} setPoissonEntityCol={setPoissonEntityCol}

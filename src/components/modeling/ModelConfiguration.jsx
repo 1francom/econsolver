@@ -903,7 +903,7 @@ export default function ModelConfiguration({
   treatTimeCol,   setTreatTimeCol,
   kPre,           setKPre,
   kPost,          setKPost,
-  selectedFeCols, setSelectedFeCols,
+  selectedFeCols, setSelectedFeCols, feColsDefault,
   treatedUnit,    setTreatedUnit,
   synthTreatTime, setSynthTreatTime,
   poissonEntityCol, setPoissonEntityCol,
@@ -985,7 +985,7 @@ export default function ModelConfiguration({
           wVars={wVars}
           setWVars={setWVars}
         />
-        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} />
+        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />
       </>
     );
   }
@@ -1030,7 +1030,7 @@ export default function ModelConfiguration({
     return (
       <>
         <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />
-        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} />
+        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />
       </>
     );
   }
@@ -1058,7 +1058,7 @@ export default function ModelConfiguration({
     // toggle anymore — the Fixed Effects picker below is now the sole,
     // authoritative source for which dimensions LSDV absorbs, same as
     // FE/TWFE/EventStudy).
-    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={[panel?.entityCol].filter(Boolean)} />;
+    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />;
   }
 
   if (model === "SyntheticControl") {
@@ -1190,13 +1190,13 @@ export default function ModelConfiguration({
         panel={panel}
         selectedFeCols={selectedFeCols}
         setSelectedFeCols={setSelectedFeCols}
-        defaultFeCols={panel?.entityCol ? [panel.entityCol] : []}
+        defaultFeCols={feColsDefault}
       />
     );
   }
 
   if (model === "FD") {
-    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} />;
+    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />;
   }
 
   // OLS: no model-specific configuration beyond variable selection
