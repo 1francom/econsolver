@@ -28,6 +28,8 @@ function Heatmap({v}){
 function PanelTab({rows,headers,panel,setPanel,onAdd}){
   const { C, T } = useTheme();
   const [ec,setEc]=useState(panel?.entityCol||""),[tc,setTc]=useState(panel?.timeCol||"");
+  const [extraFe,setExtraFe]=useState(panel?.feCols?.slice(2)??[]);
+  const [interactionCols,setInteractionCols]=useState(panel?.interactionCols??[]);
   const [slotCol,setSlotCol]=useState("");
   const [outcomeCols,setOutcomeCols]=useState([]);
   const [staticCols,setStaticCols]=useState([]);
@@ -59,6 +61,36 @@ function PanelTab({rows,headers,panel,setPanel,onAdd}){
             </div>
           </div>
         ))}
+      </div>
+      <div style={{marginBottom:"1.2rem"}}>
+        <Lbl color={C.teal}>Additional FE dimensions (optional)</Lbl>
+        <div style={{fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 6}}>
+          Absorbed as extra fixed effects in FE/TWFE/LSDV (e.g. industry, region). Not part of the entity×time panel index used for balance diagnostics.
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+          {headers.filter(h => h !== ec && h !== tc).map(h =>
+            colBtn(h, extraFe.includes(h), C.teal, () => toggle(h, setExtraFe, extraFe))
+          )}
+        </div>
+      </div>
+      <div style={{marginBottom:"1.2rem"}}>
+        <Lbl color={C.gold}>FE interaction (optional)</Lbl>
+        <div style={{fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 6}}>
+          Cross two columns into one combined fixed effect (e.g. state × year). Pick exactly two.
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+          {headers.map(h =>
+            colBtn(h, interactionCols.includes(h), C.gold, () => {
+              if (interactionCols.includes(h)) setInteractionCols(interactionCols.filter(c => c !== h));
+              else if (interactionCols.length < 2) setInteractionCols([...interactionCols, h]);
+            })
+          )}
+        </div>
+        {interactionCols.length === 2 && (
+          <div style={{fontSize: T.caption.fontSize, color: C.gold, marginTop: 4}}>
+            Will absorb {interactionCols.join(" × ")} as one combined FE group.
+          </div>
+        )}
       </div>
       {v&&(
         <div style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
@@ -121,7 +153,7 @@ function PanelTab({rows,headers,panel,setPanel,onAdd}){
         </div>
       </div>
       <div style={{display:"flex",gap:8}}>
-        <Btn onClick={()=>setPanel({entityCol:ec,timeCol:tc,validation:v})} color={C.gold} v="solid" dis={!ec||!tc} ch={panel?"Update panel index":"Set panel index"}/>
+        <Btn onClick={()=>{const feCols=[...new Set([ec,tc,...extraFe].filter(Boolean))];setPanel({entityCol:ec,timeCol:tc,feCols,interactionCols,validation:v});}} color={C.gold} v="solid" dis={!ec||!tc} ch={panel?"Update panel index":"Set panel index"}/>
         {panel&&<Btn onClick={()=>setPanel(null)} color={C.red} ch="Clear"/>}
       </div>
       {panel&&<div style={{marginTop:"1rem",padding:"0.5rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
