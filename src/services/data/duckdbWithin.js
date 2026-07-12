@@ -40,6 +40,13 @@ function num(v) {
  * flips reuse the same withinCTEPrefix.
  */
 export async function buildWithinSuffStats(tableName, yCol, xCols, unitCol, opts = {}) {
+  // CAP: this SQL path only demeans by unitCol + optional timeCol (2 dimensions
+  // max). Callers requesting 3+ FE dimensions (see PanelWithinEngine.js /
+  // PanelEngine.js's *Multi functions) MUST route to the JS engine instead —
+  // see ModelingTab.jsx's SQL-path guard (Task 6 of
+  // docs/superpowers/plans/2026-07-10-panel-nway-fixed-effects.md). Silently
+  // truncating to 2 dims here would produce a result that doesn't match what
+  // the user configured.
   const { mode, timeCol, dummySQL = {} } = opts;
   if (!["FE", "FD", "TWFE"].includes(mode)) {
     throw new Error(`buildWithinSuffStats: invalid mode "${mode}" (expected "FE", "FD", or "TWFE")`);

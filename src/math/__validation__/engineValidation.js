@@ -25,11 +25,18 @@
 //   node --input-type=module < src/math/__validation__/engineValidation.js
 
 import { runOLS, runWLS }                    from "../LinearEngine.js";
-import { runFE, runFD }                      from "../PanelEngine.js";
+import { runFE, runFD, runFEMulti }          from "../PanelEngine.js";
 import { run2SLS, runSharpRDD, ikBandwidth } from "../CausalEngine.js";
 import { runLogit, runProbit, runNegBinFE }  from "../NonLinearEngine.js";
 import { runGMM, runLIML, runIVPoisson }     from "../GMMEngine.js";
 import { runSyntheticControl }               from "../SyntheticControlEngine.js";
+import { readFileSync, existsSync }          from "node:fs";
+import { fileURLToPath }                     from "node:url";
+import { dirname, join }                     from "node:path";
+
+// __dirname-equivalent for ESM — used to locate benchmark/fixture files that
+// live alongside this validation script (panelNwayFe R-generated outputs).
+const __VALIDATION_DIR = dirname(fileURLToPath(import.meta.url));
 
 // ─── TOLERANCE CONSTANTS ─────────────────────────────────────────────────────
 const TOL_COEF  = 1e-5;   // coefficients: 5 decimal places (conservative)
@@ -1134,6 +1141,173 @@ function validateSyntheticControl() {
   return { pass, fail };
 }
 
+// ─── PANEL N-WAY FE vs R fixest (panelNwayFeRValidation.R) ───────────────────
+//
+// STATUS: infra-only until Franco runs panelNwayFeRValidation.R (no R on this
+// machine — see MEMORY.md). If the benchmark JSON/CSV aren't present yet, this
+// suite prints a one-line skip and reports 0 pass / 0 fail so it never breaks
+// the harness. Once Franco supplies the files (committed alongside the R
+// script, see docs/superpowers/plans/2026-07-10-panel-nway-fixed-effects.md
+// Task 8), this suite runs for real on every `node engineValidation.js`.
+//
+// Tolerances: TOL_COEF / TOL_SE (1e-5 / 1e-3) — the values actually documented
+// in README.md's Tolerances table, matching every other suite in this file
+// (the 1e-6/1e-4 figures in the file header comment are aspirational/CLAUDE.md
+// targets, not what's enforced today).
+
+// Minimal CSV parser (handles R's write.csv default quoting of factor/string
+// columns like `state_year`; numeric columns are left unquoted by R).
+// Returns {value, quoted} pairs per cell so the caller can tell whether a
+// field was quoted in the source CSV — quoting-awareness matters because
+// R's write.csv quotes factor/character columns (e.g. state_year labels
+// like "1.1", "2.6" from interaction(state, year), default sep="."), and a
+// quoted cell must NEVER be numerically coerced even if it happens to look
+// like a number, or two distinct R factor levels can collide onto the same
+// JS float (e.g. a future double-digit fixture where "1.1" and "11.1" don't
+// collide as strings but would if blindly parsed as numbers under a
+// different digit-width scenario).
+function _splitCsvLine(line) {
+  const out = [];
+  let cur = "", inQuotes = false, wasQuoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else inQuotes = false;
+      } else cur += ch;
+    } else if (ch === '"') { inQuotes = true; wasQuoted = true; }
+    else if (ch === ",") { out.push({ value: cur, quoted: wasQuoted }); cur = ""; wasQuoted = false; }
+    else cur += ch;
+  }
+  out.push({ value: cur, quoted: wasQuoted });
+  return out;
+}
+
+function _readPanelNwayFeCsv(path) {
+  const txt = readFileSync(path, "utf8").trim();
+  const lines = txt.split(/\r?\n/);
+  const header = _splitCsvLine(lines[0]).map(cell => cell.value);
+  return lines.slice(1).map(line => {
+    const cells = _splitCsvLine(line);
+    const r = {};
+    header.forEach((h, i) => {
+      const { value: raw, quoted } = cells[i] ?? { value: "", quoted: false };
+      // Quoted CSV fields (R's write.csv quotes factor/character columns)
+      // are never numerically coerced, regardless of what they look like —
+      // this is what keeps state_year as a string.
+      if (quoted) { r[h] = raw; return; }
+      const num = raw === "" ? NaN : Number(raw);
+      r[h] = isFinite(num) ? num : raw;
+    });
+    return r;
+  });
+}
+
+function validatePanelNwayFe() {
+  let pass = 0, fail = 0;
+  function c(label, got, want, tol = TOL_COEF) {
+    if (check(label, got, want, tol)) pass++; else fail++;
+  }
+
+  const benchPath   = join(__VALIDATION_DIR, "panelNwayFeBenchmarks.json");
+  const fixturePath = join(__VALIDATION_DIR, "panelNwayFeFixture.csv");
+
+  if (!existsSync(benchPath) || !existsSync(fixturePath)) {
+    console.warn(
+      "  panelNwayFe: benchmark files not found — run panelNwayFeRValidation.R " +
+      "and commit the outputs (see docs/superpowers/plans/2026-07-10-panel-nway-fixed-effects.md Task 8)"
+    );
+    return { pass: 0, fail: 0 };
+  }
+
+  const bench = JSON.parse(readFileSync(benchPath, "utf8"));
+  const rows  = _readPanelNwayFeCsv(fixturePath);
+
+  // Defensive assertion: state_year MUST parse as a string. If a future
+  // parser regression numerically coerces it, two distinct R factor levels
+  // could silently collide onto the same JS float, merging FE groups fixest
+  // treats as separate — exactly the bug the nested-FE test below exists to
+  // catch. Fail loudly here rather than let it surface as a silent,
+  // plausible-looking df/coef mismatch downstream.
+  if (rows.length > 0 && typeof rows[0].state_year !== "string") {
+    throw new Error(
+      "panelNwayFe: CSV parser regression — state_year parsed as " +
+      `${typeof rows[0].state_year} (value=${rows[0].state_year}), expected string. ` +
+      "This means quoted CSV fields are being numerically coerced again, which can " +
+      "silently collide distinct R factor levels. Fix _readPanelNwayFeCsv/_splitCsvLine " +
+      "before trusting any result from this suite."
+    );
+  }
+
+  // ── (a) 2 independent (non-nested) FE dims: state + industry ───────────────
+  const r2 = runFEMulti(rows, "y", ["x1", "x2"], ["state", "industry"], {});
+  if (!r2 || r2.error) {
+    console.warn("  ✗ panelNwayFe two-way returned error: " + (r2?.error ?? "null"));
+    fail++;
+  } else {
+    const b = bench.two_way_independent;   // R coef()/se() order: x1, x2 (no intercept — absorbed)
+    c("panelNwayFe two-way: beta[x1]",  r2.beta[0], b.coef[0], TOL_COEF);
+    c("panelNwayFe two-way: beta[x2]",  r2.beta[1], b.coef[1], TOL_COEF);
+    c("panelNwayFe two-way: se[x1]",    r2.se[0],   b.se[0],   TOL_SE);
+    c("panelNwayFe two-way: se[x2]",    r2.se[1],   b.se[1],   TOL_SE);
+    c("panelNwayFe two-way: n",         r2.n,       b.nobs,    0);
+    // non-nested FE dims — the additive feDegreesOfFreedom formula should match fixest exactly.
+    c("panelNwayFe two-way: df",        r2.df,      b.df,      0);
+  }
+
+  // ── (b) 3 independent FE dims: state + industry + year ─────────────────────
+  const r3 = runFEMulti(rows, "y", ["x1", "x2"], ["state", "industry", "year"], {});
+  if (!r3 || r3.error) {
+    console.warn("  ✗ panelNwayFe three-way returned error: " + (r3?.error ?? "null"));
+    fail++;
+  } else {
+    const b = bench.three_way_independent;
+    c("panelNwayFe three-way: beta[x1]",  r3.beta[0], b.coef[0], TOL_COEF);
+    c("panelNwayFe three-way: beta[x2]",  r3.beta[1], b.coef[1], TOL_COEF);
+    c("panelNwayFe three-way: se[x1]",    r3.se[0],   b.se[0],   TOL_SE);
+    c("panelNwayFe three-way: se[x2]",    r3.se[1],   b.se[1],   TOL_SE);
+    c("panelNwayFe three-way: n",         r3.n,       b.nobs,    0);
+    c("panelNwayFe three-way: df",        r3.df,      b.df,      0);
+  }
+
+  // ── (c) Nested pair: state + (state × year) ─────────────────────────────────
+  // `state_year` is materialized by R itself (interaction(df$state, df$year))
+  // and written into the fixture CSV, so we read it directly rather than
+  // re-deriving it via materializeFEInteraction — the exact label strings
+  // don't need to match, only the coef/SE/df values, and using R's own column
+  // guarantees identical grouping.
+  const rn = runFEMulti(rows, "y", ["x1", "x2"], ["state", "state_year"], {});
+  if (!rn || rn.error) {
+    console.warn("  ✗ panelNwayFe nested returned error: " + (rn?.error ?? "null"));
+    fail++;
+  } else {
+    const b = bench.nested_state_stateyear;
+    c("panelNwayFe nested: beta[x1]",  rn.beta[0], b.coef[0], TOL_COEF);
+    c("panelNwayFe nested: beta[x2]",  rn.beta[1], b.coef[1], TOL_COEF);
+    c("panelNwayFe nested: se[x1]",    rn.se[0],   b.se[0],   TOL_SE);
+    c("panelNwayFe nested: se[x2]",    rn.se[1],   b.se[1],   TOL_SE);
+    c("panelNwayFe nested: n",         rn.n,       b.nobs,    0);
+
+    // KNOWN RISK (see PanelWithinEngine.js feDegreesOfFreedom() comment): the
+    // additive df formula does not account for the exact nesting of `state`
+    // inside `state × year`, so it is expected to OVERCOUNT absorbed
+    // parameters (undercount df) relative to fixest's rank-based correction.
+    // Do NOT silently adjust feDegreesOfFreedom to make this pass — a mismatch
+    // here confirms the documented risk and becomes a REQUIRED follow-up task
+    // (a proper rank/collinearity-aware FE dof correction), not an optional one.
+    if (!near(rn.df, b.df, 0)) {
+      console.warn(
+        `  ⚠ panelNwayFe nested: df MISMATCH — JS=${rn.df}, R fixest=${b.df}. ` +
+        "This is the documented df-collinearity risk (see feDegreesOfFreedom() " +
+        "comment in PanelWithinEngine.js) — fixing it is a required follow-up, not optional."
+      );
+    }
+    c("panelNwayFe nested: df (KNOWN RISK — see console warning above)", rn.df, b.df, 0);
+  }
+
+  return { pass, fail };
+}
+
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 
 function validateNegBinFE() {
@@ -1183,6 +1357,7 @@ export function runAllValidations() {
     ["IV-Poisson (structural + DGP recovery)", validateIVPoisson],
     ["LIML vs R (just-id + overid)", validateLIMLvsR],
     ["Synthetic Control vs R Synth", validateSyntheticControl],
+    ["Panel N-way FE vs R fixest (pending Franco's R run)", validatePanelNwayFe],
   ];
 
   const results = [];

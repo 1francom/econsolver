@@ -6,16 +6,17 @@
 // the historical stale-closure guards are unchanged; this file is just the body.
 
 import {
-  runOLS, runWLS, run2SLS, runFE, runFD, runSharpRDD,
-  run2x2DiD, runTWFEDiD, ikBandwidth,
+  runOLS, runWLS, run2SLS, runFE, runFEMulti, runFDMulti, runSharpRDD, isLegacyFeSet,
+  run2x2DiD, runTWFEDiDMulti, ikBandwidth,
   runLogit, runProbit,
   runGMM, runLIML, runIVPoisson,
-  runFuzzyRDD, runEventStudy, runLSDV, runPoisson, runPoissonFE, runPoissonFEMulti, runNegBinFE,
+  runFuzzyRDD, runEventStudyMulti, runLSDV, runLSDVMulti, runPoisson, runPoissonFE, runPoissonFEMulti, runNegBinFE,
   runSunAbraham, runSyntheticControl, runCallawayCS,
   runSpatialRDD, runSpatialRegressionFromRows,
   wrapResult, diagnoseFit,
 } from "../../../math/index.js";
 import { applyFactors, expandInteractions, resolveEstimator } from "../helpers.js";
+import { materializeFEInteraction } from "../../../core/generate/feInteraction.js";
 
 export function dispatchEstimation(dataRows, ctx) {
   const {
@@ -24,7 +25,7 @@ export function dispatchEstimation(dataRows, ctx) {
     model, family, weightVar, seOpts, seType, panel,
     zVars, postVar, treatVar,
     runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
-    treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, lsdvTimeFE,
+    treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost,
     poissonEntityCol, poissonOffsetCol, poissonExtraFE,
     cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
     csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
@@ -32,6 +33,9 @@ export function dispatchEstimation(dataRows, ctx) {
     spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
     resolveSpatialWeights,
   } = ctx;
+  // `let` (not part of the const destructure above) because the FE-interaction
+  // block below may rewrite the effective FE set for this estimation.
+  let ctxFeCols = ctx.feCols;
 
   const y = yVar[0];
   if (!y) return { error: "Select a dependent variable (Y)." };
@@ -41,6 +45,52 @@ export function dispatchEstimation(dataRows, ctx) {
   const { rows: _r1, vars: expX } = applyFactors(ixRows, ixX, factorVars);
   const { rows: expRows, vars: expW } = applyFactors(_r1, ixW, factorVars);
   dataRows = expRows; // parameter reassignment: safe in JS
+
+  // ── FE interaction materialization (PanelTab "FE interaction" picker) ───────
+  // When the user crossed exactly two columns into one combined fixed effect
+  // (panel.interactionCols, e.g. state × year), realize that composite key as an
+  // in-memory column here and swap it into the FE set BEFORE estimation. Local
+  // scope only — materializeFEInteraction shallow-copies rows and never touches
+  // rawData or injects a pipeline step (non-destructive-pipeline invariant).
+  //
+  // DESIGN CHOICE — REPLACE the two raw source columns with their interaction,
+  // do NOT keep both. A state×year fixed effect fully nests both the state and
+  // the year main effects (each (state,year) cell is its own dummy), so
+  // absorbing state×year AND state AND year would be perfectly collinear: the
+  // raw state/year dummies are redundant and would over-count absorbed
+  // parameters (inflating df / breaking rank). This mirrors R replacing
+  // factor(state) + factor(year) with factor(state):factor(year) in a fully
+  // nested design. Any OTHER FE dims the user picked (e.g. a separate "region"
+  // via the Additional FE dimensions picker) that are not part of the
+  // interaction pair are left untouched.
+  //
+  // The interaction is a per-estimation CHOICE (FEColumnPicker's mutual-
+  // exclusion toggle — see ModelConfiguration.jsx), not forced just because
+  // it's configured in the Panel tab: the user may have deselected the
+  // combined chip in favor of its two raw source columns individually (or
+  // vice versa). Only materialize when the resolved FE set actually contains
+  // the combined label.
+  //
+  // No-op guarantee: when panel.interactionCols is empty/undefined, or the
+  // user's FE selection doesn't include the interaction label, this branch is
+  // skipped entirely — dataRows and ctxFeCols pass through unchanged, so the
+  // byte-identical-for-common-case behavior (Tasks 4/5) is preserved.
+  const interactionCols = panel?.interactionCols;
+  const interactionLabel = Array.isArray(interactionCols) && interactionCols.length === 2
+    ? interactionCols.join("×")
+    : null;
+  if (interactionLabel && Array.isArray(ctxFeCols) && ctxFeCols.includes(interactionLabel)) {
+    const mat = materializeFEInteraction(dataRows, interactionCols);
+    dataRows = mat.rows;
+    // ctxFeCols already contains interactionLabel (that's the branch guard
+    // above) — strip it too, alongside either raw source column, before
+    // appending the freshly-materialized mat.outCol (always === interactionLabel
+    // per feInteraction.js's default naming). Without this, the label ends up
+    // duplicated (e.g. ["year","state×industry","state×industry"]), which is
+    // trivially self-collinear and breaks LSDV/OLS with a singular matrix.
+    ctxFeCols = [...ctxFeCols.filter(c => !interactionCols.includes(c) && c !== interactionLabel), mat.outCol];
+  }
+
   const effModel = resolveEstimator(model, family, !!weightVar[0]);
   try {
     const allX = [...expX, ...expW];
@@ -54,18 +104,30 @@ export function dispatchEstimation(dataRows, ctx) {
     } else if (effModel === "FE") {
       if (!allX.length) return { error: "Select at least one regressor." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      const feRaw = runFE(dataRows, y, allX, ec, tc, seOpts);
+      // Plain FE's legacy default is ENTITY-ONLY demeaning (runFE(ec,tc) only ever
+      // demeaned by ec — tc was just a validity filter). runFE's wrapper also adds
+      // units/R2_between/alphas fields the UI (PanelResults "Units" badge, entity
+      // FE display) reads, which runFEMulti's raw output does not have. So: keep
+      // calling the legacy wrapper for the untouched entity-only default (byte-
+      // identical output, badges intact); only route through runFEMulti directly
+      // once the user has actually picked a different/larger FE set via the picker.
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec].filter(Boolean);
+      const isLegacyDefault = isLegacyFeSet(feCols, [ec].filter(Boolean));
+      const feRaw = isLegacyDefault
+        ? runFE(dataRows, y, allX, ec, tc, seOpts)
+        : runFEMulti(dataRows, y, allX, feCols, seOpts);
       if (!feRaw || feRaw.error) return { error: feRaw?.error ?? "Fixed Effects estimation failed." };
-      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc };
+      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols };
       const feRes = wrapResult("FE", feRaw, panelSpec);
       return { result: { type: "FE", fe: feRes, fd: null }, panelFE: feRes, panelFD: null };
 
     } else if (effModel === "FD") {
       if (!allX.length) return { error: "Select at least one regressor." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      const fdRaw = runFD(dataRows, y, allX, ec, tc, seOpts);
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec, tc].filter(Boolean);
+      const fdRaw = runFDMulti(dataRows, y, allX, feCols, seOpts);
       if (!fdRaw || fdRaw.error) return { error: fdRaw?.error ?? "First Differences estimation failed." };
-      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc };
+      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols };
       const fdRes = wrapResult("FD", fdRaw, panelSpec);
       return { result: { type: "FD", fe: null, fd: fdRes }, panelFE: null, panelFD: fdRes };
 
@@ -85,9 +147,10 @@ export function dispatchEstimation(dataRows, ctx) {
     } else if (effModel === "TWFE") {
       if (!treatVar[0]) return { error: "Select the treatment indicator column." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      const res = runTWFEDiD(dataRows, y, ec, tc, treatVar[0], expW, seOpts);
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec, tc].filter(Boolean);
+      const res = runTWFEDiDMulti(dataRows, y, ec, tc, treatVar[0], expW, feCols, seOpts);
       if (!res) return { error: "TWFE DiD failed. Check panel structure and treatment variable." };
-      return { result: wrapResult("TWFE", res, { yVar: y, wVars: expW, entityCol: ec, timeCol: tc, treatVar: treatVar[0] }), panelFE: null, panelFD: null };
+      return { result: wrapResult("TWFE", res, { yVar: y, wVars: expW, entityCol: ec, timeCol: tc, treatVar: treatVar[0], feCols }), panelFE: null, panelFD: null };
 
     } else if (effModel === "RDD") {
       if (!runningVar[0]) return { error: "Select a running variable." };
@@ -147,18 +210,35 @@ export function dispatchEstimation(dataRows, ctx) {
     } else if (effModel === "LSDV") {
       if (!allX.length) return { error: "Select at least one regressor (X)." };
       const ec = panel.entityCol, tc = panel.timeCol;
-      const res = runLSDV(dataRows, y, allX, ec, tc, { timeFE: lsdvTimeFE }, seOpts);
+      // The Fixed Effects picker (ModelConfiguration.jsx's FEColumnPicker) is the
+      // sole source of truth for which dimensions LSDV absorbs — the old separate
+      // "Time Fixed Effects" toggle (lsdvTimeFE) is gone; whether time is included
+      // is now just whether tc is present in the resolved FE set, same as every
+      // other N-way-capable estimator.
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec].filter(Boolean);
+      const timeFEForLegacy = feCols.includes(tc);
+      // runLSDV's legacy wrapper adds units/times/timeFE/refUnit/refTime + the
+      // "unit:"/"time:" varNames labels the UI reads (Panel LSDV badges). Its
+      // output is byte-identical to runLSDVMulti for the entity-only / entity+time
+      // sets, so keep using it whenever the resolved set is exactly one of those;
+      // only route through runLSDVMulti directly for genuine 3+-way/custom LSDV.
+      const legacyLSDVCols = timeFEForLegacy ? [ec, tc].filter(Boolean) : [ec].filter(Boolean);
+      const isLegacyLSDV = isLegacyFeSet(feCols, legacyLSDVCols);
+      const res = isLegacyLSDV
+        ? runLSDV(dataRows, y, allX, ec, tc, { timeFE: timeFEForLegacy }, seOpts)
+        : runLSDVMulti(dataRows, y, allX, feCols, seOpts);
       if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };
-      return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc }), panelFE: null, panelFD: null };
+      return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols }), panelFE: null, panelFD: null };
 
     } else if (effModel === "EventStudy") {
       if (!treatTimeCol[0]) return { error: "Select the treatment time column (period when each unit was first treated)." };
       const ec = panel.entityCol, tc = panel.timeCol;
       const pre  = Math.max(1, kPre  || 3);
       const post = Math.max(1, kPost || 3);
-      const res = runEventStudy(dataRows, y, ec, tc, treatTimeCol[0], pre, post, expW, seOpts);
+      const feCols = ctxFeCols?.length ? ctxFeCols : [ec, tc].filter(Boolean);
+      const res = runEventStudyMulti(dataRows, y, ec, tc, treatTimeCol[0], pre, post, expW, feCols, seOpts);
       if (!res || res.error) return { error: res?.error ?? "Event Study failed. Check panel structure and treatment time column." };
-      return { result: wrapResult("EventStudy", res, { yVar: y, xVars: expX, wVars: expW, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0] }), panelFE: null, panelFD: null };
+      return { result: wrapResult("EventStudy", res, { yVar: y, xVars: expX, wVars: expW, entityCol: ec, timeCol: tc, treatTimeCol: treatTimeCol[0], feCols }), panelFE: null, panelFD: null };
 
     } else if (effModel === "FuzzyRDD") {
       if (!treatVar[0])   return { error: "Select the treatment receipt column (D: actual 0/1 take-up)." };

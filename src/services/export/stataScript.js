@@ -698,12 +698,26 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`estimates store m_wls`);
       break;
 
-    case "FE":
-      lines.push(`* Fixed Effects (within)`);
-      lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
-      lines.push(`estimates store m_fe`);
+    case "FE": {
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity-only.
+      // Fallback preserves the pre-existing entity-only default byte-for-byte.
+      const feColsFE = feCols?.length ? feCols : [entityCol].filter(Boolean);
+      if (feColsFE.length <= 2) {
+        lines.push(`* Fixed Effects (within)`);
+        lines.push(`xtset ${entityCol} ${timeCol}`);
+        lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
+        lines.push(`estimates store m_fe`);
+      } else {
+        lines.push(`* Fixed Effects (within) — N-way absorption via reghdfe`);
+        lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
+        lines.push(`* NOTE: clusters on the first FE column (entityCol) by convention, matching the`);
+        lines.push(`* existing TWFE reghdfe export — does not yet thread the model's actual seType/`);
+        lines.push(`* clusterVar selection through this fallback path.`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsFE.join(" ")}) vce(cluster ${entityCol})`);
+        lines.push(`estimates store m_fe`);
+      }
       break;
+    }
 
     case "FD":
       lines.push(`* First Differences`);
@@ -735,9 +749,12 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "TWFE": {
       const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
+      // Fallback preserves the pre-existing entity+time default byte-for-byte.
+      const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       lines.push(`* Two-Way Fixed Effects DiD`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${entityCol} ${timeCol}) vce(cluster ${entityCol})`);
+      lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${feColsTWFE.join(" ")}) vce(cluster ${entityCol})`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
       lines.push(`estimates store m_twfe`);
       break;
@@ -775,19 +792,39 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
 
     case "LSDV": {
-      lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
-      lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`* Within (FE) — numerically equivalent to LSDV`);
-      lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
-      lines.push(`estimates store m_lsdv`);
-      lines.push(``);
-      lines.push(`* Recover alpha_i (entity fixed effects) via areg`);
-      lines.push(`areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
-      lines.push(`predict _alpha_i, dresiduals`);
-      lines.push(`label var _alpha_i "Entity fixed effect (LSDV alpha_i)"`);
-      lines.push(`* List unique entity FEs`);
-      lines.push(`bysort ${entityCol}: keep if _n == 1`);
-      lines.push(`list ${entityCol} _alpha_i, sep(0)`);
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity(+time).
+      // Fallback preserves the pre-existing entity(+time) default byte-for-byte.
+      const feColsLSDV = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
+      if (feColsLSDV.length <= 2) {
+        lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
+        lines.push(`xtset ${entityCol} ${timeCol}`);
+        lines.push(`* Within (FE) — numerically equivalent to LSDV`);
+        lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
+        lines.push(`estimates store m_lsdv`);
+        lines.push(``);
+        lines.push(`* Recover alpha_i (entity fixed effects) via areg`);
+        lines.push(`areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
+        lines.push(`predict _alpha_i, dresiduals`);
+        lines.push(`label var _alpha_i "Entity fixed effect (LSDV alpha_i)"`);
+        lines.push(`* List unique entity FEs`);
+        lines.push(`bysort ${entityCol}: keep if _n == 1`);
+        lines.push(`list ${entityCol} _alpha_i, sep(0)`);
+      } else {
+        lines.push(`* Panel LSDV — N-way absorption via reghdfe`);
+        lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
+        lines.push(`* Single call: savefe (var=newname) syntax both stores estimates and materializes`);
+        lines.push(`* alpha_i per FE dimension — no need to run reghdfe twice`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.map(c => `${c}=fe_${c}`).join(" ")}) vce(cluster ${entityCol})`);
+        lines.push(`estimates store m_lsdv`);
+        lines.push(``);
+        lines.push(`* Recover alpha_i per FE dimension`);
+        feColsLSDV.forEach((c) => {
+          lines.push(`label var fe_${c} "${c} fixed effect (LSDV alpha)"`);
+        });
+        lines.push(`* List unique entity FEs`);
+        lines.push(`bysort ${entityCol}: keep if _n == 1`);
+        lines.push(`list ${entityCol} ${feColsLSDV.map(c => `fe_${c}`).join(" ")}, sep(0)`);
+      }
       break;
     }
 
@@ -837,13 +874,18 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "EventStudy": {
       const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
+      // reghdfe natively absorbs any number of dimensions, so no <=2-dim branching is
+      // needed here (unlike PanelOLS/xtreg in the Python/Stata FE and LSDV cases).
+      // Fallback preserves the pre-existing entity+time default byte-for-byte.
+      const feColsES = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       lines.push(`* Event Study — relative-time dummies`);
       lines.push(`* Replace treat_time with the variable holding each unit's treatment period`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
       lines.push(`gen rel_time = ${timeCol} - treat_time`);
       lines.push(`* Estimate with unit + time FE, ref = -1`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
-      lines.push(`reghdfe ${yVar} ib(-1).rel_time${extra}, absorb(${entityCol} ${timeCol}) vce(cluster ${entityCol})`);
+      lines.push(`reghdfe ${yVar} ib(-1).rel_time${extra}, absorb(${feColsES.join(" ")}) vce(cluster ${entityCol})`);
       lines.push(`estimates store m_eventstudy`);
       lines.push(`* Plot coefficients`);
       lines.push(`coefplot m_eventstudy, keep(*rel_time*) vertical yline(0) xline(# replace with ref period index)`);

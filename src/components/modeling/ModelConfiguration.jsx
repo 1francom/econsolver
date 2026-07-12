@@ -57,6 +57,73 @@ function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }
   );
 }
 
+// ─── N-way FE picker ──────────────────────────────────────────────────────────
+// Multi-select FE dimension picker. Defaults to `defaultFeCols` (normally
+// panel.feCols from the PanelTab declaration; the plain "FE" estimator passes
+// [entityCol] only, since that estimator historically demeans by entity alone —
+// see estimationDispatch.js) but lets the user narrow/reorder for THIS
+// estimation only — does not mutate the stored panel declaration.
+function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCols }) {
+  const { C } = useTheme();
+  // panel.feCols is only populated once the user clicks "Set/Update panel
+  // index" in the Panel tab after this feature landed — a panel declared
+  // before that (or re-visited without re-clicking) has entityCol/timeCol
+  // but no feCols array. Fall back to those rather than hiding the whole
+  // section, so this control is always visible whenever ANY panel is
+  // declared (same expectation as the always-visible Standard Errors panel).
+  const rawFeCols = panel?.feCols?.length ? panel.feCols : [panel?.entityCol, panel?.timeCol].filter(Boolean);
+  // An FE interaction (Panel tab) crosses two columns into one combined group.
+  // Including it AND either of its two raw source columns as separate FE
+  // dimensions is collinear (the interaction's groups sum back to each raw
+  // column's own groups) — so the two are mutually exclusive, same as R's
+  // factor(a):factor(b) replacing factor(a) + factor(b). Both the raw columns
+  // and the combined chip are individually selectable; picking one clears the
+  // other side of the pair (see toggle below).
+  const interactionCols = panel?.interactionCols;
+  const hasInteraction = Array.isArray(interactionCols) && interactionCols.length === 2;
+  const interactionLabel = hasInteraction ? interactionCols.join("×") : null;
+  const availableFeCols = hasInteraction ? [...rawFeCols, interactionLabel] : rawFeCols;
+  if (!availableFeCols.length) return null;
+  const dflt = defaultFeCols ?? availableFeCols.filter(c => !hasInteraction || !interactionCols.includes(c));
+  const effective = selectedFeCols ?? dflt;
+  const toggle = col => {
+    const isSelected = effective.includes(col);
+    if (col === interactionLabel) {
+      // Turning the interaction ON replaces both its raw source columns;
+      // turning it OFF just removes the combined chip.
+      setSelectedFeCols(isSelected
+        ? effective.filter(c => c !== col)
+        : [...effective.filter(c => !interactionCols.includes(c)), col]);
+    } else if (hasInteraction && interactionCols.includes(col) && !isSelected) {
+      // Selecting a raw source column drops the combined interaction chip.
+      setSelectedFeCols([...effective.filter(c => c !== interactionLabel), col]);
+    } else {
+      setSelectedFeCols(isSelected ? effective.filter(c => c !== col) : [...effective, col]);
+    }
+  };
+  return (
+    <Section title="Fixed Effects" color={C.teal}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {availableFeCols.map(col => (
+          <Chip key={col} label={col} selected={effective.includes(col)} onClick={() => toggle(col)}
+            color={col === interactionLabel ? C.gold : C.teal} />
+        ))}
+      </div>
+      {hasInteraction && (
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+          {interactionLabel} and {interactionCols.join(", ")} individually are mutually exclusive (collinear) — selecting one clears the other.
+        </div>
+      )}
+      {!panel?.feCols?.length && (
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+          Showing entity/time only — visit the Panel tab and click "Update panel index" to add more FE dimensions or an interaction here.
+        </div>
+      )}
+    </Section>
+  );
+}
+export { FEColumnPicker };
+
 // ─── DiD 2×2: Treated + Post + Controls ──────────────────────────────────────
 function DiDConfig({ numericCols, yVar, treatVar, setTreatVar, postVar, setPostVar, wVars, setWVars }) {
   const { C, T } = useTheme();
@@ -372,19 +439,6 @@ function SunAbrahamConfig({
         onToggle={setWVars}
       />
     </>
-  );
-}
-
-// ─── LSDV: Time FE toggle ─────────────────────────────────────────────────────
-function LSDVConfig({ lsdvTimeFE, setLsdvTimeFE }) {
-  const { C, T } = useTheme();
-  return (
-    <Section title="Time Fixed Effects" color={C.blue}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <Chip label="Entity FE only" selected={!lsdvTimeFE} color={C.blue} onClick={() => setLsdvTimeFE(false)} />
-        <Chip label="Entity + Time FE" selected={lsdvTimeFE} color={C.blue} onClick={() => setLsdvTimeFE(true)} />
-      </div>
-    </Section>
   );
 }
 
@@ -849,7 +903,7 @@ export default function ModelConfiguration({
   treatTimeCol,   setTreatTimeCol,
   kPre,           setKPre,
   kPost,          setKPost,
-  lsdvTimeFE,     setLsdvTimeFE,
+  selectedFeCols, setSelectedFeCols, feColsDefault,
   treatedUnit,    setTreatedUnit,
   synthTreatTime, setSynthTreatTime,
   poissonEntityCol, setPoissonEntityCol,
@@ -921,15 +975,18 @@ export default function ModelConfiguration({
 
   if (model === "TWFE") {
     return (
-      <TWFEConfig
-        numericCols={numericCols}
-        yVar={yVar}
-        treatVar={treatVar}
-        setTreatVar={setTreatVar}
-        postVar={postVar}
-        wVars={wVars}
-        setWVars={setWVars}
-      />
+      <>
+        <TWFEConfig
+          numericCols={numericCols}
+          yVar={yVar}
+          treatVar={treatVar}
+          setTreatVar={setTreatVar}
+          postVar={postVar}
+          wVars={wVars}
+          setWVars={setWVars}
+        />
+        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />
+      </>
     );
   }
 
@@ -970,7 +1027,12 @@ export default function ModelConfiguration({
     if (family === "poisson") {
       return <SunAbrahamConfig numericCols={numericCols} headers={headers} yVar={yVar} panel={panel} cohortCol={cohortCol} setCohortCol={setCohortCol} periodCol={periodCol} setPeriodCol={setPeriodCol} saUnitCol={saUnitCol} setSaUnitCol={setSaUnitCol} saControlMode={saControlMode} setSaControlMode={setSaControlMode} saRefPeriod={saRefPeriod} setSaRefPeriod={setSaRefPeriod} wVars={wVars} setWVars={setWVars} />;
     }
-    return <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />;
+    return (
+      <>
+        <EventStudyConfig numericCols={numericCols} yVar={yVar} treatTimeCol={treatTimeCol} setTreatTimeCol={setTreatTimeCol} kPre={kPre} setKPre={setKPre} kPost={kPost} setKPost={setKPost} wVars={wVars} setWVars={setWVars} />
+        <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />
+      </>
+    );
   }
 
   if (model === "CallawayCS") {
@@ -992,7 +1054,11 @@ export default function ModelConfiguration({
   }
 
   if (model === "LSDV") {
-    return <LSDVConfig lsdvTimeFE={lsdvTimeFE} setLsdvTimeFE={setLsdvTimeFE} />;
+    // Historically defaulted to entity-only (no separate "Time Fixed Effects"
+    // toggle anymore — the Fixed Effects picker below is now the sole,
+    // authoritative source for which dimensions LSDV absorbs, same as
+    // FE/TWFE/EventStudy).
+    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />;
   }
 
   if (model === "SyntheticControl") {
@@ -1114,6 +1180,25 @@ export default function ModelConfiguration({
     );
   }
 
-  // OLS / FE / FD: no model-specific configuration beyond variable selection
+  if (model === "FE" && family !== "poisson") {
+    // Plain FE historically demeans by ENTITY ONLY (validated vs R
+    // fixest::feols(y ~ x | unit)) — default the picker to entity-only so an
+    // untouched picker reproduces that exact behavior; the user opts in to
+    // additional dims (e.g. time ⇒ two-way) by checking more chips.
+    return (
+      <FEColumnPicker
+        panel={panel}
+        selectedFeCols={selectedFeCols}
+        setSelectedFeCols={setSelectedFeCols}
+        defaultFeCols={feColsDefault}
+      />
+    );
+  }
+
+  if (model === "FD") {
+    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />;
+  }
+
+  // OLS: no model-specific configuration beyond variable selection
   return null;
 }
