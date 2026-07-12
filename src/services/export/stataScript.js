@@ -812,15 +812,18 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       } else {
         lines.push(`* Panel LSDV — N-way absorption via reghdfe`);
         lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
-        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.join(" ")}) vce(cluster ${entityCol})`);
+        lines.push(`* Single call: savefe (var=newname) syntax both stores estimates and materializes`);
+        lines.push(`* alpha_i per FE dimension — no need to run reghdfe twice`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.map(c => `${c}=fe_${c}`).join(" ")}) vce(cluster ${entityCol})`);
         lines.push(`estimates store m_lsdv`);
         lines.push(``);
-        lines.push(`* Recover alpha_i per FE dimension via reghdfe's savefe (var=newname) syntax`);
-        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.map(c => `${c}=fe_${c}`).join(" ")}) vce(cluster ${entityCol})`);
-        lines.push(`label var fe_${entityCol} "Entity fixed effect (LSDV alpha_i)"`);
+        lines.push(`* Recover alpha_i per FE dimension`);
+        feColsLSDV.forEach((c) => {
+          lines.push(`label var fe_${c} "${c} fixed effect (LSDV alpha)"`);
+        });
         lines.push(`* List unique entity FEs`);
         lines.push(`bysort ${entityCol}: keep if _n == 1`);
-        lines.push(`list ${entityCol} fe_${entityCol}, sep(0)`);
+        lines.push(`list ${entityCol} ${feColsLSDV.map(c => `fe_${c}`).join(" ")}, sep(0)`);
       }
       break;
     }
