@@ -64,16 +64,28 @@ export function dispatchEstimation(dataRows, ctx) {
   // via the Additional FE dimensions picker) that are not part of the
   // interaction pair are left untouched.
   //
-  // No-op guarantee: when panel.interactionCols is empty/undefined this branch
-  // is skipped entirely — dataRows and ctxFeCols pass through unchanged, so the
+  // The interaction is a per-estimation CHOICE (FEColumnPicker's mutual-
+  // exclusion toggle — see ModelConfiguration.jsx), not forced just because
+  // it's configured in the Panel tab: the user may have deselected the
+  // combined chip in favor of its two raw source columns individually (or
+  // vice versa). Only materialize when the resolved FE set actually contains
+  // the combined label.
+  //
+  // No-op guarantee: when panel.interactionCols is empty/undefined, or the
+  // user's FE selection doesn't include the interaction label, this branch is
+  // skipped entirely — dataRows and ctxFeCols pass through unchanged, so the
   // byte-identical-for-common-case behavior (Tasks 4/5) is preserved.
   const interactionCols = panel?.interactionCols;
-  if (Array.isArray(interactionCols) && interactionCols.length === 2) {
+  const interactionLabel = Array.isArray(interactionCols) && interactionCols.length === 2
+    ? interactionCols.join("×")
+    : null;
+  if (interactionLabel && Array.isArray(ctxFeCols) && ctxFeCols.includes(interactionLabel)) {
     const mat = materializeFEInteraction(dataRows, interactionCols);
     dataRows = mat.rows;
-    if (Array.isArray(ctxFeCols)) {
-      ctxFeCols = [...ctxFeCols.filter(c => !interactionCols.includes(c)), mat.outCol];
-    }
+    // Defensive: strip either raw source column in case both the label and a
+    // raw column ended up selected together (shouldn't happen given the
+    // picker's mutual exclusion, but absorbing both would be collinear).
+    ctxFeCols = [...ctxFeCols.filter(c => !interactionCols.includes(c)), mat.outCol];
   }
 
   const effModel = resolveEstimator(model, family, !!weightVar[0]);

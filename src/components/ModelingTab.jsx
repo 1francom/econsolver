@@ -507,9 +507,19 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // time), or every existing FE regression would silently become two-way FE.
   // FD/TWFE/EventStudy/LSDV already defaulted to the full [entity,time] set
   // pre-generalization, so panel.feCols is the correct untouched default there.
-  const feColsDefault = (model === "FE" && family !== "poisson")
+  const feColsDefaultRaw = (model === "FE" && family !== "poisson")
     ? [panel?.entityCol].filter(Boolean)
     : (panel?.feCols ?? [panel?.entityCol, panel?.timeCol].filter(Boolean));
+  // Default to the interaction ACTIVE (matches this feature's original always-on
+  // behavior) when one is configured — replace its two raw source columns with
+  // the combined label so an untouched picker still absorbs state×year rather
+  // than state + year separately. The user can still pick either individually
+  // via the picker's mutual-exclusion toggle (see FEColumnPicker).
+  const feInteractionCols = panel?.interactionCols;
+  const hasFeInteractionDefault = Array.isArray(feInteractionCols) && feInteractionCols.length === 2;
+  const feColsDefault = hasFeInteractionDefault
+    ? [...feColsDefaultRaw.filter(c => !feInteractionCols.includes(c)), feInteractionCols.join("×")]
+    : feColsDefaultRaw;
   const effectiveFeCols = selectedFeCols ?? feColsDefault;
   const [treatedUnit,    setTreatedUnit]    = useState("");
   const [synthTreatTime, setSynthTreatTime] = useState("");
@@ -985,7 +995,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       // builders hardcode entity/time and cannot absorb the crossed key, so —
       // exactly like a regressor interactionTerms — force the JS fallback here
       // rather than silently estimating without the interaction.
-      const hasFeInteraction = panel?.interactionCols?.length === 2;
+      // The interaction is only actually applied when its combined label is
+      // present in the user's resolved FE selection (see estimationDispatch.js
+      // + FEColumnPicker's mutual-exclusion toggle) — merely being configured
+      // in the Panel tab no longer forces it, so this guard must check the
+      // SAME condition, not just panel.interactionCols' presence.
+      const hasFeInteraction = hasFeInteractionDefault && effectiveFeCols.includes(feInteractionCols.join("×"));
       if (effModel !== "SpatialRegression" && !interactionTerms.length && !hasFeInteraction && shouldUseSQLPath(dispatchCtx) && yVar[0] && (allX.length > 0 || ["DiD", "TWFE", "EventStudy", "RDD", "FuzzyRDD"].includes(effModel))) {
         try {
           if (effModel === "2SLS") {

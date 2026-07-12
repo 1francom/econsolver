@@ -72,34 +72,48 @@ function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCol
   // section, so this control is always visible whenever ANY panel is
   // declared (same expectation as the always-visible Standard Errors panel).
   const rawFeCols = panel?.feCols?.length ? panel.feCols : [panel?.entityCol, panel?.timeCol].filter(Boolean);
-  // An FE interaction (Panel tab) is unconditionally materialized in place of
-  // its two raw source columns whenever panel.interactionCols is set
-  // (estimationDispatch.js) — it is not currently a per-estimation toggle.
-  // Show the combined chip (locked/always-selected) instead of the two raw
-  // source chips, so the picker reflects what's actually estimated rather
-  // than dangling raw columns that no longer correspond to reality.
+  // An FE interaction (Panel tab) crosses two columns into one combined group.
+  // Including it AND either of its two raw source columns as separate FE
+  // dimensions is collinear (the interaction's groups sum back to each raw
+  // column's own groups) — so the two are mutually exclusive, same as R's
+  // factor(a):factor(b) replacing factor(a) + factor(b). Both the raw columns
+  // and the combined chip are individually selectable; picking one clears the
+  // other side of the pair (see toggle below).
   const interactionCols = panel?.interactionCols;
   const hasInteraction = Array.isArray(interactionCols) && interactionCols.length === 2;
   const interactionLabel = hasInteraction ? interactionCols.join("×") : null;
-  const availableFeCols = hasInteraction
-    ? [...rawFeCols.filter(c => !interactionCols.includes(c)), interactionLabel]
-    : rawFeCols;
+  const availableFeCols = hasInteraction ? [...rawFeCols, interactionLabel] : rawFeCols;
   if (!availableFeCols.length) return null;
-  const dflt = defaultFeCols ?? availableFeCols;
+  const dflt = defaultFeCols ?? availableFeCols.filter(c => !hasInteraction || !interactionCols.includes(c));
   const effective = selectedFeCols ?? dflt;
-  const toggle = col => setSelectedFeCols(
-    effective.includes(col) ? effective.filter(c => c !== col) : [...effective, col]
-  );
+  const toggle = col => {
+    const isSelected = effective.includes(col);
+    if (col === interactionLabel) {
+      // Turning the interaction ON replaces both its raw source columns;
+      // turning it OFF just removes the combined chip.
+      setSelectedFeCols(isSelected
+        ? effective.filter(c => c !== col)
+        : [...effective.filter(c => !interactionCols.includes(c)), col]);
+    } else if (hasInteraction && interactionCols.includes(col) && !isSelected) {
+      // Selecting a raw source column drops the combined interaction chip.
+      setSelectedFeCols([...effective.filter(c => c !== interactionLabel), col]);
+    } else {
+      setSelectedFeCols(isSelected ? effective.filter(c => c !== col) : [...effective, col]);
+    }
+  };
   return (
     <Section title="Fixed Effects" color={C.teal}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {availableFeCols.map(col => col === interactionLabel ? (
-          <Chip key={col} label={col} selected color={C.gold} disabled
-            title="FE interaction — always absorbed while configured in the Panel tab. Clear it there to remove it." />
-        ) : (
-          <Chip key={col} label={col} selected={effective.includes(col)} onClick={() => toggle(col)} color={C.teal} />
+        {availableFeCols.map(col => (
+          <Chip key={col} label={col} selected={effective.includes(col)} onClick={() => toggle(col)}
+            color={col === interactionLabel ? C.gold : C.teal} />
         ))}
       </div>
+      {hasInteraction && (
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+          {interactionLabel} and {interactionCols.join(", ")} individually are mutually exclusive (collinear) — selecting one clears the other.
+        </div>
+      )}
       {!panel?.feCols?.length && (
         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
           Showing entity/time only — visit the Panel tab and click "Update panel index" to add more FE dimensions or an interaction here.
