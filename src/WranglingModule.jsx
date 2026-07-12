@@ -237,6 +237,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       loadOpts: rawData?._loadOpts ?? null,
       panelIndex: panel
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
+            feCols: panel.feCols, interactionCols: panel.interactionCols,
             balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
         : null,
       _duckdb: processed._duckdb ?? null,
@@ -419,6 +420,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       loadOpts: rawData?._loadOpts ?? null,
       panelIndex: panel
         ? { entityCol: panel.entityCol, timeCol: panel.timeCol,
+            feCols: panel.feCols, interactionCols: panel.interactionCols,
             balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
         : null,
       // Full-table pointer — without this, ModelingTab sees only the 500-row
