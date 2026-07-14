@@ -11,6 +11,7 @@ import { generateRScript }      from "../../services/export/rScript.js";
 import { generatePythonScript } from "../../services/export/pythonScript.js";
 import { generateStataScript }  from "../../services/export/stataScript.js";
 import { downloadReplicationBundle } from "../../services/export/replicationBundle.js";
+import { isLogVarName } from "../../core/validation/logVarDetection.js";
 
 export function Lbl({ children, color }) {
   const { C, T } = useTheme();
@@ -560,6 +561,52 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                   }
                   // Continuous — append dict description as unit hint if available
                   const unitHint = cleanDesc ? ` (${cleanDesc})` : "";
+
+                  // Log-transformed X and/or Y: elasticity / semi-elasticity framing,
+                  // never a raw "one-unit increase" reading.
+                  const xIsLog = isLogVarName(v);
+                  const yIsLog = isLogVarName(yVar ?? "");
+                  if (xIsLog || yIsLog) {
+                    if (xIsLog && yIsLog) {
+                      return (
+                        <>
+                          Log-log specification — the coefficient is (approximately) an elasticity.
+                          A 1% increase in <span style={{ color: C.text }}>{v}</span>{unitHint} is
+                          associated with a{" "}
+                          <span style={{ color: b >= 0 ? C.green : C.red }}>
+                            {b >= 0 ? "+" : ""}{b.toFixed(4)}%
+                          </span>{" "}
+                          change in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
+                        </>
+                      );
+                    }
+                    if (yIsLog) {
+                      const pct = b * 100;
+                      return (
+                        <>
+                          Log-level specification — semi-elasticity. A one-unit increase in{" "}
+                          <span style={{ color: C.text }}>{v}</span>{unitHint} is associated with a{" "}
+                          <span style={{ color: b >= 0 ? C.green : C.red }}>
+                            {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
+                          </span>{" "}
+                          change in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
+                        </>
+                      );
+                    }
+                    // xIsLog only (level-log)
+                    const unitsChange = b / 100;
+                    return (
+                      <>
+                        Level-log specification. A 1% increase in <span style={{ color: C.text }}>{v}</span> is
+                        associated with a{" "}
+                        <span style={{ color: b >= 0 ? C.green : C.red }}>
+                          {unitsChange >= 0 ? "+" : ""}{unitsChange.toFixed(6)}
+                        </span>{" "}
+                        unit change in <span style={{ color: C.text }}>{yVar}</span>, ceteris paribus.{" "}
+                      </>
+                    );
+                  }
+
                   return (
                     <>
                       A one-unit increase in <span style={{ color: C.text }}>{v}</span>{unitHint} is associated with a{" "}

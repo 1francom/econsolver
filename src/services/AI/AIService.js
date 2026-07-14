@@ -36,6 +36,7 @@ import { serializeAllowedSteps, serializeCapabilityMap } from "./appCapabilityMa
 import { filterVariableNames, filterSampleRows } from "../Privacy/privacyFilter.js";
 import { detectPII } from "../Privacy/piiDetector.js";
 import { getSession } from "../auth/authService.js";
+import { isLogVar } from "../../core/validation/logVarDetection.js";
 
 const API_URL       = "https://api.anthropic.com/v1/messages";
 const MODEL         = "claude-sonnet-4-6";        // orchestrator: narratives, cleaning, comparison
@@ -354,20 +355,6 @@ export async function inferVariableUnits(headers, sampleRows) {
 
 // Classifies each regressor and returns a VARIABLE METADATA block for the prompt.
 // The model reads this block to pick the right natural-language pattern (rule A–G).
-// Log-transformed variable name detection — covers log_x/ln_x/log(x) (underscore or
-// call form) as well as camelCase and suffix conventions (logGDP, lnIncome, gdp_log,
-// gdpLog) so renamed columns still get flagged. Columns created via a pipeline `log`
-// step are caught separately in _classifyVariables/detectFunctionalForm via `logCols`,
-// regardless of what the user renamed them to.
-const LOG_NAME_RE        = /^(log_|ln_|log\()/i;
-const LOG_CAMEL_PREFIX_RE = /^(log|ln)[A-Z]/;
-const LOG_SUFFIX_RE       = /(_log|_ln)$/i;
-const LOG_CAMEL_SUFFIX_RE = /[a-z](Log|Ln)$/;
-function isLogVarName(v) {
-  return LOG_NAME_RE.test(v) || LOG_CAMEL_PREFIX_RE.test(v) ||
-         LOG_SUFFIX_RE.test(v) || LOG_CAMEL_SUFFIX_RE.test(v);
-}
-
 function _classifyVariables(varNames, dataDictionary = {}, rows = null, logCols = new Set()) {
   // Value-based binary detection: if every non-null value is 0 or 1 → binary.
   // Uses Number() coercion to handle string "0"/"1" and boolean true/false from pipeline steps.
@@ -454,7 +441,7 @@ function _classifyVariables(varNames, dataDictionary = {}, rows = null, logCols 
     }
 
     // ── Log-transformed (name pattern, dictionary hint, or pipeline `log` step) ───
-    if (logCols.has(v) || isLogVarName(v) || /^log of/i.test(dict) || /log[- ]transformed/i.test(dict)) {
+    if (isLogVar(v, logCols) || /^log of/i.test(dict) || /log[- ]transformed/i.test(dict)) {
       lines.push(`  ${v}: log-var | ${dict || "log-transformed continuous variable"}`);
       return;
     }
@@ -503,9 +490,8 @@ function _classifyVariables(varNames, dataDictionary = {}, rows = null, logCols 
 }
 
 function detectFunctionalForm(yVar = "", xVars = [], logCols = new Set()) {
-  const isLog   = v => logCols.has(v) || isLogVarName(v);
-  const yLog    = isLog(yVar);
-  const anyXLog = xVars.some(isLog);
+  const yLog    = isLogVar(yVar, logCols);
+  const anyXLog = xVars.some(v => isLogVar(v, logCols));
   if (yLog && anyXLog)  return "log-log";
   if (yLog && !anyXLog) return "log-level";
   if (!yLog && anyXLog) return "level-log";
