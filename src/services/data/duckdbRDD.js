@@ -42,8 +42,8 @@ export function buildRDDLocalDesign({
     varNames: [
       "(Intercept)",
       "D (treatment)",
-      "running - c",
-      "D x (running - c)",
+      `${runningCol} - c`,
+      `D x (${runningCol} - c)`,
       ...controls,
     ],
   };

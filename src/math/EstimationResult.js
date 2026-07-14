@@ -426,6 +426,9 @@ function wrapRDD(eng, spec, h) {
       cutoff:     eng.cutoff     ?? null,
       h:          h              ?? eng.h ?? null,
       kernelType: eng.kernelType ?? null,
+      polyOrder:  eng.polyOrder  ?? 1,
+      nLeft:      (eng.D ?? []).filter(d => d === 0).length,
+      nRight:     (eng.D ?? []).filter(d => d === 1).length,
     },
     mcCrary: eng.mcCrary ?? null,
   };
@@ -576,7 +579,10 @@ function wrapFuzzyRDD(eng, spec) {
     mcCrary: eng.mcCrary ?? null,
     // First-stage engine output (raw, not normalised through wrapResult)
     firstStage:         eng.firstStage         ?? null,
-    firstStageVarNames: eng.firstStageVarNames ?? ["(Intercept)", "Z (instrument)", "running − c", "Z × (running − c)"],
+    firstStageVarNames: eng.firstStageVarNames ?? (() => {
+      const rv = spec?.runningVar ?? "running";
+      return ["(Intercept)", "Z (instrument)", `${rv} − c`, `Z × (${rv} − c)`];
+    })(),
   };
 }
 
