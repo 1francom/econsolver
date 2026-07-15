@@ -3346,6 +3346,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "cutoff",    value: rdd.cutoff,               color: C.textDim },
                   { label: "bandwidth", value: rdd.h?.toFixed(3) ?? "—", color: C.textDim },
                 ]} />
+                {/* rdrobust-style summary: kernel, poly order, effective N per side */}
+                <FitBar items={[
+                  { label: "kernel",         value: rdd.kernelType ?? "—", color: C.textDim },
+                  { label: "poly order",     value: rdd.polyOrder ?? 1,   color: C.textDim },
+                  { label: "eff. n (left)",  value: rdd.nLeft  ?? "—",    color: C.textDim },
+                  { label: "eff. n (right)", value: rdd.nRight ?? "—",   color: C.textDim },
+                ]} />
                 <Lbl color={C.textMuted}>RDD Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
                   <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
@@ -3625,7 +3632,31 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           currentDatasetId={datasetId}
           onRestore={(id) => {
             const r = modelBuffer.get(id);
-            if (r) { setResult(r); setActiveBufferId(id); }
+            if (!r) return;
+            setResult(r);
+            setActiveBufferId(id);
+            // Also refill the sidebar from the pinned model's spec so the user
+            // can just hit "Estimate" to get a full, unrimmed re-computation
+            // (pinned models are trimmed — no raw arrays, so plots that need
+            // row-level data, e.g. RDD scatter/McCrary, can't render from the
+            // pinned copy alone). Only fields trimResult actually preserves —
+            // seType/clusterVar aren't reliably stored on results today, so
+            // SE settings are deliberately left untouched rather than silently
+            // reset to "classical".
+            const s = r.spec ?? {};
+            if (r.type) setModel(r.type);
+            setYVar(s.yVar ? [s.yVar] : []);
+            setXVars(s.xVars ?? []);
+            setWVars(s.wVars ?? []);
+            setZVars(s.zVars ?? []);
+            setTreatVar(s.treatVar ? [s.treatVar] : []);
+            setRunningVar(s.runningVar ? [s.runningVar] : []);
+            setPostVar(s.postVar ? [s.postVar] : []);
+            setCutoff(s.cutoff != null ? String(s.cutoff) : "");
+            setKernel(s.kernel ?? "triangular");
+            setPolyOrder(s.polyOrder ?? 1);
+            if (s.bandwidth != null) { setBwMode("manual"); setBwManual(String(s.bandwidth)); }
+            else { setBwMode("ik"); setBwManual(""); }
           }}
           onRemove={(id) => {
             modelBuffer.remove(id);
