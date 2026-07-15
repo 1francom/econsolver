@@ -9,7 +9,7 @@ import { Lbl, Badge, RegressionEquation, ForestPlot, CoeffTable, FitBar, ExportB
 import { PlotSelector, RDDPlot, McCraryPlot } from "../ModelPlots.jsx";
 
 // ─── FUZZY RDD LATEX EXPORT ──────────────────────────────────────────────────
-function buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName) {
+function buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName, runningVar) {
   const fmtP = p => p == null ? "N/A" : p < 0.001 ? "$<$0.001" : p.toFixed(4);
   if (stage === "second") {
     const vars = result.varNames ?? [];
@@ -44,7 +44,7 @@ ${rows}
     }).join("\n");
     return `\\begin{table}[htbp]
 \\centering
-\\caption{Fuzzy RDD --- First Stage: \\texttt{${treatVarName ?? "D"}} $\\sim$ Z + running variable}
+\\caption{Fuzzy RDD --- First Stage: \\texttt{${treatVarName ?? "D"}} $\\sim$ Z + \\texttt{${runningVar ?? "running variable"}}}
 \\begin{tabular}{lrrrr}
 \\hline\\hline
 Variable & Estimate & Std. Error & t-value & Pr($>|t|$) \\\\
@@ -59,12 +59,12 @@ ${rows}
   }
 }
 
-function FuzzyLatexExport({ stage, result, yVar, fsVarNames, treatVarName }) {
+function FuzzyLatexExport({ stage, result, yVar, fsVarNames, treatVarName, runningVar }) {
   const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   const latex = useMemo(
-    () => buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName),
-    [stage, result, yVar, fsVarNames, treatVarName]
+    () => buildFuzzyLatex(stage, result, yVar, fsVarNames, treatVarName, runningVar),
+    [stage, result, yVar, fsVarNames, treatVarName, runningVar]
   );
   return (
     <div style={{ marginBottom: "0.8rem" }}>
@@ -97,7 +97,7 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
   const [tab, setTab] = useState("second");
   const r  = result;
   const fs = r.firstStage;
-  const fsVarNames = r.firstStageVarNames ?? ["(Intercept)", "Z (instrument)", "running − c", "Z × (running − c)"];
+  const fsVarNames = r.firstStageVarNames ?? ["(Intercept)", "Z (instrument)", `${runningVar} − c`, `Z × (${runningVar} − c)`];
 
   return (
     <div style={{ animation: "fadeUp 0.22s ease" }}>
@@ -142,7 +142,7 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
           ]} />
           <Lbl color={C.textMuted}>Second-Stage Coefficient Table</Lbl>
           <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar} df={r.df} />
-          <FuzzyLatexExport stage="second" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} />
+          <FuzzyLatexExport stage="second" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} runningVar={runningVar} />
           <PlotSelector accentColor={C.orange} defaultId="rdd" plots={[
             { id: "rdd",    label: "RDD Plot",
               node: <RDDPlot result={r.rddData ?? {}} yLabel={yVar} xLabel={runningVar} /> },
@@ -171,9 +171,9 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
               ⚠ F-stat = {r.firstStageFstat?.toFixed(2)} &lt; 10 — weak instrument. LATE estimate may be unreliable.
             </div>
           )}
-          <Lbl color={C.textMuted}>First-Stage Coefficient Table — D ~ Z + running variable</Lbl>
+          <Lbl color={C.textMuted}>First-Stage Coefficient Table — {treatVarName ?? "D"} ~ Z + {runningVar ?? "running variable"}</Lbl>
           <CoeffTable dict={dict} rows={rows} varNames={fsVarNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={treatVarName ?? "D"} df={fs.df} />
-          <FuzzyLatexExport stage="first" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} />
+          <FuzzyLatexExport stage="first" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} runningVar={runningVar} />
           <PlotSelector accentColor={C.gold} defaultId="fs_forest" plots={[
             { id: "fs_forest", label: "Coefficient plot",
               node: <ForestPlot varNames={fsVarNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId="forest-fuzzyrdd-fs" filename="fuzzyrdd_first_stage.svg" /> },

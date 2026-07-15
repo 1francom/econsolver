@@ -573,9 +573,10 @@ export function runSharpRDD(rows, yCol, runCol, cutoff, h, kernelType = "triangu
   const res = runWLS(X, Y, W, seOpts);
   if (!res) return null;
 
-  // Variable names matching column order above
-  const polyNames  = Array.from({ length: p }, (_, k) => k === 0 ? "running − c" : `(running − c)^${k + 1}`);
-  const interNames = Array.from({ length: p }, (_, k) => k === 0 ? "D × (running − c)" : `D × (running − c)^${k + 1}`);
+  // Variable names matching column order above — use the actual running-variable
+  // column name selected by the user, not a generic "running" placeholder.
+  const polyNames  = Array.from({ length: p }, (_, k) => k === 0 ? `${runCol} − c` : `(${runCol} − c)^${k + 1}`);
+  const interNames = Array.from({ length: p }, (_, k) => k === 0 ? `D × (${runCol} − c)` : `D × (${runCol} − c)^${k + 1}`);
   const varNames   = ["(Intercept)", "D (treatment)", ...polyNames, ...interNames, ...safeControls];
 
   // Fitted values per side using polynomial terms:
@@ -841,12 +842,13 @@ export function runFuzzyRDD(rows, yCol, dCol, runCol, cutoff, opts = {}) {
   });
 
   // ── 10. Return result ────────────────────────────────────────────────────────
-  const polyLbls = Array.from({ length: p }, (_, k) => k === 0 ? "running − c" : `(running − c)^${k + 1}`);
-  const interLbls = Array.from({ length: p }, (_, k) => k === 0 ? "Z × (running − c)" : `Z × (running − c)^${k + 1}`);
-  const varNames = ["(Intercept)", "D (LATE)", ...polyLbls, ...interLbls];
-  const fsPolyLbls  = Array.from({ length: p }, (_, k) => k === 0 ? "running − c" : `(running − c)^${k + 1}`);
-  const fsInterLbls = Array.from({ length: p }, (_, k) => k === 0 ? "Z × (running − c)" : `Z × (running − c)^${k + 1}`);
-  const firstStageVarNames = ["(Intercept)", "Z (instrument)", ...fsPolyLbls, ...fsInterLbls];
+  // Use the actual running-variable and treatment-column names selected by the
+  // user instead of generic "running"/"D" placeholders. Z stays generic — it's
+  // the synthetic cutoff-crossing indicator, not a real data column.
+  const polyLbls  = Array.from({ length: p }, (_, k) => k === 0 ? `${runCol} − c` : `(${runCol} − c)^${k + 1}`);
+  const interLbls = Array.from({ length: p }, (_, k) => k === 0 ? `Z × (${runCol} − c)` : `Z × (${runCol} − c)^${k + 1}`);
+  const varNames = ["(Intercept)", `${dCol} (LATE)`, ...polyLbls, ...interLbls];
+  const firstStageVarNames = ["(Intercept)", "Z (instrument)", ...polyLbls, ...interLbls];
 
   return {
     // Core LATE

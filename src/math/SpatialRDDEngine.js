@@ -153,8 +153,16 @@ export function runSpatialRDD({
   // wrapRDD: needs beta/se/tStats/pVals/R2/n/df/varNames/late/lateSE/lateP +
   // rddData: valid/xc/D/Y/W/leftFit/rightFit/cutoff/h/kernelType).
   // We append spatial-specific metadata for the UI without breaking the contract.
+  //
+  // runSharpRDD labelled its varNames using the internal signed-running-variable
+  // key (RUN), since that's the only column name it knows — swap it back out for
+  // the user's actual distance column, and name the treatment coefficient after
+  // the real treatment-side column too.
+  const relabel = v => v.split(RUN).join(`${dist} (signed)`).replace(/^D \(treatment\)$/, `${treatment} (treatment)`);
+
   return {
     ...sharp,
+    varNames: (sharp.varNames ?? []).map(relabel),
     // Spatial RD specific:
     isSpatialRDD: true,
     distCol:      dist,

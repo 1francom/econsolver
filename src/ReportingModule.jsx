@@ -170,7 +170,7 @@ function ForestPlot({ varNames, beta, se, pVals }) {
   return (
     <div style={{ overflowX: "auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`}
-           style={{ width: "100%", minWidth: 400, display: "block", fontFamily: T.code.fontFamily }}>
+           style={{ width: "100%", maxWidth: 700, minWidth: 400, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         {/* Background */}
         <rect width={W} height={H} fill={C.bg} />
 
@@ -407,7 +407,7 @@ function RDDScatterPlot({ rddResult }) {
   return (
     <div style={{ overflowX: "auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`}
-           style={{ width: "100%", minWidth: 400, display: "block", fontFamily: T.code.fontFamily }}>
+           style={{ width: "100%", maxWidth: 700, minWidth: 400, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
         <rect width={W} height={H} fill={C.bg} />
 
         {/* Horizontal grid */}
@@ -638,6 +638,7 @@ function AINarrative({ result, modelLabel, yVar, dataDictionary, rows, snapshot 
                 borderLeft: `3px solid ${accents[i] ?? C.gold}`,
                 borderRadius: 4, marginBottom: 8,
                 animation: "fadeUp 0.22s ease",
+                overflowWrap: "break-word", wordBreak: "break-word",
               }}>
                 <div style={{
                   fontSize: T.caption.fontSize, color: accents[i] ?? C.gold,
@@ -1477,9 +1478,15 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function ReportingModule({ result: rawResult, cleanedData, availableDatasets = [], pinnedModels = [], pid = null, onClose }) {
+export default function ReportingModule({ result: propResult, cleanedData, availableDatasets = [], pinnedModels = [], pid = null, onClose }) {
   const { C, T } = useTheme();
   const [tab, setTab] = useState("forest");
+
+  // Which model the report currently displays — defaults to the model that
+  // was active when this tab opened, but the user can switch to any pinned
+  // model via the selector below "How to report" without leaving the page.
+  const [selectedId, setSelectedId] = useState(null);
+  const rawResult = (selectedId && pinnedModels.find(m => m.id === selectedId)) || propResult;
 
   // ── Debug: log raw result so any NaN/undefined shows in console ──────────────
   console.log("DEBUG_RESULTS:", rawResult);
@@ -1599,8 +1606,9 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
       </div>
 
       {/* ── Body ── */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto",
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden",
                     padding: "1.4rem", paddingBottom: "3rem" }}>
+      <div style={{ maxWidth: 1400, margin: "0 auto" }}>
 
         <HintBox color={C.gold} title="How to report" sections={[
           { heading: "Requirements", items: [
@@ -1619,6 +1627,41 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
             "LaTeX output is compatible with Overleaf and standard journal templates",
           ]},
         ]} />
+
+        {/* ── Pinned-model selector — switch which model this report shows ── */}
+        {(() => {
+          const currentId = propResult?.id;
+          const alreadyPinned = currentId && pinnedModels.some(m => m.id === currentId);
+          const modelChips = [
+            ...(alreadyPinned ? [] : (propResult ? [{ ...propResult, __isCurrent: true }] : [])),
+            ...pinnedModels,
+          ];
+          if (modelChips.length < 2) return null;
+          return (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: "1.2rem" }}>
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+                Model:
+              </span>
+              {modelChips.map(m => {
+                const isActive = m.__isCurrent ? !selectedId : selectedId === m.id;
+                const label = m.label ?? m.modelLabel ?? m.type ?? "Model";
+                return (
+                  <button key={m.__isCurrent ? "__current__" : m.id}
+                    onClick={() => setSelectedId(m.__isCurrent ? null : m.id)}
+                    style={{
+                      padding: "4px 10px", borderRadius: 3, cursor: "pointer",
+                      fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                      border: `1px solid ${isActive ? C.teal : C.border2}`,
+                      background: isActive ? `${C.teal}18` : "transparent",
+                      color: isActive ? C.teal : C.textDim, transition: "all 0.12s",
+                    }}>
+                    {label}{m.yVar ? ` · ${m.yVar}` : ""}{m.__isCurrent ? " (current)" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* Fit stats always visible */}
         <FitBar result={result} />
@@ -1713,6 +1756,7 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
               background: C.surface, animation: "fadeUp 0.15s ease",
             }}>
               <AINarrative
+                key={rawResult?.id ?? "active"}
                 result={result}
                 modelLabel={modelLabel}
                 yVar={yVar}
@@ -1725,8 +1769,9 @@ export default function ReportingModule({ result: rawResult, cleanedData, availa
         </div>
 
         {/* ── AI Unified Script Export — Phase 9.10 ── */}
-        <AIUnifiedScript result={result} cleanedData={cleanedData} snapshot={snapshot} availableDatasets={availableDatasets} pinnedModels={pinnedModels} pid={pid} globalPipeline={globalPipeline} />
+        <AIUnifiedScript key={rawResult?.id ?? "active"} result={result} cleanedData={cleanedData} snapshot={snapshot} availableDatasets={availableDatasets} pinnedModels={pinnedModels} pid={pid} globalPipeline={globalPipeline} />
 
+      </div>
       </div>
     </div>
   );
