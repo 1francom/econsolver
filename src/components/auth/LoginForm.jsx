@@ -1,9 +1,11 @@
 // ─── LOGIN FORM ───────────────────────────────────────────────────────────────
 // Welcome page + email/password login. Shown when the user is not authenticated.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { signIn, signUp } from "../../services/auth/authService.js";
 import { useAuth } from "../../services/auth/AuthContext.jsx";
 import { useTheme } from "../../ThemeContext.jsx";
+import HCaptchaWidget from "./HCaptchaWidget.jsx";
+import { HCAPTCHA_SITE_KEY } from "../../services/auth/hcaptcha.js";
 
 
 export default function LoginForm() {
@@ -15,6 +17,11 @@ export default function LoginForm() {
   const [confirm,  setConfirm]  = useState("");
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
+  // Required once "Enable Captcha protection" is on in Supabase Auth settings —
+  // login, signup, and guest entry all go through the same widget/token.
+  const [captchaToken, setCaptchaToken] = useState(null);
+  const captchaRef = useRef(null);
+  const captchaRequired = !!HCAPTCHA_SITE_KEY;
 
   function switchMode(next) {
     setMode(next);
@@ -34,17 +41,39 @@ export default function LoginForm() {
       setError("Password must be at least 6 characters.");
       return;
     }
+    if (captchaRequired && !captchaToken) {
+      setError("Please complete the captcha.");
+      return;
+    }
     setLoading(true);
     try {
       if (mode === "login") {
-        await signIn(email.trim(), password);
+        await signIn(email.trim(), password, captchaToken);
       } else {
-        await signUp(email.trim(), password);
+        await signUp(email.trim(), password, captchaToken);
         // signUp with email confirmation OFF signs the user in immediately
       }
       // AuthContext will update automatically via onAuthStateChange
     } catch (err) {
       setError(err.message ?? (mode === "login" ? "Sign-in failed." : "Sign-up failed."));
+      captchaRef.current?.reset();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleGuest() {
+    if (captchaRequired && !captchaToken) {
+      setError("Please complete the captcha.");
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      await enterGuest(captchaToken);
+    } catch (err) {
+      setError(err.message ?? "Guest sign-in failed.");
+      captchaRef.current?.reset();
     } finally {
       setLoading(false);
     }
@@ -225,6 +254,10 @@ export default function LoginForm() {
             </div>
           )}
 
+          {captchaRequired && (
+            <HCaptchaWidget ref={captchaRef} onVerify={setCaptchaToken} />
+          )}
+
           {error && (
             <div style={{
               fontSize: T.caption.fontSize,
@@ -240,19 +273,19 @@ export default function LoginForm() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (captchaRequired && !captchaToken)}
             style={{
               marginTop: "0.5rem",
               padding: "0.65rem",
-              background: loading ? C.surface2 : C.teal,
-              color: loading ? C.textMuted : C.bg,
+              background: loading || (captchaRequired && !captchaToken) ? C.surface2 : C.teal,
+              color: loading || (captchaRequired && !captchaToken) ? C.textMuted : C.bg,
               border: "none",
               borderRadius: 3,
               fontFamily: T.code.fontFamily,
               fontSize: T.code.fontSize,
               fontWeight: 700,
               letterSpacing: "0.1em",
-              cursor: loading ? "not-allowed" : "pointer",
+              cursor: loading || (captchaRequired && !captchaToken) ? "not-allowed" : "pointer",
               transition: "all 0.15s",
             }}
           >
@@ -289,22 +322,23 @@ export default function LoginForm() {
         </div>
         <button
           type="button"
-          onClick={enterGuest}
+          onClick={handleGuest}
+          disabled={loading || (captchaRequired && !captchaToken)}
           style={{
             width: "100%",
             padding: "0.6rem",
             background: "transparent",
-            color: C.text,
+            color: (captchaRequired && !captchaToken) ? C.textDim : C.text,
             border: `1px solid ${C.border2}`,
             borderRadius: 3,
             fontFamily: T.code.fontFamily,
             fontSize: T.code.fontSize,
             letterSpacing: "0.04em",
-            cursor: "pointer",
+            cursor: loading || (captchaRequired && !captchaToken) ? "not-allowed" : "pointer",
             transition: "all 0.15s",
           }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.text; }}
+          onMouseEnter={e => { if (!captchaRequired || captchaToken) { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; } }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = (captchaRequired && !captchaToken) ? C.textDim : C.text; }}
         >
           Continue without an account →
         </button>

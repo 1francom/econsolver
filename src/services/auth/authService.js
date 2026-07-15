@@ -26,16 +26,22 @@ try {
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
-export async function signIn(email, password) {
+export async function signIn(email, password, captchaToken) {
   if (!supabase) throw new Error("Authentication not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel environment variables.");
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email, password,
+    options: captchaToken ? { captchaToken } : undefined,
+  });
   if (error) throw error;
   return data;
 }
 
-export async function signUp(email, password) {
+export async function signUp(email, password, captchaToken) {
   if (!supabase) throw new Error("Authentication not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel environment variables.");
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email, password,
+    options: captchaToken ? { captchaToken } : undefined,
+  });
   if (error) throw error;
   return data;
 }
@@ -44,6 +50,18 @@ export async function signOut() {
   if (!supabase) return;
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
+}
+
+// Backs guest mode with a real (anonymous) Supabase session so the AI proxy's
+// JWT check and per-user credit metering work identically to a real account.
+// Requires "Anonymous Sign-Ins" enabled in the Supabase project's Auth settings.
+export async function signInAnonymously(captchaToken) {
+  if (!supabase) throw new Error("Authentication not configured.");
+  const { data, error } = await supabase.auth.signInAnonymously({
+    options: captchaToken ? { captchaToken } : undefined,
+  });
+  if (error) throw error;
+  return data;
 }
 
 export async function getSession() {
