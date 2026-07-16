@@ -19,6 +19,15 @@ import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 import { assignVector } from "../core/generate/vectorAssign.js";
 import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
+import {
+  assignDistance, assignDistanceMetric, addDistanceBins,
+  transformCoord, transformWKT,
+  assignBuffer,
+  assignPointsToGrid, assignRectGrid, assignH3Grid,
+  spatialJoin,
+  nearestNeighbor, nearestNeighborMetric,
+  assignBoundaryDistance,
+} from "../math/SpatialEngine.js";
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
@@ -1682,6 +1691,98 @@ export function applyStep(rows, headers, s, context = {}) {
       R = geocodeRowsFromCache(rows, s);
       if (!H.includes(latCol)) H = [...H, latCol];
       if (!H.includes(lonCol)) H = [...H, lonCol];
+      break;
+    }
+
+    // ── SPATIAL STEPS ─────────────────────────────────────────────────────────
+    // Column-adding spatial ops. All SpatialEngine calls are pure sync JS.
+    // Steps referencing another dataset resolve it via context.datasets[id]
+    // (raw version — same contract as `join`) and no-op if it was deleted.
+
+    case "sp_distance": {
+      let out = s.metric
+        ? assignDistanceMetric(rows, s.latCol, s.lonCol, Number(s.refLat), Number(s.refLon), s.outCol, "EPSG:32721")
+        : assignDistance(rows, s.latCol, s.lonCol, Number(s.refLat), Number(s.refLon), s.outCol);
+      const newCols = [s.outCol];
+      if (s.metric && s.binCol) { out = addDistanceBins(out, s.outCol, s.binCol); newCols.push(s.binCol); }
+      R = out;
+      newCols.forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      break;
+    }
+
+    case "sp_crs_transform": {
+      if (s.mode === "wkt") {
+        const prec = s.target === "EPSG:4326" ? 8 : 3;
+        R = rows.map(r => ({
+          ...r,
+          [s.outWkt]: r[s.wktCol] ? transformWKT(String(r[s.wktCol]), s.source, s.target, prec) : null,
+        }));
+        if (!H.includes(s.outWkt)) H = [...H, s.outWkt];
+      } else {
+        R = rows.map(r => {
+          const x = Number(r[s.xCol]), y = Number(r[s.yCol]);
+          if (!isFinite(x) || !isFinite(y)) return { ...r, [s.outX]: null, [s.outY]: null };
+          const [nx, ny] = transformCoord(x, y, s.source, s.target);
+          return { ...r, [s.outX]: nx, [s.outY]: ny };
+        });
+        [s.outX, s.outY].forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      }
+      break;
+    }
+
+    case "sp_buffer": {
+      R = assignBuffer(rows, s.latCol, s.lonCol, Number(s.refLat), Number(s.refLon), Number(s.radiusKm), s.outCol);
+      if (!H.includes(s.outCol)) H = [...H, s.outCol];
+      break;
+    }
+
+    case "sp_grid_assign": {
+      const outCol = s.outCol || "grid_id";
+      if (s.gridType === "existing") {
+        const grid = context?.datasets?.[s.gridDatasetId];
+        if (!grid?.rows?.length) break;
+        const extraCols = s.extraCols || [];
+        R = assignPointsToGrid(rows, s.latCol, s.lonCol, grid.rows, s.wktCol, s.gridIdCol, outCol,
+          { attributeCols: extraCols, metricCrs: "EPSG:32721" });
+        [outCol, "grid_row_index", ...extraCols].forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      } else {
+        R = s.gridType === "rectangular"
+          ? assignRectGrid(rows, s.latCol, s.lonCol, Number(s.cellSize), outCol)
+          : assignH3Grid(rows, s.latCol, s.lonCol, Number(s.resolution), outCol);
+        if (!H.includes(outCol)) H = [...H, outCol];
+      }
+      break;
+    }
+
+    case "sp_spatial_join": {
+      const poly = context?.datasets?.[s.polyDatasetId];
+      if (!poly?.rows?.length) break;
+      const joinCols = s.joinCols || [];
+      R = spatialJoin(rows, s.latCol, s.lonCol, poly.rows, s.wktCol, joinCols, s.predicate || "within");
+      joinCols.forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      break;
+    }
+
+    case "sp_nearest": {
+      const ref = s.refDatasetId === "self" ? { rows } : context?.datasets?.[s.refDatasetId];
+      if (!ref?.rows?.length) break;
+      let out = (s.metric ? nearestNeighborMetric : nearestNeighbor)(
+        rows, s.latCol, s.lonCol,
+        ref.rows, s.refLatCol, s.refLonCol,
+        s.outDist, s.outIdx, "EPSG:32721");
+      const newCols = [s.outDist, s.outIdx];
+      if (s.metric && s.binCol) { out = addDistanceBins(out, s.outDist, s.binCol); newCols.push(s.binCol); }
+      R = out;
+      newCols.forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      break;
+    }
+
+    case "sp_boundary_dist": {
+      const poly = context?.datasets?.[s.polyDatasetId];
+      if (!poly?.rows?.length) break;
+      const pfx = s.outPrefix || "boundary";
+      R = assignBoundaryDistance(rows, s.latCol, s.lonCol, poly.rows, s.wktCol, pfx);
+      [`${pfx}_dist_km`, `${pfx}_treat`, `${pfx}_running`].forEach(c => { if (!H.includes(c)) H = [...H, c]; });
       break;
     }
 
