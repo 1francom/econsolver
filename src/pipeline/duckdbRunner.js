@@ -97,6 +97,12 @@ async function applyStepSQL(step, tbl, headers, conn, context = {}) {
   switch (step.type) {
 
     case "filter": {
+      // Free-text formula-mode filters (step.expr, e.g. an R-style `%in% c(...)`
+      // expression) have no SQL translation here — condToSQL only understands
+      // the structured {col,op,value} shape and would silently fall through to
+      // its "TRUE" default (matching every row) if given one. Bail out so the
+      // caller falls back to the JS runner, which does handle step.expr.
+      if (step.expr) return null;
       const where = condToSQL(step);
       await conn.query(
         `CREATE OR REPLACE TABLE "${next}" AS SELECT * FROM "${tbl}" WHERE ${where}`

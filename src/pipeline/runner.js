@@ -18,7 +18,7 @@
 import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 import { assignVector } from "../core/generate/vectorAssign.js";
-import { isSafeExpr } from "./exprGuard.js";
+import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
@@ -268,6 +268,10 @@ export function applyStep(rows, headers, s, context = {}) {
       if (s.expr) {
         // Formula mode: evaluate a boolean expression per row.
         // Pattern is consistent with the mutate sandbox already in this file.
+        // Rewrite R-style `%in%` to JS array membership before compiling — a
+        // local shadow copy, never mutating the caller's stored step (which
+        // must keep its original R-like text for replication-script export).
+        s = { ...s, expr: translateRInOperator(s.expr) };
         const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
         // eslint-disable-next-line no-new-func
         let filterFn; try { filterFn = new Function(...safeH, `"use strict"; return !!(${s.expr});`); } catch { break; }
@@ -974,6 +978,8 @@ export function applyStep(rows, headers, s, context = {}) {
         as_integer: (x) => { if (x === null || x === undefined) return null; const n = Number(x); return isFinite(n) ? Math.trunc(n) : null; },
         as_factor:  (x) => (x === null || x === undefined) ? null : String(x),
       };
+      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
+      s = { ...s, expr: translateRInOperator(s.expr) };
       const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       const pNames = [...Object.keys(helpers), "row", ...safeH];
       if (!isSafeExpr(s.expr)) break; // SECURITY: reject denylisted identifiers on the sync path
@@ -997,6 +1003,8 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.trueVal:  literal value or column name for true branch
       // s.falseVal: literal value or column name for false branch
       // s.nn:       output column name
+      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
+      s = { ...s, cond: translateRInOperator(s.cond) };
       const safeH_ife = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       if (!isSafeExpr(s.cond)) break; // SECURITY: reject denylisted identifiers on the sync path
       // eslint-disable-next-line no-new-func
@@ -1017,6 +1025,8 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.cases:      [{ cond: string, val: string|number }, ...]
       // s.defaultVal: fallback value when no condition matches
       // s.nn:         output column name
+      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
+      s = { ...s, cases: (s.cases ?? []).map(c => ({ ...c, cond: translateRInOperator(c.cond) })) };
       const safeH_cw = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       if ((s.cases ?? []).some(c => !isSafeExpr(c.cond))) break; // SECURITY: reject denylisted identifiers
       const caseFns = (s.cases ?? []).map(c => {
@@ -1042,6 +1052,8 @@ export function applyStep(rows, headers, s, context = {}) {
       const values = Array.isArray(s.values) ? s.values : [];
       let evalRule;
       if (s.mode === "conditional") {
+        // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
+        s = { ...s, rules: (s.rules ?? []).map(rule => ({ ...rule, expr: translateRInOperator(rule.expr) })) };
         const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
         // compile one predicate per rule - identical to the existing case_when case
         const ruleFns = (s.rules ?? []).map(rule => {

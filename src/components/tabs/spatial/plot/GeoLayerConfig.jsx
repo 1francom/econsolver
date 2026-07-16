@@ -2,6 +2,38 @@
 import { useMemo, useState, useEffect } from "react";
 import { useTheme } from "../../../../ThemeContext.jsx";
 import { PALETTE_DEFS, paletteToCss } from "../shared/color.js";
+import { isSafeExpr } from "../../../../pipeline/exprGuard.js";
+
+// Staged text input — draft only commits to layer state on blur/Enter, so the
+// (potentially expensive) canvas re-render doesn't fire on every keystroke.
+function FilterInput({ value, onChg, C }) {
+  const { T } = useTheme();
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => { setDraft(value ?? ""); }, [value]);
+  const unsafe = draft.trim() !== "" && !isSafeExpr(draft);
+  const commit = () => { if (!unsafe) onChg(draft); };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.11em", fontFamily: T.code.fontFamily }}>
+        Filter rows (optional)
+      </div>
+      <input value={draft} onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "Escape") setDraft(value ?? ""); }}
+        placeholder={'e.g. population > 1000  ·  region %in% c("A","B")'}
+        style={{
+          padding: "3px 6px", background: C.surface,
+          border: `1px solid ${unsafe ? C.red ?? "#c47070" : C.border2}`,
+          borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, outline: "none",
+        }} />
+      {unsafe && (
+        <div style={{ fontSize: T.caption.fontSize, color: C.red ?? "#c47070", fontFamily: T.code.fontFamily }}>
+          Unsafe expression — rejected identifier or template literal.
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PalettePicker({ value, onChange, C }) {
   const { T } = useTheme();
@@ -148,6 +180,8 @@ export function GeoLayerConfig({ ly, onChange, headers, wktHeaders, rows, availa
           {availableDatasets.map(d => <option key={d.id} value={d.id}>{d.filename ?? d.name ?? d.id}</option>)}
         </select>
       </div>
+      {/* Row-level filter — scoped to this layer only, never touches rawData or the pipeline */}
+      <FilterInput value={ly.filterExpr} onChg={v => upd({ filterExpr: v })} C={C} />
       {ly.type === "grid" && (
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
           {[["wkt", "Existing WKT"], ["boundary", "Boundary"], ["latlon", "Lat/Lon"]].map(([m, lbl]) => (

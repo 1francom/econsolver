@@ -4,7 +4,7 @@ import { parseWktRings } from "../shared/wkt.js";
 import { buildColorScale } from "../shared/color.js";
 import { BASEMAPS, lonToTx, latToTy, txToLon, tyToLat, pickTileZ } from "../shared/leaflet.js";
 import { makeCabaMetricGrid } from "../shared/crs.js";
-import { geoBbox } from "./geo.js";
+import { geoBbox, applyLayerFilter } from "./geo.js";
 import { GEO_MARGIN, appendSvgLegend } from "./legend.js";
 import { kde2d, polygonCentroid, transformCoord } from "../../../../math/SpatialEngine.js";
 import { useTheme } from "../../../../ThemeContext.jsx";
@@ -129,7 +129,10 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
     const plotLegend = (() => {
       for (const ly of [...layers].reverse()) {
         if (!ly.visible) continue;
-        const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+        const r = applyLayerFilter(
+          (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows,
+          ly
+        );
         const fillCol = ly.fillByCol ?? ly.colorByCol;
         if ((ly.type === "grid" || ly.type === "polygon") && ly.mode !== "boundary" && fillCol) return buildColorScale(r, fillCol, ly.palette).legend;
         if (ly.type === "point" && ly.colorCol) return buildColorScale(r, ly.colorCol, ly.palette).legend;
@@ -165,7 +168,10 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
 
     for (const ly of layers) {
       if (!ly.visible) continue;
-      const r = (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows;
+      const r = applyLayerFilter(
+        (!ly.datasetId || ly.datasetId === "active") ? rows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? rows,
+        ly
+      );
       if (ly.type === "point" && ly.mode === "wkt" && ly.wktCol) {
         const ptData = r.flatMap(row => {
           const p = parseWktRings(row[ly.wktCol]);
