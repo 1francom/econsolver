@@ -26,13 +26,14 @@ import { SpatialGeoPlot } from "./spatial/plot/SpatialGeoPlot.jsx";
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset, pid }) {
+export default function SpatialTab({ rows = [], headers = [], availableDatasets = [], onAddDataset, onAddStep, pid }) {
   const { C, T } = useTheme();
   const [mainTab,     setMainTab]     = useState("analyze");
   const [pendingRows, setPendingRows] = useState(null);
   const [pendingCols, setPendingCols] = useState([]);
   const [pendingHeaders, setPendingHeaders] = useState(null);
   const [pendingKey, setPendingKey] = useState(null);
+  const [pendingStep, setPendingStep] = useState(null);
 
   const numericHeaders = useMemo(
     () => headers.filter(h => rows.slice(0, 20).some(r => typeof r[h] === "number")),
@@ -69,20 +70,31 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
   const sectionsKey = headers.join("\0");
   const visiblePendingRows = pendingKey === sectionsKey ? pendingRows : null;
 
-  const handleResult = useCallback((resultRows, newCols, baseHeaders = null) => {
+  const handleResult = useCallback((resultRows, newCols, baseHeaders = null, stepSpec = null) => {
     setPendingRows(resultRows);
     setPendingCols(newCols);
     setPendingHeaders(baseHeaders);
+    setPendingStep(stepSpec);
     setPendingKey(sectionsKey);
   }, [sectionsKey]);
 
-  function handleSave(name, resultRows) {
-    const allHeaders = [...new Set([...(pendingHeaders ?? headers), ...pendingCols])];
-    onAddDataset?.(name, resultRows, allHeaders);
+  function clearPending() {
     setPendingRows(null);
     setPendingCols([]);
     setPendingHeaders(null);
+    setPendingStep(null);
     setPendingKey(null);
+  }
+
+  function handleSave(name, resultRows) {
+    const allHeaders = [...new Set([...(pendingHeaders ?? headers), ...pendingCols])];
+    onAddDataset?.(name, resultRows, allHeaders, null, pendingStep?.step ?? null);
+    clearPending();
+  }
+
+  function handleAddStep() {
+    if (pendingStep?.kind === "step") onAddStep?.(pendingStep.step);
+    clearPending();
   }
 
   return (
@@ -264,7 +276,9 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
               <OutputPanel
                 pendingRows={visiblePendingRows}
                 pendingCols={pendingCols}
+                pendingStep={pendingStep}
                 onSave={handleSave}
+                onAddStep={handleAddStep}
                 C={C}
               />
             </div>
