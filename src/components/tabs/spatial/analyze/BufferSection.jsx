@@ -27,7 +27,10 @@ export function BufferSection({ rows, headers, onResult, C }) {
       const treated = out.filter(r => r[outCol] === 1).length;
       setResult({ rows: out, treated });
       appendLog({ module: "spatial", opType: "buffer_assign", params: { latCol, lonCol, refLat: Number(refLat), refLon: Number(refLon), radius: Number(radius), outCol }, label: `Buffer ${radius}km → ${outCol} (${treated} treated)` });
-      onResult(out, [outCol]);
+      onResult(out, [outCol], null, { kind: "step", step: {
+        type: "sp_buffer", latCol, lonCol,
+        refLat: Number(refLat), refLon: Number(refLon), radiusKm: Number(radius), outCol,
+      }});
     } catch (e) {
       setErr(e.message);
     }

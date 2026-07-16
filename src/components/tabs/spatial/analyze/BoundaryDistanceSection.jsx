@@ -37,7 +37,10 @@ export function BoundaryDistanceSection({ rows, headers, availableDatasets, onRe
       const newCols  = [`${outPrefix}_dist_km`, `${outPrefix}_treat`, `${outPrefix}_running`];
       setResult({ rows: out, treated, newCols });
       appendLog({ module: "spatial", opType: "boundary_distance", params: { latCol, lonCol, polyDsId, wktCol: effectiveWkt, outPrefix }, label: `Boundary distance → ${outPrefix}_dist_km, ${outPrefix}_running (${treated} treated)` });
-      onResult(out, newCols);
+      onResult(out, newCols, null, { kind: "step", step: {
+        type: "sp_boundary_dist", latCol, lonCol,
+        polyDatasetId: polyDsId, wktCol: effectiveWkt, outPrefix,
+      }});
     } catch (e) {
       setErr(e.message);
     }

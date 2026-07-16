@@ -82,7 +82,11 @@ export function GeocodeSection({ rows, headers, C, onResult }) {
       const matched = out.filter(r => Number.isFinite(r[latCol]) && Number.isFinite(r[lonCol])).length;
       setResult({ rows: out, matched });
       appendLog({ module: "spatial", opType: "geocode", reproducible: false, params: { addressCol, latCol, lonCol, provider, bbox: bboxPreset }, label: `Geocode ${addressCol} → (${latCol}, ${lonCol}): ${matched}/${rows.length} matched` });
-      onResult(out, [latCol, lonCol]);
+      onResult(out, [latCol, lonCol], null, { kind: "step", step: {
+        type: "geocode", addressCol, latCol, lonCol, provider,
+        bbox: Array.isArray(bbox) ? bbox.join(",") : (bbox ?? ""),
+        endpoint: endpoint.trim(), apiKey: apiKey.trim(),
+      }});
     } catch (e) {
       setErr(e.message || "Geocoding failed");
     } finally {

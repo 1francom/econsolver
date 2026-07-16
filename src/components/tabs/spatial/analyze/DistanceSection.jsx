@@ -34,7 +34,11 @@ export function DistanceSection({ rows, headers, onResult, C }) {
       }
       setResult({ rows: out, cols });
       appendLog({ module: "spatial", opType: "distance", params: { latCol, lonCol, refLat: Number(refLat), refLon: Number(refLon), outCol, metric }, label: `Distance → ${outCol}${metric ? " (metric)" : ""}` });
-      onResult(out, cols);
+      onResult(out, cols, null, { kind: "step", step: {
+        type: "sp_distance", latCol, lonCol,
+        refLat: Number(refLat), refLon: Number(refLon),
+        outCol, metric, binCol: metric ? binCol.trim() : "",
+      }});
     } catch (e) {
       setErr(e.message);
     }

@@ -67,7 +67,11 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
         const distinct = new Set(out.map(r => r[outCol]).filter(v => v != null)).size;
         setResult({ rows: out, distinct, matched, cols });
         appendLog({ module: "spatial", opType: "grid_assign_existing", params: { latCol, lonCol, outCol, gridDsId, wktCol: effectiveWkt, gridIdCol: effectiveGridId, extraCols }, label: `Grid assign → ${outCol} (${distinct} cells, ${matched}/${rows.length} matched)` });
-        onResult(out, cols);
+        onResult(out, cols, null, { kind: "step", step: {
+          type: "sp_grid_assign", gridType: "existing", latCol, lonCol, outCol,
+          gridDatasetId: gridDsId, wktCol: effectiveWkt, gridIdCol: effectiveGridId, extraCols,
+          cellSize: 0, resolution: 0,
+        }});
         return;
       }
 
@@ -77,7 +81,11 @@ export function GridSection({ rows, headers, availableDatasets, onResult, C }) {
       const distinct = new Set(out.map(r => r[outCol]).filter(v => v != null)).size;
       setResult({ rows: out, distinct, matched: null, cols: [outCol] });
       appendLog({ module: "spatial", opType: gridType === "rectangular" ? "grid_rect" : "grid_hex", params: { latCol, lonCol, outCol, ...(gridType === "rectangular" ? { cellSize: Number(cellSize) } : { resolution: Number(resolution) }) }, label: `${gridType === "rectangular" ? `Rect grid ${cellSize}km` : `Hex grid res ${resolution}`} → ${outCol} (${distinct} cells)` });
-      onResult(out, [outCol]);
+      onResult(out, [outCol], null, { kind: "step", step: {
+        type: "sp_grid_assign", gridType, latCol, lonCol, outCol,
+        gridDatasetId: "", wktCol: "", gridIdCol: "", extraCols: [],
+        cellSize: Number(cellSize), resolution: Number(resolution),
+      }});
     } catch (e) {
       setErr(e.message);
     }

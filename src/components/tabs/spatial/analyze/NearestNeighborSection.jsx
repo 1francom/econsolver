@@ -49,7 +49,11 @@ export function NearestNeighborSection({ rows, headers, availableDatasets, C, on
         }
         setResult({ rows: out, cols });
         appendLog({ module: "spatial", opType: "nearest_neighbor", params: { latCol, lonCol, refDsId, refLatCol: effectiveRefLat, refLonCol: effectiveRefLon, outDist, outIdx, metric }, label: `Nearest neighbor → ${outDist}${metric ? " (metric)" : ""}` });
-        onResult(out, cols);
+        onResult(out, cols, null, { kind: "step", step: {
+          type: "sp_nearest", latCol, lonCol,
+          refDatasetId: refDsId, refLatCol: effectiveRefLat, refLonCol: effectiveRefLon,
+          outDist, outIdx, metric, binCol: metric ? binCol.trim() : "",
+        }});
       } catch (e) {
         setErr(e.message);
       }
