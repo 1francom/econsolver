@@ -63,7 +63,8 @@ CTX.datasets.G1 = SP_GRID;
 
 // T1 uses SMOKE_INPUT[type] when present; FIX/HEADERS otherwise.
 const SMOKE_INPUT = {};
-for (const t of ["sp_distance", "sp_crs_transform", "sp_buffer", "sp_grid_assign", "sp_spatial_join", "sp_nearest", "sp_boundary_dist"]) {
+for (const t of ["sp_distance", "sp_crs_transform", "sp_buffer", "sp_grid_assign", "sp_spatial_join", "sp_nearest", "sp_boundary_dist",
+  "sp_metric_buffer", "sp_buffer_exposure", "sp_aggregate_grid", "sp_areal_interp"]) {
   SMOKE_INPUT[t] = { rows: SP_POINTS(), headers: SP_HEADERS };
 }
 
@@ -127,6 +128,10 @@ const SMOKE = {
   sp_spatial_join:  { latCol: "lat", lonCol: "lon", polyDatasetId: "G1", wktCol: "wkt", joinCols: ["zone"], predicate: "within" },
   sp_nearest:       { latCol: "lat", lonCol: "lon", refDatasetId: "self", refLatCol: "lat", refLonCol: "lon", outDist: "nn_dist_km", outIdx: "nn_idx", metric: false, binCol: "" },
   sp_boundary_dist: { latCol: "lat", lonCol: "lon", polyDatasetId: "G1", wktCol: "wkt", outPrefix: "boundary" },
+  sp_metric_buffer:   { mode: "point_buffers", latCol: "lat", lonCol: "lon", radius: 100 },
+  sp_buffer_exposure: { mode: "count", bufferDatasetId: "G1", gridDatasetId: "G1", bufferWkt: "wkt", gridWkt: "wkt", gridIdCol: "grid_id", outPrefix: "buf" },
+  sp_aggregate_grid:  { mode: "geometry", gridDatasetId: "G1", wktCol: "wkt", latCol: "lat", lonCol: "lon", fn: "count", valueCol: "", outCol: "n_points" },
+  sp_areal_interp:    { srcDatasetId: "G1", tgtDatasetId: "G1", srcWkt: "wkt", tgtWkt: "wkt", tgtIdCol: "grid_id", valueCols: [], extensive: true, outPrefix: "aw" },
 };
 
 function wellFormed(out) {

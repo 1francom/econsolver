@@ -27,6 +27,9 @@ import {
   spatialJoin,
   nearestNeighbor, nearestNeighborMetric,
   assignBoundaryDistance,
+  createMetricPointBuffers, countPointsWithinGridCentroidBuffer,
+  dissolveBuffers, gridExposureShare, countBuffersIntersectingGrid,
+  aggregateToGrid, aggregateGridById, arealInterpolate,
 } from "../math/SpatialEngine.js";
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
@@ -1704,7 +1707,7 @@ export function applyStep(rows, headers, s, context = {}) {
         ? assignDistanceMetric(rows, s.latCol, s.lonCol, Number(s.refLat), Number(s.refLon), s.outCol, "EPSG:32721")
         : assignDistance(rows, s.latCol, s.lonCol, Number(s.refLat), Number(s.refLon), s.outCol);
       const newCols = [s.outCol];
-      if (s.metric && s.binCol) { out = addDistanceBins(out, s.outCol, s.binCol); newCols.push(s.binCol); }
+      if (s.metric && s.binCol?.trim()) { out = addDistanceBins(out, s.outCol, s.binCol.trim()); newCols.push(s.binCol.trim()); }
       R = out;
       newCols.forEach(c => { if (!H.includes(c)) H = [...H, c]; });
       break;
@@ -1771,7 +1774,7 @@ export function applyStep(rows, headers, s, context = {}) {
         ref.rows, s.refLatCol, s.refLonCol,
         s.outDist, s.outIdx, "EPSG:32721");
       const newCols = [s.outDist, s.outIdx];
-      if (s.metric && s.binCol) { out = addDistanceBins(out, s.outDist, s.binCol); newCols.push(s.binCol); }
+      if (s.metric && s.binCol?.trim()) { out = addDistanceBins(out, s.outDist, s.binCol.trim()); newCols.push(s.binCol.trim()); }
       R = out;
       newCols.forEach(c => { if (!H.includes(c)) H = [...H, c]; });
       break;
@@ -1783,6 +1786,73 @@ export function applyStep(rows, headers, s, context = {}) {
       const pfx = s.outPrefix || "boundary";
       R = assignBoundaryDistance(rows, s.latCol, s.lonCol, poly.rows, s.wktCol, pfx);
       [`${pfx}_dist_km`, `${pfx}_treat`, `${pfx}_running`].forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      break;
+    }
+
+    // Dataset-producing spatial ops. In a pipeline, input rows are the active
+    // (parent) dataset; the OUTPUT rows are the derived shape (grid/target/
+    // buffer rows). The "active" sentinel in dataset-id params means "use the
+    // current pipeline rows".
+
+    case "sp_metric_buffer": {
+      const radius = Number(s.radius);
+      if (s.mode === "grid_centroids") {
+        const grid = context?.datasets?.[s.gridDatasetId];
+        if (!grid?.rows?.length) break;
+        const prefix = s.prefix || "points";
+        R = countPointsWithinGridCentroidBuffer(grid.rows, s.wktCol, rows, s.latCol, s.lonCol, radius, prefix,
+          { metricCrs: "EPSG:32721", outCol: s.outCol });
+        H = [...new Set([...grid.headers, s.outCol, `${prefix}_buffer_radius_m`])];
+      } else {
+        R = createMetricPointBuffers(rows, s.latCol, s.lonCol, radius, { metricCrs: "EPSG:32721", segments: 48 });
+        H = [...new Set([...H, "buffer_id", "buffer_radius_m", "center_lon", "center_lat", "center_x", "center_y", "geometry", "metric_geometry"])];
+      }
+      break;
+    }
+
+    case "sp_buffer_exposure": {
+      const buf  = s.bufferDatasetId === "active" ? { rows, headers: H } : context?.datasets?.[s.bufferDatasetId];
+      const grid = s.gridDatasetId   === "active" ? { rows, headers: H } : context?.datasets?.[s.gridDatasetId];
+      if (!buf?.rows?.length || !grid?.rows?.length) break;
+      const prefix = s.outPrefix || "buffer";
+      const shareCol = `${prefix}_exposure_share`, countCol = `${prefix}_overlap_count`;
+      let out = grid.rows;
+      const newCols = [];
+      if (s.mode === "share" || s.mode === "both") {
+        const dissolved = dissolveBuffers(buf.rows, s.bufferWkt, { sourceCrs: "auto", metricCrs: "EPSG:32721", outputCrs: "EPSG:32721" });
+        out = gridExposureShare(out, s.gridWkt, s.gridIdCol, dissolved,
+          { gridSourceCrs: "auto", dissolvedSourceCrs: "EPSG:32721", metricCrs: "EPSG:32721", outCol: shareCol });
+        newCols.push(shareCol, `${shareCol}_area_m2`, "area_total_m2");
+      }
+      if (s.mode === "count" || s.mode === "both") {
+        out = countBuffersIntersectingGrid(out, s.gridWkt, s.gridIdCol, buf.rows, s.bufferWkt,
+          { gridSourceCrs: "auto", bufferSourceCrs: "auto", metricCrs: "EPSG:32721", outCol: countCol });
+        newCols.push(countCol);
+      }
+      R = out;
+      H = [...new Set([...grid.headers, ...newCols])];
+      break;
+    }
+
+    case "sp_aggregate_grid": {
+      const grid = context?.datasets?.[s.gridDatasetId];
+      if (!grid?.rows?.length) break;
+      const spec = { col: s.fn === "count" ? "" : s.valueCol, fn: s.fn, outCol: s.outCol };
+      R = s.mode === "grid_id"
+        ? aggregateGridById(grid.rows, s.gridIdCol, rows, s.pointGridCol, [spec])
+        : aggregateToGrid(grid.rows, s.wktCol, rows, s.latCol, s.lonCol, [spec]);
+      H = [...new Set([...grid.headers, s.outCol])];
+      break;
+    }
+
+    case "sp_areal_interp": {
+      const src = s.srcDatasetId === "active" ? { rows, headers: H } : context?.datasets?.[s.srcDatasetId];
+      const tgt = s.tgtDatasetId === "active" ? { rows, headers: H } : context?.datasets?.[s.tgtDatasetId];
+      if (!src?.rows?.length || !tgt?.rows?.length) break;
+      R = arealInterpolate(src.rows, s.srcWkt, tgt.rows, s.tgtWkt, s.tgtIdCol, s.valueCols || [],
+        { sourceCrs: "auto", targetSourceCrs: "auto", metricCrs: "EPSG:32721", extensive: !!s.extensive, outPrefix: (s.outPrefix || "").trim() });
+      const outCols = (s.valueCols || []).map(c => (s.outPrefix || "").trim() ? `${s.outPrefix.trim()}_${c}` : c);
+      H = [...new Set([...tgt.headers, ...outCols])];
       break;
     }
 

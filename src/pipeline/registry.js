@@ -1072,6 +1072,96 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "sp_boundary_dist", latCol: "", lonCol: "", polyDatasetId: "", wktCol: "", outPrefix: "boundary" }),
   },
 
+  {
+    type: "sp_metric_buffer",
+    label: "Metric buffers",
+    category: "spatial",
+    description: "Create EPSG:32721 buffer polygons from point rows, or count points within a radius of grid centroids. Produces a derived dataset.",
+    schema: [
+      { key: "mode",   type: "select", label: "Mode", options: [
+        { value: "point_buffers",  label: "Create buffer polygons" },
+        { value: "grid_centroids", label: "Count points near grid centroids" },
+      ]},
+      { key: "latCol",        type: "col",    label: "Point latitude" },
+      { key: "lonCol",        type: "col",    label: "Point longitude" },
+      { key: "radius",        type: "number", label: "Radius (m)" },
+      { key: "gridDatasetId", type: "text",   label: "Grid dataset id (grid_centroids mode)" },
+      { key: "wktCol",        type: "text",   label: "Grid WKT column (grid_centroids mode)" },
+      { key: "prefix",        type: "text",   label: "Output prefix (grid_centroids mode)" },
+      { key: "outCol",        type: "text",   label: "Count output column (grid_centroids mode)" },
+    ],
+    toLabel: s => `sp_metric_buffer [${s.mode}] r=${s.radius}m`,
+    defaultStep: () => ({ type: "sp_metric_buffer", mode: "point_buffers", latCol: "", lonCol: "", radius: 100, gridDatasetId: "", wktCol: "", prefix: "points", outCol: "" }),
+  },
+
+  {
+    type: "sp_buffer_exposure",
+    label: "Buffer exposure",
+    category: "spatial",
+    description: "Dissolved-buffer exposure share and/or overlapping-buffer count per grid cell. Produces a derived dataset (grid rows + exposure columns).",
+    schema: [
+      { key: "mode", type: "select", label: "Mode", options: [
+        { value: "both",  label: "Share + count" },
+        { value: "share", label: "Exposure share" },
+        { value: "count", label: "Overlap count" },
+      ]},
+      { key: "bufferDatasetId", type: "text", label: "Buffer dataset id (or \"active\")" },
+      { key: "gridDatasetId",   type: "text", label: "Grid dataset id (or \"active\")" },
+      { key: "bufferWkt",       type: "text", label: "Buffer WKT column" },
+      { key: "gridWkt",         type: "text", label: "Grid WKT column" },
+      { key: "gridIdCol",       type: "text", label: "Grid ID column" },
+      { key: "outPrefix",       type: "text", label: "Output prefix" },
+    ],
+    toLabel: s => `sp_buffer_exposure [${s.mode}] → ${s.outPrefix || "buffer"}_*`,
+    defaultStep: () => ({ type: "sp_buffer_exposure", mode: "both", bufferDatasetId: "active", gridDatasetId: "", bufferWkt: "", gridWkt: "", gridIdCol: "", outPrefix: "buffer" }),
+  },
+
+  {
+    type: "sp_aggregate_grid",
+    label: "Aggregate points to grid",
+    category: "spatial",
+    description: "count/sum/mean/share of point rows per grid cell, by assigned grid_id or point-in-polygon. Produces a derived dataset (grid rows + aggregate column).",
+    schema: [
+      { key: "mode", type: "select", label: "Mode", options: [
+        { value: "grid_id",  label: "Use assigned grid_id" },
+        { value: "geometry", label: "Point-in-polygon" },
+      ]},
+      { key: "gridDatasetId", type: "text", label: "Grid dataset id" },
+      { key: "gridIdCol",     type: "text", label: "Grid ID column (grid_id mode)" },
+      { key: "pointGridCol",  type: "text", label: "Point grid ID column (grid_id mode)" },
+      { key: "wktCol",        type: "text", label: "Grid WKT column (geometry mode)" },
+      { key: "latCol",        type: "text", label: "Point latitude (geometry mode)" },
+      { key: "lonCol",        type: "text", label: "Point longitude (geometry mode)" },
+      { key: "fn", type: "select", label: "Aggregation", options: [
+        { value: "count", label: "count" }, { value: "sum", label: "sum" },
+        { value: "mean",  label: "mean"  }, { value: "share", label: "share" },
+      ]},
+      { key: "valueCol", type: "text", label: "Value column (non-count)" },
+      { key: "outCol",   type: "text", label: "Output column" },
+    ],
+    toLabel: s => `sp_aggregate_grid ${s.fn === "count" ? "count" : `${s.fn}(${s.valueCol})`} → ${s.outCol}`,
+    defaultStep: () => ({ type: "sp_aggregate_grid", mode: "grid_id", gridDatasetId: "", gridIdCol: "", pointGridCol: "", wktCol: "", latCol: "", lonCol: "", fn: "count", valueCol: "", outCol: "n_points" }),
+  },
+
+  {
+    type: "sp_areal_interp",
+    label: "Areal interpolation",
+    category: "spatial",
+    description: "Area-weighted interpolation of numeric columns from source polygons onto target polygons. Produces a derived dataset (target rows + interpolated columns).",
+    schema: [
+      { key: "srcDatasetId", type: "text",    label: "Source dataset id (or \"active\")" },
+      { key: "tgtDatasetId", type: "text",    label: "Target dataset id (or \"active\")" },
+      { key: "srcWkt",       type: "text",    label: "Source WKT column" },
+      { key: "tgtWkt",       type: "text",    label: "Target WKT column" },
+      { key: "tgtIdCol",     type: "text",    label: "Target ID column" },
+      { key: "valueCols",    type: "cols",    label: "Value columns" },
+      { key: "extensive",    type: "boolean", label: "Extensive (sums) vs intensive (means)" },
+      { key: "outPrefix",    type: "text",    label: "Output prefix" },
+    ],
+    toLabel: s => `sp_areal_interp → ${(s.valueCols || []).map(c => s.outPrefix ? `${s.outPrefix}_${c}` : c).join(", ")}`,
+    defaultStep: () => ({ type: "sp_areal_interp", srcDatasetId: "active", tgtDatasetId: "", srcWkt: "", tgtWkt: "", tgtIdCol: "", valueCols: [], extensive: true, outPrefix: "aw" }),
+  },
+
 ];
 
 // ─── LOOKUP HELPERS ───────────────────────────────────────────────────────────
