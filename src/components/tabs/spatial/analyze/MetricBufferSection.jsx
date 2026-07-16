@@ -55,7 +55,10 @@ export function MetricBufferSection({ rows, headers, availableDatasets, onResult
         const valid = out.filter(r => r.geometry).length;
         setResult({ rows: out, cols, message: `${valid} buffers created` });
         appendLog({ module: "spatial", opType: "metric_buffer_create", params: { latCol, lonCol, radius, crs: "EPSG:32721" }, label: `Create metric buffers ${radiusText} → geometry` });
-        onResult(out, cols, headers);
+        onResult(out, cols, headers, { kind: "dataset", step: {
+          type: "sp_metric_buffer", mode: "point_buffers", latCol, lonCol, radius,
+          gridDatasetId: "", wktCol: "", prefix: "", outCol: "",
+        }});
         return;
       }
 
@@ -72,7 +75,10 @@ export function MetricBufferSection({ rows, headers, availableDatasets, onResult
       const cols = [countCol, radiusCol];
       setResult({ rows: out, cols, message: `${out.length} grid cells processed` });
       appendLog({ module: "spatial", opType: "metric_buffer_count", params: { latCol, lonCol, radius, gridDsId, wktCol: effectiveWkt, outCol: countCol, prefix }, label: `Count points within ${radiusText} of grid centroids → ${countCol}` });
-      onResult(out, cols, gridHeaders);
+      onResult(out, cols, gridHeaders, { kind: "dataset", step: {
+        type: "sp_metric_buffer", mode: "grid_centroids", latCol, lonCol, radius,
+        gridDatasetId: gridDsId, wktCol: effectiveWkt, prefix, outCol: countCol,
+      }});
     } catch (e) {
       setErr(e.message);
     }

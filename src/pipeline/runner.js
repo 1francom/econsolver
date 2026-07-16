@@ -1800,9 +1800,15 @@ export function applyStep(rows, headers, s, context = {}) {
         const grid = context?.datasets?.[s.gridDatasetId];
         if (!grid?.rows?.length) break;
         const prefix = s.prefix || "points";
+        // Matches SpatialEngine.js's internal `radiusLabel()` fallback exactly (km when
+        // radius is an even multiple of 1000m, otherwise rounded meters) so H always
+        // carries the REAL column name the engine wrote, even for a hand-edited step
+        // with no explicit outCol.
+        const radiusLbl = radius >= 1000 && radius % 1000 === 0 ? `${radius / 1000}km` : `${Math.round(radius)}m`;
+        const countCol = s.outCol || `${prefix}_within_${radiusLbl}`;
         R = countPointsWithinGridCentroidBuffer(grid.rows, s.wktCol, rows, s.latCol, s.lonCol, radius, prefix,
-          { metricCrs: "EPSG:32721", outCol: s.outCol });
-        H = [...new Set([...grid.headers, s.outCol, `${prefix}_buffer_radius_m`])];
+          { metricCrs: "EPSG:32721", outCol: countCol });
+        H = [...new Set([...grid.headers, countCol, `${prefix}_buffer_radius_m`])];
       } else {
         R = createMetricPointBuffers(rows, s.latCol, s.lonCol, radius, { metricCrs: "EPSG:32721", segments: 48 });
         H = [...new Set([...H, "buffer_id", "buffer_radius_m", "center_lon", "center_lat", "center_x", "center_y", "geometry", "metric_geometry"])];

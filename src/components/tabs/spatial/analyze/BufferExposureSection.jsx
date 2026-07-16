@@ -86,7 +86,12 @@ export function BufferExposureSection({ rows, headers, availableDatasets, C, onR
         cols.push(countCol);
       }
       setResult({ rows: out, cols });
-      onResult(out, cols, gridDs.headers);
+      onResult(out, cols, gridDs.headers, { kind: "dataset", step: {
+        type: "sp_buffer_exposure", mode,
+        bufferDatasetId: bufferId, gridDatasetId: gridId,
+        bufferWkt: effectiveBufferWkt, gridWkt: effectiveGridWkt,
+        gridIdCol: effectiveGridId, outPrefix: prefix,
+      }});
     } catch (e) {
       setErr(e.message);
     }

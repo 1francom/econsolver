@@ -46,7 +46,15 @@ export function AggregateToGridSection({ rows, headers, availableDatasets, C, on
         : aggregateToGrid(gridDs.rows, effectiveWkt, rows, latCol, lonCol, [spec]);
       setResult({ rows: out, cols: [outCol] });
       appendLog({ module: "spatial", opType: "aggregate_to_grid", params: { mode, gridDsId, outCol, fn, ...(fn !== "count" ? { valueCol } : {}), ...(mode === "grid_id" ? { pointGridCol, gridIdCol: effectiveGridId } : { latCol, lonCol, wktCol: effectiveWkt }) }, label: `Aggregate ${fn === "count" ? "count" : `${fn}(${valueCol})`} → ${outCol} (${out.length} grid cells)` });
-      onResult(out, [outCol], gridHeaders);
+      onResult(out, [outCol], gridHeaders, { kind: "dataset", step: {
+        type: "sp_aggregate_grid", mode, gridDatasetId: gridDsId,
+        gridIdCol: mode === "grid_id" ? effectiveGridId : "",
+        pointGridCol: mode === "grid_id" ? pointGridCol : "",
+        wktCol: mode === "geometry" ? effectiveWkt : "",
+        latCol: mode === "geometry" ? latCol : "",
+        lonCol: mode === "geometry" ? lonCol : "",
+        fn, valueCol: fn === "count" ? "" : valueCol, outCol,
+      }});
     } catch (e) {
       setErr(e.message);
     }
