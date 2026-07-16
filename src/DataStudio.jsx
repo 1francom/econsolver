@@ -695,6 +695,11 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
   const wranglingAddStepRef = useRef(null);
   const addRowSeqRef = useRef(0);
 
+  // Step queued for a dataset that isn't Clean-active yet — set by addStepTo,
+  // drained by the effect below once the target WranglingModule has mounted
+  // and re-registered wranglingAddStepRef (child effects run before parents).
+  const pendingStepRef = useRef(null);
+
   // Track which dataset IDs have already been registered in sessionState.
   // Prevents duplicate dispatches while ensuring every new dataset gets registered
   // regardless of which code path added it (handleLoadFile, handleSaveSubset, etc).
@@ -714,6 +719,14 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
   const [loadErr, setLoadErr]     = useState("");
   const [wbOpen,   setWbOpen]     = useState(false);
   const [oecdOpen, setOecdOpen]   = useState(false);
+
+  useEffect(() => {
+    const p = pendingStepRef.current;
+    if (p && p.datasetId === activeId && wranglingAddStepRef.current) {
+      pendingStepRef.current = null;
+      wranglingAddStepRef.current(p.step);
+    }
+  }); // no dep array — mirror of WranglingModule's addStepRef registration
 
   // ── Hydrate the whole dataset list on mount ─────────────────────────────────
   // Load the durable registry (metadata) and each dataset's rows (raw_data).
@@ -1117,7 +1130,19 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         desc: `inject "${colName}" (${values.length} values)`,
       });
     },
-  }), [handleLoadFile, handleLoadFiles, addParsedDataset, handleSaveSubset]);
+    // Called by SpatialTab's "Add to pipeline" — appends a spatial sp_* step to
+    // the pipeline of the dataset the Spatial tab is viewing, switching the
+    // Clean-active dataset first when needed (step is queued until the target
+    // WranglingModule mounts).
+    addStepTo: (datasetId, step) => {
+      if (!datasetId || datasetId === activeId) {
+        wranglingAddStepRef.current?.(step);
+        return;
+      }
+      pendingStepRef.current = { datasetId, step };
+      setActiveId(datasetId);
+    },
+  }), [handleLoadFile, handleLoadFiles, addParsedDataset, handleSaveSubset, activeId]);
 
   return (
     <div style={{
