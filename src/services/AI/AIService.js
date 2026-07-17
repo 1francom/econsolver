@@ -115,7 +115,7 @@ function mockNarrative(result) {
 // If system is falsy, only SHARED_CONTEXT is sent (still cached).
 // messages: optional array of { role:'user'|'assistant', content: string }
 // If provided, used directly (multi-turn). Otherwise `user` is wrapped as a single turn.
-export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, model = MODEL }) {
+export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, model = MODEL, task = "misc" }) {
   const systemArray = [
     {
       type: "text",
@@ -145,6 +145,7 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
         headers: {
           "Content-Type":  "application/json",
           "Authorization": token ? `Bearer ${token}` : "",
+          "x-litux-task":  task,   // instrumentation label (server-side usage log)
         },
         body: JSON.stringify(body),
       });
@@ -174,8 +175,14 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
     if (res.status === 403 && errBody?.error === "premium_required") {
       throw new Error("PREMIUM_REQUIRED");
     }
+    if (res.status === 403 && errBody?.error === "replication_paid_only") {
+      throw new Error("REPLICATION_PAID_ONLY");
+    }
     if (res.status === 402 && errBody?.error === "insufficient_credits") {
       throw new Error("INSUFFICIENT_CREDITS");
+    }
+    if (res.status === 429 && errBody?.error === "free_pool_exhausted") {
+      throw new Error("FREE_POOL_EXHAUSTED");
     }
     if (res.status === 401) {
       throw new Error("Session expired — please sign in again.");
@@ -194,7 +201,7 @@ export async function callClaude({ system, user, messages, maxTokens = MAX_TOK, 
 // anthropic-beta header). Parses the Anthropic SSE stream and forwards each text
 // delta to onText. Honors an AbortController signal — on abort, resolves with the
 // partial text accumulated so far (abort is NOT thrown as an error).
-export async function streamClaude({ system, messages, maxTokens = MAX_TOK, model = MODEL, signal, onText, extraCached = null }) {
+export async function streamClaude({ system, messages, maxTokens = MAX_TOK, model = MODEL, signal, onText, extraCached = null, task = "coach" }) {
   const systemArray = [
     { type: "text", text: SHARED_CONTEXT, cache_control: { type: "ephemeral" } },
   ];
@@ -218,6 +225,7 @@ export async function streamClaude({ system, messages, maxTokens = MAX_TOK, mode
         headers: {
           "Content-Type":  "application/json",
           "Authorization": token ? `Bearer ${token}` : "",
+          "x-litux-task":  task,   // instrumentation label (server-side usage log)
         },
         body:   JSON.stringify(body),
         signal,
@@ -247,7 +255,9 @@ export async function streamClaude({ system, messages, maxTokens = MAX_TOK, mode
     let errBody;
     try { errBody = await res.json(); } catch { errBody = { error: res.statusText }; }
     if (res.status === 403 && errBody?.error === "premium_required") throw new Error("PREMIUM_REQUIRED");
+    if (res.status === 403 && errBody?.error === "replication_paid_only") throw new Error("REPLICATION_PAID_ONLY");
     if (res.status === 402 && errBody?.error === "insufficient_credits") throw new Error("INSUFFICIENT_CREDITS");
+    if (res.status === 429 && errBody?.error === "free_pool_exhausted") throw new Error("FREE_POOL_EXHAUSTED");
     if (res.status === 401) throw new Error("Session expired — please sign in again.");
     throw new Error(`API error ${res.status}: ${errBody?.error ?? res.statusText}`);
   }
@@ -325,7 +335,7 @@ export async function inferVariableUnits(headers, sampleRows) {
 
   let raw;
   try {
-    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 600, model: MODEL_FAST });
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 600, model: MODEL_FAST, task: "units" });
   } catch (err) {
     console.warn("[AIService] inferVariableUnits failed:", err.message);
     return identity();
@@ -596,7 +606,7 @@ Write the two-paragraph interpretation now.`;
 
   try {
     const taskPrompt = INTERPRET_REGRESSION_PROMPT.replace(SHARED_CONTEXT, "").trim();
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: MAX_TOK });
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: MAX_TOK, task: "interpret" });
   } catch (err) {
     console.warn("[AIService] interpretRegression failed:", err.message);
     return mockNarrative(result);
@@ -685,7 +695,7 @@ export async function suggestCleaning(dataQualityReport) {
 
   let raw;
   try {
-    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 1800 });
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 1800, task: "cleaning" });
   } catch (err) {
     console.warn("[AIService] suggestCleaning failed:", err.message);
     return [];
@@ -729,7 +739,7 @@ export async function nlToPipeline({ command, columns = [], allowedCategories = 
 
   let raw;
   try {
-    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 1500, signal });
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 1500, signal, task: "nl_pipeline" });
   } catch (err) {
     console.warn("[AIService] nlToPipeline failed:", err.message);
     return { error: err.message };
@@ -808,7 +818,7 @@ export async function compareModels(modelsOrA, dataDictionaryOrB = null, legacyD
 
   try {
     const taskPrompt = COMPARE_MODELS_PROMPT.replace(SHARED_CONTEXT, "").trim();
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 800 });
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 800, task: "compare" });
   } catch (err) {
     console.warn("[AIService] compareModels failed:", err.message);
     return "Model comparison unavailable — check API key and connection.";
@@ -973,9 +983,26 @@ function _buildPlotsContext(savedPlots = []) {
   return "\n\nSAVED PLOTS:\n" + entries.join("\n") + "\n────────────────────────────";
 }
 
+// Deterministic, PAYLOAD-based model routing for the coach (Franco 2026-07-17).
+// The rule inspects what the turn ACTUALLY carries — never the user's intent, and
+// never an LLM judge. A bare conceptual/how-to question (no model, no pinned
+// models, no image) is cheap Q&A → route to Haiku (0 credits). Anything that
+// attaches something to REASON OVER — an estimated model, pinned models to
+// compare, or an image (typically a screenshot of output to interpret) — escalates
+// to Sonnet. Fail UP: when in doubt we pay for Sonnet, because a thesis student
+// won't detect a weak Haiku answer. The snapshot itself is ALWAYS attached by the
+// UI, so its mere presence is not a signal — only its analytical CONTENTS are.
+function pickCoachModel({ modelResult, snapshot, images }) {
+  const hasModel  = !!modelResult || !!snapshot?.activeResult;
+  const hasPinned = (snapshot?.pinnedModels?.length ?? 0) > 0;
+  const hasImage  = (images?.length ?? 0) > 0;
+  return (hasModel || hasPinned || hasImage) ? MODEL : MODEL_FAST;
+}
+
 export async function researchCoach({ question, images = [], modelResult, dataDictionary = null, history = [], metadataReport = null, snapshot = null, cleanedData = null, allDatasets = [], savedPlots = [], signal = undefined, onText = undefined }) {
   if (!question?.trim()) return "";
 
+  const coachModel    = pickCoachModel({ modelResult, snapshot, images });
   const modelContext  = _serializeModelContext(modelResult, dataDictionary);
   const taskPrompt    = RESEARCH_COACH_PROMPT.replace(SHARED_CONTEXT, "").trim();
   const metaCtx       = metadataReport ? "\n" + buildMetadataContext(metadataReport) : "";
@@ -1005,9 +1032,10 @@ export async function researchCoach({ question, images = [], modelResult, dataDi
       : textContent;
     apiMessages.push({ role: "user", content: newContent });
 
-    return await streamClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 800, signal, onText, extraCached: getCapabilityMap() });
+    return await streamClaude({ system: taskPrompt, messages: apiMessages, maxTokens: 800, model: coachModel, signal, onText, extraCached: getCapabilityMap(), task: "coach" });
   } catch (err) {
-    if (err.message === "PREMIUM_REQUIRED") throw err; // let caller handle the gate
+    // Let the caller surface these gates as a friendly bubble.
+    if (err.message === "PREMIUM_REQUIRED" || err.message === "FREE_POOL_EXHAUSTED") throw err;
     console.warn("[AIService] researchCoach failed:", err.message);
     return "The research coach is unavailable — check your API key and network connection.";
   }
@@ -1046,7 +1074,7 @@ export async function coachDispatch({ question, headers = [], sampleRows = [], p
 
   let raw;
   try {
-    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 220, model: MODEL_FAST });
+    raw = await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 220, model: MODEL_FAST, task: "coach_dispatch" });
   } catch (err) {
     console.warn("[AIService] coachDispatch failed:", err.message);
     return null;
@@ -1109,7 +1137,7 @@ export async function interpretMarginalEffects({ model, dataDictionary = null, p
 
   const taskPrompt = INTERPRET_MARGINAL_EFFECTS_PROMPT.replace(SHARED_CONTEXT, "").trim();
   try {
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 500 });
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 500, task: "marginal" });
   } catch (err) {
     console.warn("[AIService] interpretMarginalEffects failed:", err.message);
     throw err; // let caller show error — no mock needed here
@@ -1198,7 +1226,7 @@ export async function interpretOptimization({ session, results = {}, dataDiction
 
   const taskPrompt = INTERPRET_OPTIMIZATION_PROMPT.replace(SHARED_CONTEXT, "").trim();
   try {
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 650 });
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 650, task: "optimization" });
   } catch (err) {
     console.warn("[AIService] interpretOptimization failed:", err.message);
     throw err;
@@ -1329,7 +1357,7 @@ export async function generateUnifiedScript(sections, language, dataDictionary =
     const taskPrompt = UNIFIED_SCRIPT_PROMPT.replace(SHARED_CONTEXT, "").trim();
     // 8000 (was 6000): long multi-dataset + spatial + plots sessions were hitting
     // the cap and truncating the final statement mid-call.
-    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 8000, model: "claude-opus-4-8" });
+    return await callClaude({ system: taskPrompt, user: userPrompt, maxTokens: 8000, model: "claude-opus-4-8", task: "replication" });
   } catch (err) {
     console.warn("[AIService] generateUnifiedScript failed:", err.message);
     return fallback();

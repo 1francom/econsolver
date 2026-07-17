@@ -572,6 +572,8 @@ export default function AIContextSidebar({ isOpen, onClose, screen, cleanedData,
         ? "Your account doesn't have access to AI features. Sign in to use the AI Coach."
         : err.message === "INSUFFICIENT_CREDITS"
         ? "You've used all your credits for this month. Credits reset automatically every 30 days."
+        : err.message === "FREE_POOL_EXHAUSTED"
+        ? "The free AI Coach has reached this month's shared usage budget. It resets at the start of next month — or upgrade to a paid plan for uninterrupted access. In the meantime, Litux's built-in checks (data quality, PII, outliers) still work offline."
         : `Error: ${err.message}`;
       updateActive(msgs => [...msgs, { role: "assistant", text: msg }]);
     } finally {
