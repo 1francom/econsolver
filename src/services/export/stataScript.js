@@ -141,6 +141,7 @@ function isGridEditStep(step) {
 
 function transpileStep(step, allDatasets = {}) {
   const { type, params = {} } = step;
+  if (typeof type === "string" && type.startsWith("sp_")) return toStata(step, "df", allDatasets);
   switch (type) {
     case "add_column": {
       const out = stVar(step.nn);

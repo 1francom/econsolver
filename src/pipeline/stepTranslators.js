@@ -8,6 +8,8 @@
 //
 // Design: pure functions, no React, no imports from UI.
 
+import { toDfVar } from "./exporter.js";
+
 // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
 
 function safeDatasetName(id, allDatasets) {
@@ -372,6 +374,8 @@ function stWhere(where) {
 export function toR(step, df = "df", allDatasets = {}) {
   const col = step.col ? rName(step.col) : null;
   const nn  = step.nn  ? rName(step.nn)  : null;
+
+  if (typeof step.type === "string" && step.type.startsWith("sp_")) return spatialR(step, df, allDatasets);
 
   switch (step.type) {
 
@@ -893,6 +897,8 @@ export function toR(step, df = "df", allDatasets = {}) {
 export function toStata(step, df = "df", allDatasets = {}) {
   const v = step.col ? stVar(step.col) : null;
   const o = step.nn  ? stVar(step.nn)  : null;
+
+  if (typeof step.type === "string" && step.type.startsWith("sp_")) return spatialStata(step);
 
   switch (step.type) {
 
@@ -1460,6 +1466,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
   const c = step.col ? pyCol(step.col) : null;
   const o = step.nn  ? pyCol(step.nn)  : null;
 
+  if (typeof step.type === "string" && step.type.startsWith("sp_")) return spatialPy(step, df, allDatasets);
+
   switch (step.type) {
 
     case "rename":
@@ -1950,4 +1958,502 @@ export function toPython(step, df = "df", allDatasets = {}) {
     default:
       return `# [unknown step: ${step.type}]`;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPATIAL STEPS (sp_*) — pipeline citizens (2026-07-16 spatial-pipeline design)
+//
+// Column-adders (sp_distance/sp_crs_transform/sp_buffer/sp_grid_assign/
+// sp_spatial_join/sp_nearest/sp_boundary_dist) append columns to the point frame.
+// Dataset-producers (sp_metric_buffer/sp_buffer_exposure/sp_aggregate_grid/
+// sp_areal_interp) REPLACE the frame with the derived shape (buffer/grid/target
+// rows) — the translation reassigns `df` accordingly, matching runner.js.
+//
+// R uses sf(+dplyr); Python uses geopandas(+shapely); Stata has no geometry stack
+// so it emits a documented comment (never a silent drop). Referenced datasets
+// (grid/polygon/reference) resolve to their df_<name> variable; the "self"/
+// "active" sentinels mean "the current frame".
+// ─────────────────────────────────────────────────────────────────────────────
+
+const rNum  = (x) => (Number.isFinite(Number(x)) ? String(Number(x)) : "NA");
+const pyNum = (x) => (Number.isFinite(Number(x)) ? String(Number(x)) : "float('nan')");
+
+// Distance-bin cut labels match SpatialEngine.addDistanceBins defaults (0/100/
+// 200/300 m, left-closed) — used only in metric mode.
+const BIN_BREAKS = [0, 100, 200, 300];
+const BIN_LABELS = ["0-100m", "100-200m", "200-300m", "300m+"];
+
+// Resolve a spatial step's referenced dataset id to its data-frame variable.
+// "self"/"active"/empty → the current frame. Known id → df_<name>. Unknown id →
+// a readable role placeholder + a note the builder surfaces so the user can bind it.
+function spRef(id, role, df, allDatasets) {
+  if (!id || id === "self" || id === "active") return { v: df, note: null };
+  const ds = allDatasets?.[id];
+  if (ds && (ds.name || ds.filename)) return { v: toDfVar(ds.name ?? ds.filename), note: null };
+  const ph = { grid: "grid_cells", poly: "polygons", ref: "reference_points",
+               src: "source_polygons", tgt: "target_polygons", buffer: "buffer_polygons" }[role] ?? "other_layer";
+  return { v: ph, note: `bind '${ph}' to the ${role} dataset — export it from Litux and load it first (it has no source file).` };
+}
+
+function spEmit(notes, lines, cmt) {
+  const noteLines = (notes || []).filter(Boolean).map(n => `${cmt} NOTE: ${n}`);
+  return [...noteLines, ...lines].join("\n");
+}
+
+// Default output column the runner writes when a grid_centroids count col is blank.
+function metricBufferCountCol(step) {
+  const radius = Number(step.radius);
+  const prefix = step.prefix || "points";
+  const lbl = radius >= 1000 && radius % 1000 === 0 ? `${radius / 1000}km` : `${Math.round(radius)}m`;
+  return step.outCol || `${prefix}_within_${lbl}`;
+}
+
+// ── R (sf) ───────────────────────────────────────────────────────────────────
+function spatialR(step, df, allDatasets) {
+  const s = step;
+  const notes = [];
+  const ptsSf = (v, lon, lat) => `sf::st_as_sf(${v}, coords = c("${lon}", "${lat}"), crs = 4326)`;
+  const binLine = (out, bin) =>
+    `${df}$${rName(bin)} <- cut(${df}$${rName(out)}, breaks = c(${BIN_BREAKS.join(", ")}, Inf), ` +
+    `labels = c(${BIN_LABELS.map(rStr).join(", ")}), right = FALSE)`;
+
+  switch (s.type) {
+    case "sp_distance": {
+      const out = rName(s.outCol || "dist_km");
+      const lines = s.metric
+        ? [
+            `# sp_distance: planar distance to reference point in EPSG:32721 (m)`,
+            `.pt  <- sf::st_transform(${ptsSf(df, s.lonCol, s.latCol)}, 32721)`,
+            `.ref <- sf::st_transform(sf::st_sfc(sf::st_point(c(${rNum(s.refLon)}, ${rNum(s.refLat)})), crs = 4326), 32721)`,
+            `${df}$${out} <- as.numeric(sf::st_distance(.pt, .ref))`,
+          ]
+        : [
+            `# sp_distance: geodesic distance to reference point (km)`,
+            `${df}$${out} <- as.numeric(sf::st_distance(`,
+            `  ${ptsSf(df, s.lonCol, s.latCol)},`,
+            `  sf::st_sfc(sf::st_point(c(${rNum(s.refLon)}, ${rNum(s.refLat)})), crs = 4326))) / 1000`,
+          ];
+      if (s.metric && s.binCol?.trim()) lines.push(binLine(s.outCol || "dist_km", s.binCol.trim()));
+      return spEmit(notes, lines, "#");
+    }
+
+    case "sp_crs_transform": {
+      if (s.mode === "wkt") {
+        return spEmit(notes, [
+          `# sp_crs_transform (WKT geometry): ${s.source} -> ${s.target}`,
+          `${df}$${rName(s.outWkt)} <- sf::st_as_text(sf::st_transform(sf::st_as_sfc(${df}$${rName(s.wktCol)}, crs = "${s.source}"), "${s.target}"))`,
+        ], "#");
+      }
+      return spEmit(notes, [
+        `# sp_crs_transform (point columns): ${s.source} -> ${s.target}`,
+        `.sf <- sf::st_transform(sf::st_as_sf(${df}, coords = c("${s.xCol}", "${s.yCol}"), crs = "${s.source}"), "${s.target}")`,
+        `${df}$${rName(s.outX)} <- sf::st_coordinates(.sf)[, 1]`,
+        `${df}$${rName(s.outY)} <- sf::st_coordinates(.sf)[, 2]`,
+      ], "#");
+    }
+
+    case "sp_buffer": {
+      const out = rName(s.outCol || "in_buffer");
+      return spEmit(notes, [
+        `# sp_buffer: 1 if point within ${rNum(s.radiusKm)} km of reference point`,
+        `${df}$${out} <- as.integer(as.numeric(sf::st_distance(`,
+        `  ${ptsSf(df, s.lonCol, s.latCol)},`,
+        `  sf::st_sfc(sf::st_point(c(${rNum(s.refLon)}, ${rNum(s.refLat)})), crs = 4326))) / 1000 <= ${rNum(s.radiusKm)})`,
+      ], "#");
+    }
+
+    case "sp_grid_assign": {
+      const out = rName(s.outCol || "grid_id");
+      if (s.gridType === "rectangular") {
+        return spEmit(notes, [
+          `# sp_grid_assign: rectangular ${rNum(s.cellSize)} km bins (id = "<latIdx>_<lonIdx>")`,
+          `.latStep <- ${rNum(s.cellSize)} / 111`,
+          `.lonStep <- ${rNum(s.cellSize)} / (111 * cos(${df}[["${s.latCol}"]] * pi / 180))`,
+          `${df}$${out} <- paste0(floor(${df}[["${s.latCol}"]] / .latStep), "_", floor(${df}[["${s.lonCol}"]] / .lonStep))`,
+        ], "#");
+      }
+      if (s.gridType === "hex") {
+        return spEmit(notes, [
+          `# sp_grid_assign: approximate hex bins, resolution ${rNum(s.resolution)} (id = "h<res>_<q>_<r>")`,
+          `.cell   <- 1000 / (7 ^ ${rNum(s.resolution)})`,
+          `.latStep <- .cell / 111`,
+          `.lonStep <- .cell / (111 * cos(${df}[["${s.latCol}"]] * pi / 180))`,
+          `.q <- round(${df}[["${s.lonCol}"]] / .lonStep)`,
+          `.r <- round(${df}[["${s.latCol}"]] / .latStep - .q * 0.5)`,
+          `${df}$${out} <- paste0("h${rNum(s.resolution)}_", .q, "_", .r)`,
+        ], "#");
+      }
+      const grid = spRef(s.gridDatasetId, "grid", df, allDatasets); if (grid.note) notes.push(grid.note);
+      const keep = [rStr(s.gridIdCol), ...(s.extraCols || []).map(rStr)].filter(Boolean).join(", ");
+      return spEmit(notes, [
+        `# sp_grid_assign: point-in-polygon against an existing grid layer`,
+        `.pts  <- ${ptsSf(df, s.lonCol, s.latCol)}`,
+        `.grid <- sf::st_make_valid(sf::st_as_sf(${grid.v}, wkt = "${s.wktCol}", crs = 4326))`,
+        `${df} <- sf::st_drop_geometry(sf::st_join(.pts, .grid[c(${keep})], join = sf::st_within))`,
+        `${df} <- dplyr::rename(${df}, ${out} = ${rName(s.gridIdCol)})`,
+      ], "#");
+    }
+
+    case "sp_spatial_join": {
+      const poly = spRef(s.polyDatasetId, "poly", df, allDatasets); if (poly.note) notes.push(poly.note);
+      const cols = (s.joinCols || []).map(rStr).join(", ");
+      const join = s.predicate === "intersects" ? "sf::st_intersects" : "sf::st_within";
+      return spEmit(notes, [
+        `# sp_spatial_join (${s.predicate || "within"}): assign polygon attributes to points`,
+        `.pts  <- ${ptsSf(df, s.lonCol, s.latCol)}`,
+        `.poly <- sf::st_as_sf(${poly.v}, wkt = "${s.wktCol}", crs = 4326)`,
+        `${df} <- sf::st_drop_geometry(sf::st_join(.pts, .poly[c(${cols})], join = ${join}))`,
+      ], "#");
+    }
+
+    case "sp_nearest": {
+      const ref = spRef(s.refDatasetId, "ref", df, allDatasets); if (ref.note) notes.push(ref.note);
+      const refLat = s.refDatasetId === "self" ? s.latCol : s.refLatCol;
+      const refLon = s.refDatasetId === "self" ? s.lonCol : s.refLonCol;
+      const scale  = s.metric ? "" : " / 1000";
+      const crs    = s.metric ? 32721 : 4326;
+      const lines = [
+        `# sp_nearest: nearest reference feature per point (${s.metric ? "EPSG:32721 m" : "geodesic km"})`,
+        `.pts <- sf::st_transform(${ptsSf(df, s.lonCol, s.latCol)}, ${crs})`,
+        `.ref <- sf::st_transform(sf::st_as_sf(${ref.v}, coords = c("${refLon}", "${refLat}"), crs = 4326), ${crs})`,
+        `.idx <- sf::st_nearest_feature(.pts, .ref)`,
+        `${df}$${rName(s.outIdx)}  <- .idx`,
+        `${df}$${rName(s.outDist)} <- as.numeric(sf::st_distance(.pts, .ref[.idx, ], by_element = TRUE))${scale}`,
+      ];
+      if (s.metric && s.binCol?.trim()) lines.push(binLine(s.outDist, s.binCol.trim()));
+      return spEmit(notes, lines, "#");
+    }
+
+    case "sp_boundary_dist": {
+      const poly = spRef(s.polyDatasetId, "poly", df, allDatasets); if (poly.note) notes.push(poly.note);
+      const pfx = s.outPrefix || "boundary";
+      return spEmit(notes, [
+        `# sp_boundary_dist: distance to nearest boundary (km) + inside-treatment + signed running var`,
+        `.pts  <- ${ptsSf(df, s.lonCol, s.latCol)}`,
+        `.poly <- sf::st_make_valid(sf::st_as_sf(${poly.v}, wkt = "${s.wktCol}", crs = 4326))`,
+        `${df}$${rName(`${pfx}_dist_km`)} <- apply(sf::st_distance(.pts, sf::st_boundary(.poly)), 1, min) / 1000`,
+        `${df}$${rName(`${pfx}_treat`)}   <- as.integer(lengths(sf::st_within(.pts, .poly)) > 0)`,
+        `${df}$${rName(`${pfx}_running`)} <- ifelse(${df}$${rName(`${pfx}_treat`)} == 1, ${df}$${rName(`${pfx}_dist_km`)}, -${df}$${rName(`${pfx}_dist_km`)})`,
+      ], "#");
+    }
+
+    case "sp_metric_buffer": {
+      if (s.mode === "grid_centroids") {
+        const grid = spRef(s.gridDatasetId, "grid", df, allDatasets); if (grid.note) notes.push(grid.note);
+        const out = rName(metricBufferCountCol(s));
+        return spEmit(notes, [
+          `# sp_metric_buffer (grid_centroids): count points within ${rNum(s.radius)} m of each grid centroid → derived grid dataset`,
+          `.pts  <- sf::st_transform(${ptsSf(df, s.lonCol, s.latCol)}, 32721)`,
+          `.grid <- sf::st_transform(sf::st_make_valid(sf::st_as_sf(${grid.v}, wkt = "${s.wktCol}", crs = 4326)), 32721)`,
+          `.grid$${out} <- lengths(sf::st_intersects(sf::st_buffer(sf::st_centroid(.grid), ${rNum(s.radius)}), .pts))`,
+          `${df} <- sf::st_drop_geometry(.grid)`,
+        ], "#");
+      }
+      return spEmit(notes, [
+        `# sp_metric_buffer (point_buffers): buffer each point by ${rNum(s.radius)} m in EPSG:32721 → derived buffer-polygon dataset`,
+        `${df} <- sf::st_buffer(sf::st_transform(${ptsSf(df, s.lonCol, s.latCol)}, 32721), ${rNum(s.radius)})`,
+      ], "#");
+    }
+
+    case "sp_buffer_exposure": {
+      const buf  = spRef(s.bufferDatasetId, "buffer", df, allDatasets); if (buf.note) notes.push(buf.note);
+      const grid = spRef(s.gridDatasetId, "grid", df, allDatasets);     if (grid.note) notes.push(grid.note);
+      const pfx = s.outPrefix || "buffer";
+      const lines = [
+        `# sp_buffer_exposure (${s.mode}): per grid cell, in EPSG:32721 → derived grid dataset`,
+        `.grid <- sf::st_transform(sf::st_make_valid(sf::st_as_sf(${grid.v}, wkt = "${s.gridWkt}", crs = 4326)), 32721)`,
+        `.buf  <- sf::st_transform(sf::st_make_valid(sf::st_as_sf(${buf.v}, wkt = "${s.bufferWkt}", crs = 4326)), 32721)`,
+      ];
+      if (s.mode === "share" || s.mode === "both") {
+        lines.push(
+          `.diss <- sf::st_union(.buf)  # dissolve overlapping buffers`,
+          `.ov   <- as.numeric(sf::st_area(sf::st_intersection(.grid, .diss)))  # exposed area per cell`,
+          `.grid$${rName(`${pfx}_exposure_share`)} <- .ov / as.numeric(sf::st_area(.grid))`);
+      }
+      if (s.mode === "count" || s.mode === "both") {
+        lines.push(`.grid$${rName(`${pfx}_overlap_count`)} <- lengths(sf::st_intersects(.grid, .buf))`);
+      }
+      lines.push(`${df} <- sf::st_drop_geometry(.grid)`);
+      return spEmit(notes, lines, "#");
+    }
+
+    case "sp_aggregate_grid": {
+      const grid = spRef(s.gridDatasetId, "grid", df, allDatasets); if (grid.note) notes.push(grid.note);
+      const out = rName(s.outCol || "n_points");
+      const aggExpr =
+        s.fn === "count" ? `dplyr::n()` :
+        s.fn === "sum"   ? `sum(${rName(s.valueCol)}, na.rm = TRUE)` :
+        s.fn === "mean"  ? `mean(${rName(s.valueCol)}, na.rm = TRUE)` :
+                           `mean(as.numeric(${rName(s.valueCol)}) > 0, na.rm = TRUE)`; // share
+      if (s.mode === "geometry") {
+        return spEmit(notes, [
+          `# sp_aggregate_grid (point-in-polygon, ${s.fn}) → derived grid dataset`,
+          `.pts  <- ${ptsSf(df, s.lonCol, s.latCol)}`,
+          `.grid <- sf::st_make_valid(sf::st_as_sf(${grid.v}, wkt = "${s.wktCol}", crs = 4326))`,
+          `${df} <- sf::st_join(.pts, .grid, join = sf::st_within) |>`,
+          `  sf::st_drop_geometry() |>`,
+          `  dplyr::group_by(dplyr::across(dplyr::starts_with("grid"))) |>`,
+          `  dplyr::summarise(${out} = ${aggExpr}, .groups = "drop")`,
+        ], "#");
+      }
+      return spEmit(notes, [
+        `# sp_aggregate_grid (by assigned grid_id, ${s.fn}) → derived grid dataset`,
+        `.agg <- ${df} |> dplyr::group_by(${rName(s.pointGridCol)}) |> dplyr::summarise(${out} = ${aggExpr}, .groups = "drop")`,
+        `${df} <- dplyr::left_join(${grid.v}, .agg, by = c(${rStr(s.gridIdCol)} = ${rStr(s.pointGridCol)}))`,
+      ], "#");
+    }
+
+    case "sp_areal_interp": {
+      const src = spRef(s.srcDatasetId, "src", df, allDatasets); if (src.note) notes.push(src.note);
+      const tgt = spRef(s.tgtDatasetId, "tgt", df, allDatasets); if (tgt.note) notes.push(tgt.note);
+      const cols = (s.valueCols || []).map(rStr).join(", ");
+      return spEmit(notes, [
+        `# sp_areal_interp: area-weighted ${s.extensive ? "extensive (sums)" : "intensive (means)"} interpolation → target polygons`,
+        `.src <- sf::st_make_valid(sf::st_transform(sf::st_as_sf(${src.v}, wkt = "${s.srcWkt}", crs = 4326), 32721))`,
+        `.tgt <- sf::st_make_valid(sf::st_transform(sf::st_as_sf(${tgt.v}, wkt = "${s.tgtWkt}", crs = 4326), 32721))`,
+        `.aw  <- sf::st_interpolate_aw(.src[c(${cols})], .tgt, extensive = ${s.extensive ? "TRUE" : "FALSE"})`,
+        `${df} <- cbind(sf::st_drop_geometry(.tgt), sf::st_drop_geometry(.aw))${s.outPrefix?.trim() ? `  # prefix interpolated columns with "${s.outPrefix.trim()}_" to match Litux` : ""}`,
+      ], "#");
+    }
+
+    default:
+      return `# [spatial step: ${s.type}] — see Litux (no R translation)`;
+  }
+}
+
+// ── Python (geopandas) ───────────────────────────────────────────────────────
+// geopandas is not in the base script header, so each spatial block carries its
+// own `import geopandas as gpd` (idempotent — safe to repeat across steps).
+function spatialPy(step, df, allDatasets) {
+  const code = spatialPyBody(step, df, allDatasets);
+  return code.startsWith("# [spatial step:") ? code : `import geopandas as gpd\n${code}`;
+}
+
+function spatialPyBody(step, df, allDatasets) {
+  const s = step;
+  const notes = [];
+  const ptsGdf = (v, lon, lat) => `gpd.GeoDataFrame(${v}, geometry=gpd.points_from_xy(${v}["${lon}"], ${v}["${lat}"]), crs=4326)`;
+  const ptsGs  = (v, lon, lat) => `gpd.GeoSeries(gpd.points_from_xy(${v}["${lon}"], ${v}["${lat}"]), crs=4326)`;
+  const binLine = (out, bin) =>
+    `${df}[${pyStr(bin)}] = pd.cut(${df}[${pyStr(out)}], bins=[${BIN_BREAKS.join(", ")}, float("inf")], ` +
+    `labels=[${BIN_LABELS.map(pyStr).join(", ")}], right=False)`;
+
+  switch (s.type) {
+    case "sp_distance": {
+      const out = pyStr(s.outCol || "dist_km");
+      const lines = s.metric
+        ? [
+            `# sp_distance: planar distance to reference point in EPSG:32721 (m)`,
+            `from shapely.geometry import Point`,
+            `_pts = ${ptsGs(df, s.lonCol, s.latCol)}.to_crs(32721)`,
+            `_ref = gpd.GeoSeries([Point(${pyNum(s.refLon)}, ${pyNum(s.refLat)})], crs=4326).to_crs(32721).iloc[0]`,
+            `${df}[${out}] = _pts.distance(_ref)`,
+          ]
+        : [
+            `# sp_distance: geodesic distance to reference point (km) via EPSG:32721 planar approx`,
+            `from shapely.geometry import Point`,
+            `_pts = ${ptsGs(df, s.lonCol, s.latCol)}.to_crs(32721)`,
+            `_ref = gpd.GeoSeries([Point(${pyNum(s.refLon)}, ${pyNum(s.refLat)})], crs=4326).to_crs(32721).iloc[0]`,
+            `${df}[${out}] = _pts.distance(_ref) / 1000`,
+          ];
+      if (s.metric && s.binCol?.trim()) lines.push(binLine(s.outCol || "dist_km", s.binCol.trim()));
+      return spEmit(notes, lines, "#");
+    }
+
+    case "sp_crs_transform": {
+      if (s.mode === "wkt") {
+        return spEmit(notes, [
+          `# sp_crs_transform (WKT geometry): ${s.source} -> ${s.target}`,
+          `_g = gpd.GeoSeries.from_wkt(${df}["${s.wktCol}"], crs="${s.source}").to_crs("${s.target}")`,
+          `${df}["${s.outWkt}"] = _g.to_wkt()`,
+        ], "#");
+      }
+      return spEmit(notes, [
+        `# sp_crs_transform (point columns): ${s.source} -> ${s.target}`,
+        `_g = gpd.GeoSeries(gpd.points_from_xy(${df}["${s.xCol}"], ${df}["${s.yCol}"]), crs="${s.source}").to_crs("${s.target}")`,
+        `${df}["${s.outX}"] = _g.x`,
+        `${df}["${s.outY}"] = _g.y`,
+      ], "#");
+    }
+
+    case "sp_buffer": {
+      const out = pyStr(s.outCol || "in_buffer");
+      return spEmit(notes, [
+        `# sp_buffer: 1 if point within ${pyNum(s.radiusKm)} km of reference point`,
+        `from shapely.geometry import Point`,
+        `_pts = ${ptsGs(df, s.lonCol, s.latCol)}.to_crs(32721)`,
+        `_ref = gpd.GeoSeries([Point(${pyNum(s.refLon)}, ${pyNum(s.refLat)})], crs=4326).to_crs(32721).iloc[0]`,
+        `${df}[${out}] = (_pts.distance(_ref) <= ${pyNum(s.radiusKm)} * 1000).astype(int)`,
+      ], "#");
+    }
+
+    case "sp_grid_assign": {
+      const out = pyStr(s.outCol || "grid_id");
+      if (s.gridType === "rectangular") {
+        return spEmit(notes, [
+          `# sp_grid_assign: rectangular ${pyNum(s.cellSize)} km bins (id = "<latIdx>_<lonIdx>")`,
+          `import numpy as np`,
+          `_latStep = ${pyNum(s.cellSize)} / 111`,
+          `_lonStep = ${pyNum(s.cellSize)} / (111 * np.cos(np.radians(${df}["${s.latCol}"])))`,
+          `${df}[${out}] = (np.floor(${df}["${s.latCol}"] / _latStep).astype(int).astype(str) + "_" + np.floor(${df}["${s.lonCol}"] / _lonStep).astype(int).astype(str))`,
+        ], "#");
+      }
+      if (s.gridType === "hex") {
+        return spEmit(notes, [
+          `# sp_grid_assign: approximate hex bins, resolution ${pyNum(s.resolution)} (id = "h<res>_<q>_<r>")`,
+          `import numpy as np`,
+          `_cell = 1000 / (7 ** ${pyNum(s.resolution)}); _latStep = _cell / 111`,
+          `_lonStep = _cell / (111 * np.cos(np.radians(${df}["${s.latCol}"])))`,
+          `_q = np.round(${df}["${s.lonCol}"] / _lonStep)`,
+          `_r = np.round(${df}["${s.latCol}"] / _latStep - _q * 0.5)`,
+          `${df}[${out}] = "h${pyNum(s.resolution)}_" + _q.astype(int).astype(str) + "_" + _r.astype(int).astype(str)`,
+        ], "#");
+      }
+      const grid = spRef(s.gridDatasetId, "grid", df, allDatasets); if (grid.note) notes.push(grid.note);
+      const keep = [pyStr(s.gridIdCol), ...(s.extraCols || []).map(pyStr)].filter(Boolean).join(", ");
+      return spEmit(notes, [
+        `# sp_grid_assign: point-in-polygon against an existing grid layer`,
+        `_pts  = ${ptsGdf(df, s.lonCol, s.latCol)}`,
+        `_grid = gpd.GeoDataFrame(${grid.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${grid.v}["${s.wktCol}"]), crs=4326)`,
+        `_grid["geometry"] = _grid.make_valid()`,
+        `${df} = gpd.sjoin(_pts, _grid[[${keep}, "geometry"]], predicate="within").drop(columns=["geometry", "index_right"], errors="ignore")`,
+        `${df} = ${df}.rename(columns={${pyStr(s.gridIdCol)}: ${out}})`,
+      ], "#");
+    }
+
+    case "sp_spatial_join": {
+      const poly = spRef(s.polyDatasetId, "poly", df, allDatasets); if (poly.note) notes.push(poly.note);
+      const cols = (s.joinCols || []).map(pyStr).join(", ");
+      const pred = s.predicate === "intersects" ? "intersects" : "within";
+      return spEmit(notes, [
+        `# sp_spatial_join (${s.predicate || "within"}): assign polygon attributes to points`,
+        `_pts  = ${ptsGdf(df, s.lonCol, s.latCol)}`,
+        `_poly = gpd.GeoDataFrame(${poly.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${poly.v}["${s.wktCol}"]), crs=4326)`,
+        `${df} = gpd.sjoin(_pts, _poly[[${cols}, "geometry"]], predicate="${pred}").drop(columns=["geometry", "index_right"], errors="ignore")`,
+      ], "#");
+    }
+
+    case "sp_nearest": {
+      const ref = spRef(s.refDatasetId, "ref", df, allDatasets); if (ref.note) notes.push(ref.note);
+      const refLat = s.refDatasetId === "self" ? s.latCol : s.refLatCol;
+      const refLon = s.refDatasetId === "self" ? s.lonCol : s.refLonCol;
+      const lines = [
+        `# sp_nearest: nearest reference feature per point (${s.metric ? "EPSG:32721 m" : "geodesic km"})`,
+        `_pts = ${ptsGdf(df, s.lonCol, s.latCol)}.to_crs(32721)`,
+        `_ref = gpd.GeoDataFrame(${ref.v}.copy(), geometry=gpd.points_from_xy(${ref.v}["${refLon}"], ${ref.v}["${refLat}"]), crs=4326).to_crs(32721)`,
+        `_nn = gpd.sjoin_nearest(_pts, _ref, distance_col=${pyStr(s.outDist)})`,
+        `${df}[${pyStr(s.outIdx)}]  = _nn["index_right"].values`,
+        `${df}[${pyStr(s.outDist)}] = _nn[${pyStr(s.outDist)}].values${s.metric ? "" : " / 1000  # → km"}`,
+      ];
+      if (s.metric && s.binCol?.trim()) lines.push(binLine(s.outDist, s.binCol.trim()));
+      return spEmit(notes, lines, "#");
+    }
+
+    case "sp_boundary_dist": {
+      const poly = spRef(s.polyDatasetId, "poly", df, allDatasets); if (poly.note) notes.push(poly.note);
+      const pfx = s.outPrefix || "boundary";
+      return spEmit(notes, [
+        `# sp_boundary_dist: distance to nearest boundary (km) + inside-treatment + signed running var`,
+        `_pts  = ${ptsGdf(df, s.lonCol, s.latCol)}.to_crs(32721)`,
+        `_poly = gpd.GeoDataFrame(${poly.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${poly.v}["${s.wktCol}"]).make_valid(), crs=4326).to_crs(32721)`,
+        `_bnd  = _poly.geometry.boundary.union_all()`,
+        `${df}["${pfx}_dist_km"] = _pts.geometry.distance(_bnd) / 1000`,
+        `${df}["${pfx}_treat"]   = _pts.geometry.apply(lambda g: int(_poly.contains(g).any()))`,
+        `${df}["${pfx}_running"] = ${df}["${pfx}_dist_km"].where(${df}["${pfx}_treat"] == 1, -${df}["${pfx}_dist_km"])`,
+      ], "#");
+    }
+
+    case "sp_metric_buffer": {
+      if (s.mode === "grid_centroids") {
+        const grid = spRef(s.gridDatasetId, "grid", df, allDatasets); if (grid.note) notes.push(grid.note);
+        const out = pyStr(metricBufferCountCol(s));
+        return spEmit(notes, [
+          `# sp_metric_buffer (grid_centroids): count points within ${pyNum(s.radius)} m of each grid centroid → derived grid dataset`,
+          `_pts  = ${ptsGs(df, s.lonCol, s.latCol)}.to_crs(32721)`,
+          `_grid = gpd.GeoDataFrame(${grid.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${grid.v}["${s.wktCol}"]).make_valid(), crs=4326).to_crs(32721)`,
+          `_buf  = _grid.geometry.centroid.buffer(${pyNum(s.radius)})`,
+          `_grid[${out}] = _buf.apply(lambda b: int(_pts.within(b).sum()))`,
+          `${df} = pd.DataFrame(_grid.drop(columns="geometry"))`,
+        ], "#");
+      }
+      return spEmit(notes, [
+        `# sp_metric_buffer (point_buffers): buffer each point by ${pyNum(s.radius)} m in EPSG:32721 → derived buffer-polygon dataset`,
+        `${df} = ${ptsGdf(df, s.lonCol, s.latCol)}.to_crs(32721)`,
+        `${df}["geometry"] = ${df}.buffer(${pyNum(s.radius)})`,
+      ], "#");
+    }
+
+    case "sp_buffer_exposure": {
+      const buf  = spRef(s.bufferDatasetId, "buffer", df, allDatasets); if (buf.note) notes.push(buf.note);
+      const grid = spRef(s.gridDatasetId, "grid", df, allDatasets);     if (grid.note) notes.push(grid.note);
+      const pfx = s.outPrefix || "buffer";
+      const lines = [
+        `# sp_buffer_exposure (${s.mode}): per grid cell, in EPSG:32721 → derived grid dataset`,
+        `_grid = gpd.GeoDataFrame(${grid.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${grid.v}["${s.gridWkt}"]).make_valid(), crs=4326).to_crs(32721)`,
+        `_buf  = gpd.GeoDataFrame(${buf.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${buf.v}["${s.bufferWkt}"]).make_valid(), crs=4326).to_crs(32721)`,
+      ];
+      if (s.mode === "share" || s.mode === "both") {
+        lines.push(
+          `_diss = _buf.geometry.union_all()  # dissolve overlapping buffers`,
+          `_grid["${pfx}_exposure_share"] = _grid.geometry.apply(lambda g: g.intersection(_diss).area / g.area if g.area else 0.0)`);
+      }
+      if (s.mode === "count" || s.mode === "both") {
+        lines.push(`_grid["${pfx}_overlap_count"] = _grid.geometry.apply(lambda g: int(_buf.intersects(g).sum()))`);
+      }
+      lines.push(`${df} = pd.DataFrame(_grid.drop(columns="geometry"))`);
+      return spEmit(notes, lines, "#");
+    }
+
+    case "sp_aggregate_grid": {
+      const grid = spRef(s.gridDatasetId, "grid", df, allDatasets); if (grid.note) notes.push(grid.note);
+      const out = pyStr(s.outCol || "n_points");
+      const aggChain =
+        s.fn === "count" ? `.size().reset_index(name=${out})` :
+        s.fn === "sum"   ? `[${pyStr(s.valueCol)}].sum().reset_index(name=${out})` :
+        s.fn === "mean"  ? `[${pyStr(s.valueCol)}].mean().reset_index(name=${out})` :
+                           `.apply(lambda g: (pd.to_numeric(g[${pyStr(s.valueCol)}], errors="coerce") > 0).mean()).reset_index(name=${out})`;
+      if (s.mode === "geometry") {
+        return spEmit(notes, [
+          `# sp_aggregate_grid (point-in-polygon, ${s.fn}) → derived grid dataset`,
+          `_pts  = ${ptsGdf(df, s.lonCol, s.latCol)}`,
+          `_grid = gpd.GeoDataFrame(${grid.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${grid.v}["${s.wktCol}"]).make_valid(), crs=4326)`,
+          `_joined = gpd.sjoin(_pts, _grid, predicate="within")`,
+          `_agg = _joined.groupby("index_right")${aggChain}`,
+          `${df} = ${grid.v}.join(_agg.set_index("index_right"), how="left")`,
+        ], "#");
+      }
+      return spEmit(notes, [
+        `# sp_aggregate_grid (by assigned grid_id, ${s.fn}) → derived grid dataset`,
+        `_agg = ${df}.groupby(${pyStr(s.pointGridCol)})${aggChain}`,
+        `${df} = ${grid.v}.merge(_agg, left_on=${pyStr(s.gridIdCol)}, right_on=${pyStr(s.pointGridCol)}, how="left")`,
+      ], "#");
+    }
+
+    case "sp_areal_interp": {
+      const src = spRef(s.srcDatasetId, "src", df, allDatasets); if (src.note) notes.push(src.note);
+      const tgt = spRef(s.tgtDatasetId, "tgt", df, allDatasets); if (tgt.note) notes.push(tgt.note);
+      const cols = (s.valueCols || []).map(pyStr).join(", ");
+      return spEmit(notes, [
+        `# sp_areal_interp: area-weighted ${s.extensive ? "extensive (sums)" : "intensive (means)"} interpolation → target polygons`,
+        `# Requires the 'tobler' package: pip install tobler`,
+        `from tobler.area_weighted import area_interpolate`,
+        `_src = gpd.GeoDataFrame(${src.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${src.v}["${s.srcWkt}"]).make_valid(), crs=4326).to_crs(32721)`,
+        `_tgt = gpd.GeoDataFrame(${tgt.v}.copy(), geometry=gpd.GeoSeries.from_wkt(${tgt.v}["${s.tgtWkt}"]).make_valid(), crs=4326).to_crs(32721)`,
+        `_aw = area_interpolate(_src, _tgt, ${s.extensive ? "extensive_variables" : "intensive_variables"}=[${cols}])`,
+        `${df} = _tgt.drop(columns="geometry").reset_index(drop=True).join(_aw.drop(columns="geometry").reset_index(drop=True))`,
+      ], "#");
+    }
+
+    default:
+      return `# [spatial step: ${s.type}] — see Litux (no Python translation)`;
+  }
+}
+
+// ── Stata (no native geometry stack) ─────────────────────────────────────────
+function spatialStata(step) {
+  return [
+    `* Spatial step "${step.type}" — Stata has no native geometry stack (no sf/geopandas).`,
+    `* Reproduce this step in the R (sf) or Python (geopandas) script, or load the`,
+    `* exported result dataset from Litux and continue the analysis here.`,
+  ].join("\n");
 }

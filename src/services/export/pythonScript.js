@@ -173,6 +173,7 @@ function isGridEditStep(step) {
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────
 function transpileStep(step, allDatasets = {}) {
   const { type, params = {} } = step;
+  if (typeof type === "string" && type.startsWith("sp_")) return toPython(step, "df", allDatasets);
   switch (type) {
     case "add_column":
       return `df[${pyStr(step.nn)}] = ${pyValue(step.fill, step.dtype)}`;

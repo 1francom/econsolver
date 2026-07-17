@@ -35,7 +35,7 @@
 
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 import { stepLabel } from "../../pipeline/registry.js";
-import { jsExprToR, rRightLoad } from "../../pipeline/stepTranslators.js";
+import { toR, jsExprToR, rRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildRLoadLine } from "./loadLine.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -115,6 +115,8 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
   const col  = step.col  ? rName(step.col)  : null;
   const nn   = step.nn   ? rName(step.nn)   : null;
   const quot = step.col  ? rStr(step.col)   : null;
+
+  if (typeof step.type === "string" && step.type.startsWith("sp_")) return toR(step, dfVar, allDatasets);
 
   switch (step.type) {
 
