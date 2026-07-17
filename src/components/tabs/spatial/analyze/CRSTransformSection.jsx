@@ -38,7 +38,9 @@ export function CRSTransformSection({ rows, headers, onResult, C }) {
         });
         setResult({ rows: out, cols: [outX, outY] });
         appendLog({ module: "spatial", opType: "crs_transform", params: { mode: "point", xCol, yCol, outX, outY, source, target }, label: `CRS transform ${source} → ${target}: (${xCol}, ${yCol}) → (${outX}, ${outY})` });
-        onResult(out, [outX, outY]);
+        onResult(out, [outX, outY], null, { kind: "step", step: {
+          type: "sp_crs_transform", mode: "point", source, target, xCol, yCol, outX, outY, wktCol: "", outWkt: "",
+        }});
       } else {
         const out = rows.map(r => ({
           ...r,
@@ -46,7 +48,9 @@ export function CRSTransformSection({ rows, headers, onResult, C }) {
         }));
         setResult({ rows: out, cols: [outWkt] });
         appendLog({ module: "spatial", opType: "crs_transform", params: { mode: "wkt", wktCol, outWkt, source, target }, label: `CRS transform ${source} → ${target}: ${wktCol} → ${outWkt}` });
-        onResult(out, [outWkt]);
+        onResult(out, [outWkt], null, { kind: "step", step: {
+          type: "sp_crs_transform", mode: "wkt", source, target, xCol: "", yCol: "", outX: "", outY: "", wktCol, outWkt,
+        }});
       }
     } catch (e) {
       setErr(e.message || "CRS transform failed");

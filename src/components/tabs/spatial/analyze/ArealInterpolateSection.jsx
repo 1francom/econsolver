@@ -76,7 +76,13 @@ export function ArealInterpolateSection({ rows, headers, availableDatasets, C, o
         },
       );
       setResult({ rows: out, cols: outCols });
-      onResult(out, outCols, targetDs.headers);
+      onResult(out, outCols, targetDs.headers, { kind: "dataset", step: {
+        type: "sp_areal_interp",
+        srcDatasetId: sourceId, tgtDatasetId: targetId,
+        srcWkt: effectiveSourceWkt, tgtWkt: effectiveTargetWkt,
+        tgtIdCol: effectiveTargetId, valueCols, extensive,
+        outPrefix: (outPrefix || "").trim(),
+      }});
     } catch (e) {
       setErr(e.message);
     }

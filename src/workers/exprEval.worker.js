@@ -23,7 +23,7 @@
 "use strict";
 
 import { drawSamples } from "../math/dgpDraw.js";
-import { assertSafeExpr } from "../pipeline/exprGuard.js";
+import { assertSafeExpr, translateRInOperator } from "../pipeline/exprGuard.js";
 import { HELPERS } from "../pipeline/expressionHelpers.js";
 
 // ── SECURITY: scrub exfiltration / escape globals from the worker scope ────────
@@ -39,6 +39,14 @@ for (const k of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importS
 // ── Helpers injected into mutate expressions ──────────────────────────────────
 // ── eval_col ──────────────────────────────────────────────────────────────────
 function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, cases, defaultVal, rules, elseValue }) {
+  // ai_tr expressions are hand-written JS (value, rowIndex) transforms, not
+  // R-style conditions — never rewrite those.
+  if (mode !== "ai_tr") {
+    expr  = translateRInOperator(expr);
+    cases = cases?.map(c => ({ ...c, cond: translateRInOperator(c.cond) }));
+    rules = rules?.map(r => ({ ...r, expr: translateRInOperator(r.expr) }));
+  }
+
   if (mode === "ai_tr") {
     // ai_tr: full arrow-fn or body expression operating on a single column value
     const js = (expr || "").trim();

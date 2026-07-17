@@ -45,6 +45,29 @@ const HEADERS = ["id", "t", "region", "wage", "educ", "inc", "treat", "post", "d
 const RIGHT = { rows: [{ id: "a", gdp: 100 }, { id: "b", gdp: 200 }], headers: ["id", "gdp"] };
 const CTX = { datasets: { R1: RIGHT } };
 
+// Spatial fixtures — Munich-ish points + two adjacent WKT grid cells (lon lat order).
+const SP_POINTS = () => [
+  { __ri: 0, name: "p1", lat: 48.14, lon: 11.55 },
+  { __ri: 1, name: "p2", lat: 48.15, lon: 11.65 },
+  { __ri: 2, name: "p3", lat: 48.30, lon: 11.90 },   // outside both cells
+];
+const SP_HEADERS = ["name", "lat", "lon"];
+const SP_GRID = {
+  rows: [
+    { grid_id: "g1", zone: "west", wkt: "POLYGON((11.5 48.1, 11.6 48.1, 11.6 48.2, 11.5 48.2, 11.5 48.1))" },
+    { grid_id: "g2", zone: "east", wkt: "POLYGON((11.6 48.1, 11.7 48.1, 11.7 48.2, 11.6 48.2, 11.6 48.1))" },
+  ],
+  headers: ["grid_id", "zone", "wkt"],
+};
+CTX.datasets.G1 = SP_GRID;
+
+// T1 uses SMOKE_INPUT[type] when present; FIX/HEADERS otherwise.
+const SMOKE_INPUT = {};
+for (const t of ["sp_distance", "sp_crs_transform", "sp_buffer", "sp_grid_assign", "sp_spatial_join", "sp_nearest", "sp_boundary_dist",
+  "sp_metric_buffer", "sp_buffer_exposure", "sp_aggregate_grid", "sp_areal_interp"]) {
+  SMOKE_INPUT[t] = { rows: SP_POINTS(), headers: SP_HEADERS };
+}
+
 // Per-step minimal valid config (merged over defaultStep). Steps that require
 // the async expression worker or network are smoke-EXEMPT (still covered by T5).
 const WORKER_OR_NET = new Set(["ai_tr", "mutate", "if_else", "case_when", "geocode", "grouped_mutate"]);
@@ -98,6 +121,17 @@ const SMOKE = {
   factor_interactions: { contCol: "wage", dummyCols: ["d1", "d2"], prefix: "wxd_" },
   inject_column: { colName: "pred", values: [1, 2, 3, 4] },
   balance_panel: { entityCol: "id", timeCol: "t", outcomeCols: ["wage"], staticCols: ["region"], fillValue: 0 },
+  sp_distance:      { latCol: "lat", lonCol: "lon", refLat: 48.14, refLon: 11.55, outCol: "dist_km", metric: false, binCol: "" },
+  sp_crs_transform: { mode: "point", source: "EPSG:4326", target: "EPSG:32721", xCol: "lon", yCol: "lat", outX: "x_m", outY: "y_m" },
+  sp_buffer:        { latCol: "lat", lonCol: "lon", refLat: 48.14, refLon: 11.55, radiusKm: 5, outCol: "in_buffer" },
+  sp_grid_assign:   { gridType: "existing", latCol: "lat", lonCol: "lon", outCol: "grid_id", gridDatasetId: "G1", wktCol: "wkt", gridIdCol: "grid_id", extraCols: ["zone"] },
+  sp_spatial_join:  { latCol: "lat", lonCol: "lon", polyDatasetId: "G1", wktCol: "wkt", joinCols: ["zone"], predicate: "within" },
+  sp_nearest:       { latCol: "lat", lonCol: "lon", refDatasetId: "self", refLatCol: "lat", refLonCol: "lon", outDist: "nn_dist_km", outIdx: "nn_idx", metric: false, binCol: "" },
+  sp_boundary_dist: { latCol: "lat", lonCol: "lon", polyDatasetId: "G1", wktCol: "wkt", outPrefix: "boundary" },
+  sp_metric_buffer:   { mode: "point_buffers", latCol: "lat", lonCol: "lon", radius: 100 },
+  sp_buffer_exposure: { mode: "count", bufferDatasetId: "G1", gridDatasetId: "G1", bufferWkt: "wkt", gridWkt: "wkt", gridIdCol: "grid_id", outPrefix: "buf" },
+  sp_aggregate_grid:  { mode: "geometry", gridDatasetId: "G1", wktCol: "wkt", latCol: "lat", lonCol: "lon", fn: "count", valueCol: "", outCol: "n_points" },
+  sp_areal_interp:    { srcDatasetId: "G1", tgtDatasetId: "G1", srcWkt: "wkt", tgtWkt: "wkt", tgtIdCol: "grid_id", valueCols: [], extensive: true, outPrefix: "aw" },
 };
 
 function wellFormed(out) {
@@ -160,7 +194,8 @@ section("T1 · per-step smoke (all registry types)");
     if (!cfg) { check(`smoke ${type}`, false, "no SMOKE config — add one"); continue; }
     const step = { ...defaultStep(type), ...cfg, type };
     try {
-      const out = applyStep(FIX(), HEADERS, step, CTX);
+      const input = SMOKE_INPUT[type] ?? { rows: FIX(), headers: HEADERS };
+      const out = applyStep(input.rows, input.headers, step, CTX);
       check(`smoke ${type}`, wellFormed(out), "malformed output");
       smoked++;
     } catch (err) {

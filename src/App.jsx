@@ -3110,21 +3110,13 @@ export default function App() {
                     headers={tabOutput("spatial")?.headers ?? tabRawData("spatial")?.headers ?? []}
                     availableDatasets={availableDatasets}
                     pid={tabDsId("spatial")}
-                    onAddDataset={(name, rows, headers, options = null) => {
-                      const newId = studioRef.current?.addApiData(name, rows, headers, null, options);
+                    onAddStep={(step) => {
+                      studioRef.current?.addStepTo?.(tabDsId("spatial"), step);
+                    }}
+                    onAddDataset={(name, rows, headers, options = null, recipe = null) => {
+                      const newId = studioRef.current?.addApiData(name, rows, headers, recipe, options);
                       if (newId) selectDataset("spatial", newId);
                       return newId;
-                    }}
-                    onMergeColumns={(resultRows, newCols) => {
-                      const activeId = tabDsId("spatial");
-                      const activeDs = availableDatasets.find(d => d.id === activeId);
-                      const name     = activeDs?.filename ?? activeDs?.name ?? "spatial_data";
-                      const allHeaders = [...new Set([...(activeDs?.headers ?? []), ...newCols])];
-                      const newId = studioRef.current?.addApiData(name, resultRows, allHeaders);
-                      if (newId) {
-                        studioRef.current?.removeDataset(activeId);
-                        selectDataset("spatial", newId);
-                      }
                     }}
                   />
                 </div>

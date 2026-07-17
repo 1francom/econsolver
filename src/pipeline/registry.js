@@ -28,6 +28,7 @@ export const CATEGORIES = [
   { id: "features",  label: "Features"  },
   { id: "reshape",   label: "Reshape"   },
   { id: "merge",     label: "Merge"     },
+  { id: "spatial",   label: "Spatial"   },
 ];
 
 // ─── REGISTRY ─────────────────────────────────────────────────────────────────
@@ -924,6 +925,241 @@ export const STEP_REGISTRY = [
     ],
     toLabel: s => `balance_panel ${s.entityCol} × ${s.timeCol}${s.slotCol ? ` × ${s.slotCol}` : ""} (fill ${s.fillValue ?? 0})`,
     defaultStep: () => ({ type: "balance_panel", entityCol: "", timeCol: "", slotCol: "", outcomeCols: [], staticCols: [], fillValue: 0 }),
+  },
+
+  // ── SPATIAL ─────────────────────────────────────────────────────────────────
+  // Column-adding spatial ops (Phase: spatial pipeline integration, 2026-07-16).
+  // Steps referencing a second dataset resolve it via context.datasets[id],
+  // identically to `join`. Category "spatial" is NOT in serializeAllowedSteps'
+  // whitelist, so the NL command bar cannot emit these until validated.
+
+  {
+    type: "sp_distance",
+    label: "Distance to point",
+    category: "spatial",
+    description: "Distance from each row's lat/lon to a fixed reference point (haversine km, or EPSG:32721 metric meters with optional distance bins).",
+    schema: [
+      { key: "latCol",  type: "col",     label: "Latitude column" },
+      { key: "lonCol",  type: "col",     label: "Longitude column" },
+      { key: "refLat",  type: "number",  label: "Reference latitude" },
+      { key: "refLon",  type: "number",  label: "Reference longitude" },
+      { key: "outCol",  type: "text",    label: "Output column" },
+      { key: "metric",  type: "boolean", label: "EPSG:32721 metric distance (m)" },
+      { key: "binCol",  type: "text",    label: "Distance bin column (optional, metric only)" },
+    ],
+    toLabel: s => `sp_distance → ${s.outCol}${s.metric ? " (m)" : " (km)"}`,
+    defaultStep: () => ({ type: "sp_distance", latCol: "", lonCol: "", refLat: 0, refLon: 0, outCol: "dist_km", metric: false, binCol: "" }),
+  },
+
+  {
+    type: "sp_crs_transform",
+    label: "CRS transform",
+    category: "spatial",
+    description: "Transform point columns or a WKT geometry column between EPSG:4326 and EPSG:32721.",
+    schema: [
+      { key: "mode",   type: "select", label: "Mode", options: [
+        { value: "point", label: "Point columns" },
+        { value: "wkt",   label: "WKT geometry" },
+      ]},
+      { key: "source", type: "text", label: "Source CRS (EPSG:4326 / EPSG:32721)" },
+      { key: "target", type: "text", label: "Target CRS" },
+      { key: "xCol",   type: "col",  label: "X / longitude column (point mode)" },
+      { key: "yCol",   type: "col",  label: "Y / latitude column (point mode)" },
+      { key: "outX",   type: "text", label: "Output X column (point mode)" },
+      { key: "outY",   type: "text", label: "Output Y column (point mode)" },
+      { key: "wktCol", type: "col",  label: "WKT column (wkt mode)" },
+      { key: "outWkt", type: "text", label: "Output WKT column (wkt mode)" },
+    ],
+    toLabel: s => `sp_crs_transform ${s.source} → ${s.target} [${s.mode}]`,
+    defaultStep: () => ({ type: "sp_crs_transform", mode: "point", source: "EPSG:4326", target: "EPSG:32721", xCol: "", yCol: "", outX: "x_32721", outY: "y_32721", wktCol: "", outWkt: "geometry_32721" }),
+  },
+
+  {
+    type: "sp_buffer",
+    label: "Buffer indicator",
+    category: "spatial",
+    description: "Binary 0/1 indicator — 1 if the row's point lies within a radius (km) of a reference point.",
+    schema: [
+      { key: "latCol",   type: "col",    label: "Latitude column" },
+      { key: "lonCol",   type: "col",    label: "Longitude column" },
+      { key: "refLat",   type: "number", label: "Reference latitude" },
+      { key: "refLon",   type: "number", label: "Reference longitude" },
+      { key: "radiusKm", type: "number", label: "Radius (km)" },
+      { key: "outCol",   type: "text",   label: "Output column" },
+    ],
+    toLabel: s => `sp_buffer ${s.radiusKm}km → ${s.outCol}`,
+    defaultStep: () => ({ type: "sp_buffer", latCol: "", lonCol: "", refLat: 0, refLon: 0, radiusKm: 50, outCol: "in_buffer" }),
+  },
+
+  {
+    type: "sp_grid_assign",
+    label: "Grid assignment",
+    category: "spatial",
+    description: "Assign each point a grid cell ID — from an existing grid dataset (point-in-polygon), or quick rectangular/hex bins.",
+    schema: [
+      { key: "gridType", type: "select", label: "Grid type", options: [
+        { value: "existing",    label: "Existing grid dataset" },
+        { value: "rectangular", label: "Rectangular bins" },
+        { value: "hex",         label: "Hex bins (approx.)" },
+      ]},
+      { key: "latCol",        type: "col",    label: "Latitude column" },
+      { key: "lonCol",        type: "col",    label: "Longitude column" },
+      { key: "outCol",        type: "text",   label: "Output column" },
+      { key: "gridDatasetId", type: "text",   label: "Grid dataset id (existing mode)" },
+      { key: "wktCol",        type: "text",   label: "Grid WKT column (existing mode)" },
+      { key: "gridIdCol",     type: "text",   label: "Grid ID column (existing mode)" },
+      { key: "extraCols",     type: "cols",   label: "Grid attribute columns to carry (existing mode)" },
+      { key: "cellSize",      type: "number", label: "Cell size km (rectangular mode)" },
+      { key: "resolution",    type: "number", label: "Resolution 0-5 (hex mode)" },
+    ],
+    toLabel: s => `sp_grid_assign [${s.gridType}] → ${s.outCol}`,
+    defaultStep: () => ({ type: "sp_grid_assign", gridType: "existing", latCol: "", lonCol: "", outCol: "grid_id", gridDatasetId: "", wktCol: "", gridIdCol: "", extraCols: [], cellSize: 50, resolution: 2 }),
+  },
+
+  {
+    type: "sp_spatial_join",
+    label: "Spatial join (point-in-polygon)",
+    category: "spatial",
+    description: "Join polygon-dataset attributes onto each point by containment test against a WKT polygon column.",
+    schema: [
+      { key: "latCol",        type: "col",  label: "Latitude column" },
+      { key: "lonCol",        type: "col",  label: "Longitude column" },
+      { key: "polyDatasetId", type: "text", label: "Polygon dataset id" },
+      { key: "wktCol",        type: "text", label: "Polygon WKT column" },
+      { key: "joinCols",      type: "cols", label: "Polygon columns to join" },
+      { key: "predicate",     type: "select", label: "Predicate", options: [
+        { value: "within",     label: "within" },
+        { value: "intersects", label: "intersects" },
+      ]},
+    ],
+    toLabel: s => `sp_spatial_join (${s.predicate}) → ${(s.joinCols || []).join(", ")}`,
+    defaultStep: () => ({ type: "sp_spatial_join", latCol: "", lonCol: "", polyDatasetId: "", wktCol: "", joinCols: [], predicate: "within" }),
+  },
+
+  {
+    type: "sp_nearest",
+    label: "Nearest neighbour",
+    category: "spatial",
+    description: "For each row, distance to (and index of) the nearest point in a reference dataset. refDatasetId \"self\" = same dataset.",
+    schema: [
+      { key: "latCol",       type: "col",     label: "Latitude column" },
+      { key: "lonCol",       type: "col",     label: "Longitude column" },
+      { key: "refDatasetId", type: "text",    label: "Reference dataset id (or \"self\")" },
+      { key: "refLatCol",    type: "text",    label: "Reference latitude column" },
+      { key: "refLonCol",    type: "text",    label: "Reference longitude column" },
+      { key: "outDist",      type: "text",    label: "Distance output column" },
+      { key: "outIdx",       type: "text",    label: "Index output column" },
+      { key: "metric",       type: "boolean", label: "EPSG:32721 metric distance (m)" },
+      { key: "binCol",       type: "text",    label: "Distance bin column (optional, metric only)" },
+    ],
+    toLabel: s => `sp_nearest → ${s.outDist}${s.metric ? " (m)" : " (km)"}`,
+    defaultStep: () => ({ type: "sp_nearest", latCol: "", lonCol: "", refDatasetId: "self", refLatCol: "", refLonCol: "", outDist: "nn_dist_km", outIdx: "nn_idx", metric: false, binCol: "" }),
+  },
+
+  {
+    type: "sp_boundary_dist",
+    label: "Distance to boundary",
+    category: "spatial",
+    description: "Minimum distance from each point to the nearest polygon boundary, plus treatment indicator and signed running variable (Spatial RD).",
+    schema: [
+      { key: "latCol",        type: "col",  label: "Latitude column" },
+      { key: "lonCol",        type: "col",  label: "Longitude column" },
+      { key: "polyDatasetId", type: "text", label: "Boundary polygon dataset id" },
+      { key: "wktCol",        type: "text", label: "Polygon WKT column" },
+      { key: "outPrefix",     type: "text", label: "Output column prefix" },
+    ],
+    toLabel: s => `sp_boundary_dist → ${s.outPrefix || "boundary"}_dist_km/_treat/_running`,
+    defaultStep: () => ({ type: "sp_boundary_dist", latCol: "", lonCol: "", polyDatasetId: "", wktCol: "", outPrefix: "boundary" }),
+  },
+
+  {
+    type: "sp_metric_buffer",
+    label: "Metric buffers",
+    category: "spatial",
+    description: "Create EPSG:32721 buffer polygons from point rows, or count points within a radius of grid centroids. Produces a derived dataset.",
+    schema: [
+      { key: "mode",   type: "select", label: "Mode", options: [
+        { value: "point_buffers",  label: "Create buffer polygons" },
+        { value: "grid_centroids", label: "Count points near grid centroids" },
+      ]},
+      { key: "latCol",        type: "col",    label: "Point latitude" },
+      { key: "lonCol",        type: "col",    label: "Point longitude" },
+      { key: "radius",        type: "number", label: "Radius (m)" },
+      { key: "gridDatasetId", type: "text",   label: "Grid dataset id (grid_centroids mode)" },
+      { key: "wktCol",        type: "text",   label: "Grid WKT column (grid_centroids mode)" },
+      { key: "prefix",        type: "text",   label: "Output prefix (grid_centroids mode)" },
+      { key: "outCol",        type: "text",   label: "Count output column (grid_centroids mode)" },
+    ],
+    toLabel: s => `sp_metric_buffer [${s.mode}] r=${s.radius}m`,
+    defaultStep: () => ({ type: "sp_metric_buffer", mode: "point_buffers", latCol: "", lonCol: "", radius: 100, gridDatasetId: "", wktCol: "", prefix: "points", outCol: "" }),
+  },
+
+  {
+    type: "sp_buffer_exposure",
+    label: "Buffer exposure",
+    category: "spatial",
+    description: "Dissolved-buffer exposure share and/or overlapping-buffer count per grid cell. Produces a derived dataset (grid rows + exposure columns).",
+    schema: [
+      { key: "mode", type: "select", label: "Mode", options: [
+        { value: "both",  label: "Share + count" },
+        { value: "share", label: "Exposure share" },
+        { value: "count", label: "Overlap count" },
+      ]},
+      { key: "bufferDatasetId", type: "text", label: "Buffer dataset id (or \"active\")" },
+      { key: "gridDatasetId",   type: "text", label: "Grid dataset id (or \"active\")" },
+      { key: "bufferWkt",       type: "text", label: "Buffer WKT column" },
+      { key: "gridWkt",         type: "text", label: "Grid WKT column" },
+      { key: "gridIdCol",       type: "text", label: "Grid ID column" },
+      { key: "outPrefix",       type: "text", label: "Output prefix" },
+    ],
+    toLabel: s => `sp_buffer_exposure [${s.mode}] → ${s.outPrefix || "buffer"}_*`,
+    defaultStep: () => ({ type: "sp_buffer_exposure", mode: "both", bufferDatasetId: "active", gridDatasetId: "", bufferWkt: "", gridWkt: "", gridIdCol: "", outPrefix: "buffer" }),
+  },
+
+  {
+    type: "sp_aggregate_grid",
+    label: "Aggregate points to grid",
+    category: "spatial",
+    description: "count/sum/mean/share of point rows per grid cell, by assigned grid_id or point-in-polygon. Produces a derived dataset (grid rows + aggregate column).",
+    schema: [
+      { key: "mode", type: "select", label: "Mode", options: [
+        { value: "grid_id",  label: "Use assigned grid_id" },
+        { value: "geometry", label: "Point-in-polygon" },
+      ]},
+      { key: "gridDatasetId", type: "text", label: "Grid dataset id" },
+      { key: "gridIdCol",     type: "text", label: "Grid ID column (grid_id mode)" },
+      { key: "pointGridCol",  type: "text", label: "Point grid ID column (grid_id mode)" },
+      { key: "wktCol",        type: "text", label: "Grid WKT column (geometry mode)" },
+      { key: "latCol",        type: "text", label: "Point latitude (geometry mode)" },
+      { key: "lonCol",        type: "text", label: "Point longitude (geometry mode)" },
+      { key: "fn", type: "select", label: "Aggregation", options: [
+        { value: "count", label: "count" }, { value: "sum", label: "sum" },
+        { value: "mean",  label: "mean"  }, { value: "share", label: "share" },
+      ]},
+      { key: "valueCol", type: "text", label: "Value column (non-count)" },
+      { key: "outCol",   type: "text", label: "Output column" },
+    ],
+    toLabel: s => `sp_aggregate_grid ${s.fn === "count" ? "count" : `${s.fn}(${s.valueCol})`} → ${s.outCol}`,
+    defaultStep: () => ({ type: "sp_aggregate_grid", mode: "grid_id", gridDatasetId: "", gridIdCol: "", pointGridCol: "", wktCol: "", latCol: "", lonCol: "", fn: "count", valueCol: "", outCol: "n_points" }),
+  },
+
+  {
+    type: "sp_areal_interp",
+    label: "Areal interpolation",
+    category: "spatial",
+    description: "Area-weighted interpolation of numeric columns from source polygons onto target polygons. Produces a derived dataset (target rows + interpolated columns).",
+    schema: [
+      { key: "srcDatasetId", type: "text",    label: "Source dataset id (or \"active\")" },
+      { key: "tgtDatasetId", type: "text",    label: "Target dataset id (or \"active\")" },
+      { key: "srcWkt",       type: "text",    label: "Source WKT column" },
+      { key: "tgtWkt",       type: "text",    label: "Target WKT column" },
+      { key: "tgtIdCol",     type: "text",    label: "Target ID column" },
+      { key: "valueCols",    type: "cols",    label: "Value columns" },
+      { key: "extensive",    type: "boolean", label: "Extensive (sums) vs intensive (means)" },
+      { key: "outPrefix",    type: "text",    label: "Output prefix" },
+    ],
+    toLabel: s => `sp_areal_interp → ${(s.valueCols || []).map(c => s.outPrefix ? `${s.outPrefix}_${c}` : c).join(", ")}`,
+    defaultStep: () => ({ type: "sp_areal_interp", srcDatasetId: "active", tgtDatasetId: "", srcWkt: "", tgtWkt: "", tgtIdCol: "", valueCols: [], extensive: true, outPrefix: "aw" }),
   },
 
 ];

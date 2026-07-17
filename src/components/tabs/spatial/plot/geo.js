@@ -1,5 +1,24 @@
 // ─── ECON STUDIO · spatial/plot/geo.js ─ (moved verbatim from SpatialTab.jsx)
 import { parseWktRings } from "../shared/wkt.js";
+import { isSafeExpr, translateRInOperator } from "../../../../pipeline/exprGuard.js";
+
+// Optional per-layer row filter (GeoLayerConfig "Filter" box). Purely a local
+// render-state subset — never touches rawData, never injects a pipeline step.
+// Same sandboxed-expression pattern as exprEval.worker.js (bare Function call,
+// no dynamic-code escape hatch reachable — see exprGuard.js's denylist), with
+// the same R-style `%in% c(...)` translation used by the Clean-tab filters.
+export function applyLayerFilter(rows, ly) {
+  const expr = ly?.filterExpr?.trim();
+  if (!expr || !rows.length || !isSafeExpr(expr)) return rows;
+  const translated = translateRInOperator(expr);
+  const safeH = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
+  let fn;
+  try { fn = Function(...safeH, `"use strict"; return !!(${translated});`); }
+  catch { return rows; }
+  return rows.filter(row => {
+    try { return fn(...safeH.map(h => row[h] ?? null)); } catch { return true; }
+  });
+}
 
 let _geoPlt = null, _geoPltPromise = null;
 export function loadGeoPlt() {
@@ -16,7 +35,10 @@ export function geoBbox(layers, defaultRows, availableDatasets) {
   const exp = (x, y) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); };
   for (const ly of layers) {
     if (!ly.visible) continue;
-    const r = (!ly.datasetId || ly.datasetId === "active") ? defaultRows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? defaultRows;
+    const r = applyLayerFilter(
+      (!ly.datasetId || ly.datasetId === "active") ? defaultRows : availableDatasets.find(d => d.id === ly.datasetId)?.rows ?? defaultRows,
+      ly
+    );
     if (ly.type === "point" && ly.mode === "wkt" && ly.wktCol) {
       for (const row of r) { const p = parseWktRings(row[ly.wktCol]); if (p?.type === "point") exp(p.rings[0][0][0], p.rings[0][0][1]); }
     } else if (ly.type === "point" && ly.latCol && ly.lonCol) {

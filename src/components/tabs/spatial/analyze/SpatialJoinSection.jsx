@@ -42,7 +42,10 @@ export function SpatialJoinSection({ rows, headers, availableDatasets, C, onResu
       const matched = out.filter(r => r[joinCols[0]] != null).length;
       setResult({ rows: out, matched });
       appendLog({ module: "spatial", opType: "spatial_join", params: { latCol, lonCol, polyDsId, wktCol: effectiveWkt, joinCols, predicate }, label: `Spatial join (${predicate}) → ${joinCols.join(", ")} (${matched}/${rows.length} matched)` });
-      onResult(out, joinCols);
+      onResult(out, joinCols, null, { kind: "step", step: {
+        type: "sp_spatial_join", latCol, lonCol,
+        polyDatasetId: polyDsId, wktCol: effectiveWkt, joinCols, predicate,
+      }});
     } catch (e) {
       setErr(e.message);
     }

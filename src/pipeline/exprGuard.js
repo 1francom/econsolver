@@ -31,3 +31,60 @@ export function assertSafeExpr(expr) {
     );
   }
 }
+
+// ── R-STYLE %in% TRANSLATION ──────────────────────────────────────────────────
+// Litux users are R/Stata researchers who naturally type R's membership operator
+// (`col %in% c("A","B")`, `col %in% 1:10`) into filter/mutate/condition boxes.
+// `%in%` is not valid JS (`%` is modulo), so every boolean-condition expression
+// (filter, mutate, if_else, case_when, vector_assign — sync AND worker paths)
+// is rewritten to a JS array-membership check BEFORE it reaches Function().
+// String-level transform only — no full R parser — covering the forms
+// researchers actually use:
+//   col %in% c(1, 2, 3)   → [1, 2, 3].includes(col)
+//   col %in% 1:10         → Array.from({length:10-1+1},(_,_i)=>1+_i).includes(col)
+//   col %in% otherArray   → [].concat(otherArray).includes(col)   (bare fallback)
+const IN_IDENT = String.raw`[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*`;
+
+// c(...) argument lists routinely contain string values with their own parens
+// (e.g. `regionname %in% c("Spain (Espana)", "Basque Country (Pais Vasco)")`),
+// so a flat `[^()]*` regex capture breaks on the first ")" inside the string.
+// Scan for the matching close-paren by hand, tracking quote state, instead.
+const C_CALL_HEAD = new RegExp(`(${IN_IDENT})\\s*%in%\\s*c\\(`, "g");
+function translateInCLists(expr) {
+  let out = "", last = 0;
+  for (const m of expr.matchAll(C_CALL_HEAD)) {
+    if (m.index < last) continue; // already consumed by a previous match's scan
+    const lhs = m[1];
+    const openIdx = m.index + m[0].length - 1; // index of the "("
+    let depth = 1, i = openIdx + 1, quote = null;
+    while (i < expr.length && depth > 0) {
+      const ch = expr[i];
+      if (quote) {
+        if (ch === "\\") { i += 2; continue; }
+        if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      i++;
+    }
+    if (depth !== 0) continue; // unbalanced — leave this occurrence as-is
+    const list = expr.slice(openIdx + 1, i - 1);
+    out += expr.slice(last, m.index) + `[${list}].includes(${lhs})`;
+    last = i;
+  }
+  return out + expr.slice(last);
+}
+
+export function translateRInOperator(expr) {
+  if (typeof expr !== "string" || !expr.includes("%in%")) return expr;
+  let out = translateInCLists(expr);
+  out = out.replace(
+    new RegExp(`(${IN_IDENT})\\s*%in%\\s*(-?\\d+)\\s*:\\s*(-?\\d+)`, "g"),
+    (_, lhs, lo, hi) => `Array.from({length:(${hi})-(${lo})+1},(_,_i)=>(${lo})+_i).includes(${lhs})`
+  );
+  out = out.replace(
+    new RegExp(`(${IN_IDENT})\\s*%in%\\s*(${IN_IDENT})`, "g"),
+    (_, lhs, rhs) => `[].concat(${rhs}).includes(${lhs})`
+  );
+  return out;
+}

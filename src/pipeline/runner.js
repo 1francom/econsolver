@@ -18,7 +18,19 @@
 import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 import { assignVector } from "../core/generate/vectorAssign.js";
-import { isSafeExpr } from "./exprGuard.js";
+import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
+import {
+  assignDistance, assignDistanceMetric, addDistanceBins,
+  transformCoord, transformWKT,
+  assignBuffer,
+  assignPointsToGrid, assignRectGrid, assignH3Grid,
+  spatialJoin,
+  nearestNeighbor, nearestNeighborMetric,
+  assignBoundaryDistance,
+  createMetricPointBuffers, countPointsWithinGridCentroidBuffer,
+  dissolveBuffers, gridExposureShare, countBuffersIntersectingGrid,
+  aggregateToGrid, aggregateGridById, arealInterpolate,
+} from "../math/SpatialEngine.js";
 
 // ─── PATTERN CONSTANTS ────────────────────────────────────────────────────────
 export const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
@@ -268,6 +280,10 @@ export function applyStep(rows, headers, s, context = {}) {
       if (s.expr) {
         // Formula mode: evaluate a boolean expression per row.
         // Pattern is consistent with the mutate sandbox already in this file.
+        // Rewrite R-style `%in%` to JS array membership before compiling — a
+        // local shadow copy, never mutating the caller's stored step (which
+        // must keep its original R-like text for replication-script export).
+        s = { ...s, expr: translateRInOperator(s.expr) };
         const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
         // eslint-disable-next-line no-new-func
         let filterFn; try { filterFn = new Function(...safeH, `"use strict"; return !!(${s.expr});`); } catch { break; }
@@ -974,6 +990,8 @@ export function applyStep(rows, headers, s, context = {}) {
         as_integer: (x) => { if (x === null || x === undefined) return null; const n = Number(x); return isFinite(n) ? Math.trunc(n) : null; },
         as_factor:  (x) => (x === null || x === undefined) ? null : String(x),
       };
+      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
+      s = { ...s, expr: translateRInOperator(s.expr) };
       const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       const pNames = [...Object.keys(helpers), "row", ...safeH];
       if (!isSafeExpr(s.expr)) break; // SECURITY: reject denylisted identifiers on the sync path
@@ -997,6 +1015,8 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.trueVal:  literal value or column name for true branch
       // s.falseVal: literal value or column name for false branch
       // s.nn:       output column name
+      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
+      s = { ...s, cond: translateRInOperator(s.cond) };
       const safeH_ife = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       if (!isSafeExpr(s.cond)) break; // SECURITY: reject denylisted identifiers on the sync path
       // eslint-disable-next-line no-new-func
@@ -1017,6 +1037,8 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.cases:      [{ cond: string, val: string|number }, ...]
       // s.defaultVal: fallback value when no condition matches
       // s.nn:         output column name
+      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
+      s = { ...s, cases: (s.cases ?? []).map(c => ({ ...c, cond: translateRInOperator(c.cond) })) };
       const safeH_cw = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       if ((s.cases ?? []).some(c => !isSafeExpr(c.cond))) break; // SECURITY: reject denylisted identifiers
       const caseFns = (s.cases ?? []).map(c => {
@@ -1042,6 +1064,8 @@ export function applyStep(rows, headers, s, context = {}) {
       const values = Array.isArray(s.values) ? s.values : [];
       let evalRule;
       if (s.mode === "conditional") {
+        // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
+        s = { ...s, rules: (s.rules ?? []).map(rule => ({ ...rule, expr: translateRInOperator(rule.expr) })) };
         const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
         // compile one predicate per rule - identical to the existing case_when case
         const ruleFns = (s.rules ?? []).map(rule => {
@@ -1670,6 +1694,171 @@ export function applyStep(rows, headers, s, context = {}) {
       R = geocodeRowsFromCache(rows, s);
       if (!H.includes(latCol)) H = [...H, latCol];
       if (!H.includes(lonCol)) H = [...H, lonCol];
+      break;
+    }
+
+    // ── SPATIAL STEPS ─────────────────────────────────────────────────────────
+    // Column-adding spatial ops. All SpatialEngine calls are pure sync JS.
+    // Steps referencing another dataset resolve it via context.datasets[id]
+    // (raw version — same contract as `join`) and no-op if it was deleted.
+
+    case "sp_distance": {
+      let out = s.metric
+        ? assignDistanceMetric(rows, s.latCol, s.lonCol, Number(s.refLat), Number(s.refLon), s.outCol, "EPSG:32721")
+        : assignDistance(rows, s.latCol, s.lonCol, Number(s.refLat), Number(s.refLon), s.outCol);
+      const newCols = [s.outCol];
+      if (s.metric && s.binCol?.trim()) { out = addDistanceBins(out, s.outCol, s.binCol.trim()); newCols.push(s.binCol.trim()); }
+      R = out;
+      newCols.forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      break;
+    }
+
+    case "sp_crs_transform": {
+      if (s.mode === "wkt") {
+        const prec = s.target === "EPSG:4326" ? 8 : 3;
+        R = rows.map(r => ({
+          ...r,
+          [s.outWkt]: r[s.wktCol] ? transformWKT(String(r[s.wktCol]), s.source, s.target, prec) : null,
+        }));
+        if (!H.includes(s.outWkt)) H = [...H, s.outWkt];
+      } else {
+        R = rows.map(r => {
+          const x = Number(r[s.xCol]), y = Number(r[s.yCol]);
+          if (!isFinite(x) || !isFinite(y)) return { ...r, [s.outX]: null, [s.outY]: null };
+          const [nx, ny] = transformCoord(x, y, s.source, s.target);
+          return { ...r, [s.outX]: nx, [s.outY]: ny };
+        });
+        [s.outX, s.outY].forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      }
+      break;
+    }
+
+    case "sp_buffer": {
+      R = assignBuffer(rows, s.latCol, s.lonCol, Number(s.refLat), Number(s.refLon), Number(s.radiusKm), s.outCol);
+      if (!H.includes(s.outCol)) H = [...H, s.outCol];
+      break;
+    }
+
+    case "sp_grid_assign": {
+      const outCol = s.outCol || "grid_id";
+      if (s.gridType === "existing") {
+        const grid = context?.datasets?.[s.gridDatasetId];
+        if (!grid?.rows?.length) break;
+        const extraCols = s.extraCols || [];
+        R = assignPointsToGrid(rows, s.latCol, s.lonCol, grid.rows, s.wktCol, s.gridIdCol, outCol,
+          { attributeCols: extraCols, metricCrs: "EPSG:32721" });
+        [outCol, "grid_row_index", ...extraCols].forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      } else {
+        R = s.gridType === "rectangular"
+          ? assignRectGrid(rows, s.latCol, s.lonCol, Number(s.cellSize), outCol)
+          : assignH3Grid(rows, s.latCol, s.lonCol, Number(s.resolution), outCol);
+        if (!H.includes(outCol)) H = [...H, outCol];
+      }
+      break;
+    }
+
+    case "sp_spatial_join": {
+      const poly = context?.datasets?.[s.polyDatasetId];
+      if (!poly?.rows?.length) break;
+      const joinCols = s.joinCols || [];
+      R = spatialJoin(rows, s.latCol, s.lonCol, poly.rows, s.wktCol, joinCols, s.predicate || "within");
+      joinCols.forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      break;
+    }
+
+    case "sp_nearest": {
+      const ref = s.refDatasetId === "self" ? { rows } : context?.datasets?.[s.refDatasetId];
+      if (!ref?.rows?.length) break;
+      let out = (s.metric ? nearestNeighborMetric : nearestNeighbor)(
+        rows, s.latCol, s.lonCol,
+        ref.rows, s.refLatCol, s.refLonCol,
+        s.outDist, s.outIdx, "EPSG:32721");
+      const newCols = [s.outDist, s.outIdx];
+      if (s.metric && s.binCol?.trim()) { out = addDistanceBins(out, s.outDist, s.binCol.trim()); newCols.push(s.binCol.trim()); }
+      R = out;
+      newCols.forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      break;
+    }
+
+    case "sp_boundary_dist": {
+      const poly = context?.datasets?.[s.polyDatasetId];
+      if (!poly?.rows?.length) break;
+      const pfx = s.outPrefix || "boundary";
+      R = assignBoundaryDistance(rows, s.latCol, s.lonCol, poly.rows, s.wktCol, pfx);
+      [`${pfx}_dist_km`, `${pfx}_treat`, `${pfx}_running`].forEach(c => { if (!H.includes(c)) H = [...H, c]; });
+      break;
+    }
+
+    // Dataset-producing spatial ops. In a pipeline, input rows are the active
+    // (parent) dataset; the OUTPUT rows are the derived shape (grid/target/
+    // buffer rows). The "active" sentinel in dataset-id params means "use the
+    // current pipeline rows".
+
+    case "sp_metric_buffer": {
+      const radius = Number(s.radius);
+      if (s.mode === "grid_centroids") {
+        const grid = context?.datasets?.[s.gridDatasetId];
+        if (!grid?.rows?.length) break;
+        const prefix = s.prefix || "points";
+        // Matches SpatialEngine.js's internal `radiusLabel()` fallback exactly (km when
+        // radius is an even multiple of 1000m, otherwise rounded meters) so H always
+        // carries the REAL column name the engine wrote, even for a hand-edited step
+        // with no explicit outCol.
+        const radiusLbl = radius >= 1000 && radius % 1000 === 0 ? `${radius / 1000}km` : `${Math.round(radius)}m`;
+        const countCol = s.outCol || `${prefix}_within_${radiusLbl}`;
+        R = countPointsWithinGridCentroidBuffer(grid.rows, s.wktCol, rows, s.latCol, s.lonCol, radius, prefix,
+          { metricCrs: "EPSG:32721", outCol: countCol });
+        H = [...new Set([...grid.headers, countCol, `${prefix}_buffer_radius_m`])];
+      } else {
+        R = createMetricPointBuffers(rows, s.latCol, s.lonCol, radius, { metricCrs: "EPSG:32721", segments: 48 });
+        H = [...new Set([...H, "buffer_id", "buffer_radius_m", "center_lon", "center_lat", "center_x", "center_y", "geometry", "metric_geometry"])];
+      }
+      break;
+    }
+
+    case "sp_buffer_exposure": {
+      const buf  = s.bufferDatasetId === "active" ? { rows, headers: H } : context?.datasets?.[s.bufferDatasetId];
+      const grid = s.gridDatasetId   === "active" ? { rows, headers: H } : context?.datasets?.[s.gridDatasetId];
+      if (!buf?.rows?.length || !grid?.rows?.length) break;
+      const prefix = s.outPrefix || "buffer";
+      const shareCol = `${prefix}_exposure_share`, countCol = `${prefix}_overlap_count`;
+      let out = grid.rows;
+      const newCols = [];
+      if (s.mode === "share" || s.mode === "both") {
+        const dissolved = dissolveBuffers(buf.rows, s.bufferWkt, { sourceCrs: "auto", metricCrs: "EPSG:32721", outputCrs: "EPSG:32721" });
+        out = gridExposureShare(out, s.gridWkt, s.gridIdCol, dissolved,
+          { gridSourceCrs: "auto", dissolvedSourceCrs: "EPSG:32721", metricCrs: "EPSG:32721", outCol: shareCol });
+        newCols.push(shareCol, `${shareCol}_area_m2`, "area_total_m2");
+      }
+      if (s.mode === "count" || s.mode === "both") {
+        out = countBuffersIntersectingGrid(out, s.gridWkt, s.gridIdCol, buf.rows, s.bufferWkt,
+          { gridSourceCrs: "auto", bufferSourceCrs: "auto", metricCrs: "EPSG:32721", outCol: countCol });
+        newCols.push(countCol);
+      }
+      R = out;
+      H = [...new Set([...grid.headers, ...newCols])];
+      break;
+    }
+
+    case "sp_aggregate_grid": {
+      const grid = context?.datasets?.[s.gridDatasetId];
+      if (!grid?.rows?.length) break;
+      const spec = { col: s.fn === "count" ? "" : s.valueCol, fn: s.fn, outCol: s.outCol };
+      R = s.mode === "grid_id"
+        ? aggregateGridById(grid.rows, s.gridIdCol, rows, s.pointGridCol, [spec])
+        : aggregateToGrid(grid.rows, s.wktCol, rows, s.latCol, s.lonCol, [spec]);
+      H = [...new Set([...grid.headers, s.outCol])];
+      break;
+    }
+
+    case "sp_areal_interp": {
+      const src = s.srcDatasetId === "active" ? { rows, headers: H } : context?.datasets?.[s.srcDatasetId];
+      const tgt = s.tgtDatasetId === "active" ? { rows, headers: H } : context?.datasets?.[s.tgtDatasetId];
+      if (!src?.rows?.length || !tgt?.rows?.length) break;
+      R = arealInterpolate(src.rows, s.srcWkt, tgt.rows, s.tgtWkt, s.tgtIdCol, s.valueCols || [],
+        { sourceCrs: "auto", targetSourceCrs: "auto", metricCrs: "EPSG:32721", extensive: !!s.extensive, outPrefix: (s.outPrefix || "").trim() });
+      const outCols = (s.valueCols || []).map(c => (s.outPrefix || "").trim() ? `${s.outPrefix.trim()}_${c}` : c);
+      H = [...new Set([...tgt.headers, ...outCols])];
       break;
     }
 
