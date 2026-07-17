@@ -1226,7 +1226,12 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
       // or rewrite them).
       setScript(visualSections ? `${out}\n${visualSections}` : out);
     } catch (e) {
-      setError(e.message ?? "Generation failed.");
+      const msg = e.message === "REPLICATION_PAID_ONLY"
+        ? "AI script replication is a paid-tier feature. Upgrade to Pro or Premium to generate the unified replication script. (You can still export the deterministic R / Stata / Python scripts from the model tab.)"
+        : e.message === "INSUFFICIENT_CREDITS"
+        ? "You've used all your credits for this month. They reset automatically every 30 days."
+        : (e.message ?? "Generation failed.");
+      setError(msg);
     } finally {
       setLoading(false);
     }
