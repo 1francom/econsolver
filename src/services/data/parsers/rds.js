@@ -127,9 +127,21 @@ function readObject(r) {
   if (type === 251) return null;   // MISSINGARG_SXP
   if (type === 250) return null;   // BASENAMESPACE_SXP
 
-  // Allocate slot in reference table before reading children
-  const refIdx = r.refs.length;
-  r.refs.push(null);
+  // Allocate slot in reference table before reading children.
+  //
+  // ONLY symbols, environments and namespaces/packages go in R's reference
+  // table (see WriteItem in R's serialize.c — AddToRefTable is called for
+  // SYMSXP and ENVSXP only). Reserving a slot for every SEXP, as this used to
+  // do, drifts our indices away from R's the moment any other object is
+  // written, so a later REFSXP resolves to the wrong node. It went unnoticed
+  // because a single-object .rds emits each symbol in full the first time and
+  // never needs a back-reference; the drift only bites from the SECOND
+  // data.frame in a workspace, which reuses the "names"/"class"/"row.names"
+  // symbols via REFSXP and silently lost its column names to the V1 fallback.
+  const isRefType = type === SYMSXP || type === 4 /* ENVSXP */
+                 || type === 239 /* NAMESPACESXP */ || type === 240 /* PACKAGESXP */;
+  const refIdx = isRefType ? r.refs.length : -1;
+  if (isRefType) r.refs.push(null);
 
   let obj;
 
@@ -308,7 +320,7 @@ function readObject(r) {
         "Only data.frame and named numeric/character vectors are supported.");
   }
 
-  r.refs[refIdx] = obj;
+  if (refIdx >= 0) r.refs[refIdx] = obj;
   return obj;
   } finally { _depth--; }
 }
@@ -350,9 +362,16 @@ function strsxpStrings(obj) {
   return obj.values.map(v => (v == null ? "" : String(v)));
 }
 
-/** Extract JS array from any vector sxp, handling factors, POSIXct, and geometry */
+/** R's Date is DAYS since 1970-01-01; POSIXct is SECONDS. Both need converting
+ *  or the column loads as a meaningless epoch offset (18262, not "2020-01-01"). */
+const DAY_MS = 86400000;
+const daysToISO = v => new Date(Math.round(v * DAY_MS)).toISOString().slice(0, 10);
+
+/** Extract JS array from any vector sxp, handling factors, Date, POSIXct, and geometry */
 function vectorValues(obj) {
   if (!obj) return [];
+  const classes = obj.attrs ? strsxpStrings(attrsToMap(obj.attrs)["class"]) : [];
+
   if (obj.sxp === INTSXP) {
     // Factor: INTSXP with "levels" STRSXP attribute → return level strings
     if (obj.attrs) {
@@ -363,20 +382,18 @@ function vectorValues(obj) {
         return obj.values.map(v => v == null ? null : (lvlArr[v - 1] ?? null));
       }
     }
+    // Date is usually REALSXP but R will store whole days as INTSXP too.
+    if (classes.includes("Date")) return obj.values.map(v => v == null ? null : daysToISO(v));
     return obj.values;
   }
   if (obj.sxp === REALSXP) {
+    if (classes.includes("Date")) {
+      return obj.values.map(v => v == null ? null : daysToISO(v));
+    }
     // POSIXct: REALSXP with class "POSIXct" → seconds-since-epoch to ISO string
-    if (obj.attrs) {
-      const am = attrsToMap(obj.attrs);
-      const cls = am["class"];
-      if (cls) {
-        const clsArr = strsxpStrings(cls);
-        if (clsArr.includes("POSIXct")) {
-          return obj.values.map(v => v == null ? null :
-            new Date(v * 1000).toISOString().slice(0, 19).replace("T", " "));
-        }
-      }
+    if (classes.includes("POSIXct")) {
+      return obj.values.map(v => v == null ? null :
+        new Date(v * 1000).toISOString().slice(0, 19).replace("T", " "));
     }
     return obj.values;
   }
