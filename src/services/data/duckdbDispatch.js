@@ -46,6 +46,11 @@ export function shouldUseSQLPath(ctx) {
   if (!SQL_SUPPORTED_SE.has(se)) return false;
   if (ctx.hasWeights && ctx.estimator !== "WLS") return false;
 
+  // Regression through the origin: every suff-stats builder emits a constant
+  // column into X'X unconditionally, so the SQL path cannot honour it. Fall
+  // back to JS rather than silently returning an intercept-fitted model.
+  if (ctx.noIntercept) return false;
+
   // Cluster/HAC need their operand columns present; otherwise the SQL path
   // cannot run — fall back to JS so the engine returns "classical HC1" per
   // robustSE.js's existing degradation contract.

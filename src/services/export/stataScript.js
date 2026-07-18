@@ -88,7 +88,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2 }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false }));
   lines.push("");
 
   return lines.join("\n");
@@ -666,7 +666,7 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 // ppmlhdfe) — these accept vce(cluster) but not vce(hc2)/vce(hc3) or a HAC option.
 const PANEL_TYPES = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "PoissonFE"]);
 
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
@@ -760,10 +760,16 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
   }
 
   switch (type) {
-    case "OLS":
-      lines.push(`reg ${yVar} ${xList}${opt}`);
+    case "OLS": {
+      // `noconstant` is an option, so it needs the option comma. `opt` is either
+      // "" or ", vce(...)" — reuse its comma when present rather than emitting a
+      // second one, which is a syntax error.
+      const olsOpt = noIntercept ? (opt ? `${opt} noconstant` : `, noconstant`) : opt;
+      if (noIntercept) lines.push(`* Regression through the origin — no intercept estimated.`);
+      lines.push(`reg ${yVar} ${xList}${olsOpt}`);
       lines.push(`estimates store m_ols`);
       break;
+    }
 
     case "WLS":
       if (!weightCol) {
@@ -1235,7 +1241,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
             treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
             interactionTerms: ixm = [], xVarsRaw: xrm = null, wVarsRaw: wrm = null,
-            seType: seM = "classical", clusterVar: clM = null, clusterVar2: cl2M = null } = configs[0].model ?? {};
+            seType: seM = "classical", clusterVar: clM = null, clusterVar2: cl2M = null, noIntercept: niM = false } = configs[0].model ?? {};
     const allX = [...xVars, ...wVars];
 
     configs.forEach((c) => {
@@ -1245,7 +1251,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       lines.push(`preserve`);
       if (filterExpr) lines.push(`  keep if ${filterExpr}`);
       else            lines.push(`  * Full sample — no filter`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, seType: seM, clusterVar: clM, clusterVar2: cl2M });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, seType: seM, clusterVar: clM, clusterVar2: cl2M, noIntercept: niM });
       let hasStore = false;
       modelLines.forEach(l => {
         const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
@@ -1277,10 +1283,10 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
               treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
               interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null,
-              seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null } = c.model ?? {};
+              seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null, noIntercept: niC = false } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, seType: seC, clusterVar: clC, clusterVar2: cl2C });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
       let hasStore = false;
       modelLines.forEach(l => {
         const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);

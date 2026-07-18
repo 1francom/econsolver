@@ -940,6 +940,7 @@ export default function ModelConfiguration({
   spatialWeightsJCol, setSpatialWeightsJCol,
   spatialWeightsWCol, setSpatialWeightsWCol,
   availableDatasets,
+  noIntercept, setNoIntercept,
   rows,
   headers,
   panel,
@@ -1169,14 +1170,32 @@ export default function ModelConfiguration({
   }
 
   if (model === "OLS" && family === "linear") {
+    // Two spec options for linear OLS: the constant term and survey weights.
+    // Poisson/logit/probit return earlier or run through GLM engines that build
+    // their own design matrix, so the constant toggle is deliberately linear-only.
     return (
-      <CollapsibleWeights
-        numericCols={numericCols}
-        yVar={yVar}
-        xVars={xVars}
-        weightVar={weightVar}
-        setWeightVar={setWeightVar}
-      />
+      <>
+        {setNoIntercept && (
+          <Section title="Constant">
+            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginBottom: 6, fontFamily: T.code.fontFamily }}>
+              Drop the intercept to regress through the origin — R&apos;s <code>y ~ 0 + x</code>,
+              Stata&apos;s <code>regress, noconstant</code>. Use it on already-demeaned or
+              first-differenced data. R² and F switch to the uncentered convention.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              <Chip label="With intercept"     selected={!noIntercept} color={C.teal} onClick={() => setNoIntercept(false)} />
+              <Chip label="Through the origin" selected={!!noIntercept} color={C.gold} onClick={() => setNoIntercept(true)} />
+            </div>
+          </Section>
+        )}
+        <CollapsibleWeights
+          numericCols={numericCols}
+          yVar={yVar}
+          xVars={xVars}
+          weightVar={weightVar}
+          setWeightVar={setWeightVar}
+        />
+      </>
     );
   }
 
@@ -1199,6 +1218,8 @@ export default function ModelConfiguration({
     return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />;
   }
 
-  // OLS: no model-specific configuration beyond variable selection
+  // No model-specific configuration beyond variable selection.
+  // NOTE: OLS does NOT reach here — it returns from the linear/poisson branches
+  // above. Do not add OLS config at this point; it is unreachable for that model.
   return null;
 }

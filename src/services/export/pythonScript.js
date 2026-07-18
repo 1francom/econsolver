@@ -112,7 +112,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push("# ── Estimation ─────────────────────────────────────────────────────────────");
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2 }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false }));
   lines.push("");
 
   return lines.join("\n");
@@ -645,7 +645,7 @@ function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
   const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
@@ -735,7 +735,9 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
   switch (type) {
     case "OLS": {
-      const formula = `"${yVar} ~ ${pyFormStr}"`;
+      // patsy spells "no intercept" as a trailing `- 1`.
+      const formula = `"${yVar} ~ ${pyFormStr}${noIntercept ? " - 1" : ""}"`;
+      if (noIntercept) lines.push(`# Regression through the origin — no intercept estimated.`);
       lines.push(`model = smf.ols(${formula}, data=df).fit(${smCov()})`);
       lines.push(`print(model.summary())`);
       break;
@@ -1354,12 +1356,12 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
             treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
             interactionTerms: ix0 = [], xVarsRaw: xr0 = null, wVarsRaw: wr0 = null,
-            seType: se0 = "classical", clusterVar: cl0 = null, clusterVar2: cl20 = null } = configs[0].model ?? {};
+            seType: se0 = "classical", clusterVar: cl0 = null, clusterVar2: cl20 = null, noIntercept: ni0 = false } = configs[0].model ?? {};
     const allX0 = [...xVars, ...wVars];
     const singleLines = transpileModel({ type, yVar, allX: allX0, xVars, wVars, zVars,
       entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime,
       feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null,
-      interactionTerms: ix0, xVarsRaw: xr0, wVarsRaw: wr0, seType: se0, clusterVar: cl0, clusterVar2: cl20 });
+      interactionTerms: ix0, xVarsRaw: xr0, wVarsRaw: wr0, seType: se0, clusterVar: cl0, clusterVar2: cl20, noIntercept: ni0 });
     // Strip assignment prefix, swap df → s
     const fitCall = singleLines
       .map(l => l.replace(/\bmodel\b\s*=\s*/, "").replace(/\bdf\b/g, "s"))
@@ -1385,12 +1387,12 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
               treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
               interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null,
-              seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null } = c.model ?? {};
+              seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null, noIntercept: niC = false } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       const fitName = `model_${i + 1}`;
       fitNames.push(fitName);
       lines.push(`# Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, seType: seC, clusterVar: clC, clusterVar2: cl2C });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
       modelLines.forEach(l => lines.push(l.replace(/\bmodel\b/g, fitName)));
       lines.push("");
     });
@@ -1508,9 +1510,9 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
           entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
           treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
           interactionTerms: ixs = [], xVarsRaw: xrs = null, wVarsRaw: wrs = null,
-          seType: seS = "classical", clusterVar: clS = null, clusterVar2: cl2S = null } = model;
+          seType: seS = "classical", clusterVar: clS = null, clusterVar2: cl2S = null, noIntercept: niS = false } = model;
   const allX = [...(xVars ?? []), ...(wVars ?? [])];
-  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixs, xVarsRaw: xrs, wVarsRaw: wrs, seType: seS, clusterVar: clS, clusterVar2: cl2S });
+  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixs, xVarsRaw: xrs, wVarsRaw: wrs, seType: seS, clusterVar: clS, clusterVar2: cl2S, noIntercept: niS });
 
   lines.push(`# ── Model function ───────────────────────────────────────────────────────`);
   lines.push(`def run_model(d):`);

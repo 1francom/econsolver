@@ -186,28 +186,34 @@ export function YFittedPlot({ resid, Yhat, yLabel = "Y", svgIdSuffix = "" }) {
 //   beta_i   — coefficient of xCol (for annotation)
 //   pVal_i   — p-value of xCol (for significance color)
 //   runOLS   — engine function passed in to avoid circular import
-export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, svgIdSuffix = "" }) {
+export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, intercept_i = null, noIntercept = false, runOLS, svgIdSuffix = "" }) {
   const { C, T } = useTheme();
   const [showSE, setShowSE] = useState(false);
   if (!rows?.length || !yCol || !xCol || !runOLS) return null;
+
+  // With no other regressors there is nothing to partial out. The added-variable
+  // plot would degenerate into the raw scatter shifted so both means sit at the
+  // origin — no extra information, and it hides the intercept (residual axes are
+  // mean-zero by construction, so the fitted line ALWAYS passes through (0,0),
+  // which reads as a mismatch against the coefficient table). So: raw scatter in
+  // original units, with the model's own fitted line.
+  const isRaw = otherX.length === 0;
 
   // Frisch-Waugh: regress Y on otherX, take residuals
   // then regress xCol on otherX, take residuals
   // scatter those residuals against each other
   let eY, eX;
 
-  if (otherX.length === 0) {
-    // No other regressors — partial = raw demeaned
-    const yVals = rows.map(r => r[yCol]).filter(v => typeof v === "number" && isFinite(v));
-    const xVals = rows.map(r => r[xCol]).filter(v => typeof v === "number" && isFinite(v));
-    if (yVals.length < 4 || xVals.length < 4) return null;
-    const yMean = yVals.reduce((s,v)=>s+v,0)/yVals.length;
-    const xMean = xVals.reduce((s,v)=>s+v,0)/xVals.length;
-    eY = rows.map(r => (typeof r[yCol]==="number" && isFinite(r[yCol])) ? r[yCol]-yMean : null);
-    eX = rows.map(r => (typeof r[xCol]==="number" && isFinite(r[xCol])) ? r[xCol]-xMean : null);
+  if (isRaw) {
+    const fin = v => (typeof v === "number" && isFinite(v)) ? v : null;
+    eY = rows.map(r => fin(r[yCol]));
+    eX = rows.map(r => fin(r[xCol]));
+    if (eY.filter(v => v != null).length < 4) return null;
   } else {
-    const resY = runOLS(rows, yCol,  otherX);
-    const resX = runOLS(rows, xCol,  otherX);
+    // Residualize under the SAME intercept convention as the fitted model —
+    // FWL on a through-the-origin model requires through-the-origin auxiliaries.
+    const resY = runOLS(rows, yCol,  otherX, {}, { noIntercept });
+    const resX = runOLS(rows, xCol,  otherX, {}, { noIntercept });
     if (!resY || !resX) return null;
     // runOLS filters to valid rows — we need residuals aligned to the same valid rows
     const validRows = rows.filter(r =>
@@ -239,8 +245,11 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
   const sx = v => PAD.l + ((v-xLo)/(xHi-xLo))*iW;
   const sy = v => PAD.t + iH - ((v-yLo)/(yHi-yLo))*iH;
 
-  const xTicks = niceTicks(xLo, xHi, 5);
-  const yTicks = niceTicks(yLo, yHi, 5);
+  // Denser than the default 5: with a ~37-unit range niceTicks(…,5) snaps to a
+  // step of 10, which leaves the intercept stranded mid-gap with no gridline to
+  // read it against. n=8 snaps to 5 and puts a line within half a step of it.
+  const xTicks = niceTicks(xLo, xHi, 7);
+  const yTicks = niceTicks(yLo, yHi, 8);
 
   // fitted line — slope = beta_i
   const xm  = xVals.reduce((s,v)=>s+v,0)/xVals.length;
@@ -250,7 +259,14 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
     const sxy = xVals.reduce((s,v,i)=>s+(v-xm)*(yVals[i]-ym),0);
     return sxx>0 ? sxy/sxx : 0;
   })();
-  const intercept = ym - slope * xm;
+  // Raw mode: draw the model's OWN line so it matches the coefficient table
+  // exactly. A through-the-origin fit has no intercept. The `ym - slope*xm`
+  // fallback is the exact OLS intercept for a single regressor, so it still
+  // agrees with the table when intercept_i was not supplied.
+  // Partial mode: both axes are residuals (mean zero) ⇒ this is ~0 by construction.
+  const intercept = isRaw
+    ? (noIntercept ? 0 : (intercept_i ?? (ym - slope * xm)))
+    : ym - slope * xm;
   const fitY1 = slope*xLo + intercept;
   const fitY2 = slope*xHi + intercept;
 
@@ -272,10 +288,16 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
 
   const sig   = pVal_i != null && pVal_i < 0.05;
   const lColor = sig ? C.teal : C.textMuted;
-  const svgId  = `partial-${xCol.replace(/[^a-z0-9]/gi,"-")}${svgIdSuffix}`;
+  const slug   = xCol.replace(/[^a-z0-9]/gi,"-");
+  const svgId  = `${isRaw ? "fit" : "partial"}-${slug}${svgIdSuffix}`;
+  // Labels track the mode: raw axes are the variables themselves, partial axes
+  // are residuals. Saying "| others" when otherX is empty was a lie.
+  const plotTitle = isRaw ? `${yCol} vs ${xCol}` : `Partial: ${yCol} ~ ${xCol} | others`;
+  const xLabel    = isRaw ? xCol : `e(${xCol} | others)`;
+  const yLabel    = isRaw ? yCol : `e(${yCol} | others)`;
 
   return (
-    <InlinePlotShell title={`Partial: ${yCol} ~ ${xCol} | others`} svgId={svgId} filename={`partial_${xCol.replace(/[^a-z0-9]/gi,"-")}${svgIdSuffix}.svg`}>
+    <InlinePlotShell title={plotTitle} svgId={svgId} filename={`${isRaw ? "fit" : "partial"}_${slug}${svgIdSuffix}.svg`}>
     <div style={{ padding: "0.5rem", background: C.bg, overflowX: "auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
       <button
         onClick={() => setShowSE(v => !v)}
@@ -288,7 +310,7 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
 
         {/* title */}
         <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
-          Partial: {yCol} ~ {xCol} | others
+          {plotTitle}
         </text>
 
         {/* grid */}
@@ -302,8 +324,8 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
         ))}
 
         {/* zero lines */}
-        {xLo<0&&xHi>0&&<line x1={sx(0)} x2={sx(0)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />}
-        {yLo<0&&yHi>0&&<line x1={PAD.l} x2={PAD.l+iW} y1={sy(0)} y2={sy(0)} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3" />}
+        {xLo<0&&xHi>0&&<line x1={sx(0)} x2={sx(0)} y1={PAD.t} y2={PAD.t+iH} stroke={C.textMuted} strokeWidth={1.6} strokeDasharray="7 4" />}
+        {yLo<0&&yHi>0&&<line x1={PAD.l} x2={PAD.l+iW} y1={sy(0)} y2={sy(0)} stroke={C.textMuted} strokeWidth={1.6} strokeDasharray="7 4" />}
 
         {/* SE band */}
         {showSE && Sxx > 0 && (
@@ -354,11 +376,11 @@ export function PartialPlot({ rows, yCol, xCol, otherX, beta_i, pVal_i, runOLS, 
         <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} />
 
         <text x={PAD.l+iW/2} y={H-4} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
-          e({xCol} | others)
+          {xLabel}
         </text>
         <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`}
           textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
-          e({yCol} | others)
+          {yLabel}
         </text>
       </svg>
     </div>
@@ -1857,8 +1879,8 @@ export function EndogeneityPlot({ residFirst, residSecond, endVar = "X_endog", s
         <text x={PAD.l+iW/2} y={16} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>Endogeneity check — first vs second stage residuals</text>
         {xTicks.map((t,i)=><line key={`gx${i}`} x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4}/>)}
         {yTicks.map((t,i)=><line key={`gy${i}`} x1={PAD.l} x2={PAD.l+iW} y1={sy(t)} y2={sy(t)} stroke={C.border} strokeWidth={1} strokeDasharray="3 3" opacity={0.4}/>)}
-        {xLo<0&&xHi>0&&<line x1={sx(0)} x2={sx(0)} y1={PAD.t} y2={PAD.t+iH} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3"/>}
-        {yLo<0&&yHi>0&&<line x1={PAD.l} x2={PAD.l+iW} y1={sy(0)} y2={sy(0)} stroke={C.border2} strokeWidth={1} strokeDasharray="4 3"/>}
+        {xLo<0&&xHi>0&&<line x1={sx(0)} x2={sx(0)} y1={PAD.t} y2={PAD.t+iH} stroke={C.textMuted} strokeWidth={1.6} strokeDasharray="7 4"/>}
+        {yLo<0&&yHi>0&&<line x1={PAD.l} x2={PAD.l+iW} y1={sy(0)} y2={sy(0)} stroke={C.textMuted} strokeWidth={1.6} strokeDasharray="7 4"/>}
         {pts.map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={2.2} fill={hasCorr?C.red:C.blue} opacity={0.4}/>)}
         <line x1={sx(xLo)} y1={sy(slope*xLo+intcp)} x2={sx(xHi)} y2={sy(slope*xHi+intcp)} stroke={lColor} strokeWidth={1.8} opacity={0.85}/>
         <rect x={PAD.l+6} y={PAD.t+4} width={110} height={22} fill={C.surface} stroke={lColor+"40"} rx={3}/>

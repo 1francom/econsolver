@@ -848,6 +848,7 @@ function transpileModel(model) {
     cohortCol, periodCol, controlMode, refPeriod,
     interactionTerms = [], xVarsRaw = null, wVarsRaw = null,
     seType = "classical", clusterVar = null, clusterVar2 = null,
+    noIntercept = false,
   } = model;
 
   // SE the user actually selected — emitted instead of a hardcoded "HC1".
@@ -868,13 +869,17 @@ function transpileModel(model) {
   const fmtR  = v => fvSet.has(v) ? `factor(${rName(v)})` : rName(v);
 
   const y    = rName(yVar);
-  const xStr = buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
+  // `0 +` suppresses the intercept (regression through the origin). Only OLS
+  // exposes this; every other branch keeps `xStr` untouched.
+  const xStr = (noIntercept && type === "OLS" ? "0 + " : "")
+    + buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
 
   switch (type) {
 
     case "OLS":
       return [
         `# ── OLS ──────────────────────────────────────────────────────────────`,
+        ...(noIntercept ? [`# Regression through the origin — no intercept estimated.`] : []),
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
         ...rHC23Lines(vc.hcExact, `${y} ~ ${xStr}`),

@@ -481,6 +481,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [xVars,      setXVars]      = useState([]);
   const [wVars,      setWVars]      = useState([]);
   const [interactionTerms, setInteractionTerms] = useState([]);
+  // Regression through the origin (R: `y ~ 0 + x`, Stata: `regress, noconstant`).
+  // OLS only — the panel/IV engines build their own design matrices.
+  const [noIntercept, setNoIntercept] = useState(false);
   const [zVars,      setZVars]      = useState([]);
   const [postVar,    setPostVar]    = useState([]);
   const [treatVar,   setTreatVar]   = useState([]);
@@ -817,7 +820,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     const dispatch = dispatchEstimation(dataRows, {
       yVar, xVars, wVars, factorVars,
       interactionTerms,
-      model, family, weightVar, seOpts, seType, panel,
+      model, family, weightVar, seOpts, seType, panel, noIntercept,
       zVars, postVar, treatVar,
       runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
       treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost,
@@ -835,7 +838,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     // seType/clusterVar are captured PER MODEL at estimation time so each pinned
     // model exports with the SE it was actually run with (not the current global
     // selector). Without this, pinned models silently default to classical.
-    const specExtras = { factorVars: [...factorVars], interactionTerms, xVarsRaw: [...xVars], wVarsRaw: [...wVars], filename: cleanedData?.filename ?? null, seType, clusterVar, clusterVar2 };
+    const specExtras = { factorVars: [...factorVars], interactionTerms, xVarsRaw: [...xVars], wVarsRaw: [...wVars], filename: cleanedData?.filename ?? null, seType, clusterVar, clusterVar2, noIntercept };
     if (dispatch?.result?.spec)      Object.assign(dispatch.result.spec,      specExtras);
     if (dispatch?.result?.fe?.spec)  Object.assign(dispatch.result.fe.spec,   specExtras);
     if (dispatch?.result?.fd?.spec)  Object.assign(dispatch.result.fd.spec,   specExtras);
@@ -844,7 +847,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
     if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
     return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, noIntercept, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── DuckDB full-table pull ────────────────────────────────────────────────
   // For DuckDB-backed datasets `rows` is only a 500-row preview — every JS
@@ -965,6 +968,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         seType:        seTypeNorm,
         hasWeights:    !!weightVar[0],
         weightCol:     weightVar[0] || null,
+        noIntercept,
         hasFactors:    factorVars.size > 0,
         clusterVar:    clusterVar ?? null,
         clusterVar2:   clusterVar2 ?? null,
@@ -2086,6 +2090,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             xVars={xVars}         setXVars={setXVars}
             wVars={wVars}         setWVars={setWVars}
             zVars={zVars}         setZVars={setZVars}
+            noIntercept={noIntercept} setNoIntercept={setNoIntercept}
             treatVar={treatVar}   setTreatVar={setTreatVar}
             postVar={postVar}     setPostVar={setPostVar}
             runningVar={runningVar} setRunningVar={setRunningVar}
@@ -2602,6 +2607,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                           otherX={resultRegressors.filter(x => x !== xc)}
                           beta_i={idx >= 0 ? r.beta[idx] : null}
                           pVal_i={idx >= 0 ? r.pVals[idx] : null}
+                          intercept_i={r.varNames?.[0] === "(Intercept)" ? r.beta[0] : null}
+                          noIntercept={!!r.spec?.noIntercept}
                           runOLS={runOLS}
                           svgIdSuffix={`-${i}`}
                         />,

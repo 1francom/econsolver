@@ -61,6 +61,9 @@ function buildScript(tab, result, allDatasets = {}) {
       seType:            spec.seType            ?? "classical",
       clusterVar:        spec.clusterVar        ?? null,
       clusterVar2:       spec.clusterVar2       ?? null,
+      // Regression through the origin — must be forwarded or the exported script
+      // silently re-adds the intercept the platform dropped.
+      noIntercept:       spec.noIntercept       ?? false,
     },
   };
 
