@@ -487,3 +487,112 @@
 
 - [12:37] · Calculate
   Allow plotting constants in the graph (e.g. draw a horizontal line for a constant value alongside function curves)
+
+---
+
+## 2026-07-05 batch
+
+### Bugs
+
+- [12:00] · Clean
+  Share Project does not work, it violates some security row level
+
+- [13:43] · Clean
+  Replication code for CS DiD 2021 does not work
+
+- [14:16] · General
+  Adjust the size of LaTeX tables when the number of columns increases
+
+- [14:19] · Explore
+  Replication codes of the plots must have the lines to load datasets as well
+
+### Features
+
+- [12:39] · General
+  Add plots with 3 axis
+
+---
+
+## 2026-07-06 batch
+
+### Bugs
+
+- [14:50] · Model
+  Add vector for running more than 1 hypothesis and save them to replicate in R
+
+---
+
+## 2026-07-09 batch
+
+### Bugs
+
+- [11:12] · Explore
+  Add labels for the Time series plot, title, axis, etc.
+
+- [11:19] · Model
+  Add options for fixed effects, not just entity and time, but also variables like country, state, sector must be allowed to be FE, every categorical variable
+
+- [11:20] · Model
+  Add also FE with interactions
+
+- [11:23] · Model
+  Add direct elasticity interpretation
+
+### Features
+
+- [13:10] · Model
+  Add a variable searcher in the variable slider, so if there are a large amount users can type and find them faster
+
+---
+
+## 2026-07-11 batch
+
+### Features
+
+- [12:12] · Explore
+  Add more labels in tables or boxes when plotting by color
+
+---
+
+## 2026-07-13 batch
+
+### Bugs
+
+- [13:53] · General
+  Shared projects can't be opened, this error appears: "Share files could not be downloaded. Your account email must exactly match the address the share was sent to. If it does, ask the owner to revoke and re-share."
+
+---
+
+## 2026-07-17 batch
+
+### Bugs
+
+- [07:50] · Calculate
+  Stata workbench doesn't work completely
+
+- [09:00] · General
+  Guide tour must be updated
+
+- [11:52] · Explore
+  Basic math operations cannot be executed in group and summarise, like ATE by taking the difference in means between treatment and control group
+
+- [12:05] · Model
+  Add chi-square for linearhypothesis
+
+- ~~[12:16] · Model
+  HC2 is not replicated in the code, there is a bug — the generated R uses `vcov = "hetero"` (which is HC1) instead of `sandwich::vcovHC(fit, "HC2")`:
+  `fit <- fixest::feols(post_score ~ treatment + pre_score + covariate1 + covariate2, data = df, vcov = "hetero")`~~ ✓ code-complete 2026-07-18 — HC2/HC3 now emit an `lm()`/`AER::ivreg()` refit + `sandwich::vcovHC` in R (exact), `vce(hc2)`/`vce(hc3)` in Stata (native), and were already correct in Python. Also fixed in the same pass: HAC bandwidth in Python (was `maxlags=1`, now Litux's `floor(4*(n/100)^(2/9))`), silent fallbacks for clustered/two-way/HAC now emit warnings, and `seType` is now threaded into the multi-model and per-subset script generators (they previously always emitted classical SE). Browser validation pending Franco.
+
+- [12:28] · General
+  Create groups for pinned models, plots, and maps, so not everything is compared at the same time and users can group them by their criteria
+
+- [13:05] · Clean
+  Save progress of uncompleted work in transformation subsections — e.g. writing a case_when, going back to Clean to see variable names, and coming back to case_when to continue writing the cases
+
+- [13:28] · Data
+  Add arrange functions in the data viewer
+
+### Features
+
+- [13:14] · Clean
+  Add an option to click on one pipeline step and go to the corresponding subsection automatically, so users can easily modify a step

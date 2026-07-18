@@ -894,6 +894,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         seType:      spec.seType ?? model.seType ?? "classical",
         clusterVar:  spec.clusterVar  ?? null,
         clusterVar2: spec.clusterVar2 ?? null,
+        noIntercept: spec.noIntercept ?? false,
       },
     };
     try {

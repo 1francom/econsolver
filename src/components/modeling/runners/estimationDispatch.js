@@ -22,7 +22,7 @@ export function dispatchEstimation(dataRows, ctx) {
   const {
     yVar, xVars, wVars, factorVars,
     interactionTerms = [],
-    model, family, weightVar, seOpts, seType, panel,
+    model, family, weightVar, seOpts, seType, panel, noIntercept = false,
     zVars, postVar, treatVar,
     runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
     treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost,
@@ -97,9 +97,9 @@ export function dispatchEstimation(dataRows, ctx) {
 
     if (effModel === "OLS") {
       if (!allX.length) return { error: "Select at least one regressor." };
-      const res = runOLS(dataRows, y, allX, seOpts);
+      const res = runOLS(dataRows, y, allX, seOpts, { noIntercept });
       if (!res) return { error: diagnoseFit(dataRows, y, allX, null) };
-      return { result: wrapResult("OLS", res, { yVar: y, xVars: expX, wVars: expW, weightCol: null }), panelFE: null, panelFD: null };
+      return { result: wrapResult("OLS", res, { yVar: y, xVars: expX, wVars: expW, weightCol: null, noIntercept }), panelFE: null, panelFD: null };
 
     } else if (effModel === "FE") {
       if (!allX.length) return { error: "Select at least one regressor." };

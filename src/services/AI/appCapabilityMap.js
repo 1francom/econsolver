@@ -57,7 +57,7 @@ export const APP_CAPABILITY_MAP = {
 
 // Full app map: curated shell + auto-derived pipeline operations (never drifts).
 export function serializeCapabilityMap() {
-  const lines = ["ECON STUDIO — WHERE TO DO THINGS (guide the user to the right place):"];
+  const lines = ["Litux — WHERE TO DO THINGS (guide the user to the right place):"];
   for (const [tab, info] of Object.entries(APP_CAPABILITY_MAP)) {
     lines.push(`\n[${tab}] ${info.purpose}`);
     for (const [sub, desc] of Object.entries(info.subtabs || {})) {

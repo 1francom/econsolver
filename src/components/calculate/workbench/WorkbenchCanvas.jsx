@@ -15,7 +15,7 @@ function mixHex(a, b, t) {
 
 // Draws plot curves + f′ overlays + integral shading + markers for a session.
 // Props: equations[], results { [eqId]: { [op]: contract } }, family, conditions, view, height
-export default function WorkbenchCanvas({ equations, results, family, conditions, view, height = 460 }) {
+export default function WorkbenchCanvas({ equations, results, family, conditions, view, height = 460, hideBase = false }) {
   const { C, T } = useTheme();
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
@@ -28,7 +28,7 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
     draw();
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [equations, results, family, conditions, view, height, C]);
+  }, [equations, results, family, conditions, view, height, hideBase, C]);
 
   function draw() {
     const canvas = canvasRef.current, wrap = wrapRef.current;
@@ -227,8 +227,11 @@ export default function WorkbenchCanvas({ equations, results, family, conditions
         }
       }
 
-      // Plot curve.
-      if (r.plot?.numeric?.points?.length) {
+      // Plot curve. Suppressed when the comparative-statics "show base curve f(x)"
+      // toggle is off, so the swept family reads without the bold primary curve
+      // overlapping it. The base points still fed the Y-range above, so hiding the
+      // curve doesn't rescale the axes.
+      if (!hideBase && r.plot?.numeric?.points?.length) {
         ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.beginPath();
         r.plot.numeric.points.forEach((p, k) => { const X = sx(p.x), Y = sy(p.y); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
         ctx.stroke();

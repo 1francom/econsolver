@@ -57,7 +57,9 @@ function isNAReal(hi, lo) {
 }
 
 // ── Reader ─────────────────────────────────────────────────────────────────────
-class XDRReader {
+// Exported for rdata.js, which reads the SAME serialization stream but whose
+// root object is a pairlist of name→value bindings rather than a single object.
+export class XDRReader {
   constructor(buffer) {
     this.dv  = new DataView(buffer);
     this.pos = 0;
@@ -125,9 +127,21 @@ function readObject(r) {
   if (type === 251) return null;   // MISSINGARG_SXP
   if (type === 250) return null;   // BASENAMESPACE_SXP
 
-  // Allocate slot in reference table before reading children
-  const refIdx = r.refs.length;
-  r.refs.push(null);
+  // Allocate slot in reference table before reading children.
+  //
+  // ONLY symbols, environments and namespaces/packages go in R's reference
+  // table (see WriteItem in R's serialize.c — AddToRefTable is called for
+  // SYMSXP and ENVSXP only). Reserving a slot for every SEXP, as this used to
+  // do, drifts our indices away from R's the moment any other object is
+  // written, so a later REFSXP resolves to the wrong node. It went unnoticed
+  // because a single-object .rds emits each symbol in full the first time and
+  // never needs a back-reference; the drift only bites from the SECOND
+  // data.frame in a workspace, which reuses the "names"/"class"/"row.names"
+  // symbols via REFSXP and silently lost its column names to the V1 fallback.
+  const isRefType = type === SYMSXP || type === 4 /* ENVSXP */
+                 || type === 239 /* NAMESPACESXP */ || type === 240 /* PACKAGESXP */;
+  const refIdx = isRefType ? r.refs.length : -1;
+  if (isRefType) r.refs.push(null);
 
   let obj;
 
@@ -306,7 +320,7 @@ function readObject(r) {
         "Only data.frame and named numeric/character vectors are supported.");
   }
 
-  r.refs[refIdx] = obj;
+  if (refIdx >= 0) r.refs[refIdx] = obj;
   return obj;
   } finally { _depth--; }
 }
@@ -348,9 +362,16 @@ function strsxpStrings(obj) {
   return obj.values.map(v => (v == null ? "" : String(v)));
 }
 
-/** Extract JS array from any vector sxp, handling factors, POSIXct, and geometry */
+/** R's Date is DAYS since 1970-01-01; POSIXct is SECONDS. Both need converting
+ *  or the column loads as a meaningless epoch offset (18262, not "2020-01-01"). */
+const DAY_MS = 86400000;
+const daysToISO = v => new Date(Math.round(v * DAY_MS)).toISOString().slice(0, 10);
+
+/** Extract JS array from any vector sxp, handling factors, Date, POSIXct, and geometry */
 function vectorValues(obj) {
   if (!obj) return [];
+  const classes = obj.attrs ? strsxpStrings(attrsToMap(obj.attrs)["class"]) : [];
+
   if (obj.sxp === INTSXP) {
     // Factor: INTSXP with "levels" STRSXP attribute → return level strings
     if (obj.attrs) {
@@ -361,20 +382,18 @@ function vectorValues(obj) {
         return obj.values.map(v => v == null ? null : (lvlArr[v - 1] ?? null));
       }
     }
+    // Date is usually REALSXP but R will store whole days as INTSXP too.
+    if (classes.includes("Date")) return obj.values.map(v => v == null ? null : daysToISO(v));
     return obj.values;
   }
   if (obj.sxp === REALSXP) {
+    if (classes.includes("Date")) {
+      return obj.values.map(v => v == null ? null : daysToISO(v));
+    }
     // POSIXct: REALSXP with class "POSIXct" → seconds-since-epoch to ISO string
-    if (obj.attrs) {
-      const am = attrsToMap(obj.attrs);
-      const cls = am["class"];
-      if (cls) {
-        const clsArr = strsxpStrings(cls);
-        if (clsArr.includes("POSIXct")) {
-          return obj.values.map(v => v == null ? null :
-            new Date(v * 1000).toISOString().slice(0, 19).replace("T", " "));
-        }
-      }
+    if (classes.includes("POSIXct")) {
+      return obj.values.map(v => v == null ? null :
+        new Date(v * 1000).toISOString().slice(0, 19).replace("T", " "));
     }
     return obj.values;
   }
@@ -411,7 +430,7 @@ function vectorValues(obj) {
 }
 
 // ── Gzip decompression ─────────────────────────────────────────────────────────
-async function decompressGzip(arrayBuffer) {
+export async function decompressGzip(arrayBuffer) {
   const ds = new DecompressionStream("gzip");
   const writer = ds.writable.getWriter();
   writer.write(new Uint8Array(arrayBuffer));
@@ -428,6 +447,87 @@ async function decompressGzip(arrayBuffer) {
   let off = 0;
   for (const c of chunks) { out.set(c, off); off += c.length; }
   return out.buffer;
+}
+
+// ── Serialization stream header ────────────────────────────────────────────────
+/**
+ * Read the "X\n" + version header at `startPos` and return the root object.
+ * Shared by parseRDS (startPos = 0) and parseRData (startPos = 5, after the
+ * "RDX2\n" / "RDX3\n" workspace magic). Resets the module-level depth guard.
+ * @returns {{ root: any, reader: XDRReader, version: number }}
+ */
+export function readSerializedStream(arrayBuffer, startPos = 0) {
+  _depth = 0;
+  const r = new XDRReader(arrayBuffer);
+  r.pos = startPos + 2; // skip "X\n"
+
+  const version = r.readUint32();
+  r.readUint32();                  // writer R version
+  r.readUint32();                  // min reader R version
+
+  if (version < 2 || version > 3) {
+    throw new Error(`R serialization: unsupported version ${version}. Expected 2 or 3.`);
+  }
+  // Version 3 adds a UTF-8 locale string before the root object
+  if (version === 3) {
+    const nativeEncLen = r.readInt32();
+    if (nativeEncLen > 0) r.readString(nativeEncLen);
+  }
+  return { root: readObject(r), reader: r, version };
+}
+
+// ── SEXP → table conversion ────────────────────────────────────────────────────
+/** Build { headers, rows } from parallel column arrays. */
+function buildTable(colNames, colArrays) {
+  const nRow = colArrays.length ? colArrays[0].length : 0;
+  const rows = [];
+  for (let i = 0; i < nRow; i++) {
+    const row = {};
+    colNames.forEach((h, j) => { row[h] = colArrays[j][i] ?? null; });
+    rows.push(row);
+  }
+  return { headers: colNames, rows };
+}
+
+/**
+ * Convert a parsed R object into { headers, rows }. Handles data.frame /
+ * named list (VECSXP) and bare vectors. Throws on anything else.
+ * Exported so rdata.js can run it per binding in a workspace.
+ */
+export function sexpToTable(root) {
+  // Case 1: VECSXP (data.frame or named list)
+  if (root && root.sxp === VECSXP) {
+    const attrMap  = root.attrs ? attrsToMap(root.attrs) : {};
+    const names    = strsxpStrings(attrMap["names"]);
+
+    if (!names.length) {
+      // No names attr — generate V1, V2, … so data is still usable.
+      // This happens for some sf/tibble objects where names are stored via
+      // a reference or non-standard attribute order.
+      if (!root.elements.length) {
+        throw new Error("VECSXP has no 'names' attribute and is empty.");
+      }
+      const fallback = root.elements.map((_, i) => `V${i + 1}`);
+      return buildTable(fallback, root.elements.map(el => vectorValues(el)));
+    }
+    return buildTable(names, root.elements.map(el => vectorValues(el)));
+  }
+
+  // Case 2: Single vector (REALSXP / INTSXP / STRSXP), named or not
+  if (root && (root.sxp === REALSXP || root.sxp === INTSXP || root.sxp === STRSXP)) {
+    const attrMap  = root.attrs ? attrsToMap(root.attrs) : {};
+    const namesSxp = attrMap["names"];
+    if (namesSxp) {
+      // Named vector → one row per element, two columns: name + value
+      const names  = strsxpStrings(namesSxp);
+      const values = vectorValues(root);
+      return { headers: ["name", "value"], rows: names.map((n, i) => ({ name: n, value: values[i] ?? null })) };
+    }
+    // Un-named vector → single column "value"
+    return { headers: ["value"], rows: vectorValues(root).map(v => ({ value: v })) };
+  }
+
+  throw new Error("unsupported R object type — expected a data.frame, named list, or vector.");
 }
 
 // ── Main export ────────────────────────────────────────────────────────────────
@@ -460,81 +560,15 @@ export async function parseRDS(arrayBuffer) {
     throw new Error(`RDS: Unrecognized file magic 0x${magic0.toString(16)} 0x${magic1.toString(16)}. Is this an .rds file?`);
   }
 
-  const r = new XDRReader(arrayBuffer);
-  r.pos = 2; // skip "X\n"
+  const { root } = readSerializedStream(arrayBuffer, 0);
 
-  const version = r.readUint32();  // bytes 2–5
-  r.readUint32();                  // writer R version (bytes 6–9)
-  r.readUint32();                  // min R version (bytes 10–13)
-
-  if (version < 2 || version > 3) {
-    throw new Error(`RDS: Unsupported serialization version ${version}. Expected 2 or 3.`);
+  try {
+    return sexpToTable(root);
+  } catch {
+    throw new Error(
+      "RDS: Unsupported R object type at root. " +
+      "parseRDS handles data.frame, named list, and numeric/character vectors. " +
+      "Save your data as a data.frame with saveRDS(df, 'file.rds', compress=FALSE, version=2)."
+    );
   }
-
-  // Version 3 adds a UTF-8 locale string
-  if (version === 3) {
-    const nativeEncLen = r.readInt32();
-    if (nativeEncLen > 0) r.readString(nativeEncLen);
-  }
-
-  const root = readObject(r);
-
-  // ── Try to convert to { headers, rows } ────────────────────────────────────
-
-  // Helper: build rows from a column-keyed object
-  function buildTable(colNames, colArrays) {
-    const nRow = colArrays.length ? colArrays[0].length : 0;
-    const rows = [];
-    for (let i = 0; i < nRow; i++) {
-      const row = {};
-      colNames.forEach((h, j) => { row[h] = colArrays[j][i] ?? null; });
-      rows.push(row);
-    }
-    return { headers: colNames, rows };
-  }
-
-  // Case 1: VECSXP (data.frame or named list)
-  if (root && root.sxp === VECSXP) {
-    const attrMap = root.attrs ? attrsToMap(root.attrs) : {};
-    const namesSxp = attrMap["names"];
-    const names    = strsxpStrings(namesSxp);
-
-    if (!names.length) {
-      // No names attr — generate V1, V2, … so data is still usable.
-      // This happens for some sf/tibble objects where names are stored via
-      // a reference or non-standard attribute order.
-      if (!root.elements.length) {
-        throw new Error("RDS: VECSXP has no 'names' attribute and is empty.");
-      }
-      const fallback = root.elements.map((_, i) => `V${i + 1}`);
-      const colArrays = root.elements.map(el => vectorValues(el));
-      return buildTable(fallback, colArrays);
-    }
-
-    const colArrays = root.elements.map(el => vectorValues(el));
-    return buildTable(names, colArrays);
-  }
-
-  // Case 2: Single named vector (REALSXP / INTSXP / STRSXP with names attr)
-  if (root && (root.sxp === REALSXP || root.sxp === INTSXP || root.sxp === STRSXP)) {
-    const attrMap  = root.attrs ? attrsToMap(root.attrs) : {};
-    const namesSxp = attrMap["names"];
-    if (namesSxp) {
-      // Named vector → one row per element, two columns: name + value
-      const names  = strsxpStrings(namesSxp);
-      const values = vectorValues(root);
-      const rows   = names.map((n, i) => ({ name: n, value: values[i] ?? null }));
-      return { headers: ["name", "value"], rows };
-    }
-    // Un-named vector → single column "value"
-    const values = vectorValues(root);
-    const rows   = values.map(v => ({ value: v }));
-    return { headers: ["value"], rows };
-  }
-
-  throw new Error(
-    "RDS: Unsupported R object type at root. " +
-    "parseRDS handles data.frame, named list, and numeric/character vectors. " +
-    "Save your data as a data.frame with saveRDS(df, 'file.rds', compress=FALSE, version=2)."
-  );
 }

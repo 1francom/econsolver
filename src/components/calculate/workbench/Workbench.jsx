@@ -261,7 +261,8 @@ export default function Workbench({ pid }) {
         <div data-wb-canvas>
           <ViewControls view={active.view} onChange={onViewChange} />
           <WorkbenchCanvas equations={active.equations} results={results} family={family}
-            conditions={conditionResults} view={active.view} height={active.view.height} />
+            conditions={conditionResults} view={active.view} height={active.view.height}
+            hideBase={active.sweep?.showBase === false && !!family?.curves?.length} />
           {locus && <LocusCanvas locus={locus} />}
         </div>
       </div>

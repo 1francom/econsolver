@@ -109,15 +109,26 @@ export function stars(p) {
 // Returns { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat,
 //           Fstat, Fpval, varNames }
 // seOpts (optional): { seType, clusterVar, clusterVar2, timeVar, maxLag }
-export function runOLS(rows, yCol, xCols, seOpts = {}) {
+// opts   (optional): { noIntercept } — regression through the origin (R's
+//   `y ~ 0 + x`, Stata's `regress, noconstant`). When set, the constant column
+//   is dropped from X, k = xCols.length, and R²/F switch to the UNCENTERED
+//   convention (TSS = Σy² instead of Σ(y−ȳ)²) — this is what R and Stata report
+//   for no-intercept models. Reporting a centered R² here can exceed 1 or go
+//   negative, so the convention must switch with the design matrix.
+export function runOLS(rows, yCol, xCols, seOpts = {}, opts = {}) {
+  const noIntercept = !!opts.noIntercept;
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     xCols.every(c => typeof r[c] === "number" && isFinite(r[c]))
   );
-  if (valid.length < xCols.length + 2) return null;
+  const k = xCols.length + (noIntercept ? 0 : 1); // number of estimated parameters
+  if (!k) return null;
+  if (valid.length < k + 1) return null;
   const n = valid.length;
   const Y = valid.map(r => r[yCol]);
-  const X = valid.map(r => [1, ...xCols.map(c => r[c])]);
+  const X = valid.map(r => noIntercept
+    ? xCols.map(c => r[c])
+    : [1, ...xCols.map(c => r[c])]);
   const Xt = transpose(X);
   const XtXinv = matInv(matMul(Xt, X));
   if (!XtXinv) return null;
@@ -125,13 +136,21 @@ export function runOLS(rows, yCol, xCols, seOpts = {}) {
   const Yhat = X.map(row => row.reduce((s, v, i) => s + v * beta[i], 0));
   const resid = Y.map((y, i) => y - Yhat[i]);
   const SSR = resid.reduce((s, e) => s + e * e, 0);
-  const k = xCols.length + 1; // number of parameters (incl. intercept)
   const df = n - k;
   const s2 = SSR / Math.max(1, df);
   const Ym = Y.reduce((a, b) => a + b, 0) / n;
-  const SST = Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
-  const R2 = 1 - SSR / SST;
-  const adjR2 = 1 - (1 - R2) * (n - 1) / Math.max(1, df);
+  // Uncentered TSS when there is no intercept — matches R's summary.lm and
+  // Stata's `regress, noconstant`.
+  const SST = noIntercept
+    ? Y.reduce((s, y) => s + y * y, 0)
+    : Y.reduce((s, y) => s + (y - Ym) ** 2, 0);
+  const R2 = SST > 0 ? 1 - SSR / SST : null;
+  // adj-R² loses the intercept's df: R divides by (n − k) over (n) rather than
+  // (n − 1) in the no-intercept case.
+  const adjR2 = R2 == null ? null
+    : noIntercept
+      ? 1 - (1 - R2) * n / Math.max(1, df)
+      : 1 - (1 - R2) * (n - 1) / Math.max(1, df);
 
   // Robust SE — falls back to classical when seType is "classical" or absent
   let se = XtXinv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
@@ -140,10 +159,13 @@ export function runOLS(rows, yCol, xCols, seOpts = {}) {
 
   const tStats = beta.map((b, i) => b / se[i]);
   const pVals = tStats.map(t => pValue(t, df));
-  const Fstat = ((SST - SSR) / xCols.length) / s2;
-  const Fpval = fCDF(Fstat, xCols.length, df);
-  const varNames = ["(Intercept)", ...xCols];
-  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames, XtXinv };
+  // With no intercept every coefficient is under test, so dfNum = k (not k − 1),
+  // and the F numerator uses the same uncentered TSS as R² above.
+  const dfNum = noIntercept ? k : xCols.length;
+  const Fstat = dfNum > 0 ? ((SST - SSR) / dfNum) / s2 : null;
+  const Fpval = Fstat == null ? null : fCDF(Fstat, dfNum, df);
+  const varNames = noIntercept ? [...xCols] : ["(Intercept)", ...xCols];
+  return { beta, se, tStats, pVals, R2, adjR2, n, df, SSR, s2, resid, Yhat, Fstat, Fpval, varNames, XtXinv, noIntercept };
 }
 
 // ─── OLS FROM SUFFICIENT STATISTICS ───────────────────────────────────────────

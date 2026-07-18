@@ -62,6 +62,14 @@ export default function SweepPanel({ detectedSymbols, params, sweep, onChange })
             show family of curves
           </label>
 
+          {/* Hide the base f(x) so the swept family isn't visually masked by the
+              bold primary curve running through it. */}
+          <label style={{ ...row(C, T), marginTop: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={sw.showBase !== false}
+              onChange={(e) => onChange({ showBase: e.target.checked })} style={{ accentColor: C.teal }} />
+            show base curve f(x)
+          </label>
+
           <div style={{ ...row(C, T), marginTop: 6, gap: 10 }}>
             <span>optimum locus</span>
             {[["off", "off"], ["argmax", "x*"], ["value", "f(x*)"]].map(([val, label]) => (
