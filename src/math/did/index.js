@@ -4,3 +4,4 @@
 
 export { compute2x2 } from "./drdid.js";
 export { enumerateCells, controlSet, aggregate } from "./staggeredDiD.js";
+export { runBaconDecomposition, checkBaconIdentity, BACON_TYPES } from "./baconDecomp.js";

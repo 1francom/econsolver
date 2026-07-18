@@ -26,6 +26,10 @@ src/
 │   ├── SyntheticControlEngine.js   ← Frank-Wolfe synthetic control, placebo inference
 │   ├── SpatialEngine.js            ← haversine/euclidean, buffer assign, grid assign (rect+H3), spatial join, nearest-neighbor
 │   ├── timeSeries.js               ← time series utilities
+│   ├── did/
+│   │   ├── drdid.js                ← Callaway-Sant'Anna doubly-robust ATT(g,t)
+│   │   ├── staggeredDiD.js         ← cell enumeration, control sets, aggregation
+│   │   └── baconDecomp.js          ← Goodman-Bacon (2021) 2×2 decomposition + identity check
 │   ├── ModelHypothesis.js          ← post-estimation coefficient/effect hypothesis tests + R/Python/Stata snippet generator
 │   ├── SampleTests.js              ← pre-model sample tests: one-sample mean t, variance χ², generic parameter t/z
 │   ├── EstimationResult.js         ← shared result type for all engines
@@ -123,7 +127,8 @@ src/
 │   │   ├── ResearchCoach.jsx     ← AI-driven research coaching suggestions
 │   │   ├── InferenceOptions.jsx  ← collapsible SE type selector (chips + cluster/lag inputs)
 │   │   ├── CodeEditor.jsx        ← collapsible replication code viewer/editor: R / Python / Stata tabs
-│   │   └── CoefficientTestPanel.jsx ← post-estimation hypothesis test on a pinned model's coefficients (below Predict from Model)
+│   │   ├── CoefficientTestPanel.jsx
+│   │   └── BaconPanel.jsx        ← Goodman-Bacon decomposition (collapsible, under TWFE result) ← post-estimation hypothesis test on a pinned model's coefficients (below Predict from Model)
 │   │
 │   ├── tabs/
 │   │   ├── CalculateTab.jsx      ← calculator tab; HintBox with calculator tips
@@ -252,17 +257,18 @@ Merge (6): `join` (`left, inner, right, full, semi, anti`), `append, bind_cols, 
 
 **DONE 2026-07-18 — `.RData` / `.rda` workspace loading.** `services/data/parsers/rdata.js`. A workspace is the same serialization stream as `.rds`, differing only in a 5-byte `RDX2\n`/`RDX3\n` magic and a root that is a **pairlist of name→value bindings** rather than one object — so `rds.js` was refactored (not duplicated) to export `XDRReader`, `readObject`, `decompressGzip`, plus two new shared helpers `readSerializedStream(buf, startPos)` and `sexpToTable(root)`; `parseRDS` now calls both. **This is the only parser that yields more than one dataset from one file**: it returns a `_multi` envelope that `parseFiles` and `handleLoadFile` fan out, one dataset per data.frame, named after the R object. Non-tabular bindings and **ragged named lists** are reported in `skipped` rather than dropped — `sexpToTable` sizes the table off the first column, so a ragged list would silently truncate. gzip is handled (R's `save()` default); bzip2/xz throw a "re-save with compress=gzip" message. `loadOpts.objectName` is recorded so exports emit `load(f); df <- <obj>` (R) and `pyreadr.read_r(f)["<obj>"]` (Python); Stata gets a documented no-support comment. Validated against 4 hand-built fixtures (multi-object, gzipped, RDX3-with-locale, ragged) plus a 3-case `.rds` regression check — no R on this machine, so fixtures are byte-constructed from the format spec, NOT R-generated. Unblocks PS5.R, which previously could not even open its data file.
 
+**DONE 2026-07-18 — Goodman-Bacon decomposition.** `src/math/did/baconDecomp.js` + `components/modeling/BaconPanel.jsx`, mounted under the TWFE DiD result. Splits the TWFE coefficient into every 2×2 it averages, with Goodman-Bacon (2021) Theorem-1 weights, and reports how much weight sits on **Later vs Earlier Treated** — the comparisons that use already-treated units as controls. Deliberately a **panel, not an estimator**: it estimates nothing new, it explains the number already on screen, and takes the same inputs as the TWFE spec. Does NOT reuse `did/drdid.js`'s `compute2x2` — that is Callaway-Sant'Anna's doubly-robust ATT(g,t); Bacon's 2×2s are plain means-based DiDs on time-window subsamples. **Validated by identity, not by R**: the decomposition is exact, so `checkBaconIdentity()` asserts Σw = 1 and Σw·β = β_TWFE (independently re-estimated via `runFEMulti`). 5 fixtures pass at ≤1e-12 — homogeneous, PS6's heterogeneous case, no-never-treated, 3 cohorts × 5 periods, and always-treated-present — plus 4 guards (unbalanced, non-absorbing, non-binary, no treated units) that throw rather than return a number. **Scope is enforced, not assumed**: balanced + binary + absorbing + no covariates, matching `bacondecomp::bacon`'s base case; outside it the identity silently fails, so the guards are load-bearing. `V^D` is taken as the sum of weight numerators (making Σw = 1 exact) and cross-checked against the independently computed two-way-demeaned treatment variance. Panel carries its own R/Stata replication snippets (no maintained Python port exists — the Python button says so instead of emitting something that does not run). Reproduces PS6.R Q5: with TE_early_3 = 40 the Later-vs-Earlier 2×2 comes in at **−32** while every true effect is positive.
+
 **Open, ordered by cost/benefit:**
-1. **Goodman-Bacon decomposition** (`bacondecomp::bacon`) — nothing in repo. PS6.R Q5's central teaching point: the 2×2 weights and the weight-vs-estimate plot that show *why* TWFE breaks under heterogeneous effects. Medium.
-2. **Synthetic Control `special.predictors`** — predictors averaged over per-predictor time windows (`gdpcap` mean 1960–69, `sec.agriculture` odd years 1961–69, `popdens` at 1969 only), and `time.predictors.prior` separate from `time.optimize.ssr`. The engine averages over the whole pre-period; this *is* Abadie et al.'s Basque spec, so PS7.R Q6–Q9 can't be reproduced. Medium.
-3. **CR2/CR3 cluster-robust SE** (bias-reduced, `clubSandwich`-style) — `robustSE.js` has HC0–HC3, CGM cluster, Newey-West. PS1.R Q5 asks for `se_type = "CR2"` explicitly. Medium.
-4. **RDD: CCT MSE-optimal bandwidth + bias-corrected CI + `rddensity`** — only IK bandwidth and McCrary exist. PS3.R Q9c/Q11. Medium. (Kernel choice and polynomial order are already exposed in the UI — verified 2026-07-18, not a gap.)
-5. **Fixed-effect estimates extraction + join back to rows** (`fixef()`) — LSDV returns dummy coefficients but there is no way to write `worker_fe`/`firm_fe` back as columns. Blocks PS4.R Ex2. Medium.
-6. **Graph connected-components** (`igraph::components`) — absent. AKM is not identified without the largest connected set. PS4.R Ex2. High.
-7. **Matrix-algebra workspace** — `t()`, `%*%`, `solve()`, `rankMatrix()`, `det()`, `diag()`. The Calculate tab is scalar-only. PS2.Rmd is *entirely* explicit matrix algebra (X'X, its inverse, the vcov, manual t-stats) and is unreplicable end to end. Needs a new surface, not a pipeline step. High.
-8. **Staggered-panel DGP in Simulate** — the DGP builder emits iid variables, not a person×period panel with treatment cohorts and per-cohort effects. PS6.R Q1. Medium.
-9. **PlotBuilder `geom_tile` + `facet_wrap`** — PS4.R Q10 residual heatmap by FE quintile, Q11 three-scenario facets. Medium.
-10. **Bundled teaching datasets** (wooldridge `wage1`/`bwght`/`mroz`/`jtrain`/`kielmc`, `Synth::basque`) — 5 of the 6 notebooks open with `data("…")`, so an LMU student cannot start without sourcing CSVs themselves. Trivial technically, high go-to-market weight given institutional licensing is the GTM. Low.
+1. **Synthetic Control `special.predictors`** — predictors averaged over per-predictor time windows (`gdpcap` mean 1960–69, `sec.agriculture` odd years 1961–69, `popdens` at 1969 only), and `time.predictors.prior` separate from `time.optimize.ssr`. The engine averages over the whole pre-period; this *is* Abadie et al.'s Basque spec, so PS7.R Q6–Q9 can't be reproduced. Medium.
+2. **CR2/CR3 cluster-robust SE** (bias-reduced, `clubSandwich`-style) — `robustSE.js` has HC0–HC3, CGM cluster, Newey-West. PS1.R Q5 asks for `se_type = "CR2"` explicitly. Medium.
+3. **RDD: CCT MSE-optimal bandwidth + bias-corrected CI + `rddensity`** — only IK bandwidth and McCrary exist. PS3.R Q9c/Q11. Medium. (Kernel choice and polynomial order are already exposed in the UI — verified 2026-07-18, not a gap.)
+4. **Fixed-effect estimates extraction + join back to rows** (`fixef()`) — LSDV returns dummy coefficients but there is no way to write `worker_fe`/`firm_fe` back as columns. Blocks PS4.R Ex2. Medium.
+5. **Graph connected-components** (`igraph::components`) — absent. AKM is not identified without the largest connected set. PS4.R Ex2. High.
+6. **Matrix-algebra workspace** — `t()`, `%*%`, `solve()`, `rankMatrix()`, `det()`, `diag()`. The Calculate tab is scalar-only. PS2.Rmd is *entirely* explicit matrix algebra (X'X, its inverse, the vcov, manual t-stats) and is unreplicable end to end. Needs a new surface, not a pipeline step. High.
+7. **Staggered-panel DGP in Simulate** — the DGP builder emits iid variables, not a person×period panel with treatment cohorts and per-cohort effects. PS6.R Q1. Medium.
+8. **PlotBuilder `geom_tile` + `facet_wrap`** — PS4.R Q10 residual heatmap by FE quintile, Q11 three-scenario facets. Medium.
+9. **Bundled teaching datasets** (wooldridge `wage1`/`bwght`/`mroz`/`jtrain`/`kielmc`, `Synth::basque`) — 5 of the 6 notebooks open with `data("…")`, so an LMU student cannot start without sourcing CSVs themselves. Trivial technically, high go-to-market weight given institutional licensing is the GTM. Low.
 
 **Not gaps (checked 2026-07-18, do not re-add):** fitted/residual extraction to a column (`ExtractPanel.jsx` already does it); RDD kernel + polynomial order UI (`ModelConfiguration.jsx` `PolyOrderSection` + kernel chips); event-study reference period (PS5's `ref = 2014` and PS7's `ref = 1974` are both k = −1 relative to treatment, which `runEventStudyMulti` already omits by default — a configurable ref is only worth it for k = −2 robustness checks).
 
@@ -343,7 +349,7 @@ Fase 8 supplement (2026-05-21): the Fase 3a/3c robust-SE guards above are lifted
 
 1. **DuckDB as the data boundary.** Never pull the full Arrow result into JS objects. Query only the columns needed, filter/aggregate/sort/paginate inside DuckDB. Avoid `SELECT *` on large tables.
 
-2. **Parquet as primary format for large data.** Pipeline: CSV/TSV upload → convert to Parquet in DuckDB → all subsequent queries hit the cached Parquet. Already wired for `.parquet` uploads; extend to auto-convert large CSV on first load.
+1. **Parquet as primary format for large data.** Pipeline: CSV/TSV upload → convert to Parquet in DuckDB → all subsequent queries hit the cached Parquet. Already wired for `.parquet` uploads; extend to auto-convert large CSV on first load.
 
 3. **OPFS persistence.** Cache the DuckDB Parquet file in OPFS so re-opening the same project skips re-import. Load-once, query-many.
 

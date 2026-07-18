@@ -94,6 +94,7 @@ import { PlotSelector, YFittedPlot, PartialPlot, YXhatPlot, XvsXhatPlot, Endogen
 import { HintBox } from "./HelpSystem.jsx";
 import { ResidualVsFitted, QQPlot } from "../components/modeling/ResidualPlots.jsx";
 import DiagnosticsPanel    from "../components/modeling/DiagnosticsPanel.jsx";
+import BaconPanel          from "../components/modeling/BaconPanel.jsx";
 
 // ─── LOCAL DISPLAY PRIMITIVES & RESULT PANELS ─────────────────────────────────
 // Shared display atoms extracted to ./modeling/resultDisplay.jsx; per-estimator
@@ -3161,6 +3162,19 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${result.type.toLowerCase()}`} filename={`${result.type.toLowerCase()}_coefficients.svg`} /> },
                   ]}
                 />
+                {/* Goodman-Bacon: explains the TWFE number by splitting it into
+                    the 2x2s it averages. Needs staggered timing, so it is offered
+                    for TWFE only — a 2x2 DiD has nothing to decompose. */}
+                {result.type === "TWFE" && panel?.entityCol && panel?.timeCol && treatVar[0] && (
+                  <BaconPanel
+                    rows={rows}
+                    yCol={yVar[0]}
+                    unitCol={panel.entityCol}
+                    timeCol={panel.timeCol}
+                    treatCol={treatVar[0]}
+                    betaTWFE={r.att ?? (r.varNames?.indexOf(treatVar[0]) >= 0 ? r.beta[r.varNames.indexOf(treatVar[0])] : null)}
+                  />
+                )}
                 <ExportBar yVar={yVar[0]} results={r} model={result.type}
                   onReport={() => openReport({ ...r, modelLabel: result.type === "DiD" ? "DiD 2×2" : "TWFE DiD", yVar: yVar[0], xVars: [...wVars] })}
                   replicateConfig={{ ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: result.type, yVar: yVar[0], wVars,
