@@ -222,6 +222,11 @@ export async function parseFiles(fileList) {
   for (const g of groups) {
     try {
       const parsed = await g.parse();
+      // .RData workspaces expand into one entry per data.frame they contain.
+      if (parsed?._multi?.length) {
+        for (const m of parsed._multi) out.push({ filename: m.filename, parsed: m.parsed });
+        continue;
+      }
       if (parsed && parsed.rows?.length) out.push({ filename: g.filename, parsed });
       else out.push({ filename: g.filename, error: "No rows parsed." });
     } catch (e) {
@@ -366,6 +371,17 @@ async function validateFileMagic(file) {
     // Stata 13+ XML: starts with '<' (0x3C); legacy binary: version byte 108–121
     if (b[0] !== 0x3C && !(b[0] >= 108 && b[0] <= 121))
       throw new Error(`"${file.name}" is not a valid Stata .dta file — unrecognised file header.`);
+  } else if (ext === "rdata" || ext === "rda") {
+    // Workspace magic "RDX2\n"/"RDX3\n" (0x52 0x44 0x58), or a compression
+    // wrapper — gzip (1F 8B), bzip2 ("BZh"), xz (FD 37 7A 58). The parser gives
+    // the precise "re-save with compress=gzip" message for the last two.
+    const isRDataMagic = (b[0] === 0x52 && b[1] === 0x44 && b[2] === 0x58)
+                      || (b[0] === 0x1F && b[1] === 0x8B)
+                      || (b[0] === 0x42 && b[1] === 0x5A && b[2] === 0x68)
+                      || (b[0] === 0xFD && b[1] === 0x37 && b[2] === 0x7A && b[3] === 0x58)
+                      || (b[0] === 0x58 && b[1] === 0x0A); // bare .rds named .RData
+    if (!isRDataMagic)
+      throw new Error(`"${file.name}" is not a valid R workspace (.RData/.rda) — unrecognised header.`);
   } else if (ext === "rds") {
     // R serialisation: 'X\n' (XDR), 'A\n' (ASCII), 'B\n' (binary), or gzip (1F 8B) — default compress=TRUE
     const isRDSMagic = ((b[0] === 0x58 || b[0] === 0x41 || b[0] === 0x42) && b[1] === 0x0A)
@@ -420,6 +436,23 @@ async function parseFile(file) {
     const { parseRDS } = await import("./services/data/parsers/rds.js");
     const buf = await file.arrayBuffer();
     return withLoadOpts(await parseRDS(buf), { format: "rds" });
+  }
+  if (ext === "rdata" || ext === "rda") {
+    // A workspace can hold several data.frames, so this is the one parser that
+    // can yield MORE THAN ONE dataset from a single file. It returns a `_multi`
+    // envelope; parseFiles/handleLoadFile fan it out into separate datasets.
+    // `objectName` is kept in loadOpts so replication scripts can emit
+    // `load(file)` followed by `df <- <objectName>` rather than guessing.
+    const { parseRData } = await import("./services/data/parsers/rdata.js");
+    const { tables, skipped } = await parseRData(await file.arrayBuffer());
+    const multi = tables.map(t => withLoadOpts(
+      { headers: t.headers, rows: t.rows },
+      { format: "rdata", objectName: t.name, sourceFile: file.name },
+    ));
+    // Single-object workspace behaves exactly like any other single-table file.
+    if (multi.length === 1) return multi[0];
+    return { _multi: multi.map((p, i) => ({ filename: tables[i].name, parsed: p })), _skipped: skipped,
+             headers: multi[0].headers, rows: multi[0].rows };
   }
   if (ext === "parquet") {
     const { loadParquet } = await import("./services/data/duckdb.js");
@@ -620,7 +653,7 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
           ref={fileRef}
           type="file"
           multiple
-          accept=".csv,.tsv,.xlsx,.xls,.txt,.json,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
+          accept=".csv,.tsv,.xlsx,.xls,.txt,.json,.dta,.rds,.RData,.rda,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
           style={{ display: "none" }}
           onChange={e => { if (e.target.files?.length) onLoadFile(e.target.files); e.target.value = ""; }}
         />
@@ -909,6 +942,17 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       let parsed = await parseFile(file);
       if (!parsed || !parsed.rows.length) {
         throw new Error("Could not parse file — no rows found. Check the file format.");
+      }
+      // .RData workspace holding several data.frames → one dataset per object,
+      // named after the R object rather than the file.
+      if (parsed._multi?.length) {
+        for (const m of parsed._multi) addParsedDataset(m.filename, m.parsed);
+        const skipped = parsed._skipped ?? [];
+        setLoadErr(
+          `Loaded ${parsed._multi.length} data.frames from ${file.name}.` +
+          (skipped.length ? ` Skipped ${skipped.length}: ${skipped.map(s => s.name).join(", ")}.` : "")
+        );
+        return;
       }
       if (parsed._duckdb?.truncated) {
         setLoadErr(

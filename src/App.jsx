@@ -342,7 +342,7 @@ function Uploader({onReady}){
         onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}}
         onClick={()=>ref.current?.click()}
         style={{width:"100%",border:`2px dashed ${drag?C.gold:C.border2}`,borderRadius:6,padding:"2.5rem 1.5rem",textAlign:"center",cursor:"pointer",background:drag?C.goldFaint:C.surface,transition:"all 0.15s"}}>
-        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.parquet,.zip" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
+        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.RData,.rda,.parquet,.zip" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
         <div style={{fontSize: T.display.fontSize,marginBottom:8}}>⬆</div>
         <div style={{fontSize: T.body.fontSize,color:C.text,marginBottom:4}}>Drop file or click to browse</div>
         <div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>CSV · TSV · XLSX · Stata .dta · R .rds · Shapefile .zip</div>
@@ -1265,7 +1265,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                 transition:"all 0.15s",
               }}>
               <input ref={fileRef} type="file" multiple
-                accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
+                accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.RData,.rda,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
                 onChange={e=>handleFile(e.target.files)} style={{display:"none"}}/>
               {loading
                 ? <div style={{fontSize: T.code.fontSize,color:C.textDim}}>Parsing…</div>
@@ -1489,7 +1489,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
                       background: dragOver ? C.goldFaint : "transparent",
                       transition:"all 0.15s",marginBottom:10}}>
               <input ref={fileRef} type="file" multiple
-                accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
+                accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.dta,.rds,.RData,.rda,.dbf,.shp,.prj,.shx,.cpg,.parquet,.zip"
                 onChange={e=>handleFile(e.target.files)}
                 style={{display:"none"}}/>
               {loading

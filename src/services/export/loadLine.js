@@ -28,6 +28,7 @@ function inferFormat(filename, loadOpts) {
   if (ext === "xlsx" || ext === "xls") return "excel";
   if (ext === "dta")  return "stata";
   if (ext === "rds")  return "rds";
+  if (ext === "rdata" || ext === "rda") return "rdata";
   if (ext === "parquet") return "parquet";
   if (ext === "dbf")  return "shapefile-dbf";
   if (ext === "shp")  return "shapefile-shp";
@@ -62,6 +63,10 @@ export function buildRLoadLine(filename, loadOpts = null) {
       return `df <- haven::read_dta(${f})`;
     case "rds":
       return `df <- readRDS(${f})`;
+    case "rdata":
+      // load() restores every object in the workspace under its own name, so the
+      // one this dataset came from has to be picked out explicitly afterwards.
+      return `load(${f})\ndf <- ${loadOpts?.objectName ?? "# TODO: name the object from the workspace"}`;
     case "parquet":
       return `df <- arrow::read_parquet(${f})`;
     case "shapefile-shp":
@@ -99,6 +104,9 @@ export function buildPyLoadLine(filename, loadOpts = null) {
       return `df = pd.read_stata(${f})`;
     case "rds":
       return `df = pyreadr.read_r(${f})[None]  # requires pyreadr`;
+    case "rdata":
+      // pyreadr returns an OrderedDict keyed by the workspace object names.
+      return `df = pyreadr.read_r(${f})[${loadOpts?.objectName ? pyStr(loadOpts.objectName) : "None  # TODO: name the object from the workspace"}]  # requires pyreadr`;
     case "parquet":
       return `df = pd.read_parquet(${f})`;
     case "shapefile-shp":
@@ -137,6 +145,8 @@ export function buildStataLoadLine(filename, loadOpts = null) {
       return `use "${f}", clear`;
     case "rds":
       return `* .rds files are not natively supported in Stata; re-export as .dta first.\nuse "${f.replace(/\.rds$/i, ".dta")}", clear`;
+    case "rdata":
+      return `* .RData workspaces are not natively supported in Stata; export the object\n* to .dta from R first: haven::write_dta(${loadOpts?.objectName ?? "<object>"}, "…dta")\nuse "${f.replace(/\.(rdata|rda)$/i, ".dta")}", clear`;
     case "parquet":
       return `* Parquet not natively supported; convert to .dta first.\nuse "${f.replace(/\.parquet$/i, ".dta")}", clear`;
     case "shapefile-shp":
