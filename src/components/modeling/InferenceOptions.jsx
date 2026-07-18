@@ -6,7 +6,7 @@
 // Props:
 //   modelType    {string}   — current estimator (OLS, FE, FD, 2SLS, DiD, TWFE, RDD, …)
 //   headers      {string[]} — all column names (for cluster dropdown)
-//   seType       {string}   — one of: classical | hc1 | hc2 | hc3 | clustered | twoway | hac
+//   seType       {string}   — one of: classical | hc1 | hc2 | hc3 | clustered | cr2 | cr3 | twoway | hac
 //   setSeType    {fn}
 //   clusterVar   {string|null}
 //   setClusterVar {fn}
@@ -28,6 +28,8 @@ const SE_TYPES = [
   { id: "hc2",       label: "HC2",           hint: "HC2 leverage-corrected robust SE — unbiased under homoskedasticity; default in R's iv_robust" },
   { id: "hc3",       label: "HC3",           hint: "HC3 leverage-corrected robust SE — preferred in small samples" },
   { id: "clustered", label: "Clustered",     hint: "Cluster-robust SE: accounts for within-group correlation" },
+  { id: "cr2",       label: "CR2",           hint: "Bias-reduced cluster-robust SE (Bell-McCaffrey) — the clubSandwich / estimatr default; preferred with few clusters" },
+  { id: "cr3",       label: "CR3",           hint: "Cluster jackknife approximation — more conservative than CR2" },
   { id: "twoway",    label: "Two-Way",       hint: "Two-way cluster-robust SE (Cameron-Gelbach-Miller)" },
   { id: "hac",       label: "HAC",           hint: "Newey-West heteroskedasticity-and-autocorrelation-consistent SE" },
 ];
@@ -90,7 +92,10 @@ export default function InferenceOptions({
     ? null
     : SE_TYPES.find(s => s.id === seType)?.label ?? seType;
 
-  const showCluster  = seType === "clustered" || seType === "twoway";
+  // CR2/CR3 need a cluster variable just as much as "clustered" does — leaving
+  // them out of this test would hide the picker and silently degrade to HC1.
+  const showCluster  = seType === "clustered" || seType === "twoway"
+                    || seType === "cr2" || seType === "cr3";
   const showCluster2 = seType === "twoway";
   const showHac      = seType === "hac";
 

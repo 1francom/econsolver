@@ -661,6 +661,10 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       case "hc2":       return `cov_type="HC2"`;
       case "hc3":       return `cov_type="HC3"`;
       case "clustered": return clusterVar ? `cov_type="cluster", cov_kwds={"groups": df["${clusterVar}"]}` : `cov_type="HC1"`;
+      // statsmodels has no CR2/CR3 — its "cluster" is CR1. Emitting CR1 silently
+      // would misreport which estimator produced the SE, so the note below says so.
+      case "cr2":
+      case "cr3":       return clusterVar ? `cov_type="cluster", cov_kwds={"groups": df["${clusterVar}"]}` : `cov_type="HC1"`;
       case "twoway":    return (clusterVar && clusterVar2) ? `cov_type="cluster", cov_kwds={"groups": df[["${clusterVar}", "${clusterVar2}"]]}` : `cov_type="HC1"`;
       // Litux's Newey-West default bandwidth is L = floor(4*(n/100)^(2/9))
       // (see core/inference/robustSE.js). maxlags was hardcoded to 1, which is
@@ -735,6 +739,11 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
   switch (type) {
     case "OLS": {
+      if (["cr2", "cr3"].includes((seType || "").toLowerCase())) {
+        lines.push(`# NOTE: Litux reported ${(seType || "").toUpperCase()} (bias-reduced cluster-robust) SE.`);
+        lines.push(`# statsmodels has no CR2/CR3; the line below gives CR1, which will differ.`);
+        lines.push(`# For the exact SE use R: clubSandwich::coef_test(fit, vcov = "${(seType || "").toUpperCase()}", cluster = ...)`);
+      }
       // patsy spells "no intercept" as a trailing `- 1`.
       const formula = `"${yVar} ~ ${pyFormStr}${noIntercept ? " - 1" : ""}"`;
       if (noIntercept) lines.push(`# Regression through the origin — no intercept estimated.`);

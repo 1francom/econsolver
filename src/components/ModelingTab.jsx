@@ -959,6 +959,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       const seTypeNorm =
           rawSE === "hac"        ? "HAC"
         : rawSE.startsWith("hc") ? rawSE.toUpperCase()
+        : rawSE.startsWith("cr") ? rawSE.toUpperCase()   // cr2/cr3 → CR2/CR3
         : rawSE;
       const effModel = resolveEstimator(model, family, !!weightVar[0]);
       const dispatchCtx = {

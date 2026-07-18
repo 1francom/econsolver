@@ -688,6 +688,9 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       case "hc2":       return "vce(hc2)";
       case "hc3":       return "vce(hc3)";
       case "clustered": return clusterVar ? `vce(cluster ${clusterVar})` : "robust";
+      // No native CR2/CR3 in Stata; vce(cluster) is CR1. See the note emitted below.
+      case "cr2":
+      case "cr3":       return clusterVar ? `vce(cluster ${clusterVar})` : "robust";
       // Stata's vce(cluster) takes a single variable; true two-way clustering
       // needs a user command (e.g. vcemway / cgmreg) — see the note emitted below.
       case "twoway":    return clusterVar ? `vce(cluster ${clusterVar})` : "robust";
@@ -756,6 +759,13 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     lines.push(`* NOTE: Litux used Newey-West HAC SE. regress has no HAC option; the line`);
     lines.push(`* below reports robust (HC1) SE. For true HAC: tsset the data, then`);
     lines.push(`* newey ${yVar} ${xList}, lag(#)`);
+    lines.push(``);
+  }
+
+  if (["cr2", "cr3"].includes(seLower)) {
+    lines.push(`* NOTE: Litux reported ${seLower.toUpperCase()} (bias-reduced cluster-robust) SE.`);
+    lines.push(`* Stata has no native CR2/CR3; vce(cluster) below is CR1 and will differ.`);
+    lines.push(`* For the exact SE use R: clubSandwich::coef_test(fit, vcov = "${seLower.toUpperCase()}", cluster = ...)`);
     lines.push(``);
   }
 

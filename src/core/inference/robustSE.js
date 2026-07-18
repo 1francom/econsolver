@@ -8,7 +8,9 @@
 //   "HC1"        — HC0 × n/(n−k)   (Stata default "robust")
 //   "HC2"        — leverage-corrected: e_i²/(1−h_ii)
 //   "HC3"        — squared leverage: e_i²/(1−h_ii)²
-//   "clustered"  — one-way clustered (Cameron & Miller 2015)
+//   "clustered"  — one-way clustered (Cameron & Miller 2015) — this is CR1
+//   "CR2"        — bias-reduced linearization (Bell & McCaffrey 2002)
+//   "CR3"        — cluster jackknife approximation
 //   "twoway"     — two-way clustered (Cameron, Gelbach & Miller 2011)
 //   "HAC"        — Newey-West HAC with Bartlett kernel
 
@@ -171,6 +173,184 @@ export function clusteredSE(XtXinv, X, e, clusters, n, k) {
   return sandwichDiagSqrt(XtXinv, Bsc);
 }
 
+// ─── BIAS-REDUCED CLUSTER SE (CR2 / CR3) ─────────────────────────────────────
+// Cholesky of a symmetric positive-definite matrix: M = L Lᵀ. null if not PD.
+function cholesky(M) {
+  const n = M.length;
+  const L = Array.from({ length: n }, () => Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      let s = M[i][j];
+      for (let l = 0; l < j; l++) s -= L[i][l] * L[j][l];
+      if (i === j) {
+        if (s <= 1e-14) return null;      // not positive definite
+        L[i][j] = Math.sqrt(s);
+      } else {
+        L[i][j] = s / L[j][j];
+      }
+    }
+  }
+  return L;
+}
+
+// Cyclic Jacobi eigendecomposition of a symmetric matrix.
+// Returns { values: number[], vectors: number[][] } with vectors[i][j] = i-th
+// component of eigenvector j. Only used on k×k matrices (k = #regressors), so
+// the O(k³) cost per sweep is irrelevant.
+function jacobiEigen(Min, maxSweeps = 100) {
+  const n = Min.length;
+  const A = Min.map(r => r.slice());
+  let V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+
+  for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    let off = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += A[i][j] * A[i][j];
+    if (off < 1e-24) break;
+
+    for (let p = 0; p < n - 1; p++) {
+      for (let q = p + 1; q < n; q++) {
+        if (Math.abs(A[p][q]) < 1e-18) continue;
+        const theta = (A[q][q] - A[p][p]) / (2 * A[p][q]);
+        const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+        for (let i = 0; i < n; i++) {
+          const aip = A[i][p], aiq = A[i][q];
+          A[i][p] = c * aip - s * aiq;
+          A[i][q] = s * aip + c * aiq;
+        }
+        for (let i = 0; i < n; i++) {
+          const api = A[p][i], aqi = A[q][i];
+          A[p][i] = c * api - s * aqi;
+          A[q][i] = s * api + c * aqi;
+        }
+        for (let i = 0; i < n; i++) {
+          const vip = V[i][p], viq = V[i][q];
+          V[i][p] = c * vip - s * viq;
+          V[i][q] = s * vip + c * viq;
+        }
+      }
+    }
+  }
+  return { values: A.map((r, i) => r[i]), vectors: V };
+}
+
+/**
+ * clusterBiasReducedSE — CR2 (Bell & McCaffrey 2002) and CR3 (cluster jackknife).
+ *
+ * Both replace the raw cluster residual e_g with an adjusted ẽ_g = A_g e_g:
+ *   CR2: A_g = (I − H_gg)^(−1/2)      CR3: A_g = (I − H_gg)^(−1)
+ * where H_gg = X_g (X′X)⁻¹ X_gᵀ is the cluster's leverage block.
+ *
+ * IMPLEMENTATION NOTE — why this is not the textbook formula.
+ * Done literally, A_g needs the eigendecomposition of an n_g × n_g matrix:
+ * O(n_g³) per cluster, which is hopeless in a browser for anything but toy
+ * clusters. But H_gg has rank ≤ k, so write (X′X)⁻¹ = L Lᵀ and Z_g = X_g L,
+ * giving H_gg = Z_g Z_gᵀ. The nonzero eigenvalues of H_gg are exactly those of
+ * the k × k matrix S_g = Z_gᵀ Z_g, and with S_g = Q Λ Qᵀ and P = Z_g Q Λ^(−1/2):
+ *
+ *     A_g = I + P · diag( f(λ_j) − 1 ) · Pᵀ ,   f(λ) = (1−λ)^(−1/2) or (1−λ)^(−1)
+ *
+ * so ẽ_g = e_g + P [ (f(λ)−1) ⊙ (Pᵀ e_g) ] costs O(n_g k² + k³). Same numbers,
+ * tractable cost. This is the reduction clubSandwich uses.
+ *
+ * DEGENERATE CLUSTERS: λ_j → 1 means the cluster is perfectly fit by the design
+ * (typically n_g ≤ k), so (1−λ)^(−1/2) diverges and the adjustment is undefined.
+ * Rather than emit Infinity, we degrade that whole estimate to CR1 — the nearest
+ * meaningful alternative — since returning a silently broken SE is worse.
+ *
+ * @param {number[][]} XtXinv
+ * @param {number[][]} X
+ * @param {number[]}   e
+ * @param {Array}      clusters — cluster label per observation, length n
+ * @param {number}     n
+ * @param {number}     k
+ * @param {"CR2"|"CR3"} type
+ * @returns {number[]|null} se, or null when the adjustment is not computable
+ */
+export function clusterBiasReducedSE(XtXinv, X, e, clusters, n, k, type = "CR2") {
+  const p = X[0].length;
+  const L = cholesky(XtXinv);
+  if (!L) return null;                       // (X′X)⁻¹ not PD → caller degrades
+
+  const groups = new Map();
+  for (let i = 0; i < n; i++) {
+    const g = clusters[i];
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(i);
+  }
+  const G = groups.size;
+  if (G < 2) return null;
+
+  const B = Array.from({ length: p }, () => Array(p).fill(0));
+
+  for (const idxs of groups.values()) {
+    const ng = idxs.length;
+
+    // Z_g = X_g L   (ng × p)
+    const Z = idxs.map(i => {
+      const z = Array(p).fill(0);
+      for (let a = 0; a < p; a++)
+        for (let b = a; b < p; b++) z[a] += X[i][b] * L[b][a];
+      return z;
+    });
+
+    // S_g = Z_gᵀ Z_g  (p × p) — the small eigenproblem
+    const S = Array.from({ length: p }, () => Array(p).fill(0));
+    for (let r = 0; r < ng; r++)
+      for (let a = 0; a < p; a++)
+        for (let b = 0; b < p; b++) S[a][b] += Z[r][a] * Z[r][b];
+
+    const { values, vectors } = jacobiEigen(S);
+
+    // P = Z Q Λ^(−1/2), keeping only directions with λ > 0
+    const keep = [];
+    for (let j = 0; j < p; j++) if (values[j] > 1e-12) keep.push(j);
+
+    // f(λ) − 1 per kept direction; bail out if the cluster is fully leveraged
+    const coef = [];
+    for (const j of keep) {
+      const lam = Math.min(Math.max(values[j], 0), 1);
+      if (1 - lam < 1e-10) return null;      // degenerate → caller falls back to CR1
+      coef.push(type === "CR3"
+        ? 1 / (1 - lam) - 1
+        : 1 / Math.sqrt(1 - lam) - 1);
+    }
+
+    // P columns and Pᵀe in one pass
+    const eg = idxs.map(i => e[i]);
+    const Pte = Array(keep.length).fill(0);
+    const P = Array.from({ length: ng }, () => Array(keep.length).fill(0));
+    keep.forEach((j, c) => {
+      const inv = 1 / Math.sqrt(values[j]);
+      for (let r = 0; r < ng; r++) {
+        let v = 0;
+        for (let a = 0; a < p; a++) v += Z[r][a] * vectors[a][j];
+        P[r][c] = v * inv;
+        Pte[c] += P[r][c] * eg[r];
+      }
+    });
+
+    // ẽ_g = e_g + P (coef ⊙ Pᵀe)
+    const et = eg.slice();
+    for (let r = 0; r < ng; r++)
+      for (let c = 0; c < keep.length; c++) et[r] += P[r][c] * coef[c] * Pte[c];
+
+    // score s_g = X_gᵀ ẽ_g, accumulate s_g s_gᵀ
+    const sg = Array(p).fill(0);
+    idxs.forEach((i, r) => { for (let j = 0; j < p; j++) sg[j] += et[r] * X[i][j]; });
+    for (let a = 0; a < p; a++)
+      for (let b = 0; b < p; b++) B[a][b] += sg[a] * sg[b];
+  }
+
+  // NEITHER type carries an extra multiplier: the whole correction lives in A_g.
+  // CR3 is often written with a (G−1)/G jackknife factor, and this code had it
+  // until the clubSandwich comparison showed R/ours = 1/sqrt((G−1)/G) exactly
+  // across G = 8, 13, 20. clubSandwich (the reference implementation, and what
+  // estimatr defers to) applies no such factor, so neither do we.
+  void G;
+  return sandwichDiagSqrt(XtXinv, B);
+}
+
 // ─── TWO-WAY CLUSTERED SE ────────────────────────────────────────────────────
 /**
  * twowayClusteredSE — Cameron-Gelbach-Miller two-way clustered SE.
@@ -272,6 +452,15 @@ export function computeRobustSE(seOpts, XtXinv, X, e, n, k, rows) {
     if (!clusterVar || !rows) return sandwichSE(XtXinv, X, e, n, k, "HC1");
     const clusters = rows.map(r => r[clusterVar] ?? "__missing__");
     return clusteredSE(XtXinv, X, e, clusters, n, k);
+  }
+
+  if (seType === "CR2" || seType === "CR3") {
+    if (!clusterVar || !rows) return sandwichSE(XtXinv, X, e, n, k, "HC1");
+    const clusters = rows.map(r => r[clusterVar] ?? "__missing__");
+    const se = clusterBiasReducedSE(XtXinv, X, e, clusters, n, k, seType);
+    // Degenerate cluster (fully leveraged) or non-PD bread: fall back to CR1
+    // rather than HC1 — same family, so the number stays interpretable.
+    return se ?? clusteredSE(XtXinv, X, e, clusters, n, k);
   }
 
   if (seType === "TWOWAY") {

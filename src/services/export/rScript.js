@@ -699,7 +699,7 @@ function buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTe
 //   arg     — the fixest `vcov=` value
 //   note    — comment line explaining an approximation, or null
 //   hcExact — "HC2" | "HC3" when fixest cannot produce the requested SE natively.
-//             Call sites MUST pass this to rHC23Lines() so the script also emits
+//             Call sites MUST pass the vc object to rExactSELines() so the script also emits
 //             an lm()-based refit that reports the exact SE. fixest's "hetero" is
 //             HC1 and nothing else; silently emitting it for an HC2/HC3 request
 //             made the exported script disagree with the platform's own numbers.
@@ -719,6 +719,15 @@ function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
       ? { arg: `~${rName(clusterVar)}`, note: null, hcExact: null }
       : { arg: `"hetero"`, hcExact: null,
           note: `# WARNING: clustered SE requested but no cluster variable was set —\n# falling back to heteroskedasticity-robust (HC1) SE.` };
+    case "cr2":
+    case "cr3":       return clusterVar
+      ? { arg: `~${rName(clusterVar)}`, hcExact: null,
+          crExact: (seType || "").toUpperCase(), crCluster: clusterVar,
+          note: `# NOTE: fixest has no CR2/CR3 — vcov=~cluster is CR1. The feols fit below is
+# for point estimates; the exact SE come from the clubSandwich refit.` }
+      : { arg: `"hetero"`, hcExact: null, crExact: null,
+          note: `# WARNING: ${(seType || "").toUpperCase()} SE requested but no cluster variable was set —
+# falling back to heteroskedasticity-robust (HC1) SE.` };
     case "twoway":    return (clusterVar && clusterVar2)
       ? { arg: `~${rName(clusterVar)} + ${rName(clusterVar2)}`, note: null, hcExact: null }
       : { arg: clusterVar ? `~${rName(clusterVar)}` : `"hetero"`, hcExact: null,
@@ -821,15 +830,29 @@ function rGlmVcovLines(seType, fitName, { clusterVar, clusterVar2 } = {}) {
 // re-run inference on an equivalent lm(), which sandwich::vcovHC does support
 // exactly (it needs hatvalues(), which lm provides and fixest does not).
 // Returns [] when hcExact is null, so call sites can spread it unconditionally.
-function rHC23Lines(hcExact, formula, weightsCol = null) {
-  if (!hcExact) return [];
+// Emits the exact-SE refit when fixest cannot produce the requested variance
+// natively: HC2/HC3 via sandwich, CR2/CR3 via clubSandwich. Takes the whole vc
+// object so a new exact-SE family only touches rVcov and this function.
+function rExactSELines(vc, formula, weightsCol = null) {
   const w = weightsCol ? `, weights = ${weightsCol}` : "";
-  return [
-    ``,
-    `# Exact ${hcExact} standard errors (these are the SE Litux reports)`,
-    `fit_lm <- lm(${formula}, data = df${w})`,
-    `lmtest::coeftest(fit_lm, vcov. = sandwich::vcovHC(fit_lm, type = "${hcExact}"))`,
-  ];
+  if (vc?.crExact) {
+    return [
+      ``,
+      `# Exact ${vc.crExact} standard errors (these are the SE Litux reports)`,
+      `fit_lm <- lm(${formula}, data = df${w})`,
+      `clubSandwich::coef_test(fit_lm, vcov = "${vc.crExact}",`,
+      `                        cluster = df[["${vc.crCluster}"]])`,
+    ];
+  }
+  if (vc?.hcExact) {
+    return [
+      ``,
+      `# Exact ${vc.hcExact} standard errors (these are the SE Litux reports)`,
+      `fit_lm <- lm(${formula}, data = df${w})`,
+      `lmtest::coeftest(fit_lm, vcov. = sandwich::vcovHC(fit_lm, type = "${vc.hcExact}"))`,
+    ];
+  }
+  return [];
 }
 
 // Estimators whose panel HAC is Driscoll-Kraay rather than plain Newey-West.
@@ -882,7 +905,7 @@ function transpileModel(model) {
         ...(noIntercept ? [`# Regression through the origin — no intercept estimated.`] : []),
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
-        ...rHC23Lines(vc.hcExact, `${y} ~ ${xStr}`),
+        ...rExactSELines(vc, `${y} ~ ${xStr}`),
         ``,
         `# Diagnostics`,
         `fixest::etable(fit)`,
@@ -899,7 +922,7 @@ function transpileModel(model) {
           `# WARNING: no weight column supplied; falling back to OLS`,
           ...(vc.note ? [vc.note] : []),
           `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
-          ...rHC23Lines(vc.hcExact, `${y} ~ ${xStr}`),
+          ...rExactSELines(vc, `${y} ~ ${xStr}`),
           `fixest::etable(fit)`,
         ].join("\n");
       }
@@ -908,7 +931,7 @@ function transpileModel(model) {
         `# Weights: ${w}`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, vcov = ${vc.arg})`,
-        ...rHC23Lines(vc.hcExact, `${y} ~ ${xStr}`, `df$${w}`),
+        ...rExactSELines(vc, `${y} ~ ${xStr}`, `df$${w}`),
         ``,
         `# Diagnostics`,
         `fixest::etable(fit)`,
@@ -987,7 +1010,7 @@ function transpileModel(model) {
         `# DiD interaction term: post × treat`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${rhs}, data = df, vcov = ${vc.arg})`,
-        ...rHC23Lines(vc.hcExact, `${y} ~ ${rhs}`),
+        ...rExactSELines(vc, `${y} ~ ${rhs}`),
         ``,
         `fixest::etable(fit)`,
         ``,
