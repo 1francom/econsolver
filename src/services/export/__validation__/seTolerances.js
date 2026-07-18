@@ -65,9 +65,11 @@ Reference: Calonico, Cattaneo & Titiunik (2014) — rdrobust documentation §3.`
     tolerance:  { coef: 1e-3, se: 1e-2 },
     severity:   "warn",
     note: `When rdrobust Python package is unavailable, the emitted script falls back
-to manual local-linear WLS (smf.wls) with HC3 SE. HC3 and rdrobust's robust SE
-use different small-sample adjustments. Coef matches well (1e-3); SE may diverge
-up to 1e-2 depending on sample size and bandwidth.`,
+to manual local-linear WLS (smf.wls). As of 2026-07-18 that fallback uses the SE
+type the user selected in Inference Options (it used to hardcode HC3 regardless).
+Whichever HC variant is used, its small-sample adjustment differs from rdrobust's
+robust SE. Coef matches well (1e-3); SE may diverge up to 1e-2 depending on
+sample size and bandwidth.`,
   },
 
   // ── 3. Panel FE / TWFE — HC2/HC3 leverage-based SE ─────────────────────────

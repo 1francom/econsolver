@@ -662,6 +662,10 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
+// Estimators whose Stata command is a panel command (xtreg / reghdfe / areg /
+// ppmlhdfe) — these accept vce(cluster) but not vce(hc2)/vce(hc3) or a HAC option.
+const PANEL_TYPES = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "PoissonFE"]);
+
 function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
@@ -670,17 +674,90 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
   // Stata SE option matching the user's selection (was hardcoded ", robust").
   // Returns the trailing option string ("" = classical default, no comma).
+  //
+  // `regress` supports hc2/hc3 natively via vce(hc2)/vce(hc3) — these used to be
+  // collapsed onto plain `robust` (= HC1), so the do-file silently reported
+  // different SE than the platform. NOTE: vce(hc2)/vce(hc3) are a `regress`-only
+  // feature; commands like xtreg/reghdfe/ivregress do not accept them, which is
+  // what `vceNoHC23` is for.
+  const seLower = (seType || "classical").toLowerCase();
   const vce = (() => {
-    switch ((seType || "classical").toLowerCase()) {
+    switch (seLower) {
       case "classical": return "";
-      case "hc1": case "hc2": case "hc3": return "robust";
+      case "hc1":       return "robust";
+      case "hc2":       return "vce(hc2)";
+      case "hc3":       return "vce(hc3)";
       case "clustered": return clusterVar ? `vce(cluster ${clusterVar})` : "robust";
+      // Stata's vce(cluster) takes a single variable; true two-way clustering
+      // needs a user command (e.g. vcemway / cgmreg) — see the note emitted below.
       case "twoway":    return clusterVar ? `vce(cluster ${clusterVar})` : "robust";
       case "hac":       return "robust";   // reg has no native HAC; use newey for true HAC
       default:          return "";
     }
   })();
   const opt = vce ? `, ${vce}` : "";   // append only when non-empty
+
+  // Same mapping for commands that do NOT accept vce(hc2)/vce(hc3).
+  const vceNoHC23 = (seLower === "hc2" || seLower === "hc3") ? "robust" : vce;
+  const optNoHC23 = vceNoHC23 ? `, ${vceNoHC23}` : "";
+
+  // Panel commands (xtreg / reghdfe / areg / ppmlhdfe). These used to hardcode
+  // vce(cluster entityCol) regardless of the user's selection, which disagreed
+  // with the platform — with the default seType="classical", computeRobustSE
+  // returns classical SE, it does not cluster by entity. Emitted WITHOUT a
+  // leading comma, since these commands already have options (fe / absorb()).
+  const pVce = (() => {
+    switch (seLower) {
+      case "classical": return "";
+      case "hc1": case "hc2": case "hc3": return "robust";   // no hc2/hc3 here
+      case "clustered": return `vce(cluster ${clusterVar || entityCol})`;
+      // NOTE: single cluster variable only. xtreg and areg reject a second one —
+      // `xtreg y x, fe vce(cluster a b)` is a syntax error. Two-way clustering is
+      // available on reghdfe, which uses pVceHdfe below.
+      case "twoway":    return `vce(cluster ${clusterVar || entityCol})`;
+      case "hac":       return "robust";   // true panel HAC needs xtscc
+      default:          return "";
+    }
+  })();
+  const pOpt = pVce ? ` ${pVce}` : "";
+
+  // reghdfe accepts multi-way clustering, so it can honour two-way exactly.
+  const pVceHdfe = (seLower === "twoway" && clusterVar && clusterVar2)
+    ? `vce(cluster ${clusterVar} ${clusterVar2})`
+    : pVce;
+  const pOptHdfe = pVceHdfe ? ` ${pVceHdfe}` : "";
+
+  if (seLower === "twoway" && clusterVar && clusterVar2 && PANEL_TYPES.has(type)) {
+    lines.push(`* NOTE: two-way clustering (${clusterVar}, ${clusterVar2}) is emitted on reghdfe.`);
+    lines.push(`* xtreg/areg accept one cluster variable only and fall back to ${clusterVar}.`);
+    lines.push(``);
+  }
+
+  if ((seLower === "hc2" || seLower === "hc3") && PANEL_TYPES.has(type)) {
+    lines.push(`* NOTE: Litux used ${seLower.toUpperCase()} SE. xtreg/reghdfe/areg have no hc2/hc3`);
+    lines.push(`* option; this reports robust (HC1) SE — expect a small SE difference.`);
+    lines.push(``);
+  }
+  if (seLower === "hac" && PANEL_TYPES.has(type)) {
+    lines.push(`* NOTE: Litux used Driscoll-Kraay HAC SE. xtreg/reghdfe have no HAC option;`);
+    lines.push(`* this reports robust SE. For Driscoll-Kraay: ssc install xtscc, then`);
+    lines.push(`* xtscc ${yVar} ${xList}, fe`);
+    lines.push(``);
+  }
+
+  // Caveats that belong in the do-file rather than in a code comment nobody sees.
+  if (seLower === "twoway" && clusterVar && clusterVar2) {
+    lines.push(`* NOTE: Litux used two-way clustered SE (${clusterVar}, ${clusterVar2}).`);
+    lines.push(`* Official Stata vce(cluster) accepts one variable only; this do-file clusters`);
+    lines.push(`* on ${clusterVar}. For the two-way SE install vcemway: ssc install vcemway`);
+    lines.push(``);
+  }
+  if (seLower === "hac") {
+    lines.push(`* NOTE: Litux used Newey-West HAC SE. regress has no HAC option; the line`);
+    lines.push(`* below reports robust (HC1) SE. For true HAC: tsset the data, then`);
+    lines.push(`* newey ${yVar} ${xList}, lag(#)`);
+    lines.push(``);
+  }
 
   switch (type) {
     case "OLS":
@@ -706,7 +783,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       if (feColsFE.length <= 2) {
         lines.push(`* Fixed Effects (within)`);
         lines.push(`xtset ${entityCol} ${timeCol}`);
-        lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
+        lines.push(`xtreg ${yVar} ${xList}, fe${pOpt}`);
         lines.push(`estimates store m_fe`);
       } else {
         lines.push(`* Fixed Effects (within) — N-way absorption via reghdfe`);
@@ -714,7 +791,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`* NOTE: clusters on the first FE column (entityCol) by convention, matching the`);
         lines.push(`* existing TWFE reghdfe export — does not yet thread the model's actual seType/`);
         lines.push(`* clusterVar selection through this fallback path.`);
-        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsFE.join(" ")}) vce(cluster ${entityCol})`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsFE.join(" ")})${pOptHdfe}`);
         lines.push(`estimates store m_fe`);
       }
       break;
@@ -723,7 +800,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     case "FD":
       lines.push(`* First Differences`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`xtreg ${yVar} ${xList}, fd vce(cluster ${entityCol})`);
+      lines.push(`xtreg ${yVar} ${xList}, fd${pOpt}`);
       lines.push(`estimates store m_fd`);
       break;
 
@@ -732,7 +809,13 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const instr = zVars.join(" ");
       const exog  = wVars.join(" ");
       lines.push(`* Two-Stage Least Squares / IV`);
-      lines.push(`ivregress 2sls ${yVar} ${exog ? `(${endog} = ${instr}) ${exog}` : `(${endog} = ${instr})`}${opt}`);
+      // ivregress does not accept vce(hc2)/vce(hc3) — fall back to robust (HC1)
+      // and say so, rather than emitting a line that errors out in Stata.
+      if (seLower === "hc2" || seLower === "hc3") {
+        lines.push(`* NOTE: Litux used ${seLower.toUpperCase()} SE. ivregress has no hc2/hc3 option;`);
+        lines.push(`* this reports robust (HC1) SE instead — expect a small SE difference.`);
+      }
+      lines.push(`ivregress 2sls ${yVar} ${exog ? `(${endog} = ${instr}) ${exog}` : `(${endog} = ${instr})`}${optNoHC23}`);
       lines.push(`estimates store m_2sls`);
       lines.push(`* First-stage F-statistic`);
       lines.push(`estat firststage`);
@@ -755,7 +838,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       lines.push(`* Two-Way Fixed Effects DiD`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${feColsTWFE.join(" ")}) vce(cluster ${entityCol})`);
+      lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${feColsTWFE.join(" ")})${pOptHdfe}`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
       lines.push(`estimates store m_twfe`);
       break;
@@ -773,7 +856,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`gen _above_run = _above * _run_c`);
       lines.push(`* Triangular kernel weights:`);
       lines.push(`gen _w = max(0, 1 - abs(_run_c) / ${bandwidth ?? 1}) if abs(_run_c) <= ${bandwidth ?? 1}`);
-      lines.push(`reg ${yVar} _above _run_c _above_run${extra} [aw=_w], robust`);
+      lines.push(`reg ${yVar} _above _run_c _above_run${extra} [aw=_w]${opt}`);
       lines.push(`drop _above _run_c _above_run _w`);
       break;
     }
@@ -800,11 +883,11 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
         lines.push(`xtset ${entityCol} ${timeCol}`);
         lines.push(`* Within (FE) — numerically equivalent to LSDV`);
-        lines.push(`xtreg ${yVar} ${xList}, fe vce(cluster ${entityCol})`);
+        lines.push(`xtreg ${yVar} ${xList}, fe${pOpt}`);
         lines.push(`estimates store m_lsdv`);
         lines.push(``);
         lines.push(`* Recover alpha_i (entity fixed effects) via areg`);
-        lines.push(`areg ${yVar} ${xList}, absorb(${entityCol}) vce(cluster ${entityCol})`);
+        lines.push(`areg ${yVar} ${xList}, absorb(${entityCol})${pOpt}`);
         lines.push(`predict _alpha_i, dresiduals`);
         lines.push(`label var _alpha_i "Entity fixed effect (LSDV alpha_i)"`);
         lines.push(`* List unique entity FEs`);
@@ -815,7 +898,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
         lines.push(`* Single call: savefe (var=newname) syntax both stores estimates and materializes`);
         lines.push(`* alpha_i per FE dimension — no need to run reghdfe twice`);
-        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.map(c => `${c}=fe_${c}`).join(" ")}) vce(cluster ${entityCol})`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.map(c => `${c}=fe_${c}`).join(" ")})${pOptHdfe}`);
         lines.push(`estimates store m_lsdv`);
         lines.push(``);
         lines.push(`* Recover alpha_i per FE dimension`);
@@ -841,7 +924,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`* First-stage jump in take-up probability`);
       lines.push(`gen _Z = (${runningVar} >= ${cutoff ?? 0})`);
       lines.push(`gen _run_c = ${runningVar} - ${cutoff ?? 0}`);
-      lines.push(`ivregress 2sls ${yVar} _run_c (${dVar} = _Z), robust`);
+      lines.push(`ivregress 2sls ${yVar} _run_c (${dVar} = _Z)${optNoHC23}`);
       lines.push(`drop _Z _run_c`);
       break;
     }
@@ -868,7 +951,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`gen _above_run = _above * _signed_dist`);
       const bwStata = h ?? "# replace with bandwidth";
       lines.push(`gen _w = max(0, 1 - abs(_signed_dist) / ${bwStata}) if abs(_signed_dist) <= ${bwStata}`);
-      lines.push(`reg ${yVar} _above _signed_dist _above_run${wVars.length ? " " + wVars.join(" ") : ""} [aw=_w], robust`);
+      lines.push(`reg ${yVar} _above _signed_dist _above_run${wVars.length ? " " + wVars.join(" ") : ""} [aw=_w]${opt}`);
       lines.push(`drop _signed_dist _above _above_run _w`);
       break;
     }
@@ -886,7 +969,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`gen rel_time = ${timeCol} - treat_time`);
       lines.push(`* Estimate with unit + time FE, ref = -1`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
-      lines.push(`reghdfe ${yVar} ib(-1).rel_time${extra}, absorb(${feColsES.join(" ")}) vce(cluster ${entityCol})`);
+      lines.push(`reghdfe ${yVar} ib(-1).rel_time${extra}, absorb(${feColsES.join(" ")})${pOptHdfe}`);
       lines.push(`estimates store m_eventstudy`);
       lines.push(`* Plot coefficients`);
       lines.push(`coefplot m_eventstudy, keep(*rel_time*) vertical yline(0) xline(# replace with ref period index)`);
@@ -957,10 +1040,10 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`* Structural: ${yVar} ~ ${exog || "(no exog)"} + (${endog || "endog"}) endogenous`);
       lines.push(`* Instruments: ${instrs || "(instruments)"}`);
       if (wVars.length) {
-        lines.push(`ivregress gmm ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")}), wmatrix(robust)`);
+        lines.push(`ivregress gmm ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")}), wmatrix(${seLower === "classical" ? "unadjusted" : "robust"})`);
       } else {
         lines.push(`* No endogenous variables specified — using 2SLS form`);
-        lines.push(`ivregress gmm ${yVar} ${exog}, robust`);
+        lines.push(`ivregress gmm ${yVar} ${exog}${optNoHC23}`);
       }
       lines.push(`estat overid  /* Sargan-Hansen J-test — available after gmm */`);
       break;
@@ -971,10 +1054,10 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const exog   = xVars.join(" ");
       lines.push(`* Limited Information Maximum Likelihood (LIML)`);
       if (wVars.length) {
-        lines.push(`ivregress liml ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")}), vce(robust)`);
+        lines.push(`ivregress liml ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")})${optNoHC23}`);
       } else {
         lines.push(`* No endogenous variables specified — defaulting to OLS`);
-        lines.push(`reg ${yVar} ${exog}, robust`);
+        lines.push(`reg ${yVar} ${exog}${opt}`);
       }
       lines.push(`estat firststage  /* first-stage F-statistics */`);
       break;
@@ -982,7 +1065,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "Poisson": {
       lines.push(`* Poisson regression (count GLM, log link)`);
-      lines.push(`poisson ${yVar} ${xList}, vce(robust) irr`);
+      lines.push(`poisson ${yVar} ${xList}${opt ? opt : ", vce(robust)"} irr`);
       lines.push(`* irr option reports Incidence Rate Ratios (exp(beta))`);
       lines.push(`estimates store m_poisson`);
       lines.push(`* Overdispersion check: deviance / df and Pearson / df`);
@@ -995,7 +1078,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const cov  = xVars.join(" ");
       lines.push(`* Poisson FE (PPML with ${fes.length}-way fixed effects)`);
       lines.push(`* ppmlhdfe recommended — if not installed: ssc install ppmlhdfe`);
-      lines.push(`ppmlhdfe ${yVar}${cov ? ` ${cov}` : ""}, absorb(${fes.join(" ")}) vce(cluster ${fes[0]})`);
+      lines.push(`ppmlhdfe ${yVar}${cov ? ` ${cov}` : ""}, absorb(${fes.join(" ")})${pOpt || " vce(cluster " + fes[0] + ")"}`);
       lines.push(`* Incidence Rate Ratios (manual — Stata PPML reports log-IRR by default):`);
       lines.push(`* nlcom (exp(_b[${xVars[0] ?? "x"}]))`);
       break;
@@ -1151,7 +1234,8 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
             treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
-            interactionTerms: ixm = [], xVarsRaw: xrm = null, wVarsRaw: wrm = null } = configs[0].model ?? {};
+            interactionTerms: ixm = [], xVarsRaw: xrm = null, wVarsRaw: wrm = null,
+            seType: seM = "classical", clusterVar: clM = null, clusterVar2: cl2M = null } = configs[0].model ?? {};
     const allX = [...xVars, ...wVars];
 
     configs.forEach((c) => {
@@ -1161,7 +1245,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       lines.push(`preserve`);
       if (filterExpr) lines.push(`  keep if ${filterExpr}`);
       else            lines.push(`  * Full sample — no filter`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, seType: seM, clusterVar: clM, clusterVar2: cl2M });
       let hasStore = false;
       modelLines.forEach(l => {
         const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
@@ -1192,10 +1276,11 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
               treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
-              interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null } = c.model ?? {};
+              interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null,
+              seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, seType: seC, clusterVar: clC, clusterVar2: cl2C });
       let hasStore = false;
       modelLines.forEach(l => {
         const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);

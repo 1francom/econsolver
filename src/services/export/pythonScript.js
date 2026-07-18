@@ -662,11 +662,17 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       case "hc3":       return `cov_type="HC3"`;
       case "clustered": return clusterVar ? `cov_type="cluster", cov_kwds={"groups": df["${clusterVar}"]}` : `cov_type="HC1"`;
       case "twoway":    return (clusterVar && clusterVar2) ? `cov_type="cluster", cov_kwds={"groups": df[["${clusterVar}", "${clusterVar2}"]]}` : `cov_type="HC1"`;
-      case "hac":       return `cov_type="HAC", cov_kwds={"maxlags": 1}`;
+      // Litux's Newey-West default bandwidth is L = floor(4*(n/100)^(2/9))
+      // (see core/inference/robustSE.js). maxlags was hardcoded to 1, which is
+      // that formula's answer only for tiny samples — reproduce it instead.
+      case "hac":       return `cov_type="HAC", cov_kwds={"maxlags": int(np.floor(4 * (len(df) / 100) ** (2 / 9)))}`;
       default:          return `cov_type="nonrobust"`;
     }
   };
-  // linearmodels IV2SLS `.fit(...)` covariance argument.
+  // linearmodels IV2SLS `.fit(...)` covariance argument. Unlike statsmodels,
+  // linearmodels has no HC2/HC3 — those fall back to its `robust` sandwich, so
+  // the SE will differ slightly from Litux's. `ivCovNote()` says so out loud
+  // rather than leaving the user to discover the mismatch numerically.
   const ivCov = () => {
     switch ((seType || "classical").toLowerCase()) {
       case "classical": return `cov_type="unadjusted"`;
@@ -674,6 +680,57 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       case "hac":       return `cov_type="kernel"`;
       default:          return `cov_type="robust"`;   // HC1/HC2/HC3 → robust sandwich
     }
+  };
+  // linearmodels PanelOLS / FirstDifferenceOLS `.fit(...)` covariance argument.
+  // These call sites used to hardcode cov_type="clustered", cluster_entity=True
+  // regardless of the user's selection, which disagreed with the platform: with
+  // the default seType="classical", computeRobustSE returns classical SE — it
+  // does not cluster by entity.
+  const panelCov = () => {
+    const s = (seType || "classical").toLowerCase();
+    switch (s) {
+      case "classical": return `cov_type="unadjusted"`;
+      case "hc1": case "hc2": case "hc3": return `cov_type="robust"`;
+      case "clustered":
+        return (clusterVar && clusterVar !== entityCol)
+          ? `cov_type="clustered", clusters=df_panel["${clusterVar}"]`
+          : `cov_type="clustered", cluster_entity=True`;
+      case "twoway": return `cov_type="clustered", cluster_entity=True, cluster_time=True`;
+      case "hac":    return `cov_type="kernel"`;   // Driscoll-Kraay
+      default:       return `cov_type="unadjusted"`;
+    }
+  };
+  const panelCovNote = () => {
+    const s = (seType || "classical").toLowerCase();
+    if (s === "hc2" || s === "hc3") {
+      return [`# NOTE: Litux used ${s.toUpperCase()} SE. linearmodels' panel estimators have no`,
+              `# HC2/HC3 option; this uses cov_type="robust" — expect a small SE difference.`];
+    }
+    return [];
+  };
+  // pyfixest `vcov=` argument (fepois / feols). Same vocabulary as R's fixest:
+  // "iid" / "hetero" / {"CRV1": col}. Was hardcoded to CRV1 on the first FE column.
+  const pfVcov = () => {
+    const s = (seType || "classical").toLowerCase();
+    switch (s) {
+      case "classical": return `"iid"`;
+      case "hc1": case "hc2": case "hc3": return `"hetero"`;
+      case "clustered":
+      case "twoway":    return clusterVar ? `{"CRV1": "${clusterVar}"}` : `"hetero"`;
+      default:          return `"iid"`;
+    }
+  };
+  const ivCovNote = () => {
+    const s = (seType || "classical").toLowerCase();
+    if (s === "hc2" || s === "hc3") {
+      return [`# NOTE: Litux used ${s.toUpperCase()} SE. linearmodels has no HC2/HC3 option;`,
+              `# this uses its 'robust' sandwich (HC0-family) — expect a small SE difference.`];
+    }
+    if (s === "hac") {
+      return [`# NOTE: cov_type="kernel" defaults to Bartlett with linearmodels' own`,
+              `# automatic bandwidth, which may differ from Litux's L = floor(4*(n/100)^(2/9)).`];
+    }
+    return [];
   };
 
   switch (type) {
@@ -705,7 +762,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`# Fixed Effects (within estimator)`);
         lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
         lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
-        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
+        lines.push(...panelCovNote());
+      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True).fit(${panelCov()})`);
         lines.push(`print(model.summary)`);
       } else {
         lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
@@ -724,7 +782,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`# First Differences estimator`);
       lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
       lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
-      lines.push(`model = FirstDifferenceOLS(df_panel["${yVar}"], exog).fit(cov_type="clustered", cluster_entity=True)`);
+      lines.push(...panelCovNote());
+      lines.push(`model = FirstDifferenceOLS(df_panel["${yVar}"], exog).fit(${panelCov()})`);
       lines.push(`print(model.summary)`);
       break;
     }
@@ -748,6 +807,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`endog_vars = df[[${endog}]]`);
         lines.push(`instr_vars = df[[${instr}]]`);
       }
+      lines.push(...ivCovNote());
       lines.push(`model = IV2SLS(dependent, exog_vars, endog_vars, instr_vars).fit(${ivCov()})`);
       lines.push(`print(model.summary)`);
       break;
@@ -772,7 +832,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`# Two-Way Fixed Effects DiD`);
         lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
         lines.push(`exog = sm.add_constant(df_panel[["${treatVar}"${extraX}]])`);
-        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
+        lines.push(...panelCovNote());
+      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(${panelCov()})`);
         lines.push(`print(model.summary)`);
       } else {
         lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
@@ -812,7 +873,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       } else {
         lines.push(`    df_rdd["_w"] = 1.0`);
       }
-      lines.push(`    model = smf.wls("${yVar} ~ above + run_c + above:run_c${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(cov_type="HC3")`);
+      lines.push(`    model = smf.wls("${yVar} ~ above + run_c + above:run_c${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(${smCov()})`);
       lines.push(`    print(model.summary())`);
       lines.push(`    print(f"LATE = {model.params['above']:.4f}  SE = {model.bse['above']:.4f}  p = {model.pvalues['above']:.4f}")`);
       break;
@@ -838,7 +899,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`# Panel LSDV (numerically equivalent to within/FE)`);
         lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
         lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
-        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True${timeCol ? ", time_effects=True" : ""}).fit(cov_type="clustered", cluster_entity=True)`);
+        lines.push(...panelCovNote());
+      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True${timeCol ? ", time_effects=True" : ""}).fit(${panelCov()})`);
         lines.push(`print(model.summary)`);
         lines.push(``);
         lines.push(`# Recover entity fixed effects (LSDV alpha_i)`);
@@ -894,11 +956,11 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`    df_bw["_w"] = 1.0`);
       }
       lines.push(`    # First stage: Z -> D`);
-      lines.push(`    fs = smf.wls("${dVar} ~ _Z + _run_c + _Z:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(cov_type="HC3")`);
+      lines.push(`    fs = smf.wls("${dVar} ~ _Z + _run_c + _Z:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(${smCov()})`);
       lines.push(`    print(f"First-stage F-stat: {fs.fvalue:.2f}  (p={fs.f_pvalue:.4f})")`);
       lines.push(`    # Second stage: use D_hat as instrument`);
       lines.push(`    df_bw["_D_hat"] = fs.fittedvalues`);
-      lines.push(`    ss = smf.wls("${yVar} ~ _D_hat + _run_c + _D_hat:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(cov_type="HC3")`);
+      lines.push(`    ss = smf.wls("${yVar} ~ _D_hat + _run_c + _D_hat:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(${smCov()})`);
       lines.push(`    print(ss.summary())`);
       lines.push(`    print(f"LATE = {ss.params['_D_hat']:.4f}  SE = {ss.bse['_D_hat']:.4f}  p = {ss.pvalues['_D_hat']:.4f}")`);
       break;
@@ -925,7 +987,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`df_rdd["_w"] = 1.0`);
       }
       lines.push(`df_rdd["_above"] = (df_rdd["_signed_dist"] >= 0).astype(int)`);
-      lines.push(`model = smf.wls("${yVar} ~ _above + _signed_dist + _above:_signed_dist${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(cov_type="HC3")`);
+      lines.push(`model = smf.wls("${yVar} ~ _above + _signed_dist + _above:_signed_dist${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(${smCov()})`);
       lines.push(`print(model.summary())`);
       lines.push(`print(f"LATE at boundary = {model.params['_above']:.4f}  SE = {model.bse['_above']:.4f}  p = {model.pvalues['_above']:.4f}")`);
       break;
@@ -950,7 +1012,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
           lines.push(`exog = sm.add_constant(rel_dummies)`);
         }
         lines.push(`from linearmodels.panel import PanelOLS`);
-        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(cov_type="clustered", cluster_entity=True)`);
+        lines.push(...panelCovNote());
+      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(${panelCov()})`);
         lines.push(`print(model.summary)`);
       } else {
         lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
@@ -985,7 +1048,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`import pyfixest as pf`);
       lines.push(`# sunab(cohort, period) builds the saturated cohort x relative-period interactions`);
       lines.push(`# and auto-aggregates to interaction-weighted per-relative-period ATTs.`);
-      lines.push(`fit = pf.fepois("${yVar} ~ sunab(${coh}, ${per})${ctrls} | ${feStr}", data=df, vcov={"CRV1": "${cl}"})`);
+      lines.push(`fit = pf.fepois("${yVar} ~ sunab(${coh}, ${per})${ctrls} | ${feStr}", data=df, vcov=${pfVcov()})`);
       lines.push(`pf.etable([fit])`);
       lines.push(`import numpy as np`);
       lines.push(`print("IRR (exp of event-study coefficients):", np.exp(fit.coef().values))`);
@@ -1049,7 +1112,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`exog_vars  = sm.add_constant(df[[${xList || `"# add exog columns"`}]])` );
       lines.push(`endog_vars = df[[${wList || `"# add endogenous columns"`}]]`);
       lines.push(`instr_vars = df[[${zList || `"# add instrument columns"`}]]`);
-      lines.push(`model = IVGMM(dependent, exog_vars, endog_vars, instr_vars).fit(cov_type="robust")`);
+      lines.push(`model = IVGMM(dependent, exog_vars, endog_vars, instr_vars).fit(${ivCov()})`);
       lines.push(`print(model.summary)`);
       lines.push(`# J-statistic (over-identification test)`);
       lines.push(`print(f"J-stat: {model.j_stat.stat:.4f}  p={model.j_stat.pval:.4f}")`);
@@ -1066,7 +1129,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`exog_vars  = sm.add_constant(df[[${xList || `"# add exog columns"`}]])`);
       lines.push(`endog_vars = df[[${wList || `"# add endogenous columns"`}]]`);
       lines.push(`instr_vars = df[[${zList || `"# add instrument columns"`}]]`);
-      lines.push(`model = IVLIML(dependent, exog_vars, endog_vars, instr_vars).fit(cov_type="robust")`);
+      lines.push(`model = IVLIML(dependent, exog_vars, endog_vars, instr_vars).fit(${ivCov()})`);
       lines.push(`print(model.summary)`);
       lines.push(`# kappa: 1 = just-identified (= 2SLS); > 1 = over-identified`);
       lines.push(`print(f"kappa = {model.kappa:.6f}")`);
@@ -1077,7 +1140,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const formula = `"${yVar} ~ ${pyFormStr}"`;
       lines.push(`# Poisson regression (count GLM, log link)`);
       lines.push(`model = smf.glm(${formula},`);
-      lines.push(`    data=df, family=sm.families.Poisson()).fit(cov_type="HC1")`);
+      lines.push(`    data=df, family=sm.families.Poisson()).fit(${smCov()})`);
       lines.push(`print(model.summary())`);
       lines.push(`# Incidence Rate Ratios (exp(beta))`);
       lines.push(`print("IRR:")`);
@@ -1095,7 +1158,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`# pip install pyfixest`);
       lines.push(`try:`);
       lines.push(`    import pyfixest as pf`);
-      lines.push(`    fit = pf.fepois("${yVar} ~ ${xVars.join(" + ") || "1"} | ${feStr}", data=df, vcov={"CRV1": "${fes[0]}"})`);
+      lines.push(`    fit = pf.fepois("${yVar} ~ ${xVars.join(" + ") || "1"} | ${feStr}", data=df, vcov=${pfVcov()})`);
       lines.push(`    pf.etable([fit])`);
       lines.push(`    import numpy as np`);
       lines.push(`    print("IRR:", np.exp(fit.coef().values))`);
@@ -1103,7 +1166,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`    # Option 2 — statsmodels GLM with FE dummies (slow for large N)`);
       lines.push(`    import statsmodels.formula.api as smf`);
       lines.push(`    model = smf.glm("${yVar} ~ ${[...xVars, ...fes.map(f => `C(${f})`)].join(" + ") || "1"}",`);
-      lines.push(`        data=df, family=sm.families.Poisson()).fit(cov_type="HC3")`);
+      lines.push(`        data=df, family=sm.families.Poisson()).fit(${smCov()})`);
       lines.push(`    print(model.summary())`);
       lines.push(`    import numpy as np`);
       lines.push(`    print("IRR:", np.exp(model.params))`);
@@ -1290,12 +1353,13 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
     const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
             treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
-            interactionTerms: ix0 = [], xVarsRaw: xr0 = null, wVarsRaw: wr0 = null } = configs[0].model ?? {};
+            interactionTerms: ix0 = [], xVarsRaw: xr0 = null, wVarsRaw: wr0 = null,
+            seType: se0 = "classical", clusterVar: cl0 = null, clusterVar2: cl20 = null } = configs[0].model ?? {};
     const allX0 = [...xVars, ...wVars];
     const singleLines = transpileModel({ type, yVar, allX: allX0, xVars, wVars, zVars,
       entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime,
       feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null,
-      interactionTerms: ix0, xVarsRaw: xr0, wVarsRaw: wr0 });
+      interactionTerms: ix0, xVarsRaw: xr0, wVarsRaw: wr0, seType: se0, clusterVar: cl0, clusterVar2: cl20 });
     // Strip assignment prefix, swap df → s
     const fitCall = singleLines
       .map(l => l.replace(/\bmodel\b\s*=\s*/, "").replace(/\bdf\b/g, "s"))
@@ -1320,12 +1384,13 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
       const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
               treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
-              interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null } = c.model ?? {};
+              interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null,
+              seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       const fitName = `model_${i + 1}`;
       fitNames.push(fitName);
       lines.push(`# Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, seType: seC, clusterVar: clC, clusterVar2: cl2C });
       modelLines.forEach(l => lines.push(l.replace(/\bmodel\b/g, fitName)));
       lines.push("");
     });
@@ -1442,9 +1507,10 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
   const { type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [],
           entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
           treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
-          interactionTerms: ixs = [], xVarsRaw: xrs = null, wVarsRaw: wrs = null } = model;
+          interactionTerms: ixs = [], xVarsRaw: xrs = null, wVarsRaw: wrs = null,
+          seType: seS = "classical", clusterVar: clS = null, clusterVar2: cl2S = null } = model;
   const allX = [...(xVars ?? []), ...(wVars ?? [])];
-  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixs, xVarsRaw: xrs, wVarsRaw: wrs });
+  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixs, xVarsRaw: xrs, wVarsRaw: wrs, seType: seS, clusterVar: clS, clusterVar2: cl2S });
 
   lines.push(`# ── Model function ───────────────────────────────────────────────────────`);
   lines.push(`def run_model(d):`);

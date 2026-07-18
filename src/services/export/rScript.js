@@ -695,19 +695,145 @@ function buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTe
 // fixest `vcov=` argument for a given SE type. Mirrors the SE the user selected
 // in Litux's Inference Options so the exported script reports the SAME standard
 // errors as the platform (was previously hardcoded to "HC1"). Returns an object
-// { arg, note } — `note` flags an approximation (fixest has no native HC2/HC3).
+// { arg, note, hcExact } where:
+//   arg     — the fixest `vcov=` value
+//   note    — comment line explaining an approximation, or null
+//   hcExact — "HC2" | "HC3" when fixest cannot produce the requested SE natively.
+//             Call sites MUST pass this to rHC23Lines() so the script also emits
+//             an lm()-based refit that reports the exact SE. fixest's "hetero" is
+//             HC1 and nothing else; silently emitting it for an HC2/HC3 request
+//             made the exported script disagree with the platform's own numbers.
 function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
   switch ((seType || "classical").toLowerCase()) {
-    case "classical": return { arg: `"iid"`,    note: null };
-    case "hc1":       return { arg: `"hetero"`,  note: null };
-    case "hc2":       return { arg: `"hetero"`,  note: `# Note: fixest "hetero" = HC1; for exact HC2 use sandwich::vcovHC(fit, "HC2")` };
-    case "hc3":       return { arg: `"hetero"`,  note: `# Note: fixest "hetero" = HC1; for exact HC3 use sandwich::vcovHC(fit, "HC3")` };
-    case "clustered": return { arg: clusterVar ? `~${rName(clusterVar)}` : `"hetero"`, note: null };
-    case "twoway":    return { arg: (clusterVar && clusterVar2) ? `~${rName(clusterVar)} + ${rName(clusterVar2)}` : `"hetero"`, note: null };
-    case "hac":       return { arg: `"NW"`,      note: null };
-    default:          return { arg: `"iid"`,     note: null };
+    case "classical": return { arg: `"iid"`,    note: null, hcExact: null };
+    case "hc1":       return { arg: `"hetero"`, note: null, hcExact: null };
+    case "hc2":       return {
+      arg: `"hetero"`, hcExact: "HC2",
+      note: `# NOTE: fixest's vcov="hetero" is HC1 — it has no native HC2. The feols\n# fit below is for point estimates; the exact HC2 SE come from the refit below.`,
+    };
+    case "hc3":       return {
+      arg: `"hetero"`, hcExact: "HC3",
+      note: `# NOTE: fixest's vcov="hetero" is HC1 — it has no native HC3. The feols\n# fit below is for point estimates; the exact HC3 SE come from the refit below.`,
+    };
+    case "clustered": return clusterVar
+      ? { arg: `~${rName(clusterVar)}`, note: null, hcExact: null }
+      : { arg: `"hetero"`, hcExact: null,
+          note: `# WARNING: clustered SE requested but no cluster variable was set —\n# falling back to heteroskedasticity-robust (HC1) SE.` };
+    case "twoway":    return (clusterVar && clusterVar2)
+      ? { arg: `~${rName(clusterVar)} + ${rName(clusterVar2)}`, note: null, hcExact: null }
+      : { arg: clusterVar ? `~${rName(clusterVar)}` : `"hetero"`, hcExact: null,
+          note: `# WARNING: two-way clustered SE requested but ${clusterVar ? "the second" : "no"} cluster\n# variable was set — falling back to ${clusterVar ? "one-way clustering" : "HC1"}.` };
+    case "hac":       return {
+      arg: `"NW"`, hcExact: null,
+      note: `# NOTE: fixest's vcov="NW" (Newey-West) requires the data to be declared\n# as a panel/time series (see the panel= argument). For pure cross-sections use\n# sandwich::NeweyWest(fit) instead.`,
+    };
+    default:          return { arg: `"iid"`, note: null, hcExact: null };
   }
 }
+
+// Panel / absorbed-FE models. fixest treats iid / hetero / ~cluster / NW the
+// same way it does for a cross-section, so `vc.arg` carries over unchanged and
+// these estimators can simply honour the user's seType — they used to hardcode
+// `vcov = ~entityCol`, which silently disagreed with the platform whenever the
+// user had not picked clustered SE (computeRobustSE returns classical SE by
+// default, it does not cluster by entity).
+//
+// HC2/HC3 are the one case that cannot be made exact: there is no native fixest
+// support, and an LSDV lm() refit computes leverage on a design that INCLUDES
+// the FE dummies, whereas Litux computes h_ii on the within-transformed design
+// (duckdbWithinHC23). The two agree to ~1e-3 — see the "panel-hc23-leverage"
+// entry in __validation__/seTolerances.js. Emit the refit, but label it as
+// approximate rather than claiming it reproduces the platform exactly.
+function rPanelHC23Lines(hcExact, formula, feCols = []) {
+  if (!hcExact) return [];
+  const dummies = feCols.filter(Boolean).map(c => `factor(${rName(c)})`).join(" + ");
+  return [
+    ``,
+    `# Approximate ${hcExact} SE — fixest has no ${hcExact} for absorbed models.`,
+    `# This LSDV refit carries the fixed effects as dummies, so its leverage (and`,
+    `# hence the SE) differs from Litux's within-design leverage by ~1e-3.`,
+    `fit_lm <- lm(${formula}${dummies ? ` + ${dummies}` : ""}, data = df)`,
+    `lmtest::coeftest(fit_lm, vcov. = sandwich::vcovHC(fit_lm, type = "${hcExact}"))`,
+  ];
+}
+
+// plm-based models (FD, and the FE Hausman companion) report classical SE from
+// summary() alone. plm has its own vcov family, so map the user's seType onto it
+// instead of leaving every FD export at classical regardless of the selection.
+// The platform runs FD as an OLS on the differenced design, which is exactly the
+// design plm::vcovHC operates on, so these line up.
+function rPlmVcovLines(seType, fitName, { clusterVar } = {}) {
+  const s = (seType || "classical").toLowerCase();
+  const wrap = expr => [
+    ``,
+    `# ${s.toUpperCase()} standard errors (these are the SE Litux reports)`,
+    `lmtest::coeftest(${fitName}, vcov. = ${expr})`,
+  ];
+  switch (s) {
+    case "classical": return [];   // summary() is already classical
+    case "hc1": case "hc2": case "hc3":
+      // method="white1" is plain heteroskedasticity-robust; "arellano" (plm's
+      // default) is cluster-by-group and would silently be the wrong thing here.
+      return wrap(`plm::vcovHC(${fitName}, method = "white1", type = "${s.toUpperCase()}")`);
+    case "clustered":
+      return wrap(`plm::vcovHC(${fitName}, method = "arellano", type = "HC1", cluster = "group")`);
+    case "twoway":
+      return [
+        ``,
+        `# NOTE: Litux used two-way clustered SE. plm has no native two-way vcov;`,
+        `# this clusters on the panel's group dimension only${clusterVar ? ` (${rName(clusterVar)})` : ""}.`,
+        `lmtest::coeftest(${fitName}, vcov. = plm::vcovHC(${fitName}, method = "arellano", type = "HC1", cluster = "group"))`,
+      ];
+    case "hac":
+      // Driscoll-Kraay — the same reference plm::vcovSCC that Fase 4b validated
+      // the platform's panel HAC against.
+      return wrap(`plm::vcovSCC(${fitName}, type = "HC1")`);
+    default: return [];
+  }
+}
+
+// glm()-based models (Poisson, Logit, Probit). sandwich works directly on glm
+// objects, so every SE type the platform offers has an exact counterpart here.
+// This used to be a hardcoded HC1 regardless of the user's selection.
+function rGlmVcovLines(seType, fitName, { clusterVar, clusterVar2 } = {}) {
+  const s = (seType || "classical").toLowerCase();
+  const wrap = expr => [`lmtest::coeftest(${fitName}, vcov. = ${expr})`];
+  switch (s) {
+    case "classical": return [`summary(${fitName})`];
+    case "hc1": case "hc2": case "hc3":
+      return wrap(`sandwich::vcovHC(${fitName}, type = "${s.toUpperCase()}")`);
+    case "clustered":
+      return clusterVar
+        ? wrap(`sandwich::vcovCL(${fitName}, cluster = df$${rName(clusterVar)})`)
+        : wrap(`sandwich::vcovHC(${fitName}, type = "HC1")`);
+    case "twoway":
+      return (clusterVar && clusterVar2)
+        ? wrap(`sandwich::vcovCL(${fitName}, cluster = ~ ${rName(clusterVar)} + ${rName(clusterVar2)})`)
+        : wrap(`sandwich::vcovHC(${fitName}, type = "HC1")`);
+    case "hac":
+      return wrap(`sandwich::NeweyWest(${fitName})`);
+    default: return [`summary(${fitName})`];
+  }
+}
+
+// Exact HC2 / HC3 standard errors. fixest cannot produce them, so when the user
+// picked HC2/HC3 we keep the feols fit for point estimates and diagnostics and
+// re-run inference on an equivalent lm(), which sandwich::vcovHC does support
+// exactly (it needs hatvalues(), which lm provides and fixest does not).
+// Returns [] when hcExact is null, so call sites can spread it unconditionally.
+function rHC23Lines(hcExact, formula, weightsCol = null) {
+  if (!hcExact) return [];
+  const w = weightsCol ? `, weights = ${weightsCol}` : "";
+  return [
+    ``,
+    `# Exact ${hcExact} standard errors (these are the SE Litux reports)`,
+    `fit_lm <- lm(${formula}, data = df${w})`,
+    `lmtest::coeftest(fit_lm, vcov. = sandwich::vcovHC(fit_lm, type = "${hcExact}"))`,
+  ];
+}
+
+// Estimators whose panel HAC is Driscoll-Kraay rather than plain Newey-West.
+const PANEL_TYPES_R = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "PoissonFE"]);
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
 function transpileModel(model) {
@@ -726,6 +852,15 @@ function transpileModel(model) {
 
   // SE the user actually selected — emitted instead of a hardcoded "HC1".
   const vc = rVcov(seType, { clusterVar, clusterVar2 });
+  // Panel HAC in Litux is Driscoll-Kraay (duckdbWithinHAC / plm::vcovSCC — see
+  // Fase 4b in CLAUDE.md), not the plain Newey-West that rVcov emits for a
+  // cross-section. fixest spells that `DK ~ time`, so override it here rather
+  // than emitting "NW", which is a different estimator (and errors on a feols
+  // model with no panel.id declared).
+  if ((seType || "").toLowerCase() === "hac" && PANEL_TYPES_R.has(type) && timeCol) {
+    vc.arg  = `DK ~ ${rName(timeCol)}`;
+    vc.note = `# NOTE: Litux's panel HAC is Driscoll-Kraay — fixest spells this DK ~ time.`;
+  }
   // Number of regressors (for the VIF guard — vif() errors on < 2 terms).
   const nReg = (xVars?.length ?? 0) + (wVars?.length ?? 0) + (interactionTerms?.length ?? 0);
 
@@ -742,6 +877,7 @@ function transpileModel(model) {
         `# ── OLS ──────────────────────────────────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
+        ...rHC23Lines(vc.hcExact, `${y} ~ ${xStr}`),
         ``,
         `# Diagnostics`,
         `fixest::etable(fit)`,
@@ -758,6 +894,7 @@ function transpileModel(model) {
           `# WARNING: no weight column supplied; falling back to OLS`,
           ...(vc.note ? [vc.note] : []),
           `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
+          ...rHC23Lines(vc.hcExact, `${y} ~ ${xStr}`),
           `fixest::etable(fit)`,
         ].join("\n");
       }
@@ -766,6 +903,7 @@ function transpileModel(model) {
         `# Weights: ${w}`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, vcov = ${vc.arg})`,
+        ...rHC23Lines(vc.hcExact, `${y} ~ ${xStr}`, `df$${w}`),
         ``,
         `# Diagnostics`,
         `fixest::etable(fit)`,
@@ -779,7 +917,9 @@ function transpileModel(model) {
       const feClauseFE = feColsFE.map(rName).join(" + ");
       return [
         `# ── Fixed Effects (within estimator) ────────────────────────────────`,
-        `fit_fe <- fixest::feols(${y} ~ ${xStr} | ${feClauseFE}, data = df, vcov = ~${rName(entityCol)})`,
+        ...(vc.note ? [vc.note] : []),
+        `fit_fe <- fixest::feols(${y} ~ ${xStr} | ${feClauseFE}, data = df, vcov = ${vc.arg})`,
+        ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${xStr}`, feColsFE),
         `fit_fd <- plm::plm(${y} ~ ${xStr}, data = df,`,
         `  index = c(${rStr(entityCol)}, ${rStr(timeCol)}),`,
         `  model = "fd")`,
@@ -802,6 +942,7 @@ function transpileModel(model) {
         `  model = "fd")`,
         ``,
         `summary(fit_fd)`,
+        ...rPlmVcovLines(seType, "fit_fd", { clusterVar }),
       ].join("\n");
 
     case "2SLS": {
@@ -816,6 +957,14 @@ function transpileModel(model) {
         `# ── 2SLS / IV ────────────────────────────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${ctrls || "1"} | ${endog} ~ ${iv_rhs}, data = df, vcov = ${vc.arg})`,
+        // fixest has no HC2/HC3; AER::ivreg does support sandwich::vcovHC exactly.
+        ...(vc.hcExact ? [
+          ``,
+          `# Exact ${vc.hcExact} standard errors (these are the SE Litux reports)`,
+          `fit_iv <- AER::ivreg(${y} ~ ${[endog, ctrls].filter(Boolean).join(" + ")} |`,
+          `  ${[iv_rhs, ctrls].filter(Boolean).join(" + ")}, data = df)`,
+          `lmtest::coeftest(fit_iv, vcov. = sandwich::vcovHC(fit_iv, type = "${vc.hcExact}"))`,
+        ] : []),
         ``,
         `# First-stage diagnostics`,
         `fixest::fitstat(fit, ~ ivwald)   # Wald F for instrument strength`,
@@ -833,6 +982,7 @@ function transpileModel(model) {
         `# DiD interaction term: post × treat`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${rhs}, data = df, vcov = ${vc.arg})`,
+        ...rHC23Lines(vc.hcExact, `${y} ~ ${rhs}`),
         ``,
         `fixest::etable(fit)`,
         ``,
@@ -852,8 +1002,10 @@ function transpileModel(model) {
       const feClauseTWFE = feColsTWFE.map(rName).join(" + ");
       return [
         `# ── Two-Way Fixed Effects DiD ────────────────────────────────────────`,
+        ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${treat}${ctrls} | ${feClauseTWFE},`,
-        `  data = df, vcov = ~${ec})`,
+        `  data = df, vcov = ${vc.arg})`,
+        ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${treat}${ctrls}`, feColsTWFE),
         ``,
         `fixest::etable(fit)`,
         ``,
@@ -929,7 +1081,9 @@ function transpileModel(model) {
       return [
         `# ── Panel LSDV (Least Squares Dummy Variables) ───────────────────────`,
         `# LSDV is numerically equivalent to within (FE) estimation`,
-        `fit <- fixest::feols(${y} ~ ${xStr} | ${feClauseLSDV}, data = df, vcov = ~${ec})`,
+        ...(vc.note ? [vc.note] : []),
+        `fit <- fixest::feols(${y} ~ ${xStr} | ${feClauseLSDV}, data = df, vcov = ${vc.arg})`,
+        ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${xStr}`, feColsLSDV),
         ``,
         `fixest::etable(fit)`,
         ``,
@@ -1010,8 +1164,9 @@ function transpileModel(model) {
         `df <- df |> dplyr::mutate(rel_time = ${tc} - treat_time)`,
         ``,
         `# Estimate — ref = -1 (last pre-period)`,
+        ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ i(rel_time, ref = -1)${ctrlStr} | ${feClauseES},`,
-        `  data = df, vcov = ~${ec})`,
+        `  data = df, vcov = ${vc.arg})`,
         ``,
         `fixest::iplot(fit, main = "Event Study")   # coefficient plot with CI`,
         `fixest::etable(fit)`,
@@ -1097,7 +1252,15 @@ function transpileModel(model) {
         `# Instruments: exogenous + excluded`,
         `fit <- gmm::gmm(${y} ~ ${exog}${wVars.length ? ` + ${wVars.map(fmtR).join(" + ")}` : ""},`,
         `  ~ ${instrs || "1"},`,
-        `  data = df, vcov = "HAC")`,
+        // gmm::gmm's vcov vocabulary is "iid" / "MDS" / "HAC" — not sandwich's.
+        // "MDS" is the martingale-difference (heteroskedasticity-robust) weight
+        // matrix, which is the closest counterpart to the HC family here.
+        `  data = df, vcov = ${(() => {
+          const s = (seType || "classical").toLowerCase();
+          if (s === "classical") return `"iid"`;
+          if (s === "hac") return `"HAC"`;
+          return `"MDS"`;
+        })()})`,
         ``,
         `summary(fit)`,
         `coef(fit)`,
@@ -1135,8 +1298,8 @@ function transpileModel(model) {
         `  data   = df,`,
         `  family = poisson(link = "log"))`,
         ``,
-        `# Coefficients with heteroskedasticity-robust (HC1) SE`,
-        `lmtest::coeftest(fit, vcov. = sandwich::vcovHC(fit, type = "HC1"))`,
+        `# Coefficients with the SE type selected in Litux`,
+        ...rGlmVcovLines(seType, "fit", { clusterVar, clusterVar2 }),
         ``,
         `# Incidence Rate Ratios (exp(beta)) with 95% CI`,
         `exp(cbind(IRR = coef(fit), confint(fit)))`,
@@ -1156,7 +1319,8 @@ function transpileModel(model) {
         `# ── Poisson FE (PPML with ${fes.length}-way fixed effects) ───────────────────`,
         `library(fixest)`,
         ``,
-        `fit <- fixest::fepois(${y} ~ ${cov} | ${feStr}, data = df, vcov = ~${fes[0]})`,
+        ...(vc.note ? [vc.note] : []),
+        `fit <- fixest::fepois(${y} ~ ${cov} | ${feStr}, data = df, vcov = ${vc.arg})`,
         ``,
         `fixest::etable(fit)`,
         `cat("Incidence Rate Ratios:\\n")`,
@@ -1302,7 +1466,7 @@ export function generateRScript(config) {
 
   const baseName = filename.replace(/\.[^.]+$/, "");
   const ts       = new Date().toISOString().slice(0, 10);
-  const pkgs     = buildPackageList(model.type, pipeline);
+  const pkgs     = buildPackageList(model.type, pipeline, model.seType);
 
   const lines = [];
 
@@ -1581,7 +1745,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
 export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [], perSubsetSteps = [], subsets = [], model = {}, dataDictionary = null, dataLoadOpts = null, allDatasets = {} } = {}) {
   const ts      = new Date().toISOString().slice(0, 10);
   const stem    = filename.replace(/\.[^.]+$/, "");
-  const pkgs    = buildPackageList(model.type, [...pipeline, ...perSubsetSteps]);
+  const pkgs    = buildPackageList(model.type, [...pipeline, ...perSubsetSteps], model.seType);
   const lines   = [];
 
   // Filter expressions: { col, op, val } → R expression
@@ -1695,8 +1859,17 @@ export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [],
 }
 
 // ─── PACKAGE LIST ─────────────────────────────────────────────────────────────
-function buildPackageList(modelType, pipeline) {
+function buildPackageList(modelType, pipeline, seType = "classical") {
   const pkgs = new Set(["dplyr", "tidyr", "readr", "fixest", "modelsummary"]);
+
+  // HC2/HC3 are emitted as an lm()/ivreg() refit + sandwich::vcovHC, so those
+  // packages must be in the install/library block or the script fails on line 1.
+  const seLower = (seType || "classical").toLowerCase();
+  if (seLower === "hc2" || seLower === "hc3") {
+    pkgs.add("sandwich");
+    pkgs.add("lmtest");
+    if (modelType === "2SLS") pkgs.add("AER");
+  }
 
   // Model-specific
   if (modelType === "FE" || modelType === "FD") pkgs.add("plm");
