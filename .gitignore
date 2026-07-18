@@ -42,3 +42,6 @@ __pycache__/
 # local installers (e.g. GeoGebra under skills)
 *.exe
 src/math/__validation__/.Rhistory
+# LMU course material — reference only, not part of the codebase
+LMU-tutorials/
+LMU tutorials/
