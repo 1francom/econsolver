@@ -1784,10 +1784,17 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
 // ─── QUICK FILTER ─────────────────────────────────────────────────────────────
 // Ephemeral in-explorer filter — never touches the pipeline or rawData.
 // Conditions are ANDed; numeric ops (>,<,>=,<=) skip non-numeric values.
-const FILTER_OPS = [">", "<", ">=", "<=", "=", "≠", "contains"];
+const FILTER_OPS = [">", "<", ">=", "<=", "=", "≠", "in", "contains"];
 
+// "in" mirrors R's `col %in% c(...)` / Python's `col.isin([...])` — val is either
+// an array (from the multi-select editor) or a comma-separated string typed by hand.
 function matchCond(row, {col, op, val}) {
   const v = row[col];
+  if (op === "in") {
+    const arr = Array.isArray(val) ? val : String(val ?? "").split(",").map(s => s.trim()).filter(Boolean);
+    if (!arr.length) return true; // nothing selected yet — don't filter everything out
+    return arr.some(x => String(v) === x);
+  }
   if (op === "contains") return String(v ?? "").toLowerCase().includes(String(val).toLowerCase());
   if (op === "=")  return String(v) === String(val);
   if (op === "≠")  return String(v) !== String(val);
@@ -1800,7 +1807,60 @@ function matchCond(row, {col, op, val}) {
   return true;
 }
 
-function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
+// Unique string values of `col` across `rows`, capped at `cap` — returns null past the
+// cap so the caller can fall back to a free-text comma-separated editor instead of
+// rendering an unusably long checkbox list.
+function uniqueColValues(rows, col, cap = 200) {
+  if (!col) return [];
+  const set = new Set();
+  for (const r of rows) {
+    const v = r[col];
+    if (v === undefined || v === null || v === "") continue;
+    set.add(String(v));
+    if (set.size > cap) return null;
+  }
+  return Array.from(set).sort();
+}
+
+function VectorValueEditor({col, rows, value, onChange, selStyle, C, T}) {
+  const [open, setOpen] = useState(false);
+  const uniques = useMemo(() => uniqueColValues(rows, col), [rows, col]);
+  const selected = Array.isArray(value) ? value : String(value ?? "").split(",").map(s => s.trim()).filter(Boolean);
+
+  if (uniques === null) {
+    return (
+      <input value={selected.join(", ")}
+        onChange={e => onChange(e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
+        style={{...selStyle, width:160}} placeholder="e.g. US, DE, FR" />
+    );
+  }
+
+  const toggle = (v) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
+
+  return (
+    <div style={{position:"relative"}}>
+      <button onClick={() => setOpen(s => !s)} style={{...selStyle, width:140, textAlign:"left", cursor:"pointer"}}>
+        {selected.length ? `${selected.length} selected` : "select values…"}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{position:"fixed", inset:0, zIndex:19}} />
+          <div style={{position:"absolute", top:"100%", left:0, marginTop:2, zIndex:20, background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:6, maxHeight:200, overflowY:"auto", minWidth:160, boxShadow:"0 4px 12px rgba(0,0,0,0.35)"}}>
+            {uniques.length === 0 && <div style={{fontSize:T.caption.fontSize, color:C.textMuted, fontFamily:T.code.fontFamily, padding:"2px 4px"}}>no values</div>}
+            {uniques.map(v => (
+              <label key={v} style={{display:"flex", alignItems:"center", gap:6, fontSize:T.caption.fontSize, fontFamily:T.code.fontFamily, color:C.text, padding:"2px 4px", cursor:"pointer", whiteSpace:"nowrap"}}>
+                <input type="checkbox" checked={selected.includes(v)} onChange={() => toggle(v)} />
+                {v}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function QuickFilter({headers, rows, totalRows, filteredCount, conds, setConds}) {
   const {C, T} = useTheme();
   const [open, setOpen] = useState(false);
   const active = conds.length > 0;
@@ -1824,11 +1884,20 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
               <select value={cond.col} onChange={e=>upd(i,{col:e.target.value})} style={selStyle}>
                 {headers.map(h=><option key={h} value={h}>{h}</option>)}
               </select>
-              <select value={cond.op} onChange={e=>upd(i,{op:e.target.value})} style={{...selStyle,width:76}}>
+              <select value={cond.op} onChange={e=>{
+                const newOp = e.target.value;
+                const wasVec = cond.op === "in", isVec = newOp === "in";
+                let val = cond.val;
+                if (isVec && !wasVec) val = String(val ?? "").split(",").map(s=>s.trim()).filter(Boolean);
+                else if (!isVec && wasVec) val = Array.isArray(val) ? val.join(", ") : val;
+                upd(i,{op:newOp, val});
+              }} style={{...selStyle,width:76}}>
                 {FILTER_OPS.map(op=><option key={op} value={op}>{op}</option>)}
               </select>
-              <input value={cond.val} onChange={e=>upd(i,{val:e.target.value})}
-                style={{...selStyle,width:100}} placeholder="value" />
+              {cond.op === "in"
+                ? <VectorValueEditor col={cond.col} rows={rows} value={cond.val} onChange={v=>upd(i,{val:v})} selStyle={selStyle} C={C} T={T} />
+                : <input value={cond.val} onChange={e=>upd(i,{val:e.target.value})}
+                    style={{...selStyle,width:100}} placeholder="value" />}
               <button onClick={()=>setConds(cs=>cs.filter((_,j)=>j!==i))}
                 style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize: T.h2.fontSize,lineHeight:1,padding:"0 2px"}}>×</button>
             </div>
@@ -2043,7 +2112,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           ]},
         ]} />
         {/* Quick Filter */}
-        <QuickFilter headers={headers} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
+        <QuickFilter headers={headers} rows={rows} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
           {[["summary","⊞ Summary"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"]].map(([k,l])=>(
