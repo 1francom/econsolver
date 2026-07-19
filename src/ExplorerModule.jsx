@@ -977,6 +977,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const [grpCol, setGrpCol] = useState(""); // "" = no grouping
   const [agg,    setAgg]    = useState("mean"); // mean | sum | count | median
   const [tsView, setTsView] = useState("line"); // "line" | "acf" | "adf"
+  const [seriesColors, setSeriesColors] = useState({}); // grp -> user-picked color override
 
   // ── Flat sorted series for ACF/ADF (no grouping, mean agg) ──────────────────
   const flatY = useMemo(() => {
@@ -1015,6 +1016,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const iH = H - PAD.t - PAD.b;
 
   const COLORS = [C.teal, C.orange, C.violet, C.green, C.red, C.blue, C.gold, C.purple];
+  const colorFor = (grp, si) => seriesColors[grp] ?? COLORS[si % COLORS.length];
 
   const chart = useMemo(() => {
     if (!series.length) return null;
@@ -1168,7 +1170,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
               >↓ PNG</button>
             </div>
           </div>
-          <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center" }}>
+          <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center", alignItems: "center" }}>
             <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
               style={{ width: "100%", maxWidth: 700, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
               <rect width={W} height={H} fill={C.bg} />
@@ -1191,7 +1193,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
 
               {/* series lines */}
               {series.map((s, si) => {
-                const col = COLORS[si % COLORS.length];
+                const col = colorFor(s.grp, si);
                 const d = s.pts.map((p, i) =>
                   `${i === 0 ? "M" : "L"}${chart.sx(p.t).toFixed(1)},${chart.sy(p.y).toFixed(1)}`
                 ).join(" ");
@@ -1233,21 +1235,29 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
               <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {agg}({yCol})
               </text>
-
-              {/* legend — only when grouped */}
-              {grpCol && series.length <= 8 && (
-                <g transform={`translate(${PAD.l + 10}, ${PAD.t + 6})`}>
-                  {series.map((s, si) => (
-                    <g key={s.grp} transform={`translate(0, ${si * 14})`}>
-                      <line x1={0} x2={14} y1={5} y2={5} stroke={COLORS[si % COLORS.length]} strokeWidth={2} />
-                      <text x={18} y={9} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
-                        {String(s.grp).length > 16 ? String(s.grp).slice(0,15)+"…" : String(s.grp)}
-                      </text>
-                    </g>
-                  ))}
-                </g>
-              )}
             </svg>
+            {/* Legend — sits to the right of the plot (never overlapping it), with a
+                clickable color swatch per series so the user can pick their own colors. */}
+            {series.length > 1 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0.4rem 0.4rem 0.4rem 0.2rem", maxHeight: "45vh", overflowY: "auto", flexShrink: 0 }}>
+                {series.map((s, si) => (
+                  <label key={s.grp} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="color" value={colorFor(s.grp, si)}
+                      onChange={e => setSeriesColors(prev => ({ ...prev, [s.grp]: e.target.value }))}
+                      style={{ width: 16, height: 16, padding: 0, border: `1px solid ${C.border2}`, borderRadius: 2, cursor: "pointer", background: "none" }} />
+                    <span style={{ fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.data.fontFamily, whiteSpace: "nowrap" }}>
+                      {String(s.grp).length > 20 ? String(s.grp).slice(0, 19) + "…" : String(s.grp)}
+                    </span>
+                  </label>
+                ))}
+                {Object.keys(seriesColors).length > 0 && (
+                  <button onClick={() => setSeriesColors({})}
+                    style={{ marginTop: 4, padding: "0.15rem 0.4rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
+                    reset colors
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* footer stats */}
