@@ -83,7 +83,17 @@ export function applyPreset(svgString, preset) {
 export function getSVGElement(containerOrSVG) {
   if (!containerOrSVG) return null;
   if (containerOrSVG.tagName?.toLowerCase() === "svg") return containerOrSVG;
-  return containerOrSVG.querySelector("svg") ?? null;
+  const svgs = Array.from(containerOrSVG.querySelectorAll("svg"));
+  if (svgs.length <= 1) return svgs[0] ?? null;
+  // Observable Plot's color legend (color: {legend:true}) renders one tiny <svg>
+  // per swatch ahead of the actual chart <svg> in DOM order — a plain
+  // querySelector("svg") grabbed a single-color swatch icon instead of the chart.
+  // Pick the largest by rendered area instead, since the chart is always far bigger.
+  const area = (svg) => {
+    const r = svg.getBoundingClientRect();
+    return r.width * r.height;
+  };
+  return svgs.reduce((best, svg) => (area(svg) > area(best) ? svg : best));
 }
 
 // ─── DOWNLOAD SVG ─────────────────────────────────────────────────────────────
