@@ -1394,7 +1394,7 @@ function generateExploreScript(language, { headers, info, filename }) {
 
 // ─── GROUP & SUMMARIZE EXPLORER ───────────────────────────────────────────────
 // Non-destructive descriptive stats panel with as.factor() override and LaTeX export.
-function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
+function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPreview }) {
   const { C, T } = useTheme();
   const [byCols,    setByCols]    = useState([]);
   const [factorOverrides, setFactorOverrides] = useState(new Set()); // numeric cols forced as categorical
@@ -1491,6 +1491,15 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
     setSumResult({ rows: outRows, headers: outHeaders, by: byCols, aggs: validAggs });
     setLatexOpen(false); setCopied(false);
   }
+
+  // doSummarize() snapshots `rows` at click time — if the user hits Compute while
+  // still on the preview (usingPreview), the wrong numbers would otherwise stick
+  // around forever even after the full table finishes loading. Re-run silently
+  // (keeping the same by/aggs config) whenever the underlying rows change.
+  useEffect(() => {
+    if (sumResult) doSummarize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
 
   function buildLatex(res) {
     const numCols = new Set(res.aggs.map(a => a.nn));
@@ -1646,14 +1655,17 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
         ))}
       </div>
 
-      <button onClick={doSummarize} disabled={!canSummarize} style={{
-        padding:"0.42rem 0.9rem",borderRadius:3,cursor:canSummarize?"pointer":"not-allowed",
-        fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,fontWeight:700,
-        background:canSummarize?C.gold:"transparent",
-        color:canSummarize?C.bg:C.textMuted,
-        border:`1px solid ${canSummarize?C.gold:C.border2}`,
-        opacity:canSummarize?1:0.5,marginBottom:"1.5rem",
-      }}>Compute →</button>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.5rem"}}>
+        <button onClick={doSummarize} disabled={!canSummarize} style={{
+          padding:"0.42rem 0.9rem",borderRadius:3,cursor:canSummarize?"pointer":"not-allowed",
+          fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,fontWeight:700,
+          background:canSummarize?C.gold:"transparent",
+          color:canSummarize?C.bg:C.textMuted,
+          border:`1px solid ${canSummarize?C.gold:C.border2}`,
+          opacity:canSummarize?1:0.5,
+        }}>Compute →</button>
+        {usingPreview && <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily}}>⏳ full dataset still loading — result will auto-refresh when ready</span>}
+      </div>
 
       {/* ── Result ── */}
       {sumResult && (
@@ -2153,7 +2165,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             <DispersionPanel rows={filteredRows} headers={headers} info={info} onPin={pinExplore}/>
             <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
-              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset}/>
+              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset} usingPreview={usingPreview}/>
             </div>
           </>
         )}
