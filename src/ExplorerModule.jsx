@@ -1836,13 +1836,17 @@ function uniqueColValues(rows, col, cap = 200) {
 
 function VectorValueEditor({col, rows, value, onChange, selStyle, C, T}) {
   const [open, setOpen] = useState(false);
+  // Free-text fallback mode keeps its own typed-text state: re-deriving the input's
+  // value from split(",").filter(Boolean) on every keystroke stripped a just-typed
+  // trailing comma (or space) immediately, making it look like commas didn't work.
+  const [text, setText] = useState(() => Array.isArray(value) ? value.join(", ") : String(value ?? ""));
   const uniques = useMemo(() => uniqueColValues(rows, col), [rows, col]);
   const selected = Array.isArray(value) ? value : String(value ?? "").split(",").map(s => s.trim()).filter(Boolean);
 
   if (uniques === null) {
     return (
-      <input value={selected.join(", ")}
-        onChange={e => onChange(e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
+      <input value={text}
+        onChange={e => { setText(e.target.value); onChange(e.target.value); }}
         style={{...selStyle, width:160}} placeholder="e.g. US, DE, FR" />
     );
   }
