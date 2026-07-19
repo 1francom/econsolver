@@ -1922,13 +1922,25 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // raw data grid can stay on the preview — this only affects analysis.
   const duckTable = cleanedData._duckdb?.tableName ?? null;
   const [fullRows, setFullRows] = useState(null);
+  const [fullRowsError, setFullRowsError] = useState(null);
+  const [fullRowsRetry, setFullRowsRetry] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setFullRows(null);
+    setFullRowsError(null);
     if (!duckTable) return;
-    extractAllRows(duckTable).then(all => { if (!cancelled) setFullRows(all); }).catch(() => {});
+    extractAllRows(duckTable)
+      .then(all => { if (!cancelled) setFullRows(all); })
+      .catch(e => {
+        if (cancelled) return;
+        console.error("[ExplorerModule] failed to load full DuckDB table — falling back to the preview:", e);
+        setFullRowsError(e?.message || "failed to load the full dataset");
+      });
     return () => { cancelled = true; };
-  }, [duckTable]);
+  }, [duckTable, fullRowsRetry]);
+  // Every stat/plot below reads `rows` — while this is true they are silently computed
+  // on the 500-row preview, not the full table. Never let that happen without telling the user.
+  const usingPreview = !!duckTable && !fullRows;
   const rows = (duckTable && fullRows) ? fullRows : previewRows;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
@@ -2081,6 +2093,22 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             <button onClick={onProceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>→ Modeling</button>
           </div>
         </div>
+        {/* Preview-vs-full-table notice — every stat/plot below reads `rows`, which is
+            the 500-row preview until the full DuckDB table finishes loading (or forever,
+            if that load fails). Must never be silent — Fase X correctness bug. */}
+        {usingPreview && (
+          <div style={{marginBottom:"1rem",padding:"0.5rem 0.8rem",borderRadius:4,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+            background:fullRowsError?`${C.red}14`:`${C.gold}14`,
+            border:`1px solid ${fullRowsError?C.red:C.gold}55`,
+            color:fullRowsError?C.red:C.gold,
+            display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            {fullRowsError
+              ? <>⚠ Could not load the full {(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()}-row dataset — every stat and plot below is computed on a {previewRows.length.toLocaleString()}-row preview only.
+                  <button onClick={()=>setFullRowsRetry(n=>n+1)} style={{fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,color:"inherit",background:"none",border:`1px solid currentColor`,borderRadius:3,padding:"0.15rem 0.5rem",cursor:"pointer"}}>retry</button>
+                </>
+              : <>⏳ Loading full dataset ({(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()} rows)… stats and plots below are computed on a {previewRows.length.toLocaleString()}-row preview until this finishes.</>}
+          </div>
+        )}
         {/* AI Insights */}
         <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
         <HintBox title="How to explore" sections={[
