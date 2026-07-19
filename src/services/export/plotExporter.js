@@ -96,6 +96,85 @@ export function getSVGElement(containerOrSVG) {
   return svgs.reduce((best, svg) => (area(svg) > area(best) ? svg : best));
 }
 
+// ─── LEGEND EXTRACTION / INJECTION ────────────────────────────────────────────
+// Observable Plot's color legend (color: {legend:true}) renders its swatches as
+// small standalone <svg> icons, each wrapped in a <span> alongside the category's
+// label text. getSVGElement() above deliberately excludes them from the chosen
+// chart <svg>, so a plain clone-and-serialize drops the legend entirely. These
+// helpers pull the swatch color + label pairs from the container and redraw them
+// as native SVG elements inside the exported clone, so exported PNG/SVG matches
+// what's on screen instead of silently losing which series is which.
+
+/**
+ * Read {color, label} pairs from a container's legend swatch <svg> elements
+ * (every <svg> in the container other than the chosen chart svg).
+ * @param {HTMLElement} container
+ * @param {SVGElement} mainSvg
+ * @returns {{color:string, label:string}[]}
+ */
+export function getLegendItems(container, mainSvg) {
+  if (!container || container.tagName?.toLowerCase() === "svg") return [];
+  const swatchSvgs = Array.from(container.querySelectorAll("svg")).filter(s => s !== mainSvg);
+  const items = [];
+  const seen = new Set();
+  for (const svg of swatchSvgs) {
+    const shape = svg.querySelector("rect, circle, path, line, polygon");
+    if (!shape) continue;
+    const fill = shape.getAttribute("fill");
+    const color = fill && fill !== "none" ? fill : shape.getAttribute("stroke");
+    const label = (svg.parentElement?.textContent || "").trim();
+    if (color && label && !seen.has(label)) { seen.add(label); items.push({ color, label }); }
+  }
+  return items;
+}
+
+/**
+ * Widen an SVG clone and draw a color-swatch legend in the new right-hand
+ * margin. Mutates `svgEl` in place (width, viewBox, appended <g>).
+ * @param {SVGElement} svgEl   — the clone to mutate (not the live DOM node)
+ * @param {{color:string,label:string}[]} items
+ * @param {number} width       — current width (px) before widening
+ * @param {number} height      — current height (px)
+ * @returns {number} the new total width (px)
+ */
+export function appendLegend(svgEl, items, width, height) {
+  if (!items.length) return width;
+  const svgNS = "http://www.w3.org/2000/svg";
+  const maxLabelLen = Math.max(...items.map(i => i.label.length));
+  const legendW = Math.min(220, Math.max(90, maxLabelLen * 6 + 30));
+  const g = svgEl.ownerDocument.createElementNS(svgNS, "g");
+  g.setAttribute("transform", `translate(${width + 10}, 16)`);
+  items.forEach((item, i) => {
+    const y = i * 18;
+    const rect = svgEl.ownerDocument.createElementNS(svgNS, "rect");
+    rect.setAttribute("x", "0"); rect.setAttribute("y", String(y));
+    rect.setAttribute("width", "10"); rect.setAttribute("height", "10");
+    rect.setAttribute("rx", "2");
+    rect.setAttribute("fill", item.color);
+    g.appendChild(rect);
+    const text = svgEl.ownerDocument.createElementNS(svgNS, "text");
+    text.setAttribute("x", "16"); text.setAttribute("y", String(y + 9));
+    text.setAttribute("font-family", "IBM Plex Mono, monospace");
+    text.setAttribute("font-size", "10");
+    text.setAttribute("fill", "#ddd8cc"); // theme-mapped by applyPreset's JOURNAL_MAP/PRESENTATION_MAP
+    text.textContent = item.label;
+    g.appendChild(text);
+  });
+  svgEl.appendChild(g);
+
+  const newWidth = width + legendW;
+  svgEl.setAttribute("width", String(newWidth));
+  const vb = svgEl.getAttribute("viewBox");
+  if (vb) {
+    const parts = vb.trim().split(/\s+/).map(Number);
+    const [minX = 0, minY = 0, , h = height] = parts;
+    svgEl.setAttribute("viewBox", `${minX} ${minY} ${newWidth} ${h}`);
+  } else {
+    svgEl.setAttribute("viewBox", `0 0 ${newWidth} ${height}`);
+  }
+  return newWidth;
+}
+
 // ─── DOWNLOAD SVG ─────────────────────────────────────────────────────────────
 /**
  * Download the SVG as a .svg file.
@@ -106,8 +185,13 @@ export function getSVGElement(containerOrSVG) {
 export function downloadSVG(el, filename = "plot", preset = "default") {
   const svg = getSVGElement(el);
   if (!svg) return;
+  const legendItems = getLegendItems(el, svg);
   const clone = svg.cloneNode(true);
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  if (legendItems.length) {
+    const { width: rawW, height: rawH } = svg.getBoundingClientRect();
+    appendLegend(clone, legendItems, rawW || 600, rawH || 360);
+  }
   let src = new XMLSerializer().serializeToString(clone);
   src = applyPreset(src, preset);
   src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
@@ -131,16 +215,19 @@ export function downloadSVG(el, filename = "plot", preset = "default") {
 export function downloadPNG(el, filename = "plot", preset = "default", scale = 2) {
   const svg = getSVGElement(el);
   if (!svg) return;
+  const legendItems = getLegendItems(el, svg);
 
   const { width: rawW, height: rawH } = svg.getBoundingClientRect();
-  const width  = rawW  || 600;
-  const height = rawH || 360;
+  const chartWidth = rawW  || 600;
+  const height     = rawH || 360;
 
   const clone = svg.cloneNode(true);
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   // Ensure explicit pixel dimensions for canvas rendering
-  clone.setAttribute("width",  String(width));
+  clone.setAttribute("width",  String(chartWidth));
   clone.setAttribute("height", String(height));
+
+  const width = legendItems.length ? appendLegend(clone, legendItems, chartWidth, height) : chartWidth;
 
   let src = new XMLSerializer().serializeToString(clone);
   src = applyPreset(src, preset);
