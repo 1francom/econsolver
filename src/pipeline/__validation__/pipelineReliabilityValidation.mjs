@@ -105,6 +105,7 @@ const SMOKE = {
   arrange:       { col: "wage", dir: "desc" },
   group_summarize:{ by: ["region"], aggs: [{ col: "wage", fn: "mean", nn: "wage_mean" }] },
   group_transform:{ by: ["region"], col: "wage", fn: "mean", nn: "wage_gm" },
+  connected_components: { colA: "id", colB: "region", nn: "component", keepLargest: "all" },
   patch:         { internal: true, ri: 0, col: "region", value: "edited" },
   join:          { rightId: "R1", leftKey: "id", rightKey: "id", how: "left", suffix: "_r" },
   append:        { rightId: "R1" },

@@ -127,3 +127,122 @@ export function feDegreesOfFreedom(n, kReg, nLevels) {
   const absorbed = nLevels.reduce((s, L) => s + (L - 1), 0) + 1; // +1 grand intercept
   return n - kReg - absorbed;
 }
+
+// ─── FIXED-EFFECT RECOVERY (fixest::fixef equivalent) ────────────────────────
+/**
+ * Recover the estimated fixed effects per dimension after a within regression.
+ *
+ * The within transform sweeps the FEs out, so they are not coefficients of the
+ * fitted model — they are recovered from the partial residual
+ *   e_it = y_it − x_it'β
+ * by solving  e ≈ Σ_d α_d[level_d(it)]  with alternating projections
+ * (Gauss-Seidel): hold every other dimension fixed, set each level's effect to
+ * the mean of the remaining residual, and repeat until it stops moving.
+ * For D = 1 this converges in a single pass to the exact α_i = ȳ_i − x̄_i'β.
+ *
+ * IDENTIFICATION — the reason this returns `normalization` and a warning:
+ * with D ≥ 2 the FEs are only identified up to a constant that can be shifted
+ * between dimensions (add c to every α_1, subtract it from every α_2, and the
+ * fit is unchanged). We therefore adopt an explicit convention: dimensions
+ * 2..D are centred on zero and the whole level sits in dimension 1 plus the
+ * intercept. fixest::fixef() picks references differently, so INDIVIDUAL levels
+ * can differ from R by a constant per dimension while every within-dimension
+ * DIFFERENCE, the sums α_d1 + α_d2, correlations, and variances agree.
+ *
+ * A second, sharper caveat for AKM-style person×firm models: firm effects are
+ * identified only WITHIN a connected set of firms linked by movers. Across
+ * disconnected components the constant is separately free, so comparing levels
+ * across components is meaningless. This function does not compute components;
+ * it flags the risk when D ≥ 2.
+ *
+ * @param {object[]} rows     estimation sample (already NA-filtered)
+ * @param {string}   yCol
+ * @param {string[]} xCols
+ * @param {string[]} feCols   FE dimensions, in order
+ * @param {number[]} betaX    slope coefficients aligned to xCols (no intercept)
+ * @param {object}   [opts]   { maxIter = 200, tol = 1e-10 }
+ * @returns {{ estimates: Record<string, Map>, perRow: Record<string, number[]>,
+ *             intercept: number, iterations: number, converged: boolean,
+ *             normalization: string, warnings: string[] }}
+ */
+export function recoverFixedEffects(rows, yCol, xCols, feCols, betaX, opts = {}) {
+  const { maxIter = 200, tol = 1e-10 } = opts;
+  const D = feCols.length;
+  const n = rows.length;
+  const warnings = [];
+  if (!D || !n) return { estimates: {}, perRow: {}, intercept: 0, iterations: 0, converged: true, normalization: "none", warnings };
+
+  // Partial residual: what the fixed effects have to explain.
+  const e = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let v = rows[i][yCol];
+    for (let j = 0; j < xCols.length; j++) v -= (betaX[j] ?? 0) * rows[i][xCols[j]];
+    e[i] = v;
+  }
+
+  // Row → level index, per dimension.
+  const levels = feCols.map(c => [...new Set(rows.map(r => r[c]))]);
+  const index  = feCols.map((c, d) => {
+    const m = new Map(levels[d].map((lv, k) => [String(lv), k]));
+    return rows.map(r => m.get(String(r[c])));
+  });
+
+  const alpha = levels.map(lv => new Float64Array(lv.length));
+  const counts = levels.map((lv, d) => {
+    const c = new Float64Array(lv.length);
+    for (let i = 0; i < n; i++) c[index[d][i]]++;
+    return c;
+  });
+
+  // Alternating projections.
+  let iterations = 0, converged = false;
+  for (; iterations < maxIter; iterations++) {
+    let maxShift = 0;
+    for (let d = 0; d < D; d++) {
+      const sum = new Float64Array(levels[d].length);
+      for (let i = 0; i < n; i++) {
+        let r = e[i];
+        for (let d2 = 0; d2 < D; d2++) if (d2 !== d) r -= alpha[d2][index[d2][i]];
+        sum[index[d][i]] += r;
+      }
+      for (let l = 0; l < sum.length; l++) {
+        const next = counts[d][l] ? sum[l] / counts[d][l] : 0;
+        maxShift = Math.max(maxShift, Math.abs(next - alpha[d][l]));
+        alpha[d][l] = next;
+      }
+    }
+    if (maxShift < tol) { converged = true; iterations++; break; }
+  }
+  if (!converged) {
+    warnings.push(`Fixed-effect recovery did not converge in ${maxIter} iterations — levels may be weakly identified.`);
+  }
+
+  // Normalisation: centre dimensions 2..D, park the level in the intercept.
+  let intercept = 0;
+  for (let d = 1; d < D; d++) {
+    let wsum = 0, tot = 0;
+    for (let l = 0; l < alpha[d].length; l++) { wsum += alpha[d][l] * counts[d][l]; tot += counts[d][l]; }
+    const m = tot ? wsum / tot : 0;
+    for (let l = 0; l < alpha[d].length; l++) alpha[d][l] -= m;
+    intercept += m;
+  }
+  if (D >= 2) {
+    warnings.push(
+      "With 2+ FE dimensions the levels are identified only up to a constant shift between dimensions. " +
+      "Dimensions after the first are centred on zero; differences within a dimension, and correlations, are unaffected. " +
+      "For person×firm (AKM) models firm effects are comparable only within a connected set of firms linked by movers."
+    );
+  }
+
+  const estimates = {}, perRow = {};
+  feCols.forEach((c, d) => {
+    estimates[c] = new Map(levels[d].map((lv, k) => [lv, alpha[d][k]]));
+    perRow[c]    = Array.from({ length: n }, (_, i) => alpha[d][index[d][i]]);
+  });
+
+  return {
+    estimates, perRow, intercept, iterations, converged,
+    normalization: D >= 2 ? "dimensions 2..D centred on zero; level absorbed into the intercept" : "exact (single dimension)",
+    warnings,
+  };
+}

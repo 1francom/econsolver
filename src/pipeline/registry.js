@@ -629,6 +629,24 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "group_transform", by: [], col: "", fn: "mean", nn: "" }),
   },
 
+  {
+    type: "connected_components",
+    label: "Connected components (link graph)",
+    category: "features",
+    description: "Label each row with the connected component of the bipartite graph linking two id columns (e.g. person and firm). Component 1 is always the largest. Needed for AKM-style two-way models, where a firm effect is identified only relative to firms reachable through a chain of movers. Equivalent to igraph::components().",
+    schema: [
+      { key: "colA", type: "col",  label: "First id column (e.g. person)" },
+      { key: "colB", type: "col",  label: "Second id column (e.g. firm)" },
+      { key: "nn",   type: "text", label: "Output column name" },
+      { key: "keepLargest", type: "select", label: "Rows to keep", options: [
+        { value: "all",     label: "All rows (label only)" },
+        { value: "largest", label: "Largest component only" },
+      ]},
+    ],
+    toLabel: s => `connected_components ${s.colA} ~ ${s.colB} -> ${s.nn || "component"}${s.keepLargest === "largest" ? " (largest only)" : ""}`,
+    defaultStep: () => ({ type: "connected_components", colA: "", colB: "", nn: "component", keepLargest: "all" }),
+  },
+
   // ── CELL EDITS ──────────────────────────────────────────────────────────────
 
   {

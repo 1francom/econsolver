@@ -119,6 +119,16 @@ function buildExtractColumns(result, yVar, xVars) {
       }
     });
   }
+  // Recovered fixed effects, one column per dimension (fixest::fixef).
+  // perRow is aligned to the estimation sample, exactly like resid/Yhat, so the
+  // full-length guard above governs these too.
+  if (result.fixef?.perRow) {
+    for (const [dim, values] of Object.entries(result.fixef.perRow)) {
+      if (values?.length) {
+        cols.push({ name: `${dim}__fe`, label: `Fixed effect (${dim})`, values });
+      }
+    }
+  }
   // Synthetic Control gap
   if (result.type === "SyntheticControl" && result.gapSeries?.length) {
     cols.push({ name: "sc__gap", label: "SC gap (y − ŷ_SC)", values: result.gapSeries.map(g => g.gap) });

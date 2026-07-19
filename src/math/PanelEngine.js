@@ -7,7 +7,7 @@ import {
   runOLS, pValue, fCDF, stars,
 } from "./LinearEngine.js";
 import { computeRobustSE } from "../core/inference/robustSE.js";
-import { demeanByFE, feDegreesOfFreedom } from "./PanelWithinEngine.js";
+import { demeanByFE, feDegreesOfFreedom, recoverFixedEffects } from "./PanelWithinEngine.js";
 
 /**
  * Order-insensitive check: does `feCols` represent the same FE set as
@@ -155,6 +155,12 @@ export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
   const SST_w   = dmYvals.reduce((s, v) => s + (v - dmYmean) ** 2, 0);
   const R2_within = 1 - res.SSR / SST_w;
 
+  // Recovered fixed effects (fixest::fixef equivalent), so the levels can be
+  // written back as columns. Computed from the partial residual y − xβ, NOT
+  // from the within regression, which sweeps them out. See recoverFixedEffects
+  // for the identification caveat when there are 2+ dimensions.
+  const fixef = recoverFixedEffects(valid, yCol, xCols, feCols, res.beta.slice(1));
+
   return {
     beta:     res.beta.slice(1),
     se:       corrSE.slice(1),
@@ -165,6 +171,7 @@ export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
     n:    valid.length,
     feCols,
     nLevels,          // level count per FE dimension, in feCols order
+    fixef,            // { estimates, perRow, intercept, normalization, warnings }
     df:   df_fe,
     SSR:  res.SSR,
     s2:   s2_fe,

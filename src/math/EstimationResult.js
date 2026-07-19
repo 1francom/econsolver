@@ -282,6 +282,7 @@ function wrapLinear(type, eng, spec) {
 function wrapFE(eng, spec) {
   return {
     ...base("FE", spec),
+    fixef:     eng.fixef ?? null,   // recovered FE levels, for ExtractPanel
     varNames:  eng.varNames ?? [],
     beta:      clean(eng.beta),
     se:        clean(eng.se),

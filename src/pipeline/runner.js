@@ -19,6 +19,7 @@ import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 import { assignVector } from "../core/generate/vectorAssign.js";
 import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
+import { connectedComponents } from "../math/graph/connectedComponents.js";
 import {
   assignDistance, assignDistanceMetric, addDistanceBins,
   transformCoord, transformWKT,
@@ -633,6 +634,19 @@ export function applyStep(rows, headers, s, context = {}) {
         groups.forEach(idxs => { const a = agg(idxs); idxs.forEach(i => { valByRow[i] = a; }); });
       }
       R = rows.map((r, i) => ({ ...r, [nn]: valByRow[i] }));
+      if (!H.includes(nn)) H = [...H, nn];
+      break;
+    }
+
+    case "connected_components": {
+      // Bipartite person-firm style link graph. Component 1 is the largest, so
+      // "keep the connected set" is just a filter on == 1.
+      const { colA, colB } = s;
+      const nn = s.nn || "component";
+      if (!colA || !colB || colA === colB) break;   // malformed step is a no-op, never a crash
+      const cc = connectedComponents(rows, colA, colB);
+      R = rows.map((r, i) => ({ ...r, [nn]: cc.componentOf[i] }));
+      if (s.keepLargest === "largest") R = R.filter(r => r[nn] === 1);
       if (!H.includes(nn)) H = [...H, nn];
       break;
     }

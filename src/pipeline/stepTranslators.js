@@ -743,6 +743,23 @@ export function toR(step, df = "df", allDatasets = {}) {
       return `${df} <- ${df} |> distinct(${rSubset || "."}${rSubset ? ", " : ""}.keep_all = TRUE)`;
     }
 
+    case "connected_components": {
+      // igraph numbers components arbitrarily; Litux ranks them by row count so
+      // component 1 is always the largest. Reproduce that ranking explicitly,
+      // otherwise "keep component 1" means different things in the two scripts.
+      const ccA = rName(step.colA), ccB = rName(step.colB);
+      const ccOut = rName(step.nn ?? "component");
+      const lines = [
+        `.cc_g <- igraph::graph_from_data_frame(data.frame(`,
+        `  a = paste0("A", ${df}$${ccA}), b = paste0("B", ${df}$${ccB})), directed = FALSE)`,
+        `.cc_m <- igraph::components(.cc_g)$membership[paste0("A", ${df}$${ccA})]`,
+        `.cc_rank <- rank(-table(.cc_m), ties.method = "first")`,
+        `${df}$${ccOut} <- as.integer(.cc_rank[as.character(.cc_m)])`,
+      ];
+      if (step.keepLargest === "largest") lines.push(`${df} <- ${df}[${df}$${ccOut} == 1, ]`);
+      return lines.join("\n");
+    }
+
     case "group_transform": {
       const rBy  = (step.by ?? []).map(rName).join(", ");
       const rOut = rName(step.nn ?? `${step.fn}_${step.col}`);
@@ -1283,6 +1300,16 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return `duplicates drop ${stDiSub}, force`;
     }
 
+    case "connected_components": {
+      // Stata has no graph library in base; -netsis-/-spnet- are user-written and
+      // not assumable. Emit an honest note rather than a silent drop.
+      return [
+        `* connected_components (${step.colA} ~ ${step.colB}) has no base-Stata equivalent.`,
+        `* Compute it in R (igraph::components) or Python (networkx) and merge the`,
+        `* resulting component id back in before this point.`,
+      ].join("\n");
+    }
+
     case "group_transform": {
       const stGtBy   = (step.by ?? []).map(stVar).join(" ");
       const stGtOut  = stVar(step.nn ?? `${step.fn ?? "mean"}_${step.col}`);
@@ -1798,6 +1825,22 @@ export function toPython(step, df = "df", allDatasets = {}) {
       const pyDiSub = step.subset ?? [];
       const pyDiArg = pyDiSub.length ? `subset=${pyList(pyDiSub)}, ` : "";
       return `${df} = ${df}.drop_duplicates(${pyDiArg}keep="first").reset_index(drop=True)`;
+    }
+
+    case "connected_components": {
+      const ccA = pyStr(step.colA), ccB = pyStr(step.colB);
+      const ccOut = pyStr(step.nn ?? "component");
+      const lines = [
+        `_g = networkx.Graph()  # requires networkx`,
+        `_g.add_edges_from(zip("A" + ${df}[${ccA}].astype(str), "B" + ${df}[${ccB}].astype(str)))`,
+        `_comp = {n: i for i, c in enumerate(networkx.connected_components(_g)) for n in c}`,
+        `_m = ("A" + ${df}[${ccA}].astype(str)).map(_comp)`,
+        `# rank by row count so component 1 is the largest, matching Litux`,
+        `_rank = {c: i + 1 for i, c in enumerate(_m.value_counts().index)}`,
+        `${df}[${ccOut}] = _m.map(_rank)`,
+      ];
+      if (step.keepLargest === "largest") lines.push(`${df} = ${df}[${df}[${ccOut}] == 1]`);
+      return lines.join("\n");
     }
 
     case "group_transform": {
