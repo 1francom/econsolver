@@ -234,9 +234,15 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
 
     case "histogram": {
       if (aes.x) {
-        const { bins = 20 } = ly.opts || {};
+        const { bins: binsRaw = 20, binMode = "count", binWidth: binWidthRaw = 1 } = ly.opts || {};
+        // Inputs may hold a transient "" or partial value while the user is typing —
+        // fall back to a valid default here rather than in the input handler, so the
+        // field itself can be freely cleared and retyped.
+        const bins = Number(binsRaw) > 0 ? Math.round(Number(binsRaw)) : 20;
+        const binWidth = Number(binWidthRaw) > 0 ? Number(binWidthRaw) : 1;
+        const binOpt = binMode === "width" ? { interval: binWidth } : { thresholds: bins };
         marks.push(Plt.rectY(rows, Plt.binX({ y: "count" }, {
-          x: aes.x, fill: colorVal, fillOpacity: 0.85 * op, thresholds: bins,
+          x: aes.x, fill: colorVal, fillOpacity: 0.85 * op, ...binOpt,
         })));
       }
       break;
@@ -244,12 +250,14 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
 
     case "density": {
       if (aes.x) {
-        const { adjust = 1.0 } = ly.opts || {};
+        const { adjust = 1.0, binMode = "count", binWidth: binWidthRaw = 1 } = ly.opts || {};
+        const binWidth = Number(binWidthRaw) > 0 ? Number(binWidthRaw) : 1;
+        const binOpt = binMode === "width" ? { interval: binWidth } : { thresholds: Math.round(40 * adjust) };
         marks.push(Plt.areaY(rows, Plt.binX({ y: "proportion" }, {
-          x: aes.x, fill: colorVal, fillOpacity: 0.22 * op, thresholds: Math.round(40 * adjust),
+          x: aes.x, fill: colorVal, fillOpacity: 0.22 * op, ...binOpt,
         })));
         marks.push(Plt.lineY(rows, Plt.binX({ y: "proportion" }, {
-          x: aes.x, stroke: colorVal, strokeWidth: 1.8, strokeOpacity: op, thresholds: Math.round(40 * adjust),
+          x: aes.x, stroke: colorVal, strokeWidth: 1.8, strokeOpacity: op, ...binOpt,
         })));
       }
       break;
@@ -868,16 +876,44 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
   </>;
 
   if (geom === "histogram") return <>
-    {lbl("bins")}
-    <input type="number" min={3} max={200} value={opts.bins ?? 20}
-      onChange={e => set("bins", Math.max(3, +e.target.value))}
-      style={{ width: 52, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
+    <div style={{ display: "flex", gap: 2 }}
+      title="N bins = fixed number of bars, like ggplot's bins= (fewer bins → wider bars). Bin width = fixed bar width in data units, like ggplot's binwidth= (smaller width → MORE, narrower bars — opposite direction from N bins).">
+      {[["count", "N bins"], ["width", "Bin width"]].map(([k, l]) => (
+        <button key={k} onClick={() => set("binMode", k)} style={chip((opts.binMode ?? "count") === k)}>{l}</button>
+      ))}
+    </div>
+    {(opts.binMode ?? "count") === "count" ? <>
+      {lbl("bins")}
+      <input type="number" min={1} max={200} value={opts.bins ?? 20}
+        onChange={e => set("bins", e.target.value === "" ? "" : +e.target.value)}
+        onBlur={e => { if (!(+e.target.value >= 1)) set("bins", 20); }}
+        style={{ width: 52, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
+    </> : <>
+      {lbl("width")}
+      <input type="number" min={0.0001} step="any" value={opts.binWidth ?? 1}
+        onChange={e => set("binWidth", e.target.value === "" ? "" : +e.target.value)}
+        onBlur={e => { if (!(+e.target.value > 0)) set("binWidth", 1); }}
+        style={{ width: 68, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
+    </>}
   </>;
 
   if (geom === "density") return <>
     {lbl("adjust")}
     {slider("adjust", 0.25, 3, 0.25, 1)}
     <span style={{ ...numW, width: 30 }}>{opts.adjust ?? 1}×</span>
+    <div style={{ display: "flex", gap: 2 }}
+      title="N bins = fixed number of density bins, like ggplot's bins= (fewer bins → wider bars). Bin width = fixed bar width in data units, like ggplot's binwidth= (smaller width → MORE, narrower bars — opposite direction from N bins).">
+      {[["count", "N bins"], ["width", "Bin width"]].map(([k, l]) => (
+        <button key={k} onClick={() => set("binMode", k)} style={chip((opts.binMode ?? "count") === k)}>{l}</button>
+      ))}
+    </div>
+    {(opts.binMode ?? "count") === "width" && <>
+      {lbl("width")}
+      <input type="number" min={0.0001} step="any" value={opts.binWidth ?? 1}
+        onChange={e => set("binWidth", e.target.value === "" ? "" : +e.target.value)}
+        onBlur={e => { if (!(+e.target.value > 0)) set("binWidth", 1); }}
+        style={{ width: 68, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
+    </>}
   </>;
 
   if (geom === "bar") return <>
