@@ -632,11 +632,14 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
   const isBetween  = cond.op === "between";
   const isInList   = cond.op === "in" || cond.op === "nin";
   const colInfo    = info[cond.col] || {};
+  const [chipSearch, setChipSearch] = useState("");
 
-  // For categorical in/nin: show unique value chips
-  const uVals = (isInList && colInfo.uVals)
-    ? colInfo.uVals.slice(0, 40).map(v => String(v))
-    : [];
+  // For categorical in/nin: show unique value chips, filterable by chipSearch so a
+  // long list (many countries, categories, etc.) doesn't force scanning every chip.
+  const allUVals = (isInList && colInfo.uVals) ? colInfo.uVals.map(v => String(v)) : [];
+  const uVals = chipSearch.trim()
+    ? allUVals.filter(v => v.toLowerCase().includes(chipSearch.trim().toLowerCase())).slice(0, 40)
+    : allUVals.slice(0, 40);
 
   const inS = {
     padding:"0.3rem 0.55rem", background:C.surface3, border:`1px solid ${C.border2}`,
@@ -691,8 +694,15 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
       {cond.col && isInList && (
         <div style={{ flex:"1 1 200px", minWidth:0 }}>
           {/* If categorical: show chips from unique values */}
-          {uVals.length > 0 ? (
-            <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4 }}>
+          {allUVals.length > 0 ? (
+            <>
+              <input
+                value={chipSearch}
+                onChange={e => setChipSearch(e.target.value)}
+                placeholder={`search ${allUVals.length} values…`}
+                style={{ ...inS, width:"100%", marginBottom:4, boxSizing:"border-box" }}
+              />
+              <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4, maxHeight:120, overflowY:"auto" }}>
               {uVals.map(v => {
                 const sel = (cond.values || []).includes(v);
                 return (
@@ -710,7 +720,13 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
                   }}>{sel?"✓ ":""}{v}</button>
                 );
               })}
-            </div>
+              </div>
+              {allUVals.length > uVals.length && (
+                <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily }}>
+                  showing {uVals.length} of {allUVals.length}{chipSearch.trim() ? " matching" : ""} — refine the search above
+                </div>
+              )}
+            </>
           ) : (
             /* Numeric or many-valued: free text comma-separated */
             <input

@@ -1006,6 +1006,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const [grpCol, setGrpCol] = useState(""); // "" = no grouping
   const [agg,    setAgg]    = useState("mean"); // mean | sum | count | median
   const [tsView, setTsView] = useState("line"); // "line" | "acf" | "adf"
+  const [seriesColors, setSeriesColors] = useState({}); // grp -> user-picked color override
 
   // ── Flat sorted series for ACF/ADF (no grouping, mean agg) ──────────────────
   const flatY = useMemo(() => {
@@ -1044,6 +1045,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const iH = H - PAD.t - PAD.b;
 
   const COLORS = [C.teal, C.orange, C.violet, C.green, C.red, C.blue, C.gold, C.purple];
+  const colorFor = (grp, si) => seriesColors[grp] ?? COLORS[si % COLORS.length];
 
   const chart = useMemo(() => {
     if (!series.length) return null;
@@ -1197,7 +1199,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
               >↓ PNG</button>
             </div>
           </div>
-          <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center" }}>
+          <div style={{ background: C.bg, padding: "0.5rem", display: "flex", justifyContent: "center", alignItems: "center" }}>
             <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
               style={{ width: "100%", maxWidth: 700, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
               <rect width={W} height={H} fill={C.bg} />
@@ -1220,7 +1222,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
 
               {/* series lines */}
               {series.map((s, si) => {
-                const col = COLORS[si % COLORS.length];
+                const col = colorFor(s.grp, si);
                 const d = s.pts.map((p, i) =>
                   `${i === 0 ? "M" : "L"}${chart.sx(p.t).toFixed(1)},${chart.sy(p.y).toFixed(1)}`
                 ).join(" ");
@@ -1262,21 +1264,29 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
               <text transform={`translate(12,${PAD.t+iH/2}) rotate(-90)`} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
                 {agg}({yCol})
               </text>
-
-              {/* legend — only when grouped */}
-              {grpCol && series.length <= 8 && (
-                <g transform={`translate(${PAD.l + 10}, ${PAD.t + 6})`}>
-                  {series.map((s, si) => (
-                    <g key={s.grp} transform={`translate(0, ${si * 14})`}>
-                      <line x1={0} x2={14} y1={5} y2={5} stroke={COLORS[si % COLORS.length]} strokeWidth={2} />
-                      <text x={18} y={9} fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
-                        {String(s.grp).length > 16 ? String(s.grp).slice(0,15)+"…" : String(s.grp)}
-                      </text>
-                    </g>
-                  ))}
-                </g>
-              )}
             </svg>
+            {/* Legend — sits to the right of the plot (never overlapping it), with a
+                clickable color swatch per series so the user can pick their own colors. */}
+            {series.length > 1 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0.4rem 0.4rem 0.4rem 0.2rem", maxHeight: "45vh", overflowY: "auto", flexShrink: 0 }}>
+                {series.map((s, si) => (
+                  <label key={s.grp} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="color" value={colorFor(s.grp, si)}
+                      onChange={e => setSeriesColors(prev => ({ ...prev, [s.grp]: e.target.value }))}
+                      style={{ width: 16, height: 16, padding: 0, border: `1px solid ${C.border2}`, borderRadius: 2, cursor: "pointer", background: "none" }} />
+                    <span style={{ fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.data.fontFamily, whiteSpace: "nowrap" }}>
+                      {String(s.grp).length > 20 ? String(s.grp).slice(0, 19) + "…" : String(s.grp)}
+                    </span>
+                  </label>
+                ))}
+                {Object.keys(seriesColors).length > 0 && (
+                  <button onClick={() => setSeriesColors({})}
+                    style={{ marginTop: 4, padding: "0.15rem 0.4rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
+                    reset colors
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* footer stats */}
@@ -1423,7 +1433,7 @@ function generateExploreScript(language, { headers, info, filename }) {
 
 // ─── GROUP & SUMMARIZE EXPLORER ───────────────────────────────────────────────
 // Non-destructive descriptive stats panel with as.factor() override and LaTeX export.
-function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
+function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPreview }) {
   const { C, T } = useTheme();
   const [byCols,    setByCols]    = useState([]);
   const [factorOverrides, setFactorOverrides] = useState(new Set()); // numeric cols forced as categorical
@@ -1520,6 +1530,15 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
     setSumResult({ rows: outRows, headers: outHeaders, by: byCols, aggs: validAggs });
     setLatexOpen(false); setCopied(false);
   }
+
+  // doSummarize() snapshots `rows` at click time — if the user hits Compute while
+  // still on the preview (usingPreview), the wrong numbers would otherwise stick
+  // around forever even after the full table finishes loading. Re-run silently
+  // (keeping the same by/aggs config) whenever the underlying rows change.
+  useEffect(() => {
+    if (sumResult) doSummarize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
 
   function buildLatex(res) {
     const numCols = new Set(res.aggs.map(a => a.nn));
@@ -1675,14 +1694,17 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
         ))}
       </div>
 
-      <button onClick={doSummarize} disabled={!canSummarize} style={{
-        padding:"0.42rem 0.9rem",borderRadius:3,cursor:canSummarize?"pointer":"not-allowed",
-        fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,fontWeight:700,
-        background:canSummarize?C.gold:"transparent",
-        color:canSummarize?C.bg:C.textMuted,
-        border:`1px solid ${canSummarize?C.gold:C.border2}`,
-        opacity:canSummarize?1:0.5,marginBottom:"1.5rem",
-      }}>Compute →</button>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.5rem"}}>
+        <button onClick={doSummarize} disabled={!canSummarize} style={{
+          padding:"0.42rem 0.9rem",borderRadius:3,cursor:canSummarize?"pointer":"not-allowed",
+          fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,fontWeight:700,
+          background:canSummarize?C.gold:"transparent",
+          color:canSummarize?C.bg:C.textMuted,
+          border:`1px solid ${canSummarize?C.gold:C.border2}`,
+          opacity:canSummarize?1:0.5,
+        }}>Compute →</button>
+        {usingPreview && <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily}}>⏳ full dataset still loading — result will auto-refresh when ready</span>}
+      </div>
 
       {/* ── Result ── */}
       {sumResult && (
@@ -1813,10 +1835,17 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset }) {
 // ─── QUICK FILTER ─────────────────────────────────────────────────────────────
 // Ephemeral in-explorer filter — never touches the pipeline or rawData.
 // Conditions are ANDed; numeric ops (>,<,>=,<=) skip non-numeric values.
-const FILTER_OPS = [">", "<", ">=", "<=", "=", "≠", "contains"];
+const FILTER_OPS = [">", "<", ">=", "<=", "=", "≠", "in", "contains"];
 
+// "in" mirrors R's `col %in% c(...)` / Python's `col.isin([...])` — val is either
+// an array (from the multi-select editor) or a comma-separated string typed by hand.
 function matchCond(row, {col, op, val}) {
   const v = row[col];
+  if (op === "in") {
+    const arr = Array.isArray(val) ? val : String(val ?? "").split(",").map(s => s.trim()).filter(Boolean);
+    if (!arr.length) return true; // nothing selected yet — don't filter everything out
+    return arr.some(x => String(v) === x);
+  }
   if (op === "contains") return String(v ?? "").toLowerCase().includes(String(val).toLowerCase());
   if (op === "=")  return String(v) === String(val);
   if (op === "≠")  return String(v) !== String(val);
@@ -1829,7 +1858,64 @@ function matchCond(row, {col, op, val}) {
   return true;
 }
 
-function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
+// Unique string values of `col` across `rows`, capped at `cap` — returns null past the
+// cap so the caller can fall back to a free-text comma-separated editor instead of
+// rendering an unusably long checkbox list.
+function uniqueColValues(rows, col, cap = 200) {
+  if (!col) return [];
+  const set = new Set();
+  for (const r of rows) {
+    const v = r[col];
+    if (v === undefined || v === null || v === "") continue;
+    set.add(String(v));
+    if (set.size > cap) return null;
+  }
+  return Array.from(set).sort();
+}
+
+function VectorValueEditor({col, rows, value, onChange, selStyle, C, T}) {
+  const [open, setOpen] = useState(false);
+  // Free-text fallback mode keeps its own typed-text state: re-deriving the input's
+  // value from split(",").filter(Boolean) on every keystroke stripped a just-typed
+  // trailing comma (or space) immediately, making it look like commas didn't work.
+  const [text, setText] = useState(() => Array.isArray(value) ? value.join(", ") : String(value ?? ""));
+  const uniques = useMemo(() => uniqueColValues(rows, col), [rows, col]);
+  const selected = Array.isArray(value) ? value : String(value ?? "").split(",").map(s => s.trim()).filter(Boolean);
+
+  if (uniques === null) {
+    return (
+      <input value={text}
+        onChange={e => { setText(e.target.value); onChange(e.target.value); }}
+        style={{...selStyle, width:160}} placeholder="e.g. US, DE, FR" />
+    );
+  }
+
+  const toggle = (v) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
+
+  return (
+    <div style={{position:"relative"}}>
+      <button onClick={() => setOpen(s => !s)} style={{...selStyle, width:140, textAlign:"left", cursor:"pointer"}}>
+        {selected.length ? `${selected.length} selected` : "select values…"}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{position:"fixed", inset:0, zIndex:19}} />
+          <div style={{position:"absolute", top:"100%", left:0, marginTop:2, zIndex:20, background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, padding:6, maxHeight:200, overflowY:"auto", minWidth:160, boxShadow:"0 4px 12px rgba(0,0,0,0.35)"}}>
+            {uniques.length === 0 && <div style={{fontSize:T.caption.fontSize, color:C.textMuted, fontFamily:T.code.fontFamily, padding:"2px 4px"}}>no values</div>}
+            {uniques.map(v => (
+              <label key={v} style={{display:"flex", alignItems:"center", gap:6, fontSize:T.caption.fontSize, fontFamily:T.code.fontFamily, color:C.text, padding:"2px 4px", cursor:"pointer", whiteSpace:"nowrap"}}>
+                <input type="checkbox" checked={selected.includes(v)} onChange={() => toggle(v)} />
+                {v}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function QuickFilter({headers, rows, totalRows, filteredCount, conds, setConds}) {
   const {C, T} = useTheme();
   const [open, setOpen] = useState(false);
   const active = conds.length > 0;
@@ -1853,11 +1939,20 @@ function QuickFilter({headers, totalRows, filteredCount, conds, setConds}) {
               <select value={cond.col} onChange={e=>upd(i,{col:e.target.value})} style={selStyle}>
                 {headers.map(h=><option key={h} value={h}>{h}</option>)}
               </select>
-              <select value={cond.op} onChange={e=>upd(i,{op:e.target.value})} style={{...selStyle,width:76}}>
+              <select value={cond.op} onChange={e=>{
+                const newOp = e.target.value;
+                const wasVec = cond.op === "in", isVec = newOp === "in";
+                let val = cond.val;
+                if (isVec && !wasVec) val = String(val ?? "").split(",").map(s=>s.trim()).filter(Boolean);
+                else if (!isVec && wasVec) val = Array.isArray(val) ? val.join(", ") : val;
+                upd(i,{op:newOp, val});
+              }} style={{...selStyle,width:76}}>
                 {FILTER_OPS.map(op=><option key={op} value={op}>{op}</option>)}
               </select>
-              <input value={cond.val} onChange={e=>upd(i,{val:e.target.value})}
-                style={{...selStyle,width:100}} placeholder="value" />
+              {cond.op === "in"
+                ? <VectorValueEditor col={cond.col} rows={rows} value={cond.val} onChange={v=>upd(i,{val:v})} selStyle={selStyle} C={C} T={T} />
+                : <input value={cond.val} onChange={e=>upd(i,{val:e.target.value})}
+                    style={{...selStyle,width:100}} placeholder="value" />}
               <button onClick={()=>setConds(cs=>cs.filter((_,j)=>j!==i))}
                 style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize: T.h2.fontSize,lineHeight:1,padding:"0 2px"}}>×</button>
             </div>
@@ -1882,13 +1977,25 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // raw data grid can stay on the preview — this only affects analysis.
   const duckTable = cleanedData._duckdb?.tableName ?? null;
   const [fullRows, setFullRows] = useState(null);
+  const [fullRowsError, setFullRowsError] = useState(null);
+  const [fullRowsRetry, setFullRowsRetry] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setFullRows(null);
+    setFullRowsError(null);
     if (!duckTable) return;
-    extractAllRows(duckTable).then(all => { if (!cancelled) setFullRows(all); }).catch(() => {});
+    extractAllRows(duckTable)
+      .then(all => { if (!cancelled) setFullRows(all); })
+      .catch(e => {
+        if (cancelled) return;
+        console.error("[ExplorerModule] failed to load full DuckDB table — falling back to the preview:", e);
+        setFullRowsError(e?.message || "failed to load the full dataset");
+      });
     return () => { cancelled = true; };
-  }, [duckTable]);
+  }, [duckTable, fullRowsRetry]);
+  // Every stat/plot below reads `rows` — while this is true they are silently computed
+  // on the 500-row preview, not the full table. Never let that happen without telling the user.
+  const usingPreview = !!duckTable && !fullRows;
   const rows = (duckTable && fullRows) ? fullRows : previewRows;
   const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
   const [tab,setTab] = useState("summary");
@@ -2041,6 +2148,22 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             <button onClick={onProceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>→ Modeling</button>
           </div>
         </div>
+        {/* Preview-vs-full-table notice — every stat/plot below reads `rows`, which is
+            the 500-row preview until the full DuckDB table finishes loading (or forever,
+            if that load fails). Must never be silent — Fase X correctness bug. */}
+        {usingPreview && (
+          <div style={{marginBottom:"1rem",padding:"0.5rem 0.8rem",borderRadius:4,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+            background:fullRowsError?`${C.red}14`:`${C.gold}14`,
+            border:`1px solid ${fullRowsError?C.red:C.gold}55`,
+            color:fullRowsError?C.red:C.gold,
+            display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            {fullRowsError
+              ? <>⚠ Could not load the full {(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()}-row dataset — every stat and plot below is computed on a {previewRows.length.toLocaleString()}-row preview only.
+                  <button onClick={()=>setFullRowsRetry(n=>n+1)} style={{fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,color:"inherit",background:"none",border:`1px solid currentColor`,borderRadius:3,padding:"0.15rem 0.5rem",cursor:"pointer"}}>retry</button>
+                </>
+              : <>⏳ Loading full dataset ({(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()} rows)… stats and plots below are computed on a {previewRows.length.toLocaleString()}-row preview until this finishes.</>}
+          </div>
+        )}
         {/* AI Insights */}
         <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
         <HintBox title="How to explore" sections={[
@@ -2072,7 +2195,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           ]},
         ]} />
         {/* Quick Filter */}
-        <QuickFilter headers={headers} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
+        <QuickFilter headers={headers} rows={rows} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
           {[["summary","⊞ Summary"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"]].map(([k,l])=>(
@@ -2085,7 +2208,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             <DispersionPanel rows={filteredRows} headers={headers} info={info} onPin={pinExplore}/>
             <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
-              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset}/>
+              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset} usingPreview={usingPreview}/>
             </div>
           </>
         )}
