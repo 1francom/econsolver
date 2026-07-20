@@ -192,22 +192,35 @@ function SvgHistogram({data,color,label="",title="",xLabel="",yLabel="",nBins=20
 }
 
 // ─── CATEGORICAL BAR CHART ────────────────────────────────────────────────────
-function SvgBarChart({items,color,fillMode="filled",title="",xLabel=""}){
+function SvgBarChart({items,color,fillMode="filled",title="",xLabel="",scale="linear"}){
   // items: [{label, count}] already sorted
   const{C,T}=useTheme();
   if(!items?.length)return null;
-  const W=480,barH=22,titleH=title?20:0,xLabH=xLabel?16:0,PAD={l:120,r:48,t:8+titleH,b:16+xLabH};
+  const W=480,barH=22,titleH=title?20:0,xLabH=xLabel?16:0,PAD={l:120,r:48,t:8+titleH,b:32+xLabH};
   const H=PAD.t+items.length*barH+PAD.b;
-  const maxV=Math.max(...items.map(d=>d.count),1);
   const iW=W-PAD.l-PAD.r;
+  const axisY=PAD.t+items.length*barH;
+  const isLog=scale==="log";
+  // log scale maps counts through log10(v+1) so a 0-count category still sits at the origin.
+  const scaleFn=isLog?(v=>Math.log10(v+1)):(v=>v);
+  const maxV=Math.max(...items.map(d=>d.count),1);
+  const maxScaled=scaleFn(maxV)||1;
+  const toW=v=>Math.max(2,(scaleFn(v)/maxScaled)*iW);
+  const nTicks=4;
+  const ticks=Array.from({length:nTicks+1},(_,i)=>{
+    const frac=i/nTicks;
+    // ticks are even in scaled space, then mapped back to a real count for the label
+    const val=isLog?Math.pow(10,frac*maxScaled)-1:frac*maxV;
+    return{x:PAD.l+frac*iW,label:val>=100?Math.round(val):val>=10?val.toFixed(0):val.toFixed(1)};
+  });
   return(
     <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:600,display:"block",fontFamily: T.code.fontFamily}}>
       <rect width={W} height={H} fill="transparent"/>
       {title&&<text x={W/2} y={14} textAnchor="middle" fill={C.text} fontSize={T.code.fontSize} fontFamily={T.code.fontFamily} fontWeight={600}>{title}</text>}
-      {xLabel&&<text x={PAD.l+iW/2} y={H-2} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{xLabel}</text>}
+      {xLabel&&<text x={PAD.l+iW/2} y={H-2} textAnchor="middle" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{xLabel}{isLog?" (log scale)":""}</text>}
       {items.map((d,i)=>{
         const y=PAD.t+i*barH;
-        const bw=Math.max(2,(d.count/maxV)*iW);
+        const bw=toW(d.count);
         return<g key={i}>
           <text x={PAD.l-6} y={y+barH/2+4} textAnchor="end" fill={C.textDim} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{String(d.label).slice(0,18)}</text>
           {fillMode==="outline"
@@ -216,7 +229,14 @@ function SvgBarChart({items,color,fillMode="filled",title="",xLabel=""}){
           <text x={PAD.l+bw+4} y={y+barH/2+4} fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{d.count}</text>
         </g>;
       })}
-      <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t+items.length*barH} stroke={C.border2} strokeWidth={1}/>
+      {ticks.map((t,i)=>(
+        <g key={i}>
+          <line x1={t.x} y1={PAD.t} x2={t.x} y2={axisY} stroke={C.border} strokeWidth={1} strokeDasharray={i===0?undefined:"2,3"} opacity={i===0?1:0.5}/>
+          <text x={t.x} y={axisY+13} textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>{t.label}</text>
+        </g>
+      ))}
+      <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={axisY} stroke={C.border2} strokeWidth={1}/>
+      <line x1={PAD.l} y1={axisY} x2={PAD.l+iW} y2={axisY} stroke={C.border2} strokeWidth={1}/>
     </svg>
   );
 }
@@ -609,6 +629,7 @@ function DistributionTab({rows,headers,info,panel,onPin}){
   const [xLab,setXLab]=useState("");
   const [yLab,setYLab]=useState("");
   const [catOrder,setCatOrder]=useState("count");    // "count" | "alpha" | "rev"
+  const [barScale,setBarScale]=useState("linear");   // "linear" | "log" — axis scale for the count bars
   const hasPanel=panel?.entityCol&&panel?.timeCol;
   const histRef=useRef(null);
   const subTabs=[
@@ -656,7 +677,7 @@ function DistributionTab({rows,headers,info,panel,onPin}){
           <PinBtn onClick={()=>{
             const labs={title:plotTitle||null,xLabel:xLab||null,yLabel:yLab||null};
             if(sub==="hist") onPin({kind:"histogram",col:histCol,bins:nBins,transform:transform==="none"?null:transform,color:barColor,fillMode,...labs},`Histogram: ${histCol} (${nBins} bins${transform!=="none"?", "+transform:""})`);
-            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder,color:barColor,fillMode,...labs},`Bar chart: ${catCol} (order: ${catOrder})`);
+            else if(sub==="cat") onPin({kind:"barchart",col:catCol,order:catOrder,scale:barScale,color:barColor,fillMode,...labs},`Bar chart: ${catCol} (order: ${catOrder}${barScale==="log"?", log scale":""})`);
             else onPin({kind:"spaghetti",col:spagCol,entityCol:panel?.entityCol,timeCol:panel?.timeCol},`Spaghetti: ${spagCol} by ${panel?.entityCol} over ${panel?.timeCol}`);
           }}/>
         </div>}
@@ -805,6 +826,14 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                 ))}
               </div>
             </div>
+            <div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale (axis)</div>
+              <div style={{display:"flex",gap:2}}>
+                {[["linear","Linear"],["log","Log"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>setBarScale(k)} style={chip(barScale===k,C.gold)}>{l}</button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {catCol&&(()=>{
@@ -824,7 +853,7 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                   {items.length} categories · n = {rows.filter(r=>r[catCol]!=null).length}
                 </div>
                 {labelsRow}
-                <SvgBarChart items={items} color={barColor} fillMode={fillMode} title={plotTitle} xLabel={xLab||catCol}/>
+                <SvgBarChart items={items} color={barColor} fillMode={fillMode} title={plotTitle} xLabel={xLab||catCol} scale={barScale}/>
               </div>
             );
           })()}
@@ -1920,7 +1949,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
       filteredRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
       let bars = Object.entries(counts).map(([label, count]) => ({ label, count }));
       if (p.order === "count") bars.sort((a, b) => b.count - a.count);
-      return <SvgBarChart items={bars.slice(0, 15)} color={p.color} fillMode={p.fillMode ?? "filled"} title={p.title ?? ""} xLabel={p.xLabel ?? p.col} />;
+      return <SvgBarChart items={bars.slice(0, 15)} color={p.color} fillMode={p.fillMode ?? "filled"} title={p.title ?? ""} xLabel={p.xLabel ?? p.col} scale={p.scale ?? "linear"} />;
     }
     if (item?.kind === "spaghetti") {
       return <SvgSpaghetti rows={filteredRows} entityCol={p.entityCol} timeCol={p.timeCol} col={p.col} sampleN={15} />;
