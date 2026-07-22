@@ -2,7 +2,7 @@
 // Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
 // Consumes cleanedData emitted by WranglingModule.
 import { useState, useMemo, useRef, useEffect, Fragment } from "react";
-import { extractAllRows } from "./services/data/duckdb.js";
+import { extractAllRows, queryDuckDB } from "./services/data/duckdb.js";
 import { useTheme } from "./ThemeContext.jsx";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
@@ -1433,7 +1433,7 @@ function generateExploreScript(language, { headers, info, filename }) {
 
 // ─── GROUP & SUMMARIZE EXPLORER ───────────────────────────────────────────────
 // Non-destructive descriptive stats panel with as.factor() override and LaTeX export.
-function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPreview }) {
+function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPreview, duckTable }) {
   const { C, T } = useTheme();
   const [byCols,    setByCols]    = useState([]);
   const [factorOverrides, setFactorOverrides] = useState(new Set()); // numeric cols forced as categorical
@@ -1444,6 +1444,8 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
   const [hoveredCol, setHoveredCol] = useState(null);
   const [saveName,  setSaveName]  = useState("");
   const [saved,     setSaved]     = useState(false);
+  const [computing, setComputing] = useState(false);
+  const [sqlError,  setSqlError]  = useState(null);
 
   const numC = headers.filter(h => info[h]?.isNum);
   const FN_OPTS = [
@@ -1489,10 +1491,49 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
   }
   function rmAgg(i) { setAggs(a => a.filter((_, j) => j !== i)); }
 
-  function doSummarize() {
+  // SQL aggregate expressions, mirroring the JS fallback's semantics exactly:
+  // "sd" is sample std (n-1, matches stddev_samp), "count" counts all group rows
+  // (not just non-null numeric ones, matches _rows.length in the JS branch).
+  const SQL_AGG = {
+    mean:   c => `avg(${c})`,
+    median: c => `percentile_cont(0.5) WITHIN GROUP (ORDER BY ${c})`,
+    sum:    c => `sum(${c})`,
+    count:  () => `count(*)`,
+    min:    c => `min(${c})`,
+    max:    c => `max(${c})`,
+    sd:     c => `stddev_samp(${c})`,
+  };
+
+  async function doSummarize() {
     if (!byCols.length || !aggs.length) return;
     const validAggs = aggs.filter(a => a.col && a.fn && a.nn.trim());
     if (!validAggs.length) return;
+    const outHeaders = [...byCols, ...validAggs.map(a => a.nn)];
+
+    // DuckDB path: query the FULL table directly — never materializes rows into JS,
+    // so this is correct and fast regardless of dataset size (the whole point of
+    // moving this off the `rows` prop, which is only a preview until fully loaded).
+    if (duckTable) {
+      setComputing(true); setSqlError(null);
+      try {
+        const esc = s => `"${String(s).replace(/"/g, '""')}"`;
+        const groupSel = byCols.map(esc).join(", ");
+        const aggSel = validAggs.map(({ col, fn, nn }) => `${SQL_AGG[fn](esc(col))} AS ${esc(nn)}`).join(", ");
+        const sql = `SELECT ${groupSel}, ${aggSel} FROM "${duckTable}" GROUP BY ${groupSel} ORDER BY ${groupSel}`;
+        const { rows: outRows } = await queryDuckDB(sql);
+        setSumResult({ rows: outRows, headers: outHeaders, by: byCols, aggs: validAggs });
+        setLatexOpen(false); setCopied(false);
+      } catch (e) {
+        console.error("[GroupSummarizeExplorer] SQL aggregation failed:", e);
+        setSqlError(e?.message || "aggregation query failed");
+      } finally {
+        setComputing(false);
+      }
+      return;
+    }
+
+    // JS fallback — only reached for datasets small enough to skip DuckDB entirely,
+    // where `rows` is already the true full array (no preview truncation).
     const byKey = r => byCols.map(b => String(r[b] ?? "")).join("||");
     const groups = new Map();
     rows.forEach(r => {
@@ -1501,7 +1542,6 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
       groups.get(k)._rows.push(r);
     });
     const outRows = [];
-    const outHeaders = [...byCols, ...validAggs.map(a => a.nn)];
     for (const { _first, _rows } of groups.values()) {
       const out = {};
       byCols.forEach(b => { out[b] = _first[b]; });
@@ -1531,12 +1571,12 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
     setLatexOpen(false); setCopied(false);
   }
 
-  // doSummarize() snapshots `rows` at click time — if the user hits Compute while
-  // still on the preview (usingPreview), the wrong numbers would otherwise stick
-  // around forever even after the full table finishes loading. Re-run silently
-  // (keeping the same by/aggs config) whenever the underlying rows change.
+  // JS-fallback-only safety net: doSummarize()'s JS branch snapshots `rows` at click
+  // time, so on a dataset without a DuckDB table (duckTable is null there, `rows` is
+  // just whatever the caller passed) a stale snapshot would otherwise never refresh.
+  // Not needed for the SQL branch — that always queries the live full table.
   useEffect(() => {
-    if (sumResult) doSummarize();
+    if (!duckTable && sumResult) doSummarize();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
@@ -1695,15 +1735,18 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
       </div>
 
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.5rem"}}>
-        <button onClick={doSummarize} disabled={!canSummarize} style={{
-          padding:"0.42rem 0.9rem",borderRadius:3,cursor:canSummarize?"pointer":"not-allowed",
+        <button onClick={doSummarize} disabled={!canSummarize || computing} style={{
+          padding:"0.42rem 0.9rem",borderRadius:3,cursor:(canSummarize && !computing)?"pointer":"not-allowed",
           fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,fontWeight:700,
           background:canSummarize?C.gold:"transparent",
           color:canSummarize?C.bg:C.textMuted,
           border:`1px solid ${canSummarize?C.gold:C.border2}`,
-          opacity:canSummarize?1:0.5,
-        }}>Compute →</button>
-        {usingPreview && <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily}}>⏳ full dataset still loading — result will auto-refresh when ready</span>}
+          opacity:(canSummarize && !computing)?1:0.5,
+        }}>{computing ? "Computing…" : "Compute →"}</button>
+        {duckTable
+          ? (computing && <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>running SQL over the full table…</span>)
+          : (usingPreview && <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily}}>⏳ full dataset still loading — result will auto-refresh when ready</span>)}
+        {sqlError && <span style={{fontSize: T.caption.fontSize,color:C.red,fontFamily: T.code.fontFamily}}>⚠ {sqlError}</span>}
       </div>
 
       {/* ── Result ── */}
@@ -2208,7 +2251,8 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             <DispersionPanel rows={filteredRows} headers={headers} info={info} onPin={pinExplore}/>
             <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
-              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset} usingPreview={usingPreview}/>
+              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset} usingPreview={usingPreview}
+                duckTable={filterConds.length ? null : duckTable}/>
             </div>
           </>
         )}
