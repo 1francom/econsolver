@@ -31,6 +31,38 @@ function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
 }
 function Spin(){const{C,T}=useTheme();return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
 
+// Editable number field that never fights the user: unlike a plain
+// <input type="number" value={x} onChange={e=>set(clamp(+e.target.value))}>,
+// this doesn't force-clamp on every keystroke — an empty/partial value while
+// typing (e.g. clearing "20" to type "5") is allowed to sit in the field as-is.
+// Clamps to [min,max] only on blur/Enter, reverting to the last valid value if
+// what's left isn't a parseable number.
+function FreeNumberInput({value, onCommit, min, max, style}){
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+  const commit = () => {
+    const n = parseFloat(text);
+    if (isFinite(n)) {
+      const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
+      setText(String(clamped));
+      if (clamped !== value) onCommit(clamped);
+    } else {
+      setText(String(value));
+    }
+  };
+  return (
+    <input value={text} inputMode="decimal"
+      onChange={e => {
+        setText(e.target.value);
+        const n = parseFloat(e.target.value);
+        if (e.target.value.trim() !== "" && isFinite(n)) onCommit(n); // live update while typing, unclamped
+      }}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === "Enter") { commit(); e.currentTarget.blur(); } }}
+      style={style} />
+  );
+}
+
 // ─── PIN FOR REPLICATION (Fase 1.3, D5) ──────────────────────────────────────
 // Explore is exploratory by default — nothing is logged automatically. This
 // button lets the user pin the CURRENT view (plot config or descriptive stat,
@@ -280,6 +312,18 @@ function SvgBarChart({items,color,fillMode="filled",title="",xLabel="",scale="li
 // ─── DISTRIBUTIONS SQL HELPERS ─────────────────────────────────────────────────
 // Same convention as the correlation/time-series SQL paths above: the full table
 // stays in DuckDB, only aggregated results cross into JS.
+
+// Given the data domain [min,max] and the user's chosen bin mode, resolves the
+// actual bin count + the extended right edge of the binned domain (bins always
+// fully cover [min,max], so in width mode the last bin's right edge is rounded
+// up past max — same convention as ggplot2's geom_histogram(binwidth=)).
+function resolveBinning(min, max, binMode, nBins, binWidth) {
+  if (binMode === "width" && binWidth > 0) {
+    const n = Math.max(1, Math.ceil((max - min) / binWidth));
+    return { nBins: n, max: min + n * binWidth };
+  }
+  return { nBins: Math.max(1, Math.round(nBins) || 20), max };
+}
 
 function sqlTransformExpr(colExpr, transform) {
   if (transform === "log")   return { expr: `ln(${colExpr})`,    guard: `${colExpr} > 0` };
@@ -767,6 +811,8 @@ function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
   const [fillMode,setFillMode]=useState("filled");   // "filled" | "outline"
   const [transform,setTransform]=useState("none");   // "none" | "log" | "log10" | "sqrt"
   const [nBins,setNBins]=useState(20);
+  const [binMode,setBinMode]=useState("count");      // "count" | "width" — mirrors PlotBuilder's histogram/density toggle
+  const [binWidth,setBinWidth]=useState(1);
   const [plotTitle,setPlotTitle]=useState("");       // custom labels (blank = auto)
   const [xLab,setXLab]=useState("");
   const [yLab,setYLab]=useState("");
@@ -795,7 +841,8 @@ function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
         if (cancelled) return;
         setSqlHistStats(stats);
         if (stats.min != null && stats.max != null) {
-          const bins = await fetchHistogramBinsSQL(duckTable, histCol, transform, stats.min, stats.max, nBins);
+          const { nBins: effN, max: effMax } = resolveBinning(stats.min, stats.max, binMode, nBins, binWidth);
+          const bins = await fetchHistogramBinsSQL(duckTable, histCol, transform, stats.min, effMax, effN);
           if (!cancelled) setSqlHistBins(bins);
         }
       })
@@ -806,7 +853,7 @@ function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
       })
       .finally(() => { if (!cancelled) setHistLoading(false); });
     return () => { cancelled = true; };
-  }, [duckTable, histCol, transform, nBins, sub]);
+  }, [duckTable, histCol, transform, nBins, binMode, binWidth, sub]);
 
   // ── SQL path: categorical counts over the full table ────────────────────────
   const [sqlCatCounts, setSqlCatCounts] = useState(null);
@@ -914,12 +961,24 @@ function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
             </div>
             {/* bins */}
             <div>
-              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_break (bins)</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_break</div>
               <div style={{display:"flex",alignItems:"center",gap:4}}>
-                <input type="range" min={5} max={60} step={1} value={nBins}
-                  onChange={e=>setNBins(Number(e.target.value))}
-                  style={{width:80,accentColor:C.gold}}/>
-                <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily,minWidth:20}}>{nBins}</span>
+                <div style={{display:"flex",gap:2}}
+                  title="N bins = fixed number of bars (fewer bins → wider bars). Bin width = fixed bar width in data units, like ggplot's binwidth= (smaller width → MORE, narrower bars).">
+                  {[["count","N bins"],["width","Bin width"]].map(([k,l])=>(
+                    <button key={k} onClick={()=>setBinMode(k)} style={chip(binMode===k,C.gold)}>{l}</button>
+                  ))}
+                </div>
+                {binMode==="count" ? <>
+                  <input type="range" min={5} max={60} step={1} value={nBins}
+                    onChange={e=>setNBins(Number(e.target.value))}
+                    style={{width:60,accentColor:C.gold}}/>
+                  <FreeNumberInput value={nBins} onCommit={setNBins} min={1} max={500}
+                    style={{width:44,background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,padding:"0.2rem 0.4rem",outline:"none"}}/>
+                </> : <>
+                  <FreeNumberInput value={binWidth} onCommit={setBinWidth} min={0.0001}
+                    style={{width:64,background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,padding:"0.2rem 0.4rem",outline:"none"}}/>
+                </>}
               </div>
             </div>
           </div>
@@ -947,15 +1006,18 @@ function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
             const outlierCount=useSql?sqlHistStats.outlierCount:(q1!=null&&q3!=null?vals.filter(v=>v<q1-1.5*(q3-q1)||v>q3+1.5*(q3-q1)).length:0);
             const droppedCount=useSql?Math.max(0,sqlHistStats.totalNonNull-sqlHistStats.n):(rawVals.length-vals.length);
             const histLabel=`${histCol}${transformLabel}`;
+            // Bins always fully cover [min,max] — in width mode binMax extends past the
+            // true max so every bin is exactly binWidth wide (ggplot2 convention).
+            const {nBins:effNBins,max:binMax}=(min!=null&&max!=null)?resolveBinning(min,max,binMode,nBins,binWidth):{nBins,max};
             function downloadHistLatex(){
-              const bw2=(max-min||1)/nBins;
+              const bw2=(binMax-min||1)/effNBins;
               // Replicate SvgHistogram binning so LaTeX export matches on-screen plot.
               let counts;
               if (useSql && sqlHistBins) {
                 counts = sqlHistBins;
               } else {
-                counts=Array(nBins).fill(0);
-                vals.forEach(v=>{const b=Math.min(nBins-1,Math.max(0,Math.floor((v-min)/bw2)));counts[b]++;});
+                counts=Array(effNBins).fill(0);
+                vals.forEach(v=>{const b=Math.min(effNBins-1,Math.max(0,Math.floor((v-min)/bw2)));counts[b]++;});
               }
               const coords=counts.map((c,i)=>`(${(min+i*bw2).toFixed(4)},${c})`).join(" ");
               const tex=`% pgfplots histogram — generated by Econ Studio\n\\begin{figure}[htbp]\n\\centering\n\\begin{tikzpicture}\n\\begin{axis}[\n  title={Histogram of ${histLabel}},\n  xlabel={${histLabel}},\n  ylabel={Count},\n  ybar interval,\n  xtick style={draw=none},\n  ymajorgrids=true,\n  grid style=dashed,\n]\n\\addplot[fill=teal!60,draw=teal!80] coordinates {\n  ${coords}\n};\n\\end{axis}\n\\end{tikzpicture}\n\\caption{Histogram of ${histLabel} (n=${n})}\n\\end{figure}`;
@@ -964,6 +1026,15 @@ function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
               a.download=`histogram_${histCol}.tex`;
               a.click();URL.revokeObjectURL(a.href);
             }
+            // Compute bin counts the same way for both the SQL and JS-fallback paths, so
+            // width mode (an exact binwidth, matching ggplot2's binwidth=) works
+            // identically regardless of where the underlying data came from.
+            const counts = useSql ? sqlHistBins : (min==null||max==null ? null : (() => {
+              const bw2=(binMax-min)||1;
+              const c=Array(effNBins).fill(0);
+              vals.forEach(v=>{const b=Math.min(effNBins-1,Math.max(0,Math.floor((v-min)/bw2)));c[b]++;});
+              return c;
+            })());
             return(
               <div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1rem"}}>
@@ -977,7 +1048,7 @@ function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
                 {labelsRow}
                 <div ref={histRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
                   <div style={{padding:"0.5rem"}}>
-                    <SvgHistogram data={useSql?undefined:vals} counts={useSql?sqlHistBins:undefined} min={useSql?min:undefined} max={useSql?max:undefined} color={barColor} title={plotTitle} xLabel={xLab||histLabel} yLabel={yLab||"Count"} nBins={nBins} fillMode={fillMode}/>
+                    <SvgHistogram counts={counts} min={min} max={binMax} color={barColor} title={plotTitle} xLabel={xLab||histLabel} yLabel={yLab||"Count"} fillMode={fillMode}/>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6,padding:"0.3rem 0.65rem",borderTop:`1px solid ${C.border}`,background:C.bg}}>
                     <PlotExportBar getEl={()=>histRef.current?.querySelector("svg")} filename={`histogram_${histCol}`} style={{flex:1,padding:0,background:"transparent",border:"none"}}/>
@@ -2292,36 +2363,12 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   },[rows,filterConds]);
   const corrRef = useRef(null);
 
-  // ── Plot Builder sampling (SQL) ──────────────────────────────────────────────
-  // PlotBuilder draws every visible row as a mark (point/line/histogram bin, etc.)
-  // — a full materialized array of hundreds of thousands of rows makes the browser
-  // choke rendering SVG regardless of where the array came from. Past a threshold,
-  // fetch a random SQL sample (`USING SAMPLE`) specifically for this tab instead of
-  // the full table, disclosed via a visible banner — never a silent truncation.
-  const PLOT_SAMPLE_THRESHOLD = 50000;
-  const PLOT_SAMPLE_SIZE = 20000;
-  const rowCount = cleanedData._duckdb?.rowCount ?? rows.length;
-  const needsPlotSample = !!duckTable && rowCount > PLOT_SAMPLE_THRESHOLD && !filterConds.length;
-  const [plotSampleRows, setPlotSampleRows] = useState(null);
-  const [plotSampling,   setPlotSampling]   = useState(false);
-  const [plotSampleError, setPlotSampleError] = useState(null);
-  useEffect(() => {
-    let cancelled = false;
-    setPlotSampleRows(null); setPlotSampleError(null);
-    if (tab !== "plot" || !needsPlotSample) return;
-    setPlotSampling(true);
-    queryDuckDB(`SELECT * FROM "${duckTable}" USING SAMPLE ${PLOT_SAMPLE_SIZE} ROWS`)
-      .then(({ rows: sampled }) => { if (!cancelled) setPlotSampleRows(sampled); })
-      .catch(e => {
-        if (cancelled) return;
-        console.error("[ExplorerModule] Plot Builder SQL sample failed:", e);
-        setPlotSampleError(e?.message || "sampling query failed");
-      })
-      .finally(() => { if (!cancelled) setPlotSampling(false); });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, duckTable, needsPlotSample]);
-  const plotRows = (needsPlotSample && plotSampleRows) ? plotSampleRows : filteredRows;
+  // Plot Builder gets the exact full `rows` array — no SQL sampling here. Aggregating
+  // geoms (histogram/density/line/bar/smooth) collapse to a small, fixed-size result
+  // regardless of row count (Observable Plot bins/groups in one linear pass), so
+  // sampling them buys no performance and only degrades accuracy. The one geom that
+  // truly draws one SVG element per row (point/dot) is thinned client-side inside
+  // PlotBuilder itself (buildMarksForLayer's "point" case) — scoped to just that mark.
 
   // ── Pin-for-replication emitter (Fase 1.3, D5) ──────────────────────────────
   // Every pin records the active QuickFilter so the replicated stat/plot runs
@@ -2549,19 +2596,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
-        {tab==="plot"&&<>
-          {needsPlotSample && (
-            <div style={{marginBottom:8,padding:"0.5rem 0.8rem",borderRadius:4,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
-              background:plotSampleError?`${C.red}14`:`${C.gold}14`,border:`1px solid ${plotSampleError?C.red:C.gold}55`,color:plotSampleError?C.red:C.gold}}>
-              {plotSampleError
-                ? `⚠ ${plotSampleError} — plotting the loaded rows instead.`
-                : plotSampling
-                  ? `⏳ sampling ${PLOT_SAMPLE_SIZE.toLocaleString()} rows from the full ${rowCount.toLocaleString()}-row table…`
-                  : `◈ plotting a random ${PLOT_SAMPLE_SIZE.toLocaleString()}-row sample of ${rowCount.toLocaleString()} rows for performance — aggregated marks (mean lines, histograms) are approximate.`}
-            </div>
-          )}
-          <PlotBuilder headers={headers} rows={plotRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>
-        </>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
       <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
     </div>

@@ -197,10 +197,18 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
         const rOpt  = aes.sizeCol  ? { r: aes.sizeCol }  : { r: size };
         const sym   = shape !== "circle" ? { symbol: shape } : {};
         const dotO  = { x: aes.x, y: aes.y, fill: colorVal, ...rOpt, ...sym, fillOpacity: 0.78 * op };
+        // Unlike aggregating geoms (histogram/density/line/bar/smooth), point draws one
+        // SVG circle per row — the browser can't handle hundreds of thousands of those
+        // regardless of dataset size. Thin systematically (every Nth row, not random,
+        // so the plot doesn't jitter between re-renders of the same data) past a limit.
+        const POINT_LIMIT = 20000;
+        const pointRows = rows.length > POINT_LIMIT
+          ? rows.filter((_, i) => i % Math.ceil(rows.length / POINT_LIMIT) === 0)
+          : rows;
         if (ly.position === "jitter" || ly.position === "dodge") {
-          marks.push(Plt.dot(rows, Plt.dodgeX("middle", { ...dotO, padding: 1 })));
+          marks.push(Plt.dot(pointRows, Plt.dodgeX("middle", { ...dotO, padding: 1 })));
         } else {
-          marks.push(Plt.dot(rows, dotO));
+          marks.push(Plt.dot(pointRows, dotO));
         }
       }
       break;
