@@ -596,3 +596,23 @@
 
 - [13:14] · Clean
   Add an option to click on one pipeline step and go to the corresponding subsection automatically, so users can easily modify a step
+
+---
+
+## 2026-07-19 batch
+
+### Bugs
+
+- ~~[12:12] · Explore
+  Adjust scale of axis in the bar (columns) plots~~ ✓ fixed 2026-07-20 — `SvgBarChart` (`ExplorerModule.jsx`) had no axis-scale control at all (just the raw count printed at the end of each bar, no ticks). Added a Linear/Log toggle next to `levels = c()` in the Categorical sub-tab (mirrors the histogram's existing `scale_data` control), plus real numeric axis ticks along the bottom. Wired into pin/compare params (`scale` field) and `renderPinnedPlot`.
+
+- ~~[12:14] · Explore
+  Minimal BW is 3 in Histograms of Plot Builder, change it so users can choose it freely~~ ✓ already fixed by PR #115 (`e873f1a4`, merged 2026-07-19 15:23) — filed 3h before the fix landed. `binMode==="width"` already accepts `min={0.0001}`. No further action needed.
+
+### Features
+
+- [12:57] · Clean
+  Add a function for Country Codes — needs scope: iso2/iso3/country-name crosswalk transform (new `FeatureTab.jsx` case, small static lookup table) vs. fuzzy country-name matching (bigger, reuses `fuzzyGroups` in `wrangling/utils.js`). Not started — logged for a future brainstorming pass to pick scope with Franco.
+
+- [14:23] · General
+  Think about how to construct lists, save them and use them during the session when filtering or constructing variables — cross-module feature (Clean filters + Feature builder + maybe Explore). No natural home yet in the current per-module state model; needs a design session (where do lists live — session-scoped React context like `sessionState.jsx`? IndexedDB-persisted?) before implementation. Not started.
