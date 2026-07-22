@@ -241,6 +241,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             balance: panel.validation?.balance, blockFD: panel.validation?.blockFD }
         : null,
       _duckdb: processed._duckdb ?? null,
+      _duckdbRestoreFailed: rawData?._duckdbRestoreFailed ?? false,
+      _expectedRowCount: rawData?._expectedRowCount ?? null,
     });
   }, [idbReady, processed, panel]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -426,6 +428,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       // Full-table pointer — without this, ModelingTab sees only the 500-row
       // preview after "→ Analyze" and estimates on it (onReady already sends it).
       _duckdb: processed._duckdb ?? null,
+      _duckdbRestoreFailed: rawData?._duckdbRestoreFailed ?? false,
+      _expectedRowCount: rawData?._expectedRowCount ?? null,
       changeLog: pipeline.map(s => ({
         type: s.type, description: s.desc,
         col: s.col || s.c1 || s.nn || "", map: s.map || null,
