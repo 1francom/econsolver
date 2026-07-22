@@ -98,6 +98,33 @@ function aggregateTimeSeries(rows, tCol, yCol, grpCol, agg) {
   }).filter(s => s.pts.length > 0);
 }
 
+// SQL equivalent of aggregateTimeSeries() — GROUP BY (grpCol, tCol) inside DuckDB, so
+// only the resulting (group × period) points cross into JS, correct and fast at any
+// row count. Falls back to the JS version above for small/non-DuckDB datasets and
+// filtered views. Reused for flatY too (grpCol="", agg="mean" — always the mean of
+// yCol per period, independent of the chart's own agg selector).
+async function fetchAggregateTimeSeriesSQL(duckTable, tCol, yCol, grpCol, agg) {
+  const esc = s => `"${String(s).replace(/"/g, '""')}"`;
+  const AGG_SQL = {
+    mean:   c => `avg(${c})`,
+    sum:    c => `sum(${c})`,
+    count:  () => `count(*)`,
+    median: c => `percentile_cont(0.5) WITHIN GROUP (ORDER BY ${c})`,
+  };
+  const grpSel = grpCol ? `${esc(grpCol)} AS grp, ` : "";
+  const groupBy = grpCol ? `${esc(grpCol)}, ${esc(tCol)}` : esc(tCol);
+  const where = [`${esc(tCol)} IS NOT NULL`, ...(agg !== "count" ? [`${esc(yCol)} IS NOT NULL`] : [])].join(" AND ");
+  const sql = `SELECT ${grpSel}${esc(tCol)} AS t, ${AGG_SQL[agg](esc(yCol))} AS y FROM "${duckTable}" WHERE ${where} GROUP BY ${groupBy} ORDER BY ${groupBy}`;
+  const { rows } = await queryDuckDB(sql);
+  const byGrp = new Map();
+  rows.forEach(r => {
+    const grp = grpCol ? String(r.grp ?? "") : "_all_";
+    if (!byGrp.has(grp)) byGrp.set(grp, []);
+    byGrp.get(grp).push({ t: Number(r.t), y: r.y == null ? null : Number(r.y) });
+  });
+  return Array.from(byGrp.entries()).map(([grp, pts]) => ({ grp, pts: pts.filter(p => p.y != null) })).filter(s => s.pts.length > 0);
+}
+
 // ─── SVG CHARTS ───────────────────────────────────────────────────────────────
 // Compact time-series line chart — same COLORS palette as TimeSeriesTab so the
 // pin Compare preview matches the full chart's aesthetics.
@@ -141,20 +168,29 @@ function SvgMiniTimeSeries({ series }) {
   );
 }
 
-function SvgHistogram({data,color,label="",title="",xLabel="",yLabel="",nBins=20,fillMode="filled"}){
+// data: raw values, binned client-side (small/non-DuckDB fallback). Or pass
+// counts+min+max directly (bin counts already computed server-side via SQL) to
+// draw the same chart without ever materializing the raw column into JS.
+function SvgHistogram({data,counts:countsProp,min:minProp,max:maxProp,color,label="",title="",xLabel="",yLabel="",nBins=20,fillMode="filled"}){
   const{C,T}=useTheme();color=color??C.gold;
   const W=480;
   const titleH=title?20:0, xLabH=xLabel?16:0, yLabW=yLabel?14:0;
   const H=160+titleH+xLabH, PAD={l:44+yLabW,r:16,t:8+titleH,b:36+xLabH};
   const iW=W-PAD.l-PAD.r,iH=H-PAD.t-PAD.b;
-  if(!data.length)return null;
-  const min=arrMin(data),max=arrMax(data);
+  let counts, min, max;
+  if (countsProp) {
+    if (minProp == null || maxProp == null || !countsProp.length) return null;
+    counts = countsProp; min = minProp; max = maxProp;
+  } else {
+    if(!data?.length)return null;
+    min=arrMin(data);max=arrMax(data);
+    const bw=(max-min||1)/nBins;
+    counts=Array(nBins).fill(0);
+    data.forEach(v=>{const b=Math.min(nBins-1,Math.floor((v-min)/bw));counts[b]++;});
+  }
   const range=max-min||1;
-  const bw=range/nBins;
-  const counts=Array(nBins).fill(0);
-  data.forEach(v=>{const b=Math.min(nBins-1,Math.floor((v-min)/bw));counts[b]++;});
   const maxC=Math.max(...counts,1);
-  const barW=iW/nBins;
+  const barW=iW/counts.length;
   const yTicks=[0,0.25,0.5,0.75,1].map(f=>Math.round(f*maxC));
   const bottomLabel=xLabel||label;
   return(
@@ -241,6 +277,74 @@ function SvgBarChart({items,color,fillMode="filled",title="",xLabel="",scale="li
   );
 }
 
+// ─── DISTRIBUTIONS SQL HELPERS ─────────────────────────────────────────────────
+// Same convention as the correlation/time-series SQL paths above: the full table
+// stays in DuckDB, only aggregated results cross into JS.
+
+function sqlTransformExpr(colExpr, transform) {
+  if (transform === "log")   return { expr: `ln(${colExpr})`,    guard: `${colExpr} > 0` };
+  if (transform === "log10") return { expr: `log10(${colExpr})`, guard: `${colExpr} > 0` };
+  if (transform === "sqrt")  return { expr: `sqrt(${colExpr})`,  guard: `${colExpr} >= 0` };
+  return { expr: colExpr, guard: null };
+}
+
+// mean/std/min/max/median/q1/q3/n/outlierCount for one (possibly transformed) numeric
+// column. std uses stddev_pop (population, matches this tab's own JS n-divisor
+// formula); median/q1/q3 use percentile_cont (linear interpolation, R's default
+// quantile type) rather than the JS fallback's simpler nearest-rank indexing —
+// deliberately the more standard definition, not a bug.
+async function fetchHistogramStatsSQL(duckTable, col, transform) {
+  const c = `"${String(col).replace(/"/g, '""')}"`;
+  const { expr, guard } = sqlTransformExpr(c, transform);
+  const where = [`${c} IS NOT NULL`, ...(guard ? [guard] : [])].join(" AND ");
+  const sql = `
+    SELECT count(*) AS n, avg(${expr}) AS mean, stddev_pop(${expr}) AS std,
+      min(${expr}) AS min, max(${expr}) AS max,
+      percentile_cont(0.5)  WITHIN GROUP (ORDER BY ${expr}) AS median,
+      percentile_cont(0.25) WITHIN GROUP (ORDER BY ${expr}) AS q1,
+      percentile_cont(0.75) WITHIN GROUP (ORDER BY ${expr}) AS q3
+    FROM "${duckTable}" WHERE ${where}`;
+  const { rows } = await queryDuckDB(sql);
+  const row = rows[0] || {};
+  const n = v => (v == null ? null : Number(v));
+  const stats = { n: n(row.n) ?? 0, mean: n(row.mean), std: n(row.std), min: n(row.min), max: n(row.max), median: n(row.median), q1: n(row.q1), q3: n(row.q3) };
+  if (stats.q1 != null && stats.q3 != null) {
+    const iqr = stats.q3 - stats.q1;
+    const lo = stats.q1 - 1.5 * iqr, hi = stats.q3 + 1.5 * iqr;
+    const { rows: ocRows } = await queryDuckDB(`SELECT count(*) AS c FROM "${duckTable}" WHERE ${where} AND (${expr} < ${lo} OR ${expr} > ${hi})`);
+    stats.outlierCount = Number(ocRows[0]?.c ?? 0);
+  } else {
+    stats.outlierCount = 0;
+  }
+  // Non-null count ignoring the transform guard, so the UI can report how many rows
+  // a log/sqrt transform dropped (non-positive values) — matches the JS fallback's
+  // "rawVals.length - vals.length" notice.
+  const { rows: totalRows } = await queryDuckDB(`SELECT count(${c}) AS total FROM "${duckTable}" WHERE ${c} IS NOT NULL`);
+  stats.totalNonNull = Number(totalRows[0]?.total ?? stats.n);
+  return stats;
+}
+
+// Bin counts for a fixed [min,max]/nBins grid — same bucketing rule as SvgHistogram's
+// own JS binning (Math.floor((v-min)/binWidth), clamped to [0,nBins-1]).
+async function fetchHistogramBinsSQL(duckTable, col, transform, min, max, nBins) {
+  const c = `"${String(col).replace(/"/g, '""')}"`;
+  const { expr, guard } = sqlTransformExpr(c, transform);
+  const where = [`${c} IS NOT NULL`, ...(guard ? [guard] : [])].join(" AND ");
+  const binWidth = (max - min) || 1;
+  const binExpr = `LEAST(${nBins - 1}, GREATEST(0, CAST(FLOOR((${expr} - ${min}) / ${binWidth / nBins}) AS INTEGER)))`;
+  const { rows } = await queryDuckDB(`SELECT ${binExpr} AS bin, count(*) AS c FROM "${duckTable}" WHERE ${where} GROUP BY bin`);
+  const counts = Array(nBins).fill(0);
+  rows.forEach(r => { const b = Number(r.bin); if (b >= 0 && b < nBins) counts[b] = Number(r.c); });
+  return counts;
+}
+
+// Category counts for the bar-chart sub-tab — GROUP BY catCol, sorted client-side to
+// match the existing "count"/"alpha"/"rev" order options without another round trip.
+async function fetchCategoryCountsSQL(duckTable, col) {
+  const c = `"${String(col).replace(/"/g, '""')}"`;
+  const { rows } = await queryDuckDB(`SELECT ${c} AS label, count(*) AS count FROM "${duckTable}" WHERE ${c} IS NOT NULL GROUP BY ${c}`);
+  return rows.map(r => ({ label: String(r.label), count: Number(r.count) }));
+}
 
 function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
   const{C,T}=useTheme();
@@ -275,11 +379,47 @@ function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
   );
 }
 
-function CorrHeatmap({headers,rows,info}){
+// One query, corr() for every pair (upper triangle only, mirrored) — the full table
+// is scanned inside DuckDB and only the n(n+1)/2 resulting numbers cross into JS, so
+// this is correct and fast regardless of row count. JS pearson() below is the fallback
+// for small/non-DuckDB datasets and for ad hoc QuickFilter views (duckTable passed as
+// null there — same convention as GroupSummarizeExplorer).
+async function fetchCorrMatrixSQL(duckTable, numH) {
+  const esc = s => `"${String(s).replace(/"/g, '""')}"`;
+  const parts = [];
+  for (let i = 0; i < numH.length; i++) {
+    for (let j = i; j < numH.length; j++) {
+      parts.push(`corr(${esc(numH[i])}, ${esc(numH[j])}) AS c${i}_${j}`);
+    }
+  }
+  const { rows } = await queryDuckDB(`SELECT ${parts.join(", ")} FROM "${duckTable}"`);
+  const row = rows[0] || {};
+  return numH.map((_, i) => numH.map((_, j) => {
+    const key = i <= j ? `c${i}_${j}` : `c${j}_${i}`;
+    const v = row[key];
+    return v == null ? 0 : Number(v);
+  }));
+}
+
+function CorrHeatmap({headers,rows,info,duckTable}){
   const{C,T}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+  const [sqlMat, setSqlMat] = useState(null);
+  const [corrLoading, setCorrLoading] = useState(false);
+  const [corrError, setCorrError] = useState(null);
+  const numHKey = numH.join("|");
+  useEffect(() => {
+    setSqlMat(null); setCorrError(null);
+    if (!duckTable || numH.length < 2) return;
+    setCorrLoading(true);
+    fetchCorrMatrixSQL(duckTable, numH)
+      .then(m => setSqlMat(m))
+      .catch(e => { console.error("[CorrHeatmap] SQL correlation failed:", e); setCorrError(e?.message || "correlation query failed"); })
+      .finally(() => setCorrLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duckTable, numHKey]);
   if(numH.length<2)return<div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>Need ≥2 numeric columns.</div>;
-  const mat=numH.map(h1=>numH.map(h2=>{
+  const mat = sqlMat ?? numH.map(h1=>numH.map(h2=>{
     const pairs=rows.filter(r=>typeof r[h1]==="number"&&typeof r[h2]==="number");
     return pearson(pairs.map(r=>r[h1]),pairs.map(r=>r[h2]));
   }));
@@ -293,6 +433,8 @@ function CorrHeatmap({headers,rows,info}){
   };
   return(
     <div style={{overflowX:"auto"}}>
+      {duckTable && corrLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>⏳ computing correlations over the full table…</div>}
+      {corrError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.code.fontFamily}}>⚠ {corrError} — showing values from the loaded rows instead.</div>}
       <svg viewBox={`0 0 ${W+8} ${H_total+8}`} style={{width:"100%",maxWidth:W+8,display:"block",fontFamily: T.code.fontFamily}}>
         {numH.map((h,i)=>(
           <text key={h} x={lblH+i*cellSz+cellSz/2} y={lblH-4} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={T.data.fontFamily} textAnchor="middle" transform={`rotate(-35,${lblH+i*cellSz+cellSz/2},${lblH-4})`}>{h.slice(0,8)}</text>
@@ -603,7 +745,7 @@ function DispersionPanel({rows,headers,info,onPin}){
 }
 
 // ─── DISTRIBUTION TAB ─────────────────────────────────────────────────────────
-function DistributionTab({rows,headers,info,panel,onPin}){
+function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
   const{C,T}=useTheme();
   const palette = [
     { label:"teal",  val:C.teal },
@@ -637,6 +779,54 @@ function DistributionTab({rows,headers,info,panel,onPin}){
     ...(catH.length?[["cat","Categorical"]]:[] ),
     ...(hasPanel?[["spaghetti","Spaghetti"]]:[] ),
   ];
+
+  // ── SQL path: histogram stats + bins over the full table ────────────────────
+  const [sqlHistStats, setSqlHistStats] = useState(null);
+  const [sqlHistBins,  setSqlHistBins]  = useState(null);
+  const [histLoading,  setHistLoading]  = useState(false);
+  const [histSqlError, setHistSqlError] = useState(null);
+  useEffect(() => {
+    setSqlHistStats(null); setSqlHistBins(null); setHistSqlError(null);
+    if (!duckTable || !histCol || sub !== "hist") return;
+    let cancelled = false;
+    setHistLoading(true);
+    fetchHistogramStatsSQL(duckTable, histCol, transform)
+      .then(async stats => {
+        if (cancelled) return;
+        setSqlHistStats(stats);
+        if (stats.min != null && stats.max != null) {
+          const bins = await fetchHistogramBinsSQL(duckTable, histCol, transform, stats.min, stats.max, nBins);
+          if (!cancelled) setSqlHistBins(bins);
+        }
+      })
+      .catch(e => {
+        if (cancelled) return;
+        console.error("[DistributionTab] SQL histogram failed:", e);
+        setHistSqlError(e?.message || "histogram query failed");
+      })
+      .finally(() => { if (!cancelled) setHistLoading(false); });
+    return () => { cancelled = true; };
+  }, [duckTable, histCol, transform, nBins, sub]);
+
+  // ── SQL path: categorical counts over the full table ────────────────────────
+  const [sqlCatCounts, setSqlCatCounts] = useState(null);
+  const [catLoading,   setCatLoading]   = useState(false);
+  const [catSqlError,  setCatSqlError]  = useState(null);
+  useEffect(() => {
+    setSqlCatCounts(null); setCatSqlError(null);
+    if (!duckTable || !catCol || sub !== "cat") return;
+    let cancelled = false;
+    setCatLoading(true);
+    fetchCategoryCountsSQL(duckTable, catCol)
+      .then(items => { if (!cancelled) setSqlCatCounts(items); })
+      .catch(e => {
+        if (cancelled) return;
+        console.error("[DistributionTab] SQL category counts failed:", e);
+        setCatSqlError(e?.message || "category count query failed");
+      })
+      .finally(() => { if (!cancelled) setCatLoading(false); });
+    return () => { cancelled = true; };
+  }, [duckTable, catCol, sub]);
 
   // Shared labels (title / x / y) — blank fields fall back to auto labels.
   const labInput=(ph,val,setter)=>(
@@ -734,24 +924,39 @@ function DistributionTab({rows,headers,info,panel,onPin}){
             </div>
           </div>
 
+          {duckTable && histLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>⏳ computing over the full table…</div>}
+          {histSqlError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.code.fontFamily}}>⚠ {histSqlError} — showing values from the loaded rows instead.</div>}
           {histCol&&(()=>{
-            const rawVals=rows.map(r=>r[histCol]).filter(v=>typeof v==="number"&&isFinite(v));
-            const vals=rawVals.map(v=>applyTransform(v)).filter(v=>v!=null&&isFinite(v));
-            const n=vals.length;
-            const mean=n?vals.reduce((s,v)=>s+v,0)/n:null;
-            const std=n?Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/n):null;
-            const sorted=[...vals].sort((a,b)=>a-b);
-            const median=n?sorted[Math.floor(n/2)]:null;
-            const min=n?sorted[0]:null;
-            const max=n?sorted[n-1]:null;
-            const q1=sorted[Math.floor(n*0.25)],q3=sorted[Math.floor(n*0.75)],iqr=q3-q1;
-            const outlierCount=vals.filter(v=>v<q1-1.5*iqr||v>q3+1.5*iqr).length;
+            // SQL path: mean/std/min/max/median/q1/q3/outlierCount already computed over
+            // the FULL table (see fetchHistogramStatsSQL) — vals/rawVals only need to be
+            // materialized for the JS fallback (small/non-DuckDB datasets, or while the
+            // SQL query is still in flight).
+            const useSql = !!sqlHistStats;
+            const rawVals=useSql?[]:rows.map(r=>r[histCol]).filter(v=>typeof v==="number"&&isFinite(v));
+            const vals=useSql?[]:rawVals.map(v=>applyTransform(v)).filter(v=>v!=null&&isFinite(v));
+            const n=useSql?sqlHistStats.n:vals.length;
+            const jsMean=n?vals.reduce((s,v)=>s+v,0)/n:null;
+            const mean=useSql?sqlHistStats.mean:jsMean;
+            const std=useSql?sqlHistStats.std:(n?Math.sqrt(vals.reduce((s,v)=>s+(v-jsMean)**2,0)/n):null);
+            const sorted=useSql?null:[...vals].sort((a,b)=>a-b);
+            const median=useSql?sqlHistStats.median:(n?sorted[Math.floor(n/2)]:null);
+            const min=useSql?sqlHistStats.min:(n?sorted[0]:null);
+            const max=useSql?sqlHistStats.max:(n?sorted[n-1]:null);
+            const q1=useSql?sqlHistStats.q1:sorted?.[Math.floor(n*0.25)];
+            const q3=useSql?sqlHistStats.q3:sorted?.[Math.floor(n*0.75)];
+            const outlierCount=useSql?sqlHistStats.outlierCount:(q1!=null&&q3!=null?vals.filter(v=>v<q1-1.5*(q3-q1)||v>q3+1.5*(q3-q1)).length:0);
+            const droppedCount=useSql?Math.max(0,sqlHistStats.totalNonNull-sqlHistStats.n):(rawVals.length-vals.length);
             const histLabel=`${histCol}${transformLabel}`;
             function downloadHistLatex(){
               const bw2=(max-min||1)/nBins;
               // Replicate SvgHistogram binning so LaTeX export matches on-screen plot.
-              const counts=Array(nBins).fill(0);
-              vals.forEach(v=>{const b=Math.min(nBins-1,Math.max(0,Math.floor((v-min)/bw2)));counts[b]++;});
+              let counts;
+              if (useSql && sqlHistBins) {
+                counts = sqlHistBins;
+              } else {
+                counts=Array(nBins).fill(0);
+                vals.forEach(v=>{const b=Math.min(nBins-1,Math.max(0,Math.floor((v-min)/bw2)));counts[b]++;});
+              }
               const coords=counts.map((c,i)=>`(${(min+i*bw2).toFixed(4)},${c})`).join(" ");
               const tex=`% pgfplots histogram — generated by Econ Studio\n\\begin{figure}[htbp]\n\\centering\n\\begin{tikzpicture}\n\\begin{axis}[\n  title={Histogram of ${histLabel}},\n  xlabel={${histLabel}},\n  ylabel={Count},\n  ybar interval,\n  xtick style={draw=none},\n  ymajorgrids=true,\n  grid style=dashed,\n]\n\\addplot[fill=teal!60,draw=teal!80] coordinates {\n  ${coords}\n};\n\\end{axis}\n\\end{tikzpicture}\n\\caption{Histogram of ${histLabel} (n=${n})}\n\\end{figure}`;
               const a=document.createElement("a");
@@ -772,7 +977,7 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                 {labelsRow}
                 <div ref={histRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
                   <div style={{padding:"0.5rem"}}>
-                    <SvgHistogram data={vals} color={barColor} title={plotTitle} xLabel={xLab||histLabel} yLabel={yLab||"Count"} nBins={nBins} fillMode={fillMode}/>
+                    <SvgHistogram data={useSql?undefined:vals} counts={useSql?sqlHistBins:undefined} min={useSql?min:undefined} max={useSql?max:undefined} color={barColor} title={plotTitle} xLabel={xLab||histLabel} yLabel={yLab||"Count"} nBins={nBins} fillMode={fillMode}/>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6,padding:"0.3rem 0.65rem",borderTop:`1px solid ${C.border}`,background:C.bg}}>
                     <PlotExportBar getEl={()=>histRef.current?.querySelector("svg")} filename={`histogram_${histCol}`} style={{flex:1,padding:0,background:"transparent",border:"none"}}/>
@@ -784,7 +989,7 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                   </div>
                 </div>
                 {outlierCount>0&&<div style={{marginTop:8,fontSize: T.code.fontSize,color:C.orange,fontFamily: T.code.fontFamily}}>⚠ {outlierCount} IQR-outlier{outlierCount>1?"s":""} detected. Consider winsorizing.</div>}
-                {vals.length<rawVals.length&&<div style={{marginTop:6,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>ℹ {rawVals.length-vals.length} row(s) dropped (non-positive values not valid for {transform} transform).</div>}
+                {droppedCount>0&&<div style={{marginTop:6,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>ℹ {droppedCount} row(s) dropped (non-positive values not valid for {transform} transform).</div>}
               </div>
             );
           })()}
@@ -836,21 +1041,29 @@ function DistributionTab({rows,headers,info,panel,onPin}){
             </div>
           </div>
 
+          {duckTable && catLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>⏳ counting over the full table…</div>}
+          {catSqlError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.code.fontFamily}}>⚠ {catSqlError} — showing values from the loaded rows instead.</div>}
           {catCol&&(()=>{
-            const freq={};
-            rows.forEach(r=>{
-              const v=r[catCol];
-              if(v==null)return;
-              freq[v]=(freq[v]||0)+1;
-            });
-            let items=Object.entries(freq).map(([label,count])=>({label,count}));
-            if(catOrder==="count")      items=items.sort((a,b)=>b.count-a.count);
-            else if(catOrder==="alpha") items=items.sort((a,b)=>String(a.label).localeCompare(String(b.label)));
-            else if(catOrder==="rev")   items=items.sort((a,b)=>String(b.label).localeCompare(String(a.label)));
+            let items;
+            if (sqlCatCounts) {
+              items = sqlCatCounts;
+            } else {
+              const freq={};
+              rows.forEach(r=>{
+                const v=r[catCol];
+                if(v==null)return;
+                freq[v]=(freq[v]||0)+1;
+              });
+              items=Object.entries(freq).map(([label,count])=>({label,count}));
+            }
+            if(catOrder==="count")      items=[...items].sort((a,b)=>b.count-a.count);
+            else if(catOrder==="alpha") items=[...items].sort((a,b)=>String(a.label).localeCompare(String(b.label)));
+            else if(catOrder==="rev")   items=[...items].sort((a,b)=>String(b.label).localeCompare(String(a.label)));
+            const totalN = items.reduce((s,i)=>s+i.count,0);
             return(
               <div>
                 <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:8}}>
-                  {items.length} categories · n = {rows.filter(r=>r[catCol]!=null).length}
+                  {items.length} categories · n = {totalN}
                 </div>
                 {labelsRow}
                 <SvgBarChart items={items} color={barColor} fillMode={fillMode} title={plotTitle} xLabel={xLab||catCol} scale={barScale}/>
@@ -990,7 +1203,7 @@ function AdfPanel({ results }) {
 }
 
 // ─── TIME SERIES TAB ──────────────────────────────────────────────────────────
-function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
+function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
   const{C,T}=useTheme();
   const numH = headers.filter(h => info[h]?.isNum);
   const catH = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && headers.includes(h)));
@@ -1008,8 +1221,8 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const [tsView, setTsView] = useState("line"); // "line" | "acf" | "adf"
   const [seriesColors, setSeriesColors] = useState({}); // grp -> user-picked color override
 
-  // ── Flat sorted series for ACF/ADF (no grouping, mean agg) ──────────────────
-  const flatY = useMemo(() => {
+  // ── Flat sorted series for ACF/ADF (no grouping, mean agg) — JS fallback ────
+  const jsFlatY = useMemo(() => {
     if (!tCol || !yCol || !rows.length) return [];
     const valid = rows.filter(r =>
       typeof r[tCol] === "number" && isFinite(r[tCol]) &&
@@ -1027,16 +1240,43 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
       .map(([, vals]) => vals.reduce((s, v) => s + v, 0) / vals.length);
   }, [rows, tCol, yCol]);
 
+  // ── Aggregate — JS fallback ──────────────────────────────────────────────────
+  const jsSeries = useMemo(
+    () => aggregateTimeSeries(rows, tCol, yCol, grpCol, agg),
+    [rows, tCol, yCol, grpCol, agg]
+  );
+
+  // ── SQL path: GROUP BY (grpCol, tCol) inside DuckDB, only the resulting points
+  // cross into JS. flatY is always the mean of yCol per period regardless of the
+  // chart's own `agg` selector, so it's fetched with grpCol="" + agg="mean" always.
+  const [sqlFlatY,  setSqlFlatY]  = useState(null);
+  const [sqlSeries, setSqlSeries] = useState(null);
+  const [tsLoading, setTsLoading] = useState(false);
+  const [tsError,   setTsError]   = useState(null);
+  useEffect(() => {
+    setSqlFlatY(null); setSqlSeries(null); setTsError(null);
+    if (!duckTable || !tCol || !yCol) return;
+    setTsLoading(true);
+    Promise.all([
+      fetchAggregateTimeSeriesSQL(duckTable, tCol, yCol, "", "mean"),
+      fetchAggregateTimeSeriesSQL(duckTable, tCol, yCol, grpCol, agg),
+    ]).then(([flatSeries, series]) => {
+      setSqlFlatY(flatSeries[0]?.pts.map(p => p.y) ?? []);
+      setSqlSeries(series);
+    }).catch(e => {
+      console.error("[TimeSeriesTab] SQL aggregation failed:", e);
+      setTsError(e?.message || "aggregation query failed");
+    }).finally(() => setTsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duckTable, tCol, yCol, grpCol, agg]);
+
+  const flatY  = sqlFlatY  ?? jsFlatY;
+  const series = sqlSeries ?? jsSeries;
+
   const maxLag   = Math.min(20, Math.floor((flatY.length - 1) / 2));
   const acfVals  = useMemo(() => flatY.length > 4 ? computeACF(flatY, maxLag)  : [], [flatY, maxLag]);
   const pacfVals = useMemo(() => acfVals.length > 1 ? computePACF(acfVals, maxLag) : [], [acfVals, maxLag]);
   const adfRes   = useMemo(() => flatY.length > 8 ? adfTest(flatY, 2)          : [], [flatY]);
-
-  // ── Aggregate ───────────────────────────────────────────────────────────────
-  const series = useMemo(
-    () => aggregateTimeSeries(rows, tCol, yCol, grpCol, agg),
-    [rows, tCol, yCol, grpCol, agg]
-  );
 
   // ── SVG ─────────────────────────────────────────────────────────────────────
   const W = 620, H = 300;
@@ -1104,6 +1344,9 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
           }}/>
         </div>}
       </div>
+
+      {duckTable && tsLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>⏳ aggregating over the full table…</div>}
+      {tsError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.code.fontFamily}}>⚠ {tsError} — showing values from the loaded rows instead.</div>}
 
       {/* Controls */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: "1.4rem" }}>
@@ -2049,6 +2292,37 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   },[rows,filterConds]);
   const corrRef = useRef(null);
 
+  // ── Plot Builder sampling (SQL) ──────────────────────────────────────────────
+  // PlotBuilder draws every visible row as a mark (point/line/histogram bin, etc.)
+  // — a full materialized array of hundreds of thousands of rows makes the browser
+  // choke rendering SVG regardless of where the array came from. Past a threshold,
+  // fetch a random SQL sample (`USING SAMPLE`) specifically for this tab instead of
+  // the full table, disclosed via a visible banner — never a silent truncation.
+  const PLOT_SAMPLE_THRESHOLD = 50000;
+  const PLOT_SAMPLE_SIZE = 20000;
+  const rowCount = cleanedData._duckdb?.rowCount ?? rows.length;
+  const needsPlotSample = !!duckTable && rowCount > PLOT_SAMPLE_THRESHOLD && !filterConds.length;
+  const [plotSampleRows, setPlotSampleRows] = useState(null);
+  const [plotSampling,   setPlotSampling]   = useState(false);
+  const [plotSampleError, setPlotSampleError] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    setPlotSampleRows(null); setPlotSampleError(null);
+    if (tab !== "plot" || !needsPlotSample) return;
+    setPlotSampling(true);
+    queryDuckDB(`SELECT * FROM "${duckTable}" USING SAMPLE ${PLOT_SAMPLE_SIZE} ROWS`)
+      .then(({ rows: sampled }) => { if (!cancelled) setPlotSampleRows(sampled); })
+      .catch(e => {
+        if (cancelled) return;
+        console.error("[ExplorerModule] Plot Builder SQL sample failed:", e);
+        setPlotSampleError(e?.message || "sampling query failed");
+      })
+      .finally(() => { if (!cancelled) setPlotSampling(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, duckTable, needsPlotSample]);
+  const plotRows = (needsPlotSample && plotSampleRows) ? plotSampleRows : filteredRows;
+
   // ── Pin-for-replication emitter (Fase 1.3, D5) ──────────────────────────────
   // Every pin records the active QuickFilter so the replicated stat/plot runs
   // on exactly the rows the user was looking at (D8 argument fidelity).
@@ -2256,7 +2530,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             </div>
           </>
         )}
-        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
+        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
         {tab==="corr"&&(
           <div>
             <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4,display:"flex",alignItems:"center",gap:10}}>
@@ -2268,14 +2542,26 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             </div>
             <div ref={corrRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
               <div style={{padding:"0.5rem"}}>
-                <CorrHeatmap headers={headers} rows={filteredRows} info={info}/>
+                <CorrHeatmap headers={headers} rows={filteredRows} info={info} duckTable={filterConds.length ? null : duckTable}/>
               </div>
               <PlotExportBar getEl={() => corrRef.current} filename="correlation_heatmap" />
             </div>
           </div>
         )}
-        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
+        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
+        {tab==="plot"&&<>
+          {needsPlotSample && (
+            <div style={{marginBottom:8,padding:"0.5rem 0.8rem",borderRadius:4,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+              background:plotSampleError?`${C.red}14`:`${C.gold}14`,border:`1px solid ${plotSampleError?C.red:C.gold}55`,color:plotSampleError?C.red:C.gold}}>
+              {plotSampleError
+                ? `⚠ ${plotSampleError} — plotting the loaded rows instead.`
+                : plotSampling
+                  ? `⏳ sampling ${PLOT_SAMPLE_SIZE.toLocaleString()} rows from the full ${rowCount.toLocaleString()}-row table…`
+                  : `◈ plotting a random ${PLOT_SAMPLE_SIZE.toLocaleString()}-row sample of ${rowCount.toLocaleString()} rows for performance — aggregated marks (mean lines, histograms) are approximate.`}
+            </div>
+          )}
+          <PlotBuilder headers={headers} rows={plotRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>
+        </>}
       </div>
       <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
     </div>
