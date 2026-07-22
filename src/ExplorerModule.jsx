@@ -2,7 +2,7 @@
 // Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
 // Consumes cleanedData emitted by WranglingModule.
 import { useState, useMemo, useRef, useEffect, Fragment } from "react";
-import { extractAllRows } from "./services/data/duckdb.js";
+import { extractAllRows, queryDuckDB } from "./services/data/duckdb.js";
 import { useTheme } from "./ThemeContext.jsx";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
@@ -30,6 +30,51 @@ function Btn({onClick,ch,color,v="out",dis=false,sm=false}){
   return<button onClick={onClick} disabled={dis} style={{...b,background:"transparent",border:`1px solid ${C.border2}`,color:dis?C.textMuted:C.textDim}}>{ch}</button>;
 }
 function Spin(){const{C,T}=useTheme();return<div style={{width:14,height:14,border:`2px solid ${C.border2}`,borderTopColor:C.gold,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
+
+// Editable number field that never fights the user: unlike a plain
+// <input type="number" value={x} onChange={e=>set(clamp(+e.target.value))}>,
+// this doesn't force-clamp on every keystroke — an empty/partial value while
+// typing (e.g. clearing "20" to type "5") is allowed to sit in the field as-is.
+// Clamps to [min,max] only on blur/Enter, reverting to the last valid value if
+// what's left isn't a parseable number.
+function FreeNumberInput({value, onCommit, min, max, style}){
+  const [text, setText] = useState(String(value));
+  // Tracks the value WE last pushed via onCommit, so the resync effect below only
+  // fires on an external change (e.g. a "reset" button elsewhere), never on our own
+  // live-while-typing commit. Without this, typing "0.001" then backspacing to
+  // "0.00" (which parses to the same number as plain 0) commits 0 -> the `value`
+  // prop changes -> the effect fired on every render and overwrote the in-progress
+  // text with String(0) = "0", silently eating the ".00" the user just typed.
+  const lastCommitted = useRef(value);
+  useEffect(() => {
+    if (value !== lastCommitted.current) {
+      setText(String(value));
+      lastCommitted.current = value;
+    }
+  }, [value]);
+  const commitValue = (n) => { lastCommitted.current = n; onCommit(n); };
+  const commit = () => {
+    const n = parseFloat(text);
+    if (isFinite(n)) {
+      const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
+      setText(String(clamped));
+      if (clamped !== value) commitValue(clamped);
+    } else {
+      setText(String(value));
+    }
+  };
+  return (
+    <input value={text} inputMode="decimal"
+      onChange={e => {
+        setText(e.target.value);
+        const n = parseFloat(e.target.value);
+        if (e.target.value.trim() !== "" && isFinite(n)) commitValue(n); // live update while typing, unclamped
+      }}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === "Enter") { commit(); e.currentTarget.blur(); } }}
+      style={style} />
+  );
+}
 
 // ─── PIN FOR REPLICATION (Fase 1.3, D5) ──────────────────────────────────────
 // Explore is exploratory by default — nothing is logged automatically. This
@@ -98,6 +143,33 @@ function aggregateTimeSeries(rows, tCol, yCol, grpCol, agg) {
   }).filter(s => s.pts.length > 0);
 }
 
+// SQL equivalent of aggregateTimeSeries() — GROUP BY (grpCol, tCol) inside DuckDB, so
+// only the resulting (group × period) points cross into JS, correct and fast at any
+// row count. Falls back to the JS version above for small/non-DuckDB datasets and
+// filtered views. Reused for flatY too (grpCol="", agg="mean" — always the mean of
+// yCol per period, independent of the chart's own agg selector).
+async function fetchAggregateTimeSeriesSQL(duckTable, tCol, yCol, grpCol, agg) {
+  const esc = s => `"${String(s).replace(/"/g, '""')}"`;
+  const AGG_SQL = {
+    mean:   c => `avg(${c})`,
+    sum:    c => `sum(${c})`,
+    count:  () => `count(*)`,
+    median: c => `percentile_cont(0.5) WITHIN GROUP (ORDER BY ${c})`,
+  };
+  const grpSel = grpCol ? `${esc(grpCol)} AS grp, ` : "";
+  const groupBy = grpCol ? `${esc(grpCol)}, ${esc(tCol)}` : esc(tCol);
+  const where = [`${esc(tCol)} IS NOT NULL`, ...(agg !== "count" ? [`${esc(yCol)} IS NOT NULL`] : [])].join(" AND ");
+  const sql = `SELECT ${grpSel}${esc(tCol)} AS t, ${AGG_SQL[agg](esc(yCol))} AS y FROM "${duckTable}" WHERE ${where} GROUP BY ${groupBy} ORDER BY ${groupBy}`;
+  const { rows } = await queryDuckDB(sql);
+  const byGrp = new Map();
+  rows.forEach(r => {
+    const grp = grpCol ? String(r.grp ?? "") : "_all_";
+    if (!byGrp.has(grp)) byGrp.set(grp, []);
+    byGrp.get(grp).push({ t: Number(r.t), y: r.y == null ? null : Number(r.y) });
+  });
+  return Array.from(byGrp.entries()).map(([grp, pts]) => ({ grp, pts: pts.filter(p => p.y != null) })).filter(s => s.pts.length > 0);
+}
+
 // ─── SVG CHARTS ───────────────────────────────────────────────────────────────
 // Compact time-series line chart — same COLORS palette as TimeSeriesTab so the
 // pin Compare preview matches the full chart's aesthetics.
@@ -141,20 +213,29 @@ function SvgMiniTimeSeries({ series }) {
   );
 }
 
-function SvgHistogram({data,color,label="",title="",xLabel="",yLabel="",nBins=20,fillMode="filled"}){
+// data: raw values, binned client-side (small/non-DuckDB fallback). Or pass
+// counts+min+max directly (bin counts already computed server-side via SQL) to
+// draw the same chart without ever materializing the raw column into JS.
+function SvgHistogram({data,counts:countsProp,min:minProp,max:maxProp,color,label="",title="",xLabel="",yLabel="",nBins=20,fillMode="filled"}){
   const{C,T}=useTheme();color=color??C.gold;
   const W=480;
   const titleH=title?20:0, xLabH=xLabel?16:0, yLabW=yLabel?14:0;
   const H=160+titleH+xLabH, PAD={l:44+yLabW,r:16,t:8+titleH,b:36+xLabH};
   const iW=W-PAD.l-PAD.r,iH=H-PAD.t-PAD.b;
-  if(!data.length)return null;
-  const min=arrMin(data),max=arrMax(data);
+  let counts, min, max;
+  if (countsProp) {
+    if (minProp == null || maxProp == null || !countsProp.length) return null;
+    counts = countsProp; min = minProp; max = maxProp;
+  } else {
+    if(!data?.length)return null;
+    min=arrMin(data);max=arrMax(data);
+    const bw=(max-min||1)/nBins;
+    counts=Array(nBins).fill(0);
+    data.forEach(v=>{const b=Math.min(nBins-1,Math.floor((v-min)/bw));counts[b]++;});
+  }
   const range=max-min||1;
-  const bw=range/nBins;
-  const counts=Array(nBins).fill(0);
-  data.forEach(v=>{const b=Math.min(nBins-1,Math.floor((v-min)/bw));counts[b]++;});
   const maxC=Math.max(...counts,1);
-  const barW=iW/nBins;
+  const barW=iW/counts.length;
   const yTicks=[0,0.25,0.5,0.75,1].map(f=>Math.round(f*maxC));
   const bottomLabel=xLabel||label;
   return(
@@ -241,6 +322,87 @@ function SvgBarChart({items,color,fillMode="filled",title="",xLabel="",scale="li
   );
 }
 
+// ─── DISTRIBUTIONS SQL HELPERS ─────────────────────────────────────────────────
+// Same convention as the correlation/time-series SQL paths above: the full table
+// stays in DuckDB, only aggregated results cross into JS.
+
+// Given the data domain [min,max] and the user's chosen bin mode, resolves the
+// actual bin count + the extended right edge of the binned domain (bins always
+// fully cover [min,max], so in width mode the last bin's right edge is rounded
+// up past max — same convention as ggplot2's geom_histogram(binwidth=)).
+const MAX_HIST_BINS = 5000; // sanity cap — a mistyped tiny binwidth on a wide range shouldn't ask for millions of bins
+function resolveBinning(min, max, binMode, nBins, binWidth) {
+  if (binMode === "width" && binWidth > 0) {
+    const n = Math.min(MAX_HIST_BINS, Math.max(1, Math.ceil((max - min) / binWidth)));
+    return { nBins: n, max: min + n * binWidth };
+  }
+  return { nBins: Math.min(MAX_HIST_BINS, Math.max(1, Math.round(nBins) || 20)), max };
+}
+
+function sqlTransformExpr(colExpr, transform) {
+  if (transform === "log")   return { expr: `ln(${colExpr})`,    guard: `${colExpr} > 0` };
+  if (transform === "log10") return { expr: `log10(${colExpr})`, guard: `${colExpr} > 0` };
+  if (transform === "sqrt")  return { expr: `sqrt(${colExpr})`,  guard: `${colExpr} >= 0` };
+  return { expr: colExpr, guard: null };
+}
+
+// mean/std/min/max/median/q1/q3/n/outlierCount for one (possibly transformed) numeric
+// column. std uses stddev_pop (population, matches this tab's own JS n-divisor
+// formula); median/q1/q3 use percentile_cont (linear interpolation, R's default
+// quantile type) rather than the JS fallback's simpler nearest-rank indexing —
+// deliberately the more standard definition, not a bug.
+async function fetchHistogramStatsSQL(duckTable, col, transform) {
+  const c = `"${String(col).replace(/"/g, '""')}"`;
+  const { expr, guard } = sqlTransformExpr(c, transform);
+  const where = [`${c} IS NOT NULL`, ...(guard ? [guard] : [])].join(" AND ");
+  const sql = `
+    SELECT count(*) AS n, avg(${expr}) AS mean, stddev_pop(${expr}) AS std,
+      min(${expr}) AS min, max(${expr}) AS max,
+      percentile_cont(0.5)  WITHIN GROUP (ORDER BY ${expr}) AS median,
+      percentile_cont(0.25) WITHIN GROUP (ORDER BY ${expr}) AS q1,
+      percentile_cont(0.75) WITHIN GROUP (ORDER BY ${expr}) AS q3
+    FROM "${duckTable}" WHERE ${where}`;
+  const { rows } = await queryDuckDB(sql);
+  const row = rows[0] || {};
+  const n = v => (v == null ? null : Number(v));
+  const stats = { n: n(row.n) ?? 0, mean: n(row.mean), std: n(row.std), min: n(row.min), max: n(row.max), median: n(row.median), q1: n(row.q1), q3: n(row.q3) };
+  if (stats.q1 != null && stats.q3 != null) {
+    const iqr = stats.q3 - stats.q1;
+    const lo = stats.q1 - 1.5 * iqr, hi = stats.q3 + 1.5 * iqr;
+    const { rows: ocRows } = await queryDuckDB(`SELECT count(*) AS c FROM "${duckTable}" WHERE ${where} AND (${expr} < ${lo} OR ${expr} > ${hi})`);
+    stats.outlierCount = Number(ocRows[0]?.c ?? 0);
+  } else {
+    stats.outlierCount = 0;
+  }
+  // Non-null count ignoring the transform guard, so the UI can report how many rows
+  // a log/sqrt transform dropped (non-positive values) — matches the JS fallback's
+  // "rawVals.length - vals.length" notice.
+  const { rows: totalRows } = await queryDuckDB(`SELECT count(${c}) AS total FROM "${duckTable}" WHERE ${c} IS NOT NULL`);
+  stats.totalNonNull = Number(totalRows[0]?.total ?? stats.n);
+  return stats;
+}
+
+// Bin counts for a fixed [min,max]/nBins grid — same bucketing rule as SvgHistogram's
+// own JS binning (Math.floor((v-min)/binWidth), clamped to [0,nBins-1]).
+async function fetchHistogramBinsSQL(duckTable, col, transform, min, max, nBins) {
+  const c = `"${String(col).replace(/"/g, '""')}"`;
+  const { expr, guard } = sqlTransformExpr(c, transform);
+  const where = [`${c} IS NOT NULL`, ...(guard ? [guard] : [])].join(" AND ");
+  const binWidth = (max - min) || 1;
+  const binExpr = `LEAST(${nBins - 1}, GREATEST(0, CAST(FLOOR((${expr} - ${min}) / ${binWidth / nBins}) AS INTEGER)))`;
+  const { rows } = await queryDuckDB(`SELECT ${binExpr} AS bin, count(*) AS c FROM "${duckTable}" WHERE ${where} GROUP BY bin`);
+  const counts = Array(nBins).fill(0);
+  rows.forEach(r => { const b = Number(r.bin); if (b >= 0 && b < nBins) counts[b] = Number(r.c); });
+  return counts;
+}
+
+// Category counts for the bar-chart sub-tab — GROUP BY catCol, sorted client-side to
+// match the existing "count"/"alpha"/"rev" order options without another round trip.
+async function fetchCategoryCountsSQL(duckTable, col) {
+  const c = `"${String(col).replace(/"/g, '""')}"`;
+  const { rows } = await queryDuckDB(`SELECT ${c} AS label, count(*) AS count FROM "${duckTable}" WHERE ${c} IS NOT NULL GROUP BY ${c}`);
+  return rows.map(r => ({ label: String(r.label), count: Number(r.count) }));
+}
 
 function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
   const{C,T}=useTheme();
@@ -275,11 +437,47 @@ function SvgSpaghetti({rows,entityCol,timeCol,col,sampleN=15}){
   );
 }
 
-function CorrHeatmap({headers,rows,info}){
+// One query, corr() for every pair (upper triangle only, mirrored) — the full table
+// is scanned inside DuckDB and only the n(n+1)/2 resulting numbers cross into JS, so
+// this is correct and fast regardless of row count. JS pearson() below is the fallback
+// for small/non-DuckDB datasets and for ad hoc QuickFilter views (duckTable passed as
+// null there — same convention as GroupSummarizeExplorer).
+async function fetchCorrMatrixSQL(duckTable, numH) {
+  const esc = s => `"${String(s).replace(/"/g, '""')}"`;
+  const parts = [];
+  for (let i = 0; i < numH.length; i++) {
+    for (let j = i; j < numH.length; j++) {
+      parts.push(`corr(${esc(numH[i])}, ${esc(numH[j])}) AS c${i}_${j}`);
+    }
+  }
+  const { rows } = await queryDuckDB(`SELECT ${parts.join(", ")} FROM "${duckTable}"`);
+  const row = rows[0] || {};
+  return numH.map((_, i) => numH.map((_, j) => {
+    const key = i <= j ? `c${i}_${j}` : `c${j}_${i}`;
+    const v = row[key];
+    return v == null ? 0 : Number(v);
+  }));
+}
+
+function CorrHeatmap({headers,rows,info,duckTable}){
   const{C,T}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+  const [sqlMat, setSqlMat] = useState(null);
+  const [corrLoading, setCorrLoading] = useState(false);
+  const [corrError, setCorrError] = useState(null);
+  const numHKey = numH.join("|");
+  useEffect(() => {
+    setSqlMat(null); setCorrError(null);
+    if (!duckTable || numH.length < 2) return;
+    setCorrLoading(true);
+    fetchCorrMatrixSQL(duckTable, numH)
+      .then(m => setSqlMat(m))
+      .catch(e => { console.error("[CorrHeatmap] SQL correlation failed:", e); setCorrError(e?.message || "correlation query failed"); })
+      .finally(() => setCorrLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duckTable, numHKey]);
   if(numH.length<2)return<div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>Need ≥2 numeric columns.</div>;
-  const mat=numH.map(h1=>numH.map(h2=>{
+  const mat = sqlMat ?? numH.map(h1=>numH.map(h2=>{
     const pairs=rows.filter(r=>typeof r[h1]==="number"&&typeof r[h2]==="number");
     return pearson(pairs.map(r=>r[h1]),pairs.map(r=>r[h2]));
   }));
@@ -293,6 +491,8 @@ function CorrHeatmap({headers,rows,info}){
   };
   return(
     <div style={{overflowX:"auto"}}>
+      {duckTable && corrLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>⏳ computing correlations over the full table…</div>}
+      {corrError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.code.fontFamily}}>⚠ {corrError} — showing values from the loaded rows instead.</div>}
       <svg viewBox={`0 0 ${W+8} ${H_total+8}`} style={{width:"100%",maxWidth:W+8,display:"block",fontFamily: T.code.fontFamily}}>
         {numH.map((h,i)=>(
           <text key={h} x={lblH+i*cellSz+cellSz/2} y={lblH-4} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={T.data.fontFamily} textAnchor="middle" transform={`rotate(-35,${lblH+i*cellSz+cellSz/2},${lblH-4})`}>{h.slice(0,8)}</text>
@@ -603,7 +803,7 @@ function DispersionPanel({rows,headers,info,onPin}){
 }
 
 // ─── DISTRIBUTION TAB ─────────────────────────────────────────────────────────
-function DistributionTab({rows,headers,info,panel,onPin}){
+function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
   const{C,T}=useTheme();
   const palette = [
     { label:"teal",  val:C.teal },
@@ -625,6 +825,8 @@ function DistributionTab({rows,headers,info,panel,onPin}){
   const [fillMode,setFillMode]=useState("filled");   // "filled" | "outline"
   const [transform,setTransform]=useState("none");   // "none" | "log" | "log10" | "sqrt"
   const [nBins,setNBins]=useState(20);
+  const [binMode,setBinMode]=useState("count");      // "count" | "width" — mirrors PlotBuilder's histogram/density toggle
+  const [binWidth,setBinWidth]=useState(1);
   const [plotTitle,setPlotTitle]=useState("");       // custom labels (blank = auto)
   const [xLab,setXLab]=useState("");
   const [yLab,setYLab]=useState("");
@@ -637,6 +839,55 @@ function DistributionTab({rows,headers,info,panel,onPin}){
     ...(catH.length?[["cat","Categorical"]]:[] ),
     ...(hasPanel?[["spaghetti","Spaghetti"]]:[] ),
   ];
+
+  // ── SQL path: histogram stats + bins over the full table ────────────────────
+  const [sqlHistStats, setSqlHistStats] = useState(null);
+  const [sqlHistBins,  setSqlHistBins]  = useState(null);
+  const [histLoading,  setHistLoading]  = useState(false);
+  const [histSqlError, setHistSqlError] = useState(null);
+  useEffect(() => {
+    setSqlHistStats(null); setSqlHistBins(null); setHistSqlError(null);
+    if (!duckTable || !histCol || sub !== "hist") return;
+    let cancelled = false;
+    setHistLoading(true);
+    fetchHistogramStatsSQL(duckTable, histCol, transform)
+      .then(async stats => {
+        if (cancelled) return;
+        setSqlHistStats(stats);
+        if (stats.min != null && stats.max != null) {
+          const { nBins: effN, max: effMax } = resolveBinning(stats.min, stats.max, binMode, nBins, binWidth);
+          const bins = await fetchHistogramBinsSQL(duckTable, histCol, transform, stats.min, effMax, effN);
+          if (!cancelled) setSqlHistBins(bins);
+        }
+      })
+      .catch(e => {
+        if (cancelled) return;
+        console.error("[DistributionTab] SQL histogram failed:", e);
+        setHistSqlError(e?.message || "histogram query failed");
+      })
+      .finally(() => { if (!cancelled) setHistLoading(false); });
+    return () => { cancelled = true; };
+  }, [duckTable, histCol, transform, nBins, binMode, binWidth, sub]);
+
+  // ── SQL path: categorical counts over the full table ────────────────────────
+  const [sqlCatCounts, setSqlCatCounts] = useState(null);
+  const [catLoading,   setCatLoading]   = useState(false);
+  const [catSqlError,  setCatSqlError]  = useState(null);
+  useEffect(() => {
+    setSqlCatCounts(null); setCatSqlError(null);
+    if (!duckTable || !catCol || sub !== "cat") return;
+    let cancelled = false;
+    setCatLoading(true);
+    fetchCategoryCountsSQL(duckTable, catCol)
+      .then(items => { if (!cancelled) setSqlCatCounts(items); })
+      .catch(e => {
+        if (cancelled) return;
+        console.error("[DistributionTab] SQL category counts failed:", e);
+        setCatSqlError(e?.message || "category count query failed");
+      })
+      .finally(() => { if (!cancelled) setCatLoading(false); });
+    return () => { cancelled = true; };
+  }, [duckTable, catCol, sub]);
 
   // Shared labels (title / x / y) — blank fields fall back to auto labels.
   const labInput=(ph,val,setter)=>(
@@ -724,34 +975,64 @@ function DistributionTab({rows,headers,info,panel,onPin}){
             </div>
             {/* bins */}
             <div>
-              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_break (bins)</div>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>scale_break</div>
               <div style={{display:"flex",alignItems:"center",gap:4}}>
-                <input type="range" min={5} max={60} step={1} value={nBins}
-                  onChange={e=>setNBins(Number(e.target.value))}
-                  style={{width:80,accentColor:C.gold}}/>
-                <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily,minWidth:20}}>{nBins}</span>
+                <div style={{display:"flex",gap:2}}
+                  title="N bins = fixed number of bars (fewer bins → wider bars). Bin width = fixed bar width in data units, like ggplot's binwidth= (smaller width → MORE, narrower bars).">
+                  {[["count","N bins"],["width","Bin width"]].map(([k,l])=>(
+                    <button key={k} onClick={()=>setBinMode(k)} style={chip(binMode===k,C.gold)}>{l}</button>
+                  ))}
+                </div>
+                {binMode==="count" ? <>
+                  <input type="range" min={5} max={60} step={1} value={nBins}
+                    onChange={e=>setNBins(Number(e.target.value))}
+                    style={{width:60,accentColor:C.gold}}/>
+                  <FreeNumberInput value={nBins} onCommit={setNBins} min={1} max={500}
+                    style={{width:44,background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,padding:"0.2rem 0.4rem",outline:"none"}}/>
+                </> : <>
+                  <FreeNumberInput value={binWidth} onCommit={setBinWidth} min={0.0001}
+                    style={{width:64,background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,padding:"0.2rem 0.4rem",outline:"none"}}/>
+                </>}
               </div>
             </div>
           </div>
 
+          {duckTable && histLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>⏳ computing over the full table…</div>}
+          {histSqlError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.code.fontFamily}}>⚠ {histSqlError} — showing values from the loaded rows instead.</div>}
           {histCol&&(()=>{
-            const rawVals=rows.map(r=>r[histCol]).filter(v=>typeof v==="number"&&isFinite(v));
-            const vals=rawVals.map(v=>applyTransform(v)).filter(v=>v!=null&&isFinite(v));
-            const n=vals.length;
-            const mean=n?vals.reduce((s,v)=>s+v,0)/n:null;
-            const std=n?Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/n):null;
-            const sorted=[...vals].sort((a,b)=>a-b);
-            const median=n?sorted[Math.floor(n/2)]:null;
-            const min=n?sorted[0]:null;
-            const max=n?sorted[n-1]:null;
-            const q1=sorted[Math.floor(n*0.25)],q3=sorted[Math.floor(n*0.75)],iqr=q3-q1;
-            const outlierCount=vals.filter(v=>v<q1-1.5*iqr||v>q3+1.5*iqr).length;
+            // SQL path: mean/std/min/max/median/q1/q3/outlierCount already computed over
+            // the FULL table (see fetchHistogramStatsSQL) — vals/rawVals only need to be
+            // materialized for the JS fallback (small/non-DuckDB datasets, or while the
+            // SQL query is still in flight).
+            const useSql = !!sqlHistStats;
+            const rawVals=useSql?[]:rows.map(r=>r[histCol]).filter(v=>typeof v==="number"&&isFinite(v));
+            const vals=useSql?[]:rawVals.map(v=>applyTransform(v)).filter(v=>v!=null&&isFinite(v));
+            const n=useSql?sqlHistStats.n:vals.length;
+            const jsMean=n?vals.reduce((s,v)=>s+v,0)/n:null;
+            const mean=useSql?sqlHistStats.mean:jsMean;
+            const std=useSql?sqlHistStats.std:(n?Math.sqrt(vals.reduce((s,v)=>s+(v-jsMean)**2,0)/n):null);
+            const sorted=useSql?null:[...vals].sort((a,b)=>a-b);
+            const median=useSql?sqlHistStats.median:(n?sorted[Math.floor(n/2)]:null);
+            const min=useSql?sqlHistStats.min:(n?sorted[0]:null);
+            const max=useSql?sqlHistStats.max:(n?sorted[n-1]:null);
+            const q1=useSql?sqlHistStats.q1:sorted?.[Math.floor(n*0.25)];
+            const q3=useSql?sqlHistStats.q3:sorted?.[Math.floor(n*0.75)];
+            const outlierCount=useSql?sqlHistStats.outlierCount:(q1!=null&&q3!=null?vals.filter(v=>v<q1-1.5*(q3-q1)||v>q3+1.5*(q3-q1)).length:0);
+            const droppedCount=useSql?Math.max(0,sqlHistStats.totalNonNull-sqlHistStats.n):(rawVals.length-vals.length);
             const histLabel=`${histCol}${transformLabel}`;
+            // Bins always fully cover [min,max] — in width mode binMax extends past the
+            // true max so every bin is exactly binWidth wide (ggplot2 convention).
+            const {nBins:effNBins,max:binMax}=(min!=null&&max!=null)?resolveBinning(min,max,binMode,nBins,binWidth):{nBins,max};
             function downloadHistLatex(){
-              const bw2=(max-min||1)/nBins;
+              const bw2=(binMax-min||1)/effNBins;
               // Replicate SvgHistogram binning so LaTeX export matches on-screen plot.
-              const counts=Array(nBins).fill(0);
-              vals.forEach(v=>{const b=Math.min(nBins-1,Math.max(0,Math.floor((v-min)/bw2)));counts[b]++;});
+              let counts;
+              if (useSql && sqlHistBins) {
+                counts = sqlHistBins;
+              } else {
+                counts=Array(effNBins).fill(0);
+                vals.forEach(v=>{const b=Math.min(effNBins-1,Math.max(0,Math.floor((v-min)/bw2)));counts[b]++;});
+              }
               const coords=counts.map((c,i)=>`(${(min+i*bw2).toFixed(4)},${c})`).join(" ");
               const tex=`% pgfplots histogram — generated by Econ Studio\n\\begin{figure}[htbp]\n\\centering\n\\begin{tikzpicture}\n\\begin{axis}[\n  title={Histogram of ${histLabel}},\n  xlabel={${histLabel}},\n  ylabel={Count},\n  ybar interval,\n  xtick style={draw=none},\n  ymajorgrids=true,\n  grid style=dashed,\n]\n\\addplot[fill=teal!60,draw=teal!80] coordinates {\n  ${coords}\n};\n\\end{axis}\n\\end{tikzpicture}\n\\caption{Histogram of ${histLabel} (n=${n})}\n\\end{figure}`;
               const a=document.createElement("a");
@@ -759,6 +1040,15 @@ function DistributionTab({rows,headers,info,panel,onPin}){
               a.download=`histogram_${histCol}.tex`;
               a.click();URL.revokeObjectURL(a.href);
             }
+            // Compute bin counts the same way for both the SQL and JS-fallback paths, so
+            // width mode (an exact binwidth, matching ggplot2's binwidth=) works
+            // identically regardless of where the underlying data came from.
+            const counts = useSql ? sqlHistBins : (min==null||max==null ? null : (() => {
+              const bw2=(binMax-min)||1;
+              const c=Array(effNBins).fill(0);
+              vals.forEach(v=>{const b=Math.min(effNBins-1,Math.max(0,Math.floor((v-min)/bw2)));c[b]++;});
+              return c;
+            })());
             return(
               <div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1rem"}}>
@@ -772,7 +1062,7 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                 {labelsRow}
                 <div ref={histRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
                   <div style={{padding:"0.5rem"}}>
-                    <SvgHistogram data={vals} color={barColor} title={plotTitle} xLabel={xLab||histLabel} yLabel={yLab||"Count"} nBins={nBins} fillMode={fillMode}/>
+                    <SvgHistogram counts={counts} min={min} max={binMax} color={barColor} title={plotTitle} xLabel={xLab||histLabel} yLabel={yLab||"Count"} fillMode={fillMode}/>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6,padding:"0.3rem 0.65rem",borderTop:`1px solid ${C.border}`,background:C.bg}}>
                     <PlotExportBar getEl={()=>histRef.current?.querySelector("svg")} filename={`histogram_${histCol}`} style={{flex:1,padding:0,background:"transparent",border:"none"}}/>
@@ -784,7 +1074,7 @@ function DistributionTab({rows,headers,info,panel,onPin}){
                   </div>
                 </div>
                 {outlierCount>0&&<div style={{marginTop:8,fontSize: T.code.fontSize,color:C.orange,fontFamily: T.code.fontFamily}}>⚠ {outlierCount} IQR-outlier{outlierCount>1?"s":""} detected. Consider winsorizing.</div>}
-                {vals.length<rawVals.length&&<div style={{marginTop:6,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>ℹ {rawVals.length-vals.length} row(s) dropped (non-positive values not valid for {transform} transform).</div>}
+                {droppedCount>0&&<div style={{marginTop:6,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>ℹ {droppedCount} row(s) dropped (non-positive values not valid for {transform} transform).</div>}
               </div>
             );
           })()}
@@ -836,21 +1126,29 @@ function DistributionTab({rows,headers,info,panel,onPin}){
             </div>
           </div>
 
+          {duckTable && catLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>⏳ counting over the full table…</div>}
+          {catSqlError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.code.fontFamily}}>⚠ {catSqlError} — showing values from the loaded rows instead.</div>}
           {catCol&&(()=>{
-            const freq={};
-            rows.forEach(r=>{
-              const v=r[catCol];
-              if(v==null)return;
-              freq[v]=(freq[v]||0)+1;
-            });
-            let items=Object.entries(freq).map(([label,count])=>({label,count}));
-            if(catOrder==="count")      items=items.sort((a,b)=>b.count-a.count);
-            else if(catOrder==="alpha") items=items.sort((a,b)=>String(a.label).localeCompare(String(b.label)));
-            else if(catOrder==="rev")   items=items.sort((a,b)=>String(b.label).localeCompare(String(a.label)));
+            let items;
+            if (sqlCatCounts) {
+              items = sqlCatCounts;
+            } else {
+              const freq={};
+              rows.forEach(r=>{
+                const v=r[catCol];
+                if(v==null)return;
+                freq[v]=(freq[v]||0)+1;
+              });
+              items=Object.entries(freq).map(([label,count])=>({label,count}));
+            }
+            if(catOrder==="count")      items=[...items].sort((a,b)=>b.count-a.count);
+            else if(catOrder==="alpha") items=[...items].sort((a,b)=>String(a.label).localeCompare(String(b.label)));
+            else if(catOrder==="rev")   items=[...items].sort((a,b)=>String(b.label).localeCompare(String(a.label)));
+            const totalN = items.reduce((s,i)=>s+i.count,0);
             return(
               <div>
                 <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:8}}>
-                  {items.length} categories · n = {rows.filter(r=>r[catCol]!=null).length}
+                  {items.length} categories · n = {totalN}
                 </div>
                 {labelsRow}
                 <SvgBarChart items={items} color={barColor} fillMode={fillMode} title={plotTitle} xLabel={xLab||catCol} scale={barScale}/>
@@ -990,7 +1288,7 @@ function AdfPanel({ results }) {
 }
 
 // ─── TIME SERIES TAB ──────────────────────────────────────────────────────────
-function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
+function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
   const{C,T}=useTheme();
   const numH = headers.filter(h => info[h]?.isNum);
   const catH = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && headers.includes(h)));
@@ -1008,8 +1306,8 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
   const [tsView, setTsView] = useState("line"); // "line" | "acf" | "adf"
   const [seriesColors, setSeriesColors] = useState({}); // grp -> user-picked color override
 
-  // ── Flat sorted series for ACF/ADF (no grouping, mean agg) ──────────────────
-  const flatY = useMemo(() => {
+  // ── Flat sorted series for ACF/ADF (no grouping, mean agg) — JS fallback ────
+  const jsFlatY = useMemo(() => {
     if (!tCol || !yCol || !rows.length) return [];
     const valid = rows.filter(r =>
       typeof r[tCol] === "number" && isFinite(r[tCol]) &&
@@ -1027,16 +1325,43 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
       .map(([, vals]) => vals.reduce((s, v) => s + v, 0) / vals.length);
   }, [rows, tCol, yCol]);
 
+  // ── Aggregate — JS fallback ──────────────────────────────────────────────────
+  const jsSeries = useMemo(
+    () => aggregateTimeSeries(rows, tCol, yCol, grpCol, agg),
+    [rows, tCol, yCol, grpCol, agg]
+  );
+
+  // ── SQL path: GROUP BY (grpCol, tCol) inside DuckDB, only the resulting points
+  // cross into JS. flatY is always the mean of yCol per period regardless of the
+  // chart's own `agg` selector, so it's fetched with grpCol="" + agg="mean" always.
+  const [sqlFlatY,  setSqlFlatY]  = useState(null);
+  const [sqlSeries, setSqlSeries] = useState(null);
+  const [tsLoading, setTsLoading] = useState(false);
+  const [tsError,   setTsError]   = useState(null);
+  useEffect(() => {
+    setSqlFlatY(null); setSqlSeries(null); setTsError(null);
+    if (!duckTable || !tCol || !yCol) return;
+    setTsLoading(true);
+    Promise.all([
+      fetchAggregateTimeSeriesSQL(duckTable, tCol, yCol, "", "mean"),
+      fetchAggregateTimeSeriesSQL(duckTable, tCol, yCol, grpCol, agg),
+    ]).then(([flatSeries, series]) => {
+      setSqlFlatY(flatSeries[0]?.pts.map(p => p.y) ?? []);
+      setSqlSeries(series);
+    }).catch(e => {
+      console.error("[TimeSeriesTab] SQL aggregation failed:", e);
+      setTsError(e?.message || "aggregation query failed");
+    }).finally(() => setTsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duckTable, tCol, yCol, grpCol, agg]);
+
+  const flatY  = sqlFlatY  ?? jsFlatY;
+  const series = sqlSeries ?? jsSeries;
+
   const maxLag   = Math.min(20, Math.floor((flatY.length - 1) / 2));
   const acfVals  = useMemo(() => flatY.length > 4 ? computeACF(flatY, maxLag)  : [], [flatY, maxLag]);
   const pacfVals = useMemo(() => acfVals.length > 1 ? computePACF(acfVals, maxLag) : [], [acfVals, maxLag]);
   const adfRes   = useMemo(() => flatY.length > 8 ? adfTest(flatY, 2)          : [], [flatY]);
-
-  // ── Aggregate ───────────────────────────────────────────────────────────────
-  const series = useMemo(
-    () => aggregateTimeSeries(rows, tCol, yCol, grpCol, agg),
-    [rows, tCol, yCol, grpCol, agg]
-  );
 
   // ── SVG ─────────────────────────────────────────────────────────────────────
   const W = 620, H = 300;
@@ -1104,6 +1429,9 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin }) {
           }}/>
         </div>}
       </div>
+
+      {duckTable && tsLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>⏳ aggregating over the full table…</div>}
+      {tsError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.code.fontFamily}}>⚠ {tsError} — showing values from the loaded rows instead.</div>}
 
       {/* Controls */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: "1.4rem" }}>
@@ -1433,7 +1761,7 @@ function generateExploreScript(language, { headers, info, filename }) {
 
 // ─── GROUP & SUMMARIZE EXPLORER ───────────────────────────────────────────────
 // Non-destructive descriptive stats panel with as.factor() override and LaTeX export.
-function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPreview }) {
+function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPreview, duckTable }) {
   const { C, T } = useTheme();
   const [byCols,    setByCols]    = useState([]);
   const [factorOverrides, setFactorOverrides] = useState(new Set()); // numeric cols forced as categorical
@@ -1444,6 +1772,8 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
   const [hoveredCol, setHoveredCol] = useState(null);
   const [saveName,  setSaveName]  = useState("");
   const [saved,     setSaved]     = useState(false);
+  const [computing, setComputing] = useState(false);
+  const [sqlError,  setSqlError]  = useState(null);
 
   const numC = headers.filter(h => info[h]?.isNum);
   const FN_OPTS = [
@@ -1489,10 +1819,49 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
   }
   function rmAgg(i) { setAggs(a => a.filter((_, j) => j !== i)); }
 
-  function doSummarize() {
+  // SQL aggregate expressions, mirroring the JS fallback's semantics exactly:
+  // "sd" is sample std (n-1, matches stddev_samp), "count" counts all group rows
+  // (not just non-null numeric ones, matches _rows.length in the JS branch).
+  const SQL_AGG = {
+    mean:   c => `avg(${c})`,
+    median: c => `percentile_cont(0.5) WITHIN GROUP (ORDER BY ${c})`,
+    sum:    c => `sum(${c})`,
+    count:  () => `count(*)`,
+    min:    c => `min(${c})`,
+    max:    c => `max(${c})`,
+    sd:     c => `stddev_samp(${c})`,
+  };
+
+  async function doSummarize() {
     if (!byCols.length || !aggs.length) return;
     const validAggs = aggs.filter(a => a.col && a.fn && a.nn.trim());
     if (!validAggs.length) return;
+    const outHeaders = [...byCols, ...validAggs.map(a => a.nn)];
+
+    // DuckDB path: query the FULL table directly — never materializes rows into JS,
+    // so this is correct and fast regardless of dataset size (the whole point of
+    // moving this off the `rows` prop, which is only a preview until fully loaded).
+    if (duckTable) {
+      setComputing(true); setSqlError(null);
+      try {
+        const esc = s => `"${String(s).replace(/"/g, '""')}"`;
+        const groupSel = byCols.map(esc).join(", ");
+        const aggSel = validAggs.map(({ col, fn, nn }) => `${SQL_AGG[fn](esc(col))} AS ${esc(nn)}`).join(", ");
+        const sql = `SELECT ${groupSel}, ${aggSel} FROM "${duckTable}" GROUP BY ${groupSel} ORDER BY ${groupSel}`;
+        const { rows: outRows } = await queryDuckDB(sql);
+        setSumResult({ rows: outRows, headers: outHeaders, by: byCols, aggs: validAggs });
+        setLatexOpen(false); setCopied(false);
+      } catch (e) {
+        console.error("[GroupSummarizeExplorer] SQL aggregation failed:", e);
+        setSqlError(e?.message || "aggregation query failed");
+      } finally {
+        setComputing(false);
+      }
+      return;
+    }
+
+    // JS fallback — only reached for datasets small enough to skip DuckDB entirely,
+    // where `rows` is already the true full array (no preview truncation).
     const byKey = r => byCols.map(b => String(r[b] ?? "")).join("||");
     const groups = new Map();
     rows.forEach(r => {
@@ -1501,7 +1870,6 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
       groups.get(k)._rows.push(r);
     });
     const outRows = [];
-    const outHeaders = [...byCols, ...validAggs.map(a => a.nn)];
     for (const { _first, _rows } of groups.values()) {
       const out = {};
       byCols.forEach(b => { out[b] = _first[b]; });
@@ -1531,12 +1899,12 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
     setLatexOpen(false); setCopied(false);
   }
 
-  // doSummarize() snapshots `rows` at click time — if the user hits Compute while
-  // still on the preview (usingPreview), the wrong numbers would otherwise stick
-  // around forever even after the full table finishes loading. Re-run silently
-  // (keeping the same by/aggs config) whenever the underlying rows change.
+  // JS-fallback-only safety net: doSummarize()'s JS branch snapshots `rows` at click
+  // time, so on a dataset without a DuckDB table (duckTable is null there, `rows` is
+  // just whatever the caller passed) a stale snapshot would otherwise never refresh.
+  // Not needed for the SQL branch — that always queries the live full table.
   useEffect(() => {
-    if (sumResult) doSummarize();
+    if (!duckTable && sumResult) doSummarize();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
@@ -1695,15 +2063,18 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
       </div>
 
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.5rem"}}>
-        <button onClick={doSummarize} disabled={!canSummarize} style={{
-          padding:"0.42rem 0.9rem",borderRadius:3,cursor:canSummarize?"pointer":"not-allowed",
+        <button onClick={doSummarize} disabled={!canSummarize || computing} style={{
+          padding:"0.42rem 0.9rem",borderRadius:3,cursor:(canSummarize && !computing)?"pointer":"not-allowed",
           fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,fontWeight:700,
           background:canSummarize?C.gold:"transparent",
           color:canSummarize?C.bg:C.textMuted,
           border:`1px solid ${canSummarize?C.gold:C.border2}`,
-          opacity:canSummarize?1:0.5,
-        }}>Compute →</button>
-        {usingPreview && <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily}}>⏳ full dataset still loading — result will auto-refresh when ready</span>}
+          opacity:(canSummarize && !computing)?1:0.5,
+        }}>{computing ? "Computing…" : "Compute →"}</button>
+        {duckTable
+          ? (computing && <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>running SQL over the full table…</span>)
+          : (usingPreview && <span style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily}}>⏳ full dataset still loading — result will auto-refresh when ready</span>)}
+        {sqlError && <span style={{fontSize: T.caption.fontSize,color:C.red,fontFamily: T.code.fontFamily}}>⚠ {sqlError}</span>}
       </div>
 
       {/* ── Result ── */}
@@ -1976,6 +2347,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // table for computation (summary stats, distributions, correlation, plots). The
   // raw data grid can stay on the preview — this only affects analysis.
   const duckTable = cleanedData._duckdb?.tableName ?? null;
+  // Set by DataStudio's hydration effect when this dataset was DuckDB-backed
+  // (rowCount > the 500-row preview persisted to IndexedDB) but the OPFS Parquet
+  // cache couldn't reconstruct a live table after a page reload — `duckTable` is
+  // null here even though the dataset "should" be much bigger than what's loaded.
+  // Permanent until the user re-imports the file, unlike `usingPreview` below.
+  const duckdbRestoreFailed = !!cleanedData._duckdbRestoreFailed;
+  const expectedRowCount = cleanedData._expectedRowCount ?? null;
   const [fullRows, setFullRows] = useState(null);
   const [fullRowsError, setFullRowsError] = useState(null);
   const [fullRowsRetry, setFullRowsRetry] = useState(0);
@@ -2005,6 +2383,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     return rows.filter(row=>filterConds.every(cond=>matchCond(row,cond)));
   },[rows,filterConds]);
   const corrRef = useRef(null);
+
+  // Plot Builder gets the exact full `rows` array — no SQL sampling here. Aggregating
+  // geoms (histogram/density/line/bar/smooth) collapse to a small, fixed-size result
+  // regardless of row count (Observable Plot bins/groups in one linear pass), so
+  // sampling them buys no performance and only degrades accuracy. The one geom that
+  // truly draws one SVG element per row (point/dot) is thinned client-side inside
+  // PlotBuilder itself (buildMarksForLayer's "point" case) — scoped to just that mark.
 
   // ── Pin-for-replication emitter (Fase 1.3, D5) ──────────────────────────────
   // Every pin records the active QuickFilter so the replicated stat/plot runs
@@ -2148,6 +2533,17 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             <button onClick={onProceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>→ Modeling</button>
           </div>
         </div>
+        {/* Permanent-loss notice: the full table didn't survive a page reload (OPFS
+            restore failed or unavailable) and there is no live DuckDB table to retry
+            against — re-importing the file is the only fix, so say so explicitly
+            instead of quietly showing the 500-row preview as if it were everything. */}
+        {duckdbRestoreFailed && (
+          <div style={{marginBottom:"1rem",padding:"0.5rem 0.8rem",borderRadius:4,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+            background:`${C.red}14`,border:`1px solid ${C.red}55`,color:C.red,
+            display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            ⚠ This dataset had {(expectedRowCount ?? 0).toLocaleString()} rows, but the full table couldn't be restored after the last page reload — every stat and plot below is running on a {previewRows.length.toLocaleString()}-row preview only. Re-load the source file from the Data tab to fix this.
+          </div>
+        )}
         {/* Preview-vs-full-table notice — every stat/plot below reads `rows`, which is
             the 500-row preview until the full DuckDB table finishes loading (or forever,
             if that load fails). Must never be silent — Fase X correctness bug. */}
@@ -2208,11 +2604,12 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             <DispersionPanel rows={filteredRows} headers={headers} info={info} onPin={pinExplore}/>
             <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
-              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset} usingPreview={usingPreview}/>
+              <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset} usingPreview={usingPreview}
+                duckTable={filterConds.length ? null : duckTable}/>
             </div>
           </>
         )}
-        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
+        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
         {tab==="corr"&&(
           <div>
             <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4,display:"flex",alignItems:"center",gap:10}}>
@@ -2224,13 +2621,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             </div>
             <div ref={corrRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
               <div style={{padding:"0.5rem"}}>
-                <CorrHeatmap headers={headers} rows={filteredRows} info={info}/>
+                <CorrHeatmap headers={headers} rows={filteredRows} info={info} duckTable={filterConds.length ? null : duckTable}/>
               </div>
               <PlotExportBar getEl={() => corrRef.current} filename="correlation_heatmap" />
             </div>
           </div>
         )}
-        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>}
+        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
         {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
       <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />

@@ -785,7 +785,19 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
               }
             }
             const raw = await loadRawData(m.id);
-            return raw && raw.rows?.length ? { meta: m, raw } : null;
+            if (!raw || !raw.rows?.length) return null;
+            // saveRawData() only ever persists a 500-row preview for DuckDB-backed
+            // datasets (see indexedDB.js — it never writes `_duckdb`). If the registry
+            // says this dataset had more rows than that, the OPFS restore above either
+            // failed or was never available for it — flag it so the UI can tell the
+            // user their analysis is silently running on a stale preview instead of
+            // just showing a wrong "N obs" with no explanation (see ExplorerModule's
+            // duckdbRestoreFailed banner).
+            if (m.rowCount > raw.rows.length) {
+              raw._duckdbRestoreFailed = true;
+              raw._expectedRowCount = m.rowCount;
+            }
+            return { meta: m, raw };
           }));
           if (cancelled) return;
           const entries = loaded.filter(Boolean).map(({ meta, raw }) => ({
