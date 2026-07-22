@@ -29,6 +29,10 @@ import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { deleteCacheEntry } from "./services/data/parquetCache.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 
+// Must match PREVIEW_ROWS in services/data/duckdb.js — the number of rows a
+// DuckDB-backed dataset keeps in JS (and therefore all IndexedDB ever holds).
+const PREVIEW_ROWS = 500;
+
 // ─── THEME ────────────────────────────────────────────────────────────────────
 // ─── UTILITIES ────────────────────────────────────────────────────────────────
 function genId() {
@@ -775,14 +779,32 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
 
         if (registry.length) {
           const loaded = await Promise.all(registry.map(async m => {
+            let restoreFailed = false;
             if (m.opfsCacheKey) {
               try {
                 const { restoreCachedParquet } = await import("./services/data/duckdb.js");
                 const restored = await restoreCachedParquet(m.opfsCacheKey, `project_${m.id}`);
                 if (restored) return { meta: m, raw: restored };
+                restoreFailed = true;
               } catch (error) {
-                console.warn("[DataStudio] OPFS restore failed, using IndexedDB preview:", error);
+                restoreFailed = true;
+                console.warn("[DataStudio] OPFS restore threw, using IndexedDB preview:", error);
               }
+              if (restoreFailed) {
+                console.warn(
+                  `[DataStudio] OPFS restore failed for "${m.filename}" ` +
+                  `(key=${m.opfsCacheKey}, registry says ${m.rowCount} rows) — falling back to the preview. ` +
+                  `Run window.__validation.fase9.listCache() to see what is actually in OPFS.`
+                );
+              }
+            } else if (m.rowCount > PREVIEW_ROWS) {
+              // A DuckDB-backed dataset whose durable key is gone: it can never be
+              // restored, so say so instead of silently serving the preview.
+              restoreFailed = true;
+              console.warn(
+                `[DataStudio] "${m.filename}" has ${m.rowCount} rows in the registry but no opfsCacheKey — ` +
+                `cannot restore the full table. Re-import the file.`
+              );
             }
             const raw = await loadRawData(m.id);
             if (!raw || !raw.rows?.length) return null;
@@ -793,9 +815,9 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
             // user their analysis is silently running on a stale preview instead of
             // just showing a wrong "N obs" with no explanation (see ExplorerModule's
             // duckdbRestoreFailed banner).
-            if (m.rowCount > raw.rows.length) {
+            if (restoreFailed || m.rowCount > raw.rows.length) {
               raw._duckdbRestoreFailed = true;
-              raw._expectedRowCount = m.rowCount;
+              raw._expectedRowCount = m.rowCount || raw.rows.length;
             }
             return { meta: m, raw };
           }));
@@ -812,6 +834,12 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
             crs:      meta.crs ?? raw?._crs ?? null,
             origin:   meta.origin ?? undefined,
             source:   meta.source ?? undefined,
+            // Durable DuckDB identity. saveRawData() never persists `_duckdb`
+            // (indexedDB.js stores headers+rows only), so when the OPFS restore
+            // above fails these registry values are the ONLY surviving copy —
+            // the persist effect below must fall back to them, never to null.
+            opfsCacheKey: meta.opfsCacheKey ?? null,
+            srcRowCount:  meta.rowCount ?? 0,
           }));
           if (entries.length) {
             setDatasets(entries);
@@ -852,8 +880,15 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       crs:      datasetCrs(d),
       headers:  d.rawData?.headers ?? d.headers ?? [],
       loadOpts: d.rawData?._loadOpts ?? d.loadOpts ?? null,
-      opfsCacheKey: d.rawData?._duckdb?.opfsCacheKey ?? null,
-      rowCount: d.rawData?._duckdb?.rowCount ?? d.rawData?.rows?.length ?? 0,
+      // Fall back to the values hydration read out of the registry. A reload
+      // whose OPFS restore failed leaves `rawData` as the 500-row preview with
+      // no `_duckdb`; writing null/500 here would erase the cache pointer and
+      // the true row count, so the next reload would not even attempt a restore
+      // (and the count check that raises the warning banner would compare
+      // 500 > 500 and stay quiet). One transient failure would become permanent
+      // and invisible.
+      opfsCacheKey: d.rawData?._duckdb?.opfsCacheKey ?? d.opfsCacheKey ?? null,
+      rowCount: d.rawData?._duckdb?.rowCount ?? d.srcRowCount ?? d.rawData?.rows?.length ?? 0,
     })));
   }, [datasets, projectPid]);
 
