@@ -2865,7 +2865,8 @@ export default function App() {
   // Wrap a raw dataset in the cleanedData shape (empty pipeline = passthrough)
   // so any module can use a freshly-selected dataset without a prior Clean run.
   const rawToCleaned = (rd) => (rd?.rows?.length
-    ? { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0, _duckdb: rd._duckdb ?? null }
+    ? { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0,
+        _duckdb: rd._duckdb ?? null, _duckdbRestoreFailed: rd._duckdbRestoreFailed ?? false, _expectedRowCount: rd._expectedRowCount ?? null }
     : null);
 
   // Stable cleanedData per output tab: prefer pipeline output, fall back to the

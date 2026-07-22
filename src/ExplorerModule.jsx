@@ -39,13 +39,26 @@ function Spin(){const{C,T}=useTheme();return<div style={{width:14,height:14,bord
 // what's left isn't a parseable number.
 function FreeNumberInput({value, onCommit, min, max, style}){
   const [text, setText] = useState(String(value));
-  useEffect(() => { setText(String(value)); }, [value]);
+  // Tracks the value WE last pushed via onCommit, so the resync effect below only
+  // fires on an external change (e.g. a "reset" button elsewhere), never on our own
+  // live-while-typing commit. Without this, typing "0.001" then backspacing to
+  // "0.00" (which parses to the same number as plain 0) commits 0 -> the `value`
+  // prop changes -> the effect fired on every render and overwrote the in-progress
+  // text with String(0) = "0", silently eating the ".00" the user just typed.
+  const lastCommitted = useRef(value);
+  useEffect(() => {
+    if (value !== lastCommitted.current) {
+      setText(String(value));
+      lastCommitted.current = value;
+    }
+  }, [value]);
+  const commitValue = (n) => { lastCommitted.current = n; onCommit(n); };
   const commit = () => {
     const n = parseFloat(text);
     if (isFinite(n)) {
       const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
       setText(String(clamped));
-      if (clamped !== value) onCommit(clamped);
+      if (clamped !== value) commitValue(clamped);
     } else {
       setText(String(value));
     }
@@ -55,7 +68,7 @@ function FreeNumberInput({value, onCommit, min, max, style}){
       onChange={e => {
         setText(e.target.value);
         const n = parseFloat(e.target.value);
-        if (e.target.value.trim() !== "" && isFinite(n)) onCommit(n); // live update while typing, unclamped
+        if (e.target.value.trim() !== "" && isFinite(n)) commitValue(n); // live update while typing, unclamped
       }}
       onBlur={commit}
       onKeyDown={e => { if (e.key === "Enter") { commit(); e.currentTarget.blur(); } }}
@@ -317,12 +330,13 @@ function SvgBarChart({items,color,fillMode="filled",title="",xLabel="",scale="li
 // actual bin count + the extended right edge of the binned domain (bins always
 // fully cover [min,max], so in width mode the last bin's right edge is rounded
 // up past max — same convention as ggplot2's geom_histogram(binwidth=)).
+const MAX_HIST_BINS = 5000; // sanity cap — a mistyped tiny binwidth on a wide range shouldn't ask for millions of bins
 function resolveBinning(min, max, binMode, nBins, binWidth) {
   if (binMode === "width" && binWidth > 0) {
-    const n = Math.max(1, Math.ceil((max - min) / binWidth));
+    const n = Math.min(MAX_HIST_BINS, Math.max(1, Math.ceil((max - min) / binWidth)));
     return { nBins: n, max: min + n * binWidth };
   }
-  return { nBins: Math.max(1, Math.round(nBins) || 20), max };
+  return { nBins: Math.min(MAX_HIST_BINS, Math.max(1, Math.round(nBins) || 20)), max };
 }
 
 function sqlTransformExpr(colExpr, transform) {
@@ -2333,6 +2347,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // table for computation (summary stats, distributions, correlation, plots). The
   // raw data grid can stay on the preview — this only affects analysis.
   const duckTable = cleanedData._duckdb?.tableName ?? null;
+  // Set by DataStudio's hydration effect when this dataset was DuckDB-backed
+  // (rowCount > the 500-row preview persisted to IndexedDB) but the OPFS Parquet
+  // cache couldn't reconstruct a live table after a page reload — `duckTable` is
+  // null here even though the dataset "should" be much bigger than what's loaded.
+  // Permanent until the user re-imports the file, unlike `usingPreview` below.
+  const duckdbRestoreFailed = !!cleanedData._duckdbRestoreFailed;
+  const expectedRowCount = cleanedData._expectedRowCount ?? null;
   const [fullRows, setFullRows] = useState(null);
   const [fullRowsError, setFullRowsError] = useState(null);
   const [fullRowsRetry, setFullRowsRetry] = useState(0);
@@ -2512,6 +2533,17 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             <button onClick={onProceed} style={{padding:"0.28rem 0.65rem",borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,fontWeight:700}}>→ Modeling</button>
           </div>
         </div>
+        {/* Permanent-loss notice: the full table didn't survive a page reload (OPFS
+            restore failed or unavailable) and there is no live DuckDB table to retry
+            against — re-importing the file is the only fix, so say so explicitly
+            instead of quietly showing the 500-row preview as if it were everything. */}
+        {duckdbRestoreFailed && (
+          <div style={{marginBottom:"1rem",padding:"0.5rem 0.8rem",borderRadius:4,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+            background:`${C.red}14`,border:`1px solid ${C.red}55`,color:C.red,
+            display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            ⚠ This dataset had {(expectedRowCount ?? 0).toLocaleString()} rows, but the full table couldn't be restored after the last page reload — every stat and plot below is running on a {previewRows.length.toLocaleString()}-row preview only. Re-load the source file from the Data tab to fix this.
+          </div>
+        )}
         {/* Preview-vs-full-table notice — every stat/plot below reads `rows`, which is
             the 500-row preview until the full DuckDB table finishes loading (or forever,
             if that load fails). Must never be silent — Fase X correctness bug. */}
