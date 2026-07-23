@@ -130,6 +130,7 @@ export async function saveToOPFS(db, tableName, file) {
     const wr  = await fh.createWritable();
     await wr.write(buf);
     await wr.close();
+    console.info(`[parquetCache] cached "${key}" (${(buf.byteLength / 1e6).toFixed(1)} MB) — full table will survive reload.`);
     return true;
   } catch (e) {
     console.warn("[parquetCache] saveToOPFS failed:", e?.message ?? String(e));
@@ -170,5 +171,21 @@ if (typeof window !== "undefined") {
     recordHit()  { this.cacheHits++;    },
     recordMiss() { this.cacheMisses++;  },
     recordErr()  { this.writeErrors++;  },
+    // Enumerate what is actually on disk, so a failed restore can be told apart
+    // from a missing/renamed cache entry without guessing.
+    async listCache() {
+      if (!opfsSupported()) return { supported: false, entries: [] };
+      try {
+        const dir = await getCacheDir();
+        const entries = [];
+        for await (const [name, handle] of dir.entries()) {
+          const f = await handle.getFile();
+          entries.push({ name, mb: +(f.size / 1e6).toFixed(2) });
+        }
+        return { supported: true, entries };
+      } catch (e) {
+        return { supported: true, error: e?.message ?? String(e), entries: [] };
+      }
+    },
   };
 }
