@@ -72,8 +72,14 @@ function aesCall(layer, options = {}) {
     if (aes.yMax) parts.push(`ymax = ${rColumn(aes.yMax)}`);
   }
   if (aes.color) {
-    parts.push(`color = ${rColumn(aes.color)}`);
-    if (options.fill) parts.push(`fill = ${rColumn(aes.color)}`);
+    // geom_tile maps the value column to `fill` ONLY — emitting `color` too
+    // would outline every tile by its own value and bury the fill underneath.
+    if (options.fillOnly) {
+      parts.push(`fill = ${rColumn(aes.color)}`);
+    } else {
+      parts.push(`color = ${rColumn(aes.color)}`);
+      if (options.fill) parts.push(`fill = ${rColumn(aes.color)}`);
+    }
   }
   if (aes.sizeCol) parts.push(`size = ${rColumn(aes.sizeCol)}`);
   if (aes.alphaCol) {
@@ -216,6 +222,13 @@ function buildLayer(layer, dfVar) {
         opacity,
       ]);
 
+    case "tile":
+      return geomCall("geom_tile", [
+        aesCall(layer, { fillOnly: true }),
+        ...fixedColorArgs(layer, { fill: true }),
+        opacity,
+      ]);
+
     case "hline":
       return geomCall("geom_hline", [
         `yintercept = ${rNumber(layer.value)}`,
@@ -237,6 +250,40 @@ function buildLayer(layer, dfVar) {
     default:
       return null;
   }
+}
+
+// PlotBuilder TILE_SCHEMES ids → ggplot2 continuous fill scales.
+// Keep in sync with TILE_SCHEMES in components/PlotBuilder.jsx: a scheme with no
+// entry here would render in the app and then silently lose its palette in R.
+const TILE_FILL_SCALES = {
+  viridis: "scale_fill_viridis_c()",
+  magma:   `scale_fill_viridis_c(option = "magma")`,
+  blues:   `scale_fill_distiller(palette = "Blues", direction = 1)`,
+  greens:  `scale_fill_distiller(palette = "Greens", direction = 1)`,
+  // d3's RdBu (and matplotlib's) runs red at the low end → blue at the high end;
+  // midpoint = 0 mirrors the `pivot: 0` the app applies to diverging ramps.
+  rdbu:    `scale_fill_gradient2(low = "#b2182b", mid = "#f7f7f7", high = "#2166ac", midpoint = 0)`,
+};
+
+function tileFillScale(layer) {
+  return TILE_FILL_SCALES[layer?.opts?.scheme ?? "viridis"] ?? null;
+}
+
+function tileValueLayer(layer) {
+  const aes = layer?.aes ?? {};
+  if (!aes.x || !aes.y || !aes.color) return null;
+  const decimals = Math.max(0, Math.min(6, Math.round(Number(layer?.opts?.decimals ?? 2) || 0)));
+  return geomCall("geom_text", [
+    `aes(x = ${rColumn(aes.x)}, y = ${rColumn(aes.y)}, label = round(${rColumn(aes.color)}, ${decimals}))`,
+    "size = 3",
+    `colour = "white"`,
+  ]);
+}
+
+function facetWrapCall(entry) {
+  if (!entry?.facetCol) return null;
+  const ncol = Math.max(1, Math.min(12, Math.round(Number(entry.facetCols) || 3)));
+  return `facet_wrap(~ ${rColumn(entry.facetCol)}, ncol = ${ncol})`;
 }
 
 function parseCategories(value) {
@@ -269,7 +316,7 @@ function domainVector(domain) {
   return `c(${rNumber(domain[0])}, ${rNumber(domain[1])})`;
 }
 
-function paletteComponents(plotEntry, layers) {
+function paletteComponents(plotEntry, layers, { suppressFill = false } = {}) {
   const scheme = plotEntry?.scheme;
   const mappedLayers = layers.filter(layer => layer?.aes?.color);
   if (!scheme || !mappedLayers.length) return { comments: [], components: [] };
@@ -282,7 +329,8 @@ function paletteComponents(plotEntry, layers) {
     };
   }
 
-  const usesFill = mappedLayers.some(layer => ["bar", "histogram", "density", "boxplot", "ribbon"].includes(layer.geom));
+  const usesFill = !suppressFill
+    && mappedLayers.some(layer => ["bar", "histogram", "density", "boxplot", "ribbon"].includes(layer.geom));
   return {
     comments: [],
     components: [
@@ -297,8 +345,23 @@ export function buildGgplot(plotEntry, { dfVar = "df" } = {}) {
   const layers = (Array.isArray(entry.layers) ? entry.layers : [])
     .filter(layer => layer?.visible !== false && layer?.geom !== "map");
   const geoms = layers.map(layer => buildLayer(layer, dfVar)).filter(Boolean);
-  const palette = paletteComponents(entry, layers);
+  // A tile layer owns the fill scale — ggplot allows only one per plot, so the
+  // categorical brewer fill is suppressed here just as the app's colour channel
+  // hands over to the tile's sequential scheme.
+  const tileLayer = layers.find(layer => layer.geom === "tile" && layer.aes?.color) ?? null;
+  const palette = paletteComponents(entry, layers, { suppressFill: !!tileLayer });
   const components = [...geoms];
+
+  // Value labels sit above the tiles, so they follow every geom in the chain.
+  if (tileLayer?.opts?.showValues) {
+    const textLayer = tileValueLayer(tileLayer);
+    if (textLayer) components.push(textLayer);
+  }
+  const facet = facetWrapCall(entry);
+  if (facet) components.push(facet);
+
+  const tileScale = tileLayer ? tileFillScale(tileLayer) : null;
+  if (tileScale) components.push(tileScale);
 
   const xScale = axisScale("x", entry.xScale ?? "linear", entry.xCatOrder, entry.xFmt);
   const yScale = axisScale("y", entry.yScale ?? "linear", entry.yCatOrder, entry.yFmt);
@@ -572,6 +635,17 @@ function pyColor(layer, fallback = null) {
   return layer?.fill ? pyString(layer.fill) : fallback;
 }
 
+// PlotBuilder TILE_SCHEMES ids → matplotlib colormaps. Both matplotlib's RdBu
+// and d3's run red (low) → blue (high), so no `_r` suffix is needed.
+const TILE_CMAPS = {
+  viridis: "viridis",
+  magma:   "magma",
+  blues:   "Blues",
+  greens:  "Greens",
+  rdbu:    "RdBu",
+};
+const DIVERGING_CMAPS = new Set(["rdbu"]);
+
 function matplotlibLayer(layer, index, dfVar) {
   const aes = layer?.aes ?? {};
   const opts = layer?.opts ?? {};
@@ -682,6 +756,23 @@ function matplotlibLayer(layer, index, dfVar) {
       break;
     }
 
+    case "tile": {
+      if (!aes.x || !aes.y || !aes.color) break;
+      usesSeaborn = true;
+      const pivot = `_tile_${index}`;
+      const decimals = Math.max(0, Math.min(6, Math.round(Number(opts.decimals ?? 2) || 0)));
+      const args = [pivot, "ax=ax", `cmap=${pyString(TILE_CMAPS[opts.scheme ?? "viridis"] ?? "viridis")}`];
+      if (DIVERGING_CMAPS.has(opts.scheme)) args.push("center=0");
+      if (opts.showValues) args.push("annot=True", `fmt=${pyString(`.${decimals}f`)}`);
+      lines.push(
+        // seaborn draws index[0] in the TOP row; ggplot puts the smallest y at the
+        // bottom. Sorting descending restores the ggplot orientation.
+        `${pivot} = ${dfVar}.pivot_table(index=${pyString(aes.y)}, columns=${pyString(aes.x)}, values=${pyString(aes.color)}, aggfunc="mean").sort_index(ascending=False)`,
+        `sns.heatmap(${args.join(", ")})`,
+      );
+      break;
+    }
+
     case "hline":
       lines.push(`ax.axhline(y=${pyNumber(layer.value, 0)}, linestyle="--", linewidth=1.5, alpha=${alpha}${pyColor(layer) ? `, color=${pyColor(layer)}` : ""})`);
       break;
@@ -708,25 +799,69 @@ export function buildMatplotlibPlot(plotEntry, { dfVar = "df" } = {}) {
   const entry = plotEntry ?? {};
   const layers = (Array.isArray(entry.layers) ? entry.layers : [])
     .filter(layer => layer?.visible !== false && layer?.geom !== "map");
-  const built = layers.map((layer, index) => matplotlibLayer(layer, index + 1, dfVar));
+
+  // matplotlib has no facet_wrap: a faceted plot is a subplot grid whose panels
+  // are each drawn from a filtered frame. The layer emitters are reused verbatim
+  // against `_d` (the per-panel frame) so every geom facets without a second
+  // implementation — including the stats, which recompute per panel as ggplot's
+  // facet_wrap does.
+  const ncol = Math.max(1, Math.min(12, Math.round(Number(entry.facetCols) || 3)));
+  const faceted = !!entry.facetCol;
+  const panelVar = faceted ? "_d" : dfVar;
+
+  const built = layers.map((layer, index) => matplotlibLayer(layer, index + 1, panelVar));
   const usesSeaborn = built.some(layer => layer.usesSeaborn);
   const lines = ["import matplotlib.pyplot as plt"];
   if (usesSeaborn) lines.push("import seaborn as sns");
-  lines.push("", "fig, ax = plt.subplots()", "");
-  built.forEach(layer => {
-    if (layer.lines.length) lines.push(...layer.lines, "");
-  });
+  lines.push("");
 
-  if (entry.xScale === "log") lines.push(`ax.set_xscale("log")`);
-  if (entry.yScale === "log") lines.push(`ax.set_yscale("log")`);
+  const axisLines = [];
+  if (entry.xScale === "log") axisLines.push(`ax.set_xscale("log")`);
+  if (entry.yScale === "log") axisLines.push(`ax.set_yscale("log")`);
   const xDomain = pyDomain(entry.xDomain);
   const yDomain = pyDomain(entry.yDomain);
-  if (xDomain) lines.push(`ax.set_xlim(${xDomain})`);
-  if (yDomain) lines.push(`ax.set_ylim(${yDomain})`);
-  if (entry.title) lines.push(`ax.set_title(${pyString(entry.title)})`);
-  if (entry.xLabel) lines.push(`ax.set_xlabel(${pyString(entry.xLabel)})`);
-  if (entry.yLabel) lines.push(`ax.set_ylabel(${pyString(entry.yLabel)})`);
-  if (layers.some(layer => layer?.aes?.color)) lines.push("ax.legend()");
+  if (xDomain) axisLines.push(`ax.set_xlim(${xDomain})`);
+  if (yDomain) axisLines.push(`ax.set_ylim(${yDomain})`);
+
+  if (faceted) {
+    lines.push(
+      `_levels = sorted(${dfVar}[${pyString(entry.facetCol)}].dropna().unique())`,
+      `_ncol = ${ncol}`,
+      `_nrow = -(-len(_levels) // _ncol)`,
+      `fig, _axes = plt.subplots(_nrow, _ncol, figsize=(4 * _ncol, 3 * _nrow), sharex=True, sharey=True, squeeze=False)`,
+      "",
+      `for _i, _level in enumerate(_levels):`,
+      `    ax = _axes.flat[_i]`,
+      `    _d = ${dfVar}[${dfVar}[${pyString(entry.facetCol)}] == _level]`,
+    );
+    built.forEach(layer => {
+      layer.lines.forEach(line => lines.push(`    ${line}`));
+    });
+    axisLines.forEach(line => lines.push(`    ${line}`));
+    lines.push(
+      `    ax.set_title(str(_level))`,
+      "",
+      `# blank out the unused cells of the last row`,
+      `for _j in range(len(_levels), _nrow * _ncol):`,
+      `    _axes.flat[_j].axis("off")`,
+      "",
+    );
+    // Faceted panels share one set of axis labels, like facet_wrap's strips.
+    if (entry.title) lines.push(`fig.suptitle(${pyString(entry.title)})`);
+    if (entry.xLabel) lines.push(`fig.supxlabel(${pyString(entry.xLabel)})`);
+    if (entry.yLabel) lines.push(`fig.supylabel(${pyString(entry.yLabel)})`);
+  } else {
+    lines.push("fig, ax = plt.subplots()", "");
+    built.forEach(layer => {
+      if (layer.lines.length) lines.push(...layer.lines, "");
+    });
+    lines.push(...axisLines);
+    if (entry.title) lines.push(`ax.set_title(${pyString(entry.title)})`);
+    if (entry.xLabel) lines.push(`ax.set_xlabel(${pyString(entry.xLabel)})`);
+    if (entry.yLabel) lines.push(`ax.set_ylabel(${pyString(entry.yLabel)})`);
+    if (layers.some(layer => layer?.aes?.color)) lines.push("ax.legend()");
+  }
+
   lines.push("fig.tight_layout()", "plt.show()");
   return lines.join("\n");
 }
@@ -776,6 +911,13 @@ function stataLayer(layer) {
       return aes.x && aes.yMin && aes.yMax
         ? { twoway: `rarea ${aes.yMax} ${aes.yMin} ${aes.x}`, comment: "* ribbon has no direct twoway equivalent - approximated with rarea" }
         : null;
+    case "tile":
+      // Base Stata has no heatmap/tile graph. Emit the closest community command
+      // with its install line rather than silently dropping the layer or
+      // approximating it with something that plots different numbers.
+      return aes.x && aes.y && aes.color
+        ? { comment: `* geom_tile has no base-Stata equivalent - requires the community command heatplot:\n*   ssc install heatplot\n*   heatplot ${aes.color} i.${aes.y} i.${aes.x}` }
+        : { comment: "* geom_tile layer skipped - needs x, y and a fill column" };
     case "hline":
       return { option: `yline(${stataNumber(layer.value)})` };
     case "vline":
@@ -809,6 +951,11 @@ export function buildStataPlot(plotEntry, { dataVar = "" } = {}) {
   if (entry.title) options.push(`title(${stataString(entry.title)})`);
   if (entry.xLabel) options.push(`xtitle(${stataString(entry.xLabel)})`);
   if (entry.yLabel) options.push(`ytitle(${stataString(entry.yLabel)})`);
+  // by() is Stata's facet_wrap; cols() matches ncol.
+  if (entry.facetCol) {
+    const ncol = Math.max(1, Math.min(12, Math.round(Number(entry.facetCols) || 3)));
+    options.push(`by(${entry.facetCol}, cols(${ncol}))`);
+  }
 
   const lines = [
     `* assumes the relevant dataset is loaded${dataVar ? ` (${dataVar})` : ""}`,

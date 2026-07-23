@@ -42,7 +42,7 @@ export const APP_CAPABILITY_MAP = {
                  "AI command": "describe a change in plain language; preview & apply pipeline steps" } },
   Explore:   { purpose: "Descriptive stats & plots", subtabs: {
                  "Explorer": "summary stats, distributions",
-                 "Plot Builder": "layered charts (point/line/bar/histogram/density)" } },
+                 "Plot Builder": "layered charts (point/line/bar/histogram/density/smooth/boxplot/errorbar/ribbon/tile/h-line/v-line), facet_wrap by any column" } },
   Model:     { purpose: "Estimate econometric models", subtabs: {
                  "Estimator": "pick a model — Linear (OLS), Panel (FE/FD/LSDV), DiD (2×2 DiD, TWFE DiD, CS DiD, Sun-Abraham), Event Study (Classical TWFE, CS DiD, Sun-Abraham), IV/2SLS, RDD, GMM, Synthetic Control",
                  "Variables": "choose Y, X, instruments, weights",

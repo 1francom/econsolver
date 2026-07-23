@@ -89,9 +89,27 @@ const GEOMS = [
   { id: "boxplot",   label: "Boxplot"   },
   { id: "errorbar",  label: "Errorbar"  },
   { id: "ribbon",    label: "Ribbon"    },
+  { id: "tile",      label: "Tile"      },
   { id: "hline",     label: "H-Line"    },
   { id: "vline",     label: "V-Line"    },
 ];
+
+// Continuous fill scales for geom_tile. `diverging` schemes pivot at 0 — the
+// right default for residual heatmaps, where the sign is the story.
+// Every entry must have a faithful ggplot2 AND matplotlib equivalent; see
+// tileFillScale() in services/export/plotScript.js. Do not add a scheme here
+// without adding it there too, or the R script silently drops the palette.
+const TILE_SCHEMES = [
+  { id: "viridis", label: "viridis", diverging: false },
+  { id: "magma",   label: "magma",   diverging: false },
+  { id: "blues",   label: "blues",   diverging: false },
+  { id: "greens",  label: "greens",  diverging: false },
+  { id: "rdbu",    label: "RdBu",    diverging: true  },
+];
+
+function isDivergingScheme(id) {
+  return !!TILE_SCHEMES.find(s => s.id === id)?.diverging;
+}
 
 const PALETTE_PRESETS = [
   { id: "",             label: "Manual"      },
@@ -130,6 +148,7 @@ const GEOM_OPTS_DEFAULTS = {
   density:   { adjust: 1.0 },
   bar:       { strokeWidth: 0 },
   errorbar:  { strokeWidth: 1.5 },
+  tile:      { scheme: "viridis", showValues: false, decimals: 2 },
 };
 
 function mkLayer(geom, idx) {
@@ -183,11 +202,21 @@ function loessSmooth(pairs, span = 0.75) {
 // ─── BUILD MARKS FOR A SINGLE LAYER ──────────────────────────────────────────
 // Returns an array of Observable Plot marks for one layer.
 // opacity is applied to every fillOpacity/strokeOpacity.
-function buildMarksForLayer(Plt, ly, rows, showSE = true) {
+//
+// `facetConst` is null for the normal path. Most geoms hand `rows` straight to
+// Plot, so the plot-level `facet` option faceting them by data identity is
+// enough. But geoms that PRE-COMPUTE a statistic in JS (loess, the mean rule,
+// grouped boxplots) build a fresh array, which no longer matches `facet.data` —
+// Plot would then repeat one whole-sample statistic identically in every panel.
+// For those, PlotCanvas calls this once per panel with the panel's own rows and
+// passes {fx, fy} accessors so the mark lands in the right cell. That keeps
+// facet_wrap's contract: each panel's stat is computed from that panel's data.
+function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
   const marks = [];
   const { geom, aes, fill, opacity = 1 } = ly;
   const op  = Math.max(0, Math.min(1, opacity));
   const colorVal = aes.color || fill;
+  const fc = facetConst || {};
 
   switch (geom) {
     case "point": {
@@ -291,7 +320,7 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
             marks.push(Plt.line(smoothed, {
               x: "x", y: "y",
               stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
-              curve: "catmull-rom",
+              curve: "catmull-rom", ...fc,
             }));
           }
         } else if (method === "mean") {
@@ -300,7 +329,7 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
             const ymean = yVals.reduce((s, v) => s + v, 0) / yVals.length;
             marks.push(Plt.ruleY([ymean], {
               stroke: colorVal, strokeWidth: 2, strokeOpacity: 0.88 * op,
-              strokeDasharray: "6 3",
+              strokeDasharray: "6 3", ...fc,
             }));
           }
         }
@@ -327,7 +356,7 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
             x: "__x", y: "__y",
             fill: subColor, stroke: subColor,
             fillOpacity: 0.68 * op, strokeOpacity: 0.85 * op,
-            r: outR,
+            r: outR, ...fc,
           }));
         }
       } else {
@@ -339,7 +368,7 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
             x: aes.x ? "__x" : null, y: "__y",
             fill: colorVal, stroke: colorVal,
             fillOpacity: 0.68 * op, strokeOpacity: 0.85 * op,
-            r: outR,
+            r: outR, ...fc,
           }));
         }
       }
@@ -367,6 +396,42 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true) {
           x: aes.x, y1: aes.yMin, y2: aes.yMax, fill: colorVal, fillOpacity: 0.28 * op,
         }));
       break;
+
+    // ggplot: geom_tile(aes(x, y, fill = value)). Observable's `cell` is the
+    // band-scale equivalent — one rectangle per (x, y) category pair, so x/y are
+    // treated as discrete even when the underlying values are numeric (quintile
+    // indices, years, bins). That matches the heatmap use case; for scattered
+    // continuous coordinates ggplot's geom_tile would center a tile on each
+    // point instead, which `cell` does not reproduce.
+    case "tile": {
+      if (aes.x && aes.y) {
+        const { showValues = false, decimals = 2 } = ly.opts || {};
+        const fillCol = aes.color;
+        marks.push(Plt.cell(rows, {
+          x: aes.x, y: aes.y,
+          ...(fillCol ? { fill: fillCol } : { fill }),
+          fillOpacity: op,
+          inset: 0.5,
+          ...fc,
+        }));
+        if (showValues && fillCol) {
+          const d = Math.max(0, Math.min(6, Math.round(Number(decimals) || 0)));
+          marks.push(Plt.text(rows, {
+            x: aes.x, y: aes.y,
+            text: r => {
+              const v = Number(r[fillCol]);
+              return isFinite(v) ? v.toFixed(d) : "";
+            },
+            // White glyph with a dark halo stays legible on both ends of every
+            // sequential ramp — a single flat text colour never does.
+            fill: "#fff", stroke: "#000", strokeWidth: 2, paintOrder: "stroke",
+            fontSize: 9,
+            ...fc,
+          }));
+        }
+      }
+      break;
+    }
 
     case "hline": {
       const hv = parseFloat(ly.value);
@@ -426,6 +491,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
   xDomain = [null, null], yDomain = [null, null],
   xFmt = "", yFmt = "",
   xCatOrder = "", yCatOrder = "",
+  facetCol = "", facetCols = 3,
   onRenderError,
 }) {
   const { C, T } = useTheme();
@@ -470,12 +536,61 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
           })
         : plotRows;
 
+      // ── facet_wrap ──────────────────────────────────────────────────────────
+      // Observable Plot's fx/fy are a single row and a single column of panels;
+      // ggplot's facet_wrap flows one variable across `ncol` columns and wraps.
+      // Reproduce that by mapping each level to a (column, row) index pair and
+      // faceting on both, then hiding the index axes and drawing the real level
+      // name as a text mark per panel — otherwise the strip labels would read
+      // "0", "1", "2" instead of the category.
+      const facetLevels = facetCol
+        ? [...new Set(marksRows.map(r => String(r[facetCol] ?? "")))]
+        : [];
+      // Numeric-looking levels must sort numerically: "10" belongs after "9",
+      // and lexicographic order would put it after "1".
+      const allNumeric = facetLevels.length > 0 && facetLevels.every(v => v !== "" && isFinite(+v));
+      if (allNumeric) facetLevels.sort((a, b) => +a - +b);
+      else facetLevels.sort((a, b) => a.localeCompare(b));
+
+      const facetActive = facetLevels.length > 0;
+      const nCols  = Math.max(1, Math.min(12, Math.round(Number(facetCols) || 3)));
+      const nRows  = facetActive ? Math.ceil(facetLevels.length / nCols) : 1;
+      const posOf  = new Map(facetLevels.map((lv, i) => [lv, { fx: String(i % nCols), fy: String(Math.floor(i / nCols)) }]));
+
+      // Marks must read from the SAME array instance the plot-level `facet.data`
+      // points at — Plot matches marks to facets by data identity, not by value.
+      const facetRows = facetActive
+        ? marksRows.map(r => {
+            const p = posOf.get(String(r[facetCol] ?? ""));
+            return { ...r, __fx: p.fx, __fy: p.fy };
+          })
+        : marksRows;
+
       // Build data marks first, then compose full mark stack
       const dataMarks = [];
       for (const ly of layers) {
         if (!ly.visible) continue;
-        dataMarks.push(...buildMarksForLayer(Plt, ly, marksRows, showSE));
+        // Geoms that pre-compute a statistic in JS need one pass per panel (see
+        // buildMarksForLayer's note); everything else facets by data identity.
+        const derived = ly.geom === "boxplot"
+          || (ly.geom === "smooth" && (ly.opts?.method ?? "lm") !== "lm");
+        if (facetActive && derived) {
+          for (const lv of facetLevels) {
+            const p = posOf.get(lv);
+            const panelRows = facetRows.filter(r => r.__fx === p.fx && r.__fy === p.fy);
+            if (!panelRows.length) continue;
+            dataMarks.push(...buildMarksForLayer(Plt, ly, panelRows, showSE, { fx: () => p.fx, fy: () => p.fy }));
+          }
+        } else {
+          dataMarks.push(...buildMarksForLayer(Plt, ly, facetRows, showSE));
+        }
       }
+
+      // One label row per panel, carrying its own fx/fy so Plot places it in
+      // that cell rather than repeating it across all of them.
+      const facetLabelRows = facetActive
+        ? facetLevels.map(lv => ({ ...posOf.get(lv), __label: lv }))
+        : [];
 
       // Compute actual data extents to decide whether zero rules are meaningful
       const xCol = xColForSort;
@@ -497,8 +612,13 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       // duplicate "0" entry (number vs string) in Observable Plot's categorical domain.
       // Also skip ruleX when x is categorical (xVals empty because all values are strings).
       const hasBoxplot = layers.some(ly => ly.visible && ly.geom === "boxplot");
-      const showRuleX = !xIsDate && !hasBoxplot && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
-      const showRuleY = yVals.length > 0 && 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
+      // Tile puts BOTH axes on band scales. A numeric ruleX/ruleY([0]) would add a
+      // stray "0" band to a categorical domain (the boxplot bug above), and the
+      // numeric [yMin, yMax] domain injected further down would replace the band
+      // domain outright — so tile opts out of all three.
+      const hasTile = layers.some(ly => ly.visible && ly.geom === "tile");
+      const showRuleX = !xIsDate && !hasBoxplot && !hasTile && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
+      const showRuleY = !hasTile && yVals.length > 0 && 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
 
       const zeroStyle = { stroke: "#888", strokeWidth: 1.4, strokeOpacity: 0.55 };
       const marks = [
@@ -518,13 +638,42 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
         ...dataMarks,
         // 4. Frame on top to cleanly border the plot area
         Plt.frame({ stroke: "#333" }),
+        // 5. Panel titles — stand in for ggplot's facet strip labels
+        ...(facetActive ? [Plt.text(facetLabelRows, {
+          fx: "fx", fy: "fy", text: "__label",
+          frameAnchor: "top", dy: -12,
+          fill: C.textMuted, fontSize: 10, fontFamily: T.code.fontFamily,
+        })] : []),
       ];
 
       // Boxplot manages its own grouped colors with hardcoded hex — exclude it from the
       // color channel so Observable Plot doesn't create an "undefined" legend entry.
       const hasColorChannel = layers.some(ly => ly.visible && ly.aes?.color && ly.geom !== "boxplot");
       const tealGoldRange = PLOT_PALETTES["teal-gold"];
-      const colorOpts = hasColorChannel
+
+      // A tile's fill is a CONTINUOUS channel, and Plot (like ggplot) has one
+      // colour scale per plot. Feeding numeric values to a categorical scheme
+      // like observable10 produces one discrete swatch per distinct value — so
+      // when a numeric-filled tile layer is present its sequential scheme wins
+      // over the plot-level palette, exactly as scale_fill_viridis_c() would
+      // override a scale_fill_brewer() earlier in a ggplot chain.
+      const tileLayer = layers.find(ly => ly.visible && ly.geom === "tile" && ly.aes?.color);
+      const tileFillIsNumeric = !!tileLayer && rows.some(r => {
+        const v = r[tileLayer.aes.color];
+        return v !== null && v !== "" && isFinite(+v);
+      });
+      const tileScheme = tileLayer?.opts?.scheme ?? "viridis";
+
+      const colorOpts = tileFillIsNumeric
+        ? {
+            scheme: tileScheme,
+            legend: true,
+            // Diverging ramps are only meaningful anchored at zero — without the
+            // pivot the midpoint floats to the data's centre and the sign of a
+            // residual stops being readable from its colour.
+            ...(isDivergingScheme(tileScheme) ? { pivot: 0 } : {}),
+          }
+        : hasColorChannel
         ? (scheme === "teal-gold"
             ? { range: tealGoldRange, legend: true }
             : { scheme: scheme || "observable10", legend: true })
@@ -533,10 +682,23 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
             : scheme ? { scheme } : {};
       const el = Plt.plot({
         width:        width || 580,
-        height:       height || 310,
+        // Plot divides the given height across facet rows, so a fixed height
+        // makes every extra row thinner until the panels are unreadable. Grow
+        // the canvas instead once the rows can no longer fit at ~150px each.
+        height:       facetActive
+          ? Math.max(height || 310, nRows * 150)
+          : (height || 310),
         marginLeft:   52,
         marginBottom: xIsDate ? 52 : 40,
-        marginTop:    24,
+        // Panel titles are drawn above each facet — reserve room for them.
+        marginTop:    facetActive ? 34 : 24,
+        ...(facetActive ? {
+          facet: { data: facetRows, x: "__fx", y: "__fy" },
+          // Hide the synthetic column/row indices; the text mark carries the
+          // real level names.
+          fx: { axis: null, domain: Array.from({ length: nCols }, (_, i) => String(i)) },
+          fy: { axis: null, domain: Array.from({ length: nRows }, (_, i) => String(i)) },
+        } : {}),
         style: {
           background: "transparent",
           color:      C.text,
@@ -577,7 +739,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
             ? { domain: yCatOrder.split(",").map(s => s.trim()).filter(Boolean) }
             : yDomain[0] != null || yDomain[1] != null
               ? { domain: [yDomain[0] ?? yMin, yDomain[1] ?? yMax] }
-              : yVals.length > 0
+              : yVals.length > 0 && !hasTile
                 ? { domain: [yMin, yMax] }
                 : {}),
           ...(yFmt ? { tickFormat: yFmt } : {}),
@@ -593,7 +755,7 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       if (onRenderError) onRenderError(e.message);
     }
     return () => { if (ref.current) ref.current.replaceChildren(); };
-  }, [Plt, layers, rows, xLabel, yLabel, width, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder]);
+  }, [Plt, layers, rows, xLabel, yLabel, width, height, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder, facetCol, facetCols]);
 
   if (err) return <div style={{ color: C.red, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "1.5rem" }}>{err}</div>;
   if (!Plt) return <div style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1.5rem" }}>Loading Observable Plot…</div>;
@@ -936,6 +1098,31 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
     <span style={numW}>{opts.strokeWidth ?? 1.5}</span>
   </>;
 
+  if (geom === "tile") return <>
+    {lbl("fill scale")}
+    <select value={opts.scheme ?? "viridis"} onChange={e => set("scheme", e.target.value)}
+      title="Continuous fill ramp for the tile values (like scale_fill_viridis_c / scale_fill_gradient2). Diverging ramps are pivoted at 0."
+      style={{
+        background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
+        fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text,
+      }}>
+      {TILE_SCHEMES.map(s => (
+        <option key={s.id} value={s.id}>{s.label}{s.diverging ? " (0-centred)" : ""}</option>
+      ))}
+    </select>
+    {sep}
+    <button onClick={() => set("showValues", !(opts.showValues ?? false))} style={chip(opts.showValues ?? false)}>
+      values {(opts.showValues ?? false) ? "on" : "off"}
+    </button>
+    {(opts.showValues ?? false) && <>
+      {lbl("dec")}
+      <input type="number" min={0} max={6} value={opts.decimals ?? 2}
+        onChange={e => set("decimals", e.target.value === "" ? "" : +e.target.value)}
+        onBlur={e => { if (!(+e.target.value >= 0)) set("decimals", 2); }}
+        style={{ width: 42, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
+    </>}
+  </>;
+
   return null;
 }
 
@@ -943,6 +1130,7 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
 function LayerEditorInline({ layer, onChange, headers }) {
   const { C, T } = useTheme();
   const isMap        = layer.geom === "map";
+  const isTile       = layer.geom === "tile";
   const isRefLine    = ["hline", "vline"].includes(layer.geom);
   const needsYMinMax = ["errorbar", "ribbon"].includes(layer.geom);
   const noY          = ["histogram", "density", "hline", "vline"].includes(layer.geom);
@@ -995,9 +1183,11 @@ function LayerEditorInline({ layer, onChange, headers }) {
         </select>
       </>}
       {!isRefLine && <>
-        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>color</span>
+        {/* For tile this channel IS the fill value (ggplot aes(fill = …)), not a
+            grouping colour — label it so, and mark it required rather than optional. */}
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{isTile ? "fill" : "color"}</span>
         <select value={layer.aes.color} onChange={e => onChange({ ...layer, aes: { ...layer.aes, color: e.target.value } })} style={selStyle(!!layer.aes.color)}>
-          <option value="">— none —</option>
+          <option value="">{isTile ? "— value col —" : "— none —"}</option>
           {headers.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
       </>}
@@ -1198,6 +1388,8 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   const [yFmt,          setYFmt]          = useState("");
   const [xCatOrder,     setXCatOrder]     = useState(""); // comma-separated category order
   const [yCatOrder,     setYCatOrder]     = useState("");
+  const [facetCol,      setFacetCol]      = useState(""); // ggplot facet_wrap(~col)
+  const [facetCols,     setFacetCols]     = useState(3);  // ncol
   const [showAxisOpts,  setShowAxisOpts]  = useState(false);
   const [plotRenderError,  setPlotRenderError]  = useState(null);
   const [showPlotError,    setShowPlotError]    = useState(false);
@@ -1276,6 +1468,8 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setYFmt(entry.yFmt || "");
     setXCatOrder(entry.xCatOrder || "");
     setYCatOrder(entry.yCatOrder || "");
+    setFacetCol(entry.facetCol || "");
+    setFacetCols(entry.facetCols || 3);
   }, []);
 
   // After App switches datasets to honor a cross-dataset plot click, open the
@@ -1298,9 +1492,9 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     const scaleState = { xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder };
     return {
       layers: JSON.parse(JSON.stringify(layers)),
-      title, xLabel, yLabel, scheme, ...scaleState,
+      title, xLabel, yLabel, scheme, ...scaleState, facetCol, facetCols,
     };
-  }, [layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder]);
+  }, [layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder, facetCol, facetCols]);
 
   const savePlot = useCallback(() => {
     if (layers.length === 0) return;
@@ -1527,6 +1721,31 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
             </select>
           </div>
 
+          {/* Facet — ggplot facet_wrap(~col, ncol=N). One small multiple per level. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>Facet</span>
+            <select value={facetCol} onChange={e => setFacetCol(e.target.value)}
+              title="Split the plot into one panel per level of this column (facet_wrap)"
+              style={{
+                background: C.bg, border: `1px solid ${facetCol ? C.teal : C.border}`, borderRadius: 3,
+                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px",
+                color: facetCol ? C.text : C.textMuted, maxWidth: 130,
+              }}>
+              <option value="">— none —</option>
+              {headers.map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+            {facetCol && (
+              <input type="number" min={1} max={12} value={facetCols}
+                onChange={e => setFacetCols(e.target.value === "" ? "" : +e.target.value)}
+                onBlur={e => { if (!(+e.target.value >= 1)) setFacetCols(3); }}
+                title="Number of columns (ncol)"
+                style={{
+                  width: 42, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3,
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 4px", color: C.text, outline: "none",
+                }} />
+            )}
+          </div>
+
           {/* SE toggle moved to per-layer GeomOptsRow for smooth layers */}
 
           {/* Axis options toggle */}
@@ -1667,7 +1886,11 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
       </div>
 
       {/* ── BOTTOM: plot — all visible layers composited ────────────────────── */}
-      <div ref={plotRef} title="Drag the lower-right corner to resize the plot" style={{ flex: "0 0 auto", height: 400, maxHeight: "70vh", padding: "0.65rem", overflow: "hidden", resize: "vertical", minHeight: 220, position: "relative" }}>
+      {/* A facet grid grows past the fixed canvas height once it needs more than
+          one row, so scroll it vertically instead of clipping the lower panels.
+          The ResizeObserver reads contentRect, which already excludes the
+          scrollbar, so canvasW stays correct. */}
+      <div ref={plotRef} title="Drag the lower-right corner to resize the plot" style={{ flex: "0 0 auto", height: 400, maxHeight: "70vh", padding: "0.65rem", overflowX: "hidden", overflowY: facetCol ? "auto" : "hidden", resize: "vertical", minHeight: 220, position: "relative" }}>
         {/* Error badge — outside canvasRef so it is NOT captured in PNG export */}
         {plotRenderError && (
           <div style={{ position: "absolute", top: 10, right: 10, zIndex: 20 }}>
@@ -1723,6 +1946,8 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
               yFmt={yFmt}
               xCatOrder={xCatOrder}
               yCatOrder={yCatOrder}
+              facetCol={facetCol}
+              facetCols={facetCols}
               onRenderError={setPlotRenderError}
             />
           </div>
@@ -1788,10 +2013,10 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 {/* Side-by-side canvases */}
                 <div style={{ display: "flex", gap: 8, padding: "0.5rem 0.75rem", overflowX: "auto" }}>
                   <div style={{ flex: "1 1 0" }}>
-                    <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE xScale={entA.xScale||"linear"} yScale={entA.yScale||"linear"} xDomain={entA.xDomain||[null,null]} yDomain={entA.yDomain||[null,null]} xFmt={entA.xFmt||""} yFmt={entA.yFmt||""} xCatOrder={entA.xCatOrder||""} yCatOrder={entA.yCatOrder||""} canvasRef={compareRefA} />
+                    <PlotCanvas layers={entA.layers} rows={rows} title={entA.name} xLabel={entA.xLabel} yLabel={entA.yLabel} width={hw} height={320} scheme={entA.scheme} showSE xScale={entA.xScale||"linear"} yScale={entA.yScale||"linear"} xDomain={entA.xDomain||[null,null]} yDomain={entA.yDomain||[null,null]} xFmt={entA.xFmt||""} yFmt={entA.yFmt||""} xCatOrder={entA.xCatOrder||""} yCatOrder={entA.yCatOrder||""} facetCol={entA.facetCol||""} facetCols={entA.facetCols||3} canvasRef={compareRefA} />
                   </div>
                   <div style={{ flex: "1 1 0" }}>
-                    <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE xScale={entB.xScale||"linear"} yScale={entB.yScale||"linear"} xDomain={entB.xDomain||[null,null]} yDomain={entB.yDomain||[null,null]} xFmt={entB.xFmt||""} yFmt={entB.yFmt||""} xCatOrder={entB.xCatOrder||""} yCatOrder={entB.yCatOrder||""} canvasRef={compareRefB} />
+                    <PlotCanvas layers={entB.layers} rows={rows} title={entB.name} xLabel={entB.xLabel} yLabel={entB.yLabel} width={hw} height={320} scheme={entB.scheme} showSE xScale={entB.xScale||"linear"} yScale={entB.yScale||"linear"} xDomain={entB.xDomain||[null,null]} yDomain={entB.yDomain||[null,null]} xFmt={entB.xFmt||""} yFmt={entB.yFmt||""} xCatOrder={entB.xCatOrder||""} yCatOrder={entB.yCatOrder||""} facetCol={entB.facetCol||""} facetCols={entB.facetCols||3} canvasRef={compareRefB} />
                   </div>
                 </div>
                 {/* Single combined export bar */}
