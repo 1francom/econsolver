@@ -12,9 +12,7 @@ import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQu
 // ── Tab components ─────────────────────────────────────────────────────────
 import CleanTab        from "./components/wrangling/CleanTab.jsx";
 import PanelTab        from "./components/wrangling/PanelTab.jsx";
-import FeatureTab      from "./components/wrangling/FeatureTab.jsx";
-import ReshapeTab      from "./components/wrangling/ReshapeTab.jsx";
-import MergeTab        from "./components/wrangling/MergeTab.jsx";
+import WorkbenchTab    from "./components/wrangling/WorkbenchTab.jsx";
 import DictionaryTab   from "./components/wrangling/DictionaryTab.jsx";
 import History         from "./components/wrangling/History.jsx";
 import ExportMenu      from "./components/wrangling/ExportMenu.jsx";
@@ -25,7 +23,7 @@ import AuditTrail        from "./components/validation/AuditTrail.jsx";
 import { auditPipeline } from "./pipeline/auditor.js";
 
 // ── Shared atoms ───────────────────────────────────────────────────────────
-import { useTheme, Tabs } from "./components/wrangling/shared.jsx";
+import { useTheme, Tabs, Lbl, Grid } from "./components/wrangling/shared.jsx";
 
 // ── Persistence — IndexedDB (replaces localStorage 5MB cap) ───────────────
 import {
@@ -62,8 +60,13 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const [pipeline,         setPipeline]        = useState([]);
   const [panel,            setPanel]            = useState(null);
   const [dataDictionary,   setDataDictionary]   = useState(null);
-  const [tab,              setTab]              = useState(() => sessionStorage.getItem(`litux:wrangle_tab:${pid}`) || "clean");
-  const [reshapeSub,       setReshapeSub]       = useState("reshape"); // "reshape" | "joins"
+  const [tab,              setTab]              = useState(() => {
+    // Old sub-tab values ("transform"/"reshape") collapsed into the merged
+    // "workbench" tab — remap so a returning session lands on a live tab.
+    const saved = sessionStorage.getItem(`litux:wrangle_tab:${pid}`);
+    return (saved === "transform" || saved === "reshape") ? "workbench"
+         : saved || "clean";
+  });
   // Persist active sub-tab so refresh restores to the same wrangling view.
   useEffect(() => { sessionStorage.setItem(`litux:wrangle_tab:${pid}`, tab); }, [tab, pid]);
   const [idbReady,         setIdbReady]         = useState(false);
@@ -644,7 +647,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Extract regex: pull values from text columns",
             "AI Transform: describe a transformation in plain English",
           ]},
-          { heading: "Feature Engineering", items: [
+          { heading: "Workbench — features", items: [
             "Log transform (log1p — safe for zeros)",
             "Square, standardize (z-score)",
             "Dummy encode: one-hot for a categorical column",
@@ -659,7 +662,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Panel tab: declare entity column (i) and time column (t)",
             "Required to unlock FE, FD, TWFE, DiD, and Event Study in the Model tab",
           ]},
-          { heading: "Reshape & Merge", items: [
+          { heading: "Workbench — reshape & merge", items: [
             "Arrange: sort rows by one or more columns",
             "Group summarize: aggregate (mean, sum, count, min, max) by group",
             "Pivot longer: wide → long format",
@@ -670,11 +673,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
         {/* ── Tab bar ── */}
         <Tabs tabs={[
-          ["clean",     "⬡ Cleaning"],
+          ["clean",     "⬡ Clean"],
+          ["workbench", "⧉ Workbench"],
           ["structure", "⊞ Panel Structure"],
-          ["transform", "⊕ Transform"],
           ["dictionary","◈ Dictionary"],
-          ["reshape",   "⟲ Reshape & Merge"],
           ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
         ]} active={tab} set={setTab}/>
 
@@ -703,30 +705,23 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           />
         )}
         {tab === "structure" && (
-          <PanelTab rows={rows} headers={headers} panel={panel} setPanel={setPanel} onAdd={addStep}/>
+          <PanelTab rows={rows} headers={headers} info={info} panel={panel} setPanel={setPanel} onAdd={addStep}/>
         )}
-        {tab === "transform" && (
-          <FeatureTab rows={rows} headers={headers} panel={panel} info={info} onAdd={addStep} duckdbTableName={rawData?._duckdb?.tableName}/>
-        )}
-        {tab === "reshape" && (
-          <div>
-            <Tabs tabs={[["reshape","⟲ Reshape"],["joins","⊞ Joins"]]}
-              active={reshapeSub} set={setReshapeSub} accent={C.teal} sm/>
-            <div style={{marginTop:"1rem"}}>
-              {reshapeSub === "reshape" && (
-                <ReshapeTab rows={rows} headers={headers} info={info} onAdd={addStep}/>
-              )}
-              {reshapeSub === "joins" && (
-                <MergeTab rows={rows} headers={headers} filename={filename}
-                  allDatasets={allDatasets} onAdd={addStep}/>
-              )}
-            </div>
-          </div>
+        {tab === "workbench" && (
+          <WorkbenchTab rows={rows} headers={headers} info={info} panel={panel}
+            filename={filename} allDatasets={allDatasets} onAdd={addStep}
+            duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "dictionary" && (
           <DictionaryTab headers={headers} rows={rows}
             dict={dataDictionary} setDict={setDataDictionary}/>
         )}
+
+        {/* ── Pipeline output preview — visible at the end of every tab ── */}
+        <div style={{ marginTop:"1.6rem" }}>
+          <Lbl>Preview — pipeline output</Lbl>
+          <Grid headers={headers} rows={rows} max={8}/>
+        </div>
       </div>
 
       <History

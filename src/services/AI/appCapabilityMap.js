@@ -34,10 +34,9 @@ export const APP_CAPABILITY_MAP = {
                  "Data Viewer": "browse/edit the table, per-cell edits",
                  "Sources": "fetch from World Bank / OECD, upload CSV/Excel/Stata/RDS/Parquet/shapefile" } },
   Clean:     { purpose: "Wrangle & clean the data (builds the pipeline)", subtabs: {
-                 "Cleaning": "filter, drop NA, fill NA, recode, winsorize, trim/flag outliers, distinct",
-                 "Panel Structure": "declare entity/time panel structure",
-                 "Transform": "log/sq/z-score, lag/lead/diff, dummies, dates, mutate, generate column from vector",
-                 "Reshape & Merge": "pivot longer/wider, group & summarize, group transform, joins, append, combine, vector",
+                 "Clean": "filter, sort rows, drop NA, fill NA, recode, winsorize, trim/flag outliers, distinct",
+                 "Workbench": "all feature/reshape/merge ops in one view — log/sq/z-score, dummies, dates, mutate, generate column, conditional, formatting, pivot longer/wider, joins, append, combine",
+                 "Panel Structure": "declare entity/time panel structure; panel operators lag/lead/diff",
                  "Dictionary": "AI-infer or edit variable descriptions",
                  "AI command": "describe a change in plain language; preview & apply pipeline steps" } },
   Explore:   { purpose: "Descriptive stats & plots", subtabs: {

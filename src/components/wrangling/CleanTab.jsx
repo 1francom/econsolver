@@ -2,9 +2,10 @@
 // NormalizePanel, StandardizeDialog, Auditor, ColCard,
 // FilterBuilder (ConditionRow, FilterPreview), FillNaSection, CleanTab.
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin, Grid } from "./shared.jsx";
+import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { computeColStats } from "../../services/data/duckdb.js";
+import SortRowsSection from "./SortRowsSection.jsx";
 
 // ─── STANDARDIZE DIALOG (inline) ─────────────────────────────────────────────
 // NormalizePanel was removed; ColCard recode action covers that use case.
@@ -1545,6 +1546,10 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
             onCancel={()=>setShowFilter(false)}/>
         </div>
       )}
+      {/* Sort rows — moved here from Workbench (below Filter rows) */}
+      <div style={{marginBottom:"1.2rem"}}>
+        <SortRowsSection headers={headers} onAdd={onAdd}/>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"0.75rem"}}>
         {headers.map(h=><ColCard key={h} h={h} info={info} sug={sug} castType={castTypes[h]} selected={sel===h}
           onSel={h=>{setSel(h);setAct(null);setARes(null);setASt("idle");}}
@@ -1628,8 +1633,6 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
         duckdbTableName={rawData?._duckdb?.tableName}/>
       <FillNaSection headers={headers} rows={rows} info={info} onAdd={onAdd}/>
 
-      <Lbl>Preview — pipeline output</Lbl>
-      <Grid headers={headers} rows={rows} hi={sel} max={8}/>
     </div>
   );
 }

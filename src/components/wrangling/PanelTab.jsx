@@ -2,6 +2,7 @@
 import { useState, useMemo } from "react";
 import { validatePanel } from "../../pipeline/validator.js";
 import { useTheme, Lbl, Btn } from "./shared.jsx";
+import PanelOpsSection from "./PanelOpsSection.jsx";
 
 function Heatmap({v}){
   const { C, T } = useTheme();
@@ -25,7 +26,7 @@ function Heatmap({v}){
 }
 
 // ─── PANEL TAB ────────────────────────────────────────────────────────────────
-function PanelTab({rows,headers,panel,setPanel,onAdd}){
+function PanelTab({rows,headers,info,panel,setPanel,onAdd}){
   const { C, T } = useTheme();
   const [ec,setEc]=useState(panel?.entityCol||""),[tc,setTc]=useState(panel?.timeCol||"");
   const [extraFe,setExtraFe]=useState(panel?.feCols?.slice(2)??[]);
@@ -159,6 +160,11 @@ function PanelTab({rows,headers,panel,setPanel,onAdd}){
       {panel&&<div style={{marginTop:"1rem",padding:"0.5rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
         i=<span style={{color:C.gold}}>{panel.entityCol}</span> · t=<span style={{color:C.blue}}>{panel.timeCol}</span>{panel.validation?.blockFD&&<span style={{color:C.yellow}}> · ⚠ FD blocked</span>}
       </div>}
+
+      {/* Panel operators — moved here from Workbench */}
+      <div style={{marginTop:"1.6rem"}}>
+        <PanelOpsSection headers={headers} info={info} panel={panel} onAdd={onAdd}/>
+      </div>
     </div>
   );
 }

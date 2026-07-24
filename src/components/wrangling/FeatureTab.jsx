@@ -1,6 +1,6 @@
 // ─── ECON STUDIO · components/wrangling/FeatureTab.jsx ─────────────────────
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { useTheme, Lbl, Tabs, Btn } from "./shared.jsx";
+import { useTheme, Lbl, Collapsible, Btn } from "./shared.jsx";
 import { computeColStats } from "../../services/data/duckdb.js";
 const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
@@ -448,18 +448,16 @@ function MutateSubTab({rows, headers, info, onAdd}){
 
 // ─── CONDITIONAL SUB-TAB ─────────────────────────────────────────────────────
 // Provides if_else and case_when step builders.
-function ConditionalSubTab({ headers, onAdd }) {
+function ConditionalSubTab({ headers, onAdd, nm, setNm }) {
   const { C, T } = useTheme();
   const [mode, setMode] = useState("if_else"); // "if_else" | "case_when"
 
-  // if_else state
-  const [ifeNN,       setIfeNN]       = useState("");
+  // if_else state (output name comes from the shared "New variable name" field)
   const [ifeCond,     setIfeCond]     = useState("");
   const [ifeTrueVal,  setIfeTrueVal]  = useState("");
   const [ifeFalseVal, setIfeFalseVal] = useState("");
 
-  // case_when state
-  const [cwNN,      setCwNN]      = useState("");
+  // case_when state (output name comes from the shared field)
   const [cwCases,   setCwCases]   = useState([{ cond: "", val: "" }]);
   const [cwDefault, setCwDefault] = useState("");
 
@@ -471,24 +469,24 @@ function ConditionalSubTab({ headers, onAdd }) {
   const taS = { ...inpS, resize: "vertical", lineHeight: 1.5, rows: 2 };
 
   function addIfeStep() {
-    if (!ifeNN.trim() || !ifeCond.trim()) return;
+    if (!nm.trim() || !ifeCond.trim()) return;
     onAdd({
-      type: "if_else", nn: ifeNN.trim(), cond: ifeCond.trim(),
+      type: "if_else", nn: nm.trim(), cond: ifeCond.trim(),
       trueVal: ifeTrueVal, falseVal: ifeFalseVal,
-      desc: `if_else(${ifeCond.trim()}) → ${ifeNN.trim()}`,
+      desc: `if_else(${ifeCond.trim()}) → ${nm.trim()}`,
     });
-    setIfeNN(""); setIfeCond(""); setIfeTrueVal(""); setIfeFalseVal("");
+    setNm(""); setIfeCond(""); setIfeTrueVal(""); setIfeFalseVal("");
   }
 
   function addCwStep() {
-    if (!cwNN.trim() || !cwCases.some(c => c.cond.trim())) return;
+    if (!nm.trim() || !cwCases.some(c => c.cond.trim())) return;
     onAdd({
-      type: "case_when", nn: cwNN.trim(),
+      type: "case_when", nn: nm.trim(),
       cases: cwCases.filter(c => c.cond.trim()),
       defaultVal: cwDefault || null,
-      desc: `case_when(${cwCases.filter(c=>c.cond.trim()).length} cases) → ${cwNN.trim()}`,
+      desc: `case_when(${cwCases.filter(c=>c.cond.trim()).length} cases) → ${nm.trim()}`,
     });
-    setCwNN(""); setCwCases([{ cond: "", val: "" }]); setCwDefault("");
+    setNm(""); setCwCases([{ cond: "", val: "" }]); setCwDefault("");
   }
 
   const modeBtnS = (active) => ({
@@ -510,12 +508,9 @@ function ConditionalSubTab({ headers, onAdd }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ padding: "0.5rem 0.9rem", background: C.surface, border: `1px solid ${C.border}`,
             borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
-            <span style={{ color: C.gold }}>if_else(cond, trueVal, falseVal)</span> — creates a new column.
+            <span style={{ color: C.gold }}>if_else(cond, trueVal, falseVal)</span> — creates a new column
+            named by the shared <span style={{ color: C.teal }}>New variable name</span> field above.
             Condition is a JS expression (column names available). True/false values can be literals or column names.
-          </div>
-          <div>
-            <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Output column name</div>
-            <input value={ifeNN} onChange={e => setIfeNN(e.target.value)} placeholder="e.g. adult" style={inpS} />
           </div>
           <div>
             <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Condition</div>
@@ -534,7 +529,7 @@ function ConditionalSubTab({ headers, onAdd }) {
                 placeholder="literal or column name" style={inpS} />
             </div>
           </div>
-          <Btn onClick={addIfeStep} color={C.gold} v="solid" dis={!ifeNN.trim() || !ifeCond.trim()} ch="Add to pipeline →" />
+          <Btn onClick={addIfeStep} color={C.gold} v="solid" dis={!nm.trim() || !ifeCond.trim()} ch="Add to pipeline →" />
         </div>
       )}
 
@@ -543,11 +538,8 @@ function ConditionalSubTab({ headers, onAdd }) {
           <div style={{ padding: "0.5rem 0.9rem", background: C.surface, border: `1px solid ${C.border}`,
             borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
             <span style={{ color: C.gold }}>case_when(c1 → v1, c2 → v2, …, default)</span> — first matching condition wins.
+            Output column named by the shared <span style={{ color: C.teal }}>New variable name</span> field above.
             Conditions are JS expressions; values are literals.
-          </div>
-          <div>
-            <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Output column name</div>
-            <input value={cwNN} onChange={e => setCwNN(e.target.value)} placeholder="e.g. size_cat" style={inpS} />
           </div>
           <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: T.code.fontFamily, marginBottom: 4 }}>Cases — first match wins</div>
           {cwCases.map((c, i) => (
@@ -576,7 +568,7 @@ function ConditionalSubTab({ headers, onAdd }) {
               placeholder='e.g. "other" or 0' style={inpS} />
           </div>
           <Btn onClick={addCwStep} color={C.gold} v="solid"
-            dis={!cwNN.trim() || !cwCases.some(c => c.cond.trim())} ch="Add to pipeline →" />
+            dis={!nm.trim() || !cwCases.some(c => c.cond.trim())} ch="Add to pipeline →" />
         </div>
       )}
     </div>
@@ -586,9 +578,8 @@ function ConditionalSubTab({ headers, onAdd }) {
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
 function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   const { C, T } = useTheme();
-  const [vt,setVt]=useState("quick"),[nm,setNm]=useState("");
+  const [nm,setNm]=useState("");
   const [qt,setQt]=useState("log"),[qc,setQc]=useState(""),[xc2,setXc2]=useState("");
-  const [pop,setPop]=useState("lag"),[pc,setPc]=useState(""),[lagN,setLagN]=useState(1);
   const [dtc,setDtc]=useState(""),[dpc,setDpc]=useState("");
   // Date extraction state
   const [dateSrc,setDateSrc]=useState("");
@@ -625,7 +616,6 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   });
   // Subset: numeric date columns that need a parse step first
   const numericDateC=dateC.filter(h=>info[h]?.isNum);
-  const isP=panel?.entityCol&&panel?.timeCol;
 
   const suggestName=useCallback((transform,col,col2)=>{
     if(!col) return "";
@@ -685,14 +675,6 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   // canAddQuick: winz only needs qc; others need qc + non-empty name; ix also needs xc2
   const canAddQuick=qc&&(nm.trim()&&(qt!=="ix"||(qt==="ix"&&xc2)));
 
-  const doP=()=>{
-    const n=nm.trim();if(!n||!pc||!isP) return;
-    const ec=panel.entityCol,tc=panel.timeCol;
-    if(pop==="lag") onAdd({type:"lag",col:pc,nn:n,n:lagN,ec,tc,desc:`L${lagN}.${pc} (i=${ec}) → ${n}`});
-    else if(pop==="lead") onAdd({type:"lead",col:pc,nn:n,n:lagN,ec,tc,desc:`F${lagN}.${pc} (i=${ec}) → ${n}`});
-    else if(pop==="diff") onAdd({type:"diff",col:pc,nn:n,ec,tc,desc:`Δ${pc} (i=${ec}) → ${n}`});
-    setNm("");setPc("");
-  };
 const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd({type:"did",tc:dtc,pc:dpc,nn:n,desc:`DiD: ${dtc}×${dpc} → ${n}`});setNm("");setDtc("");setDpc("");};
 
   const doDateExtract=()=>{
@@ -718,31 +700,24 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
 
   return(
     <div>
-      <Tabs tabs={[["quick","⚡ Shortcuts"],["generate","⊕ Generate"],["mutate","ƒ Mutate"],["conditional","⊕ Conditional"],["date","📅 Date"],...(isP?[["panel","⊞ Panel"]]:[]),["formatting","⬡ Formatting"]]} active={vt} set={setVt} accent={C.teal} sm/>
-
-      {/* ── Variable name input (shared by quick/panel/did) ── */}
-      {(vt==="quick"||vt==="panel"||vt==="did")&&(
-        <div style={{marginBottom:"1.2rem"}}>
-          {/* For winz: show mode toggle + optional name only when newcol */}
-          (<>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                <Lbl mb={0}>New variable name</Lbl>
-                {nm&&<span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>← auto-suggested</span>}
-              </div>
-              <input value={nm} onChange={e=>{setNm(e.target.value);prevAutoRef.current="";}}
-                placeholder="e.g. log_wage, wage_lag1, treat_x_post"
-                style={{...inpS}}/>
-            </>
-          )
+      {/* ── Shared "New variable name" — common factor for single-column ops ── */}
+      <div style={{marginBottom:"1.4rem",padding:"0.7rem 0.9rem",background:C.surface2,border:`1px solid ${C.teal}30`,borderRadius:4}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+          <Lbl mb={0} color={C.teal}>New variable name</Lbl>
+          {nm&&<span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>← auto-suggested</span>}
         </div>
-      )}
+        <input value={nm} onChange={e=>{setNm(e.target.value);prevAutoRef.current="";}}
+          placeholder="e.g. log_wage, wage_lag1, adult"
+          style={{...inpS}}/>
+        <div style={{marginTop:5,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
+          Used by Shortcuts and Conditional below.
+        </div>
+      </div>
 
-      {vt==="generate"&&(
-        <VectorAssignForm rows={rows} headers={headers} onAdd={onAdd}/>
-      )}
-
+      {/* ── Create & transform ── */}
+      <Collapsible title="Create & transform columns" color={C.teal} defaultOpen>
       {/* ── Quick Transforms ── */}
-      {vt==="quick"&&(
+      {(
         <div>
           <Lbl color={C.teal}>Transform</Lbl>
           <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.2rem"}}>
@@ -773,8 +748,27 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
         </div>
       )}
 
-      {/* ── Date Parse + Extraction ── */}
-      {vt==="date"&&(
+      {/* ── Generate column (vector assign) ── */}
+      <div style={{marginTop:"1.4rem"}}>
+        <Lbl color={C.teal}>Generate column</Lbl>
+        <VectorAssignForm rows={rows} headers={headers} onAdd={onAdd}/>
+      </div>
+
+      {/* ── Custom column (mutate) — sub-section of Create ── */}
+      <div style={{marginTop:"1.6rem"}}>
+        <Lbl color={C.teal}>Custom column — expression</Lbl>
+        <MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>
+      </div>
+      </Collapsible>
+
+      {/* ── Conditional ── */}
+      <Collapsible title="Conditional column" color={C.gold}>
+      <ConditionalSubTab headers={headers} onAdd={onAdd} nm={nm} setNm={setNm}/>
+      </Collapsible>
+
+      {/* ── Dates ── */}
+      <Collapsible title="Dates" color={C.violet}>
+      {(
         <div>
           {/* Info */}
           <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
@@ -891,42 +885,11 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
           <Btn onClick={doDateExtract} color={C.violet} v="solid" dis={!canExtract} ch="Add date steps →"/>
         </div>
       )}
-
-      {/* ── Panel Operators ── */}
-      {vt==="panel"&&(
-        !isP
-          ?<div style={{padding:"1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.orange}`,borderRadius:4,fontSize: T.code.fontSize,color:C.orange,lineHeight:1.7}}>⚠ Set panel index first (Panel Structure tab). Operators respect entity boundaries to prevent cross-unit contamination.</div>
-          :<div>
-            <div style={{padding:"0.48rem 0.75rem",background:`${C.blue}15`,border:`1px solid ${C.blue}30`,borderRadius:3,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.blue,fontFamily: T.code.fontFamily}}>i={panel.entityCol} · t={panel.timeCol} · entity-bounded operators</div>
-            <Lbl color={C.orange}>Operator</Lbl>
-            <div style={{display:"flex",gap:4,marginBottom:"1.2rem"}}>
-              {[["lag","L. Lag","yᵢ,ₜ₋ₙ"],["lead","F. Lead","yᵢ,ₜ₊ₙ"],["diff","Δ Diff","Δyᵢₜ"]].map(([k,l,f])=>(
-                <button key={k} onClick={()=>setPop(k)} style={{flex:1,padding:"0.5rem 0.65rem",border:`1px solid ${pop===k?C.orange:C.border2}`,background:pop===k?`${C.orange}18`:"transparent",color:pop===k?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s",textAlign:"center"}}>
-                  <div style={{fontWeight:700,marginBottom:2}}>{l}</div><div style={{fontSize: T.caption.fontSize,color:C.textMuted}}>{f}</div>
-                </button>
-              ))}
-            </div>
-            {(pop==="lag"||pop==="lead")&&<div style={{marginBottom:"1.2rem"}}><Lbl>Periods n</Lbl><div style={{display:"flex",gap:4}}>{[1,2,3,4].map(n=><button key={n} onClick={()=>setLagN(n)} style={{width:34,padding:"0.32rem",border:`1px solid ${lagN===n?C.orange:C.border2}`,background:lagN===n?`${C.orange}18`:"transparent",color:lagN===n?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>{n}</button>)}</div></div>}
-            <Lbl>Source column</Lbl>
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1rem"}}>{numC.map(h=><button key={h} onClick={()=>setPc(h)} style={{padding:"0.28rem 0.6rem",border:`1px solid ${pc===h?C.orange:C.border2}`,background:pc===h?`${C.orange}18`:"transparent",color:pc===h?C.orange:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>{pc===h?"✓ ":""}{h}</button>)}</div>
-            {pc&&nm.trim()&&<div style={{padding:"0.48rem 0.75rem",background:C.surface,border:`1px solid ${C.border}`,borderRadius:3,marginBottom:"1rem",fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
-              {pop==="lag"&&<><span style={{color:C.teal}}>{nm.trim()}</span>[i,t] = <span style={{color:C.gold}}>{pc}</span>[i,t−{lagN}] within i={panel.entityCol}</>}
-              {pop==="lead"&&<><span style={{color:C.teal}}>{nm.trim()}</span>[i,t] = <span style={{color:C.gold}}>{pc}</span>[i,t+{lagN}] within i={panel.entityCol}</>}
-              {pop==="diff"&&<><span style={{color:C.teal}}>{nm.trim()}</span> = Δ<span style={{color:C.gold}}>{pc}</span> within i={panel.entityCol}</>}
-            </div>}
-            <Btn onClick={doP} color={C.orange} v="solid" dis={!nm.trim()||!pc} ch="Add panel variable"/>
-          </div>
-      )}
-
-
-      {/* ── Mutate ── */}
-      {vt==="mutate"&&<MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>}
-
-      {/* ── Conditional ── */}
-      {vt==="conditional"&&<ConditionalSubTab headers={headers} onAdd={onAdd}/>}
+      </Collapsible>
 
       {/* ── Formatting (Numbers + Strings combined) ── */}
-      {vt==="formatting"&&(
+      <Collapsible title="Formatting" color={C.gold}>
+      {(
         <div>
           <div style={{marginBottom:"1.2rem",padding:"0.65rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
             <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:4}}>Numbers</div>
@@ -938,6 +901,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
           </div>
         </div>
       )}
+      </Collapsible>
 
     </div>
   );

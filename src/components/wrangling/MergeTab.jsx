@@ -1,7 +1,6 @@
 // ─── ECON STUDIO · components/wrangling/MergeTab.jsx ───────────────────────
 import { useState, useMemo } from "react";
-import { useTheme, Lbl, Tabs, Btn, Grid } from "./shared.jsx";
-import VectorAssignForm from "./VectorAssignForm.jsx";
+import { useTheme, Lbl, Collapsible, Btn } from "./shared.jsx";
 import { applyStep } from "../../pipeline/runner.js";
 
 const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suffix:"_r" });
@@ -11,7 +10,6 @@ const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suff
 // RHS always uses raw (pre-pipeline) data of the referenced dataset.
 function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   const { C, T } = useTheme();
-  const [subTab, setSubTab]       = useState("join");
   // JOIN state — array of staged joins, runs in order through runner.js
   const [joins, setJoins]         = useState([emptyJoin()]);
   // APPEND state
@@ -152,6 +150,8 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   // ── Empty state — no other datasets loaded ──
   if (!allDatasets.length) {
     return (
+      <div>
+      <Lbl color={C.blue}>Merge &amp; append</Lbl>
       <div style={{padding:"2.5rem 1.5rem",textAlign:"center",border:`1px dashed ${C.border2}`,borderRadius:4}}>
         <div style={{fontSize: T.display.fontSize,marginBottom:10}}>⊞</div>
         <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.8,fontFamily: T.code.fontFamily}}>
@@ -160,16 +160,15 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
           to load a second file — then join or append it here.
         </div>
       </div>
+      </div>
     );
   }
 
   return (
     <div>
-      {/* ── Sub-tabs: JOIN / APPEND ── */}
-      <Tabs tabs={[["join","⊞ Join"],["append","⊕ Append"],["combine","⊜ Combine"],["vector","⊕ Vector"]]} active={subTab} set={setSubTab} accent={C.teal} sm/>
-
       {/* ════════════ JOIN ════════════ */}
-      {subTab==="join" && (
+      <Collapsible title="Join" color={C.blue}>
+      {(
         <div>
           {/* Context note */}
           <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
@@ -347,7 +346,9 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
       )}
 
       {/* ════════════ APPEND ════════════ */}
-      {subTab==="append" && (
+      </Collapsible>
+      <Collapsible title="Append rows" color={C.violet}>
+      {(
         <div>
           <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
             borderLeft:`3px solid ${C.violet}`,borderRadius:4,marginBottom:"1.2rem",
@@ -416,7 +417,10 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
         </div>
       )}
 
-      {subTab==="combine" && (
+      {/* ════════════ COMBINE ════════════ */}
+      </Collapsible>
+      <Collapsible title="Combine — set operations" color={C.gold}>
+      {(
         <div>
           <div style={{padding:"0.55rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,
             borderLeft:`3px solid ${C.gold}`,borderRadius:4,marginBottom:"1.2rem",
@@ -484,52 +488,8 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             ch={`Add ${combineOp.toUpperCase()} to pipeline →`}/>
         </div>
       )}
+      </Collapsible>
 
-      {subTab==="vector" && (
-        <VectorAssignForm rows={rows} headers={headers} onAdd={onAdd}/>
-      )}
-
-      {/* ════════════ RESULT PREVIEW ════════════ */}
-      <div style={{marginTop:"2rem"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"0.7rem"}}>
-          <Lbl mb={0}>Current dataset — pipeline output</Lbl>
-          <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
-            {rows.length.toLocaleString()} rows × {headers.length} cols
-          </span>
-          <button
-            onClick={()=>{
-              // Serialize to CSV and trigger download
-              const esc = v => {
-                if(v===null||v===undefined) return "";
-                const s = String(v);
-                return s.includes(",")||s.includes('"')||s.includes("\n")
-                  ? `"${s.replace(/"/g,'""')}"` : s;
-              };
-              const lines = [
-                headers.map(esc).join(","),
-                ...rows.map(r=>headers.map(h=>esc(r[h])).join(","))
-              ];
-              const blob = new Blob([lines.join("\r\n")],{type:"text/csv"});
-              const a = document.createElement("a");
-              a.href = URL.createObjectURL(blob);
-              a.download = (filename ? filename.replace(/\.[^.]+$/, "") : "pipeline_output") + "_merged.csv";
-              a.click();
-              URL.revokeObjectURL(a.href);
-            }}
-            style={{
-              marginLeft:"auto", padding:"0.25rem 0.65rem",
-              background:"transparent", border:`1px solid ${C.border2}`,
-              borderRadius:3, color:C.textDim, cursor:"pointer",
-              fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.12s",
-            }}
-            onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;e.currentTarget.style.color=C.teal;}}
-            onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
-          >
-            ↓ Export CSV
-          </button>
-        </div>
-        <Grid headers={headers} rows={rows} max={8}/>
-      </div>
     </div>
   );
 }
