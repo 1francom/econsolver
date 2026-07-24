@@ -717,6 +717,7 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
       {/* ── Create & transform ── */}
       <Collapsible title="Create & transform columns" color={C.teal} defaultOpen>
       {/* ── Quick Transforms ── */}
+      <Collapsible title="Shortcuts" color={C.teal} defaultOpen>
       {(
         <div>
           <Lbl color={C.teal}>Transform</Lbl>
@@ -747,18 +748,17 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
           <Btn onClick={doQ} color={C.teal} v="solid" dis={!canAddQuick} ch="Add variable"/>
         </div>
       )}
-
-      {/* ── Generate column (vector assign) ── */}
-      <div style={{marginTop:"1.4rem"}}>
-        <Lbl color={C.teal}>Generate column</Lbl>
-        <VectorAssignForm rows={rows} headers={headers} onAdd={onAdd}/>
-      </div>
+      </Collapsible>
 
       {/* ── Custom column (mutate) — sub-section of Create ── */}
-      <div style={{marginTop:"1.6rem"}}>
-        <Lbl color={C.teal}>Custom column — expression</Lbl>
+      <Collapsible title="Custom column — expression" color={C.teal}>
         <MutateSubTab rows={rows} headers={headers} info={info} onAdd={onAdd}/>
-      </div>
+      </Collapsible>
+
+      {/* ── Generate column (vector assign) — last sub-section of Create ── */}
+      <Collapsible title="Generate column" color={C.teal}>
+        <VectorAssignForm rows={rows} headers={headers} onAdd={onAdd}/>
+      </Collapsible>
       </Collapsible>
 
       {/* ── Conditional ── */}
