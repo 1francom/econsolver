@@ -2,6 +2,7 @@
 import { useState, useMemo } from "react";
 import { useTheme, Lbl, Tabs, Btn, Grid } from "./shared.jsx";
 import VectorAssignForm from "./VectorAssignForm.jsx";
+import { applyStep } from "../../pipeline/runner.js";
 
 const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suffix:"_r" });
 
@@ -49,23 +50,47 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
     return chain; // chain[i] = headers available as left side for staged join i
   }, [joins, headers, allDatasets]);
 
-  // Match preview for the first staged join only (against the actual live `rows`).
-  // Subsequent joins act on a chained intermediate dataset we don't materialize here.
-  const firstMatchPreview = useMemo(() => {
-    const j0 = joins[0];
-    const r0 = allDatasets.find(d => d.id === j0?.rightId);
-    if (!r0 || !j0.leftKey || !j0.rightKey) return null;
-    const rKeys = new Set(r0.rawData.rows.map(r => String(r[j0.rightKey] ?? "")));
-    let matched = 0, keyNulls = 0;
-    rows.forEach(r => {
-      const v = r[j0.leftKey];
-      if (v === null || v === undefined) { keyNulls++; return; }
-      if (rKeys.has(String(v))) matched++;
-    });
-    const validRows = rows.length - keyNulls;
-    return { matched, total: rows.length, validRows, keyNulls,
-             pct: validRows ? matched / validRows : 0 };
-  }, [joins, allDatasets, rows]);
+  // Context object for applyStep — keyed by dataset id, raw (pre-pipeline) rows/headers.
+  const joinContext = useMemo(() => {
+    const datasets = {};
+    allDatasets.forEach(d => { datasets[d.id] = { rows: d.rawData.rows, headers: d.rawData.headers }; });
+    return { datasets };
+  }, [allDatasets]);
+
+  // Match preview for every staged join — materializes the row chain through prior
+  // joins (via applyStep) so join 2+ can report a real match % too, not just join 0.
+  const matchPreviews = useMemo(() => {
+    const previews = [];
+    let curRows = rows;
+    for (let i = 0; i < joins.length; i++) {
+      const j = joins[i];
+      const r = allDatasets.find(d => d.id === j.rightId);
+      if (!r || !j.leftKey || !j.rightKey) { previews.push(null); break; }
+      const rKeys = new Set(r.rawData.rows.map(rr => String(rr[j.rightKey] ?? "")));
+      let matched = 0, keyNulls = 0;
+      curRows.forEach(row => {
+        const v = row[j.leftKey];
+        if (v === null || v === undefined) { keyNulls++; return; }
+        if (rKeys.has(String(v))) matched++;
+      });
+      const validRows = curRows.length - keyNulls;
+      previews.push({ matched, total: curRows.length, validRows, keyNulls,
+                       pct: validRows ? matched / validRows : 0 });
+      // Materialize this join's output so the NEXT staged join previews against real rows.
+      if (i < joins.length - 1) {
+        if (j.how === "semi" || j.how === "anti") {
+          curRows = curRows.filter(row => {
+            const v = row[j.leftKey];
+            const has = v !== null && v !== undefined && rKeys.has(String(v));
+            return j.how === "semi" ? has : !has;
+          });
+        } else {
+          curRows = applyStep(curRows, headerChain[i] || headers, { ...j, type: "join" }, joinContext).rows;
+        }
+      }
+    }
+    return previews;
+  }, [joins, allDatasets, rows, headerChain, headers, joinContext]);
 
   const appendPreview = useMemo(() => {
     if (!appendDs) return null;
@@ -225,28 +250,29 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                     </div>
                   </div>
 
-                  {/* Match preview — only for join 0 (we don't materialize the chain) */}
-                  {idx===0 && firstMatchPreview && (() => {
-                    const mc = firstMatchPreview.pct > 0.8 ? C.green : firstMatchPreview.pct > 0.4 ? C.yellow : C.red;
+                  {/* Match preview — materialized through the chain for every staged join */}
+                  {matchPreviews[idx] && (() => {
+                    const mp = matchPreviews[idx];
+                    const mc = mp.pct > 0.8 ? C.green : mp.pct > 0.4 ? C.yellow : C.red;
                     return (
                       <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
                         border:`1px solid ${mc}30`,borderLeft:`3px solid ${mc}`,
                         borderRadius:4,marginBottom:"1rem"}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
                           <div style={{flex:1,height:4,background:C.border,borderRadius:2,overflow:"hidden"}}>
-                            <div style={{width:`${firstMatchPreview.pct*100}%`,height:"100%",background:mc,borderRadius:2,transition:"width 0.3s"}}/>
+                            <div style={{width:`${mp.pct*100}%`,height:"100%",background:mc,borderRadius:2,transition:"width 0.3s"}}/>
                           </div>
                           <span style={{fontSize: T.code.fontSize,color:mc,fontFamily: T.code.fontFamily,flexShrink:0}}>
-                            {(firstMatchPreview.pct*100).toFixed(1)}%
+                            {(mp.pct*100).toFixed(1)}%
                           </span>
                         </div>
                         <div style={{fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
-                          <span style={{color:mc}}>{firstMatchPreview.matched.toLocaleString()}</span>
-                          {" of "}{firstMatchPreview.validRows.toLocaleString()} left rows matched
+                          <span style={{color:mc}}>{mp.matched.toLocaleString()}</span>
+                          {" of "}{mp.validRows.toLocaleString()} left rows matched
                         </div>
-                        {firstMatchPreview.keyNulls > 0 && (
+                        {mp.keyNulls > 0 && (
                           <div style={{fontSize: T.caption.fontSize,color:C.orange,fontFamily: T.code.fontFamily,marginTop:4}}>
-                            ⚠ {firstMatchPreview.keyNulls} row{firstMatchPreview.keyNulls!==1?"s":""} have null in key column '{j.leftKey}'.
+                            ⚠ {mp.keyNulls} row{mp.keyNulls!==1?"s":""} have null in key column '{j.leftKey}'.
                           </div>
                         )}
                       </div>

@@ -17,12 +17,15 @@ export const DARK = {
   textMuted: "#444",
   green:     "#7ab896",
   red:       "#c47070",
+  redFaint:  "#1c0d0d",
   yellow:    "#c8b46e",
   blue:      "#6e9ec8",
   purple:    "#a87ec8",
   teal:      "#6ec8b4",
   orange:    "#c88e6e",
+  orangeFaint: "#1a1108",
   violet:    "#9e7ec8",
+  violetFaint: "#140f1a",
 };
 
 export const LIGHT = {
@@ -40,12 +43,15 @@ export const LIGHT = {
   textMuted: "#999",
   green:     "#2e7850",
   red:       "#a03030",
+  redFaint:  "#fceaea",
   yellow:    "#807010",
   blue:      "#2060a0",
   purple:    "#6030a0",
   teal:      "#1e7868",
   orange:    "#904020",
+  orangeFaint: "#fcefe6",
   violet:    "#503090",
+  violetFaint: "#f0eafa",
 };
 
 // ─── Typography ──────────────────────────────────────────────────────────────

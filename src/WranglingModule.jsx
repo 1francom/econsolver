@@ -671,11 +671,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {/* ── Tab bar ── */}
         <Tabs tabs={[
           ["clean",     "⬡ Cleaning"],
-          ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
           ["structure", "⊞ Panel Structure"],
           ["transform", "⊕ Transform"],
           ["dictionary","◈ Dictionary"],
           ["reshape",   "⟲ Reshape & Merge"],
+          ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
         ]} active={tab} set={setTab}/>
 
         {/* ── AI command bar (NL → validated pipeline steps) ── */}

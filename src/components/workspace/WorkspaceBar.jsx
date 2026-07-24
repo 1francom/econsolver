@@ -108,17 +108,17 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
           justifyContent: "center",
           width: 32,
           flexShrink: 0,
-          background: "transparent",
+          background: C.goldFaint,
           border: "none",
           borderLeft: `1px solid ${C.border}`,
-          color: C.textMuted,
+          color: C.gold,
           cursor: "pointer",
           fontSize: T.body.fontSize,
           fontFamily: T.code.fontFamily,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.teal; }}
-        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.gold; }}
       >
         ⚑
       </button>
@@ -133,17 +133,17 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
           justifyContent: "center",
           width: 32,
           flexShrink: 0,
-          background: "transparent",
+          background: C.violetFaint,
           border: "none",
           borderLeft: `1px solid ${C.border}`,
-          color: C.textMuted,
+          color: C.violet,
           cursor: "pointer",
           fontSize: T.body.fontSize,
           fontFamily: T.code.fontFamily,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
-        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.violet; }}
       >
         ?
       </button>
@@ -184,7 +184,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             justifyContent: "center",
             width: 32,
             flexShrink: 0,
-            background: "transparent",
+            background: C.surface3,
             border: "none",
             borderLeft: `1px solid ${C.border}`,
             color: C.textDim,
@@ -211,17 +211,17 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             width: 32,
             height: "100%",
             flexShrink: 0,
-            background: "transparent",
+            background: C.orangeFaint,
             border: "none",
             borderLeft: `1px solid ${C.border}`,
-            color: confirmClearLocal ? C.red : C.textMuted,
+            color: confirmClearLocal ? C.red : C.orange,
             cursor: "pointer",
             fontSize: T.body.fontSize,
             fontFamily: T.code.fontFamily,
             transition: "color 0.12s",
           }}
           onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
-          onMouseLeave={e => { e.currentTarget.style.color = confirmClearLocal ? C.red : C.textMuted; }}
+          onMouseLeave={e => { e.currentTarget.style.color = confirmClearLocal ? C.red : C.orange; }}
         >
           ⊘
         </button>
@@ -251,17 +251,17 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             width: 32,
             height: "100%",
             flexShrink: 0,
-            background: "transparent",
+            background: C.redFaint,
             border: "none",
             borderLeft: `1px solid ${C.border}`,
-            color: confirmSignOut ? C.red : C.textMuted,
+            color: C.red,
             cursor: "pointer",
             fontSize: T.code.fontSize,
             fontFamily: T.code.fontFamily,
             transition: "color 0.12s",
           }}
           onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
-          onMouseLeave={e => { e.currentTarget.style.color = confirmSignOut ? C.red : C.textMuted; }}
+          onMouseLeave={e => { e.currentTarget.style.color = C.red; }}
         >
           ⏻
         </button>
