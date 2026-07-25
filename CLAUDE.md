@@ -82,8 +82,7 @@ src/
 │   │   │   ├── rdata.js          ← .RData/.rda workspace reader; reuses rds.js internals, returns MANY tables (one per data.frame) via a _multi envelope
 │   │   │   └── shapefile.js      ← dBase III DBF parser + SHP geometry WKT
 │   │   └── fetchers/
-│   │       ├── worldBank.js      ← World Bank API fetcher
-│   │       └── oecd.js           ← OECD API fetcher
+│   │       └── worldBank.js      ← World Bank API fetcher
 │   ├── export/
 │   │   ├── rScript.js            ← pipeline + model → R script (fixest/modelsummary); generateSubsetRScript() for multi-subset lapply export
 │   │   ├── stataScript.js        ← pipeline + model → Stata do-file; generateSubsetStataScript() with preserve/restore blocks
@@ -111,7 +110,6 @@ src/
 │   │   ├── DataQualityReport.jsx
 │   │   ├── NLCommandBar.jsx      ← AI command bar: NL → validated pipeline steps (preview/apply); mounted by WranglingModule
 │   │   ├── WorldBankFetcher.jsx  ← World Bank data fetch UI
-│   │   ├── OECDFetcher.jsx       ← OECD data fetch UI
 │   │   └── SubsetManager.jsx     ← multi-subset workflow UI
 │   │
 │   ├── modeling/

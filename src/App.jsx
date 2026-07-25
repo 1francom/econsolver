@@ -11,7 +11,6 @@ import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
 import ConfirmPopover from './components/shared/ConfirmPopover.jsx';
 import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
-import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
 import ObservatorioFetcher from './components/wrangling/ObservatorioFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { SessionLogProvider } from './services/session/sessionLog.jsx';
@@ -1117,7 +1116,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
   );
 }
 
-// Dataset overview + load controls (file upload, World Bank, OECD).
+// Dataset overview + load controls (file upload, World Bank).
 function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset, onRenameDataset }) {
   const { C, T } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","JSON","DTA","RDS","DBF","SHP","ZIP"];
@@ -1126,7 +1125,6 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
   const [err,       setErr]       = useState("");
   const [success,   setSuccess]   = useState("");
   const [wbOpen,    setWbOpen]    = useState(false);
-  const [oecdOpen,  setOecdOpen]  = useState(false);
   const [obsOpen,   setObsOpen]   = useState(false);
   const [preloadedOpen, setPreloadedOpen] = useState(false);
   const [dragOver,  setDragOver]  = useState(false);
@@ -1248,7 +1246,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
               </div>
               <div style={{fontSize: T.h2.fontSize,color:C.text,marginBottom:6}}>Load your first dataset</div>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,lineHeight:1.7}}>
-                Drop a file below, fetch from World Bank / OECD, or use the Simulate tab to generate synthetic data.
+                Drop a file below, fetch from the World Bank, or use the Simulate tab to generate synthetic data.
               </div>
             </div>
 
@@ -1279,17 +1277,12 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             {err && <div style={{fontSize: T.caption.fontSize,color:C.red,fontFamily: T.code.fontFamily}}>{err}</div>}
             {success && <div style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>{success}</div>}
 
-            {/* Or: World Bank / OECD */}
+            {/* Or: World Bank */}
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>setWbOpen(true)}
                 style={{flex:1,padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
                         border:`1px solid ${C.border2}`,color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
                 World Bank ↗
-              </button>
-              <button onClick={()=>setOecdOpen(true)}
-                style={{flex:1,padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
-                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
-                OECD ↗
               </button>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:5}}>
@@ -1505,7 +1498,6 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:14}}>
               {[
                 {label:"↓ World Bank data", color:C.teal, action:()=>setWbOpen(true)},
-                {label:"↓ OECD data",       color:C.blue, action:()=>setOecdOpen(true)},
                 // Observatorio (femicidios) hidden from UI 2026-07-02 — scraper-style
                 // fetchers need a general in-app story before exposing to users.
                 // Re-add: {label:"↓ Observatorio (femicidios)", color:C.gold, action:()=>setObsOpen(true)},
@@ -1600,16 +1592,6 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
           }}
           onClose={() => setWbOpen(false)}
-        />
-      )}
-      {oecdOpen && (
-        <OECDFetcher
-          onLoad={(fname, rows, headers) => {
-            studioRef.current?.addApiData(fname, rows, headers);
-            setOecdOpen(false);
-            setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
-          }}
-          onClose={() => setOecdOpen(false)}
         />
       )}
       {obsOpen && (
@@ -3030,7 +3012,7 @@ export default function App() {
               {/* ── Tab panels — kept mounted via display:none to preserve state ── */}
               <div style={{flex:1,minHeight:0,position:"relative"}}>
 
-                {/* DATA — dataset overview + file upload + WB/OECD fetchers */}
+                {/* DATA — dataset overview + file upload + World Bank fetcher */}
                 <div style={{...tabPanel, display: activeTab==="data" ? "flex" : "none", flexDirection:"column"}}>
                   <DataTab
                     filename={filename} studioRef={studioRef}

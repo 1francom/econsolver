@@ -32,7 +32,7 @@ export function serializeAllowedSteps(allowedCategories = ["cleaning", "features
 export const APP_CAPABILITY_MAP = {
   Data:      { purpose: "Load & inspect datasets", subtabs: {
                  "Data Viewer": "browse/edit the table, per-cell edits",
-                 "Sources": "fetch from World Bank / OECD, upload CSV/Excel/Stata/RDS/Parquet/shapefile" } },
+                 "Sources": "fetch from World Bank, upload CSV/Excel/Stata/RDS/Parquet/shapefile" } },
   Clean:     { purpose: "Wrangle & clean the data (builds the pipeline)", subtabs: {
                  "Clean": "filter, sort rows, drop NA, fill NA, recode, winsorize, trim/flag outliers, distinct",
                  "Workbench": "all feature/reshape/merge ops in one view — log/sq/z-score, dummies, dates, mutate, generate column, conditional, formatting, pivot longer/wider, joins, append, combine",

@@ -24,7 +24,7 @@ import { useTheme } from "../ThemeContext.jsx";
 const SCREEN_STARTERS = {
   data: [
     "How do I load a dataset in Litux?",
-    "Can I fetch directly from World Bank or OECD?",
+    "Can I fetch directly from the World Bank?",
     "What file formats does Litux support (.csv, .dta, .rds, .xlsx, .parquet, .shp)?",
     "How do I switch between multiple datasets in this session?",
   ],

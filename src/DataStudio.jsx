@@ -23,7 +23,6 @@ import { useTheme } from "./ThemeContext.jsx";
 import WranglingModule from "./WranglingModule.jsx";
 import { saveRawData, loadRawData, deleteRawData, saveDatasetRegistry, loadDatasetRegistry, saveProject } from "./services/Persistence/indexedDB.js";
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
-import OECDFetcher     from "./components/wrangling/OECDFetcher.jsx";
 import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { deleteCacheEntry } from "./services/data/parquetCache.js";
@@ -505,7 +504,7 @@ async function parseFile(file) {
 }
 
 // ─── DATASET SIDEBAR ──────────────────────────────────────────────────────────
-function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, onFetchWorldBank, onFetchOECD, loadErr, loading }) {
+function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, onFetchWorldBank, loadErr, loading }) {
   const { C, T } = useTheme();
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
@@ -696,14 +695,6 @@ function DatasetSidebar({ datasets, activeId, onActivate, onRemove, onLoadFile, 
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
         >↓ World Bank data</button>
 
-        {/* OECD fetcher button */}
-        <button
-          onClick={onFetchOECD}
-          style={{ width:"100%", marginTop:4, padding:"0.42rem 0.5rem", background:"transparent", border:`1px solid ${C.border2}`, borderRadius:3, color:C.textDim, cursor:"pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition:"all 0.12s" }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.color = C.blue; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}
-        >↓ OECD data</button>
-
         {/* Format hint */}
         <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, marginTop: 6, lineHeight: 1.6 }}>
           CSV · TSV · XLSX · DTA · RDS · DBF · Parquet · drag & drop supported
@@ -755,7 +746,6 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
   const [loading, setLoading]     = useState(false);
   const [loadErr, setLoadErr]     = useState("");
   const [wbOpen,   setWbOpen]     = useState(false);
-  const [oecdOpen, setOecdOpen]   = useState(false);
 
   useEffect(() => {
     const p = pendingStepRef.current;
@@ -1279,14 +1269,6 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         <WorldBankFetcher
           onLoad={(fname, rows, headers) => handleSaveSubset(fname, rows, headers)}
           onClose={() => setWbOpen(false)}
-        />
-      )}
-
-      {/* ── OECD fetcher modal ── */}
-      {oecdOpen && (
-        <OECDFetcher
-          onLoad={(fname, rows, headers) => handleSaveSubset(fname, rows, headers)}
-          onClose={() => setOecdOpen(false)}
         />
       )}
     </div>

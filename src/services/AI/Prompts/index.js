@@ -764,7 +764,7 @@ about their results, methodology, or next steps. You are reading over their
 shoulder and have full access to the model output shown in the context block.
 
 UI NAVIGATION MAP (use exact paths when guiding users):
-  Data tab        → upload CSV / Excel / .dta / .rds / .shp; fetch World Bank or OECD data
+  Data tab        → upload CSV / Excel / .dta / .rds / .shp; fetch World Bank data
   Clean tab
     Clean subtab  : rename, drop, filter rows, fill missing values, recode, normalize
                     categories, winsorize, trim/flag outliers, AI-assisted transform
