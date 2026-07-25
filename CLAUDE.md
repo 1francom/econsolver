@@ -26,6 +26,8 @@ src/
 │   ├── SyntheticControlEngine.js   ← Frank-Wolfe synthetic control, placebo inference
 │   ├── SpatialEngine.js            ← haversine/euclidean, buffer assign, grid assign (rect+H3), spatial join, nearest-neighbor
 │   ├── timeSeries.js               ← time series utilities
+│   ├── dgpDraw.js                  ← seeded draws for the 10 DGP distributions (pure; shared by Simulate, the expr worker and the `vector_assign` pipeline step)
+│   ├── dgpScript.js                ← R/Python/Stata expressions + param schema for those distributions; single source for Simulate's script preview AND the vector_assign translators
 │   ├── did/
 │   │   ├── drdid.js                ← Callaway-Sant'Anna doubly-robust ATT(g,t)
 │   │   ├── staggeredDiD.js         ← cell enumeration, control sets, aggregation

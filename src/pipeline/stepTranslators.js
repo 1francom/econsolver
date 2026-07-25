@@ -12,6 +12,9 @@ import { toDfVar } from "./exporter.js";
 // Same numeric-literal rule the runner applies, so an emitted script writes the
 // same type the app wrote (a typed 1/0 must not become a character column in R).
 import { coerceLiteral } from "./literals.js";
+// Distribution emitters shared with the Simulate tab (src/math/dgpScript.js),
+// so a distribution can never be drawable in the app but unexportable here.
+import { distExprR, distExprPy, distExprStata, stataCategoricalLines, RNG_NOTE } from "../math/dgpScript.js";
 
 // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
 
@@ -805,9 +808,24 @@ export function toR(step, df = "df", allDatasets = {}) {
       const vaSeed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
       if (step.mode === "recycle")
         return `${df}$${vaOut} <- rep_len(${vaVals}, nrow(${df}))`;
+      if (step.mode === "distribution") {
+        const e = distExprR(step.dist, step.distParams, `nrow(${df})`);
+        return e
+          ? `# NOTE: ${RNG_NOTE}\nset.seed(${vaSeed}); ${df}$${vaOut} <- ${e}`
+          : `# vector_assign: unsupported distribution "${step.dist}" — no R equivalent emitted`;
+      }
       if (step.mode === "conditional") {
-        const vaLines = (step.rules || []).map(r => `    ${r.expr} ~ ${rValue(coerceLiteral(r.value))}`).join(",\n");
-        return `${df}$${vaOut} <- with(${df}, dplyr::case_when(\n${vaLines}${vaLines ? ",\n" : ""}    TRUE ~ ${rValue(coerceLiteral(step.elseValue))}\n))`;
+        // A branch may draw instead of holding a literal. case_when evaluates
+        // each branch over the whole frame and selects elementwise, so a full
+        // rnorm(nrow(df)) on the right-hand side is the correct vectorised form.
+        const rBranch = (dist, params, value) =>
+          dist ? (distExprR(dist, params, `nrow(${df})`) ?? "NA") : rValue(coerceLiteral(value));
+        const vaLines = (step.rules || [])
+          .map(r => `    ${r.expr} ~ ${rBranch(r.dist, r.distParams, r.value)}`).join(",\n");
+        const elseBranch = rBranch(step.elseDist, step.elseDistParams, step.elseValue);
+        const drawsAny = (step.rules || []).some(r => r.dist) || step.elseDist;
+        const head = drawsAny ? `# NOTE: ${RNG_NOTE}\nset.seed(${vaSeed}); ` : "";
+        return `${head}${df}$${vaOut} <- with(${df}, dplyr::case_when(\n${vaLines}${vaLines ? ",\n" : ""}    TRUE ~ ${elseBranch}\n))`;
       }
       const vaProb = step.weights ? `, prob = c(${step.weights.join(", ")})` : "";
       return `# NOTE: EconSolver uses a seeded mulberry32 RNG; values differ, distribution matches\nset.seed(${vaSeed}); ${df}$${vaOut} <- sample(${vaVals}, nrow(${df}), replace = TRUE${vaProb})`;
@@ -1400,20 +1418,40 @@ export function toStata(step, df = "df", allDatasets = {}) {
           `}`,
         ].join("\n");
       }
+      if (step.mode === "distribution") {
+        if (step.dist === "Categorical") {
+          const catLines = stataCategoricalLines(stVaOut, step.distParams);
+          return catLines
+            ? [`* NOTE: ${RNG_NOTE}`, `set seed ${stVaSeed}`, ...catLines].join("\n")
+            : `* vector_assign: Categorical needs at least one level`;
+        }
+        const stDistE = distExprStata(step.dist, step.distParams);
+        return stDistE
+          ? [`* NOTE: ${RNG_NOTE}`, `set seed ${stVaSeed}`, `generate ${stVaOut} = ${stDistE}`].join("\n")
+          : `* vector_assign: unsupported distribution "${step.dist}" — no Stata equivalent emitted`;
+      }
       if (step.mode === "conditional") {
+        // Stata's generators are row-wise, so a drawing branch is simply its
+        // expression on the right-hand side of gen/replace.
+        const stBranch = (dist, params, value, numeric) =>
+          dist ? (distExprStata(dist, params) ?? ".")
+               : (numeric ? stValue(value ?? null) : stStr(value ?? ""));
         const stVaRuleVals = (step.rules || []).map(r => coerceLiteral(r.value));
         const stVaElse     = coerceLiteral(step.elseValue);
         const stVaCondNum  = stVaRuleVals.length > 0
           && stVaRuleVals.every(v => typeof v === "number")
           && (stVaElse === null || stVaElse === undefined || typeof stVaElse === "number");
+        // Any drawing branch forces a numeric column: Stata's RNG returns
+        // numbers, so a strL declaration would make the column unusable.
+        const stDraws  = (step.rules || []).some(r => r.dist) || Boolean(step.elseDist);
+        const stNumCol = stVaCondNum || stDraws;
         return [
-          stVaCondNum
-            ? `gen ${stVaOut} = ${stValue(stVaElse ?? null)}`
+          ...(stDraws ? [`* NOTE: ${RNG_NOTE}`, `set seed ${stVaSeed}`] : []),
+          stNumCol
+            ? `gen ${stVaOut} = ${stBranch(step.elseDist, step.elseDistParams, stVaElse, true)}`
             : `gen strL ${stVaOut} = ${stStr(stVaElse ?? "")}`,
-          ...(step.rules || []).map((r, i) => {
-            const v = stVaRuleVals[i];
-            return `replace ${stVaOut} = ${stVaCondNum ? stValue(v) : stStr(v ?? "")} if ${r.expr}`;
-          }),
+          ...(step.rules || []).map((r, i) =>
+            `replace ${stVaOut} = ${stBranch(r.dist, r.distParams, stVaRuleVals[i], stNumCol)} if ${r.expr}`),
         ].join("\n");
       }
       return [
@@ -1912,10 +1950,26 @@ export function toPython(step, df = "df", allDatasets = {}) {
       const pyVaOut  = step.nn ?? "assigned";
       const pyVaSeed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
       if (step.mode === "recycle") return `${df}["${pyVaOut}"] = np.resize(${pyVaVals}, len(${df}))`;
+      if (step.mode === "distribution") {
+        const pyDistE = distExprPy(step.dist, step.distParams, `len(${df})`);
+        return pyDistE
+          ? [`# NOTE: ${RNG_NOTE}`, `rng = np.random.default_rng(${pyVaSeed})`,
+             `${df}["${pyVaOut}"] = ${pyDistE}`].join("\n")
+          : `# vector_assign: unsupported distribution "${step.dist}" — no Python equivalent emitted`;
+      }
       if (step.mode === "conditional") {
         const pyVaConds   = (step.rules || []).map(r => `${df}.eval(${pyStr(r.expr)})`).join(", ");
-        const pyVaChoices = (step.rules || []).map(r => pyValue(coerceLiteral(r.value))).join(", ");
-        return `${df}["${pyVaOut}"] = np.select([${pyVaConds}], [${pyVaChoices}], default=${pyValue(coerceLiteral(step.elseValue))})`;
+        // A branch may draw instead of holding a literal. np.select picks
+        // elementwise, so a drawing branch supplies a full len(df) vector just
+        // as the literal branches do.
+        const pyBranch = (dist, params, value) =>
+          dist ? (distExprPy(dist, params, `len(${df})`) ?? "None") : pyValue(coerceLiteral(value));
+        const pyVaChoices = (step.rules || []).map(r => pyBranch(r.dist, r.distParams, r.value)).join(", ");
+        const pyVaElse    = pyBranch(step.elseDist, step.elseDistParams, step.elseValue);
+        const pyDraws     = (step.rules || []).some(r => r.dist) || Boolean(step.elseDist);
+        const pyHead      = pyDraws
+          ? `# NOTE: ${RNG_NOTE}\nrng = np.random.default_rng(${pyVaSeed})\n` : "";
+        return `${pyHead}${df}["${pyVaOut}"] = np.select([${pyVaConds}], [${pyVaChoices}], default=${pyVaElse})`;
       }
       const pyVaWts = Array.isArray(step.weights) ? step.weights.join(", ") : "";
       const pyVaP   = pyVaWts ? `, p=np.array([${pyVaWts}]) / np.sum([${pyVaWts}])` : "";

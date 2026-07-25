@@ -17,7 +17,8 @@
 
 import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
-import { assignVector } from "../core/generate/vectorAssign.js";
+import { assignVector, mulberry32 } from "../core/generate/vectorAssign.js";
+import { drawSamples } from "../math/dgpDraw.js";
 import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
 import { coerceLiteral } from "./literals.js";
 import { connectedComponents } from "../math/graph/connectedComponents.js";
@@ -1101,18 +1102,37 @@ export function applyStep(rows, headers, s, context = {}) {
           try { return new Function(...safeH, `"use strict"; return !!(${rule.expr});`); }
           catch { return null; }
         });
-        evalRule = (r) => {
+        // A rule (or the else branch) may draw from a distribution instead of
+        // holding a literal. Each distribution is pre-drawn as a FULL column and
+        // then indexed by row, so a given row's value never depends on how many
+        // earlier rows happened to match — the replay stays reproducible even if
+        // an upstream step changes which rows hit which rule.
+        const seedBase = Number.isFinite(s.seed) ? s.seed : 42;
+        const ruleDraws = (s.rules ?? []).map((rule, i) =>
+          rule?.dist ? drawSamples(mulberry32(seedBase + i + 1), rows.length, rule.dist, rule.distParams ?? {}) : null);
+        const elseDraws = s.elseDist
+          ? drawSamples(mulberry32(seedBase), rows.length, s.elseDist, s.elseDistParams ?? {})
+          : null;
+
+        evalRule = (r, idx) => {
           const args = safeH.map(h => r[h] ?? null);
           for (let i = 0; i < (s.rules ?? []).length; i++) {
             if (!ruleFns[i]) continue;
-            try { if (ruleFns[i](...args)) return coerceLiteral(s.rules[i].value); } catch {}
+            try {
+              if (ruleFns[i](...args)) {
+                return ruleDraws[i] ? ruleDraws[i][idx] : coerceLiteral(s.rules[i].value);
+              }
+            } catch {}
           }
-          return undefined; // no match -> engine uses elseValue
+          // No match. Returning undefined lets the engine substitute elseValue;
+          // a distribution else has to be resolved here instead, per row.
+          return elseDraws ? elseDraws[idx] : undefined;
         };
       }
       const assigned = assignVector(rows, {
         values, mode: s.mode || "random",
         weights: s.weights ?? null, seed: s.seed,
+        dist: s.dist, distParams: s.distParams,
         evalRule, elseValue: coerceLiteral(s.elseValue) ?? null,
       });
       R = rows.map((r, i) => ({ ...r, [nn]: assigned[i] }));
