@@ -9,6 +9,9 @@
 // Design: pure functions, no React, no imports from UI.
 
 import { toDfVar } from "./exporter.js";
+// Same numeric-literal rule the runner applies, so an emitted script writes the
+// same type the app wrote (a typed 1/0 must not become a character column in R).
+import { coerceLiteral } from "./literals.js";
 
 // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
 
@@ -71,7 +74,13 @@ function rName(c) {
   return /^[A-Za-z_][A-Za-z0-9_.]*$/.test(c) ? c : `\`${c}\``;
 }
 function rStr(s) { return `"${String(s).replace(/"/g, '\\"')}"`;  }
+// Identifiers (column names) — ALWAYS quoted. A wide dataset whose columns are
+// named 2019, 2020 … must emit c("2019", "2020"); unquoting those would break
+// pivot_longer, which is precisely where such names occur.
 function rVec(arr) { return `c(${arr.map(rStr).join(", ")})`; }
+// User-typed literal values — numeric-looking entries emit unquoted, so a
+// generated 1/0 column is c(1, 0) rather than the character vector c("1", "0").
+function rVecLiteral(arr) { return `c(${arr.map(v => rValue(coerceLiteral(v))).join(", ")})`; }
 function rNames(arr) { return arr.map(rName).join(", "); }
 
 /**
@@ -248,7 +257,10 @@ function stVar(c) { return c.replace(/`/g, ""); }
 
 function pyCol(c) { return `"${String(c).replace(/"/g, '\\"')}"`; }
 function pyStr(s) { return `"${String(s).replace(/"/g, '\\"')}"`; }
+// Identifiers (column names) — always quoted, same reasoning as rVec.
 function pyList(arr) { return `[${(arr ?? []).map(pyStr).join(", ")}]`; }
+// User-typed literal values — numeric-looking entries emit unquoted.
+function pyListLiteral(arr) { return `[${(arr ?? []).map(v => pyValue(coerceLiteral(v))).join(", ")}]`; }
 
 function pyValue(v, dtype = null) {
   if (v === null || v === undefined) return "None";
@@ -788,14 +800,14 @@ export function toR(step, df = "df", allDatasets = {}) {
     }
 
     case "vector_assign": {
-      const vaVals = rVec(step.values ?? []);
+      const vaVals = rVecLiteral(step.values ?? []);
       const vaOut  = rName(step.nn ?? "assigned");
       const vaSeed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
       if (step.mode === "recycle")
         return `${df}$${vaOut} <- rep_len(${vaVals}, nrow(${df}))`;
       if (step.mode === "conditional") {
-        const vaLines = (step.rules || []).map(r => `    ${r.expr} ~ ${rStr(r.value)}`).join(",\n");
-        return `${df}$${vaOut} <- with(${df}, dplyr::case_when(\n${vaLines}${vaLines ? ",\n" : ""}    TRUE ~ ${rStr(step.elseValue ?? "")}\n))`;
+        const vaLines = (step.rules || []).map(r => `    ${r.expr} ~ ${rValue(coerceLiteral(r.value))}`).join(",\n");
+        return `${df}$${vaOut} <- with(${df}, dplyr::case_when(\n${vaLines}${vaLines ? ",\n" : ""}    TRUE ~ ${rValue(coerceLiteral(step.elseValue))}\n))`;
       }
       const vaProb = step.weights ? `, prob = c(${step.weights.join(", ")})` : "";
       return `# NOTE: EconSolver uses a seeded mulberry32 RNG; values differ, distribution matches\nset.seed(${vaSeed}); ${df}$${vaOut} <- sample(${vaVals}, nrow(${df}), replace = TRUE${vaProb})`;
@@ -824,16 +836,16 @@ export function toR(step, df = "df", allDatasets = {}) {
       const ieCond = jsExprToR(step.cond);
       const ieOut  = rName(step.nn);
       if (!ieCond) return `# if_else: ${step.nn} = if (${step.cond}) ... — translate condition to R manually`;
-      return `${df} <- ${df} |> mutate(${ieOut} = dplyr::if_else(${ieCond}, ${rValue(step.trueVal)}, ${rValue(step.falseVal)}))`;
+      return `${df} <- ${df} |> mutate(${ieOut} = dplyr::if_else(${ieCond}, ${rValue(coerceLiteral(step.trueVal))}, ${rValue(coerceLiteral(step.falseVal))}))`;
     }
 
     case "case_when": {
       const cwOut  = rName(step.nn);
       const cwBrs  = (step.cases ?? [])
-        .map(c => { const cc = jsExprToR(c.cond); return cc ? `    ${cc} ~ ${rValue(c.val)}` : null; })
+        .map(c => { const cc = jsExprToR(c.cond); return cc ? `    ${cc} ~ ${rValue(coerceLiteral(c.val))}` : null; })
         .filter(Boolean).join(",\n");
       return cwBrs
-        ? `${df} <- ${df} |> mutate(${cwOut} = dplyr::case_when(\n${cwBrs},\n    TRUE ~ ${rValue(step.defaultVal)}\n  ))`
+        ? `${df} <- ${df} |> mutate(${cwOut} = dplyr::case_when(\n${cwBrs},\n    TRUE ~ ${rValue(coerceLiteral(step.defaultVal))}\n  ))`
         : `# case_when: no valid conditions — translate manually`;
     }
 
@@ -1370,29 +1382,45 @@ export function toStata(step, df = "df", allDatasets = {}) {
 
     case "vector_assign": {
       const stVaOut    = stVar(step.nn ?? "assigned");
-      const stVaValues = step.values ?? [];
+      const stVaValues = (step.values ?? []).map(coerceLiteral);
       const stVaSeed   = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
+      // Stata commits to a storage type at `gen` time, so the declaration has to
+      // match the data: a numeric column declared `strL` would be unusable in any
+      // regression later in the script.
+      const stVaNum    = stVaValues.length > 0 && stVaValues.every(v => typeof v === "number");
       if (step.mode === "recycle") {
+        // word() always returns a string, so numeric output is parsed back with real().
+        const stVaPick = `word("\`vals'", \`k')`;
         return [
-          `gen strL ${stVaOut} = ""`,
+          stVaNum ? `gen ${stVaOut} = .` : `gen strL ${stVaOut} = ""`,
           `local vals "${stVaValues.join(" ")}"`,
           `forvalues i = 1/\`=_N' {`,
           `  local k = mod(\`i' - 1, ${stVaValues.length || 1}) + 1`,
-          `  replace ${stVaOut} = word("\`vals'", \`k') in \`i'`,
+          `  replace ${stVaOut} = ${stVaNum ? `real(${stVaPick})` : stVaPick} in \`i'`,
           `}`,
         ].join("\n");
       }
       if (step.mode === "conditional") {
+        const stVaRuleVals = (step.rules || []).map(r => coerceLiteral(r.value));
+        const stVaElse     = coerceLiteral(step.elseValue);
+        const stVaCondNum  = stVaRuleVals.length > 0
+          && stVaRuleVals.every(v => typeof v === "number")
+          && (stVaElse === null || stVaElse === undefined || typeof stVaElse === "number");
         return [
-          `gen strL ${stVaOut} = "${step.elseValue ?? ""}"`,
-          ...(step.rules || []).map(r => `replace ${stVaOut} = "${r.value}" if ${r.expr}`),
+          stVaCondNum
+            ? `gen ${stVaOut} = ${stValue(stVaElse ?? null)}`
+            : `gen strL ${stVaOut} = ${stStr(stVaElse ?? "")}`,
+          ...(step.rules || []).map((r, i) => {
+            const v = stVaRuleVals[i];
+            return `replace ${stVaOut} = ${stVaCondNum ? stValue(v) : stStr(v ?? "")} if ${r.expr}`;
+          }),
         ].join("\n");
       }
       return [
         `* NOTE: EconSolver uses a seeded mulberry32 RNG; exported values differ but the distribution matches`,
         `set seed ${stVaSeed}`,
         `gen double __u = runiform()`,
-        `gen strL ${stVaOut} = ""`,
+        stVaNum ? `gen ${stVaOut} = .` : `gen strL ${stVaOut} = ""`,
         `* assign ${stVaValues.join("/")} by equal or weighted bins`,
         `drop __u`,
       ].join("\n");
@@ -1411,16 +1439,16 @@ export function toStata(step, df = "df", allDatasets = {}) {
       const stIeOut  = stVar(step.nn);
       const stIeCond = jsExprToStata(step.cond);
       if (!stIeCond) return `* if_else: ${step.nn} = cond(${step.cond}, ...) — translate condition to Stata manually`;
-      return `gen ${stIeOut} = cond(${stIeCond}, ${stValue(step.trueVal)}, ${stValue(step.falseVal)})`;
+      return `gen ${stIeOut} = cond(${stIeCond}, ${stValue(coerceLiteral(step.trueVal))}, ${stValue(coerceLiteral(step.falseVal))})`;
     }
 
     case "case_when": {
       const stCwOut = stVar(step.nn);
       const stCwBrs = (step.cases ?? [])
-        .map(c => { const cc = jsExprToStata(c.cond); return cc ? `replace ${stCwOut} = ${stValue(c.val)} if ${cc}` : null; })
+        .map(c => { const cc = jsExprToStata(c.cond); return cc ? `replace ${stCwOut} = ${stValue(coerceLiteral(c.val))} if ${cc}` : null; })
         .filter(Boolean);
       if (!stCwBrs.length) return `* case_when: no valid conditions — translate manually`;
-      return [`gen ${stCwOut} = ${stValue(step.defaultVal)}`, ...stCwBrs].join("\n");
+      return [`gen ${stCwOut} = ${stValue(coerceLiteral(step.defaultVal))}`, ...stCwBrs].join("\n");
     }
 
     case "grouped_mutate": {
@@ -1880,14 +1908,14 @@ export function toPython(step, df = "df", allDatasets = {}) {
     }
 
     case "vector_assign": {
-      const pyVaVals = pyList(step.values ?? []);
+      const pyVaVals = pyListLiteral(step.values ?? []);
       const pyVaOut  = step.nn ?? "assigned";
       const pyVaSeed = Number.isFinite(Number(step.seed)) ? Number(step.seed) : 42;
       if (step.mode === "recycle") return `${df}["${pyVaOut}"] = np.resize(${pyVaVals}, len(${df}))`;
       if (step.mode === "conditional") {
         const pyVaConds   = (step.rules || []).map(r => `${df}.eval(${pyStr(r.expr)})`).join(", ");
-        const pyVaChoices = (step.rules || []).map(r => pyStr(r.value)).join(", ");
-        return `${df}["${pyVaOut}"] = np.select([${pyVaConds}], [${pyVaChoices}], default=${pyStr(step.elseValue ?? "")})`;
+        const pyVaChoices = (step.rules || []).map(r => pyValue(coerceLiteral(r.value))).join(", ");
+        return `${df}["${pyVaOut}"] = np.select([${pyVaConds}], [${pyVaChoices}], default=${pyValue(coerceLiteral(step.elseValue))})`;
       }
       const pyVaWts = Array.isArray(step.weights) ? step.weights.join(", ") : "";
       const pyVaP   = pyVaWts ? `, p=np.array([${pyVaWts}]) / np.sum([${pyVaWts}])` : "";
@@ -1907,7 +1935,7 @@ export function toPython(step, df = "df", allDatasets = {}) {
       const pyIeOut  = pyStr(step.nn);
       const pyIeCond = jsExprToPython(step.cond, df);
       if (!pyIeCond) return `# if_else: ${step.nn} = where(${step.cond}) — translate condition to Python manually`;
-      return `${df}[${pyIeOut}] = np.where(${pyIeCond}, ${pyValue(step.trueVal, "string")}, ${pyValue(step.falseVal, "string")})`;
+      return `${df}[${pyIeOut}] = np.where(${pyIeCond}, ${pyValue(coerceLiteral(step.trueVal), "string")}, ${pyValue(coerceLiteral(step.falseVal), "string")})`;
     }
 
     case "case_when": {
@@ -1916,10 +1944,10 @@ export function toPython(step, df = "df", allDatasets = {}) {
       for (const c of (step.cases ?? [])) {
         const cc = jsExprToPython(c.cond, df);
         if (!cc) continue;
-        pyCwConds.push(cc); pyCwChoices.push(pyValue(c.val, "string"));
+        pyCwConds.push(cc); pyCwChoices.push(pyValue(coerceLiteral(c.val), "string"));
       }
       if (!pyCwConds.length) return `# case_when: no valid conditions — translate manually`;
-      return `${df}[${pyCwOut}] = np.select([${pyCwConds.join(", ")}], [${pyCwChoices.join(", ")}], default=${pyValue(step.defaultVal, "string")})`;
+      return `${df}[${pyCwOut}] = np.select([${pyCwConds.join(", ")}], [${pyCwChoices.join(", ")}], default=${pyValue(coerceLiteral(step.defaultVal), "string")})`;
     }
 
     case "grouped_mutate": {

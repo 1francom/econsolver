@@ -19,6 +19,7 @@ import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 import { assignVector } from "../core/generate/vectorAssign.js";
 import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
+import { coerceLiteral } from "./literals.js";
 import { connectedComponents } from "../math/graph/connectedComponents.js";
 import {
   assignDistance, assignDistanceMetric, addDistanceBins,
@@ -1038,9 +1039,13 @@ export function applyStep(rows, headers, s, context = {}) {
       R = rows.map(r => {
         let result = false;
         try { result = ifeFn(...safeH_ife.map(h => r[h] ?? null)); } catch {}
-        // trueVal/falseVal: if it matches a header, use that column's value; else use as literal
-        const tv = H.includes(s.trueVal)  ? r[s.trueVal]  : s.trueVal;
-        const fv = H.includes(s.falseVal) ? r[s.falseVal] : s.falseVal;
+        // trueVal/falseVal: if it matches a header, use that column's value; else
+        // use as literal. Literals arrive as text from the UI inputs, so a typed
+        // 1 / 0 must become real numbers or the output column is never numeric
+        // downstream (and so never selectable as Y). Column lookup happens FIRST,
+        // so a column named e.g. "2020" is not turned into a number.
+        const tv = H.includes(s.trueVal)  ? r[s.trueVal]  : coerceLiteral(s.trueVal);
+        const fv = H.includes(s.falseVal) ? r[s.falseVal] : coerceLiteral(s.falseVal);
         return { ...r, [s.nn]: result ? tv : fv };
       });
       if (!H.includes(s.nn)) H = [...H, s.nn];
@@ -1060,13 +1065,17 @@ export function applyStep(rows, headers, s, context = {}) {
         try { return new Function(...safeH_cw, `"use strict"; return !!(${c.cond});`); }
         catch { return null; }
       });
+      // Case values come from text inputs — coerce numeric-looking ones once,
+      // up front, so the output column is genuinely numeric (see literals.js).
+      const caseVals   = (s.cases ?? []).map(c => coerceLiteral(c.val));
+      const defaultVal = coerceLiteral(s.defaultVal) ?? null;
       R = rows.map(r => {
         const args = safeH_cw.map(h => r[h] ?? null);
         for (let i = 0; i < (s.cases ?? []).length; i++) {
           if (!caseFns[i]) continue;
-          try { if (caseFns[i](...args)) return { ...r, [s.nn]: s.cases[i].val }; } catch {}
+          try { if (caseFns[i](...args)) return { ...r, [s.nn]: caseVals[i] }; } catch {}
         }
-        return { ...r, [s.nn]: s.defaultVal ?? null };
+        return { ...r, [s.nn]: defaultVal };
       });
       if (!H.includes(s.nn)) H = [...H, s.nn];
       break;
@@ -1075,7 +1084,11 @@ export function applyStep(rows, headers, s, context = {}) {
     case "vector_assign": {
       // s.nn, s.values[], s.mode, s.weights, s.seed, s.rules[{expr,value}], s.elseValue
       const nn = s.nn || "assigned";
-      const values = Array.isArray(s.values) ? s.values : [];
+      // Values arrive as text from the "values (comma or newline separated)"
+      // textarea, so a generated 1/0 column would otherwise hold the STRINGS
+      // "1"/"0" and never register as numeric downstream (see literals.js).
+      // Category labels like "red" are untouched.
+      const values = Array.isArray(s.values) ? s.values.map(coerceLiteral) : [];
       let evalRule;
       if (s.mode === "conditional") {
         // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
@@ -1092,7 +1105,7 @@ export function applyStep(rows, headers, s, context = {}) {
           const args = safeH.map(h => r[h] ?? null);
           for (let i = 0; i < (s.rules ?? []).length; i++) {
             if (!ruleFns[i]) continue;
-            try { if (ruleFns[i](...args)) return s.rules[i].value; } catch {}
+            try { if (ruleFns[i](...args)) return coerceLiteral(s.rules[i].value); } catch {}
           }
           return undefined; // no match -> engine uses elseValue
         };
@@ -1100,7 +1113,7 @@ export function applyStep(rows, headers, s, context = {}) {
       const assigned = assignVector(rows, {
         values, mode: s.mode || "random",
         weights: s.weights ?? null, seed: s.seed,
-        evalRule, elseValue: s.elseValue ?? null,
+        evalRule, elseValue: coerceLiteral(s.elseValue) ?? null,
       });
       R = rows.map((r, i) => ({ ...r, [nn]: assigned[i] }));
       if (!H.includes(nn)) H = [...H, nn];
