@@ -68,12 +68,47 @@ function UndoBtn({ label, title, onClick, enabled }) {
   );
 }
 
-function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete }) {
+function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete, collapsed = false }) {
   const { C, T } = useTheme();
   const [patchOpen, setPatchOpen] = useState(false);
   const [confirmClearAll,     setConfirmClearAll]     = useState(false);
   const [confirmClearPatches, setConfirmClearPatches] = useState(false);
+  // Overlay flag for the collapsed rail. Hook order note: this MUST stay above
+  // the early return below — a hook after a conditional return is the exact
+  // React-hooks bug CLAUDE.md records as the 2SLS black screen.
+  const [expanded, setExpanded] = useState(false);
   if (!pipeline.length && !canUndo && !canRedo) return null;
+
+  // Collapsed rail — shown when the module is too narrow for a 230px sidebar.
+  // `expanded` lets the user pull it open as a temporary overlay.
+  if (collapsed && !expanded) {
+    return (
+      <div style={{
+        width: 28, flexShrink: 0,
+        borderLeft: `1px solid ${C.border}`,
+        background: C.surface,
+        display: "flex", flexDirection: "column", alignItems: "center",
+        paddingTop: 8, gap: 8, overflow: "hidden",
+      }}>
+        <button
+          onClick={() => setExpanded(true)}
+          title="Show pipeline"
+          style={{
+            background: "transparent", border: "none", color: C.teal,
+            cursor: "pointer", fontSize: T.code.fontSize, padding: 2,
+          }}
+        >⟨</button>
+        <div style={{
+          writingMode: "vertical-rl", transform: "rotate(180deg)",
+          fontSize: T.caption.fontSize, color: C.textMuted,
+          fontFamily: T.label.fontFamily, letterSpacing: "0.18em",
+          textTransform: "uppercase", whiteSpace: "nowrap",
+        }}>
+          Pipeline · {pipeline.length}
+        </div>
+      </div>
+    );
+  }
 
   // Separate patch (cell edit) steps from regular pipeline steps
   const patches  = pipeline.map((s, i) => ({ s, i })).filter(({ s }) => s.type === "patch");
@@ -86,6 +121,12 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
       background: C.surface,
       display: "flex", flexDirection: "column",
       overflow: "hidden",
+      // Opened from the collapsed rail → float above the content instead of
+      // squeezing an already-narrow module even further.
+      ...(collapsed ? {
+        position: "absolute", right: 0, top: 0, bottom: 0,
+        zIndex: 20, boxShadow: "-8px 0 24px #0008",
+      } : {}),
     }}>
       {/* ── Header ── */}
       <div style={{
@@ -94,6 +135,17 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
         display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
       }}>
         <Lbl mb={0} style={{ flex: 1 }}>Pipeline</Lbl>
+
+        {collapsed && (
+          <button
+            onClick={() => setExpanded(false)}
+            title="Hide pipeline"
+            style={{
+              background: "transparent", border: "none", color: C.textMuted,
+              cursor: "pointer", fontSize: T.code.fontSize, padding: "0 2px",
+            }}
+          >⟩</button>
+        )}
 
         <UndoBtn label="↩" title="Undo last step" onClick={onUndo} enabled={canUndo} />
         <UndoBtn label="↪" title="Redo"            onClick={onRedo} enabled={canRedo} />

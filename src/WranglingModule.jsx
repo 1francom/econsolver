@@ -24,6 +24,7 @@ import { auditPipeline } from "./pipeline/auditor.js";
 
 // ── Shared atoms ───────────────────────────────────────────────────────────
 import { useTheme, Tabs, Lbl, Grid } from "./components/wrangling/shared.jsx";
+import { useContainerWidth } from "./hooks/useContainerWidth.js";
 
 // ── Persistence — IndexedDB (replaces localStorage 5MB cap) ───────────────
 import {
@@ -445,8 +446,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const qualityBadge = qualityReport?.flags?.filter(f => f.severity !== "ok").length;
   const [aiActionsOpen, setAiActionsOpen] = useState(false);
 
+  // Below this width the 230px History sidebar folds to a rail. Lives here
+  // (not in App) so it also helps small laptops with no split involved.
+  const rootRef    = useRef(null);
+  const rootWidth  = useContainerWidth(rootRef);
+  const narrowRoot = rootWidth !== null && rootWidth < 700;
+
   return (
-    <div style={{ display:"flex", height:"100%", minHeight:0,
+    <div ref={rootRef} style={{ display:"flex", height:"100%", minHeight:0, position:"relative",
       background:C.bg, color:C.text, fontFamily:T.body.fontFamily, overflow:"hidden" }}>
 
       <div style={{ flex:1, minWidth:0, overflowY:"auto",
@@ -725,6 +732,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       </div>
 
       <History
+        collapsed={narrowRoot}
         pipeline={pipeline}
         onRm={rmStep}
         onClear={clear}
