@@ -450,7 +450,6 @@ function MutateSubTab({rows, headers, info, onAdd}){
 // Provides if_else and case_when step builders.
 function ConditionalSubTab({ headers, onAdd, nm, setNm }) {
   const { C, T } = useTheme();
-  const [mode, setMode] = useState("if_else"); // "if_else" | "case_when"
 
   // if_else state (output name comes from the shared "New variable name" field)
   const [ifeCond,     setIfeCond]     = useState("");
@@ -489,22 +488,9 @@ function ConditionalSubTab({ headers, onAdd, nm, setNm }) {
     setNm(""); setCwCases([{ cond: "", val: "" }]); setCwDefault("");
   }
 
-  const modeBtnS = (active) => ({
-    padding: "0.3rem 0.85rem", border: `1px solid ${active ? C.gold : C.border2}`,
-    background: active ? `${C.gold}18` : "transparent",
-    color: active ? C.gold : C.textMuted,
-    borderRadius: 3, cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
-  });
-
   return (
     <div>
-      {/* Mode toggle */}
-      <div style={{ display: "flex", gap: 6, marginBottom: "1rem" }}>
-        <button style={modeBtnS(mode === "if_else")}    onClick={() => setMode("if_else")}>if_else</button>
-        <button style={modeBtnS(mode === "case_when")}  onClick={() => setMode("case_when")}>case_when</button>
-      </div>
-
-      {mode === "if_else" && (
+      <Collapsible title="if_else" color={C.gold} defaultOpen>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ padding: "0.5rem 0.9rem", background: C.surface, border: `1px solid ${C.border}`,
             borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
@@ -531,9 +517,9 @@ function ConditionalSubTab({ headers, onAdd, nm, setNm }) {
           </div>
           <Btn onClick={addIfeStep} color={C.gold} v="solid" dis={!nm.trim() || !ifeCond.trim()} ch="Add to pipeline →" />
         </div>
-      )}
+      </Collapsible>
 
-      {mode === "case_when" && (
+      <Collapsible title="case_when" color={C.gold}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ padding: "0.5rem 0.9rem", background: C.surface, border: `1px solid ${C.border}`,
             borderLeft: `3px solid ${C.gold}`, borderRadius: 4, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, lineHeight: 1.6 }}>
@@ -570,7 +556,7 @@ function ConditionalSubTab({ headers, onAdd, nm, setNm }) {
           <Btn onClick={addCwStep} color={C.gold} v="solid"
             dis={!nm.trim() || !cwCases.some(c => c.cond.trim())} ch="Add to pipeline →" />
         </div>
-      )}
+      </Collapsible>
     </div>
   );
 }
@@ -887,20 +873,14 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
       )}
       </Collapsible>
 
-      {/* ── Formatting (Numbers + Strings combined) ── */}
+      {/* ── Formatting (Numbers + Strings) ── */}
       <Collapsible title="Formatting" color={C.gold}>
-      {(
-        <div>
-          <div style={{marginBottom:"1.2rem",padding:"0.65rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4}}>
-            <div style={{fontSize: T.caption.fontSize,color:C.teal,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:4}}>Numbers</div>
-            <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="numbers"/>
-          </div>
-          <div style={{padding:"0.65rem 0.9rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.gold}`,borderRadius:4}}>
-            <div style={{fontSize: T.caption.fontSize,color:C.gold,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily: T.code.fontFamily,marginBottom:4}}>Strings</div>
-            <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="strings"/>
-          </div>
-        </div>
-      )}
+      <Collapsible title="Numbers" color={C.teal} defaultOpen>
+        <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="numbers"/>
+      </Collapsible>
+      <Collapsible title="Strings" color={C.gold}>
+        <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="strings"/>
+      </Collapsible>
       </Collapsible>
 
     </div>
