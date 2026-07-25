@@ -2764,6 +2764,33 @@ export default function App() {
 
   // ── Session restore: persist navigation state to sessionStorage ──────────────
   const NAV_KEY = "litux:nav";
+  // Pane layout gets its own per-project key (same convention as
+  // litux:wrangle_tab) so switching projects never carries a split across.
+  const PANES_KEY = pid ? `litux:panes:${pid}` : null;
+
+  // Restore the pane layout for this project. Guarded so a corrupt or stale
+  // record can never leave the workspace with no visible pane.
+  useEffect(() => {
+    if (!PANES_KEY) return;
+    try {
+      const raw = sessionStorage.getItem(PANES_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (!Array.isArray(saved?.panes) || !saved.panes[0]) return;
+      setPanes([saved.panes[0], saved.panes[1] ?? null]);
+      setFocused(saved.focused === 1 && saved.panes[1] ? 1 : 0);
+      const r = Number(saved.ratio);
+      setPaneRatio(Number.isFinite(r) && r > 0.1 && r < 0.9 ? r : 0.5);
+    } catch { sessionStorage.removeItem(PANES_KEY); }
+  }, [PANES_KEY]);
+
+  // Persist on every layout change.
+  useEffect(() => {
+    if (!PANES_KEY) return;
+    try {
+      sessionStorage.setItem(PANES_KEY, JSON.stringify({ panes, focused, ratio: paneRatio }));
+    } catch { /* sessionStorage full or unavailable — layout is not critical */ }
+  }, [PANES_KEY, panes, focused, paneRatio]);
 
   // On mount: if the user was in the workspace, reload that project + tab.
   useEffect(() => {
