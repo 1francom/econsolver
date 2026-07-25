@@ -2838,6 +2838,8 @@ export default function App() {
 
   function navigateToTab(newTab) {
     if (newTab === activeTab) return;
+    // In split view the other pane may already hold this tab; setActiveTab
+    // swaps them, which is a real change even though activeTab differs.
     pushHistory(screen, activeTab);
     setActiveTab(newTab);
   }
@@ -3049,6 +3051,9 @@ export default function App() {
               <WorkspaceBar
                 activeTab={activeTab}
                 onTabChange={navigateToTab}
+                openTabs={panes.filter(Boolean)}
+                isSplit={isSplit}
+                onToggleSplit={toggleSplit}
                 hasOutput={!!(tabOutput(activeTab) || tabRawData(activeTab)?.rows?.length)}
                 reportUnlocked={(modelingSession?.pinnedModels?.length ?? 0) > 0}
                 activeDatasetId={tabDsId(activeTab)}
