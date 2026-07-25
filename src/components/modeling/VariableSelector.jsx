@@ -16,8 +16,15 @@
 
 import { VarPanel, mono, useTheme } from "./shared.jsx";
 
-// Models that expose an X (Features) selector
-const SHOW_X = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit", "Poisson", "GMM", "LIML", "PoissonFE", "NegBinFE", "LSDV"]);
+// Models that expose an X (Features) selector.
+//
+// RDD is deliberately absent: its design is Y + running variable + cutoff, and
+// the only other input the engine takes is a single covariate list, which it
+// receives from W. `estimationDispatch` calls
+// `runSharpRDD(rows, y, runningVar, cutoff, h, kernel, expW, …)` and does not
+// even record xVars in the result spec, so an X picker there was dead UI —
+// anything selected in it was silently discarded.
+const SHOW_X = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "Logit", "Probit", "Poisson", "GMM", "LIML", "PoissonFE", "NegBinFE", "LSDV"]);
 // Models that expose a W (Controls) selector in this panel.
 // DiD/TWFE controls are rendered in ModelConfiguration alongside group selectors.
 //
@@ -59,8 +66,13 @@ export default function VariableSelector({
   const { C, T } = useTheme();
   // X/W pickers show all columns (numeric + categorical); Y picker is numeric-only
   const xwCols = allCols ?? numericCols;
+  const showX = SHOW_X.has(model);
   const availForX = xwCols.filter(h => !yVar.includes(h));
-  const availForW = xwCols.filter(h => !yVar.includes(h) && !xVars.includes(h));
+  // Only hide already-assigned X columns when the X picker is actually on screen.
+  // For an estimator without one (RDD), a stale xVars left over from a previous
+  // model would otherwise remove those columns from the W picker too, making them
+  // unselectable in both — invisible rather than merely unused.
+  const availForW = xwCols.filter(h => !yVar.includes(h) && !(showX && xVars.includes(h)));
 
   const addTerm = () =>
     setInteractionTerms?.(prev => [...prev, { var1: "", var2: "", type: "*" }]);
