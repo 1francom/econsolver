@@ -11,6 +11,7 @@ import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
 import ConfirmPopover from './components/shared/ConfirmPopover.jsx';
 import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
+import SplitDivider from './components/workspace/SplitDivider.jsx';
 import ObservatorioFetcher from './components/wrangling/ObservatorioFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { SessionLogProvider } from './services/session/sessionLog.jsx';
@@ -2708,6 +2709,32 @@ export default function App() {
     const idx = panes.indexOf(tab);
     return idx === -1 ? {} : { onMouseDownCapture: () => setFocused(idx) };
   };
+
+  // Close one pane; the survivor goes full width.
+  const closePane = useCallback((idx) => {
+    setPanes(p => [p[1 - idx] ?? p[idx], null]);
+    setFocused(0);
+    setPaneRatio(0.5);
+  }, []);
+
+  // ⊞ toggle. Opening seeds the new pane with a tab that is never locked
+  // (Data and Clean have requiresOutput:false) and focuses it, so the user's
+  // next tab click lands in the pane they just created.
+  const toggleSplit = useCallback(() => {
+    if (isSplit) {
+      const keep = panes[focused] ?? panes[0];
+      setPanes([keep, null]);
+      setFocused(0);
+      setPaneRatio(0.5);
+    } else {
+      setPanes([panes[0], panes[0] === "clean" ? "data" : "clean"]);
+      setFocused(1);
+      setPaneRatio(0.5);
+    }
+  }, [isSplit, panes, focused]);
+
+  // Panel-container ref — the divider positions itself against this box.
+  const paneWrapRef = useRef(null);
   // Per-tab independent dataset selection — each tab remembers its own active dataset
   const [activeDatasetIds,   setActiveDatasetIds]  = useState({
     data: null, clean: null, explore: null, model: null,
@@ -3061,7 +3088,16 @@ export default function App() {
               )}
 
               {/* ── Tab panels — kept mounted via display:none to preserve state ── */}
-              <div style={{flex:1,minHeight:0,position:"relative"}}>
+              <div ref={paneWrapRef} style={{flex:1,minHeight:0,position:"relative"}}>
+
+                {isSplit && (
+                  <SplitDivider
+                    ratio={paneRatio}
+                    onRatio={setPaneRatio}
+                    onClosePane={closePane}
+                    containerRef={paneWrapRef}
+                  />
+                )}
 
                 {/* DATA — dataset overview + file upload + World Bank fetcher */}
                 <div {...paneFocusProps("data")} style={{...paneBox("data"), flexDirection:"column"}}>
