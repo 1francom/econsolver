@@ -76,7 +76,7 @@ import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
 import ModelComparison  from "./modeling/ModelComparison.jsx";
 
 import EstimatorSidebar, { FAMILY_SUPPORT } from "../components/modeling/EstimatorSidebar.jsx";
-import VariableSelector   from "../components/modeling/VariableSelector.jsx";
+import VariableSelector, { FOLD_W_INTO_X } from "../components/modeling/VariableSelector.jsx";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
@@ -482,6 +482,19 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [xVars,      setXVars]      = useState([]);
   const [wVars,      setWVars]      = useState([]);
   const [interactionTerms, setInteractionTerms] = useState([]);
+
+  // Estimators in FOLD_W_INTO_X have no Controls picker, because their engines
+  // already build the design matrix as `[...xVars, ...wVars]` — W was just a
+  // second name for X. Anything still sitting in wVars (picked while a model
+  // that DOES distinguish them was active, e.g. 2SLS) is folded into xVars here.
+  // Without this, those variables would keep entering the estimate from a panel
+  // the user can no longer see. The fold is estimate-preserving by construction.
+  useEffect(() => {
+    if (!FOLD_W_INTO_X.has(model) || wVars.length === 0) return;
+    setXVars(prev => [...prev, ...wVars.filter(v => !prev.includes(v))]);
+    setWVars([]);
+  }, [model, wVars]);
+
   // Regression through the origin (R: `y ~ 0 + x`, Stata: `regress, noconstant`).
   // OLS only — the panel/IV engines build their own design matrices.
   const [noIntercept, setNoIntercept] = useState(false);
