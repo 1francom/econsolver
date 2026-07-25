@@ -77,6 +77,7 @@ import ModelComparison  from "./modeling/ModelComparison.jsx";
 
 import EstimatorSidebar, { FAMILY_SUPPORT } from "../components/modeling/EstimatorSidebar.jsx";
 import VariableSelector, { FOLD_W_INTO_X } from "../components/modeling/VariableSelector.jsx";
+import { useContainerWidth } from "../hooks/useContainerWidth.js";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
@@ -461,6 +462,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // dataset/pipeline changes. Held in a ref so it survives renders without
   // triggering re-renders on set/get.
   const suffStatsCacheRef = useRef(null);
+
+  // Same rule as Clean's History: fold the 300px spec panel when the module is
+  // too narrow to afford it (small laptop, or one half of a split).
+  const bodyRef    = useRef(null);
+  const bodyWidth  = useContainerWidth(bodyRef);
+  const specNarrow = bodyWidth !== null && bodyWidth < 700;
+  const [specPanelOpen, setSpecPanelOpen] = useState(false);
+  const specCollapsed = specNarrow && !specPanelOpen;
   if (suffStatsCacheRef.current === null) {
     suffStatsCacheRef.current = createSuffStatsCache(CACHE_MAX_ENTRIES);
   }
@@ -2037,12 +2046,58 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       </div>
 
       {/* ══ Body ══ */}
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div ref={bodyRef} style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
+
+        {/* Collapsed rail — restores the spec panel as an overlay */}
+        {specCollapsed && (
+          <div style={{
+            width: 28, flexShrink: 0, borderRight: `1px solid ${C.border}`,
+            display: "flex", flexDirection: "column", alignItems: "center",
+            paddingTop: 8, gap: 8, overflow: "hidden",
+          }}>
+            <button
+              onClick={() => setSpecPanelOpen(true)}
+              title="Show model spec"
+              style={{
+                background: "transparent", border: "none", color: C.teal,
+                cursor: "pointer", fontSize: T.code.fontSize, padding: 2,
+              }}
+            >⟩</button>
+            <div style={{
+              writingMode: "vertical-rl",
+              fontSize: T.caption.fontSize, color: C.textMuted,
+              fontFamily: T.label.fontFamily, letterSpacing: "0.18em",
+              textTransform: "uppercase", whiteSpace: "nowrap",
+            }}>
+              Spec
+            </div>
+          </div>
+        )}
 
         {/* ── LEFT: Spec Panel ── */}
-        <div style={{ width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`, overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem" }}>
+        <div style={{
+          width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`,
+          overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem",
+          display: specCollapsed ? "none" : "block",
+          ...(specNarrow && specPanelOpen ? {
+            position: "absolute", left: 0, top: 0, bottom: 0,
+            zIndex: 20, background: C.bg, boxShadow: "8px 0 24px #0008",
+          } : {}),
+        }}>
 
-          <HintBox color={C.teal} title="How to model" overlayLeft={300} sections={[
+          {specNarrow && specPanelOpen && (
+            <button
+              onClick={() => setSpecPanelOpen(false)}
+              title="Hide model spec"
+              style={{
+                background: "transparent", border: "none", color: C.textMuted,
+                cursor: "pointer", fontSize: T.code.fontSize,
+                float: "right", padding: "0 2px",
+              }}
+            >⟨</button>
+          )}
+
+          <HintBox color={C.teal} title="How to model" overlayLeft={specCollapsed ? 28 : 300} sections={[
             { heading: "Estimators", items: [
               "OLS — ordinary least squares",
               "WLS — weighted least squares (supply a weight column in W)",
