@@ -1377,10 +1377,19 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (polyOrder > 1) {
               throw new Error("RDD SQL path: polynomial order > 1 not supported via SQL — fallback to JS");
             }
-            const controlsExpansion = await expandFactors({
-              xCols: wVars.filter(v => v !== runningVar[0] && v !== yVar[0]),
-              tableName: duckTable,
-            });
+            // Covariates are Sharp-RDD only. The JS `runFuzzyRDD` takes no
+            // controls at all, so feeding them here made the SAME Fuzzy spec
+            // covariate-adjusted above the SQL threshold (~50k rows) and
+            // unadjusted below it. Until Fuzzy RDD supports covariates in both
+            // paths (with R validation — the fase7 benchmarks have no covariate
+            // cases), it runs unadjusted everywhere. See ClaudePlan 2026-07-25.
+            const isSharpRDD = effModel === "RDD";
+            const controlsExpansion = isSharpRDD
+              ? await expandFactors({
+                  xCols: wVars.filter(v => v !== runningVar[0] && v !== yVar[0]),
+                  tableName: duckTable,
+                })
+              : { xColsExpanded: [], dummySQL: "" };
             const sharedRDD = {
               tableName: duckTable,
               yCol: yVar[0],
@@ -1416,8 +1425,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 kernel: "triangular",
               }, { h: rddRaw.h })
               : wrapResult("FuzzyRDD", rddRaw, {
+                // No wVars: Fuzzy RDD is estimated unadjusted, so recording
+                // covariates here would make the spec — and the replication
+                // script built from it — claim an adjustment that never happened.
                 yVar: yVar[0],
-                wVars,
                 treatVar: treatVar[0],
                 runningVar: runningVar[0],
                 cutoff: cutoffNum,
