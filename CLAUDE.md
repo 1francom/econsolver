@@ -174,7 +174,8 @@ src/
 │   │           ├── geo.js        ← loadGeoPlt (CDN singleton), geoBbox, GEO_COLORS, mkGeoLayer
 │   │           └── legend.js     ← GEO_MARGIN, appendSvgLegend
 │   ├── workspace/
-│   │   ├── WorkspaceBar.jsx      ← 7-tab nav bar (Data/Clean/Explore/Model/Simulate/Calculate/Report) + DatasetManager toggle + ? tour button
+│   │   ├── WorkspaceBar.jsx      ← 7-tab nav bar (Data/Clean/Explore/Model/Simulate/Calculate/Report) + DatasetManager toggle + ⊞ split toggle + ? tour button
+│   │   ├── SplitDivider.jsx      ← draggable 2-pane divider (snap at 50%, dblclick reset, min 360px → closes pane)
 │   │   └── DatasetManager.jsx    ← collapsible D·N dataset button + dropdown panel showing all session datasets
 │   ├── AIContextSidebar.jsx      ← AI context panel (sidebar)
 │   ├── HelpSystem.jsx            ← HintBox (collapsible per-module tips) + TOUR_STEPS registry (9 steps) + TourOverlay (floating tour card, bottom-right)
@@ -183,6 +184,8 @@ src/
 │   └── validation/
 │       └── AuditTrail.jsx        ← surfaces auditor.js output, pipeline audit UI
 │
+├── hooks/
+│   └── useContainerWidth.js      ← ResizeObserver width probe; drives History/spec-panel auto-collapse below 700px
 ├── EconometricsEngine.js  ← legacy engine shim
 ├── WranglingModule.jsx    ← root orchestrator, pipeline state, tab router
 ├── ReportingModule.jsx    ← LaTeX Stargazer, forest plots, AI narrative
