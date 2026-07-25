@@ -69,7 +69,7 @@ export function Collapsible({ title, color, defaultOpen = false, right, children
       }}>
         <span style={{ fontSize: 12, color: ac, width: 12, flexShrink: 0 }}>{open ? "▾" : "▸"}</span>
         <span style={{
-          fontSize: 12, color: open ? ac : C.textDim, letterSpacing: "0.2em",
+          fontSize: 11, color: open ? ac : C.textDim, letterSpacing: "0.2em",
           textTransform: "uppercase", fontFamily: T.label.fontFamily, fontWeight: 500, flex: 1,
         }}>
           {title}

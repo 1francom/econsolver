@@ -687,14 +687,14 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
   return(
     <div>
       {/* ── Shared "New variable name" — common factor for single-column ops ── */}
-      <div style={{marginBottom:"1.4rem",padding:"0.7rem 0.9rem",background:C.surface2,border:`1px solid ${C.teal}30`,borderRadius:4}}>
+      <div style={{marginBottom:"1.4rem",padding:"0.7rem 0.9rem",background:`${C.teal}1f`,border:`1px solid ${C.teal}66`,borderRadius:4}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-          <Lbl mb={0} color={C.teal}>New variable name</Lbl>
+          <span style={{fontSize:11,color:C.teal,letterSpacing:"0.2em",textTransform:"uppercase",fontFamily:T.label.fontFamily,fontWeight:500}}>New variable name</span>
           {nm&&<span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>← auto-suggested</span>}
         </div>
         <input value={nm} onChange={e=>{setNm(e.target.value);prevAutoRef.current="";}}
           placeholder="e.g. log_wage, wage_lag1, adult"
-          style={{...inpS}}/>
+          style={{...inpS,fontSize:13}}/>
         <div style={{marginTop:5,fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
           Used by Shortcuts and Conditional below.
         </div>
