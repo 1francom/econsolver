@@ -11,6 +11,9 @@
 
 import { getDuckDB } from "../services/data/duckdb.js";
 import { runPipeline } from "./runner.js";
+import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
+
+const stripProtected = (hs) => hs.filter(h => !PROTECTED_ROW_ID_COLS.includes(h));
 
 const MAX_EXTRACT = 2_000_000;
 
@@ -661,7 +664,18 @@ async function countRows(tableName, conn) {
  */
 export async function runPipelineDuck(rawTableName, rawHeaders, steps, conn, context = {}) {
   let tableName = rawTableName;
-  let headers   = [...rawHeaders];
+  // Work from the table's PHYSICAL columns, not the caller's headers: callers
+  // hold the UI-facing list, which deliberately excludes __ri/__row_id — but the
+  // SQL steps that enumerate columns (rename, drop) rebuild their SELECT from
+  // this array, and would silently drop row identity from the table if it were
+  // missing here. Protected columns are stripped again at every return below,
+  // so they never leak back into the UI.
+  let headers = [...rawHeaders];
+  try {
+    const desc = await conn.query(`DESCRIBE "${rawTableName}"`);
+    const physical = desc.toArray().map(r => String(r.column_name));
+    if (physical.length) headers = physical;
+  } catch { /* DESCRIBE failed — fall back to the caller's headers */ }
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
@@ -682,8 +696,11 @@ export async function runPipelineDuck(rawTableName, rawHeaders, steps, conn, con
     const extractedRows = await extractRows(tableName, conn);
     const remaining     = steps.slice(i);
     // context is empty here — join steps referencing other datasets are
-    // already handled by the JS path in WranglingModule for secondary datasets
-    const { rows, headers: finalHeaders } = runPipeline(extractedRows, headers, remaining, context);
+    // already handled by the JS path in WranglingModule for secondary datasets.
+    // Headers handed to the JS runner are the VISIBLE ones; the extracted rows
+    // still carry __ri as an extra key (spread-preserving steps keep it), which
+    // is exactly what lets a `patch` step match rows on this fallback path.
+    const { rows, headers: finalHeaders } = runPipeline(extractedRows, stripProtected(headers), remaining, context);
     return { rows, headers: finalHeaders };
   }
 
@@ -693,7 +710,7 @@ export async function runPipelineDuck(rawTableName, rawHeaders, steps, conn, con
   const rows = await extractRows(tableName, conn, PREVIEW);
   return {
     rows, // preview only — ModelingTab calls extractAllRows() before estimating
-    headers,
+    headers: stripProtected(headers),
     _duckdb: { tableName, rowCount },
   };
 }

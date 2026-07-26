@@ -20,6 +20,7 @@
 
 import * as duckdb from "@duckdb/duckdb-wasm";
 import { tableFromJSON } from "apache-arrow";
+import { PROTECTED_ROW_ID_COLS } from "./rowIdentity.js";
 import {
   loadFromOPFS,
   loadFromOPFSKey,
@@ -74,6 +75,9 @@ async function registerAndCreate(file, tableName, createSQL) {
   } finally {
     try { await db.dropFile(file.name); } catch { /* best effort */ }
   }
+  // Materialise row identity HERE, before the callers' saveToOPFS runs — that
+  // way the cached Parquet carries __ri and every restore gets it for free.
+  await ensureRiColumn(conn, tableName);
   const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
   const rowCount = Number(countRes.toArray()[0].n);
   return { conn, tableName, rowCount };
@@ -85,6 +89,44 @@ function arrowRowToObj(row) {
   for (const [k, v] of Object.entries(row))
     obj[k] = typeof v === "bigint" ? Number(v) : v;
   return obj;
+}
+
+// ── Row identity ───────────────────────────────────────────────────────────────
+// Cell editing (the `patch` pipeline step) matches rows by the stable `__ri`
+// column, which `ensureRowIdentity` adds to JS row OBJECTS but deliberately not
+// to `headers` — so it rides along invisibly and no variable picker ever sees
+// it. For DuckDB-backed datasets the JS rows are only a 500-row preview: the
+// TABLE is the source of truth, and `CREATE TABLE … AS SELECT *` never had the
+// column. Every patch then compared `undefined === ri` in the JS fallback and
+// silently edited nothing. The fix mirrors the JS contract at the SQL level:
+// materialise `__ri` into the table once, and strip protected columns from
+// `headers` at the JS boundary (the row objects keep them).
+const RI_COL = "__ri";
+
+export function stripProtected(headers) {
+  return headers.filter(h => !PROTECTED_ROW_ID_COLS.includes(h));
+}
+
+async function tableColumns(conn, tableName) {
+  const res = await conn.query(`DESCRIBE "${tableName}"`);
+  return res.toArray().map(r => String(r.column_name));
+}
+
+// Add __ri (0-based load order) to a table that lacks it. Respects an existing
+// __ri column — a re-imported file that already carries one keeps it, matching
+// ensureRowIdentity's behaviour on JS rows. INTEGER cast so Arrow hands back a
+// plain number, not a BigInt, and `r.__ri === s.ri` compares like with like.
+// row_number() OVER () follows scan order, i.e. file order at load time — the
+// same contract as the JS index.
+async function ensureRiColumn(conn, tableName) {
+  const cols = await tableColumns(conn, tableName);
+  if (cols.includes(RI_COL)) return;
+  const tmp = `${tableName}__ri_tmp`;
+  await conn.query(
+    `CREATE OR REPLACE TABLE "${tmp}" AS SELECT *, CAST(row_number() OVER () AS INTEGER) - 1 AS ${RI_COL} FROM "${tableName}"`
+  );
+  await conn.query(`DROP TABLE "${tableName}"`);
+  await conn.query(`ALTER TABLE "${tmp}" RENAME TO "${tableName}"`);
 }
 
 /**
@@ -134,7 +176,10 @@ export async function extractAllRows(tableName) {
 export async function queryDuckDB(sql) {
   const { conn } = await getDuckDB();
   const result = await conn.query(sql);
-  const headers = result.schema.fields.map(f => f.name);
+  // Protected identity columns stay OUT of headers (so no picker or grid ever
+  // shows them) but IN the row objects (so `patch` can match on __ri) — the
+  // same contract ensureRowIdentity establishes for pure-JS datasets.
+  const headers = stripProtected(result.schema.fields.map(f => f.name));
   const rows    = result.toArray().map(arrowRowToObj);
   return { headers, rows };
 }
@@ -151,6 +196,7 @@ export async function loadParquet(file) {
   const { db, conn } = await getDuckDB();
   const cacheHit = await loadFromOPFS(db, tableName, file);
   if (cacheHit) {
+    await ensureRiColumn(conn, tableName); // Parquets cached before the __ri fix lack the column
     const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
     const rowCount = Number(countRes.toArray()[0].n);
     window.__validation?.fase9?.recordHit?.();
@@ -193,6 +239,7 @@ export async function restoreCachedParquet(opfsCacheKey, tablePrefix = "project"
   const cacheHit = await loadFromOPFSKey(db, tableName, opfsCacheKey);
   if (!cacheHit) return null;
 
+  await ensureRiColumn(conn, tableName); // Parquets cached before the __ri fix lack the column
   const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
   const rowCount = Number(countRes.toArray()[0].n);
   const { headers, rows } = await queryDuckDB(
@@ -222,6 +269,7 @@ export async function loadLargeCSV(file) {
   // ── Fase 9: OPFS Parquet cache ─────────────────────────────────────────────
   const cacheHit = await loadFromOPFS(db, tableName, file);
   if (cacheHit) {
+    await ensureRiColumn(conn, tableName); // Parquets cached before the __ri fix lack the column
     const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
     const rowCount = Number(countRes.toArray()[0].n);
     window.__validation?.fase9?.recordHit?.();
@@ -270,6 +318,7 @@ export async function loadLargeParsedData(file, parse, tablePrefix = "data") {
 
   const cacheHit = await loadFromOPFS(db, tableName, file);
   if (cacheHit) {
+    await ensureRiColumn(conn, tableName); // Parquets cached before the __ri fix lack the column
     const countRes = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"`);
     const rowCount = Number(countRes.toArray()[0].n);
     window.__validation?.fase9?.recordHit?.();
@@ -290,6 +339,8 @@ export async function loadLargeParsedData(file, parse, tablePrefix = "data") {
   const arrowTable = tableFromJSON(parsed.rows);
   await conn.insertArrowTable(arrowTable, { name: tableName, create: true });
   const rowCount = parsed.rows.length;
+  // Before saveToOPFS, so the cached Parquet carries __ri too.
+  await ensureRiColumn(conn, tableName);
 
   const persisted = await saveToOPFS(db, tableName, file);
   if (!persisted) window.__validation?.fase9?.recordErr?.();
