@@ -172,7 +172,7 @@ export async function loadParquet(file) {
   return {
     headers,
     rows, // preview only — full data served via getTablePage / extractAllRows
-    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, persisted, opfsCacheKey },
+    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
   };
 }
 
@@ -247,7 +247,7 @@ export async function loadLargeCSV(file) {
   return {
     headers,
     rows, // preview only — full data served via getTablePage / extractAllRows
-    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, persisted, opfsCacheKey },
+    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
   };
 }
 
@@ -293,6 +293,6 @@ export async function loadLargeParsedData(file, parse, tablePrefix = "data") {
     ...parsed,
     headers,
     rows,
-    _duckdb: { tableName, rowCount, truncated: true, cached: false, persisted, opfsCacheKey },
+    _duckdb: { tableName, rowCount, truncated: true, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
   };
 }

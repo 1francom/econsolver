@@ -26,6 +26,41 @@ export function cacheKey(file) {
   return raw.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200) + ".parquet";
 }
 
+// ── Durable storage ────────────────────────────────────────────────────────────
+// OPFS defaults to "best-effort": the browser may evict it at will, and a
+// deployed origin gets far less protection than localhost. `*.vercel.app` is on
+// the Public Suffix List, so every deployment is a brand-new low-engagement site
+// to the browser, and Edge/Chrome tracking protections clear such storage
+// aggressively — the symptom is a Parquet that writes fine and is simply gone on
+// the next load (loadFromOPFS then reports NotFoundError).
+//
+// Asking for persistent storage is what makes "full table will survive reload"
+// an actual promise instead of a hope. Requested once, lazily, before the first
+// write; failure is non-fatal (the cache just stays evictable).
+let _persistRequest = null;
+export function ensurePersistentStorage() {
+  if (_persistRequest) return _persistRequest;
+  _persistRequest = (async () => {
+    if (typeof navigator?.storage?.persist !== "function") return false;
+    try {
+      if (await navigator.storage.persisted?.()) return true;
+      const granted = await navigator.storage.persist();
+      if (!granted) {
+        console.warn(
+          "[parquetCache] the browser did not grant persistent storage — the cached " +
+          "Parquet may be evicted, in which case the full table cannot be restored " +
+          "after a reload and the dataset falls back to its 500-row preview."
+        );
+      }
+      return granted;
+    } catch (e) {
+      console.warn("[parquetCache] persistent-storage request failed:", e?.message ?? String(e));
+      return false;
+    }
+  })();
+  return _persistRequest;
+}
+
 // ── OPFS directory handle ──────────────────────────────────────────────────────
 async function getCacheDir() {
   const root = await navigator.storage.getDirectory();
@@ -106,6 +141,9 @@ export async function loadFromOPFSKey(db, tableName, key) {
  */
 export async function saveToOPFS(db, tableName, file) {
   if (!opfsSupported()) return false;
+  // Ask for durable storage before the first write, so the entry we are about to
+  // create is not sitting in evictable best-effort storage.
+  await ensurePersistentStorage();
   const key = cacheKey(file);
   // Unique temp filename in DuckDB virtual FS to avoid conflicts during parallel ops
   const tmp = `__es_pexport_${Date.now()}_${Math.random().toString(36).slice(2)}.parquet`;
@@ -171,6 +209,14 @@ if (typeof window !== "undefined") {
     recordHit()  { this.cacheHits++;    },
     recordMiss() { this.cacheMisses++;  },
     recordErr()  { this.writeErrors++;  },
+    // Whether the browser granted durable storage. Without it OPFS is
+    // evictable, which looks exactly like a broken restore: the Parquet writes
+    // fine and is simply gone on the next load.
+    async storagePersisted() {
+      if (typeof navigator?.storage?.persisted !== "function") return { supported: false };
+      try { return { supported: true, persisted: await navigator.storage.persisted() }; }
+      catch (e) { return { supported: true, error: e?.message ?? String(e) }; }
+    },
     // Enumerate what is actually on disk, so a failed restore can be told apart
     // from a missing/renamed cache entry without guessing.
     async listCache() {
