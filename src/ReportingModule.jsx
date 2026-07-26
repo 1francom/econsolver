@@ -1494,9 +1494,6 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
   const [selectedId, setSelectedId] = useState(null);
   const rawResult = (selectedId && pinnedModels.find(m => m.id === selectedId)) || propResult;
 
-  // ── Debug: log raw result so any NaN/undefined shows in console ──────────────
-  console.log("DEBUG_RESULTS:", rawResult);
-
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
 
   // ── Build session snapshot once per render — passed to AI calls so Claude
