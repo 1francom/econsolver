@@ -789,9 +789,14 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         );
         return;
       }
-      if (parsed._duckdb?.truncated) {
+      // DuckDB holds the FULL table; only the grid preview is capped. Say that
+      // plainly — this notice used to claim "loaded first 2,000,000 of N rows",
+      // which was never true (nothing truncates) and read as data loss.
+      if (parsed._duckdb?.rowCount > parsed.rows.length) {
         setLoadErr(
-          `Large file: loaded first 2,000,000 of ${parsed._duckdb.rowCount.toLocaleString()} rows via DuckDB.`
+          `Large file: ${parsed._duckdb.rowCount.toLocaleString()} rows loaded via DuckDB. ` +
+          `The table view shows the first ${parsed.rows.length.toLocaleString()} — every pipeline step, ` +
+          `stat and model still runs on the full table.`
         );
       }
       addParsedDataset(file.name, parsed);

@@ -3,7 +3,16 @@
  * Lazy-initialised on first use. Uses jsDelivr CDN bundles — no local WASM files needed.
  *
  * Public API:
- *   loadParquet(file)           → { headers, rows, _duckdb: { tableName, rowCount, truncated } }
+ *   loadParquet(file)           → { headers, rows, _duckdb: { tableName, rowCount } }
+ *
+ * NOTE: DuckDB holds the FULL table; `rows` is only a PREVIEW_ROWS-sized sample
+ * for the grid. This module truncates nothing — it used to carry a `truncated`
+ * flag and a 2,000,000-row MAX_ROWS cap, but neither was ever applied: the flag
+ * was hardcoded true at every call site and the cap was referenced nowhere, so
+ * the UI claimed "showing 2,000,000 of 214,558" — more rows than the table even
+ * had. The only real cap lives elsewhere: `duckdbRunner.extractRows` limits how
+ * many rows are materialised into JS memory (MAX_EXTRACT, also 2,000,000). That
+ * bounds the JS array, never the DuckDB table.
  *   loadLargeCSV(file)          → same shape
  *   queryDuckDB(sql)            → { headers, rows }
  *   getDuckDB()                 → { db, conn }   (advanced use)
@@ -18,7 +27,6 @@ import {
   cacheKey as getParquetCacheKey,
 } from "./parquetCache.js";
 
-const MAX_ROWS    = 2_000_000; // hard cap (legacy, not used for DuckDB tables)
 const PREVIEW_ROWS = 500;      // rows extracted into JS memory; rest served via getTablePage
 
 // ── Singleton ──────────────────────────────────────────────────────────────────
@@ -152,7 +160,7 @@ export async function loadParquet(file) {
     return {
       headers,
       rows,
-      _duckdb: { tableName, rowCount, truncated: true, cached: true, opfsCacheKey },
+      _duckdb: { tableName, rowCount, cached: true, opfsCacheKey },
     };
   }
 
@@ -172,7 +180,7 @@ export async function loadParquet(file) {
   return {
     headers,
     rows, // preview only — full data served via getTablePage / extractAllRows
-    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
+    _duckdb: { tableName: tbl, rowCount, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
   };
 }
 
@@ -194,7 +202,7 @@ export async function restoreCachedParquet(opfsCacheKey, tablePrefix = "project"
   return {
     headers,
     rows,
-    _duckdb: { tableName, rowCount, truncated: true, cached: true, opfsCacheKey },
+    _duckdb: { tableName, rowCount, cached: true, opfsCacheKey },
   };
 }
 
@@ -223,7 +231,7 @@ export async function loadLargeCSV(file) {
     return {
       headers,
       rows,
-      _duckdb: { tableName, rowCount, truncated: true, cached: true, opfsCacheKey },
+      _duckdb: { tableName, rowCount, cached: true, opfsCacheKey },
     };
   }
   window.__validation?.fase9?.recordMiss?.();
@@ -247,7 +255,7 @@ export async function loadLargeCSV(file) {
   return {
     headers,
     rows, // preview only — full data served via getTablePage / extractAllRows
-    _duckdb: { tableName: tbl, rowCount, truncated: true, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
+    _duckdb: { tableName: tbl, rowCount, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
   };
 }
 
@@ -271,7 +279,7 @@ export async function loadLargeParsedData(file, parse, tablePrefix = "data") {
     return {
       headers,
       rows,
-      _duckdb: { tableName, rowCount, truncated: true, cached: true, opfsCacheKey },
+      _duckdb: { tableName, rowCount, cached: true, opfsCacheKey },
     };
   }
 
@@ -293,6 +301,6 @@ export async function loadLargeParsedData(file, parse, tablePrefix = "data") {
     ...parsed,
     headers,
     rows,
-    _duckdb: { tableName, rowCount, truncated: true, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
+    _duckdb: { tableName, rowCount, cached: false, persisted, opfsCacheKey: persisted ? opfsCacheKey : null },
   };
 }
