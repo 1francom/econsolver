@@ -251,7 +251,11 @@ export function dispatchEstimation(dataRows, ctx) {
       if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
       const res = runFuzzyRDD(dataRows, y, treatVar[0], runningVar[0], c0, { bandwidth: h, kernel, seOpts, polyOrder });
       if (!res || res.error) return { error: res?.error ?? "Fuzzy RDD failed. Check treatment, running variable, and bandwidth." };
-      return { result: wrapResult("FuzzyRDD", res, { yVar: y, wVars: expW, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel, polyOrder }), panelFE: null, panelFD: null };
+      // No wVars in the spec: `runFuzzyRDD` takes no controls argument, so the
+      // estimate is unadjusted. Recording covariates here would make the result
+      // — and the replication script derived from it — claim an adjustment that
+      // never happened. See ClaudePlan 2026-07-25 for the covariate follow-up.
+      return { result: wrapResult("FuzzyRDD", res, { yVar: y, treatVar: treatVar[0], runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel, polyOrder }), panelFE: null, panelFD: null };
 
     } else if (effModel === "SpatialRDD") {
       // Keele & Titiunik 2015 geographic RD: signed running variable built from

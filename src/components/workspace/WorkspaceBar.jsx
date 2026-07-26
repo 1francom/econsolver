@@ -24,7 +24,7 @@ const TABS = [
   { id: "report",    label: "Report",    icon: "⊟", requiresOutput: true  },
 ];
 
-export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, reportUnlocked, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback }) {
+export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, reportUnlocked, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback, openTabs = [], isSplit = false, onToggleSplit }) {
   const { C, T, theme, setTheme } = useTheme();
   const { guest, exitGuest } = useAuth();
   const [showAppearance, setShowAppearance] = useState(false);
@@ -56,6 +56,8 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
         {TABS.map(tab => {
           const isActive = tab.id === activeTab;
           const isLocked = tab.requiresOutput && !hasOutput && !(tab.id === "report" && reportUnlocked);
+          // Open in the other pane — marked so the user can see what's where.
+          const isOther  = openTabs.includes(tab.id) && !isActive;
 
           return (
             <button
@@ -90,6 +92,10 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             >
               <span style={{ fontSize: T.caption.fontSize }}>{tab.icon}</span>
               <span>{tab.label}</span>
+              {isOther && (
+                <span title="Open in the other pane"
+                  style={{ fontSize: T.caption.fontSize, color: C.teal, marginLeft: 1 }}>●</span>
+              )}
               {isLocked && (
                 <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginLeft: 1 }}>🔒</span>
               )}
@@ -97,6 +103,31 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
           );
         })}
       </div>
+
+      {/* ── Split-screen toggle ── */}
+      <button
+        onClick={() => onToggleSplit?.()}
+        title={isSplit ? "Close split view" : "Split the workspace in two"}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 32,
+          flexShrink: 0,
+          background: isSplit ? `${C.teal}18` : "transparent",
+          border: "none",
+          borderLeft: `1px solid ${C.border}`,
+          color: isSplit ? C.teal : C.textMuted,
+          cursor: "pointer",
+          fontSize: T.body.fontSize,
+          fontFamily: T.code.fontFamily,
+          transition: "color 0.12s",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.teal; }}
+        onMouseLeave={e => { e.currentTarget.style.color = isSplit ? C.teal : C.textMuted; }}
+      >
+        ⊞
+      </button>
 
       {/* ── Feedback button ── */}
       <button
@@ -108,17 +139,17 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
           justifyContent: "center",
           width: 32,
           flexShrink: 0,
-          background: "transparent",
+          background: C.goldFaint,
           border: "none",
           borderLeft: `1px solid ${C.border}`,
-          color: C.textMuted,
+          color: C.gold,
           cursor: "pointer",
           fontSize: T.body.fontSize,
           fontFamily: T.code.fontFamily,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.teal; }}
-        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.gold; }}
       >
         ⚑
       </button>
@@ -133,17 +164,17 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
           justifyContent: "center",
           width: 32,
           flexShrink: 0,
-          background: "transparent",
+          background: C.violetFaint,
           border: "none",
           borderLeft: `1px solid ${C.border}`,
-          color: C.textMuted,
+          color: C.violet,
           cursor: "pointer",
           fontSize: T.body.fontSize,
           fontFamily: T.code.fontFamily,
           transition: "color 0.12s",
         }}
         onMouseEnter={e => { e.currentTarget.style.color = C.gold; }}
-        onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.violet; }}
       >
         ?
       </button>
@@ -184,7 +215,7 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             justifyContent: "center",
             width: 32,
             flexShrink: 0,
-            background: "transparent",
+            background: C.surface3,
             border: "none",
             borderLeft: `1px solid ${C.border}`,
             color: C.textDim,
@@ -211,17 +242,17 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             width: 32,
             height: "100%",
             flexShrink: 0,
-            background: "transparent",
+            background: C.orangeFaint,
             border: "none",
             borderLeft: `1px solid ${C.border}`,
-            color: confirmClearLocal ? C.red : C.textMuted,
+            color: confirmClearLocal ? C.red : C.orange,
             cursor: "pointer",
             fontSize: T.body.fontSize,
             fontFamily: T.code.fontFamily,
             transition: "color 0.12s",
           }}
           onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
-          onMouseLeave={e => { e.currentTarget.style.color = confirmClearLocal ? C.red : C.textMuted; }}
+          onMouseLeave={e => { e.currentTarget.style.color = confirmClearLocal ? C.red : C.orange; }}
         >
           ⊘
         </button>
@@ -251,17 +282,17 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
             width: 32,
             height: "100%",
             flexShrink: 0,
-            background: "transparent",
+            background: C.redFaint,
             border: "none",
             borderLeft: `1px solid ${C.border}`,
-            color: confirmSignOut ? C.red : C.textMuted,
+            color: C.red,
             cursor: "pointer",
             fontSize: T.code.fontSize,
             fontFamily: T.code.fontFamily,
             transition: "color 0.12s",
           }}
           onMouseEnter={e => { e.currentTarget.style.color = C.red; }}
-          onMouseLeave={e => { e.currentTarget.style.color = confirmSignOut ? C.red : C.textMuted; }}
+          onMouseLeave={e => { e.currentTarget.style.color = C.red; }}
         >
           ⏻
         </button>

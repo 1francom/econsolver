@@ -29,6 +29,58 @@ export function Lbl({ children, color, mb = 6 }) {
   );
 }
 
+// Titled band divider used to separate groups of operations that are all
+// rendered visible at once (the flattened Workbench replaces nested subtabs).
+export function GroupTitle({ children, color, first = false }) {
+  const { C, T } = useTheme();
+  const ac = color ?? C.teal;
+  return (
+    <div style={{
+      marginTop: first ? 0 : "2.2rem", marginBottom: "1.2rem",
+      paddingBottom: "0.5rem", borderBottom: `1px solid ${ac}33`,
+      display: "flex", alignItems: "baseline", gap: 8,
+    }}>
+      <span style={{
+        fontSize: 12, color: ac, letterSpacing: "0.24em",
+        textTransform: "uppercase", fontFamily: T.label.fontFamily, fontWeight: 500,
+      }}>
+        {children}
+      </span>
+    </div>
+  );
+}
+
+// Collapsible section: a button header that toggles its body. Replaces the
+// always-open GroupTitle bands in the Workbench so each big group is a
+// click-to-expand disclosure.
+export function Collapsible({ title, color, defaultOpen = false, right, children }) {
+  const { C, T } = useTheme();
+  const [open, setOpen] = useState(defaultOpen);
+  const ac = color ?? C.teal;
+  return (
+    <div style={{
+      marginBottom: "0.7rem", border: `1px solid ${open ? ac + "44" : C.border}`,
+      borderRadius: 4, overflow: "hidden", transition: "border-color 0.12s",
+    }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 8,
+        padding: "0.6rem 0.9rem", background: open ? ac + "12" : "transparent",
+        border: "none", cursor: "pointer", textAlign: "left",
+      }}>
+        <span style={{ fontSize: 12, color: ac, width: 12, flexShrink: 0 }}>{open ? "▾" : "▸"}</span>
+        <span style={{
+          fontSize: 11, color: open ? ac : C.textDim, letterSpacing: "0.2em",
+          textTransform: "uppercase", fontFamily: T.label.fontFamily, fontWeight: 500, flex: 1,
+        }}>
+          {title}
+        </span>
+        {right && <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.label.fontFamily }}>{right}</span>}
+      </button>
+      {open && <div style={{ padding: "1rem 0.9rem", borderTop: `1px solid ${ac}22` }}>{children}</div>}
+    </div>
+  );
+}
+
 export function Tabs({ tabs, active, set, accent, sm = false }) {
   const { C, T } = useTheme();
   const ac = accent ?? C.gold;

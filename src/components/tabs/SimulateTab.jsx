@@ -11,6 +11,7 @@ import { evalScope as evalScopeInWorker } from "../../services/exprEvalService.j
 import { useSessionLog } from "../../services/session/sessionLog.jsx";
 import { mulberry32 } from "../../math/rng.js";
 import { drawSamples } from "../../math/dgpDraw.js";
+import { distExprR, distExprPy, distExprStata, DRAW_DIST_DEFAULTS } from "../../math/dgpScript.js";
 import StatWorkspace from "./statsim/StatWorkspace.jsx";
 import SampleTestPanel from "./statsim/SampleTestPanel.jsx";
 import QTEPanel from "./statsim/QTEPanel.jsx";
@@ -131,18 +132,12 @@ function fastOLS1(ys, xs) {
 
 // ─── PARAM DEFAULTS ───────────────────────────────────────────────────────────
 const DIST_DEFAULTS = {
-  Normal:      { mean: 0, sd: 1 },
-  Uniform:     { min: 0, max: 1 },
-  Bernoulli:   { p: 0.5 },
-  Poisson:     { lambda: 2 },
-  Exponential: { lambda: 1 },
-  t:           { df: 5 },
-  "Chi-squared": { df: 3 },
+  // The drawable distributions come from the shared module so Simulate and the
+  // Clean-tab Generate column cannot drift apart; the rest are Simulate-only
+  // variable kinds that draw nothing.
+  ...DRAW_DIST_DEFAULTS,
   Constant:    { value: "0" },
   Sequence:    { from: "1", by: "1" },
-  Categorical: { levels: "Control,Treatment", probs: "", asCode: false },
-  GroupID:     { groups: "10" },
-  CycleID:     { period: "5" },
   Expression:  { expr: "" },
   ForLoop:     { init: "0", update: "prev * 0.9 + eps[i]" },
   WhileLoop:   { init: "1", update: "prev * 0.95", condition: "Math.abs(prev) > 0.001", maxIter: "1000" },
@@ -522,34 +517,6 @@ function stataPickExpression(args) {
 }
 
 export function generateSimScript(language, n, seed, variables) {
-  const distR = {
-    Normal:       v => `rnorm(n, mean=${v.params.mean??0}, sd=${v.params.sd??1})`,
-    Uniform:      v => `runif(n, min=${v.params.min??0}, max=${v.params.max??1})`,
-    Bernoulli:    v => `rbinom(n, 1, prob=${v.params.p??0.5})`,
-    Poisson:      v => `rpois(n, lambda=${v.params.lambda??1})`,
-    Exponential:  v => `rexp(n, rate=${v.params.lambda??1})`,
-    t:            v => `rt(n, df=${v.params.df??5})`,
-    "Chi-squared":v => `rchisq(n, df=${v.params.df??3})`,
-  };
-  const distPy = {
-    Normal:       v => `rng.normal(${v.params.mean??0}, ${v.params.sd??1}, n)`,
-    Uniform:      v => `rng.uniform(${v.params.min??0}, ${v.params.max??1}, n)`,
-    Bernoulli:    v => `rng.binomial(1, ${v.params.p??0.5}, n)`,
-    Poisson:      v => `rng.poisson(${v.params.lambda??1}, n)`,
-    Exponential:  v => `rng.exponential(1/${v.params.lambda??1}, n)`,
-    t:            v => `rng.standard_t(${v.params.df??5}, n)`,
-    "Chi-squared":v => `rng.chisquare(${v.params.df??3}, n)`,
-  };
-  const distStata = {
-    Normal:       v => `rnormal(${v.params.mean??0}, ${v.params.sd??1})`,
-    Uniform:      v => `runiform(${v.params.min??0}, ${v.params.max??1})`,
-    Bernoulli:    v => `rbinomial(1, ${v.params.p??0.5})`,
-    Poisson:      v => `rpoisson(${v.params.lambda??1})`,
-    Exponential:  v => `rexponential(1/${v.params.lambda??1})`,
-    t:            v => `rt(${v.params.df??5})`,
-    "Chi-squared":v => `rchi2(${v.params.df??3})`,
-  };
-
   const catParse = (params) => {
     const levels = String(params.levels ?? "").split(",").map(s => s.trim()).filter(s => s.length);
     let probs = String(params.probs ?? "").split(",").map(s => parseFloat(s)).filter(x => isFinite(x) && x >= 0);
@@ -626,7 +593,7 @@ export function generateSimScript(language, n, seed, variables) {
           `${v.name} <- rep(${v.name}_val, n)`,
         );
       } else {
-        lines.push(`${v.name} <- ${distR[v.dist]?.(v) ?? "NA"}`);
+        lines.push(`${v.name} <- ${distExprR(v.dist, v.params) ?? "NA"}`);
       }
     });
     lines.push(`df <- data.frame(${variables.map(v=>v.name).join(", ")})`);
@@ -694,7 +661,7 @@ export function generateSimScript(language, n, seed, variables) {
           `${v.name} = np.full(n, prev)`,
         );
       } else {
-        lines.push(`${v.name} = ${distPy[v.dist]?.(v) ?? "None"}`);
+        lines.push(`${v.name} = ${distExprPy(v.dist, v.params) ?? "None"}`);
       }
     });
     lines.push(`df = pd.DataFrame({${variables.map(v=>`'${v.name}': ${v.name}`).join(", ")}})`);
@@ -764,7 +731,7 @@ export function generateSimScript(language, n, seed, variables) {
           `generate ${v.name} = \`${v.name}_val'`,
         );
       } else {
-        lines.push(`generate ${v.name} = ${distStata[v.dist]?.(v) ?? "."}`);
+        lines.push(`generate ${v.name} = ${distExprStata(v.dist, v.params) ?? "."}`);
       }
     });
   }

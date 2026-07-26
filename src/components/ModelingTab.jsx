@@ -76,7 +76,8 @@ import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
 import ModelComparison  from "./modeling/ModelComparison.jsx";
 
 import EstimatorSidebar, { FAMILY_SUPPORT } from "../components/modeling/EstimatorSidebar.jsx";
-import VariableSelector   from "../components/modeling/VariableSelector.jsx";
+import VariableSelector, { FOLD_W_INTO_X } from "../components/modeling/VariableSelector.jsx";
+import { useContainerWidth } from "../hooks/useContainerWidth.js";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
 import InferenceOptions    from "../components/modeling/InferenceOptions.jsx";
 import CodeEditor          from "../components/modeling/CodeEditor.jsx";
@@ -461,6 +462,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // dataset/pipeline changes. Held in a ref so it survives renders without
   // triggering re-renders on set/get.
   const suffStatsCacheRef = useRef(null);
+
+  // Same rule as Clean's History: fold the 300px spec panel when the module is
+  // too narrow to afford it (small laptop, or one half of a split).
+  const bodyRef    = useRef(null);
+  const bodyWidth  = useContainerWidth(bodyRef);
+  const specNarrow = bodyWidth !== null && bodyWidth < 700;
+  const [specPanelOpen, setSpecPanelOpen] = useState(false);
+  const specCollapsed = specNarrow && !specPanelOpen;
   if (suffStatsCacheRef.current === null) {
     suffStatsCacheRef.current = createSuffStatsCache(CACHE_MAX_ENTRIES);
   }
@@ -482,6 +491,19 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [xVars,      setXVars]      = useState([]);
   const [wVars,      setWVars]      = useState([]);
   const [interactionTerms, setInteractionTerms] = useState([]);
+
+  // Estimators in FOLD_W_INTO_X have no Controls picker, because their engines
+  // already build the design matrix as `[...xVars, ...wVars]` — W was just a
+  // second name for X. Anything still sitting in wVars (picked while a model
+  // that DOES distinguish them was active, e.g. 2SLS) is folded into xVars here.
+  // Without this, those variables would keep entering the estimate from a panel
+  // the user can no longer see. The fold is estimate-preserving by construction.
+  useEffect(() => {
+    if (!FOLD_W_INTO_X.has(model) || wVars.length === 0) return;
+    setXVars(prev => [...prev, ...wVars.filter(v => !prev.includes(v))]);
+    setWVars([]);
+  }, [model, wVars]);
+
   // Regression through the origin (R: `y ~ 0 + x`, Stata: `regress, noconstant`).
   // OLS only — the panel/IV engines build their own design matrices.
   const [noIntercept, setNoIntercept] = useState(false);
@@ -1364,10 +1386,19 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (polyOrder > 1) {
               throw new Error("RDD SQL path: polynomial order > 1 not supported via SQL — fallback to JS");
             }
-            const controlsExpansion = await expandFactors({
-              xCols: wVars.filter(v => v !== runningVar[0] && v !== yVar[0]),
-              tableName: duckTable,
-            });
+            // Covariates are Sharp-RDD only. The JS `runFuzzyRDD` takes no
+            // controls at all, so feeding them here made the SAME Fuzzy spec
+            // covariate-adjusted above the SQL threshold (~50k rows) and
+            // unadjusted below it. Until Fuzzy RDD supports covariates in both
+            // paths (with R validation — the fase7 benchmarks have no covariate
+            // cases), it runs unadjusted everywhere. See ClaudePlan 2026-07-25.
+            const isSharpRDD = effModel === "RDD";
+            const controlsExpansion = isSharpRDD
+              ? await expandFactors({
+                  xCols: wVars.filter(v => v !== runningVar[0] && v !== yVar[0]),
+                  tableName: duckTable,
+                })
+              : { xColsExpanded: [], dummySQL: "" };
             const sharedRDD = {
               tableName: duckTable,
               yCol: yVar[0],
@@ -1403,8 +1434,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 kernel: "triangular",
               }, { h: rddRaw.h })
               : wrapResult("FuzzyRDD", rddRaw, {
+                // No wVars: Fuzzy RDD is estimated unadjusted, so recording
+                // covariates here would make the spec — and the replication
+                // script built from it — claim an adjustment that never happened.
                 yVar: yVar[0],
-                wVars,
                 treatVar: treatVar[0],
                 runningVar: runningVar[0],
                 cutoff: cutoffNum,
@@ -2013,12 +2046,58 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       </div>
 
       {/* ══ Body ══ */}
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div ref={bodyRef} style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
+
+        {/* Collapsed rail — restores the spec panel as an overlay */}
+        {specCollapsed && (
+          <div style={{
+            width: 28, flexShrink: 0, borderRight: `1px solid ${C.border}`,
+            display: "flex", flexDirection: "column", alignItems: "center",
+            paddingTop: 8, gap: 8, overflow: "hidden",
+          }}>
+            <button
+              onClick={() => setSpecPanelOpen(true)}
+              title="Show model spec"
+              style={{
+                background: "transparent", border: "none", color: C.teal,
+                cursor: "pointer", fontSize: T.code.fontSize, padding: 2,
+              }}
+            >⟩</button>
+            <div style={{
+              writingMode: "vertical-rl",
+              fontSize: T.caption.fontSize, color: C.textMuted,
+              fontFamily: T.label.fontFamily, letterSpacing: "0.18em",
+              textTransform: "uppercase", whiteSpace: "nowrap",
+            }}>
+              Spec
+            </div>
+          </div>
+        )}
 
         {/* ── LEFT: Spec Panel ── */}
-        <div style={{ width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`, overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem" }}>
+        <div style={{
+          width: 300, flexShrink: 0, borderRight: `1px solid ${C.border}`,
+          overflowY: "auto", padding: "1.2rem", paddingBottom: "3rem",
+          display: specCollapsed ? "none" : "block",
+          ...(specNarrow && specPanelOpen ? {
+            position: "absolute", left: 0, top: 0, bottom: 0,
+            zIndex: 20, background: C.bg, boxShadow: "8px 0 24px #0008",
+          } : {}),
+        }}>
 
-          <HintBox color={C.teal} title="How to model" overlayLeft={300} sections={[
+          {specNarrow && specPanelOpen && (
+            <button
+              onClick={() => setSpecPanelOpen(false)}
+              title="Hide model spec"
+              style={{
+                background: "transparent", border: "none", color: C.textMuted,
+                cursor: "pointer", fontSize: T.code.fontSize,
+                float: "right", padding: "0 2px",
+              }}
+            >⟨</button>
+          )}
+
+          <HintBox color={C.teal} title="How to model" overlayLeft={specCollapsed ? 28 : 300} sections={[
             { heading: "Estimators", items: [
               "OLS — ordinary least squares",
               "WLS — weighted least squares (supply a weight column in W)",

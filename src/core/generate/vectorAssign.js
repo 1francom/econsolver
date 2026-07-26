@@ -3,6 +3,8 @@
 // Deterministic: all randomness flows through a seeded mulberry32 RNG so the
 // non-destructive pipeline reproduces identical output on every replay.
 
+import { drawSamples } from "../../math/dgpDraw.js";
+
 // Seeded PRNG - returns a function producing floats in [0, 1).
 export function mulberry32(seed) {
   let a = (seed >>> 0) || 1;
@@ -59,7 +61,9 @@ function shuffle(arr, rng) {
 //
 // opts = {
 //   values: string[]            // value pool (required, non-empty)
-//   mode: "random"|"conditional"|"recycle"|"quota"
+//   mode: "random"|"conditional"|"recycle"|"quota"|"distribution"
+//   dist?: string               // distribution mode: dgpDraw distribution name
+//   distParams?: object         // distribution mode: its parameters
 //   weights?: number[]|null     // random/quota
 //   seed?: number               // random/quota (default 42)
 //   evalRule?: (row, idx) => value | undefined   // conditional: caller supplies
@@ -69,8 +73,22 @@ function shuffle(arr, rng) {
 export function assignVector(rows, opts) {
   const { values, mode } = opts;
   const n = rows.length;
-  if (!Array.isArray(values) || values.length === 0) return Array(n).fill(null);
   const seed = Number.isFinite(opts.seed) ? opts.seed : 42;
+
+  // Distribution mode draws from dgpDraw.js — the same generators the Simulate
+  // tab uses — so it needs no `values` pool. Checked before the pool guard
+  // below, which would otherwise return an all-null column.
+  if (mode === "distribution") {
+    return drawSamples(mulberry32(seed), n, opts.dist, opts.distParams ?? {});
+  }
+
+  // Conditional mode carries its values on the rules themselves, so it must NOT
+  // be gated on the pool — a rules-only step (every branch a distribution draw)
+  // has a legitimately empty `values`. Only the pool-consuming modes below need
+  // the guard.
+  if (mode !== "conditional" && (!Array.isArray(values) || values.length === 0)) {
+    return Array(n).fill(null);
+  }
 
   if (mode === "recycle") {
     return rows.map((_, i) => values[i % values.length]);

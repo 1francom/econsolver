@@ -1,6 +1,7 @@
 // ─── ECON STUDIO · src/components/modeling/shared.jsx ───────────────────────
 // Theme hook + micro-UI atoms shared across all Modeling sub-components.
 
+import { useState } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import { MONO_STACK } from "../../theme.js";
 
@@ -108,12 +109,45 @@ export function ModelBtn({ model, selected, disabled, onClick, color, hint }) {
   );
 }
 
-export function Section({ title, children, color }) {
+// `collapsible` turns the label into a disclosure header. `defaultOpen` is only
+// read on mount (it seeds useState), which is deliberate: callers pass a value
+// derived from their data, and re-syncing it on every render would collapse the
+// section under the user mid-interaction. Do not "fix" it into a useEffect.
+export function Section({ title, children, color, collapsible = false, defaultOpen = true }) {
   const { C, T } = useTheme();
+  const [open, setOpen] = useState(defaultOpen);
+
+  if (!collapsible) {
+    return (
+      <div style={{ marginBottom: "1.4rem" }}>
+        <Lbl color={color ?? C.textMuted}>{title}</Lbl>
+        {children}
+      </div>
+    );
+  }
+
   return (
-    <div style={{ marginBottom: "1.4rem" }}>
-      <Lbl color={color ?? C.textMuted}>{title}</Lbl>
-      {children}
+    // Collapsed sections tighten their bottom margin — the point of collapsing
+    // here is reclaiming sidebar height, so the gap shrinks with the content.
+    <div style={{ marginBottom: open ? "1.4rem" : "0.5rem" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title={open ? "Collapse" : "Expand"}
+        style={{
+          display: "flex", alignItems: "baseline", gap: 6, width: "100%",
+          background: "transparent", border: "none", padding: 0,
+          cursor: "pointer", textAlign: "left",
+        }}
+      >
+        <span style={{
+          fontSize: T.caption.fontSize, color: color ?? C.textMuted,
+          lineHeight: 1, flexShrink: 0,
+        }}>
+          {open ? "▾" : "▸"}
+        </span>
+        <Lbl color={color ?? C.textMuted}>{title}</Lbl>
+      </button>
+      {open && children}
     </div>
   );
 }
@@ -140,7 +174,14 @@ export function InfoBox({ children, color, bg }) {
 export function VarPanel({ title, color, vars, selected, onToggle, multi = true, info, factorVars, onToggleFactor }) {
   const { C, T } = useTheme();
   return (
-    <Section title={`${title} — ${selected.length > 0 ? selected.join(", ") : "none"}`} color={color}>
+    <Section
+      title={`${title} — ${selected.length > 0 ? selected.join(", ") : "none"}`}
+      color={color}
+      collapsible
+      // Already-configured panels start folded; an empty one stays open so the
+      // first selection still invites a click. Mount-time only (see Section).
+      defaultOpen={selected.length === 0}
+    >
       {info && (
         <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.body.fontFamily, marginBottom: 6 }}>
           {info}

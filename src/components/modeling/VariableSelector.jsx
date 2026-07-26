@@ -16,11 +16,37 @@
 
 import { VarPanel, mono, useTheme } from "./shared.jsx";
 
-// Models that expose an X (Features) selector
-const SHOW_X = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit", "Poisson", "GMM", "LIML", "PoissonFE", "NegBinFE", "LSDV"]);
-// Models that expose a W (Controls) selector in this panel
-// DiD/TWFE controls are rendered in ModelConfiguration alongside group selectors
-const SHOW_W = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "RDD", "Logit", "Probit", "Poisson", "GMM", "LIML", "PoissonFE", "NegBinFE", "LSDV"]);
+// Models that expose an X (Features) selector.
+//
+// RDD is deliberately absent: its design is Y + running variable + cutoff, and
+// the only other input the engine takes is a single covariate list, which it
+// receives from W. `estimationDispatch` calls
+// `runSharpRDD(rows, y, runningVar, cutoff, h, kernel, expW, …)` and does not
+// even record xVars in the result spec, so an X picker there was dead UI —
+// anything selected in it was silently discarded.
+const SHOW_X = new Set(["OLS", "WLS", "FE", "FD", "2SLS", "Logit", "Probit", "Poisson", "GMM", "LIML", "PoissonFE", "NegBinFE", "LSDV"]);
+// Models that expose a W (Controls) selector in this panel.
+// DiD/TWFE controls are rendered in ModelConfiguration alongside group selectors.
+//
+// Only estimators where W is genuinely NOT the same thing as X appear here:
+//   2SLS / GMM / LIML — X is endogenous and gets instrumented in stage 1, while
+//     W is exogenous and serves as its OWN instrument (ModelingTab builds
+//     `zAll2 = [...wVars, ...zVars]`). Folding W into X would drop those
+//     instruments and silently under-identify the model.
+//   RDD — W is the covariate list passed to the engine; X is not used there.
+//
+// For every other estimator the engine just does `[...xVars, ...wVars]`, so a
+// separate Controls picker was pure duplication of the X picker and is gone.
+// Those models are listed in FOLD_W_INTO_X below.
+const SHOW_W = new Set(["2SLS", "RDD", "GMM", "LIML"]);
+
+// Estimators that no longer show a Controls picker because W and X are combined
+// identically by the engine. ModelingTab folds any leftover W selection into X
+// when one of these is active, so a control picked under another estimator can
+// never keep silently entering the model from a panel that is no longer visible.
+export const FOLD_W_INTO_X = new Set([
+  "OLS", "WLS", "FE", "FD", "Logit", "Probit", "Poisson", "PoissonFE", "NegBinFE", "LSDV",
+]);
 
 export default function VariableSelector({
   model,
@@ -40,8 +66,13 @@ export default function VariableSelector({
   const { C, T } = useTheme();
   // X/W pickers show all columns (numeric + categorical); Y picker is numeric-only
   const xwCols = allCols ?? numericCols;
+  const showX = SHOW_X.has(model);
   const availForX = xwCols.filter(h => !yVar.includes(h));
-  const availForW = xwCols.filter(h => !yVar.includes(h) && !xVars.includes(h));
+  // Only hide already-assigned X columns when the X picker is actually on screen.
+  // For an estimator without one (RDD), a stale xVars left over from a previous
+  // model would otherwise remove those columns from the W picker too, making them
+  // unselectable in both — invisible rather than merely unused.
+  const availForW = xwCols.filter(h => !yVar.includes(h) && !(showX && xVars.includes(h)));
 
   const addTerm = () =>
     setInteractionTerms?.(prev => [...prev, { var1: "", var2: "", type: "*" }]);

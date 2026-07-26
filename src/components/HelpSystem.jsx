@@ -19,7 +19,7 @@ export const TOUR_STEPS = [
     id: "data",
     tab: "data",
     title: "1 · Data",
-    text: "Upload CSV, Excel (.xlsx/.xls), Stata (.dta), R (.rds), or shapefiles (.shp) via drag & drop. Fetch live datasets from the World Bank or OECD APIs. Column types are auto-detected.",
+    text: "Upload CSV, Excel (.xlsx/.xls), Stata (.dta), R (.rds), or shapefiles (.shp) via drag & drop. Fetch live datasets from the World Bank API. Column types are auto-detected.",
   },
   {
     id: "clean",

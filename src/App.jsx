@@ -1,7 +1,7 @@
 // ─── ECON STUDIO · App.jsx ────────────────────────────────────────────────────
 // Root orchestrator. Manages global state and screen routing.
 // All heavy logic lives in the module files — this file should stay thin.
-import { useState, useRef, useEffect, useMemo, Fragment } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from "react";
 import * as XLSX from "xlsx";
 import DataStudio, { parseFileForPrimary } from "./DataStudio.jsx";
 import ExplorerModule from "./ExplorerModule.jsx";
@@ -11,7 +11,7 @@ import WorkspaceBar from './components/workspace/WorkspaceBar.jsx';
 import ConfirmPopover from './components/shared/ConfirmPopover.jsx';
 import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
-import OECDFetcher      from './components/wrangling/OECDFetcher.jsx';
+import SplitDivider from './components/workspace/SplitDivider.jsx';
 import ObservatorioFetcher from './components/wrangling/ObservatorioFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { SessionLogProvider } from './services/session/sessionLog.jsx';
@@ -1117,7 +1117,7 @@ function ColumnMetaTable({ rows, headers, colInfo }) {
   );
 }
 
-// Dataset overview + load controls (file upload, World Bank, OECD).
+// Dataset overview + load controls (file upload, World Bank).
 function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], activeDatasetId, onSelectDataset, onDeleteDataset, onRenameDataset }) {
   const { C, T } = useTheme();
   const formats  = ["CSV","TSV","XLSX","XLS","JSON","DTA","RDS","DBF","SHP","ZIP"];
@@ -1126,7 +1126,6 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
   const [err,       setErr]       = useState("");
   const [success,   setSuccess]   = useState("");
   const [wbOpen,    setWbOpen]    = useState(false);
-  const [oecdOpen,  setOecdOpen]  = useState(false);
   const [obsOpen,   setObsOpen]   = useState(false);
   const [preloadedOpen, setPreloadedOpen] = useState(false);
   const [dragOver,  setDragOver]  = useState(false);
@@ -1248,7 +1247,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
               </div>
               <div style={{fontSize: T.h2.fontSize,color:C.text,marginBottom:6}}>Load your first dataset</div>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,lineHeight:1.7}}>
-                Drop a file below, fetch from World Bank / OECD, or use the Simulate tab to generate synthetic data.
+                Drop a file below, fetch from the World Bank, or use the Simulate tab to generate synthetic data.
               </div>
             </div>
 
@@ -1279,17 +1278,12 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             {err && <div style={{fontSize: T.caption.fontSize,color:C.red,fontFamily: T.code.fontFamily}}>{err}</div>}
             {success && <div style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>{success}</div>}
 
-            {/* Or: World Bank / OECD */}
+            {/* Or: World Bank */}
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>setWbOpen(true)}
                 style={{flex:1,padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
                         border:`1px solid ${C.border2}`,color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
                 World Bank ↗
-              </button>
-              <button onClick={()=>setOecdOpen(true)}
-                style={{flex:1,padding:"0.5rem",borderRadius:3,cursor:"pointer",background:"transparent",
-                        border:`1px solid ${C.border2}`,color:C.textDim,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize}}>
-                OECD ↗
               </button>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:5}}>
@@ -1505,7 +1499,6 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:14}}>
               {[
                 {label:"↓ World Bank data", color:C.teal, action:()=>setWbOpen(true)},
-                {label:"↓ OECD data",       color:C.blue, action:()=>setOecdOpen(true)},
                 // Observatorio (femicidios) hidden from UI 2026-07-02 — scraper-style
                 // fetchers need a general in-app story before exposing to users.
                 // Re-add: {label:"↓ Observatorio (femicidios)", color:C.gold, action:()=>setObsOpen(true)},
@@ -1600,16 +1593,6 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
           }}
           onClose={() => setWbOpen(false)}
-        />
-      )}
-      {oecdOpen && (
-        <OECDFetcher
-          onLoad={(fname, rows, headers) => {
-            studioRef.current?.addApiData(fname, rows, headers);
-            setOecdOpen(false);
-            setSuccess(`"${fname}" loaded — visible in Dataset Manager.`);
-          }}
-          onClose={() => setOecdOpen(false)}
         />
       )}
       {obsOpen && (
@@ -2674,7 +2657,84 @@ export default function App() {
   const [projectName,        setProjectName]       = useState("");
   const [pid,                setPid]               = useState(null);
   const [outputs,            setOutputs]           = useState({});
-  const [activeTab,          setActiveTab]         = useState("clean");
+  // ── Pane model ────────────────────────────────────────────────────────────
+  // `panes` is positional: [leftTabId, rightTabId | null]. null in slot 1 means
+  // no split. `activeTab` stays the focused pane's tab so every existing
+  // consumer (nav history, tour, WorkspaceBar) keeps working unchanged.
+  const [panes,     setPanes]     = useState(["clean", null]);
+  const [focused,   setFocused]   = useState(0);
+  const [paneRatio, setPaneRatio] = useState(0.5);
+
+  const isSplit   = panes[1] !== null;
+  const activeTab = panes[focused] ?? panes[0];
+
+  // Drop-in replacement for the old setter: assigns a module to the FOCUSED
+  // pane. A module is a single DOM element, so it can never appear twice —
+  // asking for one that's already in the other pane swaps the two instead.
+  const setActiveTab = useCallback((tab) => {
+    setPanes(p => {
+      const other = 1 - focused;
+      const next  = [...p];
+      if (p[other] === tab) next[other] = p[focused];
+      next[focused] = tab;
+      return next;
+    });
+  }, [focused]);
+
+  // Half the divider's width — panes leave this much room on the shared edge.
+  const DIVIDER_HALF = 3;
+
+  // The CSS box for a tab's panel. Unassigned panels stay mounted but hidden,
+  // exactly as before. This is the whole split: no element ever moves in the
+  // React tree, so nothing remounts and no module loses state.
+  const paneBox = (tab) => {
+    const idx = panes.indexOf(tab);
+    if (idx === -1)  return { ...tabPanel, display: "none" };
+    if (!isSplit)    return { ...tabPanel, display: "flex" };
+
+    const R = paneRatio * 100;
+    const box = idx === 0
+      ? { left: 0,                                  width: `calc(${R}% - ${DIVIDER_HALF}px)` }
+      : { left: `calc(${R}% + ${DIVIDER_HALF}px)`,  width: `calc(${100 - R}% - ${DIVIDER_HALF}px)` };
+
+    return {
+      position: "absolute", top: 0, bottom: 0, overflow: "hidden",
+      display: "flex", ...box,
+      boxShadow: idx === focused ? `inset 0 0 0 1px ${C.teal}66` : "none",
+    };
+  };
+
+  // Clicking anywhere inside a pane focuses it, so the next tab click lands there.
+  const paneFocusProps = (tab) => {
+    const idx = panes.indexOf(tab);
+    return idx === -1 ? {} : { onMouseDownCapture: () => setFocused(idx) };
+  };
+
+  // Close one pane; the survivor goes full width.
+  const closePane = useCallback((idx) => {
+    setPanes(p => [p[1 - idx] ?? p[idx], null]);
+    setFocused(0);
+    setPaneRatio(0.5);
+  }, []);
+
+  // ⊞ toggle. Opening seeds the new pane with a tab that is never locked
+  // (Data and Clean have requiresOutput:false) and focuses it, so the user's
+  // next tab click lands in the pane they just created.
+  const toggleSplit = useCallback(() => {
+    if (isSplit) {
+      const keep = panes[focused] ?? panes[0];
+      setPanes([keep, null]);
+      setFocused(0);
+      setPaneRatio(0.5);
+    } else {
+      setPanes([panes[0], panes[0] === "clean" ? "data" : "clean"]);
+      setFocused(1);
+      setPaneRatio(0.5);
+    }
+  }, [isSplit, panes, focused]);
+
+  // Panel-container ref — the divider positions itself against this box.
+  const paneWrapRef = useRef(null);
   // Per-tab independent dataset selection — each tab remembers its own active dataset
   const [activeDatasetIds,   setActiveDatasetIds]  = useState({
     data: null, clean: null, explore: null, model: null,
@@ -2704,6 +2764,33 @@ export default function App() {
 
   // ── Session restore: persist navigation state to sessionStorage ──────────────
   const NAV_KEY = "litux:nav";
+  // Pane layout gets its own per-project key (same convention as
+  // litux:wrangle_tab) so switching projects never carries a split across.
+  const PANES_KEY = pid ? `litux:panes:${pid}` : null;
+
+  // Restore the pane layout for this project. Guarded so a corrupt or stale
+  // record can never leave the workspace with no visible pane.
+  useEffect(() => {
+    if (!PANES_KEY) return;
+    try {
+      const raw = sessionStorage.getItem(PANES_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (!Array.isArray(saved?.panes) || !saved.panes[0]) return;
+      setPanes([saved.panes[0], saved.panes[1] ?? null]);
+      setFocused(saved.focused === 1 && saved.panes[1] ? 1 : 0);
+      const r = Number(saved.ratio);
+      setPaneRatio(Number.isFinite(r) && r > 0.1 && r < 0.9 ? r : 0.5);
+    } catch { sessionStorage.removeItem(PANES_KEY); }
+  }, [PANES_KEY]);
+
+  // Persist on every layout change.
+  useEffect(() => {
+    if (!PANES_KEY) return;
+    try {
+      sessionStorage.setItem(PANES_KEY, JSON.stringify({ panes, focused, ratio: paneRatio }));
+    } catch { /* sessionStorage full or unavailable — layout is not critical */ }
+  }, [PANES_KEY, panes, focused, paneRatio]);
 
   // On mount: if the user was in the workspace, reload that project + tab.
   useEffect(() => {
@@ -2778,6 +2865,8 @@ export default function App() {
 
   function navigateToTab(newTab) {
     if (newTab === activeTab) return;
+    // In split view the other pane may already hold this tab; setActiveTab
+    // swaps them, which is a real change even though activeTab differs.
     pushHistory(screen, activeTab);
     setActiveTab(newTab);
   }
@@ -2989,6 +3078,9 @@ export default function App() {
               <WorkspaceBar
                 activeTab={activeTab}
                 onTabChange={navigateToTab}
+                openTabs={panes.filter(Boolean)}
+                isSplit={isSplit}
+                onToggleSplit={toggleSplit}
                 hasOutput={!!(tabOutput(activeTab) || tabRawData(activeTab)?.rows?.length)}
                 reportUnlocked={(modelingSession?.pinnedModels?.length ?? 0) > 0}
                 activeDatasetId={tabDsId(activeTab)}
@@ -3028,10 +3120,19 @@ export default function App() {
               )}
 
               {/* ── Tab panels — kept mounted via display:none to preserve state ── */}
-              <div style={{flex:1,minHeight:0,position:"relative"}}>
+              <div ref={paneWrapRef} style={{flex:1,minHeight:0,position:"relative"}}>
 
-                {/* DATA — dataset overview + file upload + WB/OECD fetchers */}
-                <div style={{...tabPanel, display: activeTab==="data" ? "flex" : "none", flexDirection:"column"}}>
+                {isSplit && (
+                  <SplitDivider
+                    ratio={paneRatio}
+                    onRatio={setPaneRatio}
+                    onClosePane={closePane}
+                    containerRef={paneWrapRef}
+                  />
+                )}
+
+                {/* DATA — dataset overview + file upload + World Bank fetcher */}
+                <div {...paneFocusProps("data")} style={{...paneBox("data"), flexDirection:"column"}}>
                   <DataTab
                     filename={filename} studioRef={studioRef}
                     cleanedData={tabOutput("data")}
@@ -3044,7 +3145,7 @@ export default function App() {
                 </div>
 
                 {/* CLEAN — only mounted when there is data */}
-                <div style={{...tabPanel, display: activeTab==="clean" ? "flex" : "none", flexDirection:"column"}}>
+                <div {...paneFocusProps("clean")} style={{...paneBox("clean"), flexDirection:"column"}}>
                   <DataStudio
                     ref={studioRef}
                     key={pid}
@@ -3064,7 +3165,7 @@ export default function App() {
                 </div>
 
                 {/* EXPLORE */}
-                <div style={{...tabPanel, display: activeTab==="explore" ? "flex" : "none", flexDirection:"column"}}>
+                <div {...paneFocusProps("explore")} style={{...paneBox("explore"), flexDirection:"column"}}>
                   {exploreCleanedData
                     ? <ExplorerModule
                         key={tabDsId("explore")}
@@ -3086,7 +3187,7 @@ export default function App() {
                 </div>
 
                 {/* MODEL */}
-                <div style={{...tabPanel, display: activeTab==="model" ? "flex" : "none", flexDirection:"column"}}>
+                <div {...paneFocusProps("model")} style={{...paneBox("model"), flexDirection:"column"}}>
                   {modelCleanedData
                     ? <ModelingTab
                         cleanedData={modelCleanedData}
@@ -3105,7 +3206,7 @@ export default function App() {
                 </div>
 
                 {/* SPATIAL — Phase 11 */}
-                <div style={{...tabPanel, display: activeTab==="spatial" ? "flex" : "none", flexDirection:"column"}}>
+                <div {...paneFocusProps("spatial")} style={{...paneBox("spatial"), flexDirection:"column"}}>
                   <SpatialTab
                     rows={tabOutput("spatial")?.cleanRows ?? tabRawData("spatial")?.rows ?? []}
                     headers={tabOutput("spatial")?.headers ?? tabRawData("spatial")?.headers ?? []}
@@ -3123,7 +3224,7 @@ export default function App() {
                 </div>
 
                 {/* SIMULATE — Phase 9.8 */}
-                <div style={{...tabPanel, display: activeTab==="simulate" ? "flex" : "none", flexDirection:"column"}}>
+                <div {...paneFocusProps("simulate")} style={{...paneBox("simulate"), flexDirection:"column"}}>
                   <SimulateTab
                     rows={tabOutput("simulate")?.cleanRows ?? tabRawData("simulate")?.rows ?? []}
                     headers={tabOutput("simulate")?.headers ?? tabRawData("simulate")?.headers ?? []}
@@ -3147,7 +3248,7 @@ export default function App() {
                 </div>
 
                 {/* REPORT — Phase 9.10 */}
-                <div style={{...tabPanel, display: activeTab==="report" ? "flex" : "none"}}>
+                <div {...paneFocusProps("report")} style={{...paneBox("report")}}>
                   {(reportCleanedData || (modelingSession?.pinnedModels?.length ?? 0) > 0)
                     ? <ReportingModule result={activeResult} cleanedData={reportCleanedData} availableDatasets={availableDatasets} pinnedModels={modelingSession?.pinnedModels ?? []} pid={pid} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
@@ -3155,7 +3256,7 @@ export default function App() {
                 </div>
 
                 {/* CALCULATE — Phase 9.7 */}
-                <div style={{...tabPanel, display: activeTab==="calculate" ? "flex" : "none", flexDirection:"column"}}>
+                <div {...paneFocusProps("calculate")} style={{...paneBox("calculate"), flexDirection:"column"}}>
                   <CalculateTab
                     pid={pid}
                     rows={tabOutput("calculate")?.cleanRows ?? tabRawData("calculate")?.rows ?? []}
