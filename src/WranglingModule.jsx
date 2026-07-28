@@ -488,7 +488,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
               <span style={{ fontSize: T.caption.fontSize, padding:"2px 6px", border:`1px solid ${C.teal}`,
                 color:C.teal, borderRadius:2, letterSpacing:"0.1em",
                 fontFamily: T.code.fontFamily, whiteSpace:"nowrap" }}>
-                ⚡ DuckDB{rawData._duckdb.truncated ? ` · showing 2,000,000 of ${rawData._duckdb.rowCount.toLocaleString()}` : ""}
+                ⚡ DuckDB{rawData._duckdb.rowCount ? ` · ${rawData._duckdb.rowCount.toLocaleString()} rows` : ""}
               </span>
             )}
             {panel && (

@@ -11,6 +11,9 @@
 
 import { getDuckDB } from "../services/data/duckdb.js";
 import { runPipeline } from "./runner.js";
+import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
+
+const stripProtected = (hs) => hs.filter(h => !PROTECTED_ROW_ID_COLS.includes(h));
 
 const MAX_EXTRACT = 2_000_000;
 
@@ -29,6 +32,11 @@ const SQL_STEPS = new Set([
   "pivot_longer",
   "join", "append",
   "grouped_mutate",
+  // Cell edits. Untranslated, every single edit dropped the whole table into JS
+  // via the fallback below — 7-9 s per keystroke-commit on a 214k-row dataset,
+  // and the fallback's return carries no _duckdb, so the dataset also lost its
+  // SQL backing the moment you edited one cell.
+  "patch",
 ]);
 
 // ── Escaping helpers ───────────────────────────────────────────────────────────
@@ -36,6 +44,15 @@ const SQL_STEPS = new Set([
 /** Escape a column name for DuckDB double-quoted identifiers. */
 function esc(col) {
   return `"${String(col).replace(/"/g, '""')}"`;
+}
+
+/** A column's declared SQL type, or null if it cannot be determined. */
+async function columnType(tableName, col, conn) {
+  try {
+    const res = await conn.query(`DESCRIBE "${tableName}"`);
+    const row = res.toArray().find(r => String(r.column_name) === col);
+    return row ? String(row.column_type) : null;
+  } catch { return null; }
 }
 
 /** Escape a value for use in a LIKE pattern (escapes %, _). */
@@ -296,6 +313,32 @@ async function applyStepSQL(step, tbl, headers, conn, context = {}) {
         `);
       }
       return { tableName: next, headers: newHeaders };
+    }
+
+    // ── Cell edit ─────────────────────────────────────────────────────────────
+    // Rewrites one cell, matched on the stable __ri identity column. The value
+    // is CAST to the column's existing type so the CASE branches stay type-
+    // compatible; a value that cannot be cast (text typed into a numeric column)
+    // makes DuckDB throw, and the caller's catch falls back to JS — which allows
+    // mixed types — instead of corrupting the column. Same outcome as before the
+    // translation existed, just only for the cases that genuinely need it.
+    case "patch": {
+      if (step.ri == null || !step.col) return null;
+      if (!headers.includes(step.col)) return null;
+      if (!headers.includes("__ri")) return null; // no identity column → let JS handle it
+
+      const pType = await columnType(tbl, step.col, conn);
+      if (!pType) return null;
+      const pLit = step.value === null || step.value === undefined
+        ? "NULL"
+        : `CAST(${valSQL(step.value)} AS ${pType})`;
+      const pSel = headers.map(h =>
+        h === step.col
+          ? `CASE WHEN "__ri" = ${Number(step.ri)} THEN ${pLit} ELSE ${esc(h)} END AS ${esc(h)}`
+          : esc(h)
+      ).join(", ");
+      await conn.query(`CREATE OR REPLACE TABLE "${next}" AS SELECT ${pSel} FROM "${tbl}"`);
+      return { tableName: next, headers };
     }
 
     // ── Group 2: String operations ────────────────────────────────────────────
@@ -661,7 +704,18 @@ async function countRows(tableName, conn) {
  */
 export async function runPipelineDuck(rawTableName, rawHeaders, steps, conn, context = {}) {
   let tableName = rawTableName;
-  let headers   = [...rawHeaders];
+  // Work from the table's PHYSICAL columns, not the caller's headers: callers
+  // hold the UI-facing list, which deliberately excludes __ri/__row_id — but the
+  // SQL steps that enumerate columns (rename, drop) rebuild their SELECT from
+  // this array, and would silently drop row identity from the table if it were
+  // missing here. Protected columns are stripped again at every return below,
+  // so they never leak back into the UI.
+  let headers = [...rawHeaders];
+  try {
+    const desc = await conn.query(`DESCRIBE "${rawTableName}"`);
+    const physical = desc.toArray().map(r => String(r.column_name));
+    if (physical.length) headers = physical;
+  } catch { /* DESCRIBE failed — fall back to the caller's headers */ }
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
@@ -682,8 +736,14 @@ export async function runPipelineDuck(rawTableName, rawHeaders, steps, conn, con
     const extractedRows = await extractRows(tableName, conn);
     const remaining     = steps.slice(i);
     // context is empty here — join steps referencing other datasets are
-    // already handled by the JS path in WranglingModule for secondary datasets
-    const { rows, headers: finalHeaders } = runPipeline(extractedRows, headers, remaining, context);
+    // already handled by the JS path in WranglingModule for secondary datasets.
+    // Headers handed to the JS runner are the VISIBLE ones; the extracted rows
+    // still carry __ri as an extra key (spread-preserving steps keep it), which
+    // is exactly what lets a `patch` step match rows on this fallback path.
+    const { rows, headers: finalHeaders } = runPipeline(extractedRows, stripProtected(headers), remaining, context);
+    // No _duckdb here on purpose: the remaining steps ran in JS, so `rows` — not
+    // any table — is now the truth. Returning a stale tableName would point the
+    // model/export fast paths at data that predates those steps.
     return { rows, headers: finalHeaders };
   }
 
@@ -693,7 +753,7 @@ export async function runPipelineDuck(rawTableName, rawHeaders, steps, conn, con
   const rows = await extractRows(tableName, conn, PREVIEW);
   return {
     rows, // preview only — ModelingTab calls extractAllRows() before estimating
-    headers,
+    headers: stripProtected(headers),
     _duckdb: { tableName, rowCount },
   };
 }
