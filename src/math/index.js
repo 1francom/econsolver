@@ -97,6 +97,7 @@ export { wrapResult, wrapNegBinFE, getCoeffBlock } from "./EstimationResult.js";
 
 // ── Fit-failure diagnostics ──────────────────────────────────────────────────
 export { diagnoseFit } from "./diagnoseFit.js";
+export { diagnoseRDD } from "./diagnoseRDD.js";
 
 // Symbolic algebra for the Calculate module
 export { solveAlgebraicEquation } from "./symbolicSolve.js";

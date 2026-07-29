@@ -616,3 +616,57 @@
 
 - [14:23] · General
   Think about how to construct lists, save them and use them during the session when filtering or constructing variables — cross-module feature (Clean filters + Feature builder + maybe Explore). No natural home yet in the current per-module state model; needs a design session (where do lists live — session-scoped React context like `sessionState.jsx`? IndexedDB-persisted?) before implementation. Not started.
+
+---
+
+## 2026-07-22 batch
+
+### Bugs
+
+- ~~[11:38] · Model
+  P-values with small numbers!!!!!!~~ ✓ likely fixed — `216b1ecb` (2026-07-28, same-day fix landed after this was filed); needs confirmation
+
+- ~~[13:02] · Model
+  Subsets in RDD does not seem to work~~ ✓ fixed — 2026-07-28 (not yet committed); root cause was a silent-failure UX gap in `runAllSubsets`, not a math bug — see BugTriage.md for detail; needs Franco's confirmation in-app
+
+### Features
+
+- [12:56] · Model
+  Add more options to plot the binned scatter plots after running models using the arguments of R and Python as commands in the UI, for all estimators
+
+- [12:57] · Model
+  Allow to adjust (mainly reduce) the zoom of the plots, by changing the number of observations
+
+---
+
+## 2026-07-28 batch
+
+### Bugs
+
+- [08:30] · Simulate
+  Update the replication script, currently it replicates only the DGP
+
+- [10:40] · Explore
+  References of the group in time series doesn't work
+
+- [11:15] · Explore
+  Check bar plot (equivalent to geom_col()) and the binwidth in the histograms (Plot Builder)
+
+- ~~[11:18] · Model
+  URGENT THE p-values!!!!!! beta=0.0001 and se=0.002 can never give a p-value < 0.001 with ***~~ ✓ likely fixed — `216b1ecb` (2026-07-28); needs confirmation
+
+- ~~[11:32] · Model
+  P-Values of OLS have a problem when the estimations are insignificant~~ ✓ likely fixed — `216b1ecb` (2026-07-28); needs confirmation
+
+### Features
+
+- ~~[11:43] · Clean
+  Add FE for OLS and all estimators, equivalent to feols() in R~~ ✓ not needed — discussed with Franco 2026-07-28: the "FE" estimator already accepts arbitrary FE columns via `runFEMulti`/the FE column picker (same math as `feols(y ~ x | fe1 + fe2)`), reachable today by declaring any entity/time pair in PanelTab (even a trivial/degenerate one) and picking additional FE columns. No engine or UI work needed; closing as already covered.
+
+- [12:45] · Clean
+  Add a function to print a list with all the distinct values of a variable, e.g. a user wants to see the names in "Country" or "Continent"
+
+### UX / Design
+
+- [12:10] · Clean
+  Make the pipeline able to be hidden

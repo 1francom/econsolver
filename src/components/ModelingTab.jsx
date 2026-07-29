@@ -657,6 +657,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
   // ── Subsets ───────────────────────────────────────────────────────────────
   const [subsets, setSubsets] = useState([]);
+  // { added: number, total: number, failures: {name: string, error: string}[] } | null
+  // Surfaces per-subset estimation failures after "Run all" — previously these
+  // were silently dropped from the model buffer with zero indication, which is
+  // especially confusing for RDD (a subset can easily land one-sided on the
+  // cutoff or have too few points in the bandwidth window).
+  const [subsetRunSummary, setSubsetRunSummary] = useState(null);
 
   // ── Model buffer (pinned models) ──────────────────────────────────────────
   const [bufferVersion, setBufferVersion] = useState(0);
@@ -927,10 +933,14 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const runAllSubsets = useCallback(async () => {
     if (!subsets.length) return;
     setRunning(true);
+    setSubsetRunSummary(null);
     try {
       const baseRows = await getFullRows();
       const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
       const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
+      const failures = [];
+      let added = 0;
+      const total = subsets.length + 1; // + Full sample
 
       // Full sample (with per-subset steps applied if a branch point is set)
       const fullRows = hasSubsetSteps
@@ -941,6 +951,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         const r = { ...fullOut.result, label: `${fullOut.result.type} · Full sample`, subsetName: "Full sample", subsetFilters: [] };
         modelBuffer.add(r);
         setBufferVersion(v => v + 1);
+        added++;
+      } else {
+        failures.push({ name: "Full sample", error: fullOut.error ?? "Estimation failed." });
       }
 
       // Each named subset
@@ -954,8 +967,12 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           const r = { ...out.result, label: `${out.result.type} · ${s.name}`, subsetName: s.name, subsetFilters: s.filters ?? [] };
           modelBuffer.add(r);
           setBufferVersion(v => v + 1);
+          added++;
+        } else {
+          failures.push({ name: s.name, error: out.error ?? "Estimation failed." });
         }
       }
+      setSubsetRunSummary({ added, total, failures });
     } finally {
       setRunning(false);
     }
@@ -2325,6 +2342,26 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             onRunAll={runAllSubsets}
             running={running}
           />
+
+          {subsetRunSummary && (
+            <div style={{
+              marginTop: "0.5rem", padding: "0.5rem 0.7rem",
+              background: C.surface,
+              border: `1px solid ${subsetRunSummary.failures.length ? C.gold + "40" : C.teal + "40"}`,
+              borderLeft: `3px solid ${subsetRunSummary.failures.length ? C.gold : C.teal}`,
+              borderRadius: 4, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, lineHeight: 1.6,
+            }}>
+              <div style={{ color: subsetRunSummary.failures.length ? C.gold : C.teal }}>
+                {subsetRunSummary.added}/{subsetRunSummary.total} subsets added to the model buffer
+                {subsetRunSummary.failures.length ? ` · ${subsetRunSummary.failures.length} failed` : ""}
+              </div>
+              {subsetRunSummary.failures.map((f, i) => (
+                <div key={i} style={{ marginTop: 4, color: C.textMuted }}>
+                  <span style={{ color: C.red }}>{f.name}</span>: {f.error}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* ── H7: Download multi-subset bundle ── */}
           {subsets.length > 0 && (
