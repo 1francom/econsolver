@@ -617,7 +617,19 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       // numeric [yMin, yMax] domain injected further down would replace the band
       // domain outright — so tile opts out of all three.
       const hasTile = layers.some(ly => ly.visible && ly.geom === "tile");
-      const showRuleX = !xIsDate && !hasBoxplot && !hasTile && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
+      // barY puts x on a BAND scale and draws every bar from a zero baseline, so
+      // it needs the same two exemptions boxplot/tile already have:
+      //   - a numeric ruleX([0]) adds a stray empty "0" band to the categorical x
+      //     domain (identical to the boxplot bug above — bar was just never added
+      //     to the list), which is why a 2-category bar chart rendered 3 slots;
+      //   - the injected [yMin, yMax] domain can EXCLUDE 0, which leaves the bars
+      //     hanging off the bottom of the panel and blows a 0.117-vs-0.118
+      //     difference up to full panel height. ggplot's geom_col always keeps 0
+      //     in the scale, so mirror that instead of dropping the domain.
+      const hasBar = layers.some(ly => ly.visible && ly.geom === "bar");
+      const autoYMin = hasBar ? Math.min(0, yMin) : yMin;
+      const autoYMax = hasBar ? Math.max(0, yMax) : yMax;
+      const showRuleX = !xIsDate && !hasBoxplot && !hasTile && !hasBar && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
       const showRuleY = !hasTile && yVals.length > 0 && 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
 
       const zeroStyle = { stroke: "#888", strokeWidth: 1.4, strokeOpacity: 0.55 };
@@ -738,9 +750,9 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
           ...(yCatOrder
             ? { domain: yCatOrder.split(",").map(s => s.trim()).filter(Boolean) }
             : yDomain[0] != null || yDomain[1] != null
-              ? { domain: [yDomain[0] ?? yMin, yDomain[1] ?? yMax] }
+              ? { domain: [yDomain[0] ?? autoYMin, yDomain[1] ?? autoYMax] }
               : yVals.length > 0 && !hasTile
-                ? { domain: [yMin, yMax] }
+                ? { domain: [autoYMin, autoYMax] }
                 : {}),
           ...(yFmt ? { tickFormat: yFmt } : {}),
         },
