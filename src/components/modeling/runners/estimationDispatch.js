@@ -13,7 +13,7 @@ import {
   runFuzzyRDD, runEventStudyMulti, runLSDV, runLSDVMulti, runPoisson, runPoissonFE, runPoissonFEMulti, runNegBinFE,
   runSunAbraham, runSyntheticControl, runCallawayCS,
   runSpatialRDD, runSpatialRegressionFromRows,
-  wrapResult, diagnoseFit,
+  wrapResult, diagnoseFit, diagnoseRDD,
 } from "../../../math/index.js";
 import { applyFactors, expandInteractions, resolveEstimator } from "../helpers.js";
 import { materializeFEInteraction } from "../../../core/generate/feInteraction.js";
@@ -161,7 +161,7 @@ export function dispatchEstimation(dataRows, ctx) {
       const h = bwMode === "ik" ? ikBandwidth(runVals, yVals, c0, polyOrder) : parseFloat(bwManual);
       if (isNaN(h) || h <= 0) return { error: "Invalid bandwidth." };
       const res = runSharpRDD(dataRows, y, runningVar[0], c0, h, kernel, expW, seOpts, polyOrder);
-      if (!res) return { error: "RDD failed. Not enough observations within bandwidth." };
+      if (!res) return { error: diagnoseRDD(dataRows, y, runningVar[0], c0, h) };
       return { result: wrapResult("RDD", res, { yVar: y, wVars: expW, runningVar: runningVar[0], cutoff: c0, bandwidth: h, kernel, polyOrder }, { h }), panelFE: null, panelFD: null };
 
     } else if (effModel === "Logit" || effModel === "Probit") {

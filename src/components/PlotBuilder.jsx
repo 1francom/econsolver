@@ -138,16 +138,53 @@ function genId() { return "ly_" + Math.random().toString(36).slice(2, 8); }
 
 const DEFAULT_FILLS = ["#6ec8b4","#c8a96e","#6e9ec8","#c47070","#a87ec8","#7ab896","#c88e6e"];
 
+// ggplot2's six linetypes. Stored by NAME rather than as an SVG dasharray so
+// each exporter can spell it its own way from one vocabulary — R takes the name
+// verbatim, which is what keeps the script and the canvas from drifting apart.
+// Dash patterns mirror R's own lty units (dashed = 4 on / 4 off, etc.).
+const LINETYPES = [
+  { id: "solid",    icon: "———",   dash: null },
+  { id: "dashed",   icon: "– – –", dash: "4,4" },
+  { id: "dotted",   icon: "· · ·", dash: "1,3" },
+  { id: "dotdash",  icon: "·–·–",  dash: "1,3,4,3" },
+  { id: "longdash", icon: "—— ——", dash: "7,3" },
+  { id: "twodash",  icon: "– ·– ·", dash: "2,2,6,2" },
+];
+
+// Layers saved before linetypes were named hold a raw SVG dasharray, which is
+// the complete set the old three-chip editor could ever write.
+const LEGACY_DASH = { none: "solid", "5,3": "dashed", "5 3": "dashed", "2,2": "dotted", "2 2": "dotted" };
+
+// Stored linetype -> LINETYPES id, so the right chip highlights on old plots.
+function normDash(v, fallback = "solid") {
+  if (v == null) return fallback;
+  if (LINETYPES.some(l => l.id === v)) return v;
+  return LEGACY_DASH[String(v)] ?? fallback;
+}
+
+// Stored linetype -> SVG dasharray (null = solid).
+function dashArray(v, fallback = "solid") {
+  const id = normDash(v, fallback);
+  const hit = LINETYPES.find(l => l.id === id);
+  if (hit) return hit.dash;
+  // Unrecognised but numeric — pass a raw dasharray through rather than drop it.
+  return /^[\d.,\s]+$/.test(String(v)) ? String(v) : null;
+}
+
 // Per-geom defaults for the opts panel (ui-basic params per ggplot2-plot-design skill)
 const GEOM_OPTS_DEFAULTS = {
   point:     { size: 3,   shape: "circle" },
-  line:      { strokeWidth: 1.8, dash: "none" },
+  line:      { strokeWidth: 1.8, dash: "solid" },
   smooth:    { method: "lm", showSE: true, ci: 0.95, span: 0.75 },
   boxplot:   { outlierShow: true, outlierSize: 3, outlierColor: "", iqrCoef: 1.5 },
   histogram: { bins: 20 },
   density:   { adjust: 1.0 },
-  bar:       { strokeWidth: 0 },
+  bar:       { strokeWidth: 0, showValues: false, decimals: 2 },
   errorbar:  { strokeWidth: 1.5 },
+  // Reference lines keep their previous hardcoded look (dashed, 1.5) as the
+  // default so plots saved before these controls existed render unchanged.
+  hline:     { strokeWidth: 1.5, dash: "dashed" },
+  vline:     { strokeWidth: 1.5, dash: "dashed" },
   tile:      { scheme: "viridis", showValues: false, decimals: 2 },
 };
 
@@ -211,6 +248,42 @@ function loessSmooth(pairs, span = 0.75) {
 // For those, PlotCanvas calls this once per panel with the panel's own rows and
 // passes {fx, fy} accessors so the mark lands in the right cell. That keeps
 // facet_wrap's contract: each panel's stat is computed from that panel's data.
+// ggplot2's geom_histogram defaults to `boundary = width/2`, so bin EDGES fall
+// halfway between the data's natural grid points and values land in bin CENTRES.
+// Observable Plot's `interval` instead places edges exactly at multiples of the
+// width, leaving every value of a decimal-grid column sitting ON an edge. Stata
+// stores reals as 4-byte floats, so widening a .dta column to a JS double leaves
+// ~1e-8 of noise (0.005 arrives as 0.00499999988…) — enough to drop roughly half
+// the values into the PREVIOUS bin, doubling those bars and emptying their
+// neighbours. Measured on Hansen (2015) BAC at binwidth 0.001: 217 of 451 grid
+// values misbinned, which is the ~2x spiky histogram with gaps. Note ggplot's own
+// fuzz (binwidth * 1e-8 = 1e-11 here) is far too small to explain its immunity —
+// it is the half-width offset that does the work, so that is what we reproduce.
+// Returns null when edges can't be built (no finite data, or a width needing an
+// unreasonable number of bins); callers then fall back to Plot's own `interval`,
+// which is still correct for data that isn't on a grid.
+const MAX_BIN_EDGES = 20000;
+function centredBinThresholds(rows, col, w) {
+  if (!(w > 0) || !Number.isFinite(w)) return null;
+  let min = Infinity, max = -Infinity;
+  for (const r of rows) {
+    const v = +r[col];
+    if (Number.isFinite(v)) { if (v < min) min = v; if (v > max) max = v; }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  // Multiply by 1/w when that is an integer (0.001 -> 1000); dividing by w
+  // reintroduces the very drift this function exists to avoid.
+  const n = 1 / w;
+  const exact = Number.isInteger(n);
+  const edge = k => (exact ? (k + 0.5) / n : (k + 0.5) * w);
+  const k0 = Math.floor((exact ? min * n : min / w) - 0.5);
+  const k1 = Math.ceil((exact ? max * n : max / w) - 0.5);
+  if (!Number.isFinite(k0) || !Number.isFinite(k1) || (k1 - k0 + 2) > MAX_BIN_EDGES) return null;
+  const edges = [];
+  for (let k = k0; k <= k1 + 1; k++) edges.push(edge(k));
+  return edges;
+}
+
 function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
   const marks = [];
   const { geom, aes, fill, opacity = 1 } = ly;
@@ -245,10 +318,11 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
 
     case "line": {
       if (aes.x && aes.y) {
-        const { strokeWidth = 1.8, dash = "none" } = ly.opts || {};
+        const { strokeWidth = 1.8, dash = "solid" } = ly.opts || {};
+        const da = dashArray(dash);
         marks.push(Plt.line(rows, {
           x: aes.x, y: aes.y, stroke: colorVal, strokeWidth, strokeOpacity: op,
-          ...(dash !== "none" ? { strokeDasharray: dash } : {}),
+          ...(da ? { strokeDasharray: da } : {}),
         }));
       }
       break;
@@ -256,14 +330,32 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
 
     case "bar": {
       if (aes.x && aes.y) {
-        const { strokeWidth: bsW = 0 } = ly.opts || {};
+        const { strokeWidth: bsW = 0, showValues = false, decimals = 2 } = ly.opts || {};
         const barExtra = bsW > 0 ? { stroke: colorVal, strokeWidth: bsW } : {};
-        if (ly.position === "stack") {
-          marks.push(Plt.barY(rows, Plt.stackY({ x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra })));
-        } else if (ly.position === "dodge") {
-          marks.push(Plt.barY(rows, Plt.dodgeX("middle", { x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra, padding: 0.1 })));
-        } else {
-          marks.push(Plt.barY(rows, { x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra }));
+        // Both the bar and its label must go through the SAME position transform,
+        // or a stacked/dodged chart prints every value over the same spot.
+        const positioned = o =>
+            ly.position === "stack" ? Plt.stackY(o)
+          : ly.position === "dodge" ? Plt.dodgeX("middle", { ...o, padding: 0.1 })
+          : o;
+        marks.push(Plt.barY(rows, positioned({ x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra })));
+        // ggplot: geom_text(aes(label = round(y, d)), vjust = -0.5)
+        if (showValues) {
+          const d = Math.max(0, Math.min(6, Math.round(Number(decimals) || 0)));
+          const base = {
+            x: aes.x, y: aes.y,
+            text: r => {
+              const v = Number(r[aes.y]);
+              return isFinite(v) ? v.toFixed(d) : "";
+            },
+            fontSize: 10, textAnchor: "middle", ...fc,
+          };
+          // Plot's dy is a constant, not a channel, so negative bars (whose far
+          // end points down) need their own mark. `filter` is used rather than
+          // slicing rows because it preserves data identity — a fresh array
+          // would break facet_wrap and repeat one panel's labels everywhere.
+          marks.push(Plt.text(rows, positioned({ ...base, filter: r => !(Number(r[aes.y]) < 0), dy: -8 })));
+          marks.push(Plt.text(rows, positioned({ ...base, filter: r =>   Number(r[aes.y]) < 0,  dy: 12 })));
         }
       }
       break;
@@ -277,7 +369,10 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
         // field itself can be freely cleared and retyped.
         const bins = Number(binsRaw) > 0 ? Math.round(Number(binsRaw)) : 20;
         const binWidth = Number(binWidthRaw) > 0 ? Number(binWidthRaw) : 1;
-        const binOpt = binMode === "width" ? { interval: binWidth } : { thresholds: bins };
+        const centred = binMode === "width" ? centredBinThresholds(rows, aes.x, binWidth) : null;
+        const binOpt = binMode === "width"
+          ? (centred ? { thresholds: centred } : { interval: binWidth })
+          : { thresholds: bins };
         marks.push(Plt.rectY(rows, Plt.binX({ y: "count" }, {
           x: aes.x, fill: colorVal, fillOpacity: 0.85 * op, ...binOpt,
         })));
@@ -289,7 +384,10 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
       if (aes.x) {
         const { adjust = 1.0, binMode = "count", binWidth: binWidthRaw = 1 } = ly.opts || {};
         const binWidth = Number(binWidthRaw) > 0 ? Number(binWidthRaw) : 1;
-        const binOpt = binMode === "width" ? { interval: binWidth } : { thresholds: Math.round(40 * adjust) };
+        const centred = binMode === "width" ? centredBinThresholds(rows, aes.x, binWidth) : null;
+        const binOpt = binMode === "width"
+          ? (centred ? { thresholds: centred } : { interval: binWidth })
+          : { thresholds: Math.round(40 * adjust) };
         marks.push(Plt.areaY(rows, Plt.binX({ y: "proportion" }, {
           x: aes.x, fill: colorVal, fillOpacity: 0.22 * op, ...binOpt,
         })));
@@ -435,18 +533,24 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
 
     case "hline": {
       const hv = parseFloat(ly.value);
+      const { strokeWidth: hw = 1.5, dash: hd = "dashed" } = ly.opts || {};
+      const hda = dashArray(hd, "dashed");
       if (!isNaN(hv))
         marks.push(Plt.ruleY([hv], {
-          stroke: colorVal, strokeDasharray: "5 3", strokeOpacity: 0.88 * op, strokeWidth: 1.5,
+          stroke: colorVal, strokeOpacity: 0.88 * op, strokeWidth: hw,
+          ...(hda ? { strokeDasharray: hda } : {}),
         }));
       break;
     }
 
     case "vline": {
       const vv = parseFloat(ly.value);
+      const { strokeWidth: vw = 1.5, dash: vd = "dashed" } = ly.opts || {};
+      const vda = dashArray(vd, "dashed");
       if (!isNaN(vv))
         marks.push(Plt.ruleX([vv], {
-          stroke: colorVal, strokeDasharray: "5 3", strokeOpacity: 0.88 * op, strokeWidth: 1.5,
+          stroke: colorVal, strokeOpacity: 0.88 * op, strokeWidth: vw,
+          ...(vda ? { strokeDasharray: vda } : {}),
         }));
       break;
     }
@@ -617,7 +721,30 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       // numeric [yMin, yMax] domain injected further down would replace the band
       // domain outright — so tile opts out of all three.
       const hasTile = layers.some(ly => ly.visible && ly.geom === "tile");
-      const showRuleX = !xIsDate && !hasBoxplot && !hasTile && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
+      // barY puts x on a BAND scale and draws every bar from a zero baseline, so
+      // it needs the same two exemptions boxplot/tile already have:
+      //   - a numeric ruleX([0]) adds a stray empty "0" band to the categorical x
+      //     domain (identical to the boxplot bug above — bar was just never added
+      //     to the list), which is why a 2-category bar chart rendered 3 slots;
+      //   - the injected [yMin, yMax] domain can EXCLUDE 0, which leaves the bars
+      //     hanging off the bottom of the panel and blows a 0.117-vs-0.118
+      //     difference up to full panel height. ggplot's geom_col always keeps 0
+      //     in the scale, so mirror that instead of dropping the domain.
+      const hasBar = layers.some(ly => ly.visible && ly.geom === "bar");
+      // Bar value labels are drawn ~8px above the bar top in a 10px font. With a
+      // domain of exactly [0, max] the tallest bar reaches the panel edge, so the
+      // label lands on the frame. ggplot never shows this because its default 5%
+      // scale expansion leaves the headroom; reproduce that here, with a floor
+      // tied to the panel height so a short panel still clears the glyph rather
+      // than trusting 5% of an arbitrary data range to be enough pixels.
+      const barLabels = layers.some(ly => ly.visible && ly.geom === "bar" && ly.opts?.showValues);
+      const labelPad = barLabels && yVals.length > 0
+        ? (Math.max(0, yMax) - Math.min(0, yMin)) * Math.max(0.05, 24 / Math.max(120, height || 310))
+        : 0;
+      // Only pad the end the labels actually sit at: negative bars label downward.
+      const autoYMin = hasBar ? Math.min(0, yMin) - (yMin < 0 ? labelPad : 0) : yMin;
+      const autoYMax = hasBar ? Math.max(0, yMax) + (yMax > 0 ? labelPad : 0) : yMax;
+      const showRuleX = !xIsDate && !hasBoxplot && !hasTile && !hasBar && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
       const showRuleY = !hasTile && yVals.length > 0 && 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
 
       const zeroStyle = { stroke: "#888", strokeWidth: 1.4, strokeOpacity: 0.55 };
@@ -738,9 +865,9 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
           ...(yCatOrder
             ? { domain: yCatOrder.split(",").map(s => s.trim()).filter(Boolean) }
             : yDomain[0] != null || yDomain[1] != null
-              ? { domain: [yDomain[0] ?? yMin, yDomain[1] ?? yMax] }
+              ? { domain: [yDomain[0] ?? autoYMin, yDomain[1] ?? autoYMax] }
               : yVals.length > 0 && !hasTile
-                ? { domain: [yMin, yMax] }
+                ? { domain: [autoYMin, autoYMax] }
                 : {}),
           ...(yFmt ? { tickFormat: yFmt } : {}),
         },
@@ -994,9 +1121,21 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
     {lbl("width")}
     {slider("strokeWidth", 0.5, 6, 0.5, 1.8)}
     <span style={numW}>{opts.strokeWidth ?? 1.8}</span>
-    {lbl("dash")}
-    {[["none","———"],["5,3","– – –"],["2,2","·····"]].map(([v,ic]) => (
-      <button key={v} onClick={() => set("dash", v)} style={chip((opts.dash ?? "none") === v)}>{ic}</button>
+    {lbl("linetype")}
+    {LINETYPES.map(lt => (
+      <button key={lt.id} onClick={() => set("dash", lt.id)} title={lt.id}
+        style={chip(normDash(opts.dash, "solid") === lt.id)}>{lt.icon}</button>
+    ))}
+  </>;
+
+  if (geom === "hline" || geom === "vline") return <>
+    {lbl("width")}
+    {slider("strokeWidth", 0.25, 6, 0.25, 1.5)}
+    <span style={numW}>{opts.strokeWidth ?? 1.5}</span>
+    {lbl("linetype")}
+    {LINETYPES.map(lt => (
+      <button key={lt.id} onClick={() => set("dash", lt.id)} title={lt.id}
+        style={chip(normDash(opts.dash, "dashed") === lt.id)}>{lt.icon}</button>
     ))}
   </>;
 
@@ -1090,6 +1229,19 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
     {lbl("stroke")}
     {slider("strokeWidth", 0, 2, 0.25, 0)}
     <span style={numW}>{opts.strokeWidth ?? 0}</span>
+    {sep}
+    <button onClick={() => set("showValues", !(opts.showValues ?? false))}
+      title="Print each bar's y value above the bar, like geom_text(aes(label = ...), vjust = -0.5)."
+      style={chip(opts.showValues ?? false)}>
+      values {(opts.showValues ?? false) ? "on" : "off"}
+    </button>
+    {(opts.showValues ?? false) && <>
+      {lbl("dec")}
+      <input type="number" min={0} max={6} value={opts.decimals ?? 2}
+        onChange={e => set("decimals", e.target.value === "" ? "" : +e.target.value)}
+        onBlur={e => { if (!(+e.target.value >= 0)) set("decimals", 2); }}
+        style={{ width: 42, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
+    </>}
   </>;
 
   if (geom === "errorbar") return <>
