@@ -731,8 +731,19 @@ function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme
       //     difference up to full panel height. ggplot's geom_col always keeps 0
       //     in the scale, so mirror that instead of dropping the domain.
       const hasBar = layers.some(ly => ly.visible && ly.geom === "bar");
-      const autoYMin = hasBar ? Math.min(0, yMin) : yMin;
-      const autoYMax = hasBar ? Math.max(0, yMax) : yMax;
+      // Bar value labels are drawn ~8px above the bar top in a 10px font. With a
+      // domain of exactly [0, max] the tallest bar reaches the panel edge, so the
+      // label lands on the frame. ggplot never shows this because its default 5%
+      // scale expansion leaves the headroom; reproduce that here, with a floor
+      // tied to the panel height so a short panel still clears the glyph rather
+      // than trusting 5% of an arbitrary data range to be enough pixels.
+      const barLabels = layers.some(ly => ly.visible && ly.geom === "bar" && ly.opts?.showValues);
+      const labelPad = barLabels && yVals.length > 0
+        ? (Math.max(0, yMax) - Math.min(0, yMin)) * Math.max(0.05, 24 / Math.max(120, height || 310))
+        : 0;
+      // Only pad the end the labels actually sit at: negative bars label downward.
+      const autoYMin = hasBar ? Math.min(0, yMin) - (yMin < 0 ? labelPad : 0) : yMin;
+      const autoYMax = hasBar ? Math.max(0, yMax) + (yMax > 0 ? labelPad : 0) : yMax;
       const showRuleX = !xIsDate && !hasBoxplot && !hasTile && !hasBar && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
       const showRuleY = !hasTile && yVals.length > 0 && 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
 
