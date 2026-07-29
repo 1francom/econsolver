@@ -49,32 +49,62 @@ function lgamma(z) {
   return -tmp + Math.log(2.5066282746310005 * ser / x);
 }
 
+// Continued-fraction expansion (Lentz's method) for the regularized incomplete
+// beta function — Numerical Recipes' betacf. A fixed-step Riemann sum (the
+// previous approach here) cannot resolve the integrand once a = df/2 grows
+// large: s^(a-1) collapses to ~0 everywhere except a sliver near s=1, so with
+// large df (large-n regressions) the sum undershot the true integral and
+// t-stats near 0 were reported with p-values near 0 instead of near 1.
+function betacf(x, a, b) {
+  const MAXIT = 200, EPS = 3e-14, FPMIN = 1e-300;
+  const qab = a + b, qap = a + 1, qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < FPMIN) d = FPMIN;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= MAXIT; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c;
+    if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c;
+    if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < EPS) break;
+  }
+  return h;
+}
+
+// Regularized incomplete beta I_x(a, b), stable for any a, b (including the
+// large-df regime where a = df/2 is in the thousands).
+function betainc(x, a, b) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const bt = Math.exp(
+    lgamma(a + b) - lgamma(a) - lgamma(b) + a * Math.log(x) + b * Math.log(1 - x)
+  );
+  if (x < (a + 1) / (a + b + 2)) return (bt * betacf(x, a, b)) / a;
+  return 1 - (bt * betacf(1 - x, b, a)) / b;
+}
+
 export function tCDF(t, df) {
   const x = df / (df + t * t);
-  const a = df / 2, b = 0.5;
-  let ib = 0;
-  const steps = 2000;
-  for (let i = 0; i < steps; i++) {
-    const xi = x * (i + 0.5) / steps;
-    ib += Math.pow(xi, a - 1) * Math.pow(1 - xi, b - 1);
-  }
-  ib *= x / steps;
-  const beta = Math.exp(lgamma(a) + lgamma(b) - lgamma(a + b));
-  return Math.min(1, Math.max(0, ib / beta));
+  return betainc(x, df / 2, 0.5);
 }
 
 export function fCDF(F, df1, df2) {
   const x = df2 / (df2 + df1 * F);
-  const a = df2 / 2, b = df1 / 2;
-  let ib = 0;
-  const steps = 2000;
-  for (let i = 0; i < steps; i++) {
-    const xi = x * (i + 0.5) / steps;
-    ib += Math.pow(xi, a - 1) * Math.pow(1 - xi, b - 1);
-  }
-  ib *= x / steps;
-  const beta = Math.exp(lgamma(a) + lgamma(b) - lgamma(a + b));
-  return Math.min(1, Math.max(0, ib / beta));
+  return betainc(x, df2 / 2, df1 / 2);
 }
 
 export function pValue(t, df) {
