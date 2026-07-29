@@ -649,8 +649,8 @@
 - [10:40] · Explore
   References of the group in time series doesn't work
 
-- [11:15] · Explore
-  Check bar plot (equivalent to geom_col()) and the binwidth in the histograms (Plot Builder)
+- ~~[11:15] · Explore
+  Check bar plot (equivalent to geom_col()) and the binwidth in the histograms (Plot Builder)~~ ✓ fixed — 2026-07-28. Bar: stray empty category band (`ruleX([0])` on a band scale) + auto y-domain excluding 0 so bars hung off the panel. Histogram: Stata float32 noise + Plot placing bin edges ON the data grid; now reproduces ggplot's `boundary = width/2` centred edges. Exporters also fixed to emit `binwidth`/`width()` instead of always `bins = 20`. See BugTriage.md; needs Franco's confirmation in-app
 
 - ~~[11:18] · Model
   URGENT THE p-values!!!!!! beta=0.0001 and se=0.002 can never give a p-value < 0.001 with ***~~ ✓ likely fixed — `216b1ecb` (2026-07-28); needs confirmation

@@ -154,7 +154,12 @@ function buildLayer(layer, dfVar) {
       return geomCall("geom_histogram", [
         aesCall(layer, { y: false, fill: !!aes.color }),
         ...fixedColorArgs(layer, { fill: true }),
-        `bins = ${rNumber(opts.bins ?? 20, "20")}`,
+        // "Bin width" mode must emit binwidth=, not bins= — the two are not
+        // interchangeable, and emitting bins=20 for a binwidth plot produced a
+        // script that did not reproduce what the app showed.
+        opts.binMode === "width"
+          ? `binwidth = ${rNumber(opts.binWidth ?? 1, "1")}`
+          : `bins = ${rNumber(opts.bins ?? 20, "20")}`,
         opacity,
       ]);
 
@@ -652,6 +657,7 @@ function matplotlibLayer(layer, index, dfVar) {
   const alpha = pyNumber(layer?.opacity ?? 1, 1);
   const lines = [];
   let usesSeaborn = false;
+  let usesNumpy = false;
 
   switch (layer?.geom) {
     case "point": {
@@ -701,7 +707,22 @@ function matplotlibLayer(layer, index, dfVar) {
     case "histogram": {
       if (!aes.x) break;
       const color = pyColor(layer);
-      lines.push(`ax.hist(${pyColumn(dfVar, aes.x)}.dropna(), bins=${pyNumber(opts.bins ?? 20, 20)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+      const tail = `alpha=${alpha}${color ? `, color=${color}` : ""}`;
+      if (opts.binMode === "width") {
+        // matplotlib has no binwidth argument, so build the edges explicitly.
+        // They are offset by half a width to match ggplot's boundary = width/2
+        // (and the app), which keeps values in bin centres instead of on the
+        // boundaries where float noise would flip them into the previous bin.
+        usesNumpy = true;
+        const v = `_v_${index}`, w = `_w_${index}`;
+        lines.push(
+          `${v} = ${pyColumn(dfVar, aes.x)}.dropna()`,
+          `${w} = ${pyNumber(opts.binWidth ?? 1, 1)}`,
+          `ax.hist(${v}, bins=(np.arange(np.floor(${v}.min() / ${w} - 0.5), np.ceil(${v}.max() / ${w} - 0.5) + 2) + 0.5) * ${w}, ${tail})`,
+        );
+      } else {
+        lines.push(`ax.hist(${pyColumn(dfVar, aes.x)}.dropna(), bins=${pyNumber(opts.bins ?? 20, 20)}, ${tail})`);
+      }
       break;
     }
 
@@ -785,7 +806,7 @@ function matplotlibLayer(layer, index, dfVar) {
       break;
   }
 
-  return { lines, usesSeaborn };
+  return { lines, usesSeaborn, usesNumpy };
 }
 
 function pyDomain(domain) {
@@ -811,8 +832,10 @@ export function buildMatplotlibPlot(plotEntry, { dfVar = "df" } = {}) {
 
   const built = layers.map((layer, index) => matplotlibLayer(layer, index + 1, panelVar));
   const usesSeaborn = built.some(layer => layer.usesSeaborn);
+  const usesNumpy = built.some(layer => layer.usesNumpy);
   const lines = ["import matplotlib.pyplot as plt"];
   if (usesSeaborn) lines.push("import seaborn as sns");
+  if (usesNumpy) lines.push("import numpy as np");
   lines.push("");
 
   const axisLines = [];
@@ -889,7 +912,13 @@ function stataLayer(layer) {
         ? { twoway: `bar ${aes.y} ${aes.x}` }
         : aes.x ? { standalone: `graph bar (count), over(${aes.x})` } : null;
     case "histogram":
-      return aes.x ? { standalone: `histogram ${aes.x}, bin(${stataNumber(opts.bins ?? 20, 20)})` } : null;
+      // Stata spells the two modes width() and bin(); emitting bin() for a
+      // binwidth plot would silently change the bars.
+      return aes.x
+        ? { standalone: opts.binMode === "width"
+            ? `histogram ${aes.x}, width(${stataNumber(opts.binWidth ?? 1, 1)})`
+            : `histogram ${aes.x}, bin(${stataNumber(opts.bins ?? 20, 20)})` }
+        : null;
     case "density":
       return aes.x ? { standalone: `kdensity ${aes.x}` } : null;
     case "smooth": {

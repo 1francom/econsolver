@@ -211,6 +211,42 @@ function loessSmooth(pairs, span = 0.75) {
 // For those, PlotCanvas calls this once per panel with the panel's own rows and
 // passes {fx, fy} accessors so the mark lands in the right cell. That keeps
 // facet_wrap's contract: each panel's stat is computed from that panel's data.
+// ggplot2's geom_histogram defaults to `boundary = width/2`, so bin EDGES fall
+// halfway between the data's natural grid points and values land in bin CENTRES.
+// Observable Plot's `interval` instead places edges exactly at multiples of the
+// width, leaving every value of a decimal-grid column sitting ON an edge. Stata
+// stores reals as 4-byte floats, so widening a .dta column to a JS double leaves
+// ~1e-8 of noise (0.005 arrives as 0.00499999988…) — enough to drop roughly half
+// the values into the PREVIOUS bin, doubling those bars and emptying their
+// neighbours. Measured on Hansen (2015) BAC at binwidth 0.001: 217 of 451 grid
+// values misbinned, which is the ~2x spiky histogram with gaps. Note ggplot's own
+// fuzz (binwidth * 1e-8 = 1e-11 here) is far too small to explain its immunity —
+// it is the half-width offset that does the work, so that is what we reproduce.
+// Returns null when edges can't be built (no finite data, or a width needing an
+// unreasonable number of bins); callers then fall back to Plot's own `interval`,
+// which is still correct for data that isn't on a grid.
+const MAX_BIN_EDGES = 20000;
+function centredBinThresholds(rows, col, w) {
+  if (!(w > 0) || !Number.isFinite(w)) return null;
+  let min = Infinity, max = -Infinity;
+  for (const r of rows) {
+    const v = +r[col];
+    if (Number.isFinite(v)) { if (v < min) min = v; if (v > max) max = v; }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  // Multiply by 1/w when that is an integer (0.001 -> 1000); dividing by w
+  // reintroduces the very drift this function exists to avoid.
+  const n = 1 / w;
+  const exact = Number.isInteger(n);
+  const edge = k => (exact ? (k + 0.5) / n : (k + 0.5) * w);
+  const k0 = Math.floor((exact ? min * n : min / w) - 0.5);
+  const k1 = Math.ceil((exact ? max * n : max / w) - 0.5);
+  if (!Number.isFinite(k0) || !Number.isFinite(k1) || (k1 - k0 + 2) > MAX_BIN_EDGES) return null;
+  const edges = [];
+  for (let k = k0; k <= k1 + 1; k++) edges.push(edge(k));
+  return edges;
+}
+
 function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
   const marks = [];
   const { geom, aes, fill, opacity = 1 } = ly;
@@ -277,7 +313,10 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
         // field itself can be freely cleared and retyped.
         const bins = Number(binsRaw) > 0 ? Math.round(Number(binsRaw)) : 20;
         const binWidth = Number(binWidthRaw) > 0 ? Number(binWidthRaw) : 1;
-        const binOpt = binMode === "width" ? { interval: binWidth } : { thresholds: bins };
+        const centred = binMode === "width" ? centredBinThresholds(rows, aes.x, binWidth) : null;
+        const binOpt = binMode === "width"
+          ? (centred ? { thresholds: centred } : { interval: binWidth })
+          : { thresholds: bins };
         marks.push(Plt.rectY(rows, Plt.binX({ y: "count" }, {
           x: aes.x, fill: colorVal, fillOpacity: 0.85 * op, ...binOpt,
         })));
@@ -289,7 +328,10 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
       if (aes.x) {
         const { adjust = 1.0, binMode = "count", binWidth: binWidthRaw = 1 } = ly.opts || {};
         const binWidth = Number(binWidthRaw) > 0 ? Number(binWidthRaw) : 1;
-        const binOpt = binMode === "width" ? { interval: binWidth } : { thresholds: Math.round(40 * adjust) };
+        const centred = binMode === "width" ? centredBinThresholds(rows, aes.x, binWidth) : null;
+        const binOpt = binMode === "width"
+          ? (centred ? { thresholds: centred } : { interval: binWidth })
+          : { thresholds: Math.round(40 * adjust) };
         marks.push(Plt.areaY(rows, Plt.binX({ y: "proportion" }, {
           x: aes.x, fill: colorVal, fillOpacity: 0.22 * op, ...binOpt,
         })));
