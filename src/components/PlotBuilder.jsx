@@ -138,16 +138,53 @@ function genId() { return "ly_" + Math.random().toString(36).slice(2, 8); }
 
 const DEFAULT_FILLS = ["#6ec8b4","#c8a96e","#6e9ec8","#c47070","#a87ec8","#7ab896","#c88e6e"];
 
+// ggplot2's six linetypes. Stored by NAME rather than as an SVG dasharray so
+// each exporter can spell it its own way from one vocabulary — R takes the name
+// verbatim, which is what keeps the script and the canvas from drifting apart.
+// Dash patterns mirror R's own lty units (dashed = 4 on / 4 off, etc.).
+const LINETYPES = [
+  { id: "solid",    icon: "———",   dash: null },
+  { id: "dashed",   icon: "– – –", dash: "4,4" },
+  { id: "dotted",   icon: "· · ·", dash: "1,3" },
+  { id: "dotdash",  icon: "·–·–",  dash: "1,3,4,3" },
+  { id: "longdash", icon: "—— ——", dash: "7,3" },
+  { id: "twodash",  icon: "– ·– ·", dash: "2,2,6,2" },
+];
+
+// Layers saved before linetypes were named hold a raw SVG dasharray, which is
+// the complete set the old three-chip editor could ever write.
+const LEGACY_DASH = { none: "solid", "5,3": "dashed", "5 3": "dashed", "2,2": "dotted", "2 2": "dotted" };
+
+// Stored linetype -> LINETYPES id, so the right chip highlights on old plots.
+function normDash(v, fallback = "solid") {
+  if (v == null) return fallback;
+  if (LINETYPES.some(l => l.id === v)) return v;
+  return LEGACY_DASH[String(v)] ?? fallback;
+}
+
+// Stored linetype -> SVG dasharray (null = solid).
+function dashArray(v, fallback = "solid") {
+  const id = normDash(v, fallback);
+  const hit = LINETYPES.find(l => l.id === id);
+  if (hit) return hit.dash;
+  // Unrecognised but numeric — pass a raw dasharray through rather than drop it.
+  return /^[\d.,\s]+$/.test(String(v)) ? String(v) : null;
+}
+
 // Per-geom defaults for the opts panel (ui-basic params per ggplot2-plot-design skill)
 const GEOM_OPTS_DEFAULTS = {
   point:     { size: 3,   shape: "circle" },
-  line:      { strokeWidth: 1.8, dash: "none" },
+  line:      { strokeWidth: 1.8, dash: "solid" },
   smooth:    { method: "lm", showSE: true, ci: 0.95, span: 0.75 },
   boxplot:   { outlierShow: true, outlierSize: 3, outlierColor: "", iqrCoef: 1.5 },
   histogram: { bins: 20 },
   density:   { adjust: 1.0 },
-  bar:       { strokeWidth: 0 },
+  bar:       { strokeWidth: 0, showValues: false, decimals: 2 },
   errorbar:  { strokeWidth: 1.5 },
+  // Reference lines keep their previous hardcoded look (dashed, 1.5) as the
+  // default so plots saved before these controls existed render unchanged.
+  hline:     { strokeWidth: 1.5, dash: "dashed" },
+  vline:     { strokeWidth: 1.5, dash: "dashed" },
   tile:      { scheme: "viridis", showValues: false, decimals: 2 },
 };
 
@@ -281,10 +318,11 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
 
     case "line": {
       if (aes.x && aes.y) {
-        const { strokeWidth = 1.8, dash = "none" } = ly.opts || {};
+        const { strokeWidth = 1.8, dash = "solid" } = ly.opts || {};
+        const da = dashArray(dash);
         marks.push(Plt.line(rows, {
           x: aes.x, y: aes.y, stroke: colorVal, strokeWidth, strokeOpacity: op,
-          ...(dash !== "none" ? { strokeDasharray: dash } : {}),
+          ...(da ? { strokeDasharray: da } : {}),
         }));
       }
       break;
@@ -292,14 +330,32 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
 
     case "bar": {
       if (aes.x && aes.y) {
-        const { strokeWidth: bsW = 0 } = ly.opts || {};
+        const { strokeWidth: bsW = 0, showValues = false, decimals = 2 } = ly.opts || {};
         const barExtra = bsW > 0 ? { stroke: colorVal, strokeWidth: bsW } : {};
-        if (ly.position === "stack") {
-          marks.push(Plt.barY(rows, Plt.stackY({ x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra })));
-        } else if (ly.position === "dodge") {
-          marks.push(Plt.barY(rows, Plt.dodgeX("middle", { x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra, padding: 0.1 })));
-        } else {
-          marks.push(Plt.barY(rows, { x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra }));
+        // Both the bar and its label must go through the SAME position transform,
+        // or a stacked/dodged chart prints every value over the same spot.
+        const positioned = o =>
+            ly.position === "stack" ? Plt.stackY(o)
+          : ly.position === "dodge" ? Plt.dodgeX("middle", { ...o, padding: 0.1 })
+          : o;
+        marks.push(Plt.barY(rows, positioned({ x: aes.x, y: aes.y, fill: colorVal, fillOpacity: op, ...barExtra })));
+        // ggplot: geom_text(aes(label = round(y, d)), vjust = -0.5)
+        if (showValues) {
+          const d = Math.max(0, Math.min(6, Math.round(Number(decimals) || 0)));
+          const base = {
+            x: aes.x, y: aes.y,
+            text: r => {
+              const v = Number(r[aes.y]);
+              return isFinite(v) ? v.toFixed(d) : "";
+            },
+            fontSize: 10, textAnchor: "middle", ...fc,
+          };
+          // Plot's dy is a constant, not a channel, so negative bars (whose far
+          // end points down) need their own mark. `filter` is used rather than
+          // slicing rows because it preserves data identity — a fresh array
+          // would break facet_wrap and repeat one panel's labels everywhere.
+          marks.push(Plt.text(rows, positioned({ ...base, filter: r => !(Number(r[aes.y]) < 0), dy: -8 })));
+          marks.push(Plt.text(rows, positioned({ ...base, filter: r =>   Number(r[aes.y]) < 0,  dy: 12 })));
         }
       }
       break;
@@ -477,18 +533,24 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
 
     case "hline": {
       const hv = parseFloat(ly.value);
+      const { strokeWidth: hw = 1.5, dash: hd = "dashed" } = ly.opts || {};
+      const hda = dashArray(hd, "dashed");
       if (!isNaN(hv))
         marks.push(Plt.ruleY([hv], {
-          stroke: colorVal, strokeDasharray: "5 3", strokeOpacity: 0.88 * op, strokeWidth: 1.5,
+          stroke: colorVal, strokeOpacity: 0.88 * op, strokeWidth: hw,
+          ...(hda ? { strokeDasharray: hda } : {}),
         }));
       break;
     }
 
     case "vline": {
       const vv = parseFloat(ly.value);
+      const { strokeWidth: vw = 1.5, dash: vd = "dashed" } = ly.opts || {};
+      const vda = dashArray(vd, "dashed");
       if (!isNaN(vv))
         marks.push(Plt.ruleX([vv], {
-          stroke: colorVal, strokeDasharray: "5 3", strokeOpacity: 0.88 * op, strokeWidth: 1.5,
+          stroke: colorVal, strokeOpacity: 0.88 * op, strokeWidth: vw,
+          ...(vda ? { strokeDasharray: vda } : {}),
         }));
       break;
     }
@@ -1048,9 +1110,21 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
     {lbl("width")}
     {slider("strokeWidth", 0.5, 6, 0.5, 1.8)}
     <span style={numW}>{opts.strokeWidth ?? 1.8}</span>
-    {lbl("dash")}
-    {[["none","———"],["5,3","– – –"],["2,2","·····"]].map(([v,ic]) => (
-      <button key={v} onClick={() => set("dash", v)} style={chip((opts.dash ?? "none") === v)}>{ic}</button>
+    {lbl("linetype")}
+    {LINETYPES.map(lt => (
+      <button key={lt.id} onClick={() => set("dash", lt.id)} title={lt.id}
+        style={chip(normDash(opts.dash, "solid") === lt.id)}>{lt.icon}</button>
+    ))}
+  </>;
+
+  if (geom === "hline" || geom === "vline") return <>
+    {lbl("width")}
+    {slider("strokeWidth", 0.25, 6, 0.25, 1.5)}
+    <span style={numW}>{opts.strokeWidth ?? 1.5}</span>
+    {lbl("linetype")}
+    {LINETYPES.map(lt => (
+      <button key={lt.id} onClick={() => set("dash", lt.id)} title={lt.id}
+        style={chip(normDash(opts.dash, "dashed") === lt.id)}>{lt.icon}</button>
     ))}
   </>;
 
@@ -1144,6 +1218,19 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
     {lbl("stroke")}
     {slider("strokeWidth", 0, 2, 0.25, 0)}
     <span style={numW}>{opts.strokeWidth ?? 0}</span>
+    {sep}
+    <button onClick={() => set("showValues", !(opts.showValues ?? false))}
+      title="Print each bar's y value above the bar, like geom_text(aes(label = ...), vjust = -0.5)."
+      style={chip(opts.showValues ?? false)}>
+      values {(opts.showValues ?? false) ? "on" : "off"}
+    </button>
+    {(opts.showValues ?? false) && <>
+      {lbl("dec")}
+      <input type="number" min={0} max={6} value={opts.decimals ?? 2}
+        onChange={e => set("decimals", e.target.value === "" ? "" : +e.target.value)}
+        onBlur={e => { if (!(+e.target.value >= 0)) set("decimals", 2); }}
+        style={{ width: 42, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
+    </>}
   </>;
 
   if (geom === "errorbar") return <>

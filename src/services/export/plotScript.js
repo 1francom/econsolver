@@ -20,11 +20,34 @@ const POINT_SHAPES = {
   times: 4,
 };
 
+// Linetypes are stored by ggplot NAME, so R emits them verbatim and this table
+// only has to translate the raw dasharrays written by layers saved before the
+// named linetypes existed (the old editor could only ever write these three).
 const LINE_TYPES = {
   none: "solid",
-  "5,3": "53",
-  "2,2": "22",
+  "5,3": "dashed", "5 3": "dashed",
+  "2,2": "dotted", "2 2": "dotted",
 };
+
+// matplotlib spellings for the same six ggplot linetypes.
+const PY_LINESTYLES = {
+  solid: '"-"', dashed: '"--"', dotted: '":"', dotdash: '"-."',
+  longdash: "(0, (7, 3))", twodash: "(0, (2, 2, 6, 2))",
+};
+
+// Stata lpattern() spellings. twodash has no exact match; shortdash_dot is the
+// closest built-in pattern.
+const STATA_LPATTERNS = {
+  solid: "solid", dashed: "dash", dotted: "dot", dotdash: "dash_dot",
+  longdash: "longdash", twodash: "shortdash_dot",
+};
+
+// Resolve a stored linetype (name, or a legacy dasharray) to a ggplot name.
+function lineTypeName(dash, fallback = "solid") {
+  if (dash == null) return fallback;
+  if (LINE_TYPES[dash]) return LINE_TYPES[dash];
+  return String(dash);
+}
 
 const R_RESERVED = new Set([
   "if", "else", "repeat", "while", "function", "for", "in", "next", "break",
@@ -134,7 +157,7 @@ function buildLayer(layer, dfVar) {
         aesCall(layer),
         ...fixedColorArgs(layer, { color: true }),
         `linewidth = ${rNumber(opts.strokeWidth ?? 1.8, "1.8")}`,
-        `linetype = ${rString(LINE_TYPES[opts.dash ?? "none"] ?? opts.dash ?? "solid")}`,
+        `linetype = ${rString(lineTypeName(opts.dash, "solid"))}`,
         opacity,
       ]);
 
@@ -238,8 +261,8 @@ function buildLayer(layer, dfVar) {
       return geomCall("geom_hline", [
         `yintercept = ${rNumber(layer.value)}`,
         ...fixedColorArgs(layer, { color: true }),
-        `linetype = "dashed"`,
-        `linewidth = 1.5`,
+        `linetype = ${rString(lineTypeName(opts.dash, "dashed"))}`,
+        `linewidth = ${rNumber(opts.strokeWidth ?? 1.5, "1.5")}`,
         opacity,
       ]);
 
@@ -247,8 +270,8 @@ function buildLayer(layer, dfVar) {
       return geomCall("geom_vline", [
         `xintercept = ${rNumber(layer.value)}`,
         ...fixedColorArgs(layer, { color: true }),
-        `linetype = "dashed"`,
-        `linewidth = 1.5`,
+        `linetype = ${rString(lineTypeName(opts.dash, "dashed"))}`,
+        `linewidth = ${rNumber(opts.strokeWidth ?? 1.5, "1.5")}`,
         opacity,
       ]);
 
@@ -282,6 +305,18 @@ function tileValueLayer(layer) {
     `aes(x = ${rColumn(aes.x)}, y = ${rColumn(aes.y)}, label = round(${rColumn(aes.color)}, ${decimals}))`,
     "size = 3",
     `colour = "white"`,
+  ]);
+}
+
+// ggplot needs a separate geom_text for bar value labels, same as tile does.
+function barValueLayer(layer) {
+  const aes = layer?.aes ?? {};
+  if (!aes.x || !aes.y) return null;
+  const decimals = Math.max(0, Math.min(6, Math.round(Number(layer?.opts?.decimals ?? 2) || 0)));
+  return geomCall("geom_text", [
+    `aes(x = ${rColumn(aes.x)}, y = ${rColumn(aes.y)}, label = round(${rColumn(aes.y)}, ${decimals}))`,
+    "vjust = -0.5",
+    "size = 3",
   ]);
 }
 
@@ -362,6 +397,13 @@ export function buildGgplot(plotEntry, { dfVar = "df" } = {}) {
     const textLayer = tileValueLayer(tileLayer);
     if (textLayer) components.push(textLayer);
   }
+  // Same for bar value labels — one geom_text per labelled bar layer.
+  layers
+    .filter(layer => layer.geom === "bar" && layer.opts?.showValues)
+    .forEach(layer => {
+      const textLayer = barValueLayer(layer);
+      if (textLayer) components.push(textLayer);
+    });
   const facet = facetWrapCall(entry);
   if (facet) components.push(facet);
 
@@ -677,14 +719,15 @@ function matplotlibLayer(layer, index, dfVar) {
 
     case "line": {
       if (!aes.x || !aes.y) break;
+      const lineLs = PY_LINESTYLES[lineTypeName(opts.dash, "solid")] ?? '"-"';
       if (aes.color) {
         lines.push(
           `for group, group_df in ${dfVar}.groupby(${pyString(aes.color)}, dropna=False):`,
-          `    ax.plot(group_df[${pyString(aes.x)}], group_df[${pyString(aes.y)}], label=str(group), linewidth=${pyNumber(opts.strokeWidth ?? 1.8, 1.8)}, alpha=${alpha})`,
+          `    ax.plot(group_df[${pyString(aes.x)}], group_df[${pyString(aes.y)}], label=str(group), linewidth=${pyNumber(opts.strokeWidth ?? 1.8, 1.8)}, linestyle=${lineLs}, alpha=${alpha})`,
         );
       } else {
         const color = pyColor(layer);
-        lines.push(`ax.plot(${pyColumn(dfVar, aes.x)}, ${pyColumn(dfVar, aes.y)}, linewidth=${pyNumber(opts.strokeWidth ?? 1.8, 1.8)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+        lines.push(`ax.plot(${pyColumn(dfVar, aes.x)}, ${pyColumn(dfVar, aes.y)}, linewidth=${pyNumber(opts.strokeWidth ?? 1.8, 1.8)}, linestyle=${lineLs}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
       }
       break;
     }
@@ -692,15 +735,21 @@ function matplotlibLayer(layer, index, dfVar) {
     case "bar": {
       if (!aes.x) break;
       const color = pyColor(layer);
+      const showValues = !!opts.showValues;
+      const dec = Math.max(0, Math.min(6, Math.round(Number(opts.decimals ?? 2) || 0)));
+      const bars = `_bars_${index}`;
+      // bar_label needs the BarContainer, so capture it when labels are wanted.
+      const assign = showValues ? `${bars} = ` : "";
       if (aes.y) {
-        lines.push(`ax.bar(${pyColumn(dfVar, aes.x)}, ${pyColumn(dfVar, aes.y)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
+        lines.push(`${assign}ax.bar(${pyColumn(dfVar, aes.x)}, ${pyColumn(dfVar, aes.y)}, alpha=${alpha}${color ? `, color=${color}` : ""})`);
       } else {
         const counts = `_counts_${index}`;
         lines.push(
           `${counts} = ${pyColumn(dfVar, aes.x)}.value_counts(sort=False)`,
-          `ax.bar(${counts}.index, ${counts}.values, alpha=${alpha}${color ? `, color=${color}` : ""})`,
+          `${assign}ax.bar(${counts}.index, ${counts}.values, alpha=${alpha}${color ? `, color=${color}` : ""})`,
         );
       }
+      if (showValues) lines.push(`ax.bar_label(${bars}, fmt="%.${dec}f", padding=3)`);
       break;
     }
 
@@ -795,12 +844,13 @@ function matplotlibLayer(layer, index, dfVar) {
     }
 
     case "hline":
-      lines.push(`ax.axhline(y=${pyNumber(layer.value, 0)}, linestyle="--", linewidth=1.5, alpha=${alpha}${pyColor(layer) ? `, color=${pyColor(layer)}` : ""})`);
+    case "vline": {
+      const fn = layer.geom === "hline" ? "axhline" : "axvline";
+      const axis = layer.geom === "hline" ? "y" : "x";
+      const ls = PY_LINESTYLES[lineTypeName(opts.dash, "dashed")] ?? '"--"';
+      lines.push(`ax.${fn}(${axis}=${pyNumber(layer.value, 0)}, linestyle=${ls}, linewidth=${pyNumber(opts.strokeWidth ?? 1.5, 1.5)}, alpha=${alpha}${pyColor(layer) ? `, color=${pyColor(layer)}` : ""})`);
       break;
-
-    case "vline":
-      lines.push(`ax.axvline(x=${pyNumber(layer.value, 0)}, linestyle="--", linewidth=1.5, alpha=${alpha}${pyColor(layer) ? `, color=${pyColor(layer)}` : ""})`);
-      break;
+    }
 
     default:
       break;
@@ -907,10 +957,25 @@ function stataLayer(layer) {
       return aes.x && aes.y ? { twoway: `scatter ${aes.y} ${aes.x}` } : null;
     case "line":
       return aes.x && aes.y ? { twoway: `line ${aes.y} ${aes.x}` } : null;
-    case "bar":
-      return aes.x && aes.y
-        ? { twoway: `bar ${aes.y} ${aes.x}` }
-        : aes.x ? { standalone: `graph bar (count), over(${aes.x})` } : null;
+    case "bar": {
+      if (aes.x && aes.y) {
+        // twoway bar has no blabel(); the idiomatic way to print values is an
+        // invisible scatter carrying the marker labels on top of the bars.
+        if (opts.showValues) {
+          const dec = Math.max(0, Math.min(6, Math.round(Number(opts.decimals ?? 2) || 0)));
+          return { twoway: [
+            `bar ${aes.y} ${aes.x}`,
+            `scatter ${aes.y} ${aes.x}, msymbol(none) mlabel(${aes.y}) mlabposition(12) mlabformat(%9.${dec}f)`,
+          ] };
+        }
+        return { twoway: `bar ${aes.y} ${aes.x}` };
+      }
+      if (!aes.x) return null;
+      // graph bar does have blabel().
+      return { standalone: opts.showValues
+        ? `graph bar (count), over(${aes.x}) blabel(bar)`
+        : `graph bar (count), over(${aes.x})` };
+    }
     case "histogram":
       // Stata spells the two modes width() and bin(); emitting bin() for a
       // binwidth plot would silently change the bars.
@@ -948,9 +1013,13 @@ function stataLayer(layer) {
         ? { comment: `* geom_tile has no base-Stata equivalent - requires the community command heatplot:\n*   ssc install heatplot\n*   heatplot ${aes.color} i.${aes.y} i.${aes.x}` }
         : { comment: "* geom_tile layer skipped - needs x, y and a fill column" };
     case "hline":
-      return { option: `yline(${stataNumber(layer.value)})` };
-    case "vline":
-      return { option: `xline(${stataNumber(layer.value)})` };
+    case "vline": {
+      const pat = STATA_LPATTERNS[lineTypeName(opts.dash, "dashed")] ?? "dash";
+      const sub = `lpattern(${pat}) lwidth(${stataNumber(opts.strokeWidth ?? 1.5, 1.5)})`;
+      return { option: layer.geom === "hline"
+        ? `yline(${stataNumber(layer.value)}, ${sub})`
+        : `xline(${stataNumber(layer.value)}, ${sub})` };
+    }
     default:
       return null;
   }
@@ -967,7 +1036,10 @@ export function buildStataPlot(plotEntry, { dataVar = "" } = {}) {
     .filter(layer => layer?.visible !== false && layer?.geom !== "map");
   const built = layers.map(stataLayer).filter(Boolean);
   const comments = built.map(layer => layer.comment).filter(Boolean);
-  const twoway = built.map(layer => layer.twoway).filter(Boolean);
+  // A layer may contribute more than one twoway command (a labelled bar emits
+  // the bar plus an invisible scatter carrying the labels).
+  const twoway = built.flatMap(layer =>
+    layer.twoway == null ? [] : Array.isArray(layer.twoway) ? layer.twoway : [layer.twoway]);
   const standalone = built.map(layer => layer.standalone).filter(Boolean);
   const options = built.map(layer => layer.option).filter(Boolean);
 
