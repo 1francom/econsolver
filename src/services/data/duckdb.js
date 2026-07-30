@@ -133,10 +133,20 @@ async function ensureRiColumn(conn, tableName) {
  * Fetch one page of rows from a DuckDB table — used by DataViewer for pagination.
  * Never materialises the full dataset into JS.
  */
-export async function getTablePage(tableName, offset, limit) {
+export async function getTablePage(tableName, offset, limit, sort = null) {
   const { conn } = await getDuckDB();
+  // The sort MUST be pushed into SQL: this function returns one page, so
+  // ordering the returned rows in JS would sort only the 100 rows already on
+  // screen and silently present that as the sorted table.
+  let orderBy = "";
+  if (sort?.col) {
+    const c = String(sort.col).replace(/"/g, '""');
+    // NULLS LAST in both directions matches dplyr::arrange, where NA always
+    // sorts last regardless of desc().
+    orderBy = ` ORDER BY "${c}" ${sort.dir === "desc" ? "DESC" : "ASC"} NULLS LAST`;
+  }
   const result = await conn.query(
-    `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`
+    `SELECT * FROM "${tableName}"${orderBy} LIMIT ${limit} OFFSET ${offset}`
   );
   return result.toArray().map(arrowRowToObj);
 }

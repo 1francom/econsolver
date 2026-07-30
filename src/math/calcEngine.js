@@ -424,10 +424,22 @@ function _regGammaP(a, x) {
   return Math.exp(-x + a * Math.log(x) - _lnGamma(a)) * sum;
 }
 
-// Regularized incomplete beta I_x(a,b) via continued fraction (Lentz)
-function _incompleteBeta(x, a, b) {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
+// Regularized incomplete beta I_x(a,b) via continued fraction (Lentz).
+//
+// The continued fraction below only converges usefully for x < (a+1)/(a+b+2);
+// past that point it has to be evaluated on the complement via
+// I_x(a,b) = 1 - I_{1-x}(b,a). That switch was missing, and it is NOT a
+// tail-accuracy nicety — it silently broke ordinary results. `pt` calls this
+// with x = df/(df+t²), which approaches 1 exactly when |t| approaches 0, so
+// every INSIGNIFICANT t statistic landed in the divergent branch: at t = 0.01
+// the two-sided p came out 0.19 instead of 0.99 (df = 100k), and 0.85 instead
+// of 0.99 even at df = 10. Same bug class as the Riemann-sum `tCDF`/`fCDF` in
+// LinearEngine.js fixed 2026-07-28 — a second, independent copy of it.
+// The branch is written as a single dispatch, NOT as recursion on the
+// complement: x and 1-x are compared against thresholds that sum to exactly 1,
+// so an x sitting on its own threshold satisfies both tests and a recursive
+// form ping-pongs until the stack dies.
+function _betaCF(x, a, b) {
   const lnB = _lnGamma(a) + _lnGamma(b) - _lnGamma(a + b);
   const front = Math.exp(a * Math.log(x) + b * Math.log(1 - x) - lnB) / a;
   const TINY = 1e-30;
@@ -447,6 +459,14 @@ function _incompleteBeta(x, a, b) {
     }
   }
   return front * (f - TINY);
+}
+
+function _incompleteBeta(x, a, b) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  return x < (a + 1) / (a + b + 2)
+    ? _betaCF(x, a, b)
+    : 1 - _betaCF(1 - x, b, a);
 }
 
 // ── Normal ────────────────────────────────────────────────────────────────────

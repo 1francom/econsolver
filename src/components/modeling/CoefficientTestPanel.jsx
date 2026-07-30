@@ -14,7 +14,9 @@ import {
   getModelTestTerms,
   coefficientHypothesisTest,
   waldTest,
+  waldStatistic,
   generateModelHypothesisScript,
+  generateJointHypothesisScript,
 } from "../../math/ModelHypothesis.js";
 
 const LANGS = [["r", "R"], ["python", "Python"], ["stata", "Stata"]];
@@ -35,6 +37,10 @@ export default function CoefficientTestPanel({ models = [], liveResult = null })
   // Joint test state
   const [jointChecked, setJointChecked] = useState({}); // { [termId]: bool }
   const [jointH0s, setJointH0s]         = useState({}); // { [termId]: string }
+  // Which statistic to report — mirrors car::linearHypothesis's `test=` argument.
+  // null = follow the estimator's own default (F for t-models, χ² for ML).
+  const [jointStat, setJointStat]       = useState(null);
+  const [jointCopied, setJointCopied]   = useState("");
 
   const field = { background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none" };
 
@@ -62,8 +68,35 @@ export default function CoefficientTestPanel({ models = [], liveResult = null })
     // Parse the original beta index from "coef:N"
     const indices = selectedJointTerms.map(t => parseInt(t.id.slice(5), 10));
     const h0sArr = selectedJointTerms.map(t => Number(jointH0s[t.id] ?? 0));
-    return waldTest(beta, vcov, indices, h0sArr);
+    return waldTest(beta, vcov, indices, h0sArr, {
+      resDf: liveResult.df,
+      statLabel: liveResult.testStatLabel ?? "t",
+    });
   }, [hasVcov, liveResult, selectedJointTerms, jointH0s]);
+
+  // The statistic actually reported — the panel and the copied script both read
+  // this, so they can never disagree about which test was run.
+  const jointShown = useMemo(
+    () => (jointResult && !jointResult.error) ? waldStatistic(jointResult, jointStat) : null,
+    [jointResult, jointStat]
+  );
+
+  function copyJointScript(lang) {
+    if (!jointResult || jointResult.error) return;
+    const spec = liveResult?.spec ?? {};
+    const snippet = generateJointHypothesisScript(lang, jointResult, {
+      modelLabel: liveResult?.label ?? liveResult?.type ?? "model",
+      modelType:  liveResult?.type ?? spec.type ?? "OLS",
+      spec,
+      terms: selectedJointTerms,
+      statChoice: jointStat,
+    });
+    if (!snippet) return;
+    navigator.clipboard?.writeText(snippet.trimStart()).then(() => {
+      setJointCopied(lang);
+      setTimeout(() => setJointCopied(""), 2000);
+    }).catch(() => {});
+  }
 
   function copyScript(lang) {
     if (!term || !model || result?.error) return;
@@ -204,22 +237,55 @@ export default function CoefficientTestPanel({ models = [], liveResult = null })
                   <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.red }}>{jointResult.error}</div>
                 )}
 
-                {jointResult && !jointResult.error && (
-                  <div style={{ background: `${C.gold}0a`, border: `1px solid ${C.gold}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text, lineHeight: 1.9 }}>
-                    <div>
-                      <span style={{ color: C.textMuted }}>χ²({jointResult.df}) = </span>
-                      <span style={{ color: C.gold, fontSize: T.body.fontSize }}>{fmt(jointResult.chiSq, 4)}</span>
-                      <span style={{ color: C.textMuted }}>  ·  p = </span>
-                      <span style={{ color: jointResult.chiSqPval < 0.05 ? C.teal : C.text }}>
-                        {jointResult.chiSqPval < 1e-4 ? "<0.0001" : fmt(jointResult.chiSqPval, 4)}
-                      </span>
+                {jointShown && (
+                  <>
+                    {/* Statistic picker — car::linearHypothesis's `test=`. Only
+                        offered when the estimator has residual df; an ML fit is
+                        chi-square only, so no toggle is shown rather than one
+                        that silently does nothing. */}
+                    {jointResult.F != null && (
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.14em", textTransform: "uppercase" }}>Statistic</span>
+                        {[["F", "F"], ["chisq", "χ²"]].map(([id, label]) => (
+                          <button key={id} onClick={() => setJointStat(id)}
+                            style={{ padding: "2px 12px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, border: `1px solid ${jointShown.kind === id ? C.teal : C.border2}`, borderRadius: 2, background: jointShown.kind === id ? `${C.teal}18` : "transparent", color: jointShown.kind === id ? C.teal : C.textMuted, cursor: "pointer" }}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div style={{ background: `${C.gold}0a`, border: `1px solid ${C.gold}30`, borderRadius: 3, padding: "0.65rem 0.9rem", fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, color: C.text, lineHeight: 1.9 }}>
+                      <div>
+                        <span style={{ color: C.textMuted }}>{jointShown.label} = </span>
+                        <span style={{ color: C.gold, fontSize: T.body.fontSize }}>{fmt(jointShown.stat, 4)}</span>
+                        <span style={{ color: C.textMuted }}>  ·  p = </span>
+                        <span style={{ color: jointShown.pValue < 0.05 ? C.teal : C.text }}>
+                          {jointShown.pValue < 1e-4 ? "<0.0001" : fmt(jointShown.pValue, 4)}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
+                        {jointShown.pValue < 0.05
+                          ? "Reject H₀ — coefficients are jointly significant."
+                          : "Fail to reject H₀ — no joint significance detected."}
+                      </div>
+                      {jointResult.F == null && (
+                        <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
+                          Chi-square only — this estimator reports z statistics, so it has no residual df for an F.
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
-                      {jointResult.chiSqPval < 0.05
-                        ? "Reject H₀ — coefficients are jointly significant."
-                        : "Fail to reject H₀ — no joint significance detected."}
+
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>copy test code</span>
+                      {LANGS.map(([id, label]) => (
+                        <button key={id} onClick={() => copyJointScript(id)}
+                          style={{ padding: "2px 10px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, letterSpacing: "0.08em", border: `1px solid ${jointCopied === id ? C.teal : C.border2}`, borderRadius: 2, background: jointCopied === id ? `${C.teal}1a` : "transparent", color: jointCopied === id ? C.teal : C.textMuted, cursor: "pointer" }}>
+                          {jointCopied === id ? "✓" : label}
+                        </button>
+                      ))}
                     </div>
-                  </div>
+                  </>
                 )}
               </>
             )}
