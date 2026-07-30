@@ -717,7 +717,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "workbench" && (
           <WorkbenchTab rows={rows} headers={headers} info={info} panel={panel}
             filename={filename} allDatasets={allDatasets} onAdd={addStep}
-            duckdbTableName={rawData?._duckdb?.tableName}/>
+            duckdbTableName={rawData?._duckdb?.tableName}
+            processedTableName={processed?._duckdb?.tableName}/>
         )}
         {tab === "dictionary" && (
           <DictionaryTab headers={headers} rows={rows}
