@@ -112,7 +112,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push("# ── Estimation ─────────────────────────────────────────────────────────────");
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null, basePeriod: model.basePeriod ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -645,7 +645,7 @@ function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null, basePeriod = null }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
   const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
@@ -1217,8 +1217,12 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     case "CallawayCS": {
       // Callaway-Sant'Anna (2021) staggered DiD via csdid package
       const csY = yVar;
-      const { xVars: csXVars = [], csCompGroup = "nevertreated",
-              csEstMethod = "dr", csAnticipation = 0 } = model;
+      const csXVars = xVars ?? [];
+      const csTreatCol = treatCol;
+      const csCompGroup = compGroup ?? "nevertreated";
+      const csEstMethod = estMethod ?? "dr";
+      const csAnticipation = anticipation ?? 0;
+      const csBasePeriod = basePeriod ?? "varying";
 
       // Build xformla: if xVars empty or ["~1"], use ~1; else ~ X1 + X2 + ...
       const xformlaRhs = (csXVars && csXVars.length && !csXVars.includes("~1"))
@@ -1232,13 +1236,13 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(``);
       lines.push(`result = att_gt(`);
       lines.push(`    yname      = "${csY}",`);
-      lines.push(`    gname      = "${treatVar}",`);
+      lines.push(`    gname      = "${csTreatCol}",`);
       lines.push(`    idname     = "${entityCol}",`);
       lines.push(`    tname      = "${timeCol}",`);
       lines.push(`    xformla    = "${xformla}",`);
       lines.push(`    data       = df,`);
       lines.push(`    control_group = "${csCompGroup}",`);
-      lines.push(`    base_period   = "varying",`);
+      lines.push(`    base_period   = "${csBasePeriod}",`);
       lines.push(`    anticipation  = ${csAnticipation},`);
       lines.push(`    est_method    = "${csEstMethod}"`);
       lines.push(`)`);

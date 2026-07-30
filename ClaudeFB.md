@@ -497,8 +497,8 @@
 - [12:00] · Clean
   Share Project does not work, it violates some security row level
 
-- [13:43] · Clean
-  Replication code for CS DiD 2021 does not work
+- ~~[13:43] · Clean
+  Replication code for CS DiD 2021 does not work~~ ✓ fixed — 2026-07-30. Root cause was `CodeEditor.jsx`'s field whitelist, not `CallawayEngine.js` — see BugTriage.md; needs Franco's confirmation in-app
 
 - [14:16] · General
   Adjust the size of LaTeX tables when the number of columns increases
