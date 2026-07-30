@@ -21,7 +21,7 @@ import { useTheme } from "./modeling/shared.jsx";
 import { PLOT_PALETTES, MONO_STACK } from "../theme.js";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
-import { buildGgplot, buildMatplotlibPlot, buildStataPlot } from "../services/export/plotScript.js";
+import { buildGgplot, buildMatplotlibPlot, buildStataPlot, resolvePlotPreamble } from "../services/export/plotScript.js";
 import { toDfVar } from "../pipeline/exporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
 
@@ -1677,11 +1677,11 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   const copyPlotScript = useCallback(() => {
     if (layers.length === 0) return;
     const entry = currentPlotEntry();
-    const preamble = typeof scriptPreamble === "function"
-      ? String(scriptPreamble(scriptLanguage) ?? "").trim()
-      : "";
     const baseDfVar = datasetName ? toDfVar(datasetName) : "df";
-    const dfVar = preamble && scriptLanguage !== "stata" ? "plot_df" : baseDfVar;
+    const { code: preamble, dfVar } = resolvePlotPreamble(
+      typeof scriptPreamble === "function" ? scriptPreamble(scriptLanguage) : null,
+      { language: scriptLanguage, baseDfVar },
+    );
     const generated = scriptLanguage === "python"
       ? buildMatplotlibPlot(entry, { dfVar })
       : scriptLanguage === "stata"

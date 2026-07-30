@@ -110,9 +110,12 @@ function isInAppDataset(ds) {
  * @param {string} opts.filename      - Original filename (csv/xlsx/dta…)
  * @param {object[]} opts.pipeline    - Array of step objects
  * @param {object}  opts.allDatasets  - { id: { name, filename } } — for resolving join/append names
+ * @param {boolean} opts.preview      - emit the trailing head()/list preview (default true).
+ *                                      Off when this script is a PREAMBLE to more code
+ *                                      (e.g. a plot body), where the preview is just noise.
  * @returns {string}
  */
-export function generateCleanScript({ language, datasetName, filename, pipeline, allDatasets = {}, loadOpts = null }) {
+export function generateCleanScript({ language, datasetName, filename, pipeline, allDatasets = {}, loadOpts = null, preview = true }) {
   const lang = LANG[language];
   if (!lang) throw new Error(`Unknown language: ${language}`);
 
@@ -131,9 +134,11 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
       }
       lines.push(``);
     }
-    lines.push(`# ── Result ──`);
-    lines.push(`head(${df})`);
-    return lines.join("\n");
+    if (preview) {
+      lines.push(`# ── Result ──`);
+      lines.push(`head(${df})`);
+    }
+    return lines.join("\n").trimEnd();
   }
 
   if (language === "stata") {
@@ -150,9 +155,11 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
       }
       lines.push(``);
     }
-    lines.push(`* ── Preview ──`);
-    lines.push(`list in 1/5`);
-    return lines.join("\n");
+    if (preview) {
+      lines.push(`* ── Preview ──`);
+      lines.push(`list in 1/5`);
+    }
+    return lines.join("\n").trimEnd();
   }
 
   if (language === "python") {
@@ -170,9 +177,11 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
       }
       lines.push(``);
     }
-    lines.push(`# ── Preview ──`);
-    lines.push(`print(${df}.head())`);
-    return lines.join("\n");
+    if (preview) {
+      lines.push(`# ── Preview ──`);
+      lines.push(`print(${df}.head())`);
+    }
+    return lines.join("\n").trimEnd();
   }
 
   return "";
