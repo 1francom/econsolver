@@ -562,7 +562,7 @@ function ConditionalSubTab({ headers, onAdd, nm, setNm }) {
 }
 
 // ─── FEATURE ENGINEERING TAB ──────────────────────────────────────────────────
-function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
+function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName,onViewDistinct}){
   const { C, T } = useTheme();
   const [nm,setNm]=useState("");
   const [qt,setQt]=useState("log"),[qc,setQc]=useState(""),[xc2,setXc2]=useState("");
@@ -574,6 +574,7 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   const [dateParseMode,setDateParseMode]=useState("YYYYMMDD");
 
   const numC=headers.filter(h=>info[h]?.isNum);
+  const [distinctPickCol, setDistinctPickCol] = useState("");
 
   // Detect 8-digit YYYYMMDD integers (e.g. 20200101)
   const isYYYYMMDD = v => {
@@ -880,6 +881,18 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
       </Collapsible>
       <Collapsible title="Strings" color={C.gold}>
         <FormatTab rows={rows} headers={headers} info={info} onAdd={onAdd} mode="strings"/>
+      </Collapsible>
+      <Collapsible title="Distinct Values" color={C.violet}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.6rem 0.9rem" }}>
+          <Lbl mb={0}>column</Lbl>
+          <select value={distinctPickCol} onChange={e => setDistinctPickCol(e.target.value)}
+            style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 6px", color: C.text }}>
+            <option value="">— col —</option>
+            {headers.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+          <Btn onClick={() => distinctPickCol && onViewDistinct?.(distinctPickCol)}
+            color={C.violet} v="solid" dis={!distinctPickCol} ch="View distinct values →"/>
+        </div>
       </Collapsible>
       </Collapsible>
 
