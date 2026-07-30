@@ -507,7 +507,7 @@ function ColCard({h, info, sug, castType, selected, onSel, onAct}){
         style={{position:"absolute",top:"100%",right:0,zIndex:99,background:C.surface2,
           border:`1px solid ${C.border}`,borderRadius:4,boxShadow:"0 6px 24px #000b",
           minWidth:140,overflow:"hidden"}}>
-        {[["rename","Rename"],["filter","Filter"],["cast","Change type"],["drop","Drop"]].map(([a,l])=>(
+        {[["rename","Rename"],["filter","Filter"],["cast","Change type"],["distinct","Distinct values"],["drop","Drop"]].map(([a,l])=>(
           <button key={a} onClick={()=>{onAct(h,a);setMo(false);}}
             style={{width:"100%",padding:"0.45rem 0.8rem",background:"transparent",border:"none",
               color:a==="drop"?C.red:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,textAlign:"left"}}>{l}</button>
@@ -1431,7 +1431,7 @@ function DistinctSection({ headers, onAdd, C }) {
 }
 
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
-function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
+function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd,onViewDistinct}){
   const { C, T } = useTheme();
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
   const [rv,setRv]=useState("");
@@ -1553,7 +1553,13 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd}){
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"0.75rem"}}>
         {headers.map(h=><ColCard key={h} h={h} info={info} sug={sug} castType={castTypes[h]} selected={sel===h}
           onSel={h=>{setSel(h);setAct(null);setARes(null);setASt("idle");}}
-          onAct={(h,a)=>{setSel(h);setAct(a);}}/>)}
+          onAct={(h,a)=>{
+            // "distinct" opens the floating panel instead of an inline action
+            // form, so it must NOT go through setAct — that would render an
+            // empty action panel below the grid.
+            if(a==="distinct"){onViewDistinct?.(h);return;}
+            setSel(h);setAct(a);
+          }}/>)}
       </div>
       {/* Issue panel — shown when a column with issues is selected, before the action panel */}
       {sel && !act && sug.some(s=>s.col===sel) && (

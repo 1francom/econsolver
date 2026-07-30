@@ -19,6 +19,7 @@ import ExportMenu      from "./components/wrangling/ExportMenu.jsx";
 import ImportPipelineButton from "./components/wrangling/ImportPipelineButton.jsx";
 import DataQualityReport from "./components/wrangling/DataQualityReport.jsx";
 import NLCommandBar     from "./components/wrangling/NLCommandBar.jsx";
+import DistinctValuesPanel from "./components/wrangling/DistinctValuesPanel.jsx";
 import AuditTrail        from "./components/validation/AuditTrail.jsx";
 import { auditPipeline } from "./pipeline/auditor.js";
 
@@ -111,6 +112,17 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const [isProcessing, setIsProcessing] = useState(false);
   const [elapsedMs,    setElapsedMs]    = useState(0);
   const timerRef = useRef(null);
+
+  // Distinct-values panel. Held at module level (not inside a tab) so it
+  // survives switching between Clean's sub-tabs — see the render site below.
+  const [distinctCol,       setDistinctCol]       = useState(null);  // string | null — null = closed
+  const [distinctMinimized, setDistinctMinimized] = useState(false);
+  const openDistinct = useCallback(col => {
+    setDistinctCol(col);
+    // Requesting a column is an explicit "show me this" action, so always
+    // re-expand rather than leaving the panel collapsed.
+    setDistinctMinimized(false);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -694,7 +706,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
         {/* ── Tab panels ── */}
         {tab === "clean" && (
-          <CleanTab rows={rows} headers={headers} info={info} rawData={rawData} pipeline={pipeline} onAdd={addStep}/>
+          <CleanTab rows={rows} headers={headers} info={info} rawData={rawData} pipeline={pipeline} onAdd={addStep}
+            onViewDistinct={openDistinct}/>
         )}
         {tab === "quality" && (
           <DataQualityReport
@@ -717,8 +730,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "workbench" && (
           <WorkbenchTab rows={rows} headers={headers} info={info} panel={panel}
             filename={filename} allDatasets={allDatasets} onAdd={addStep}
-            duckdbTableName={rawData?._duckdb?.tableName}
-            processedTableName={processed?._duckdb?.tableName}/>
+            duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "dictionary" && (
           <DictionaryTab headers={headers} rows={rows}
@@ -730,6 +742,28 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           <Lbl>Preview — pipeline output</Lbl>
           <Grid headers={headers} rows={rows} max={8}/>
         </div>
+
+        {/* ── Distinct-values panel ──────────────────────────────────────────
+            Mounted OUTSIDE the `tab === …` conditionals above: those unmount
+            their subtree on every sub-tab switch, which is what previously
+            threw the panel away when the user moved between Clean's tabs.
+            Living here, it survives all of them. It is still inside
+            WranglingModule, which App.jsx keeps mounted via display:none —
+            so switching to Model/Explore hides the panel (display:none on an
+            ancestor hides position:fixed descendants too) but preserves its
+            state, and it returns intact when the user comes back to Clean.
+            `processed._duckdb` — not `rawData._duckdb` — is the post-pipeline
+            table, matching `rows`, which is what the JS fallback reads. */}
+        {distinctCol && (
+          <DistinctValuesPanel
+            col={distinctCol}
+            tableName={processed?._duckdb?.tableName}
+            rows={rows}
+            minimized={distinctMinimized}
+            onToggleMinimize={() => setDistinctMinimized(m => !m)}
+            onClose={() => setDistinctCol(null)}
+          />
+        )}
       </div>
 
       <History
