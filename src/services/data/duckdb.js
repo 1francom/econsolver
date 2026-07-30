@@ -163,6 +163,30 @@ export async function computeColStats(tableName, col) {
   return { mean: n(row.mean), sd: n(row.sd), p1: n(row.p1), p99: n(row.p99) };
 }
 
+export async function getDistinctValues(tableName, col, limit = 500) {
+  const { conn } = await getDuckDB();
+  const c = col.replace(/"/g, '""');
+  const listResult = await conn.query(`
+    SELECT "${c}" AS value, COUNT(*) AS n
+    FROM "${tableName}"
+    WHERE "${c}" IS NOT NULL
+    GROUP BY "${c}"
+    ORDER BY n DESC
+    LIMIT ${limit}
+  `);
+  const totalResult = await conn.query(`
+    SELECT COUNT(DISTINCT "${c}") AS total
+    FROM "${tableName}"
+    WHERE "${c}" IS NOT NULL
+  `);
+  const rows = listResult.toArray().map(arrowRowToObj);
+  const total = Number(totalResult.toArray()[0].total);
+  return {
+    values: rows.map(r => ({ value: r.value, count: r.n })),
+    total,
+  };
+}
+
 /**
  * Extract ALL rows from a DuckDB table into JS.
  * Only called at estimation time — never on tab transitions.
