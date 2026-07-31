@@ -497,8 +497,8 @@
 - [12:00] · Clean
   Share Project does not work, it violates some security row level
 
-- [13:43] · Clean
-  Replication code for CS DiD 2021 does not work
+- ~~[13:43] · Clean
+  Replication code for CS DiD 2021 does not work~~ ✓ fixed — 2026-07-30. Root cause was `CodeEditor.jsx`'s field whitelist, not `CallawayEngine.js` — see BugTriage.md; needs Franco's confirmation in-app
 
 - [14:16] · General
   Adjust the size of LaTeX tables when the number of columns increases
@@ -663,8 +663,8 @@
 - ~~[11:43] · Clean
   Add FE for OLS and all estimators, equivalent to feols() in R~~ ✓ not needed — discussed with Franco 2026-07-28: the "FE" estimator already accepts arbitrary FE columns via `runFEMulti`/the FE column picker (same math as `feols(y ~ x | fe1 + fe2)`), reachable today by declaring any entity/time pair in PanelTab (even a trivial/degenerate one) and picking additional FE columns. No engine or UI work needed; closing as already covered.
 
-- [12:45] · Clean
-  Add a function to print a list with all the distinct values of a variable, e.g. a user wants to see the names in "Country" or "Continent"
+- ~~[12:45] · Clean
+  Add a function to print a list with all the distinct values of a variable, e.g. a user wants to see the names in "Country" or "Continent"~~ ✓ implemented — 2026-07-30. Clean → Workbench → Formatting → "Distinct Values": pick a column, get a floating minimizable panel with each value and its count, sorted by frequency, computed over the FULL dataset (SQL when DuckDB-backed, JS otherwise). Spec + plan in `docs/superpowers/`; browser validation pending Franco (checklist in the plan's Task 6)
 
 ### UX / Design
 

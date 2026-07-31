@@ -380,6 +380,23 @@ function paletteComponents(plotEntry, layers, { suppressFill = false } = {}) {
   };
 }
 
+// PlotBuilder's optional `scriptPreamble(language)` prop may return either shape:
+//   • a string — the ModelingTab convention: the preamble rebuilds the
+//     model-derived columns into a frame literally called `plot_df`, so the geom
+//     body must be emitted over that name, not the source dataset's.
+//   • { code, dfVar } — the Explore convention: the preamble loads the source
+//     file and replays the cleaning pipeline into its own `df_<dataset>`, so the
+//     geom body keeps that name.
+// Stata holds a single dataset in memory and never names a frame, so it always
+// keeps the base name (which buildStataPlot ignores anyway).
+export function resolvePlotPreamble(raw, { language, baseDfVar = "df" } = {}) {
+  const isObj = raw != null && typeof raw === "object";
+  const code = String((isObj ? raw.code : raw) ?? "").trim();
+  const named = isObj && raw.dfVar ? String(raw.dfVar) : null;
+  if (!code || language === "stata") return { code, dfVar: baseDfVar };
+  return { code, dfVar: named ?? "plot_df" };
+}
+
 export function buildGgplot(plotEntry, { dfVar = "df" } = {}) {
   const entry = plotEntry ?? {};
   const layers = (Array.isArray(entry.layers) ? entry.layers : [])

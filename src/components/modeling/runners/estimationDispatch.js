@@ -402,6 +402,12 @@ export function dispatchEstimation(dataRows, ctx) {
           yVar: y, xVars: csXCols ?? [], wVars: expW,
           entityCol: ecol, timeCol: timeColCS, treatCol: tcol,
           compGroup: csCompGroup, csDefaultView: csDefaultView ?? "group",
+          // Recorded so replication scripts reflect what was actually run —
+          // these were passed to runCallawayCS but never captured in spec,
+          // so exports always fell back to est_method="dr"/anticipation=0.
+          estMethod: csEstMethod ?? "dr",
+          anticipation: Number(csAnticipation) || 0,
+          basePeriod: csBasePeriod ?? "varying",
         }),
         panelFE: null, panelFD: null,
       };

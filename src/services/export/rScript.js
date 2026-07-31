@@ -1433,7 +1433,8 @@ function transpileModel(model) {
       // Callaway-Sant'Anna (2021) staggered DiD
       // Extract spec fields (from model.spec in the wrapped result)
       const { yVar: csY, treatCol, entityCol: csE, timeCol: csT, xVars: csXVars = [],
-              compGroup = "nevertreated", csEstMethod = "dr", csAnticipation = 0 } = model;
+              compGroup = "nevertreated", estMethod: csEstMethod = "dr",
+              anticipation: csAnticipation = 0, basePeriod: csBasePeriod = "varying" } = model;
 
       // Build xformla: if xVars empty or ["~1"], use ~1; else ~ X1 + X2 + ...
       const xformlaRhs = (csXVars && csXVars.length && !csXVars.includes("~1"))
@@ -1454,7 +1455,7 @@ function transpileModel(model) {
         `  xformla      = ${xformla},`,
         `  data         = df,`,
         `  control_group = ${rStr(compGroup)},`,
-        `  base_period  = "varying",`,
+        `  base_period  = ${rStr(csBasePeriod)},`,
         `  anticipation = ${csAnticipation},`,
         `  est_method   = ${rStr(csEstMethod)}`,
         `)`,

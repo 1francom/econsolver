@@ -64,6 +64,15 @@ function buildScript(tab, result, allDatasets = {}) {
       // Regression through the origin — must be forwarded or the exported script
       // silently re-adds the intercept the platform dropped.
       noIntercept:       spec.noIntercept       ?? false,
+      // Callaway & Sant'Anna (2021) — none of these were forwarded before, so
+      // every exported script's gname/idname referenced treatVar (unset for
+      // this estimator) instead of treatCol, producing an empty/garbage
+      // column reference that made att_gt()/csdid fail immediately.
+      treatCol:          spec.treatCol          ?? null,
+      compGroup:         spec.compGroup         ?? null,
+      estMethod:         spec.estMethod         ?? null,
+      anticipation:      spec.anticipation      ?? null,
+      basePeriod:        spec.basePeriod        ?? null,
     },
   };
 

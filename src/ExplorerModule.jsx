@@ -14,7 +14,7 @@ import PlotBuilder from "./components/PlotBuilder.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 import { downloadPNG } from "./services/export/plotExporter.js";
-import { generateCleanScript } from "./pipeline/exporter.js";
+import { generateCleanScript, toDfVar } from "./pipeline/exporter.js";
 import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { getExplorePins, saveExplorePins } from "./services/Persistence/plotHistory.js";
@@ -2462,7 +2462,8 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     let script   = "";
     if (pipeline.length > 0) {
       try {
-        script = generateCleanScript({ language, datasetName: dsName, filename, pipeline }) + "\n\n";
+        script = generateCleanScript({ language, datasetName: dsName, filename, pipeline,
+                                       loadOpts: cleanedData?.loadOpts ?? null }) + "\n\n";
       } catch (_) { /* skip pipeline section if it fails */ }
     }
     script += generateExploreScript(language, { headers, info, filename });
@@ -2471,6 +2472,31 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     a.href     = URL.createObjectURL(blob);
     a.download = `${base}_explore.${ext}`;
     a.click(); URL.revokeObjectURL(a.href);
+  }
+
+  // Preamble for the Plot Builder's "Copy" script. The plot is drawn on
+  // POST-pipeline rows, so a geom body on its own reproduces nothing: it needs
+  // the load line and the cleaning steps that created those columns first. Same
+  // section downloadExploreScript already prepends, minus the head() trailer.
+  // Returns { code, dfVar } so PlotBuilder builds the geom over df_<dataset>
+  // rather than ModelingTab's `plot_df` convention.
+  function plotScriptPreamble(language) {
+    if (!filename) return null;
+    let code = "";
+    try {
+      code = generateCleanScript({
+        language, datasetName: filename, filename, pipeline,
+        loadOpts: cleanedData?.loadOpts ?? null, preview: false,
+      });
+    } catch (_) { return null; }
+    if (!code) return null;
+    // The QuickFilter is a view-level filter that never entered the pipeline, so
+    // it cannot be replayed here — note it, as the Explore pin exporter does.
+    if (filterConds.length) {
+      const c = language === "stata" ? "* " : "# ";
+      code += `\n\n${c}NOTE: an Explore filter was active when this plot was built — re-apply it before plotting.`;
+    }
+    return { code, dfVar: toDfVar(filename) };
   }
 
   function downloadCSV() {
@@ -2628,7 +2654,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
+        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
       </div>
       <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
     </div>

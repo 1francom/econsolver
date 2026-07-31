@@ -25,6 +25,7 @@ import { listCloudProjects, lockSession, pullProject, hasSyncSession, renameClou
 import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage } from "./services/data/duckdb.js";
+import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
 import SimulateTab      from './components/tabs/SimulateTab.jsx';
@@ -445,6 +446,9 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const [spliceNewCol, setSpliceNewCol] = useState("");
   const [dbPageRows,   setDbPageRows]  = useState([]);  // DuckDB-fetched page
   const [roundDec,     setRoundDec]    = useState("");   // "" = no rounding; "4" = 4 decimal places
+  // View-level sort (like R's View() / clicking a column header). Not a
+  // pipeline step: it changes what you look at, never the data or the export.
+  const [sort,         setSort]        = useState(null); // { col, dir:"asc"|"desc" }
 
   // When the table changes (new dataset or pipeline step), reset to page 0
   useEffect(() => { setPage(0); setDbPageRows([]); }, [duckdbMeta?.tableName]);
@@ -463,11 +467,11 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   useEffect(() => {
     if (!duckdbMeta?.tableName) return;
     let cancelled = false;
-    getTablePage(duckdbMeta.tableName, page * PAGE_SIZE, PAGE_SIZE)
+    getTablePage(duckdbMeta.tableName, page * PAGE_SIZE, PAGE_SIZE, sort)
       .then(r => { if (!cancelled) setDbPageRows(r); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [duckdbMeta?.tableName, page]);
+  }, [duckdbMeta?.tableName, page, sort?.col, sort?.dir]);
 
   // Pre-compute which columns are numeric (from preview rows — stable enough).
   const numCols = useMemo(() => {
@@ -505,14 +509,28 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     () => filterPredicate ? rows.filter(filterPredicate) : rows,
     [rows, filterPredicate]
   );
+  // JS-side sort, used whenever the page isn't coming from DuckDB. Its null
+  // handling deliberately matches the NULLS LAST in getTablePage's ORDER BY —
+  // see sortRows.js.
+  const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort]);
   useEffect(() => { setPage(0); }, [filterCol, filterOp, filterVal]);
+  useEffect(() => { setPage(0); }, [sort?.col, sort?.dir]);
+
+  // Click a header: asc → desc → off, the cycle every spreadsheet uses.
+  const toggleSort = (col) => setSort(prev =>
+    prev?.col !== col ? { col, dir: "asc" }
+    : prev.dir === "asc" ? { col, dir: "desc" }
+    : null
+  );
 
   const isDuck     = !!duckdbMeta?.tableName;
   const totalCount = isDuck && !filterPredicate ? (duckdbMeta.rowCount ?? 0) : filteredRows.length;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+  // The DuckDB branch is already ordered by SQL; sortedRows only applies to the
+  // in-memory branch (which is also the one a view-level filter forces us onto).
   const pageRows   = isDuck && !filterPredicate
     ? dbPageRows
-    : filteredRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    : sortedRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const whereClause = { col: filterCol, op: filterOp, value: filterVal };
   const hasFilterValue = ["empty","notempty"].includes(filterOp) || filterVal !== "";
   const canBulkEdit = !!filterCol && hasFilterValue && !!targetCol && !!onSetWhere;
@@ -621,6 +639,25 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
             </button>
           )}
         </div>
+        {/* Sort indicator. The sort lives in a column header, which scrolls out
+            of view on a wide table — without this the user can end up looking
+            at a reordered grid with no way to tell, or to undo it. */}
+        {sort?.col && (
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <span title="View-level sort — does not change the data or any export"
+              style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily,whiteSpace:"nowrap",
+                      border:`1px solid ${C.gold}40`,borderRadius:3,padding:"2px 6px"}}>
+              sorted: {sort.col} {sort.dir === "asc" ? "▲" : "▼"}
+            </span>
+            <button
+              onClick={() => setSort(null)}
+              title="Clear sort — restore the original row order"
+              style={{padding:"1px 5px",background:"transparent",border:`1px solid ${C.border2}`,
+                      borderRadius:3,color:C.textMuted,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,cursor:"pointer"}}>
+              ×
+            </button>
+          </div>
+        )}
         {totalPages > 1 && (
           <div style={{display:"flex",alignItems:"center",gap:4}}>
             <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>rows {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, totalCount)}</span>
@@ -856,6 +893,21 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                                       border:`1px solid ${selCol===h ? C.teal+"60" : C.border2}`,
                                       borderRadius:2,padding:"1px 4px",fontWeight:400}}>
                           {isNum ? "num" : "str"}
+                        </span>
+                        {/* Sort toggle. stopPropagation keeps the header's own
+                            click (select column → stats panel) intact. */}
+                        <span
+                          onClick={e => { e.stopPropagation(); toggleSort(h); }}
+                          title={sort?.col === h
+                            ? (sort.dir === "asc" ? `Sorted ascending — click for descending` : `Sorted descending — click to clear`)
+                            : `Sort by ${h}`}
+                          style={{
+                            cursor:"pointer", fontWeight:400, padding:"0 2px", lineHeight:1,
+                            fontSize: T.caption.fontSize,
+                            color: sort?.col === h ? C.gold : C.textMuted,
+                            opacity: sort?.col === h ? 1 : 0.45,
+                          }}>
+                          {sort?.col === h ? (sort.dir === "asc" ? "▲" : "▼") : "⇅"}
                         </span>
                       </div>
                     </th>

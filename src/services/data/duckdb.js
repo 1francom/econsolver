@@ -133,10 +133,20 @@ async function ensureRiColumn(conn, tableName) {
  * Fetch one page of rows from a DuckDB table — used by DataViewer for pagination.
  * Never materialises the full dataset into JS.
  */
-export async function getTablePage(tableName, offset, limit) {
+export async function getTablePage(tableName, offset, limit, sort = null) {
   const { conn } = await getDuckDB();
+  // The sort MUST be pushed into SQL: this function returns one page, so
+  // ordering the returned rows in JS would sort only the 100 rows already on
+  // screen and silently present that as the sorted table.
+  let orderBy = "";
+  if (sort?.col) {
+    const c = String(sort.col).replace(/"/g, '""');
+    // NULLS LAST in both directions matches dplyr::arrange, where NA always
+    // sorts last regardless of desc().
+    orderBy = ` ORDER BY "${c}" ${sort.dir === "desc" ? "DESC" : "ASC"} NULLS LAST`;
+  }
   const result = await conn.query(
-    `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`
+    `SELECT * FROM "${tableName}"${orderBy} LIMIT ${limit} OFFSET ${offset}`
   );
   return result.toArray().map(arrowRowToObj);
 }
@@ -161,6 +171,30 @@ export async function computeColStats(tableName, col) {
   const row = result.toArray()[0];
   const n = v => (v === null || v === undefined) ? null : Number(v);
   return { mean: n(row.mean), sd: n(row.sd), p1: n(row.p1), p99: n(row.p99) };
+}
+
+export async function getDistinctValues(tableName, col, limit = 500) {
+  const { conn } = await getDuckDB();
+  const c = col.replace(/"/g, '""');
+  const listResult = await conn.query(`
+    SELECT "${c}" AS value, COUNT(*) AS n
+    FROM "${tableName}"
+    WHERE "${c}" IS NOT NULL
+    GROUP BY "${c}"
+    ORDER BY n DESC
+    LIMIT ${limit}
+  `);
+  const totalResult = await conn.query(`
+    SELECT COUNT(DISTINCT "${c}") AS total
+    FROM "${tableName}"
+    WHERE "${c}" IS NOT NULL
+  `);
+  const rows = listResult.toArray().map(arrowRowToObj);
+  const total = Number(totalResult.toArray()[0].total);
+  return {
+    values: rows.map(r => ({ value: r.value, count: r.n })),
+    total,
+  };
 }
 
 /**

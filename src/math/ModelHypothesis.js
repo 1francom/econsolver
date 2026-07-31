@@ -1,4 +1,4 @@
-import { pnorm, pt, pchisq } from "./calcEngine.js";
+import { pnorm, pt, pchisq, pf } from "./calcEngine.js";
 import { matInv } from "./LinearEngine.js";
 
 function finiteNumber(v) {
@@ -175,8 +175,15 @@ export function coefficientHypothesisTest(term, nullValue = 0, alternative = "tw
 
 // Joint Wald test: H₀: Rβ = r (user selects subset of coefficient indices).
 // vcov must be the full k×k variance-covariance matrix.
-// Returns χ²(q) and F = χ²/q (using model df if provided for the F-distribution).
-export function waldTest(beta, vcov, indices, h0s = null) {
+//
+// Reports BOTH statistics R's car::linearHypothesis offers via its `test=`
+// argument, because they are not interchangeable: χ²(q) is the asymptotic form
+// and F(q, n−k) the finite-sample one, and χ² is the more liberal of the two at
+// any finite n (it ignores the estimation of σ²). The F variant needs residual
+// degrees of freedom, so it is omitted — not faked — for estimators that report
+// a z statistic (ML: logit/probit/Poisson), exactly where R also defaults to
+// Chisq. `preferred` names the default for this model, mirroring that rule.
+export function waldTest(beta, vcov, indices, h0s = null, opts = {}) {
   const q = indices.length;
   if (q < 1) return { error: "Select at least one coefficient." };
   if (!beta || !vcov) return { error: "Variance-covariance matrix not available for this result." };
@@ -210,7 +217,38 @@ export function waldTest(beta, vcov, indices, h0s = null) {
     ? Math.max(0, Math.min(1, rawPval))
     : 0;
 
-  return { chiSq, df: q, chiSqPval, indices, h0s: h };
+  // F variant: F = χ²/q on (q, n−k). Only meaningful when the estimator reports
+  // finite-sample t statistics — an ML fit has no residual df to divide by.
+  const resDf = Number(opts.resDf);
+  const statLabel = String(opts.statLabel ?? "t").toLowerCase() === "z" ? "z" : "t";
+  const hasF = statLabel === "t" && isFinite(resDf) && resDf > 0;
+  let F = null, fPval = null;
+  if (hasF) {
+    F = chiSq / q;
+    const rawF = 1 - pf(F, q, resDf);
+    fPval = (isFinite(rawF) && rawF >= 0) ? Math.max(0, Math.min(1, rawF)) : 0;
+  }
+
+  return {
+    chiSq, df: q, chiSqPval,
+    F, dfResid: hasF ? resDf : null, fPval,
+    preferred: hasF ? "F" : "chisq",
+    indices, h0s: h,
+  };
+}
+
+// Pick the statistic actually reported, given the user's choice and what the
+// estimator can support. Returns a display-ready triple so the panel and the
+// emitted script can never disagree about which test was run.
+export function waldStatistic(test, choice = null) {
+  if (!test || test.error) return null;
+  const want = choice === "F" && test.F != null ? "F"
+             : choice === "chisq" ? "chisq"
+             : test.preferred;
+  if (want === "F" && test.F != null) {
+    return { kind: "F", label: `F(${test.df}, ${test.dfResid})`, stat: test.F, pValue: test.fPval };
+  }
+  return { kind: "chisq", label: `χ²(${test.df})`, stat: test.chiSq, pValue: test.chiSqPval };
 }
 
 export function generateModelHypothesisScript(language, test, meta = {}) {
@@ -420,6 +458,72 @@ export function generateModelHypothesisScript(language, test, meta = {}) {
       `display "${statName} = " ${statVar} "  p = " litux_p_${id}`
     );
     return lines.join("\n");
+  }
+
+  return "";
+}
+
+// ─── Joint (linear) hypothesis replication snippet ───────────────────────────
+// The joint tab had no "copy test code" path at all, so a linear hypothesis a
+// user ran in Litux could not be reproduced anywhere. Emits the same test the
+// panel displays — including which statistic — so the two can't drift.
+//
+// `terms` are the SELECTED terms in the order waldTest received their indices,
+// so terms[j] pairs with test.h0s[j].
+export function generateJointHypothesisScript(language, test, meta = {}) {
+  if (!test || test.error) return "";
+  const chosen = waldStatistic(test, meta.statChoice ?? null);
+  if (!chosen) return "";
+  const modelLabel = meta.modelLabel ?? "model";
+  const terms = Array.isArray(meta.terms) ? meta.terms : [];
+  const h0s = Array.isArray(test.h0s) ? test.h0s : terms.map(() => 0);
+  if (!terms.length) return "";
+  const nameFor = (term, j, candidates) => {
+    const name = candidates(term, meta)[0] ?? term?.label ?? `coef_${j + 1}`;
+    return String(name);
+  };
+  // "x = 0" — the constraint string every one of the three languages accepts in
+  // some form, built once per term from that language's own naming candidates.
+  const constraint = (name, j) => `${name} = ${numberLiteral(h0s[j], "0")}`;
+
+  if (language === "r") {
+    const cons = terms.map((t, j) => jsString(constraint(nameFor(t, j, rTermCandidates), j)));
+    return [
+      "",
+      `# Joint linear hypothesis for ${modelLabel} (${chosen.label})`,
+      `# Litux reported ${chosen.kind === "F" ? "F" : "chi-square"} = ${numberLiteral(chosen.stat, "NA")}, p = ${numberLiteral(chosen.pValue, "NA")}`,
+      `# Coefficient names below come from Litux's labels — adjust if R names a`,
+      `# term differently (factor levels become e.g. "groupB").`,
+      `car::linearHypothesis(fit, c(${cons.join(", ")}), test = ${jsString(chosen.kind === "F" ? "F" : "Chisq")})`,
+    ].join("\n");
+  }
+
+  if (language === "python") {
+    const cons = terms.map((t, j) => constraint(nameFor(t, j, pythonTermCandidates), j));
+    return [
+      "",
+      `# Joint linear hypothesis for ${modelLabel} (${chosen.label})`,
+      `# Litux reported ${chosen.kind === "F" ? "F" : "chi-square"} = ${numberLiteral(chosen.stat, "nan")}, p = ${numberLiteral(chosen.pValue, "nan")}`,
+      // use_f=False gives the chi-square form; wald_test covers both so the two
+      // branches differ only in that flag, not in the constraint parsing.
+      `print(fit.wald_test(${jsString(cons.join(", "))}, use_f=${chosen.kind === "F" ? "True" : "False"}))`,
+    ].join("\n");
+  }
+
+  if (language === "stata") {
+    const cons = terms.map((t, j) => `(${qStata(constraint(nameFor(t, j, stataTermCandidates), j))})`);
+    return [
+      "",
+      `* Joint linear hypothesis for ${modelLabel} (${chosen.label})`,
+      `* Litux reported ${chosen.kind === "F" ? "F" : "chi2"} = ${numberLiteral(chosen.stat, ".")}, p = ${numberLiteral(chosen.pValue, ".")}`,
+      // Stata's `test` picks the statistic from the estimator (F after regress,
+      // chi2 after ML) — it has no test() option, so an explicit choice that
+      // disagrees with the fit is stated rather than silently ignored.
+      chosen.kind === "F"
+        ? `* -test- reports F after regress/xtreg and chi2 after ML — Litux used F here.`
+        : `* -test- reports chi2 after ML estimators; after regress it reports F = chi2/${test.df}.`,
+      `test ${cons.join(" ")}`,
+    ].join("\n");
   }
 
   return "";

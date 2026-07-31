@@ -88,7 +88,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -666,7 +666,7 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 // ppmlhdfe) — these accept vce(cluster) but not vce(hc2)/vce(hc3) or a HAC option.
 const PANEL_TYPES = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "PoissonFE"]);
 
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
@@ -1127,8 +1127,11 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     case "CallawayCS": {
       // Callaway-Sant'Anna (2021) staggered DiD via csdid package
       const csY = yVar;
-      const { xVars: csXVars = [], csCompGroup = "nevertreated",
-              csEstMethod = "dr", csAnticipation = 0 } = model;
+      const csXVars = xVars ?? [];
+      const csTreatCol = treatCol;
+      const csCompGroup = compGroup ?? "nevertreated";
+      const csEstMethod = estMethod ?? "dr";
+      const csAnticipation = anticipation ?? 0;
 
       // Map est_method to Stata csdid method names
       const methodMap = { dr: "dripw", reg: "drimp", ipw: "ipw" };
@@ -1149,7 +1152,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`* Install: net install csdid, from(https://friosavila.github.io/stpackages)`);
       lines.push(``);
       lines.push(xvarsLine);
-      lines.push(`  ivar(${entityCol}) time(${timeCol}) gvar(${treatVar})${notyet_flag} ///`);
+      lines.push(`  ivar(${entityCol}) time(${timeCol}) gvar(${csTreatCol})${notyet_flag} ///`);
       lines.push(`  method(${csdidMethod})${pre_flag}`);
       lines.push(``);
       lines.push(`* Aggregations`);

@@ -159,6 +159,20 @@ const ESTIMATOR_TESTS = [
     expectedStata:  "synth",
     expectedPython: "Synth",
   },
+  {
+    // Regression test for the bug where CodeEditor.jsx's whitelist never
+    // forwarded treatCol/compGroup/estMethod/anticipation/basePeriod, so every
+    // exported script's gname referenced the unset `treatVar` field instead —
+    // "" in R, the literal string "null" in Python/Stata. Assert the REAL
+    // column name and chosen options appear verbatim, not just that att_gt/
+    // csdid is mentioned (a weaker check would have passed even when broken).
+    type: "CallawayCS",
+    model: { type: "CallawayCS", yVar: "outcome", xVars: [], wVars: [], entityCol: "county", timeCol: "year",
+             treatCol: "first_treat_year", compGroup: "notyettreated", estMethod: "ipw", anticipation: 1, basePeriod: "universal" },
+    expectedR:      'gname        = "first_treat_year"',
+    expectedStata:  "gvar(first_treat_year) notyet",
+    expectedPython: 'gname      = "first_treat_year"',
+  },
 ];
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
