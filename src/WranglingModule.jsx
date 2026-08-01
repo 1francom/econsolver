@@ -531,6 +531,22 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const rootWidth  = useContainerWidth(rootRef);
   const narrowRoot = rootWidth !== null && rootWidth < 700;
 
+  // Manual collapse of the pipeline column, independent of the width fold.
+  // sessionStorage (not IDB) because this is a view preference, not project
+  // data, and it is scoped per dataset id — WranglingModule remounts on every
+  // dataset switch, so an unscoped key would leak one dataset's choice to all.
+  const histKey = `litux_pipeline_hidden_${pid}`;
+  const [histHidden, setHistHidden] = useState(() => {
+    try { return sessionStorage.getItem(histKey) === "1"; } catch { return false; }
+  });
+  const toggleHist = useCallback(() => {
+    setHistHidden(h => {
+      const next = !h;
+      try { sessionStorage.setItem(histKey, next ? "1" : "0"); } catch { /* private mode */ }
+      return next;
+    });
+  }, [histKey]);
+
   return (
     <div ref={rootRef} style={{ display:"flex", height:"100%", minHeight:0, position:"relative",
       background:C.bg, color:C.text, fontFamily:T.body.fontFamily, overflow:"hidden" }}>
@@ -729,7 +745,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           { heading: "How the pipeline works", items: [
             "Non-destructive: every step replays on the raw data — the original file is never modified",
             "That means any step can be removed or reordered later without reloading anything",
-            "Undo, redo and delete individual steps from the History sidebar on the left",
+            "Undo, redo and delete individual steps from the Pipeline column on the right — collapse it with ⟩ when you need the space",
             "Steps are auto-saved and restored when you reopen the project",
             "The pipeline is what gets exported as an R / Python / Stata script — it is the record of what you did",
           ]},
@@ -859,6 +875,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
       <History
         collapsed={narrowRoot}
+        hidden={histHidden}
+        onToggleHidden={toggleHist}
         pipeline={pipeline}
         onRm={rmStep}
         onClear={clear}

@@ -668,8 +668,8 @@
 
 ### UX / Design
 
-- [12:10] · Clean
-  Make the pipeline able to be hidden
+- ~~[12:10] · Clean
+  Make the pipeline able to be hidden~~ ✓ implemented — 2026-08-01. The Pipeline column now collapses to a 28px rail via ⟩ in its header, and reopens by clicking the rail. Choice persists per dataset for the session. Distinct from the existing width-driven fold, which still reopens as a temporary overlay; a manual collapse reopens docked.
 
 ---
 

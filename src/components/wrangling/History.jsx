@@ -68,7 +68,13 @@ function UndoBtn({ label, title, onClick, enabled }) {
   );
 }
 
-function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete, collapsed = false }) {
+// `collapsed` is the AUTOMATIC fold (module narrower than 700px); `hidden` is
+// the user's own choice, and the two reopen differently on purpose. An
+// auto-folded panel reopens as a floating overlay, because docking 230px into
+// an already-narrow module is what the fold was avoiding. A manually hidden one
+// reopens DOCKED — the user hid it to reclaim space and is asking for it back,
+// not for a temporary peek.
+function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canUndo, canRedo, branchPointIndex, onSetBranch, pendingDelete, onConfirmDelete, onCancelDelete, collapsed = false, hidden = false, onToggleHidden }) {
   const { C, T } = useTheme();
   const [patchOpen, setPatchOpen] = useState(false);
   const [confirmClearAll,     setConfirmClearAll]     = useState(false);
@@ -79,25 +85,24 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
   const [expanded, setExpanded] = useState(false);
   if (!pipeline.length && !canUndo && !canRedo) return null;
 
-  // Collapsed rail — shown when the module is too narrow for a 230px sidebar.
-  // `expanded` lets the user pull it open as a temporary overlay.
-  if (collapsed && !expanded) {
+  // The rail. Whole thing is clickable, not just the ⟨ — at 28px wide the arrow
+  // alone is a tiny target, and the vertical "Pipeline · N" label reads as the
+  // handle anyway.
+  const showRail = hidden || (collapsed && !expanded);
+  if (showRail) {
+    const reopen = () => { if (hidden) onToggleHidden?.(); else setExpanded(true); };
     return (
-      <div style={{
-        width: 28, flexShrink: 0,
-        borderLeft: `1px solid ${C.border}`,
-        background: C.surface,
-        display: "flex", flexDirection: "column", alignItems: "center",
-        paddingTop: 8, gap: 8, overflow: "hidden",
-      }}>
-        <button
-          onClick={() => setExpanded(true)}
-          title="Show pipeline"
-          style={{
-            background: "transparent", border: "none", color: C.teal,
-            cursor: "pointer", fontSize: T.code.fontSize, padding: 2,
-          }}
-        >⟨</button>
+      <div
+        onClick={reopen}
+        title={hidden ? "Show the pipeline" : "Show pipeline"}
+        style={{
+          width: 28, flexShrink: 0,
+          borderLeft: `1px solid ${C.border}`,
+          background: C.surface,
+          display: "flex", flexDirection: "column", alignItems: "center",
+          paddingTop: 8, gap: 8, overflow: "hidden", cursor: "pointer",
+        }}>
+        <span style={{ color: C.teal, fontSize: T.code.fontSize, padding: 2, lineHeight: 1 }}>⟨</span>
         <div style={{
           writingMode: "vertical-rl", transform: "rotate(180deg)",
           fontSize: T.caption.fontSize, color: C.textMuted,
@@ -136,16 +141,16 @@ function History({ pipeline, onRm, onClear, onClearPatches, onUndo, onRedo, canU
       }}>
         <Lbl mb={0} style={{ flex: 1 }}>Pipeline</Lbl>
 
-        {collapsed && (
-          <button
-            onClick={() => setExpanded(false)}
-            title="Hide pipeline"
-            style={{
-              background: "transparent", border: "none", color: C.textMuted,
-              cursor: "pointer", fontSize: T.code.fontSize, padding: "0 2px",
-            }}
-          >⟩</button>
-        )}
+        {/* Always offer a way out: at narrow widths this dismisses the overlay,
+            otherwise it folds the docked panel to the rail. */}
+        <button
+          onClick={() => { if (collapsed) setExpanded(false); else onToggleHidden?.(); }}
+          title={collapsed ? "Hide pipeline" : "Collapse the pipeline to the right edge"}
+          style={{
+            background: "transparent", border: "none", color: C.textMuted,
+            cursor: "pointer", fontSize: T.code.fontSize, padding: "0 2px",
+          }}
+        >⟩</button>
 
         <UndoBtn label="↩" title="Undo last step" onClick={onUndo} enabled={canUndo} />
         <UndoBtn label="↪" title="Redo"            onClick={onRedo} enabled={canRedo} />
