@@ -668,5 +668,22 @@
 
 ### UX / Design
 
-- [12:10] · Clean
-  Make the pipeline able to be hidden
+- ~~[12:10] · Clean
+  Make the pipeline able to be hidden~~ ✓ implemented — 2026-08-01. The Pipeline column now collapses to a 28px rail via ⟩ in its header, and reopens by clicking the rail. Choice persists per dataset for the session. Distinct from the existing width-driven fold, which still reopens as a temporary overlay; a manual collapse reopens docked.
+
+---
+
+## 2026-07-31 batch
+
+### Bugs
+
+- [13:05] · Data
+  When joining, the pipeline of the right dataset doesn't seem to be applied, changes don't merge
+
+- [13:02] · Clean
+  Add any() to the conditional functions
+
+### Features
+
+- [12:41] · Clean
+  Make possible to apply this line of code: mutate(treat = any(trarrprop != 0 & year == 2015))
