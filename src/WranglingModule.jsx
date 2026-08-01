@@ -43,6 +43,7 @@ import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 // ── Re-exports (consumed by ModelingTab and other modules) ─────────────────
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
 export { applyStep, runPipeline, runPipelineAsync } from "./pipeline/runner.js";
+import { buildDatasetContext, referencedDatasetIds } from "./pipeline/datasetContext.js";
 export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
@@ -100,9 +101,67 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     return () => { cancelled = true; };
   }, [pid, ownerPid]);
 
-  const context = useMemo(() => ({
-    datasets: Object.fromEntries((allDatasets || []).map(d => [d.id, d.rawData]))
-  }), [allDatasets]);
+  // ── Join/append context ────────────────────────────────────────────────────
+  // This used to be `Object.fromEntries(allDatasets.map(d => [d.id, d.rawData]))`,
+  // i.e. every referenced dataset in its ORIGINAL state. A join therefore pulled
+  // the right dataset's raw rows and silently ignored every cleaning step
+  // applied to it — nothing errored, you just merged the wrong data
+  // (feedback 2026-07-31). Each referenced dataset now has its own pipeline
+  // replayed first; see datasetContext.js for the recursion/cycle rules.
+  //
+  // null = not built yet. The pipeline effect below waits for it rather than
+  // running once with an empty context, which would make a join briefly no-op
+  // and then flip — the kind of flicker that reads as a race.
+  const [context, setContext] = useState(null);
+  const [contextWarnings, setContextWarnings] = useState([]);
+  // Rebuild only when the SET of referenced datasets changes — not on every
+  // step. Depending on `pipeline` itself would replay every other dataset's
+  // pipeline (and re-extract whole DuckDB tables) on each edit.
+  const refIdKey = useMemo(() => referencedDatasetIds(pipeline).sort().join("|"), [pipeline]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const others = allDatasets || [];
+      const only = refIdKey ? refIdKey.split("|") : [];
+      if (!others.length || !only.length) {
+        if (!cancelled) { setContext({ datasets: {} }); setContextWarnings([]); }
+        return;
+      }
+      let stepsById = {};
+      try {
+        const { loadProjectPipelines } = await import("./services/Persistence/indexedDB.js");
+        stepsById = (await loadProjectPipelines(ownerPid))?.datasetPipelines ?? {};
+      } catch { /* no IDB record yet — every dataset resolves to its raw rows */ }
+      // A DuckDB-backed dataset's rawData.rows is only the 500-row preview, so
+      // replaying its pipeline over that would join against 500 rows and report
+      // no error. Pull the full table for exactly those datasets.
+      const loadRows = async (ds) => {
+        const tbl = ds.rawData?._duckdb?.tableName;
+        if (tbl) {
+          const { extractAllRows } = await import("./services/data/duckdb.js");
+          return { rows: await extractAllRows(tbl), headers: ds.rawData.headers };
+        }
+        return { rows: ds.rawData.rows, headers: ds.rawData.headers };
+      };
+      const pipelineFor = (id) => {
+        const rec = stepsById[id];
+        return Array.isArray(rec?.steps) ? rec.steps
+             : Array.isArray(rec?.pipeline) ? rec.pipeline
+             : [];
+      };
+      try {
+        const built = await buildDatasetContext(others, pipelineFor, loadRows, { only });
+        if (!cancelled) { setContext({ datasets: built.datasets }); setContextWarnings(built.warnings); }
+      } catch (e) {
+        console.error("[WranglingModule] dataset context build failed — falling back to raw:", e);
+        if (!cancelled) {
+          setContext({ datasets: Object.fromEntries(others.map(d => [d.id, d.rawData])) });
+          setContextWarnings(["Could not replay the other datasets' pipelines — joins are using their original rows."]);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [allDatasets, ownerPid, refIdKey]);
 
   // ── Pipeline execution: DuckDB path (async) or JS path (deferred) ──────────
   // Initial state: raw rows, no cloning — pipeline runs after first paint.
@@ -126,6 +185,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
   useEffect(() => {
     let cancelled = false;
+    // Wait for the join/append context. Running once without it would make any
+    // join silently produce zero merged columns, then flip once it arrived.
+    if (context === null) return;
 
     // ── start spinner + elapsed clock ──────────────────────────────────────
     const t0 = Date.now();
@@ -147,7 +209,12 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       import("./pipeline/duckdbRunner.js").then(({ runPipelineDuck }) =>
         import("./services/data/duckdb.js").then(({ getDuckDB, extractAllRows }) =>
           getDuckDB().then(({ conn }) =>
-            runPipelineDuck(rawData._duckdb.tableName, rawData.headers, pipeline, conn)
+            // `context` was NOT passed here before, so on a DuckDB-backed
+            // dataset a join step found no right dataset and became a complete
+            // no-op — both in the SQL translation and in the JS fallback it
+            // hands off to. Same user-visible symptom as the raw-context bug
+            // above ("changes don't merge"), different mechanism.
+            runPipelineDuck(rawData._duckdb.tableName, rawData.headers, pipeline, conn, context)
               .then(done)
               .catch(e => {
                 console.error("[WranglingModule] DuckDB pipeline failed, falling to JS:", e);
@@ -493,6 +560,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                 </span>
               )}
             </div>
+            {/* A join whose right dataset could not be replayed still produces
+                a table — it just merges the wrong rows. Never let that be
+                silent, which is exactly how the original bug survived. */}
+            {contextWarnings.length > 0 && (
+              <div style={{ marginTop:4, fontSize: T.caption.fontSize, color:C.yellow, fontFamily: T.code.fontFamily }}>
+                ⚠ {contextWarnings.join(" · ")}
+              </div>
+            )}
           </div>
 
           <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
@@ -650,43 +725,59 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           </div>
         </div>
 
-        <HintBox color={C.teal} title="How to wrangle" sections={[
-          { heading: "Pipeline", items: [
-            "Non-destructive: every step replays on raw data — nothing is permanently changed",
-            "Undo any step from the History sidebar on the left",
-            "Steps are auto-saved and restored on reload",
+        <HintBox color={C.teal} title="Cleaning & Wrangling" sections={[
+          { heading: "How the pipeline works", items: [
+            "Non-destructive: every step replays on the raw data — the original file is never modified",
+            "That means any step can be removed or reordered later without reloading anything",
+            "Undo, redo and delete individual steps from the History sidebar on the left",
+            "Steps are auto-saved and restored when you reopen the project",
+            "The pipeline is what gets exported as an R / Python / Stata script — it is the record of what you did",
+          ]},
+          { heading: "AI command bar", items: [
+            "Describe a change in plain English and it is translated into real pipeline steps",
+            "Steps are shown for preview before they are applied — nothing runs unseen",
+            "Anything it emits is checked against the step registry, so it cannot invent an operation that does not exist",
           ]},
           { heading: "Clean", items: [
-            "Rename, drop columns / rows",
-            "Filter: keep rows matching a condition",
-            "Fill missing: mean, median, mode, forward/backward fill, constant, grouped fill",
+            "Rename and drop columns or rows",
+            "Filter: keep rows matching one or more conditions",
+            "Fill missing: mean, median, mode, forward/backward fill, constant, or grouped fill",
+            "Drop NA: remove rows with missing values, by column or across the row",
             "Recode: map specific values to new labels",
-            "Normalize categories: merge near-identical string variants",
-            "Winsorize / Trim outliers / Flag outliers",
-            "Extract regex: pull values from text columns",
-            "AI Transform: describe a transformation in plain English",
+            "Normalize categories: merge near-identical string variants (numeric variants like \"comuna 1\" vs \"comuna 2\" are never merged)",
+            "Winsorize, trim outliers, or just flag them as a new column",
+            "Type cast, string cleaning, and regex extraction from text columns",
+            "Distinct values: inspect every level of a column from its header menu, after the pipeline has run",
           ]},
           { heading: "Workbench — features", items: [
-            "Log transform (log1p — safe for zeros)",
-            "Square, standardize (z-score)",
+            "Log (log1p — safe for zeros), square, standardize (z-score)",
             "Dummy encode: one-hot for a categorical column",
-            "Lag / Lead: shift by t periods — groups by entity to prevent cross-unit contamination",
-            "First difference (diff)",
-            "Interaction term: A × B",
-            "DiD interaction: creates treat × post for difference-in-differences",
-            "Date parse / extract: year, month, quarter from date strings",
-            "Mutate: custom JS expression (e.g. col_a / col_b * 100)",
-          ]},
-          { heading: "Panel Structure", items: [
-            "Panel tab: declare entity column (i) and time column (t)",
-            "Required to unlock FE, FD, TWFE, DiD, and Event Study in the Model tab",
+            "Lag / Lead: shift by t periods — grouped by entity, so values never leak across units",
+            "First difference, interaction terms, and DiD interaction (treat × post)",
+            "Date parse / extract: year, month, quarter, and more from date strings",
+            "Mutate: a custom expression, e.g. col_a / col_b * 100",
+            "if_else and case_when for conditional columns",
+            "Grouped mutate: compute within groups without collapsing rows",
           ]},
           { heading: "Workbench — reshape & merge", items: [
-            "Arrange: sort rows by one or more columns",
-            "Group summarize: aggregate (mean, sum, count, min, max) by group",
-            "Pivot longer: wide → long format",
-            "Merge: LEFT or INNER join another dataset on a key column",
-            "Append: UNION ALL — stack rows from a second dataset",
+            "Arrange: sort by one or more columns",
+            "Group summarize: aggregate (mean, sum, count, min, max) by group — collapses rows",
+            "Pivot longer / wider: reshape between wide and long",
+            "Balance panel: fill in the missing entity-time cells",
+            "Join another dataset: left, inner, right, full, semi or anti",
+            "Append (stack rows), bind columns, union, intersect, setdiff",
+            "Join steps remember the real filenames, so the exported script reads the right files",
+          ]},
+          { heading: "Panel Structure", items: [
+            "Declare the entity column (i) and the time column (t)",
+            "Required before FE, FD, LSDV, TWFE, DiD, CS DiD, Sun-Abraham and event studies become available in Model",
+            "The heatmap shows how balanced the panel is and where the gaps are",
+          ]},
+          { heading: "Dictionary & Quality", items: [
+            "Dictionary: label and describe each variable — the AI narrative in Report uses these labels",
+            "Units can be inferred automatically, then edited by hand",
+            "Quality: missing-value patterns, outlier flags and type inconsistencies, with a fix applicable in one click",
+            "The badge on the Quality tab counts open issues; export the report as markdown",
           ]},
         ]} />
 

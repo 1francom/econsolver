@@ -21,6 +21,7 @@ import { assignVector, mulberry32 } from "../core/generate/vectorAssign.js";
 import { drawSamples } from "../math/dgpDraw.js";
 import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
 import { coerceLiteral } from "./literals.js";
+import { extractAggregateCalls, reduceAggregate } from "./groupExpr.js";
 import { connectedComponents } from "../math/graph/connectedComponents.js";
 import {
   assignDistance, assignDistanceMetric, addDistanceBins,
@@ -1338,6 +1339,12 @@ export function applyStep(rows, headers, s, context = {}) {
           return true;
         }
 
+        // Aggregate calls whose argument is an EXPRESSION (`any(a != 0 & b == 2015)`)
+        // are pulled out and evaluated row-wise, because columns are injected here
+        // as arrays and JS does not vectorise comparisons. See groupExpr.js.
+        const { source: outerExpr, calls: aggCalls } = extractAggregateCalls(exprStr);
+        const placeholderNames = aggCalls.map(c => c.placeholder);
+
         const rowValsExpr = new Map();
         for (const [, grp] of groupMap) {
           const filtRows = filt?.length ? grp.filter(r => filt.every(c => matchFilt(r, c))) : grp;
@@ -1365,11 +1372,24 @@ export function applyStep(rows, headers, s, context = {}) {
             // ai_tr, CalculateTab, SimulateTab). Input is researcher-typed formula,
             // not external/untrusted data. Scope is locked to injected column arrays
             // and helper functions — no globals accessible.
+            //
+            // Aggregate arguments are hoisted into `const __aggN__ = ...` lines
+            // ahead of the outer expression, in dependency order. Each maps over
+            // the group's rows and DESTRUCTURES the row, so inside that argument
+            // the columns are scalars and `trarrprop != 0 & year == 2015` means
+            // what it means in R. The array bindings stay visible outside, so
+            // `mean(wage)`-style expressions keep working unchanged.
+            const scalarCols = allHeaders.filter(h => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(h));
+            const hoisted = aggCalls.map(c =>
+              `const ${c.placeholder} = __reduce(${JSON.stringify(c.name)}, __rows.map(__r => {` +
+              (scalarCols.length ? ` const { ${scalarCols.join(", ")} } = __r;` : "") +
+              ` return (${c.inner}); }));`
+            ).join("\n");
             const evalFn = new Function( // eslint-disable-line no-new-func
-              ...Object.keys(colArrays), ...Object.keys(gh), ...Object.keys(ROW_H),
-              `"use strict"; return (${exprStr});`
+              ...Object.keys(colArrays), ...Object.keys(gh), ...Object.keys(ROW_H), "__rows", "__reduce",
+              `"use strict";\n${hoisted}\nreturn (${outerExpr});`
             );
-            groupVal = evalFn(...Object.values(colArrays), ...Object.values(gh), ...Object.values(ROW_H));
+            groupVal = evalFn(...Object.values(colArrays), ...Object.values(gh), ...Object.values(ROW_H), filtRows, reduceAggregate);
           } catch { groupVal = null; }
           if (typeof groupVal === "boolean") groupVal = groupVal ? 1 : 0;
           grp.forEach(r => rowValsExpr.set(r, groupVal));

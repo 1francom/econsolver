@@ -670,3 +670,20 @@
 
 - [12:10] · Clean
   Make the pipeline able to be hidden
+
+---
+
+## 2026-07-31 batch
+
+### Bugs
+
+- [13:05] · Data
+  When joining, the pipeline of the right dataset doesn't seem to be applied, changes don't merge
+
+- [13:02] · Clean
+  Add any() to the conditional functions
+
+### Features
+
+- [12:41] · Clean
+  Make possible to apply this line of code: mutate(treat = any(trarrprop != 0 & year == 2015))
