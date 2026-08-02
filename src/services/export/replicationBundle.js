@@ -219,7 +219,10 @@ export function buildMultiSubsetBundle(config) {
 
 export function downloadMultiSubsetBundle(config) {
   const bytes = buildMultiSubsetBundle(config);
-  const stem  = (config.filename ?? "analysis").replace(/\.[^.]+$/, "");
+  // SECURITY (SECURITY_AUDIT_2026-08-02.md B-1): sanitize the user/file-derived
+  // stem before it becomes a.download — browsers already strip path separators,
+  // this just keeps odd filenames from producing a broken/ugly download name.
+  const stem  = (config.filename ?? "analysis").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100);
   const ts    = new Date().toISOString().slice(0, 10);
   const blob  = new Blob([bytes], { type: "application/zip" });
   const a     = document.createElement("a");
@@ -233,7 +236,7 @@ export function downloadMultiSubsetBundle(config) {
 // Helper for the UI layer — avoids importing fflate in the component.
 export function downloadReplicationBundle(config) {
   const bytes  = buildReplicationBundle(config);
-  const stem   = (config.filename ?? "analysis").replace(/\.[^.]+$/, "");
+  const stem   = (config.filename ?? "analysis").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100);
   const model  = config.model?.type ?? "model";
   const ts     = new Date().toISOString().slice(0, 10);
 

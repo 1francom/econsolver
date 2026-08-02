@@ -303,6 +303,10 @@ export const STEP_REGISTRY = [
     type: "ai_tr",
     label: "AI transform",
     category: "cleaning",
+    // internal: true — never offered via the NL command-bar catalogue (nlToPipeline).
+    // ai_tr exists for FormatTab/CleanTab flows where the user sees the generated JS
+    // before it's added; the NL path has no such review step. See SECURITY_AUDIT_2026-08-02.md C-1.
+    internal: true,
     description: "Apply an AI-generated JavaScript transformation to a column.",
     schema: [
       { key: "col", type: "col",  label: "Column" },

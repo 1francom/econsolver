@@ -16,7 +16,10 @@ import { generateCleanScript } from "../../pipeline/exporter.js";
 function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDatasets = {} }) {
   const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
-  const base        = filename ? filename.replace(/\.[^.]+$/, "") : "dataset";
+  // SECURITY (SECURITY_AUDIT_2026-08-02.md B-1): filename/datasetName can come from an
+  // uploaded file or a user rename; browsers already sanitize a.download path
+  // separators, but stripping to safe filename chars avoids odd/broken download names.
+  const base        = filename ? filename.replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100) : "dataset";
   const dsName      = datasetName || base;
 
   function downloadCSV() {

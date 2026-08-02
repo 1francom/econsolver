@@ -6,7 +6,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useTheme, Btn, Lbl } from "./shared.jsx";
 import { nlToPipeline } from "../../services/AI/AIService.js";
 import { validateAISteps } from "../../pipeline/stepValidator.js";
-import { runPipeline } from "../../pipeline/runner.js";
+import { runPipelineAsync } from "../../pipeline/runner.js";
 
 export default function NLCommandBar({ rows = [], headers = [], onAddSteps, prefill = null, onConsumePrefill = null, onPrefillNavigate = null }) {
   const { C, T } = useTheme();
@@ -43,10 +43,14 @@ export default function NLCommandBar({ rows = [], headers = [], onAddSteps, pref
     if (resp.error) { setResult({ error: resp.error }); setBusy(false); return; }
     const { valid, rejected } = validateAISteps(resp.steps, headers);
 
-    // dry-run preview: apply valid steps on top of current rows (no datasets needed for cleaning/features)
+    // dry-run preview: apply valid steps on top of current rows (no datasets needed for cleaning/features).
+    // SECURITY: AI-emitted steps (mutate/ai_tr/if_else/case_when/conditional vector_assign)
+    // must never evaluate on the main thread — runPipelineAsync routes those through
+    // the scrubbed expression Worker (no fetch/localStorage/indexedDB in scope).
+    // See SECURITY_AUDIT_2026-08-02.md C-1(d).
     let preview = [], newCols = [];
     try {
-      const out = runPipeline(rows, headers, valid, { datasets: {} });
+      const out = await runPipelineAsync(rows, headers, valid, { datasets: {} });
       newCols = out.headers.filter(h => !headers.includes(h));
       preview = out.rows.slice(0, 5);
     } catch { /* preview is best-effort */ }
@@ -90,7 +94,7 @@ export default function NLCommandBar({ rows = [], headers = [], onAddSteps, pref
           </div>
           {result.valid.map((s, i) => {
             // Surface any dynamic expression so the user sees exactly what will run.
-            const code = s.expr ?? s.cond
+            const code = s.expr ?? s.cond ?? s.js
               ?? (Array.isArray(s.rules) ? s.rules.map(r => r.expr).filter(Boolean).join(" ; ") : null);
             return (
               <div key={`v${i}`} style={{ fontSize: T.code.fontSize, color: C.green, fontFamily: T.code.fontFamily }}>
