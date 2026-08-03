@@ -928,6 +928,20 @@ function _serializeModelContext(result, dataDictionary) {
   return lines.join("\n");
 }
 
+// SECURITY (SECURITY_AUDIT_2026-08-02.md A-1/M-6): dataset names, column names,
+// and sample values here originate from a file the user (or a third party who
+// handed them a file) uploaded — never from typed chat input. Names/values are
+// length-capped and newline-stripped so a hostile header can't smuggle a long
+// fake "instruction" into the prompt, and the whole block is wrapped in an
+// untrusted tag (see the matching rule in SHARED_CONTEXT). Sample values also
+// go through the same filterSampleRows/filterVariableNames PII choke point
+// used by inferVariableUnits — previously this was the one AI egress path that
+// skipped it, despite sending real row values on every coach turn.
+const _CTX_MAX_NAME = 64;
+function _cleanCtxName(s) {
+  return String(s ?? "").replace(/[\r\n]+/g, " ").slice(0, _CTX_MAX_NAME);
+}
+
 // Build a compact dataset-context block sent on every coach turn.
 // cleanedData: the active dataset object (has .headers, .cleanRows, .name)
 // allDatasets: DatasetMeta[] from sessionState — { id, name, headers, rowCount, colCount }
@@ -935,18 +949,22 @@ function _buildDatasetsContext(cleanedData, allDatasets = []) {
   const parts = [];
 
   if (cleanedData?.headers?.length) {
-    const N    = cleanedData.cleanRows?.length ?? "?";
-    const name = cleanedData.name ?? "dataset";
-    parts.push(`ACTIVE DATASET: "${name}" — N=${N}, ${cleanedData.headers.length} columns`);
-    parts.push(`Columns: ${cleanedData.headers.join(", ")}`);
+    const sample = (cleanedData.cleanRows ?? []).slice(0, 3);
+    const piiConfig = detectPII(cleanedData.headers, sample);
+    const { names: safeNames } = filterVariableNames(cleanedData.headers, piiConfig);
+    const { headers: safeHeaders, rows: safeRows } = filterSampleRows(cleanedData.headers, sample, piiConfig);
 
-    const rows = (cleanedData.cleanRows ?? []).slice(0, 3);
-    if (rows.length) {
-      const header = cleanedData.headers.join(" | ");
-      const body   = rows.map(r =>
-        cleanedData.headers.map(h => {
+    const N    = cleanedData.cleanRows?.length ?? "?";
+    const name = _cleanCtxName(cleanedData.name ?? "dataset");
+    parts.push(`ACTIVE DATASET: "${name}" — N=${N}, ${safeNames.length} columns`);
+    parts.push(`Columns: ${safeNames.map(_cleanCtxName).join(", ")}`);
+
+    if (safeRows.length) {
+      const header = safeHeaders.map(_cleanCtxName).join(" | ");
+      const body   = safeRows.map(r =>
+        safeHeaders.map(h => {
           const v = r[h];
-          return v == null ? "" : typeof v === "number" ? +v.toFixed(4) : String(v).slice(0, 12);
+          return v == null ? "" : typeof v === "number" ? +v.toFixed(4) : _cleanCtxName(String(v)).slice(0, 12);
         }).join(" | ")
       ).join("\n  ");
       parts.push(`head(3):\n  ${header}\n  ${body}`);
@@ -957,12 +975,13 @@ function _buildDatasetsContext(cleanedData, allDatasets = []) {
   if (others.length) {
     parts.push("OTHER LOADED DATASETS:");
     others.forEach(d => {
-      parts.push(`  • "${d.name}" — N=${d.rowCount ?? "?"}, cols: ${d.headers.join(", ")}`);
+      const { names: safeNames } = filterVariableNames(d.headers, detectPII(d.headers, []));
+      parts.push(`  • "${_cleanCtxName(d.name)}" — N=${d.rowCount ?? "?"}, cols: ${safeNames.map(_cleanCtxName).join(", ")}`);
     });
   }
 
   if (!parts.length) return "";
-  return "\n\nDATASET CONTEXT:\n" + parts.join("\n") + "\n────────────────────────────";
+  return "\n\n<dataset_context untrusted=\"true\">\n" + parts.join("\n") + "\n</dataset_context>";
 }
 
 function _buildPlotsContext(savedPlots = []) {
@@ -977,10 +996,10 @@ function _buildPlotsContext(savedPlots = []) {
     if (aes.color) parts.push(`color=${aes.color}`);
     if (aes.fill)  parts.push(`fill=${aes.fill}`);
     const desc = parts.length ? `: ${parts.join(", ")}` : "";
-    entries.push(`  • "${p.name || p.title || "untitled"}" — ${geoms}${desc}`);
+    entries.push(`  • "${_cleanCtxName(p.name || p.title || "untitled")}" — ${geoms}${desc}`);
   });
   if (!entries.length) return "";
-  return "\n\nSAVED PLOTS:\n" + entries.join("\n") + "\n────────────────────────────";
+  return "\n\n<saved_plots untrusted=\"true\">\n" + entries.join("\n") + "\n</saved_plots>";
 }
 
 // Deterministic, PAYLOAD-based model routing for the coach (Franco 2026-07-17).

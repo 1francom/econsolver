@@ -13,7 +13,7 @@ import {
 } from "./crypto.js";
 import { getCurrentUserId, getSyncSupabase } from "./supabaseClient.js";
 import { classifyConflict } from "./conflict.js";
-import { assertSafeExpr } from "../../pipeline/exprGuard.js";
+import { assertSafeExpr, exprFieldsOf } from "../../pipeline/exprGuard.js";
 import {
   listProjects,
   saveProject,
@@ -213,20 +213,6 @@ async function downloadArtifact(storageKey) {
 async function decryptManifest(key, row) {
   const encrypted = manifestFromText(row.manifest);
   return decryptJSON(key, encrypted.ct, encrypted.iv);
-}
-
-function exprFieldsOf(step) {
-  const out = [];
-  if (typeof step?.expr === "string") out.push(step.expr);
-  if (typeof step?.cond === "string") out.push(step.cond);
-  if (typeof step?.js === "string") out.push(step.js);
-  if (Array.isArray(step?.cases)) {
-    step.cases.forEach(c => { if (typeof c?.cond === "string") out.push(c.cond); });
-  }
-  if (Array.isArray(step?.rules)) {
-    step.rules.forEach(r => { if (typeof r?.expr === "string") out.push(r.expr); });
-  }
-  return out;
 }
 
 function assertSafeSteps(steps) {

@@ -12,11 +12,36 @@
 // Cache key = stable hash of (filename, fileSize, lastModified).  Same file
 // always maps to the same Parquet cache entry regardless of project or session.
 
-const DIR = "econstudio_pcache_v1";
+const DIR_PREFIX = "econstudio_pcache_v1";
 
 // ── Feature detection ──────────────────────────────────────────────────────────
 export function opfsSupported() {
   return typeof navigator?.storage?.getDirectory === "function";
+}
+
+// SECURITY (SECURITY_AUDIT_2026-08-02.md A-2): OPFS is scoped per-ORIGIN, not
+// per-account like IndexedDB (see setCurrentUser in Persistence/indexedDB.js).
+// On a shared machine — a university computer lab, exactly this product's
+// department-licensing GTM — a second user loading a file with the same
+// (name, size, lastModified) got a cache hit on the FIRST user's cached
+// Parquet, because the directory and cache key never involved identity.
+// setCacheUser() must be called alongside setCurrentUser() (AuthContext.jsx)
+// so every OPFS read/write is scoped to the signed-in uid.
+let _uid = "anon";
+export function setCacheUser(uid) {
+  _uid = uid || "anon";
+}
+function dirName() {
+  return `${DIR_PREFIX}_${_uid}`;
+}
+
+/** Remove the entire OPFS cache directory for a given uid (call on logout). */
+export async function purgeCacheForUser(uid) {
+  if (!opfsSupported() || !uid) return;
+  try {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry(`${DIR_PREFIX}_${uid}`, { recursive: true });
+  } catch { /* directory absent or already gone — fine */ }
 }
 
 // ── Stable key from file identity ─────────────────────────────────────────────
@@ -64,7 +89,7 @@ export function ensurePersistentStorage() {
 // ── OPFS directory handle ──────────────────────────────────────────────────────
 async function getCacheDir() {
   const root = await navigator.storage.getDirectory();
-  return root.getDirectoryHandle(DIR, { create: true });
+  return root.getDirectoryHandle(dirName(), { create: true });
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────

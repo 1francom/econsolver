@@ -32,6 +32,26 @@ export function assertSafeExpr(expr) {
   }
 }
 
+// Collect every dynamically-evaluated expression carried by a step. Single
+// source of truth for the field list — stepValidator.js, syncEngine.js and
+// ImportPipelineButton.jsx used to each keep their own copy, and one of them
+// (stepValidator.js) drifted and silently dropped `step.js` (ai_tr), which is
+// how SECURITY_AUDIT_2026-08-02.md's C-1 chain got through. Import this
+// instead of re-declaring the field list anywhere new.
+export function exprFieldsOf(step) {
+  const out = [];
+  if (typeof step?.expr === "string") out.push(step.expr);
+  if (typeof step?.cond === "string") out.push(step.cond);
+  if (typeof step?.js === "string") out.push(step.js);
+  if (Array.isArray(step?.cases)) {
+    step.cases.forEach(c => { if (typeof c?.cond === "string") out.push(c.cond); });
+  }
+  if (Array.isArray(step?.rules)) {
+    step.rules.forEach(r => { if (typeof r?.expr === "string") out.push(r.expr); });
+  }
+  return out;
+}
+
 // ── R-STYLE %in% TRANSLATION ──────────────────────────────────────────────────
 // Litux users are R/Stata researchers who naturally type R's membership operator
 // (`col %in% c("A","B")`, `col %in% 1:10`) into filter/mutate/condition boxes.

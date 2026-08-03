@@ -258,11 +258,15 @@ function readObject(r) {
 
       if (cls === "compact_intseq" && state?.sxp === REALSXP && state.values.length >= 3) {
         const [n, start, by] = state.values;
+        if (!Number.isFinite(n) || n < 0 || n > 10_000_000)
+          throw new Error(`RDS: ALTREP compact_intseq too long (${n}) — file may be corrupt`);
         const vals = [];
         for (let i = 0; i < n; i++) vals.push(Math.round(start + i * by));
         obj = { sxp: INTSXP, values: vals };
       } else if (cls === "compact_realseq" && state?.sxp === REALSXP && state.values.length >= 3) {
         const [n, n1, inc] = state.values;
+        if (!Number.isFinite(n) || n < 0 || n > 10_000_000)
+          throw new Error(`RDS: ALTREP compact_realseq too long (${n}) — file may be corrupt`);
         const vals = [];
         for (let i = 0; i < n; i++) vals.push(n1 + i * inc);
         obj = { sxp: REALSXP, values: vals };

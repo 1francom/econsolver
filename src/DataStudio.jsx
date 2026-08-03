@@ -467,9 +467,26 @@ async function parseFile(file) {
     return withLoadOpts(await parseShapefile(buf, null), { format: "shapefile-dbf" });
   }
   if (ext === "zip") {
-    const { unzipSync } = await import("fflate");
+    const { unzip } = await import("fflate");
     const buf = await file.arrayBuffer();
-    const files = unzipSync(new Uint8Array(buf));
+    // SECURITY (zip bomb, SECURITY_AUDIT_2026-08-02.md M-2): only shapefile
+    // companions are needed, so decompress those extensions only, and enforce
+    // an inflated-size budget per entry — a small nested-compression ZIP can
+    // otherwise expand to tens of GB and freeze the main thread (unzip's async
+    // form still avoids blocking, but the size cap is what stops the OOM).
+    const MAX_INFLATED = 500 * 1024 * 1024;
+    const WANT = /\.(shp|dbf|prj)$/i;
+    const files = await new Promise((resolve, reject) => {
+      unzip(new Uint8Array(buf), { filter: f => WANT.test(f.name) && f.originalSize <= MAX_INFLATED },
+        (err, out) => err ? reject(err) : resolve(out));
+    });
+    let totalInflated = 0;
+    for (const k of Object.keys(files)) {
+      totalInflated += files[k].length;
+      if (totalInflated > MAX_INFLATED) {
+        throw new Error("The ZIP inflates to more than 500 MB — it may be corrupt or malicious.");
+      }
+    }
     const keys = Object.keys(files);
     const shpKey = keys.find(k => k.toLowerCase().endsWith(".shp"));
     const dbfKey = keys.find(k => k.toLowerCase().endsWith(".dbf"));

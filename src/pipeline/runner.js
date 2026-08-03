@@ -288,6 +288,7 @@ export function applyStep(rows, headers, s, context = {}) {
         // local shadow copy, never mutating the caller's stored step (which
         // must keep its original R-like text for replication-script export).
         s = { ...s, expr: translateRInOperator(s.expr) };
+        if (!isSafeExpr(s.expr)) break; // SECURITY: reject denylisted identifiers on the sync path
         const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
         // eslint-disable-next-line no-new-func
         let filterFn; try { filterFn = new Function(...safeH, `"use strict"; return !!(${s.expr});`); } catch { break; }
@@ -357,6 +358,7 @@ export function applyStep(rows, headers, s, context = {}) {
     case "ai_tr": {
       try {
         const js = (s.js || "").trim();
+        if (!isSafeExpr(js)) break; // SECURITY: reject denylisted identifiers on the sync path
         // s.js may be a full arrow/function expression ("v => {...}", "function(v){...}")
         // or a raw function body ("if (v == null) return null; ...").
         // Detect by checking for arrow or function keyword at the start.
@@ -1305,6 +1307,7 @@ export function applyStep(rows, headers, s, context = {}) {
       if (fn === "expr") {
         const { expr: exprStr, filter: filt, newCol: nc } = s;
         if (!exprStr || !nc) { R = rows; break; }
+        if (!isSafeExpr(exprStr)) break; // SECURITY: reject denylisted identifiers on the sync path
 
         function makeGH(filtRows) {
           const toArr = v => {
@@ -1367,11 +1370,13 @@ export function applyStep(rows, headers, s, context = {}) {
           };
           let groupVal;
           try {
-            // NOTE: new Function() is the intentional sandbox used throughout this
-            // codebase for user-authored math expressions (same pattern in mutate,
-            // ai_tr, CalculateTab, SimulateTab). Input is researcher-typed formula,
-            // not external/untrusted data. Scope is locked to injected column arrays
-            // and helper functions — no globals accessible.
+            // NOTE: this is the intentional sandbox used throughout this codebase for
+            // user-authored math expressions (same pattern in mutate, ai_tr,
+            // CalculateTab, SimulateTab). exprStr CAN be AI/import-sourced (nlToPipeline,
+            // synced/shared pipelines) — see SECURITY_AUDIT_2026-08-02.md C-1 — so the
+            // isSafeExpr() denylist check above is load-bearing, not defense-in-depth.
+            // Scope is locked to injected column arrays and helper functions — no
+            // globals accessible.
             //
             // Aggregate arguments are hoisted into `const __aggN__ = ...` lines
             // ahead of the outer expression, in dependency order. Each maps over

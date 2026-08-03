@@ -6,6 +6,7 @@ import { getSession, onAuthStateChange, getProfile, getCredits, signInAnonymousl
 import { setCurrentUser } from "../Persistence/indexedDB.js";
 import { clearSession, listCloudProjects } from "../sync/syncEngine.js";
 import { consumeGuestParam, isGuest, enterGuest as enterGuestStore, exitGuest as exitGuestStore } from "./guestMode.js";
+import { setCacheUser, purgeCacheForUser } from "../data/parquetCache.js";
 
 const AuthContext = createContext(null);
 
@@ -14,6 +15,9 @@ export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null);
   const [tier,    setTier]    = useState("free");
   const [credits, setCredits] = useState(null);
+  // Tracks the previous signed-in uid so a real logout (uid → null/different uid)
+  // can purge that user's OPFS Parquet cache — see setCacheUser call below.
+  const prevUidRef = useRef(null);
   // Guest mode lets the app render with no account. Initialised synchronously on
   // first render so there is no flash of the login screen when arriving via ?guest=1.
   const [guest,   setGuest]   = useState(() => {
@@ -63,6 +67,15 @@ export function AuthProvider({ children }) {
     const u = s?.user ?? null;
     setUser(u);
     setCurrentUser(u?.id ?? null);
+    // SECURITY (SECURITY_AUDIT_2026-08-02.md A-2): OPFS's Parquet cache is
+    // origin-scoped, not account-scoped. Purge the outgoing user's directory on
+    // any uid change so a second account on the same (shared/lab) browser can
+    // never get a cache hit on the previous account's cached dataset.
+    const prevUid = prevUidRef.current;
+    const nextUid = u?.id ?? null;
+    if (prevUid && prevUid !== nextUid) purgeCacheForUser(prevUid);
+    prevUidRef.current = nextUid;
+    setCacheUser(nextUid);
     if (u && !u.is_anonymous) {
       // A real account supersedes guest mode — never both at once.
       exitGuestStore();

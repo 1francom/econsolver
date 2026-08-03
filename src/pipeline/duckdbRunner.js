@@ -55,9 +55,9 @@ async function columnType(tableName, col, conn) {
   } catch { return null; }
 }
 
-/** Escape a value for use in a LIKE pattern (escapes %, _). */
+/** Escape a value for use in a LIKE pattern (escapes %, _, and the enclosing quote). */
 function escapeLike(val) {
-  return String(val).replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+  return String(val).replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_").replace(/'/g, "''");
 }
 
 /** Produce a SQL literal for a filter value. Uses numeric literal when possible. */
