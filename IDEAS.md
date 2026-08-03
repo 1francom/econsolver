@@ -37,8 +37,9 @@ Add multipanel/multiwindows displays, like we did with the distinct function, if
 Example: pinned plots are opened in a separate window display, just like in R we have the plot viewer.
 Feasibility: 5 (in-page floating panels) / 1 (real OS windows)
 Notes: `DistinctValuesPanel.jsx` is already exactly this pattern — `position:fixed`, minimizable, non-modal, z-index 900, deliberately non-blocking so it stays visible while you work elsewhere. Generalizing it into a `<FloatingPanel>` shell plus a panel manager (stacking, position memory) is contained. Real OS windows are the 1: `window.open` appears nowhere in the codebase and would sever the React tree, the inline-style theming and the DuckDB singleton. `SplitDivider.jsx` already covers the 2-pane split case.
-Status: PROCESSED
+Status: ACCEPTED — spec written
 Date: 03-08-26
+Spec: `docs/superpowers/specs/2026-08-03-floating-panels-design.md`. v1 = a reusable `<FloatingPanel>` + `PanelStackContext`, with two consumers at opposite scopes: a new app-scoped Artifact Viewer (saved plots/maps/models, navigated ◀ ▶ over the order `artifactOrder.js` already persists) and the migrated module-scoped Distinct Values panel. One note on your own reference: RStudio's Plots pane is **not** N floating windows, it is ONE pane with history — which is what the design follows, since free-floating windows hand window management back to the user, the opposite of the cleaner UI you were after.
 # Idea 6
 We can improve the data viewer to simulate an excel or PowerBI tools
 Example: filter values to change the specific rows
