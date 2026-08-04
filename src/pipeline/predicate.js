@@ -18,6 +18,12 @@ const NUM = "numeric", CAT = "categorical", ANY = "any";
 export const OPERATORS = [
   { id: "notna",      label: "is not null",  symbol: null, arity: "none", types: [NUM, CAT, ANY] },
   { id: "isna",       label: "is null",      symbol: null, arity: "none", types: [NUM, CAT, ANY] },
+  // isblank/notblank exist because set_where's legacy `empty`/`notempty` treated
+  // null and "" as the same thing, while isna/notna mean strictly null. Mapping
+  // the legacy spellings onto isna would silently stop a saved "fill the blanks"
+  // step from touching empty-string cells. Distinct ops keep both meanings.
+  { id: "isblank",    label: "is blank",     symbol: null, arity: "none", types: [NUM, CAT, ANY] },
+  { id: "notblank",   label: "is not blank", symbol: null, arity: "none", types: [NUM, CAT, ANY] },
   { id: "eq",         label: "equals",       symbol: "==", arity: "one",  types: [NUM, CAT] },
   { id: "neq",        label: "not equals",   symbol: "!=", arity: "one",  types: [NUM, CAT] },
   { id: "gt",         label: "greater than", symbol: ">",  arity: "one",  types: [NUM] },
@@ -44,7 +50,8 @@ const CANONICAL = new Set(OPERATORS.map(o => o.id));
 const ALIASES = {
   // set_where (runner.js buildPredicate)
   equals: "eq", not_equals: "neq", starts: "startswith", ends: "endswith",
-  empty: "isna", notempty: "notna",
+  // NOT isna/notna — see the isblank comment above.
+  empty: "isblank", notempty: "notblank",
   // duckdbRunner condToSQL
   "==": "eq", "!=": "neq", ">": "gt", "<": "lt", ">=": "gte", "<=": "lte",
   starts_with: "startswith", ends_with: "endswith",
@@ -81,6 +88,9 @@ export function evalPredicate(node, row) {
 
   if (op === "notna") return v !== null && v !== undefined;
   if (op === "isna")  return v === null || v === undefined;
+  // Blank = null OR empty string. Must be answered before the null guard below.
+  if (op === "isblank")  return v === null || v === undefined || String(v) === "";
+  if (op === "notblank") return v !== null && v !== undefined && String(v) !== "";
 
   // For every remaining op, null never matches.
   if (v === null || v === undefined) return false;

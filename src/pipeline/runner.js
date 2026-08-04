@@ -20,6 +20,7 @@ import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 import { assignVector, mulberry32 } from "../core/generate/vectorAssign.js";
 import { drawSamples } from "../math/dgpDraw.js";
 import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
+import { evalPredicate, normalizeOp } from "./predicate.js";
 import { coerceLiteral } from "./literals.js";
 import { extractAggregateCalls, reduceAggregate } from "./groupExpr.js";
 import { connectedComponents } from "../math/graph/connectedComponents.js";
@@ -87,34 +88,28 @@ function coerceTo(v, dtype) {
   return v === undefined ? null : v;
 }
 
-// Build a row predicate from a structured where clause for set_where / filters.
+// Build a row predicate from a structured where clause for set_where.
+// The flat {col, op, value} shape is the LEGACY form; it is translated into a
+// canonical condition node so there is exactly one evaluator in this file.
+// `where.predicate` (a full tree) is accepted too — that is the shape the Data
+// Viewer's stackable filters will emit.
 function buildPredicate(where) {
-  if (!where || !where.col || !where.op) return () => true;
-  const { col, op, value } = where;
-  const sval = value == null ? "" : String(value);
-  const num = Number(value);
-  return (r) => {
-    const raw = r[col];
-    const s = raw == null ? "" : String(raw);
-    switch (op) {
-      case "equals": return s === sval;
-      case "not_equals": return s !== sval;
-      case "contains": return s.includes(sval);
-      case "starts": return s.startsWith(sval);
-      case "ends": return s.endsWith(sval);
-      case "gt": return typeof raw === "number" ? raw > num : Number(raw) > num;
-      case "lt": return typeof raw === "number" ? raw < num : Number(raw) < num;
-      case "between": {
-        const lo = Number(Array.isArray(value) ? value[0] : value);
-        const hi = Number(Array.isArray(value) ? value[1] : value);
-        const x = typeof raw === "number" ? raw : Number(raw);
-        return isFinite(x) && x >= lo && x <= hi;
-      }
-      case "empty": return raw == null || s === "";
-      case "notempty": return raw != null && s !== "";
-      default: return true;
-    }
+  if (!where) return () => true;
+  if (where.predicate) return (r) => evalPredicate(where.predicate, r);
+  if (!where.col || !where.op) return () => true;
+  // set_where's `between` passes value: [lo, hi] (see gridSteps.test.mjs), while
+  // the canonical node uses lo/hi. This shim is the only place that translation
+  // lives.
+  const node = {
+    type: "condition",
+    col: where.col,
+    op: normalizeOp(where.op),
+    value:  Array.isArray(where.value) ? where.value[0] : where.value,
+    lo:     Array.isArray(where.value) ? where.value[0] : where.lo,
+    hi:     Array.isArray(where.value) ? where.value[1] : where.hi,
+    values: where.values,
   };
+  return (r) => evalPredicate(node, r);
 }
 
 // ─── SMART NUMBER HELPERS ─────────────────────────────────────────────────────
@@ -212,75 +207,11 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
 
     case "filter": {
-      // ── predicate evaluator ──────────────────────────────────────────────────
-      // Supports two shapes:
-      //   Legacy:   { col, op, value }
-      //   Compound: { predicate: PredicateNode }
-      //
-      // PredicateNode:
-      //   { type:"and"|"or", children: PredicateNode[] }
-      //   { type:"condition", col, op, value, values }
-      //
-      // Operators: notna | isna | eq | neq | gt | gte | lt | lte |
-      //            in | nin | between | contains | startswith | endswith | regex
-
-      function evalPredicate(node, row) {
-        if (node.type === "and") return node.children.every(c => evalPredicate(c, row));
-        if (node.type === "or")  return node.children.some(c  => evalPredicate(c, row));
-
-        // leaf condition
-        const v = row[node.col];
-        const op = node.op;
-
-        if (op === "notna")     return v !== null && v !== undefined;
-        if (op === "isna")      return v === null || v === undefined;
-
-        // For remaining ops null values never match
-        if (v === null || v === undefined) return false;
-
-        const sv = String(v);
-        const nv = typeof v === "number" ? v : parseFloat(v);
-        const val = node.value;
-        const nval = parseFloat(val);
-
-        if (op === "eq")        return sv === String(val);
-        if (op === "neq")       return sv !== String(val);
-        if (op === "gt")        return isFinite(nv) && nv > nval;
-        if (op === "gte")       return isFinite(nv) && nv >= nval;
-        if (op === "lt")        return isFinite(nv) && nv < nval;
-        if (op === "lte")       return isFinite(nv) && nv <= nval;
-
-        // in / nin: node.values is string[]
-        if (op === "in") {
-          const vals = Array.isArray(node.values) ? node.values : [String(val)];
-          return vals.map(String).includes(sv);
-        }
-        if (op === "nin") {
-          const vals = Array.isArray(node.values) ? node.values : [String(val)];
-          return !vals.map(String).includes(sv);
-        }
-
-        // between: node.lo, node.hi (inclusive both ends)
-        if (op === "between") {
-          const lo = parseFloat(node.lo ?? node.value);
-          const hi = parseFloat(node.hi ?? node.value2);
-          return isFinite(nv) && nv >= lo && nv <= hi;
-        }
-
-        // string ops (case-insensitive)
-        const svl = sv.toLowerCase();
-        const vall = String(val ?? "").toLowerCase();
-        if (op === "contains")   return svl.includes(vall);
-        if (op === "startswith") return svl.startsWith(vall);
-        if (op === "endswith")   return svl.endsWith(vall);
-        if (op === "regex") {
-          try { return new RegExp(val, "i").test(sv); } catch { return false; }
-        }
-
-        return true;
-      }
-
-      // Detect shape: formula expr > compound predicate > legacy flat
+      // Three shapes, in precedence order: formula expr > compound predicate
+      // tree > legacy flat { col, op, value }. The node shape and the operator
+      // set live in ./predicate.js — deliberately NOT restated here, since a
+      // second copy of the operator list is how the five UI dialects drifted
+      // apart in the first place.
       if (s.expr) {
         // Formula mode: evaluate a boolean expression per row.
         // Pattern is consistent with the mutate sandbox already in this file.

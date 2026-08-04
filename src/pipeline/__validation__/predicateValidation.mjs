@@ -20,8 +20,12 @@ assert.equal(normalizeOp("equals"),      "eq");
 assert.equal(normalizeOp("not_equals"),  "neq");
 assert.equal(normalizeOp("starts"),      "startswith");
 assert.equal(normalizeOp("ends"),        "endswith");
-assert.equal(normalizeOp("empty"),       "isna");
-assert.equal(normalizeOp("notempty"),    "notna");
+// empty/notempty map to isblank/notblank, NOT isna/notna: the legacy set_where
+// implementation treated null and "" as the same thing, and remapping them onto
+// strict-null would silently stop a saved "fill the blanks" step from touching
+// empty-string cells.
+assert.equal(normalizeOp("empty"),       "isblank");
+assert.equal(normalizeOp("notempty"),    "notblank");
 
 // duckdbRunner's condToSQL spellings.
 assert.equal(normalizeOp("=="),           "eq");
@@ -90,5 +94,34 @@ assert.equal(evalPredicate(cond("s", "starts_with", { value: "Bue" }), row), tru
 // An unknown operator THROWS. The old code returned true here, which meant a
 // broken filter silently kept every row and looked like a valid result.
 assert.throws(() => evalPredicate(cond("n", "wat", { value: "1" }), row), /unknown operator/i);
+
+// ─── null vs blank ────────────────────────────────────────────────────────────
+// Pins the distinction that made isblank/notblank necessary. `filter` always
+// meant strict null; `set_where` always meant null-or-empty-string. Both
+// meanings survive, addressed by different operator ids.
+const blanks = { nul: null, empty: "", filled: "x", zero: 0 };
+
+assert.equal(evalPredicate(cond("nul",   "isna"), blanks), true);
+assert.equal(evalPredicate(cond("empty", "isna"), blanks), false); // "" is NOT null
+assert.equal(evalPredicate(cond("nul",   "isblank"), blanks), true);
+assert.equal(evalPredicate(cond("empty", "isblank"), blanks), true); // "" IS blank
+assert.equal(evalPredicate(cond("filled","isblank"), blanks), false);
+assert.equal(evalPredicate(cond("empty", "notblank"), blanks), false);
+assert.equal(evalPredicate(cond("filled","notblank"), blanks), true);
+// 0 is a value, not a blank — the classic falsy trap.
+assert.equal(evalPredicate(cond("zero",  "isblank"), blanks), false);
+assert.equal(evalPredicate(cond("zero",  "notblank"), blanks), true);
+
+// The legacy set_where spellings reach the blank semantics, unchanged.
+assert.equal(evalPredicate(cond("empty", "empty"), blanks), true);
+assert.equal(evalPredicate(cond("empty", "notempty"), blanks), false);
+
+// ─── deliberate behaviour changes, pinned so they cannot regress silently ─────
+// 1. String ops are now case-insensitive for set_where too (filter already was).
+assert.equal(evalPredicate(cond("s", "contains", { value: "BUENOS" }), row), true);
+// 2. null never matches a comparison. Legacy buildPredicate coerced null to 0
+//    via Number(null), so `null > -1` used to be true.
+assert.equal(evalPredicate(cond("z", "gt",  { value: "-1" }), row), false);
+assert.equal(evalPredicate(cond("z", "neq", { value: "x" }),  row), false);
 
 console.log("predicate eval OK");
