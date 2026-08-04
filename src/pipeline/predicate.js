@@ -133,3 +133,70 @@ export function evalPredicate(node, row) {
   // kept every row and looked like a legitimate result.
   throw new Error(`Unknown operator "${node.op}" in condition on column "${node.col}".`);
 }
+
+// ─── SQL compilation ──────────────────────────────────────────────────────────
+
+const sqlIdent = (col) => `"${String(col).replace(/"/g, '""')}"`;
+const sqlText  = (v)   => `'${String(v ?? "").replace(/'/g, "''")}'`;
+const sqlNum   = (v)   => {
+  const n = Number(v);
+  if (!isFinite(n)) throw new Error(`Non-numeric value "${v}" in a numeric comparison.`);
+  return String(n);
+};
+// LIKE metacharacters in a user's search term must stay literal.
+const likeBody = (v) => String(v ?? "").replace(/([\\%_])/g, "\\$1").replace(/'/g, "''");
+
+/**
+ * Compile a predicate node to a DuckDB WHERE fragment.
+ *
+ * THROWS on an unknown operator. It never falls back to "TRUE": the previous
+ * implementation (condToSQL in duckdbRunner.js) did, so an operator nobody had
+ * implemented matched every row and produced a plausible wrong table. Callers
+ * should catch and fall back to the JS runner — slower, but correct.
+ *
+ * Semantics deliberately mirror evalPredicate: eq/neq compare as TEXT, and the
+ * string ops are case-insensitive. Diverging on either silently breaks the
+ * guarantee that both paths select the same rows.
+ */
+export function predicateToSQL(node) {
+  if (node.type === "and" || node.type === "or") {
+    const sep = node.type === "and" ? " AND " : " OR ";
+    return "(" + node.children.map(predicateToSQL).join(sep) + ")";
+  }
+
+  const c   = sqlIdent(node.col);
+  const op  = normalizeOp(node.op);
+  const val = node.value;
+
+  switch (op) {
+    case "notna":    return `${c} IS NOT NULL`;
+    case "isna":     return `${c} IS NULL`;
+    case "isblank":  return `(${c} IS NULL OR CAST(${c} AS VARCHAR) = '')`;
+    case "notblank": return `(${c} IS NOT NULL AND CAST(${c} AS VARCHAR) != '')`;
+    // Text comparison so "10.0" does not match 10, matching evalPredicate.
+    case "eq":       return `CAST(${c} AS VARCHAR) = ${sqlText(val)}`;
+    case "neq":      return `CAST(${c} AS VARCHAR) != ${sqlText(val)}`;
+    case "gt":       return `${c} > ${sqlNum(val)}`;
+    case "gte":      return `${c} >= ${sqlNum(val)}`;
+    case "lt":       return `${c} < ${sqlNum(val)}`;
+    case "lte":      return `${c} <= ${sqlNum(val)}`;
+    case "between": {
+      const lo = sqlNum(node.lo ?? node.value);
+      const hi = sqlNum(node.hi ?? node.value2);
+      return `${c} BETWEEN ${lo} AND ${hi}`;
+    }
+    case "in":
+    case "nin": {
+      const vals = (Array.isArray(node.values) ? node.values : [val]).map(sqlText);
+      if (!vals.length) return op === "in" ? "FALSE" : "TRUE";
+      return `CAST(${c} AS VARCHAR) ${op === "nin" ? "NOT " : ""}IN (${vals.join(", ")})`;
+    }
+    case "contains":   return `CAST(${c} AS VARCHAR) ILIKE '%${likeBody(val)}%' ESCAPE '\\'`;
+    case "ncontains":  return `CAST(${c} AS VARCHAR) NOT ILIKE '%${likeBody(val)}%' ESCAPE '\\'`;
+    case "startswith": return `CAST(${c} AS VARCHAR) ILIKE '${likeBody(val)}%' ESCAPE '\\'`;
+    case "endswith":   return `CAST(${c} AS VARCHAR) ILIKE '%${likeBody(val)}' ESCAPE '\\'`;
+    case "regex":      return `regexp_matches(CAST(${c} AS VARCHAR), ${sqlText(val)}, 'i')`;
+    default:
+      throw new Error(`Unknown operator "${node.op}" — refusing to compile a WHERE clause that would match every row.`);
+  }
+}
