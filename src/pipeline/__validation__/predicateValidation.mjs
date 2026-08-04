@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { OPERATORS, normalizeOp } from "../predicate.js";
+import { OPERATORS, normalizeOp, evalPredicate } from "../predicate.js";
 
 // Every operator carries the fields the UI layers need.
 for (const op of OPERATORS) {
@@ -44,3 +44,51 @@ assert.equal(normalizeOp("wat"), "wat");
 assert.equal(normalizeOp(undefined), undefined);
 
 console.log("predicate operators OK");
+
+// ─── evaluator semantics ──────────────────────────────────────────────────────
+const cond = (col, op, extra = {}) => ({ type: "condition", col, op, ...extra });
+const row  = { n: 10, s: "Buenos Aires", z: null };
+
+// Null handling: only notna/isna see nulls; every other op rejects them.
+assert.equal(evalPredicate(cond("z", "notna"), row), false);
+assert.equal(evalPredicate(cond("z", "isna"),  row), true);
+assert.equal(evalPredicate(cond("z", "eq", { value: "" }), row), false);
+
+// eq compares as TEXT — this is why the SQL compiler must cast.
+assert.equal(evalPredicate(cond("n", "eq", { value: "10" }),   row), true);
+assert.equal(evalPredicate(cond("n", "eq", { value: "10.0" }), row), false);
+
+assert.equal(evalPredicate(cond("n", "gt",  { value: "5" }),  row), true);
+assert.equal(evalPredicate(cond("n", "gte", { value: "10" }), row), true);
+assert.equal(evalPredicate(cond("n", "lt",  { value: "5" }),  row), false);
+assert.equal(evalPredicate(cond("n", "between", { lo: 5,  hi: 15 }), row), true);
+assert.equal(evalPredicate(cond("n", "between", { lo: 11, hi: 15 }), row), false);
+
+assert.equal(evalPredicate(cond("s", "in",  { values: ["Buenos Aires", "Córdoba"] }), row), true);
+assert.equal(evalPredicate(cond("s", "nin", { values: ["Córdoba"] }), row), true);
+
+// String ops are case-INSENSITIVE — the SQL compiler must use ILIKE to match.
+assert.equal(evalPredicate(cond("s", "contains",   { value: "buenos" }),  row), true);
+assert.equal(evalPredicate(cond("s", "ncontains",  { value: "buenos" }),  row), false);
+assert.equal(evalPredicate(cond("s", "startswith", { value: "BUE" }),     row), true);
+assert.equal(evalPredicate(cond("s", "endswith",   { value: "AIRES" }),   row), true);
+assert.equal(evalPredicate(cond("s", "regex",      { value: "^buenos" }), row), true);
+
+// Trees.
+assert.equal(evalPredicate({ type: "and", children: [
+  cond("n", "gt", { value: "5" }), cond("s", "contains", { value: "aires" }),
+]}, row), true);
+assert.equal(evalPredicate({ type: "or", children: [
+  cond("n", "lt", { value: "5" }), cond("s", "contains", { value: "nope" }),
+]}, row), false);
+
+// Legacy spellings evaluate identically — the back-compat guarantee.
+assert.equal(evalPredicate(cond("n", "equals", { value: "10" }), row), true);
+assert.equal(evalPredicate(cond("z", "empty"), row), true);
+assert.equal(evalPredicate(cond("s", "starts_with", { value: "Bue" }), row), true);
+
+// An unknown operator THROWS. The old code returned true here, which meant a
+// broken filter silently kept every row and looked like a valid result.
+assert.throws(() => evalPredicate(cond("n", "wat", { value: "1" }), row), /unknown operator/i);
+
+console.log("predicate eval OK");

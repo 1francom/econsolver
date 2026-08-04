@@ -64,3 +64,62 @@ export function normalizeOp(op) {
 export function isCanonicalOp(op) {
   return CANONICAL.has(op);
 }
+
+/**
+ * Evaluate a predicate node against one row.
+ * Semantics are preserved exactly from the former runner.js implementation:
+ * `eq`/`neq` compare as TEXT, and contains/startswith/endswith/regex are
+ * case-INSENSITIVE. Any SQL compiler must reproduce both or the two paths
+ * disagree — see predicateToSQL.
+ */
+export function evalPredicate(node, row) {
+  if (node.type === "and") return node.children.every(c => evalPredicate(c, row));
+  if (node.type === "or")  return node.children.some(c  => evalPredicate(c, row));
+
+  const v  = row[node.col];
+  const op = normalizeOp(node.op);   // CHANGE 1: legacy spellings accepted here
+
+  if (op === "notna") return v !== null && v !== undefined;
+  if (op === "isna")  return v === null || v === undefined;
+
+  // For every remaining op, null never matches.
+  if (v === null || v === undefined) return false;
+
+  const sv   = String(v);
+  const nv   = typeof v === "number" ? v : parseFloat(v);
+  const val  = node.value;
+  const nval = parseFloat(val);
+
+  if (op === "eq")  return sv === String(val);
+  if (op === "neq") return sv !== String(val);
+  if (op === "gt")  return isFinite(nv) && nv >  nval;
+  if (op === "gte") return isFinite(nv) && nv >= nval;
+  if (op === "lt")  return isFinite(nv) && nv <  nval;
+  if (op === "lte") return isFinite(nv) && nv <= nval;
+
+  if (op === "in" || op === "nin") {
+    const vals = (Array.isArray(node.values) ? node.values : [String(val)]).map(String);
+    return op === "in" ? vals.includes(sv) : !vals.includes(sv);
+  }
+
+  if (op === "between") {
+    const lo = parseFloat(node.lo ?? node.value);
+    const hi = parseFloat(node.hi ?? node.value2);
+    return isFinite(nv) && nv >= lo && nv <= hi;
+  }
+
+  const svl  = sv.toLowerCase();
+  const vall = String(val ?? "").toLowerCase();
+  if (op === "contains")   return svl.includes(vall);
+  if (op === "ncontains")  return !svl.includes(vall);
+  if (op === "startswith") return svl.startsWith(vall);
+  if (op === "endswith")   return svl.endsWith(vall);
+  if (op === "regex") {
+    try { return new RegExp(val, "i").test(sv); } catch { return false; }
+  }
+
+  // CHANGE 2: the old code returned true here. That is the bug this module
+  // exists to remove — a filter with an operator nobody implemented silently
+  // kept every row and looked like a legitimate result.
+  throw new Error(`Unknown operator "${node.op}" in condition on column "${node.col}".`);
+}
