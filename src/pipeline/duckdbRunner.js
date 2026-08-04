@@ -12,6 +12,7 @@
 import { getDuckDB } from "../services/data/duckdb.js";
 import { runPipeline } from "./runner.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
+import { predicateToSQL } from "./predicate.js";
 
 const stripProtected = (hs) => hs.filter(h => !PROTECTED_ROW_ID_COLS.includes(h));
 
@@ -55,11 +56,6 @@ async function columnType(tableName, col, conn) {
   } catch { return null; }
 }
 
-/** Escape a value for use in a LIKE pattern (escapes %, _, and the enclosing quote). */
-function escapeLike(val) {
-  return String(val).replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_").replace(/'/g, "''");
-}
-
 /** Produce a SQL literal for a filter value. Uses numeric literal when possible. */
 function valSQL(val) {
   if (val === null || val === undefined || val === "") return "NULL";
@@ -68,34 +64,11 @@ function valSQL(val) {
   return `'${String(val).replace(/'/g, "''")}'`;
 }
 
-// ── Predicate → SQL WHERE clause ──────────────────────────────────────────────
-
-function condToSQL(cond) {
-  const { col, op, val, conditions, combinator } = cond;
-
-  // Multi-condition branch
-  if (conditions?.length) {
-    const sep = combinator === "OR" ? " OR " : " AND ";
-    return "(" + conditions.map(c => condToSQL(c)).join(sep) + ")";
-  }
-
-  const c = esc(col);
-  switch (op) {
-    case "==":           return `${c} = ${valSQL(val)}`;
-    case "!=":           return `${c} != ${valSQL(val)}`;
-    case ">":            return `${c} > ${valSQL(val)}`;
-    case "<":            return `${c} < ${valSQL(val)}`;
-    case ">=":           return `${c} >= ${valSQL(val)}`;
-    case "<=":           return `${c} <= ${valSQL(val)}`;
-    case "contains":     return `${c} LIKE '%${escapeLike(val)}%' ESCAPE '\\'`;
-    case "not_contains": return `${c} NOT LIKE '%${escapeLike(val)}%' ESCAPE '\\'`;
-    case "starts_with":  return `${c} LIKE '${escapeLike(val)}%' ESCAPE '\\'`;
-    case "ends_with":    return `${c} LIKE '%${escapeLike(val)}' ESCAPE '\\'`;
-    case "is_null":      return `${c} IS NULL`;
-    case "is_not_null":  return `${c} IS NOT NULL`;
-    default:             return "TRUE";
-  }
-}
+// Predicate → SQL lives in ./predicate.js, shared with the JS evaluator so the
+// two paths cannot drift. The former local condToSQL spoke a vocabulary that
+// overlapped the runner's on exactly one operator ("contains") and answered
+// everything else with its `default: return "TRUE"` — i.e. it silently kept
+// every row. See predicateAgreementValidation.mjs, which asserts against that.
 
 // ── Step → SQL ────────────────────────────────────────────────────────────────
 
@@ -115,12 +88,26 @@ async function applyStepSQL(step, tbl, headers, conn, context = {}) {
 
     case "filter": {
       // Free-text formula-mode filters (step.expr, e.g. an R-style `%in% c(...)`
-      // expression) have no SQL translation here — condToSQL only understands
-      // the structured {col,op,value} shape and would silently fall through to
-      // its "TRUE" default (matching every row) if given one. Bail out so the
-      // caller falls back to the JS runner, which does handle step.expr.
+      // expression) have no SQL translation — bail out so the caller falls back
+      // to the JS runner, which does handle step.expr.
       if (step.expr) return null;
-      const where = condToSQL(step);
+      // Same node shape the JS runner uses: a compound tree under `predicate`,
+      // or the legacy flat fields on the step itself.
+      const node = step.predicate ?? {
+        type: "condition",
+        col: step.col, op: step.op, value: step.value,
+        values: step.values, lo: step.lo, hi: step.hi,
+      };
+      // predicateToSQL THROWS on an operator it does not know rather than
+      // emitting TRUE. Returning null routes the step to the JS runner: slower,
+      // but it never silently keeps every row.
+      let where;
+      try {
+        where = predicateToSQL(node);
+      } catch (e) {
+        console.warn(`[duckdbRunner] filter not translatable to SQL, falling to JS: ${e.message}`);
+        return null;
+      }
       await conn.query(
         `CREATE OR REPLACE TABLE "${next}" AS SELECT * FROM "${tbl}" WHERE ${where}`
       );
