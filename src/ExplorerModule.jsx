@@ -19,6 +19,7 @@ import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { getExplorePins, saveExplorePins } from "./services/Persistence/plotHistory.js";
 import ExplorePinBar from "./components/explore/ExplorePinBar.jsx";
+import { menuLabel, normalizeOp, evalPredicate } from "./pipeline/predicate.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
@@ -2206,27 +2207,29 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
 // ─── QUICK FILTER ─────────────────────────────────────────────────────────────
 // Ephemeral in-explorer filter — never touches the pipeline or rawData.
 // Conditions are ANDed; numeric ops (>,<,>=,<=) skip non-numeric values.
-const FILTER_OPS = [">", "<", ">=", "<=", "=", "≠", "in", "contains"];
+// Operators come from pipeline/predicate.js so this bar speaks the same
+// vocabulary as Clean's filter and the Data Viewer — it used to show "=" while
+// SubsetManager showed "==" for the identical operation.
+const FILTER_OPS = ["gt", "lt", "gte", "lte", "eq", "neq", "in", "contains"];
 
 // "in" mirrors R's `col %in% c(...)` / Python's `col.isin([...])` — val is either
 // an array (from the multi-select editor) or a comma-separated string typed by hand.
 function matchCond(row, {col, op, val}) {
-  const v = row[col];
-  if (op === "in") {
+  const o = normalizeOp(op);
+  if (o === "in") {
     const arr = Array.isArray(val) ? val : String(val ?? "").split(",").map(s => s.trim()).filter(Boolean);
     if (!arr.length) return true; // nothing selected yet — don't filter everything out
-    return arr.some(x => String(v) === x);
+    return evalPredicate({ type: "condition", col, op: "in", values: arr }, row);
   }
-  if (op === "contains") return String(v ?? "").toLowerCase().includes(String(val).toLowerCase());
-  if (op === "=")  return String(v) === String(val);
-  if (op === "≠")  return String(v) !== String(val);
-  const n = parseFloat(val);
-  if (!isFinite(n) || typeof v !== "number") return true; // skip invalid numeric cond
-  if (op === ">")  return v > n;
-  if (op === "<")  return v < n;
-  if (op === ">=") return v >= n;
-  if (op === "<=") return v <= n;
-  return true;
+  // A half-typed numeric condition keeps every row rather than blanking the
+  // screen mid-keystroke. This bar filters as you type, so "no valid number yet"
+  // must not read as "no matching rows". Deliberately kept from the original.
+  if (["gt", "lt", "gte", "lte"].includes(o)) {
+    if (!isFinite(parseFloat(val)) || typeof row[col] !== "number") return true;
+  }
+  try {
+    return evalPredicate({ type: "condition", col, op: o, value: val }, row);
+  } catch { return true; }
 }
 
 // Unique string values of `col` across `rows`, capped at `cap` — returns null past the
@@ -2318,7 +2321,7 @@ function QuickFilter({headers, rows, totalRows, filteredCount, conds, setConds})
                 else if (!isVec && wasVec) val = Array.isArray(val) ? val.join(", ") : val;
                 upd(i,{op:newOp, val});
               }} style={{...selStyle,width:76}}>
-                {FILTER_OPS.map(op=><option key={op} value={op}>{op}</option>)}
+                {FILTER_OPS.map(op=><option key={op} value={op}>{menuLabel(op)}</option>)}
               </select>
               {cond.op === "in"
                 ? <VectorValueEditor col={cond.col} rows={rows} value={cond.val} onChange={v=>upd(i,{val:v})} selStyle={selStyle} C={C} T={T} />
@@ -2328,7 +2331,7 @@ function QuickFilter({headers, rows, totalRows, filteredCount, conds, setConds})
                 style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize: T.h2.fontSize,lineHeight:1,padding:"0 2px"}}>×</button>
             </div>
           ))}
-          <button onClick={()=>setConds(cs=>[...cs,{col:headers[0]??"",op:">",val:""}])}
+          <button onClick={()=>setConds(cs=>[...cs,{col:headers[0]??"",op:"gt",val:""}])}
             style={{fontSize: T.caption.fontSize,color:C.teal,background:"none",border:`1px solid ${C.teal}40`,borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,padding:"0.2rem 0.5rem",marginTop:2}}>
             + condition
           </button>
