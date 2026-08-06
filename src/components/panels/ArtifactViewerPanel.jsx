@@ -142,7 +142,11 @@ export default function ArtifactViewerPanel({ pid, datasets = [], outputs = {}, 
               }}>
                 {current.entry.name ?? current.kind}
               </span>
-              <button onClick={() => onOpen?.(current)}
+              {/* Minimize rather than close: you are about to look at this
+                  artifact full size, so the panel should get out of the way —
+                  but closing would also discard your position in the list, and
+                  the panel's whole point is to persist. */}
+              <button onClick={() => { setMinimized(true); onOpen?.(current); }}
                 style={{
                   background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3,
                   color: C.textDim, cursor: "pointer", fontSize: T.caption.fontSize, padding: "1px 8px",

@@ -18,6 +18,9 @@ import { usePanelSlot } from "./PanelStack.jsx";
 import { PANEL_MARGIN } from "./panelStackMath.js";
 
 const TITLE_BAR_HEIGHT = 30;
+// Minimized, the panel shows only its title and buttons, so it has no reason to
+// keep a wide panel's width — it would sit there as a long empty strip.
+const MINIMIZED_WIDTH = 230;
 
 /**
  * @param id          stable id used by the stack registry
@@ -36,11 +39,13 @@ export default function FloatingPanel({
   const height = minimized ? TITLE_BAR_HEIGHT : TITLE_BAR_HEIGHT + bodyHeight;
   // Never null: usePanelSlot already collapses the hidden case to PANEL_MARGIN.
   const bottom = usePanelSlot(id, height, tab);
+  const shownWidth = minimized ? Math.min(width, MINIMIZED_WIDTH) : width;
 
   return (
     <div style={{
       position: "fixed", bottom, right: PANEL_MARGIN, zIndex: 900,
-      width, maxWidth: `calc(100vw - ${PANEL_MARGIN * 2}px)`,
+      width: shownWidth, maxWidth: `calc(100vw - ${PANEL_MARGIN * 2}px)`,
+      transition: "width 0.12s",
       background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 5,
       boxShadow: "0 8px 28px #000a", overflow: "hidden",
       fontFamily: T.code.fontFamily,

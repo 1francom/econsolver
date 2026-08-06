@@ -3276,8 +3276,16 @@ export default function App() {
                 artifactViewerOpen={artifactViewerOpen}
                 onCloseArtifactViewer={() => setArtifactViewerOpen(false)}
                 onOpenArtifact={(a) => {
-                  navigateToTab(a.kind === "map" ? "spatial" : "explore");
-                  setArtifactViewerOpen(false);
+                  if (a.kind === "map") { navigateToTab("spatial"); return; }
+                  // Reuses the existing cross-dataset plot-open path: park the
+                  // id, switch Explore to the plot's own dataset, and let
+                  // PlotBuilder pick it up once that dataset's history loads.
+                  const dsId = a.entry?.datasetId ?? a.entry?._srcId ?? null;
+                  if (dsId) {
+                    setPendingExplorePlot({ datasetId: dsId, plotId: a.entry.id });
+                    selectDataset("explore", dsId, true);
+                  }
+                  navigateToTab("explore");
                 }}
               />
 
