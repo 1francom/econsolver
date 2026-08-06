@@ -25,6 +25,8 @@ import { listCloudProjects, lockSession, pullProject, hasSyncSession, renameClou
 import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage, getFilteredRowCount } from "./services/data/duckdb.js";
+import { PanelStackProvider } from "./components/panels/PanelStack.jsx";
+import PanelHost from "./components/panels/PanelHost.jsx";
 import { evalPredicate, predicateToSQL, menuLabel } from "./pipeline/predicate.js";
 import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
@@ -2798,6 +2800,7 @@ export default function App() {
   // no split. `activeTab` stays the focused pane's tab so every existing
   // consumer (nav history, tour, WorkspaceBar) keeps working unchanged.
   const [panes,     setPanes]     = useState(["clean", null]);
+  const [artifactViewerOpen, setArtifactViewerOpen] = useState(false);
   const [focused,   setFocused]   = useState(0);
   const [paneRatio, setPaneRatio] = useState(0.5);
 
@@ -3217,6 +3220,8 @@ export default function App() {
                 openTabs={panes.filter(Boolean)}
                 isSplit={isSplit}
                 onToggleSplit={toggleSplit}
+                onToggleArtifacts={() => setArtifactViewerOpen(o => !o)}
+                artifactsOpen={artifactViewerOpen}
                 hasOutput={!!(tabOutput(activeTab) || tabRawData(activeTab)?.rows?.length)}
                 reportUnlocked={(modelingSession?.pinnedModels?.length ?? 0) > 0}
                 activeDatasetId={tabDsId(activeTab)}
@@ -3254,6 +3259,22 @@ export default function App() {
                   onTabChange={setActiveTab}
                 />
               )}
+
+              {/* The provider wraps BOTH the app-level host and the tab panels.
+                  DistinctValuesPanel lives inside WranglingModule, i.e. inside a
+                  tab panel — if it fell outside this provider it would silently
+                  use the fallback offset and overlap the artifact viewer. */}
+              <PanelStackProvider panes={panes}>
+              <PanelHost
+                pid={pid}
+                datasets={availableDatasets}
+                artifactViewerOpen={artifactViewerOpen}
+                onCloseArtifactViewer={() => setArtifactViewerOpen(false)}
+                onOpenArtifact={(a) => {
+                  navigateToTab(a.kind === "map" ? "spatial" : "explore");
+                  setArtifactViewerOpen(false);
+                }}
+              />
 
               {/* ── Tab panels — kept mounted via display:none to preserve state ── */}
               <div ref={paneWrapRef} style={{flex:1,minHeight:0,position:"relative"}}>
@@ -3417,6 +3438,7 @@ export default function App() {
                 </div>
 
               </div>
+              </PanelStackProvider>
             </div>
           <AIContextSidebar
             isOpen={sidebarOpen}
