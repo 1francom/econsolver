@@ -152,6 +152,21 @@ export function menuLabel(op) {
   return o.symbol ? `${o.symbol} ${o.label}` : o.label;
 }
 
+/** Prose only: "is not null", "in list", "equals". */
+export function opLabel(op) {
+  return BY_ID.get(normalizeOp(op))?.label ?? String(op);
+}
+
+/** The symbol if the operator has one, else null. */
+export function opSymbol(op) {
+  return BY_ID.get(normalizeOp(op))?.symbol ?? null;
+}
+
+/** Symbol when there is one, prose otherwise — for inline step descriptions. */
+export function opShort(op) {
+  return opSymbol(op) ?? opLabel(op);
+}
+
 /** Every operator that has a plain infix spelling in the replication targets. */
 const OP_INFIX = {
   eq:  { r: "==", py: "==", stata: "==" },

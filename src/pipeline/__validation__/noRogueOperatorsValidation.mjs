@@ -30,6 +30,18 @@ for (const f of SURFACES) {
   }
 }
 
+// A symbol/label MAP keyed by canonical ids, e.g. {eq:"=",neq:"≠",…}. This is
+// the shape the guard originally missed: CleanTab's step-description builder had
+// one, so a pipeline card read "country ≠ World" while the dropdown directly
+// above it offered "!= not equals" — the exact inconsistency this work removes,
+// surviving in the description text rather than the selector.
+const ROGUE_MAP = /\{\s*eq\s*:\s*["']|\bneq\s*:\s*["']/;
+for (const f of SURFACES) {
+  if (ROGUE_MAP.test(readFileSync(f, "utf8"))) {
+    failures.push(`${f} maps operator ids to its own labels — use opLabel/opSymbol/menuLabel from pipeline/predicate.js`);
+  }
+}
+
 // Nobody outside predicate.js / predicateExport.js may implement the operator
 // switch. `startswith` is the tell: it appears in every copy and nowhere else.
 const ROGUE_EVAL = /(op|f\.op|node\.op)\s*===\s*["']startswith["']|case\s+["']startswith["']\s*:/;

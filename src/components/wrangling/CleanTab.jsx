@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { computeColStats } from "../../services/data/duckdb.js";
-import { OPERATORS, menuLabel, evalPredicate } from "../../pipeline/predicate.js";
+import { OPERATORS, menuLabel, opLabel, opShort, evalPredicate } from "../../pipeline/predicate.js";
 import SortRowsSection from "./SortRowsSection.jsx";
 
 // ─── STANDARDIZE DIALOG (inline) ─────────────────────────────────────────────
@@ -829,15 +829,18 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
     return { type: topLogic, children: validGroups };
   }, [groups, topLogic]);
 
-  // Build human-readable description
+  // Build human-readable description.
+  // The operator wording comes from the shared table — this function used to
+  // carry its own symbol map, which is why a step card read "country ≠ World"
+  // while the dropdown right above it offered "!= not equals".
   function condDesc(c) {
-    if (c.op === "notna") return `${c.col} is not null`;
-    if (c.op === "isna")  return `${c.col} is null`;
+    const label = opLabel(c.op);
+    if (c.op === "notna" || c.op === "isna") return `${c.col} ${label}`;
     if (c.op === "between") return `${c.col} between [${c.lo}, ${c.hi}]`;
-    if (c.op === "in")  return `${c.col} in [${(c.values||[]).join(", ")||c.value}]`;
-    if (c.op === "nin") return `${c.col} not in [${(c.values||[]).join(", ")||c.value}]`;
-    const opStr = {eq:"=",neq:"≠",gt:">",gte:"≥",lt:"<",lte:"≤",contains:"contains",startswith:"starts with",endswith:"ends with",regex:"regex"}[c.op]||c.op;
-    return `${c.col} ${opStr} ${c.value}`;
+    if (c.op === "in" || c.op === "nin") {
+      return `${c.col} ${label} [${(c.values||[]).join(", ")||c.value}]`;
+    }
+    return `${c.col} ${opShort(c.op)} ${c.value}`;
   }
   function buildDesc(pred) {
     if (!pred) return "no conditions";
