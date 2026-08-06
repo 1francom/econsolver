@@ -1542,6 +1542,11 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
           "Functions: sqrt(x), exp(x), log(x), sin(x); constants pi and e",
           "Use names for parameters (alpha, beta) — they appear as sliders below",
         ]},
+        { heading: "= here is not a comparison", items: [
+          "In the equation pad, = states a relation to solve: 2*x = 4*x - 10 finds x",
+          "Everywhere else in Litux, == compares two values and = is not an operator at all",
+          "The difference is deliberate — R, Python and Stata all keep the two apart for the same reason",
+        ]},
         { heading: "Variable Workspace", items: [
           "Define scalars or vectors using dataset column names or numeric literals",
           "Variables persist across expressions in the same session",

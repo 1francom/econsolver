@@ -2183,6 +2183,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               "Bacon decomposition (under a TWFE DiD result): shows how much weight sits on later-vs-earlier-treated comparisons",
               "Plot Builder: result-augmented charts, plus a coefficient-comparison mode across pinned models",
               "Subsets: define named subsets and run the same spec on all of them at once",
+              "Subset operators read the same as Clean's filter — == equals, >= at least — and are translated per language in the exported scripts",
               "Spec Curve: coefficient stability across a threshold range",
               "Code Editor: read and copy the R / Python / Stata replication scripts for exactly this model",
               "Export: LaTeX table, CSV coefficients, or a full replication zip bundle",

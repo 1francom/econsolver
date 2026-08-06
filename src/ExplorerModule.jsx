@@ -2592,6 +2592,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         <HintBox title="Explore" sections={[
           { heading: "Filter", items: [
             "⊘ Filter bar slices data temporarily — affects every tab here, never touches the pipeline",
+            "Operators read the same as in Clean and the Data Viewer — == equals, >= at least — and match what you type in a formula box",
             "Use it to eyeball a subgroup without committing to a cleaning step",
             "Stats, plots and correlations all recompute against the filtered rows instantly",
           ]},

@@ -1360,6 +1360,8 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           { heading: "Views", items: [
             "Overview: shape, missing-value count, numeric column count, memory estimate, and per-column metadata",
             "Data Viewer: paginated table of the rows themselves — click a header to sort",
+            "Its filter runs on the full table, not the page you can see, and the row counter reports full-table numbers",
+            "Filter operators read the same as in Clean and Explore — == equals, is blank — and match what you type in a formula box",
             "A \"pipeline applied\" badge means you are looking at cleaned output, not the raw file",
           ]},
           { heading: "Persistence & privacy", items: [
