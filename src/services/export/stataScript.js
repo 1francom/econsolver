@@ -8,6 +8,7 @@
 //   { type, yVar, xVars, wVars, zVars, entityCol, timeCol,
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
+import { opInfix } from "../../pipeline/predicate.js";
 import { toStata, jsExprToStata, stataRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildStataLoadLine } from "./loadLine.js";
 
@@ -1189,7 +1190,7 @@ function subsetFiltersToStata(filters) {
   if (!filters?.length) return null;
   return filters.map(f => {
     const val = isNaN(Number(f.val)) ? `"${f.val}"` : f.val;
-    return `${f.col} ${f.op} ${val}`;
+    return `${f.col} ${opInfix(f.op, "stata")} ${val}`;
   }).join(" & ");
 }
 
@@ -1337,7 +1338,7 @@ export function generateSubsetStataScript({ filename = "dataset.csv", pipeline =
       const col  = f.col.replace(/[^a-zA-Z0-9_]/g, "_");
       const isNum = f.val !== "" && !isNaN(Number(f.val));
       const val  = isNum ? f.val : `"${f.val}"`;
-      return `${col} ${f.op} ${val}`;
+      return `${col} ${opInfix(f.op, "stata")} ${val}`;
     }).join(" & ");
   }
 

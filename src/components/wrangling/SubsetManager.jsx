@@ -10,34 +10,39 @@
 
 import { useState } from "react";
 import { useTheme } from "../modeling/shared.jsx";
+import { OPERATORS, normalizeOp, menuLabel, evalPredicate } from "../../pipeline/predicate.js";
 
 // ─── PURE FILTER FUNCTION ────────────────────────────────────────────────────
 // Apply an array of filter conditions to rows.
-// Each filter: { col, op, val }
-// Supported ops: == != >= <= > <
-// Numeric ops coerce values with Number(); string == / != compare as strings.
+// Each filter: { col, op, val }, where `op` is a canonical operator id from
+// pipeline/predicate.js. The operator set and its semantics are documented
+// there — restating them here is how this file drifted from the rest of the app
+// in the first place.
 export function applySubsetFilter(rows, filters) {
   if (!filters?.length) return rows;
-  return rows.filter(row =>
-    filters.every(f => {
-      const v = row[f.col];
-      if (v === null || v === undefined) return false;
-      const n = Number(v), fv = Number(f.val);
-      switch (f.op) {
-        case "==": return String(v) === String(f.val);
-        case "!=": return String(v) !== String(f.val);
-        case ">=": return !isNaN(n) && !isNaN(fv) && n >= fv;
-        case "<=": return !isNaN(n) && !isNaN(fv) && n <= fv;
-        case ">":  return !isNaN(n) && !isNaN(fv) && n >  fv;
-        case "<":  return !isNaN(n) && !isNaN(fv) && n <  fv;
-        default: return true;
-      }
-    })
-  );
+  return rows.filter(row => {
+    // The switch this replaced ended in `default: return true`, so a subset
+    // carrying an unrecognised operator silently matched every row.
+    // evalPredicate throws; selecting nothing makes the breakage visible in the
+    // subset's row count instead of hiding it in a plausible result.
+    try {
+      return filters.every(f =>
+        evalPredicate({ type: "condition", col: f.col, op: f.op, value: f.val }, row)
+      );
+    } catch { return false; }
+  });
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
-const OPS = ["==", "!=", ">=", "<=", ">", "<"];
+// Deliberately the six comparison operators and no more: `in`, `contains` and
+// the null operators need a function call per language on export (%in%, grepl,
+// .isin, strpos, inlist), which opInfix refuses to guess. Widening this list
+// means teaching the three exporters first.
+const OPS = ["eq", "neq", "gte", "lte", "gt", "lt"];
+
+// The label shows the symbol, not the internal id — "region eq north" reads
+// like a typo to a user.
+const opSymbol = (op) => OPERATORS.find(o => o.id === normalizeOp(op))?.symbol ?? op;
 
 function genId() {
   return "sub_" + Math.random().toString(36).slice(2, 8);
@@ -46,7 +51,7 @@ function genId() {
 function filterLabel(filters) {
   if (!filters.length) return "no filters";
   return filters
-    .map(f => `${f.col} ${f.op} ${f.val}`)
+    .map(f => `${f.col} ${opSymbol(f.op)} ${f.val}`)
     .join(" & ");
 }
 
@@ -77,7 +82,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
           borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px",
         }}
       >
-        {OPS.map(op => <option key={op} value={op}>{op}</option>)}
+        {OPS.map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
       </select>
 
       {/* Value */}
