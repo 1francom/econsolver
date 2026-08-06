@@ -2590,6 +2590,11 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         <HintBox title="Explore" sections={[
+          { heading: "Artifacts panel", items: [
+            "◫ in the top bar opens a floating panel listing every saved plot and map in this project",
+            "It stays on screen across tabs — keep a chart visible while you build a model",
+            "◀ ▶ walks them in the project's artifact order, the same order the replication bundle emits",
+          ]},
           { heading: "Filter", items: [
             "⊘ Filter bar slices data temporarily — affects every tab here, never touches the pipeline",
             "Operators read the same as in Clean and the Data Viewer — == equals, >= at least — and match what you type in a formula box",
