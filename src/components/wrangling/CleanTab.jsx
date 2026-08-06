@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { computeColStats } from "../../services/data/duckdb.js";
+import { OPERATORS, menuLabel, evalPredicate } from "../../pipeline/predicate.js";
 import SortRowsSection from "./SortRowsSection.jsx";
 
 // ─── STANDARDIZE DIALOG (inline) ─────────────────────────────────────────────
@@ -586,42 +587,21 @@ function ColIssuePanel({ col, issues }) {
 // Builds a compound predicate tree (AND/OR groups of conditions).
 // Emits a step: { type:"filter", predicate: PredicateNode, desc }
 //
-// Operator catalogue by column type:
-//   numeric:     notna | isna | eq | neq | gt | gte | lt | lte | between | in | nin
-//   categorical: notna | isna | eq | neq | in | nin | contains | startswith | endswith | regex
-//   any:         notna | isna
-//
 // UX: top-level is always AND (most common case). User can add OR groups inside.
-
-const OPS_NUM = [
-  { v:"notna",  l:"is not null" },
-  { v:"isna",   l:"is null" },
-  { v:"eq",     l:"= equals" },
-  { v:"neq",    l:"≠ not equals" },
-  { v:"gt",     l:"> greater than" },
-  { v:"gte",    l:"≥ greater or equal" },
-  { v:"lt",     l:"< less than" },
-  { v:"lte",    l:"≤ less or equal" },
-  { v:"between",l:"between [lo, hi]" },
-  { v:"in",     l:"in list" },
-  { v:"nin",    l:"not in list" },
-];
-const OPS_CAT = [
-  { v:"notna",     l:"is not null" },
-  { v:"isna",      l:"is null" },
-  { v:"eq",        l:"= equals" },
-  { v:"neq",       l:"≠ not equals" },
-  { v:"in",        l:"in list" },
-  { v:"nin",       l:"not in list" },
-  { v:"contains",  l:"contains" },
-  { v:"startswith",l:"starts with" },
-  { v:"endswith",  l:"ends with" },
-  { v:"regex",     l:"regex match" },
-];
+//
+// The operator catalogue and its column-type gating come from
+// pipeline/predicate.js. Restating them here is how the app ended up with five
+// UI dialects for one concept.
+// isblank/notblank exist for set_where's legacy `empty`/`notempty` and are not
+// offered here: this builder never had them, and a refactor should not add
+// capability. They also have no translation in the filter exporters yet.
+const HIDDEN_OPS = new Set(["isblank", "notblank"]);
 
 function opsFor(col, info) {
-  if (!col || !info[col]) return OPS_CAT;
-  return info[col].isNum ? OPS_NUM : OPS_CAT;
+  const type = (col && info[col]?.isNum) ? "numeric" : "categorical";
+  return OPERATORS
+    .filter(o => o.types.includes(type) && !HIDDEN_OPS.has(o.id))
+    .map(o => ({ v: o.id, l: menuLabel(o.id) }));
 }
 
 // A single condition row
@@ -763,33 +743,11 @@ function FilterPreview({ rows, predicate, total }) {
   const passing = useMemo(() => {
     if (!predicate) return null;
     try {
-      // Inline eval — same logic as runner but in-browser for preview
-      function evalP(node, row) {
-        if (node.type === "and") return node.children.every(c => evalP(c, row));
-        if (node.type === "or")  return node.children.some(c  => evalP(c, row));
-        const v = row[node.col];
-        const op = node.op;
-        if (op === "notna") return v !== null && v !== undefined;
-        if (op === "isna")  return v === null || v === undefined;
-        if (v === null || v === undefined) return false;
-        const sv = String(v), nv = parseFloat(v), val = node.value, nval = parseFloat(val);
-        if (op === "eq")        return sv === String(val);
-        if (op === "neq")       return sv !== String(val);
-        if (op === "gt")        return isFinite(nv) && nv > nval;
-        if (op === "gte")       return isFinite(nv) && nv >= nval;
-        if (op === "lt")        return isFinite(nv) && nv < nval;
-        if (op === "lte")       return isFinite(nv) && nv <= nval;
-        if (op === "between")   return isFinite(nv) && nv >= parseFloat(node.lo) && nv <= parseFloat(node.hi);
-        if (op === "in")  { const vals=(Array.isArray(node.values)?node.values:[String(val)]).map(String); return vals.includes(sv); }
-        if (op === "nin") { const vals=(Array.isArray(node.values)?node.values:[String(val)]).map(String); return !vals.includes(sv); }
-        const svl=sv.toLowerCase(), vall=String(val??"").toLowerCase();
-        if (op === "contains")   return svl.includes(vall);
-        if (op === "startswith") return svl.startsWith(vall);
-        if (op === "endswith")   return svl.endsWith(vall);
-        if (op === "regex")      { try { return new RegExp(val,"i").test(sv); } catch { return false; } }
-        return true;
-      }
-      return rows.filter(r => evalP(predicate, r)).length;
+      // The runner's own evaluator, so the preview count can never disagree with
+      // what applying the step actually does. It throws on an unknown operator;
+      // the catch degrades to "no preview", which is honest — the local copy
+      // this replaced returned true and showed a confidently wrong count.
+      return rows.filter(r => evalPredicate(predicate, r)).length;
     } catch { return null; }
   }, [rows, predicate]);
 
