@@ -19,13 +19,13 @@ export const TOUR_STEPS = [
     id: "data",
     tab: "data",
     title: "1 · Data",
-    text: "Upload CSV, Excel (.xlsx/.xls), Stata (.dta), R (.rds), or shapefiles (.shp) via drag & drop. Fetch live datasets from the World Bank API. Column types are auto-detected.",
+    text: "Upload CSV/TSV, Excel (.xlsx/.xls), Stata (.dta), R (.rds and .RData/.rda workspaces), Parquet, or shapefiles (.shp+.dbf+.prj, or a .zip) via drag & drop. Fetch live datasets from the World Bank API. Column types are auto-detected, and files over 10MB are routed through DuckDB so the full table stays queryable.",
   },
   {
     id: "clean",
     tab: "clean",
     title: "2 · Clean & Wrangle",
-    text: "Build a non-destructive pipeline — every step replays on raw data, nothing is permanently changed. Tabs: Clean · Feature Engineering · Panel Structure · Reshape · Merge · Dictionary · Quality Report. Undo any step from the History sidebar.",
+    text: "Build a non-destructive pipeline — every step replays on raw data, nothing is permanently changed. Tabs: Clean · Workbench (features, reshape, merge) · Panel Structure · Dictionary · Quality. Undo any step from the History sidebar.",
   },
   {
     id: "explore",
@@ -37,7 +37,7 @@ export const TOUR_STEPS = [
     id: "model",
     tab: "model",
     title: "4 · Model",
-    text: "14 estimators: OLS · WLS · FE · FD · TWFE · 2×2 DiD · 2SLS/IV · Sharp RDD · Logit · Probit · GMM · LIML · Synthetic Control. Assign Y, X, W variables, choose SE type (HC1–HC3, clustered, HAC), and estimate. Pin any result to compare specifications. Export LaTeX + replication scripts.",
+    text: "Pick a strategy (OLS, panel FE/FD/LSDV, DiD incl. Callaway-Sant'Anna and Sun-Abraham, event study, IV/GMM/LIML, RDD, spatial, synthetic control) and an outcome family (linear, Poisson, logit, probit). Assign Y, X and controls, choose an SE type (HC1–HC3, clustered, CR2/CR3, two-way, HAC), and estimate. Pin any result to compare specifications. Export LaTeX + replication scripts.",
   },
   {
     id: "report",
@@ -49,19 +49,19 @@ export const TOUR_STEPS = [
     id: "simulate",
     tab: "simulate",
     title: "Simulate",
-    text: "Define a data-generating process: set variable distributions (normal, uniform, Bernoulli, Poisson) and structural equations. Generate synthetic datasets for power analysis or Monte Carlo experiments. Output appears in the Data tab.",
+    text: "Define a data-generating process: draw from Normal, Uniform, Bernoulli, Poisson, Exponential, t, Chi-squared or Categorical, add GroupID/CycleID for a balanced panel skeleton, and link variables with structural equations. Also hosts the stats workspace (resampling, probability, distributions) and pre-model sample tests. Output appears in the Data tab.",
   },
   {
     id: "calculate",
     tab: "calculate",
     title: "Calculate",
-    text: "Symbolic calculator, equation pad (define TR, TC, π and differentiate for FOC), numerical derivatives, Brent root solver, and model prediction (ŷ ± 95% CI from any pinned model). Export expressions as LaTeX.",
+    text: "Solve, derive, integrate, take limits, and do symbolic algebra. Equation pad (define TR, TC, π and differentiate for FOC), Brent root solver, and model prediction (ŷ ± 95% CI from any pinned model). Export expressions as LaTeX.",
   },
   {
     id: "spatial",
     tab: "spatial",
     title: "Spatial",
-    text: "Load shapefiles or coordinate data. Assign buffer zones, grid cells (rectangular or H3), and run spatial joins. Nearest-neighbour matching and haversine/euclidean distance utilities.",
+    text: "Load shapefiles or coordinate data. Analyze: CRS transforms, distances, buffers, grids (rectangular or H3), spatial joins, aggregation to grid, nearest-neighbour, boundary distance, geocoding. Map builds a live Leaflet map; Plot builds an SVG geo-plot. Every column-producing op can be committed to the pipeline.",
   },
 ];
 
@@ -69,12 +69,17 @@ export const TOUR_STEPS = [
 // Per-module help trigger.  Click → full overlay covers the main content area.
 //
 // Props:
-//   title        – overlay heading (e.g. "How to model")
+//   title        – overlay heading: the MODULE name (e.g. "Modeling", "Spatial
+//                  Analytics"). The trigger button always reads "Help" — a
+//                  per-module verb ("How to spatial") does not survive contact
+//                  with every module name, so the button stays generic and the
+//                  heading carries the context.
 //   color        – accent color
 //   tips         – string[] fallback (simple list)
 //   sections     – {heading: string, items: string[]}[] richer format
 //   overlayLeft  – px offset from left edge where the overlay starts (default 280)
-export function HintBox({ tips = [], title = "How to use", color, sections = null, overlayLeft = 280 }) {
+//   buttonLabel  – override for the trigger label (default "Help")
+export function HintBox({ tips = [], title = "Help", color, sections = null, overlayLeft = 280, buttonLabel = "Help" }) {
   const { C, T } = useTheme();
   const accent = color ?? C.teal;
   const [open, setOpen] = useState(false);
@@ -117,7 +122,7 @@ export function HintBox({ tips = [], title = "How to use", color, sections = nul
       >
         <span style={{ color: accent, fontSize: T.caption.fontSize }}>▸</span>
         <span style={{ color: accent, letterSpacing: "0.12em", textTransform: "uppercase", fontSize: T.caption.fontSize }}>
-          {title}
+          {buttonLabel}
         </span>
       </button>
 

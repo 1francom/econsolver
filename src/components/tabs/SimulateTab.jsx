@@ -895,22 +895,34 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
 
   return (
     <div style={{ height: "100%", overflowY: "auto", padding: "1.8rem 2.2rem", fontFamily: T.code.fontFamily, color: C.text, maxWidth: 900 }}>
-      <HintBox title="How to simulate" sections={[
-        { heading: "DGP Variables", items: [
-          "Define variables with distributions: normal, uniform, Bernoulli, Poisson",
-          "Categorical: sample labeled levels with probabilities (e.g. Control,Treatment) — emits strings or integer codes",
+      <HintBox title="Simulate" sections={[
+        { heading: "DGP variables", items: [
+          "Each row of the builder is one variable: give it a name, a distribution, and its parameters",
+          "Continuous: Normal (mean, sd), Uniform (min, max), Exponential (lambda), t (df), Chi-squared (df)",
+          "Discrete: Bernoulli (p), Poisson (lambda)",
+          "Categorical: labelled levels with probabilities (e.g. Control,Treatment) — emits strings or integer codes",
           "GroupID / CycleID: build a balanced panel skeleton — entity ids (rep each) and time ids (rep times)",
-          "Set mean, std, or probability parameters per variable",
-          "Variables can reference each other to build structural equations",
+          "Variables can reference each other, so order matters: define X before the equation that uses it",
         ]},
-        { heading: "Structural Equations", items: [
-          "Link variables with expressions: Y = 2*X + epsilon, D = 1*(Z > 0.5), etc.",
-          "Supports any JS math expression — all DGP variables are in scope",
+        { heading: "Structural equations", items: [
+          "Link variables with expressions: Y = 2*X + epsilon, D = 1*(Z > 0.5), and so on",
+          "Any math expression works — every DGP variable defined above is in scope",
+          "This is where you write the truth you want to recover, so you know the right answer in advance",
+        ]},
+        { heading: "Reproducibility", items: [
+          "The seed makes a draw reproducible — same seed and same spec gives the same dataset every time",
+          "Change the seed (or hit Re-generate) to see how much of your result was sampling noise",
+          "The script preview shows the equivalent R / Python / Stata draw for the distributions you chose",
         ]},
         { heading: "Output", items: [
-          "Set sample size N and click Generate",
-          "Resulting dataset appears in the Data tab for wrangling and modeling",
-          "Useful for power analysis, Monte Carlo experiments, and teaching demonstrations",
+          "Set the number of observations (n) and click Generate",
+          "The result appears in the Data tab like any other dataset — ready for Clean and Model",
+          "Useful for power analysis, Monte Carlo experiments, and demonstrating an estimator's behaviour",
+        ]},
+        { heading: "Stats workspace", items: [
+          "Below the builder: variables, computed columns, resampling, probability and distribution tools",
+          "Sample tests: one-sample mean t-test, variance χ² test, and generic parameter t/z tests",
+          "These run on any numeric column — simulated or real — before you commit to a model",
         ]},
       ]} />
       <Lbl color={C.teal} mb={4}>Simulate</Lbl>

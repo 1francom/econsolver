@@ -32,7 +32,7 @@ import SimulateTab      from './components/tabs/SimulateTab.jsx';
 import SpatialTab       from './components/tabs/SpatialTab.jsx';
 import ReportingModule  from './ReportingModule.jsx';
 import * as modelBuffer from "./services/modelBuffer.js";
-import { TourOverlay, TOUR_STEPS } from "./components/HelpSystem.jsx";
+import { TourOverlay, TOUR_STEPS, HintBox } from "./components/HelpSystem.jsx";
 
 const LS_KEY = "econ_wrangle_v2";
 
@@ -1286,6 +1286,47 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             pipeline applied
           </span>
         )}
+      </div>
+
+      <div style={{padding:"0.75rem 1.4rem 0",flexShrink:0}}>
+        <HintBox color={C.teal} title="Data" sections={[
+          { heading: "Loading files", items: [
+            "Drag & drop onto the drop zone, or click to browse — several files at once is fine, each becomes its own dataset",
+            "CSV / TSV — delimiter is auto-detected; semicolon and tab files load without any setting",
+            "Excel (.xlsx / .xls) — the FIRST sheet is read; to use another one, save it as its own file or its own workbook",
+            "Stata (.dta) — value labels and Stata dates are converted on read",
+            "R (.rds) — a single data.frame, tibble or named list",
+            "R (.RData / .rda) — a whole workspace: every data.frame inside becomes a separate dataset, named after the R object",
+            "Parquet — read directly by DuckDB, no row limit",
+            "Shapefile — drop .shp + .dbf + .prj together (or a .zip); the siblings are grouped into one dataset automatically",
+          ]},
+          { heading: "Other sources", items: [
+            "World Bank: fetch indicators live by country and year range",
+            "Preloaded datasets: sample data to try the app without uploading anything",
+            "Simulate tab: generate a synthetic dataset from a DGP — it lands here like any other",
+          ]},
+          { heading: "Large files", items: [
+            "Files over 10MB are routed through DuckDB and cached as Parquet — the full table stays queryable",
+            "The table shown on screen is a preview; pipeline steps, models and exports always run on the full dataset",
+            "A ⚡ DuckDB badge in the Clean header means the fast path is active",
+          ]},
+          { heading: "Managing datasets", items: [
+            "Dataset Manager (D·N button in the top bar): every dataset in the session, with row and column counts",
+            "Each tab remembers its own active dataset — Clean and Model can work on different ones at the same time",
+            "Rename with the ✎ button: the new name is what replication scripts use as df_<name>",
+            "The original filename is kept regardless, so the generated load call still points at the real file",
+          ]},
+          { heading: "Views", items: [
+            "Overview: shape, missing-value count, numeric column count, memory estimate, and per-column metadata",
+            "Data Viewer: paginated table of the rows themselves — click a header to sort",
+            "A \"pipeline applied\" badge means you are looking at cleaned output, not the raw file",
+          ]},
+          { heading: "Persistence & privacy", items: [
+            "Everything is parsed and computed in your browser — no file is ever uploaded to a server",
+            "Datasets and pipelines are saved to IndexedDB and restored when you reopen the project",
+            "Large tables are cached in OPFS so reopening a project skips re-importing the file",
+          ]},
+        ]} />
       </div>
 
       {/* Overview panel */}

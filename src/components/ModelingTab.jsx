@@ -2114,46 +2114,83 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             >⟨</button>
           )}
 
-          <HintBox color={C.teal} title="How to model" overlayLeft={specCollapsed ? 28 : 300} sections={[
-            { heading: "Estimators", items: [
+          <HintBox color={C.teal} title="Modeling" overlayLeft={specCollapsed ? 28 : 300} sections={[
+            { heading: "How a model is specified", items: [
+              "Two choices, not one: a STRATEGY (what identifies the effect) and an OUTCOME FAMILY (what Y looks like)",
+              "Family chips sit above the estimator list: linear · Poisson · logit · probit",
+              "So a binary outcome is OLS + logit, not a separate \"Logit\" estimator — and FE + Poisson gives you Poisson FE",
+              "Dimmed chips are combinations that are planned but not yet implemented",
+            ]},
+            { heading: "Strategies — linear & panel", items: [
               "OLS — ordinary least squares",
-              "WLS — weighted least squares (supply a weight column in W)",
-              "FE — fixed effects within estimator (panel required)",
-              "FD — first differences (panel required)",
-              "TWFE — two-way fixed effects DiD (panel required)",
-              "2×2 DiD — classic difference-in-differences",
-              "2SLS / IV — instrumental variables; Z = instrument columns",
+              "FE — fixed effects within estimator (panel required); supports N-way and nested FE",
+              "FD — first differences (panel required; needs unique entity-time pairs)",
+              "LSDV — least squares dummy variables, reports the fixed effects themselves",
+            ]},
+            { heading: "Strategies — DiD & event study", items: [
+              "DiD 2×2 — classic two-group two-period difference-in-differences",
+              "TWFE DiD — two-way fixed effects (panel required)",
+              "CS DiD (2021) — Callaway & Sant'Anna doubly-robust staggered DiD",
+              "Sun-Abraham (2021) — interaction-weighted staggered event study",
+              "Classical (TWFE) event study — dynamic DiD by relative period",
+              "With staggered timing, prefer CS or Sun-Abraham: plain TWFE can put negative weight on already-treated comparisons",
+            ]},
+            { heading: "Strategies — IV, RD, spatial, other", items: [
+              "2SLS / IV — two-stage least squares; instruments go in Z, in Model Configuration",
+              "Two-Step GMM — efficient GMM with HC-robust Ω̂ and Hansen J-test",
+              "LIML — limited-information maximum likelihood / k-class",
               "Sharp RDD — local polynomial with IK bandwidth selection",
-              "Logit / Probit — binary outcome MLE, marginal effects at mean",
-              "GMM / LIML — generalized method of moments",
-              "Synthetic Control — Frank-Wolfe, placebo inference",
+              "Fuzzy RDD — Wald ratio with delta-method SE",
+              "Spatial RD — geographic discontinuity at a boundary (Keele & Titiunik 2015)",
+              "Spatial Regression — SLX, SAR, SEM and SDM with a spatial weights matrix",
+              "Synthetic Control — Frank-Wolfe weights with placebo inference",
+              "Negative Binomial FE — NB2 with absorbed fixed effects and overdispersion",
             ]},
             { heading: "Workflow", items: [
-              "1. Estimator sidebar (left): pick model group → estimator",
-              "2. Variable Selector: assign Y (outcome), X (regressors), W (weights / instruments / controls)",
-              "3. Model Configuration: set estimator-specific options (Z instruments, cutoff, treated unit…)",
-              "4. Inference Options: choose SE type",
+              "1. Estimator sidebar (left): pick the outcome family, then the strategy",
+              "2. Variable Selector: Y (outcome), X (regressors of interest), W (additional controls)",
+              "3. Model Configuration: everything estimator-specific — instruments Z, cutoff, treated unit, cohort column, weights…",
+              "4. Inference Options: choose the SE type (and the cluster column, if clustering)",
               "5. Click Estimate",
             ]},
-            { heading: "Standard Errors", items: [
+            { heading: "Variable roles", items: [
+              "Y — the outcome; exactly one column",
+              "X — the regressors you care about; these are the coefficients you will report",
+              "W — extra controls. They enter the same regression as X, just kept visually separate",
+              "W is NOT weights and NOT instruments — survey weights are a toggle under OLS, instruments are Z in Model Configuration",
+              "Factor toggle: mark a column categorical to expand it into dummies (first level dropped)",
+              "Interaction terms are built in the selector rather than pre-computed in Clean",
+            ]},
+            { heading: "OLS options", items: [
+              "Survey weights (WLS) — optional collapsible panel: give it one column of positive weights and the fit becomes weighted least squares",
+              "Weighting does not limit how many X regressors you can use",
+              "Constant — drop the intercept to regress through the origin; R² switches to the uncentered convention, as in R and Stata",
+            ]},
+            { heading: "Standard errors", items: [
               "Classical — homoskedastic (default)",
-              "HC1 / HC2 / HC3 — heteroskedasticity-robust (HC3 best for small N)",
+              "HC1 / HC2 / HC3 — heteroskedasticity-robust (HC3 preferred in small samples)",
               "Clustered — one-way cluster-robust; specify the cluster column",
-              "Two-Way CGM — Cameron-Gelbach-Miller two-way clustering",
-              "Newey-West HAC — time-series robust with lag selection",
+              "CR2 / CR3 — bias-reduced cluster-robust (Bell-McCaffrey); use these when you have few clusters",
+              "Two-Way — Cameron-Gelbach-Miller two-way clustering",
+              "HAC — Newey-West, robust to heteroskedasticity and autocorrelation",
+              "The SE type travels with the model: pinned results, exports and replication scripts all carry it",
             ]},
-            { heading: "After Estimating", items: [
-              "Pin any result to the Model Buffer (◈ icon) — compare specs side-by-side",
-              "Model Buffer bar: coefficient comparison table across all pinned models",
-              "Code Editor: view and copy R / Python / Stata replication scripts",
-              "Plot Builder: build result-augmented charts from estimated data",
-              "Spec Curve: test coefficient stability across a threshold range",
-              "Export: LaTeX table, CSV coefficients, or full replication zip bundle",
-              "AI Coach (? button): get methodological feedback on your specification",
+            { heading: "After estimating", items: [
+              "Pin a result to the Model Buffer (◈ icon) — pinned specs compare side by side",
+              "Diagnostics: heteroskedasticity, autocorrelation, normality and multicollinearity tests",
+              "Extract: write fitted values, residuals or estimated fixed effects back as dataset columns",
+              "Coefficient test: post-estimation hypothesis tests on a pinned model, joint tests included",
+              "Bacon decomposition (under a TWFE DiD result): shows how much weight sits on later-vs-earlier-treated comparisons",
+              "Plot Builder: result-augmented charts, plus a coefficient-comparison mode across pinned models",
+              "Subsets: define named subsets and run the same spec on all of them at once",
+              "Spec Curve: coefficient stability across a threshold range",
+              "Code Editor: read and copy the R / Python / Stata replication scripts for exactly this model",
+              "Export: LaTeX table, CSV coefficients, or a full replication zip bundle",
+              "AI Coach: methodological feedback on the specification you just ran",
             ]},
-            { heading: "Panel Requirements", items: [
-              "FE, FD, TWFE, Event Study require entity + time declared in Clean → Panel Structure tab",
-              "Without panel declaration, these estimators are disabled",
+            { heading: "Panel requirements", items: [
+              "FE, FD, LSDV, TWFE, CS DiD, Sun-Abraham and event studies need entity + time declared in Clean → Panel Structure",
+              "Without a panel declaration those strategies stay disabled — hover one to see what it is waiting for",
             ]},
           ]} />
 

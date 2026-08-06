@@ -2586,21 +2586,21 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
               : <>⏳ Loading full dataset ({(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()} rows)… stats and plots below are computed on a {previewRows.length.toLocaleString()}-row preview until this finishes.</>}
           </div>
         )}
-        {/* AI Insights */}
-        <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
-        <HintBox title="How to explore" sections={[
+        <HintBox title="Explore" sections={[
           { heading: "Filter", items: [
-            "⊘ Filter bar slices data temporarily — affects all tabs, never touches the pipeline",
-            "Use it to eyeball subgroups without committing to a pipeline step",
+            "⊘ Filter bar slices data temporarily — affects every tab here, never touches the pipeline",
+            "Use it to eyeball a subgroup without committing to a cleaning step",
+            "Stats, plots and correlations all recompute against the filtered rows instantly",
           ]},
-          { heading: "Summary Table", items: [
+          { heading: "Summary", items: [
             "5-number summary (mean, SD, median, min, max) for all numeric variables",
-            "Group By: split statistics by any categorical column",
+            "Dispersion panel: variance, IQR, skewness and kurtosis",
+            "Group Summarize: aggregate by a categorical column and save the result as a new dataset",
           ]},
           { heading: "Distributions", items: [
-            "Histogram with live stats (mean, SD, median, min, max) — updates instantly with filter",
+            "Histogram with live stats — updates instantly with the filter",
             "Spaghetti plot: individual panel unit trajectories over time (panel datasets only)",
-            "Outlier warning shown if IQR outliers are detected",
+            "An outlier warning appears when IQR outliers are detected",
           ]},
           { heading: "Time Series", items: [
             "Line chart: aggregate Y over time, optionally split by group",
@@ -2611,11 +2611,21 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             "Red = negative · Teal = positive",
           ]},
           { heading: "Plot Builder", items: [
-            "Layer-based chart editor: 11 geom types (point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, hline, vline)",
-            "Aesthetic mappings: x, y, color; position stacking and jitter",
-            "Palette presets; export as SVG or PNG",
+            "Layer-based chart editor — stack as many layers as you need on one canvas",
+            "12 geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, h-line, v-line",
+            "Aesthetic mappings (x, y, colour), stacking and jitter, palette presets, axis and label controls",
+            "facet_wrap: split into one panel per level of a column, with a column-count control",
+            "Histogram and density take either a bin count or a bin width — bin width uses ggplot's centred edges",
+            "Export as SVG or PNG, or copy the equivalent R / Python / Stata plot script",
+          ]},
+          { heading: "Carrying results forward", items: [
+            "The ◈ pin button on a table or chart sends it to the Report tab",
+            "Group Summarize can save its output as a real dataset, usable in Clean and Model",
+            "Nothing in this tab modifies your data — it is read-only by design",
           ]},
         ]} />
+        {/* AI Insights */}
+        <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
         {/* Quick Filter */}
         <QuickFilter headers={headers} rows={rows} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}

@@ -1534,7 +1534,7 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
       {/* ── Left: variable workspace + tools ── */}
       <div style={{ overflowY: "auto", padding: "1.8rem 1.5rem 1.8rem 2.4rem" }}>
 
-      <HintBox title="How to calculate" sections={[
+      <HintBox title="Calculate" sections={[
         { heading: "Writing expressions (syntax)", items: [
           "Multiply with * — write 2*x, not 2x; A*K*L, not AKL",
           "Exponent with ** or ^ — x**2 or x^2 for x², K**alpha for Kᵅ",
@@ -1560,9 +1560,13 @@ export default function CalculateTab({ pid, rows = [], headers = [], onAddDatase
           "Differentiate any named equation for first-order conditions",
           "Export any expression as LaTeX",
         ]},
-        { heading: "Equation Solver & Derivatives", items: [
-          "Root solver: find x where f(x) = 0 using Brent's method",
-          "Numerical derivatives: first or higher-order at a specific point",
+        { heading: "Math tools (the six-tab strip)", items: [
+          "Solve — a single equation, an algebraic rearrangement, or a system of equations",
+          "Derive — numerical derivatives, first or higher-order, at a specific point",
+          "Symb. — symbolic differentiation, keeping unknown functions unevaluated",
+          "Algebra — expand, simplify and rearrange expressions",
+          "Integrate — definite and indefinite integrals",
+          "Limit — limits, including one-sided and at infinity",
         ]},
         { heading: "Model Prediction", items: [
           "Generate ŷ ± 95% CI from any model pinned in the Model Buffer",
