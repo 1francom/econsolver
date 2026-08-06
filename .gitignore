@@ -45,3 +45,8 @@ src/math/__validation__/.Rhistory
 # LMU course material — reference only, not part of the codebase
 LMU-tutorials/
 LMU tutorials/
+# Agent worktrees. These were tracked as an orphan gitlink (mode 160000 with no
+# .gitmodules), so every agent run showed up as a phantom submodule change.
+.claude/worktrees/
+# Local dev-server config for the preview tooling — machine-specific, not project state.
+.claude/launch.json

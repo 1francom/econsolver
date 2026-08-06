@@ -1,5 +1,5 @@
 // Validation harness for duckdbFactors.js
-import { parseFactorSpec, expandFactors } from "../duckdbFactors.js";
+import { parseFactorSpec, expandFactors, sortLevels } from "../duckdbFactors.js";
 
 let passes = 0, fails = 0;
 const check = (n, c) => c ? (passes++, console.log(`  ✓ ${n}`)) : (fails++, console.error(`  ✗ ${n}`));
@@ -36,12 +36,28 @@ async function validateExpand() {
   });
   check("numeric levels unquoted in SQL", out2.dummySQL.year_2011.includes("= 2011"));
   check("numeric ref level (2010) dropped", !out2.xColsExpanded.includes("year_2010"));
+
+  // Bug 2 regression: NULL factor rows must fall out via isfinite(), never
+  // silently become the reference category (CASE WHEN ... ELSE 0 did that).
+  check("dummySQL emits NULL (not 0) when factor is NULL",
+    /IS NULL THEN NULL/.test(out.dummySQL.country_FR));
+}
+
+function validateSortLevels() {
+  console.log("\n[sortLevels]");
+  check("numeric levels sort ascending, not lexicographic",
+    JSON.stringify(sortLevels([10, 11, 9])) === JSON.stringify([9, 10, 11]));
+  check("string numeric-looking levels stay lexicographic (matches R factor() on character)",
+    JSON.stringify(sortLevels(["9", "10", "11"])) === JSON.stringify(["10", "11", "9"]));
+  check("string levels sort lexicographically",
+    JSON.stringify(sortLevels(["banana", "apple", "cherry"])) === JSON.stringify(["apple", "banana", "cherry"]));
 }
 
 export async function runFactorsValidation() {
   passes = 0; fails = 0;
   validateParse();
   await validateExpand();
+  validateSortLevels();
   console.log(`\n${passes} passed, ${fails} failed`);
   return fails === 0;
 }

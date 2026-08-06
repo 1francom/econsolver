@@ -19,11 +19,28 @@ function literal(v) {
   return `'${String(v).replace(/'/g, "''")}'`;
 }
 
+// Sort levels the way R's factor() would: numeric ascending when every level
+// is a finite number, else lexicographic on the string form. Mirrors
+// components/modeling/helpers.js's sortFactorLevels — kept as a separate copy
+// since services/ must not import from components/. Not delegated to SQL
+// ORDER BY: whether that sorts numerically depends on the column's DuckDB
+// type (numeric column vs. VARCHAR of numeric-looking strings), so client-side
+// re-sort is the only way to guarantee the same convention as the JS path.
+export function sortLevels(rawLevels) {
+  const allNum = rawLevels.every(v => typeof v === "number" && isFinite(v));
+  return allNum
+    ? [...rawLevels].sort((a, b) => a - b)
+    : [...rawLevels].sort((a, b) => {
+        const sa = String(a), sb = String(b);
+        return sa < sb ? -1 : sa > sb ? 1 : 0;
+      });
+}
+
 async function defaultFetchLevels(tableName, col) {
   const { conn } = await getDuckDB();
-  const sql = `SELECT DISTINCT ${esc(col)} AS lvl FROM ${esc(tableName)} WHERE ${esc(col)} IS NOT NULL ORDER BY lvl`;
+  const sql = `SELECT DISTINCT ${esc(col)} AS lvl FROM ${esc(tableName)} WHERE ${esc(col)} IS NOT NULL`;
   const r = await conn.query(sql);
-  return r.toArray().map(row => row.lvl);
+  return sortLevels(r.toArray().map(row => row.lvl));
 }
 
 export async function expandFactors({ xCols, tableName, fetchLevels }) {
@@ -40,7 +57,11 @@ export async function expandFactors({ xCols, tableName, fetchLevels }) {
     for (let i = 1; i < levels.length; i++) {
       const lvl = levels[i];
       const dummyName = `${factorCol}_${String(lvl).replace(/[^A-Za-z0-9_]/g, "_")}`;
-      dummySQL[dummyName] = `CASE WHEN ${esc(factorCol)} = ${literal(lvl)} THEN 1 ELSE 0 END`;
+      // NULL (not 0) when the factor itself is NULL, so the row is excluded
+      // by buildOLSSuffStats's isfinite() filter instead of silently folding
+      // into the reference category (same contract as applyFactors' NaN rows).
+      dummySQL[dummyName] =
+        `CASE WHEN ${esc(factorCol)} IS NULL THEN NULL WHEN ${esc(factorCol)} = ${literal(lvl)} THEN 1 ELSE 0 END`;
       xColsExpanded.push(dummyName);
     }
   }

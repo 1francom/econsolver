@@ -103,13 +103,45 @@ export default function SpatialTab({ rows = [], headers = [], availableDatasets 
       fontFamily: T.code.fontFamily, color: C.text, overflow: "hidden",
     }}>
       <div style={{ padding: "0.75rem 1.2rem 0", flexShrink: 0 }}>
-        <HintBox tips={[
-          "Load a shapefile (.shp + .dbf) to map geographic boundaries",
-          "Join your dataset to the shapefile by a common identifier column",
-          "Spatial joins drop polygon geometry attributes by default; enable geometry only when you need to carry WKT forward",
-          "Metric Buffers creates EPSG:32721 radius buffers from lat/lon points or counts points around grid centroids",
-          "Choropleth maps color regions by any numeric variable",
-          "Spatial statistics: Moran's I for spatial autocorrelation",
+        <HintBox color={C.teal} title="Spatial Analytics" sections={[
+          { heading: "Getting started", items: [
+            "Load a shapefile (.shp + .dbf + .prj, or a .zip) in the Data tab — geometry arrives as a WKT column",
+            "Point data works too: any dataset with a latitude and a longitude column",
+            "Join your dataset to the shapefile by a common identifier column in Clean → Workbench → Merge",
+            "Each op has its own dataset selector — the spatial tab is not locked to the active dataset",
+          ]},
+          { heading: "Analyze — column producers", items: [
+            "CRS Transform: reproject coordinates between CRS (presets, or paste a WKT / proj4 string)",
+            "Distance: haversine or euclidean distance between two point pairs",
+            "Buffer Assign: label each point by which buffer ring it falls into",
+            "Grid Assign: assign each point to a rectangular or H3 hex cell",
+            "Spatial Join: attach polygon attributes to points by containment",
+            "Nearest Neighbour: distance and id of the closest feature in a second dataset",
+            "Boundary Distance: signed distance to a polygon border — the running variable for a geographic RD",
+            "Geocode: addresses → lat/lon via Photon (results are cached per address)",
+          ]},
+          { heading: "Analyze — dataset producers", items: [
+            "Metric Buffers: EPSG:32721 radius buffers around lat/lon points",
+            "Buffer Exposure: count or aggregate points falling inside each buffer",
+            "Aggregate to Grid: collapse points into grid cells with a chosen statistic",
+            "Areal Interpolation: transfer a variable between two incompatible polygon layers",
+          ]},
+          { heading: "Committing results", items: [
+            "Column producers preview first — click \"➕ Add to pipeline\" to make the step permanent and replayable",
+            "Dataset producers are saved as a new derived dataset, with the derivation recorded",
+            "Committed spatial steps are undoable from the History sidebar like any other step",
+            "If the Clean tab is on a different dataset, the step is queued and applied once the right one is active",
+          ]},
+          { heading: "Map & Plot", items: [
+            "Map: live Leaflet map — stack layers, choose a basemap, colour by any column, add a legend",
+            "Plot: SVG geo-plot via Observable Plot — exportable, with an optional basemap tile underlay",
+            "Both read the same rows; Map is for inspection, Plot is for a figure you will publish",
+          ]},
+          { heading: "Gotchas", items: [
+            "Spatial joins drop polygon geometry by default — enable geometry only when you need to carry WKT forward",
+            "Metric ops need a projected CRS; running them on raw lat/lon degrees gives meaningless distances",
+            "Replication: R gets sf + dplyr and Python gets geopandas, but Stata has no geometry stack — those steps export as a documented comment, never a silent drop",
+          ]},
         ]} />
       </div>
       {/* ── Header + tab bar ── */}

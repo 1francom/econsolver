@@ -9,6 +9,7 @@
 //   { type, yVar, xVars, wVars, zVars, entityCol, timeCol,
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
+import { opInfix } from "../../pipeline/predicate.js";
 import { toPython, jsExprToPython, pyRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildPyLoadLine } from "./loadLine.js";
 
@@ -1289,7 +1290,7 @@ function subsetFiltersToPython(filters, dfName = "df") {
   if (!filters?.length) return null;
   const parts = filters.map(f => {
     const val = isNaN(Number(f.val)) ? `"${f.val}"` : f.val;
-    return `(${dfName}["${f.col}"] ${f.op} ${val})`;
+    return `(${dfName}["${f.col}"] ${opInfix(f.op, "py")} ${val})`;
   });
   return `${dfName}[${parts.join(" & ")}]`;
 }
@@ -1456,7 +1457,7 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
   function filterExpr(f) {
     const isNum = f.val !== "" && !isNaN(Number(f.val));
     const val   = isNum ? f.val : JSON.stringify(f.val);
-    return `(d[${JSON.stringify(f.col)}] ${f.op} ${val})`;
+    return `(d[${JSON.stringify(f.col)}] ${opInfix(f.op, "py")} ${val})`;
   }
 
   // Strip output lines from model code so it can sit inside a function

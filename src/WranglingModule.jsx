@@ -756,7 +756,8 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           ]},
           { heading: "Clean", items: [
             "Rename and drop columns or rows",
-            "Filter: keep rows matching one or more conditions",
+            "Filter: keep rows matching one or more conditions, grouped with AND / OR",
+            "Filter operators read the same everywhere in Litux — == equals, >= at least, is null — and match what you type in a formula box",
             "Fill missing: mean, median, mode, forward/backward fill, constant, or grouped fill",
             "Drop NA: remove rows with missing values, by column or across the row",
             "Recode: map specific values to new labels",

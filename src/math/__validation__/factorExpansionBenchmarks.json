@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "source": "R 4.4.1 lm()",
+    "fixture": "factorExpansionFixture.csv"
+  },
+  "n": 42,
+  "nDroppedNA": 3,
+  "coefficients": {
+    "(Intercept)": 2.0443148995,
+    "x1": 0.48901128578,
+    "factor(year)10": 1.1817974747,
+    "factor(year)11": -0.80129541419,
+    "factor(grader)B": 0.57719137471,
+    "factor(grader)C": -0.41274216303
+  },
+  "se": {
+    "(Intercept)": 0.041927033969,
+    "x1": 0.0059952972934,
+    "factor(year)10": 0.037283272004,
+    "factor(year)11": 0.041177205321,
+    "factor(grader)B": 0.038481199188,
+    "factor(grader)C": 0.035609095185
+  },
+  "rSquared": 0.99651062186,
+  "adjRSquared": 0.99602598601,
+  "fStat": 2056.2049129837,
+  "df1": 5,
+  "df2": 36
+}

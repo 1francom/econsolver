@@ -9,6 +9,7 @@
 // Design: pure functions, no React, no imports from UI.
 
 import { toDfVar } from "./exporter.js";
+import { predicateToR, predicateToPython, predicateToStata, filterStepToNode } from "./predicateExport.js";
 // Same numeric-literal rule the runner applies, so an emitted script writes the
 // same type the app wrote (a typed 1/0 must not become a character column in R).
 import { coerceLiteral } from "./literals.js";
@@ -400,18 +401,12 @@ export function toR(step, df = "df", allDatasets = {}) {
     case "drop":
       return `${df} <- ${df} |> select(-${col})`;
 
-    case "filter": {
-      const opMap = {
-        notna: `!is.na(${col})`,
-        eq:    `${col} == ${rStr(step.value)}`,
-        neq:   `${col} != ${rStr(step.value)}`,
-        gt:    `${col} > ${step.value}`,
-        lt:    `${col} < ${step.value}`,
-        gte:   `${col} >= ${step.value}`,
-        lte:   `${col} <= ${step.value}`,
-      };
-      return `${df} <- ${df} |> filter(${opMap[step.op] ?? "TRUE"})`;
-    }
+    case "filter":
+      // Compiles the full predicate TREE, which is the shape CleanTab's
+      // FilterBuilder emits. The hand-written opMap this replaced read only
+      // step.op — undefined for a tree — and defaulted to TRUE, so every
+      // compound filter exported as "keep every row".
+      return `${df} <- ${df} |> filter(${predicateToR(filterStepToNode(step), { name: rName })})`;
 
     case "drop_na": {
       const cols = step.cols?.length
@@ -955,20 +950,10 @@ export function toStata(step, df = "df", allDatasets = {}) {
     case "drop":
       return `drop ${v}`;
 
-    case "filter": {
-      const val   = step.value ?? "";
-      const isNum = !isNaN(Number(val)) && val !== "";
-      const opMap = {
-        notna: `!missing(${v})`,
-        eq:    isNum ? `${v} == ${val}`    : `${v} == "${val}"`,
-        neq:   isNum ? `${v} != ${val}`    : `${v} != "${val}"`,
-        gt:    `${v} > ${val}`,
-        lt:    `${v} < ${val}`,
-        gte:   `${v} >= ${val}`,
-        lte:   `${v} <= ${val}`,
-      };
-      return `keep if ${opMap[step.op] ?? "1"}`;
-    }
+    case "filter":
+      // See the R case: the opMap this replaced defaulted to `1`, so a compound
+      // filter exported as `keep if 1` — every row.
+      return `keep if ${predicateToStata(filterStepToNode(step), { name: stVar })}`;
 
     case "drop_na": {
       if (!step.cols?.length) return `drop if missing(*)`;
@@ -1570,19 +1555,9 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return `${df} = ${df}.drop(columns=[${c}])`;
 
     case "filter": {
-      const val   = step.value ?? "";
-      const isNum = !isNaN(Number(val)) && val !== "";
-      const colRef = `${df}[${c}]`;
-      const opMap = {
-        notna: `${colRef}.notna()`,
-        eq:    isNum ? `${colRef} == ${val}`         : `${colRef} == ${pyStr(val)}`,
-        neq:   isNum ? `${colRef} != ${val}`         : `${colRef} != ${pyStr(val)}`,
-        gt:    `${colRef} > ${val}`,
-        lt:    `${colRef} < ${val}`,
-        gte:   `${colRef} >= ${val}`,
-        lte:   `${colRef} <= ${val}`,
-      };
-      return `${df} = ${df}[${opMap[step.op] ?? "True"}]`;
+      // See the R case: the opMap this replaced defaulted to `True`, so a
+      // compound filter exported as `df[True]` — every row.
+      return `${df} = ${df}[${predicateToPython(filterStepToNode(step), { df })}]`;
     }
 
     case "drop_na": {

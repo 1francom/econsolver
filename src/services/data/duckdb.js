@@ -133,7 +133,7 @@ async function ensureRiColumn(conn, tableName) {
  * Fetch one page of rows from a DuckDB table — used by DataViewer for pagination.
  * Never materialises the full dataset into JS.
  */
-export async function getTablePage(tableName, offset, limit, sort = null) {
+export async function getTablePage(tableName, offset, limit, sort = null, where = null) {
   const { conn } = await getDuckDB();
   // The sort MUST be pushed into SQL: this function returns one page, so
   // ordering the returned rows in JS would sort only the 100 rows already on
@@ -145,10 +145,26 @@ export async function getTablePage(tableName, offset, limit, sort = null) {
     // sorts last regardless of desc().
     orderBy = ` ORDER BY "${c}" ${sort.dir === "desc" ? "DESC" : "ASC"} NULLS LAST`;
   }
+  // The filter must be pushed down for exactly the same reason as the sort, and
+  // the consequence of not doing it was worse: `rows` in JS is only the
+  // PREVIEW_ROWS-sized sample, so filtering there searched the first 500 rows of
+  // a 900k-row table and presented the result as the whole table.
+  const whereSQL = where ? ` WHERE ${where}` : "";
   const result = await conn.query(
-    `SELECT * FROM "${tableName}"${orderBy} LIMIT ${limit} OFFSET ${offset}`
+    `SELECT * FROM "${tableName}"${whereSQL}${orderBy} LIMIT ${limit} OFFSET ${offset}`
   );
   return result.toArray().map(arrowRowToObj);
+}
+
+/**
+ * Count rows matching a WHERE fragment. Needed because a filtered view can no
+ * longer use the cached total row count for pagination.
+ */
+export async function getFilteredRowCount(tableName, where = null) {
+  const { conn } = await getDuckDB();
+  const whereSQL = where ? ` WHERE ${where}` : "";
+  const result = await conn.query(`SELECT COUNT(*) AS n FROM "${tableName}"${whereSQL}`);
+  return Number(result.toArray()[0].n);
 }
 
 /**

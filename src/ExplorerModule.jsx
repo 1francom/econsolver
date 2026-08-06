@@ -19,6 +19,7 @@ import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { getExplorePins, saveExplorePins } from "./services/Persistence/plotHistory.js";
 import ExplorePinBar from "./components/explore/ExplorePinBar.jsx";
+import { menuLabel, normalizeOp, evalPredicate } from "./pipeline/predicate.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
@@ -2206,27 +2207,29 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
 // ─── QUICK FILTER ─────────────────────────────────────────────────────────────
 // Ephemeral in-explorer filter — never touches the pipeline or rawData.
 // Conditions are ANDed; numeric ops (>,<,>=,<=) skip non-numeric values.
-const FILTER_OPS = [">", "<", ">=", "<=", "=", "≠", "in", "contains"];
+// Operators come from pipeline/predicate.js so this bar speaks the same
+// vocabulary as Clean's filter and the Data Viewer — it used to show "=" while
+// SubsetManager showed "==" for the identical operation.
+const FILTER_OPS = ["gt", "lt", "gte", "lte", "eq", "neq", "in", "contains"];
 
 // "in" mirrors R's `col %in% c(...)` / Python's `col.isin([...])` — val is either
 // an array (from the multi-select editor) or a comma-separated string typed by hand.
 function matchCond(row, {col, op, val}) {
-  const v = row[col];
-  if (op === "in") {
+  const o = normalizeOp(op);
+  if (o === "in") {
     const arr = Array.isArray(val) ? val : String(val ?? "").split(",").map(s => s.trim()).filter(Boolean);
     if (!arr.length) return true; // nothing selected yet — don't filter everything out
-    return arr.some(x => String(v) === x);
+    return evalPredicate({ type: "condition", col, op: "in", values: arr }, row);
   }
-  if (op === "contains") return String(v ?? "").toLowerCase().includes(String(val).toLowerCase());
-  if (op === "=")  return String(v) === String(val);
-  if (op === "≠")  return String(v) !== String(val);
-  const n = parseFloat(val);
-  if (!isFinite(n) || typeof v !== "number") return true; // skip invalid numeric cond
-  if (op === ">")  return v > n;
-  if (op === "<")  return v < n;
-  if (op === ">=") return v >= n;
-  if (op === "<=") return v <= n;
-  return true;
+  // A half-typed numeric condition keeps every row rather than blanking the
+  // screen mid-keystroke. This bar filters as you type, so "no valid number yet"
+  // must not read as "no matching rows". Deliberately kept from the original.
+  if (["gt", "lt", "gte", "lte"].includes(o)) {
+    if (!isFinite(parseFloat(val)) || typeof row[col] !== "number") return true;
+  }
+  try {
+    return evalPredicate({ type: "condition", col, op: o, value: val }, row);
+  } catch { return true; }
 }
 
 // Unique string values of `col` across `rows`, capped at `cap` — returns null past the
@@ -2318,7 +2321,7 @@ function QuickFilter({headers, rows, totalRows, filteredCount, conds, setConds})
                 else if (!isVec && wasVec) val = Array.isArray(val) ? val.join(", ") : val;
                 upd(i,{op:newOp, val});
               }} style={{...selStyle,width:76}}>
-                {FILTER_OPS.map(op=><option key={op} value={op}>{op}</option>)}
+                {FILTER_OPS.map(op=><option key={op} value={op}>{menuLabel(op)}</option>)}
               </select>
               {cond.op === "in"
                 ? <VectorValueEditor col={cond.col} rows={rows} value={cond.val} onChange={v=>upd(i,{val:v})} selStyle={selStyle} C={C} T={T} />
@@ -2328,7 +2331,7 @@ function QuickFilter({headers, rows, totalRows, filteredCount, conds, setConds})
                 style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize: T.h2.fontSize,lineHeight:1,padding:"0 2px"}}>×</button>
             </div>
           ))}
-          <button onClick={()=>setConds(cs=>[...cs,{col:headers[0]??"",op:">",val:""}])}
+          <button onClick={()=>setConds(cs=>[...cs,{col:headers[0]??"",op:"gt",val:""}])}
             style={{fontSize: T.caption.fontSize,color:C.teal,background:"none",border:`1px solid ${C.teal}40`,borderRadius:3,cursor:"pointer",fontFamily: T.code.fontFamily,padding:"0.2rem 0.5rem",marginTop:2}}>
             + condition
           </button>
@@ -2586,21 +2589,22 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
               : <>⏳ Loading full dataset ({(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()} rows)… stats and plots below are computed on a {previewRows.length.toLocaleString()}-row preview until this finishes.</>}
           </div>
         )}
-        {/* AI Insights */}
-        <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
-        <HintBox title="How to explore" sections={[
+        <HintBox title="Explore" sections={[
           { heading: "Filter", items: [
-            "⊘ Filter bar slices data temporarily — affects all tabs, never touches the pipeline",
-            "Use it to eyeball subgroups without committing to a pipeline step",
+            "⊘ Filter bar slices data temporarily — affects every tab here, never touches the pipeline",
+            "Operators read the same as in Clean and the Data Viewer — == equals, >= at least — and match what you type in a formula box",
+            "Use it to eyeball a subgroup without committing to a cleaning step",
+            "Stats, plots and correlations all recompute against the filtered rows instantly",
           ]},
-          { heading: "Summary Table", items: [
+          { heading: "Summary", items: [
             "5-number summary (mean, SD, median, min, max) for all numeric variables",
-            "Group By: split statistics by any categorical column",
+            "Dispersion panel: variance, IQR, skewness and kurtosis",
+            "Group Summarize: aggregate by a categorical column and save the result as a new dataset",
           ]},
           { heading: "Distributions", items: [
-            "Histogram with live stats (mean, SD, median, min, max) — updates instantly with filter",
+            "Histogram with live stats — updates instantly with the filter",
             "Spaghetti plot: individual panel unit trajectories over time (panel datasets only)",
-            "Outlier warning shown if IQR outliers are detected",
+            "An outlier warning appears when IQR outliers are detected",
           ]},
           { heading: "Time Series", items: [
             "Line chart: aggregate Y over time, optionally split by group",
@@ -2611,11 +2615,21 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             "Red = negative · Teal = positive",
           ]},
           { heading: "Plot Builder", items: [
-            "Layer-based chart editor: 11 geom types (point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, hline, vline)",
-            "Aesthetic mappings: x, y, color; position stacking and jitter",
-            "Palette presets; export as SVG or PNG",
+            "Layer-based chart editor — stack as many layers as you need on one canvas",
+            "12 geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, h-line, v-line",
+            "Aesthetic mappings (x, y, colour), stacking and jitter, palette presets, axis and label controls",
+            "facet_wrap: split into one panel per level of a column, with a column-count control",
+            "Histogram and density take either a bin count or a bin width — bin width uses ggplot's centred edges",
+            "Export as SVG or PNG, or copy the equivalent R / Python / Stata plot script",
+          ]},
+          { heading: "Carrying results forward", items: [
+            "The ◈ pin button on a table or chart sends it to the Report tab",
+            "Group Summarize can save its output as a real dataset, usable in Clean and Model",
+            "Nothing in this tab modifies your data — it is read-only by design",
           ]},
         ]} />
+        {/* AI Insights */}
+        <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
         {/* Quick Filter */}
         <QuickFilter headers={headers} rows={rows} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}

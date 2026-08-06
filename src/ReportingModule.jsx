@@ -1613,21 +1613,30 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
                     padding: "1.4rem", paddingBottom: "3rem" }}>
       <div style={{ maxWidth: 1400, margin: "0 auto" }}>
 
-        <HintBox color={C.gold} title="How to report" sections={[
+        <HintBox color={C.gold} title="Report" sections={[
           { heading: "Requirements", items: [
             "Pin at least one model in the Model tab first — use the ◈ pin icon next to any result",
             "All pinned models appear here automatically",
+            "With several pinned, a model selector appears at the top to switch which one the report describes",
           ]},
           { heading: "Outputs", items: [
             "LaTeX Stargazer table: multi-column comparison of all pinned models, publication-ready",
             "Forest plot: coefficient + 95% CI across all pinned specifications",
-            "AI Narrative: auto-generates 2–3 academic paragraphs interpreting the results",
-            "Replication bundle: download R + Stata + Python scripts + data as a zip",
+            "AI Narrative: 2–3 academic paragraphs interpreting the results",
+            "Replication bundle: R + Stata + Python scripts plus the data, as a zip",
+          ]},
+          { heading: "Replication scripts", items: [
+            "The script is built from what you actually did: the load call, every pipeline step, and the model spec",
+            "Load options are honoured — a semicolon CSV exports as read_delim(delim=\";\"), an Excel sheet keeps its sheet name, a .dta uses read_dta",
+            "Multi-dataset sessions load every dataset with the right reader and estimate on the model's own source dataset",
+            "Renaming a dataset in the Data tab changes the df_<name> it gets in the script",
+            "Scripts are editable before download — but edits are yours to maintain, they are not fed back into the app",
           ]},
           { heading: "Tips", items: [
-            "Pin models with different SE types to compare robustness in one table",
-            "The AI Narrative uses the data dictionary — label your variables in Clean → Dictionary for better output",
-            "LaTeX output is compatible with Overleaf and standard journal templates",
+            "Pin the same spec with different SE types to show robustness in a single table",
+            "Label your variables in Clean → Dictionary — the AI narrative reads those labels and writes better prose with them",
+            "LaTeX output works with Overleaf and standard journal templates",
+            "Running a spec across subsets in Model gives you a multi-subset bundle here",
           ]},
         ]} />
 

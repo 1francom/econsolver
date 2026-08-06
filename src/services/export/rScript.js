@@ -33,6 +33,7 @@
 //     dataDictionary  Record<string,string> | null
 //   }
 
+import { opInfix } from "../../pipeline/predicate.js";
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 import { stepLabel } from "../../pipeline/registry.js";
 import { toR, jsExprToR, rRightLoad } from "../../pipeline/stepTranslators.js";
@@ -1633,7 +1634,7 @@ function subsetFiltersToR(filters) {
   if (!filters?.length) return null;
   return filters.map(f => {
     const val = isNaN(Number(f.val)) ? `"${f.val}"` : f.val;
-    return `${rName(f.col)} ${f.op} ${val}`;
+    return `${rName(f.col)} ${opInfix(f.op, "r")} ${val}`;
   }).join(" & ");
 }
 
@@ -1782,7 +1783,7 @@ export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [],
     const col   = rName(f.col);
     const isNum = f.val !== "" && !isNaN(Number(f.val));
     const val   = isNum ? f.val : rStr(f.val);
-    return `${col} ${f.op} ${val}`;
+    return `${col} ${opInfix(f.op, "r")} ${val}`;
   }
 
   // Trim model code: remove output/display calls so it's function-safe

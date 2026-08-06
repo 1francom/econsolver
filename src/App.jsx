@@ -24,7 +24,8 @@ import { signOut } from "./services/auth/authService.js";
 import { listCloudProjects, lockSession, pullProject, hasSyncSession, renameCloudProject } from "./services/sync/syncEngine.js";
 import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
-import { getTablePage } from "./services/data/duckdb.js";
+import { getTablePage, getFilteredRowCount } from "./services/data/duckdb.js";
+import { evalPredicate, predicateToSQL, menuLabel } from "./pipeline/predicate.js";
 import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
@@ -32,7 +33,7 @@ import SimulateTab      from './components/tabs/SimulateTab.jsx';
 import SpatialTab       from './components/tabs/SpatialTab.jsx';
 import ReportingModule  from './ReportingModule.jsx';
 import * as modelBuffer from "./services/modelBuffer.js";
-import { TourOverlay, TOUR_STEPS } from "./components/HelpSystem.jsx";
+import { TourOverlay, TOUR_STEPS, HintBox } from "./components/HelpSystem.jsx";
 
 const LS_KEY = "econ_wrangle_v2";
 
@@ -445,6 +446,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const [spliceCount,  setSpliceCount] = useState(0);
   const [spliceNewCol, setSpliceNewCol] = useState("");
   const [dbPageRows,   setDbPageRows]  = useState([]);  // DuckDB-fetched page
+  const [dbFilteredCount, setDbFilteredCount] = useState(null); // COUNT(*) under the active filter
   const [roundDec,     setRoundDec]    = useState("");   // "" = no rounding; "4" = 4 decimal places
   // View-level sort (like R's View() / clicking a column header). Not a
   // pipeline step: it changes what you look at, never the data or the export.
@@ -463,15 +465,42 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     setSpliceCol(first);
   }, [headers]);
 
+  // ── Filter, compiled once and pushed into SQL when the table lives in DuckDB ─
+  // `rows` is only the PREVIEW_ROWS-sized sample for a DuckDB-backed dataset, so
+  // filtering it in JS searches the first 500 rows of a 900k-row table and
+  // presents that as the whole table. The filter has to run where the data is.
+  const hasFilterValue = ["isblank","notblank"].includes(filterOp) || filterVal !== "";
+  const filterActive   = !!filterCol && !!filterOp && hasFilterValue;
+  const filterNode     = useMemo(() => filterActive
+    ? { type: "condition", col: filterCol, op: filterOp, value: filterVal }
+    : null, [filterActive, filterCol, filterOp, filterVal]);
+  // predicateToSQL throws rather than emitting a permissive WHERE. A filter we
+  // cannot compile must NOT quietly fall back to filtering the preview — that
+  // is the bug. It surfaces as a banner instead (see pushdownFailed below).
+  const whereSQL = useMemo(() => {
+    if (!filterNode) return null;
+    try { return predicateToSQL(filterNode); } catch { return null; }
+  }, [filterNode]);
+
   // Async page fetch from DuckDB
   useEffect(() => {
     if (!duckdbMeta?.tableName) return;
     let cancelled = false;
-    getTablePage(duckdbMeta.tableName, page * PAGE_SIZE, PAGE_SIZE, sort)
+    getTablePage(duckdbMeta.tableName, page * PAGE_SIZE, PAGE_SIZE, sort, whereSQL)
       .then(r => { if (!cancelled) setDbPageRows(r); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [duckdbMeta?.tableName, page, sort?.col, sort?.dir]);
+  }, [duckdbMeta?.tableName, page, sort?.col, sort?.dir, whereSQL]);
+
+  // A filtered view can no longer use the cached total, so the count is a query.
+  useEffect(() => {
+    if (!duckdbMeta?.tableName || !whereSQL) { setDbFilteredCount(null); return; }
+    let cancelled = false;
+    getFilteredRowCount(duckdbMeta.tableName, whereSQL)
+      .then(n => { if (!cancelled) setDbFilteredCount(n); })
+      .catch(() => { if (!cancelled) setDbFilteredCount(null); });
+    return () => { cancelled = true; };
+  }, [duckdbMeta?.tableName, whereSQL]);
 
   // Pre-compute which columns are numeric (from preview rows — stable enough).
   const numCols = useMemo(() => {
@@ -485,26 +514,13 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     ? headers.filter(h => h.toLowerCase().includes(colFilter.toLowerCase()))
     : headers;
   const editableHeaders = headers.filter(h => !h.startsWith("__"));
+  // The same evaluator predicateToSQL mirrors. A private matcher here would make
+  // a small (JS-backed) dataset and a large (DuckDB-backed) one filter by
+  // different rules — exactly the divergence predicate.js exists to prevent.
   const filterPredicate = useMemo(() => {
-    if (!filterCol || !filterOp) return null;
-    const sval = String(filterVal ?? "");
-    const num = Number(filterVal);
-    return (r) => {
-      const raw = r[filterCol];
-      const s = raw == null ? "" : String(raw);
-      switch (filterOp) {
-        case "equals": return s === sval;
-        case "contains": return s.includes(sval);
-        case "starts": return s.startsWith(sval);
-        case "ends": return s.endsWith(sval);
-        case "gt": return Number(raw) > num;
-        case "lt": return Number(raw) < num;
-        case "empty": return raw == null || s === "";
-        case "notempty": return raw != null && s !== "";
-        default: return true;
-      }
-    };
-  }, [filterCol, filterOp, filterVal]);
+    if (!filterNode) return null;
+    return (r) => { try { return evalPredicate(filterNode, r); } catch { return false; } };
+  }, [filterNode]);
   const filteredRows = useMemo(
     () => filterPredicate ? rows.filter(filterPredicate) : rows,
     [rows, filterPredicate]
@@ -523,16 +539,24 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     : null
   );
 
-  const isDuck     = !!duckdbMeta?.tableName;
-  const totalCount = isDuck && !filterPredicate ? (duckdbMeta.rowCount ?? 0) : filteredRows.length;
+  const isDuck = !!duckdbMeta?.tableName;
+  // A filter we could compile runs in SQL over the FULL table.
+  const duckFiltered = isDuck && !!whereSQL;
+  // One we could not compile leaves the view UNFILTERED and says so. Falling
+  // back to filtering `rows` would search the 500-row preview and label the
+  // result as the whole table — the bug this whole change removes.
+  const pushdownFailed = isDuck && filterActive && !whereSQL;
+
+  const totalCount = !isDuck      ? filteredRows.length
+                   : duckFiltered ? (dbFilteredCount ?? duckdbMeta.rowCount ?? 0)
+                   :                (duckdbMeta.rowCount ?? 0);
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
-  // The DuckDB branch is already ordered by SQL; sortedRows only applies to the
-  // in-memory branch (which is also the one a view-level filter forces us onto).
-  const pageRows   = isDuck && !filterPredicate
+  // The DuckDB branch is filtered and ordered by SQL; sortedRows only applies to
+  // the in-memory branch.
+  const pageRows   = isDuck
     ? dbPageRows
     : sortedRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const whereClause = { col: filterCol, op: filterOp, value: filterVal };
-  const hasFilterValue = ["empty","notempty"].includes(filterOp) || filterVal !== "";
   const canBulkEdit = !!filterCol && hasFilterValue && !!targetCol && !!onSetWhere;
   const controlStyle = {
     padding:"2px 6px", background:C.surface, border:`1px solid ${C.border2}`,
@@ -741,17 +765,21 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                 {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
               </select>
               <select value={filterOp} onChange={e => setFilterOp(e.target.value)} style={controlStyle}>
-                {[
-                  ["equals","equals"],["contains","contains"],["starts","starts"],["ends","ends"],
-                  ["gt",">"],["lt","<"],["empty","empty"],["notempty","not empty"],
-                ].map(([op, label]) => <option key={op} value={op}>{label}</option>)}
+                {/* isblank/notblank, not isna/notna: this filter also drives the
+                    bulk-edit WHERE, and "empty" here has always meant null OR
+                    empty string. */}
+                {["eq","contains","startswith","endswith","gt","lt","isblank","notblank"]
+                  .map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
               </select>
-              {!["empty","notempty"].includes(filterOp) && (
+              {!["isblank","notblank"].includes(filterOp) && (
                 <input value={filterVal} onChange={e => setFilterVal(e.target.value)}
                   placeholder="value" style={{...controlStyle,width:130}}/>
               )}
               <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
-                {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()}
+                {/* Counts come from the FULL table when it lives in DuckDB.
+                    Reporting `rows.length` there said "3 of 500" for a 900k-row
+                    dataset, which made the preview look like the whole table. */}
+                {totalCount.toLocaleString()} of {(isDuck ? (duckdbMeta.rowCount ?? 0) : rows.length).toLocaleString()}
               </span>
               {onSetWhere && (
                 <>
@@ -771,10 +799,23 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                     Clear
                   </button>
                   <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
-                    affects {filteredRows.length.toLocaleString()}
+                    {/* set_where replays over the full dataset in the pipeline,
+                        so the affected count must be the full-table count too. */}
+                    affects {totalCount.toLocaleString()}
                   </span>
                 </>
               )}
+            </div>
+          )}
+
+          {pushdownFailed && (
+            <div style={{
+              marginTop:6, padding:"0.4rem 0.7rem", borderRadius:3,
+              background:`${C.yellow}12`, border:`1px solid ${C.yellow}44`,
+              color:C.yellow, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+            }}>
+              ⚠ This filter can't run on the full {(duckdbMeta.rowCount ?? 0).toLocaleString()}-row
+              table, so the view below is UNFILTERED. Use Clean → Filter rows to filter the dataset itself.
             </div>
           )}
 
@@ -1286,6 +1327,49 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             pipeline applied
           </span>
         )}
+      </div>
+
+      <div style={{padding:"0.75rem 1.4rem 0",flexShrink:0}}>
+        <HintBox color={C.teal} title="Data" sections={[
+          { heading: "Loading files", items: [
+            "Drag & drop onto the drop zone, or click to browse — several files at once is fine, each becomes its own dataset",
+            "CSV / TSV — delimiter is auto-detected; semicolon and tab files load without any setting",
+            "Excel (.xlsx / .xls) — the FIRST sheet is read; to use another one, save it as its own file or its own workbook",
+            "Stata (.dta) — value labels and Stata dates are converted on read",
+            "R (.rds) — a single data.frame, tibble or named list",
+            "R (.RData / .rda) — a whole workspace: every data.frame inside becomes a separate dataset, named after the R object",
+            "Parquet — read directly by DuckDB, no row limit",
+            "Shapefile — drop .shp + .dbf + .prj together (or a .zip); the siblings are grouped into one dataset automatically",
+          ]},
+          { heading: "Other sources", items: [
+            "World Bank: fetch indicators live by country and year range",
+            "Preloaded datasets: sample data to try the app without uploading anything",
+            "Simulate tab: generate a synthetic dataset from a DGP — it lands here like any other",
+          ]},
+          { heading: "Large files", items: [
+            "Files over 10MB are routed through DuckDB and cached as Parquet — the full table stays queryable",
+            "The table shown on screen is a preview; pipeline steps, models and exports always run on the full dataset",
+            "A ⚡ DuckDB badge in the Clean header means the fast path is active",
+          ]},
+          { heading: "Managing datasets", items: [
+            "Dataset Manager (D·N button in the top bar): every dataset in the session, with row and column counts",
+            "Each tab remembers its own active dataset — Clean and Model can work on different ones at the same time",
+            "Rename with the ✎ button: the new name is what replication scripts use as df_<name>",
+            "The original filename is kept regardless, so the generated load call still points at the real file",
+          ]},
+          { heading: "Views", items: [
+            "Overview: shape, missing-value count, numeric column count, memory estimate, and per-column metadata",
+            "Data Viewer: paginated table of the rows themselves — click a header to sort",
+            "Its filter runs on the full table, not the page you can see, and the row counter reports full-table numbers",
+            "Filter operators read the same as in Clean and Explore — == equals, is blank — and match what you type in a formula box",
+            "A \"pipeline applied\" badge means you are looking at cleaned output, not the raw file",
+          ]},
+          { heading: "Persistence & privacy", items: [
+            "Everything is parsed and computed in your browser — no file is ever uploaded to a server",
+            "Datasets and pipelines are saved to IndexedDB and restored when you reopen the project",
+            "Large tables are cached in OPFS so reopening a project skips re-importing the file",
+          ]},
+        ]} />
       </div>
 
       {/* Overview panel */}

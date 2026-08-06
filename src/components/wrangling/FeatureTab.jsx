@@ -7,6 +7,7 @@ const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import FormatTab from "./FormatTab.jsx";
 import VectorAssignForm from "./VectorAssignForm.jsx";
 import { isSafeExpr } from "../../pipeline/exprGuard.js";
+import { menuLabel, evalPredicate } from "../../pipeline/predicate.js";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
 // dplyr-style free-form expression evaluator.
@@ -80,17 +81,12 @@ function MutateSubTab({rows, headers, info, onAdd}){
     };
   }
 
+  // The runner's evaluator, so this preview cannot report a different row count
+  // than applying the step actually produces. It used to be a private copy with
+  // a lenient equality (`== 10.0` matched 10) and a permissive default.
   function matchFilt(r,{col:c,op,val}){
-    const rv=r[c],nv=Number(val);
-    if(op==="notna")return rv!==null&&rv!==undefined;
-    if(op==="isna") return rv===null||rv===undefined;
-    if(op==="=="||op==="=")return String(rv)===String(val)||rv===nv;
-    if(op==="!="||op==="<>")return String(rv)!==String(val)&&rv!==nv;
-    if(op===">") return Number(rv)> nv;
-    if(op===">=")return Number(rv)>=nv;
-    if(op==="<") return Number(rv)< nv;
-    if(op==="<=")return Number(rv)<=nv;
-    return true;
+    try { return evalPredicate({ type:"condition", col:c, op, value:val }, r); }
+    catch { return false; }
   }
 
   // Live preview — tracks active step
@@ -152,8 +148,8 @@ function MutateSubTab({rows, headers, info, onAdd}){
   const inpS={width:"100%",boxSizing:"border-box",padding:"0.45rem 0.7rem",background:C.surface2,
     border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"};
 
-  const OPS=[["==","=="],["!=","!="],[">=",">="],["<=","<="],[">"," >"],["<"," <"]];
-  function addFilt(){setGmFilter(fs=>[...fs,{col:headers[0]||"",op:"==",val:""}]);}
+  const OPS=["eq","neq","gte","lte","gt","lt"].map(op=>[op, menuLabel(op)]);
+  function addFilt(){setGmFilter(fs=>[...fs,{col:headers[0]||"",op:"eq",val:""}]);}
   function rmFilt(i){setGmFilter(fs=>fs.filter((_,j)=>j!==i));}
   function setFilt(i,k,v){setGmFilter(fs=>fs.map((f,j)=>j===i?{...f,[k]:v}:f));}
 
