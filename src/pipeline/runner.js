@@ -1220,19 +1220,15 @@ export function applyStep(rows, headers, s, context = {}) {
         groupMap.get(k).push(r);
       });
 
-      // Evaluate one condition against a row
-      function matchOne(r, { col: c, op, val }) {
-        const rv = r[c], nv = Number(val);
-        if (op === "notna") return rv !== null && rv !== undefined;
-        if (op === "isna")  return rv === null  || rv === undefined;
-        if (op === "==" || op === "=")   return String(rv) === String(val) || rv === nv;
-        if (op === "!=" || op === "<>") return String(rv) !== String(val) && rv !== nv;
-        if (op === ">")  return Number(rv) >  nv;
-        if (op === ">=") return Number(rv) >= nv;
-        if (op === "<")  return Number(rv) <  nv;
-        if (op === "<=") return Number(rv) <= nv;
-        return true;
-      }
+      // Evaluate one condition against a row — the shared evaluator, same as
+      // `filter` and `set_where`. This replaced a local matcher that was the
+      // app's SEVENTH operator dialect: it had two aliases nothing else used
+      // (`=`, `<>`, both now in the alias table) and a lenient equality
+      // (`String(rv) === String(val) || rv === nv`) under which `== 10.0`
+      // matched 10. Canonical `eq` compares as text only, which is the
+      // convention the SQL and export compilers mirror.
+      const matchOne = (r, { col: c, op, val }) =>
+        evalPredicate({ type: "condition", col: c, op, value: val }, r);
 
       // ── fn:"expr" mode — group-aware expression evaluation ────────────────
       if (fn === "expr") {

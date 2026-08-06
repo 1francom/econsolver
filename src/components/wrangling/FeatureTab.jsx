@@ -7,6 +7,7 @@ const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import FormatTab from "./FormatTab.jsx";
 import VectorAssignForm from "./VectorAssignForm.jsx";
 import { isSafeExpr } from "../../pipeline/exprGuard.js";
+import { menuLabel } from "../../pipeline/predicate.js";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
 // dplyr-style free-form expression evaluator.
@@ -152,8 +153,8 @@ function MutateSubTab({rows, headers, info, onAdd}){
   const inpS={width:"100%",boxSizing:"border-box",padding:"0.45rem 0.7rem",background:C.surface2,
     border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"};
 
-  const OPS=[["==","=="],["!=","!="],[">=",">="],["<=","<="],[">"," >"],["<"," <"]];
-  function addFilt(){setGmFilter(fs=>[...fs,{col:headers[0]||"",op:"==",val:""}]);}
+  const OPS=["eq","neq","gte","lte","gt","lt"].map(op=>[op, menuLabel(op)]);
+  function addFilt(){setGmFilter(fs=>[...fs,{col:headers[0]||"",op:"eq",val:""}]);}
   function rmFilt(i){setGmFilter(fs=>fs.filter((_,j)=>j!==i));}
   function setFilt(i,k,v){setGmFilter(fs=>fs.map((f,j)=>j===i?{...f,[k]:v}:f));}
 
