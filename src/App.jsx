@@ -27,6 +27,7 @@ import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage, getFilteredRowCount } from "./services/data/duckdb.js";
 import { PanelStackProvider } from "./components/panels/PanelStack.jsx";
 import PanelHost from "./components/panels/PanelHost.jsx";
+import { readPanelPref, writePanelPref } from "./components/panels/panelPrefs.js";
 import { evalPredicate, predicateToSQL, menuLabel } from "./pipeline/predicate.js";
 import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
@@ -2801,6 +2802,9 @@ export default function App() {
   // consumer (nav history, tour, WorkspaceBar) keeps working unchanged.
   const [panes,     setPanes]     = useState(["clean", null]);
   const [artifactViewerOpen, setArtifactViewerOpen] = useState(false);
+  // Open/closed survives a reload, scoped per project so it cannot bleed.
+  useEffect(() => { setArtifactViewerOpen(readPanelPref(pid, "artifactOpen", false)); }, [pid]);
+  useEffect(() => { writePanelPref(pid, "artifactOpen", artifactViewerOpen); }, [pid, artifactViewerOpen]);
   const [focused,   setFocused]   = useState(0);
   const [paneRatio, setPaneRatio] = useState(0.5);
 

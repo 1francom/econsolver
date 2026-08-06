@@ -19,6 +19,7 @@ import FloatingPanel from "./FloatingPanel.jsx";
 import { PlotCanvas } from "../PlotBuilder.jsx";
 import { getPlotHistory, getMapHistory } from "../../services/Persistence/plotHistory.js";
 import { getArtifactOrder, makeArtifactId, orderArtifacts } from "../../services/Persistence/artifactOrder.js";
+import { readPanelPref, writePanelPref } from "./panelPrefs.js";
 
 const PANEL_WIDTH = 460;
 const BODY_HEIGHT = 360;
@@ -33,8 +34,18 @@ const BODY_HEIGHT = 360;
 export default function ArtifactViewerPanel({ pid, datasets = [], onOpen, onClose }) {
   const { C, T } = useTheme();
   const [artifacts, setArtifacts] = useState([]);
-  const [idx,       setIdx]       = useState(0);
-  const [minimized, setMinimized] = useState(false);
+  const [idx,       setIdx]       = useState(() => readPanelPref(pid, "artifactIdx", 0));
+  const [minimized, setMinimized] = useState(() => readPanelPref(pid, "artifactMin", false));
+
+  // `pid` can arrive after the first render, so the lazy initialisers above are
+  // not enough on their own — re-read once it lands.
+  useEffect(() => {
+    if (!pid) return;
+    setIdx(readPanelPref(pid, "artifactIdx", 0));
+    setMinimized(readPanelPref(pid, "artifactMin", false));
+  }, [pid]);
+  useEffect(() => { writePanelPref(pid, "artifactIdx", idx); }, [pid, idx]);
+  useEffect(() => { writePanelPref(pid, "artifactMin", minimized); }, [pid, minimized]);
 
   useEffect(() => {
     if (!pid) return;
@@ -55,8 +66,12 @@ export default function ArtifactViewerPanel({ pid, datasets = [], onOpen, onClos
   }, [pid]);
 
   // Clamp when the collection shrinks — an artifact deleted in another tab.
+  // Returning early on an empty list is load-bearing: this effect also runs on
+  // mount, when artifacts have not loaded yet, and clamping to 0 there would
+  // discard the index just restored from sessionStorage.
   useEffect(() => {
-    setIdx(i => (artifacts.length === 0 ? 0 : Math.min(i, artifacts.length - 1)));
+    if (artifacts.length === 0) return;
+    setIdx(i => Math.min(i, artifacts.length - 1));
   }, [artifacts.length]);
 
   const current = artifacts[idx] ?? null;
