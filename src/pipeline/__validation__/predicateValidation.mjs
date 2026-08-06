@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { OPERATORS, normalizeOp, evalPredicate } from "../predicate.js";
+import { OPERATORS, normalizeOp, evalPredicate, menuLabel, opInfix } from "../predicate.js";
 
 // Every operator carries the fields the UI layers need.
 for (const op of OPERATORS) {
@@ -46,6 +46,37 @@ assert.equal(normalizeOp("≠"), "neq");
 // normalizeOp must never invent an operator.
 assert.equal(normalizeOp("wat"), "wat");
 assert.equal(normalizeOp(undefined), undefined);
+
+// grouped_mutate's private matcher (runner.js) used two aliases nothing else did.
+assert.equal(normalizeOp("<>"), "neq");
+assert.equal(normalizeOp("="),  "eq");
+
+// ─── menu labels and language infix ───────────────────────────────────────────
+// Menus show the symbol next to the prose so the dropdown teaches the typed form.
+assert.equal(menuLabel("eq"),  "== equals");
+assert.equal(menuLabel("gte"), ">= at least");
+// Operators with no symbol show prose alone.
+assert.equal(menuLabel("isna"),     "is null");
+assert.equal(menuLabel("contains"), "contains");
+// Legacy spellings resolve first.
+assert.equal(menuLabel("equals"), "== equals");
+
+// Exporters emit an infix form; the six comparison operators are defined for all
+// three languages.
+for (const op of ["eq", "neq", "gt", "gte", "lt", "lte"]) {
+  for (const lang of ["r", "py", "stata"]) {
+    assert.ok(opInfix(op, lang), `${op} missing infix for ${lang}`);
+  }
+}
+assert.equal(opInfix("eq", "r"),      "==");
+assert.equal(opInfix("neq", "stata"), "!=");
+assert.equal(opInfix("equals", "py"), "==");  // legacy spelling
+
+// An operator with NO infix form must throw rather than be emitted verbatim.
+// `region contains "north"` is not valid R, and shipping it would surface as a
+// broken replication script rather than as a failing test.
+assert.throws(() => opInfix("contains", "r"), /no infix form/i);
+assert.throws(() => opInfix("in", "stata"),   /no infix form/i);
 
 console.log("predicate operators OK");
 

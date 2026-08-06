@@ -58,6 +58,8 @@ const ALIASES = {
   is_null: "isna", is_not_null: "notna", not_contains: "ncontains",
   // Explore's FILTER_OPS symbols
   "=": "eq", "≠": "neq",
+  // grouped_mutate's matchOne (runner.js) — the only surface that used this
+  "<>": "neq",
 };
 
 /** Map any known spelling to its canonical id. Unknown input is returned
@@ -132,6 +134,45 @@ export function evalPredicate(node, row) {
   // exists to remove — a filter with an operator nobody implemented silently
   // kept every row and looked like a legitimate result.
   throw new Error(`Unknown operator "${node.op}" in condition on column "${node.col}".`);
+}
+
+// ─── presentation and export helpers ──────────────────────────────────────────
+
+const BY_ID = new Map(OPERATORS.map(o => [o.id, o]));
+
+/**
+ * Label for a dropdown: "== equals", ">= at least", "is null".
+ * The symbol is the SAME token the user would type in a formula box — showing
+ * `=` in a menu while the formula box wants `==` is the inconsistency this
+ * module exists to remove.
+ */
+export function menuLabel(op) {
+  const o = BY_ID.get(normalizeOp(op));
+  if (!o) return String(op);
+  return o.symbol ? `${o.symbol} ${o.label}` : o.label;
+}
+
+/** Every operator that has a plain infix spelling in the replication targets. */
+const OP_INFIX = {
+  eq:  { r: "==", py: "==", stata: "==" },
+  neq: { r: "!=", py: "!=", stata: "!=" },
+  gt:  { r: ">",  py: ">",  stata: ">"  },
+  gte: { r: ">=", py: ">=", stata: ">=" },
+  lt:  { r: "<",  py: "<",  stata: "<"  },
+  lte: { r: "<=", py: "<=", stata: "<=" },
+};
+
+/**
+ * Infix operator for a replication script. THROWS when the operator has no
+ * infix form (in, contains, isna, …) — those need a function call per language
+ * (`%in%`, `grepl`, `.isin`, `strpos`, `inlist`), and an exporter that emitted
+ * them verbatim would produce a script that does not run. Failing here turns a
+ * user-visible broken export into a failing test.
+ */
+export function opInfix(op, lang) {
+  const row = OP_INFIX[normalizeOp(op)];
+  if (!row) throw new Error(`Operator "${op}" has no infix form — ${lang} needs an explicit translation.`);
+  return row[lang];
 }
 
 // ─── SQL compilation ──────────────────────────────────────────────────────────
