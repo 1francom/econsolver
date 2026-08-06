@@ -29,18 +29,36 @@ export function buildModelHint(panel, panelOk, panelFdOk) {
 }
 
 // ─── FACTOR EXPANSION HELPER ──────────────────────────────────────────────────
+// Sort a factor's distinct levels the way R's factor() would: numeric ascending
+// when every level is a finite number (so Year ∈ {9,10,11} doesn't get the
+// lexicographic "10","11","9" ordering), else lexicographic on the string form.
+// Shared by applyFactors and expandInteractions so main-effect and interaction
+// dummies pick the same reference category. Mirrors PanelEngine.js's sortLevels.
+export function sortFactorLevels(rawLevels) {
+  const allNum = rawLevels.every(v => typeof v === "number" && isFinite(v));
+  return allNum
+    ? [...rawLevels].sort((a, b) => a - b).map(String)
+    : rawLevels.map(String).sort();
+}
+
 export function applyFactors(rows, vars, factorVars) {
   const toExpand = vars.filter(v => factorVars.has(v));
   if (!toExpand.length) return { rows, vars };
   let expandedVars = [...vars];
   let expandedRows = rows;
   for (const col of toExpand) {
-    const levels = [...new Set(rows.map(r => r[col]).filter(v => v != null))]
-      .map(String).sort();
+    const rawLevels  = [...new Set(rows.map(r => r[col]).filter(v => v != null))];
+    const levels      = sortFactorLevels(rawLevels);
     const dummyLevels = levels.slice(1); // drop first = reference category
     const dummyCols   = dummyLevels.map(lv => `${col}_${lv.replace(/\s+/g, "_")}`);
     expandedRows = expandedRows.map(r => {
-      const val    = String(r[col] ?? "");
+      if (r[col] == null) {
+        // NA in a factor => listwise deletion (like lm()/regress), not silent
+        // fold into the reference category. NaN propagates to the dummies so
+        // runOLS/runWLS's isFinite() row filter drops this row entirely.
+        return { ...r, ...Object.fromEntries(dummyCols.map(dc => [dc, NaN])) };
+      }
+      const val    = String(r[col]);
       const dummies = Object.fromEntries(dummyCols.map((dc, i) => [dc, val === dummyLevels[i] ? 1 : 0]));
       return { ...r, ...dummies };
     });
@@ -73,14 +91,21 @@ export function expandInteractions(rows, xVars, wVars, interactionTerms, factorV
     // or [col] for a numeric var. Side-effect: creates missing dummy columns in augRows.
     const ensureAndGetCols = (col) => {
       if (!fvSet.has(col)) return [col];
-      const levels = [...new Set(augRows.map(r => r[col]).filter(v => v != null))]
-        .map(String).sort();
+      const rawLevels = [...new Set(augRows.map(r => r[col]).filter(v => v != null))];
+      const levels = sortFactorLevels(rawLevels);
       const lvs = levels.slice(1);
       const dcs = lvs.map(lv => `${col}_${lv.replace(/\s+/g, '_')}`);
       const missing = dcs.filter(dc => !(dc in (augRows[0] ?? {})));
       if (missing.length) {
         augRows = augRows.map(r => {
-          const val = String(r[col] ?? '');
+          if (r[col] == null) {
+            // Same listwise-deletion contract as applyFactors: NaN propagates
+            // through the product column below and drops the row in runOLS.
+            const extras = {};
+            dcs.forEach(dc => { if (!(dc in r)) extras[dc] = NaN; });
+            return Object.keys(extras).length ? { ...r, ...extras } : r;
+          }
+          const val = String(r[col]);
           const extras = {};
           dcs.forEach((dc, i) => { if (!(dc in r)) extras[dc] = val === lvs[i] ? 1 : 0; });
           return Object.keys(extras).length ? { ...r, ...extras } : r;
@@ -96,9 +121,12 @@ export function expandInteractions(rows, xVars, wVars, interactionTerms, factorV
       for (const c2 of cols2) {
         const intName = `${c1}:${c2}`;
         if (!(intName in (augRows[0] ?? {}))) {
+          // No `|| 0` fallback: NaN must propagate (not get coerced to a false
+          // "0" interaction) so a missing factor level or numeric NA still
+          // drops the row via runOLS/runWLS's isFinite() filter.
           augRows = augRows.map(r => ({
             ...r,
-            [intName]: (Number(r[c1]) || 0) * (Number(r[c2]) || 0),
+            [intName]: Number(r[c1]) * Number(r[c2]),
           }));
         }
         if (!augX.includes(intName) && !augW.includes(intName)) augX.push(intName);
