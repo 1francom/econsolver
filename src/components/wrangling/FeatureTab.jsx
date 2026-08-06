@@ -7,7 +7,7 @@ const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import FormatTab from "./FormatTab.jsx";
 import VectorAssignForm from "./VectorAssignForm.jsx";
 import { isSafeExpr } from "../../pipeline/exprGuard.js";
-import { menuLabel } from "../../pipeline/predicate.js";
+import { menuLabel, evalPredicate } from "../../pipeline/predicate.js";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
 // dplyr-style free-form expression evaluator.
@@ -81,17 +81,12 @@ function MutateSubTab({rows, headers, info, onAdd}){
     };
   }
 
+  // The runner's evaluator, so this preview cannot report a different row count
+  // than applying the step actually produces. It used to be a private copy with
+  // a lenient equality (`== 10.0` matched 10) and a permissive default.
   function matchFilt(r,{col:c,op,val}){
-    const rv=r[c],nv=Number(val);
-    if(op==="notna")return rv!==null&&rv!==undefined;
-    if(op==="isna") return rv===null||rv===undefined;
-    if(op==="=="||op==="=")return String(rv)===String(val)||rv===nv;
-    if(op==="!="||op==="<>")return String(rv)!==String(val)&&rv!==nv;
-    if(op===">") return Number(rv)> nv;
-    if(op===">=")return Number(rv)>=nv;
-    if(op==="<") return Number(rv)< nv;
-    if(op==="<=")return Number(rv)<=nv;
-    return true;
+    try { return evalPredicate({ type:"condition", col:c, op, value:val }, r); }
+    catch { return false; }
   }
 
   // Live preview — tracks active step

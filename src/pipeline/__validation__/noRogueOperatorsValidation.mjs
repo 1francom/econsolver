@@ -43,8 +43,14 @@ for (const f of SURFACES) {
 }
 
 // Nobody outside predicate.js / predicateExport.js may implement the operator
-// switch. `startswith` is the tell: it appears in every copy and nowhere else.
-const ROGUE_EVAL = /(op|f\.op|node\.op)\s*===\s*["']startswith["']|case\s+["']startswith["']\s*:/;
+// switch. The tell is a null-operator branch: every local matcher this project
+// grew opened with `op === "notna"` / `op === "isna"`, and no other code has a
+// reason to compare an `op` variable against those strings.
+//
+// An earlier version keyed on "startswith" instead and MISSED a copy — matchFilt
+// inside grouped_mutate's expr branch, which had no string operators at all. It
+// arrived through a merge, so the guard has to catch shapes it has not seen.
+const ROGUE_EVAL = /\bop\s*===\s*["'](notna|isna)["']|case\s+["'](startswith|notna)["']\s*:/;
 for (const f of [...SURFACES, "src/pipeline/duckdbRunner.js", "src/pipeline/runner.js"]) {
   if (ROGUE_EVAL.test(readFileSync(f, "utf8"))) {
     failures.push(`${f} evaluates operators locally — use evalPredicate from pipeline/predicate.js`);

@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { computeColStats } from "../../services/data/duckdb.js";
-import { OPERATORS, menuLabel, opLabel, opShort, evalPredicate } from "../../pipeline/predicate.js";
+import { OPERATORS, menuLabel, opLabel, opShort, opArity, evalPredicate } from "../../pipeline/predicate.js";
 import SortRowsSection from "./SortRowsSection.jsx";
 
 // ─── STANDARDIZE DIALOG (inline) ─────────────────────────────────────────────
@@ -608,7 +608,7 @@ function opsFor(col, info) {
 function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove }) {
   const { C, T } = useTheme();
   const ops = opsFor(cond.col, info);
-  const needsValue = !["notna","isna"].includes(cond.op);
+  const needsValue = opArity(cond.op) !== "none";
   const isBetween  = cond.op === "between";
   const isInList   = cond.op === "in" || cond.op === "nin";
   const colInfo    = info[cond.col] || {};
@@ -835,7 +835,7 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
   // while the dropdown right above it offered "!= not equals".
   function condDesc(c) {
     const label = opLabel(c.op);
-    if (c.op === "notna" || c.op === "isna") return `${c.col} ${label}`;
+    if (opArity(c.op) === "none") return `${c.col} ${label}`;
     if (c.op === "between") return `${c.col} between [${c.lo}, ${c.hi}]`;
     if (c.op === "in" || c.op === "nin") {
       return `${c.col} ${label} [${(c.values||[]).join(", ")||c.value}]`;

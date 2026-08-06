@@ -157,6 +157,11 @@ export function opLabel(op) {
   return BY_ID.get(normalizeOp(op))?.label ?? String(op);
 }
 
+/** "none" | "one" | "two" | "list" — how many operands the operator takes. */
+export function opArity(op) {
+  return BY_ID.get(normalizeOp(op))?.arity ?? "one";
+}
+
 /** The symbol if the operator has one, else null. */
 export function opSymbol(op) {
   return BY_ID.get(normalizeOp(op))?.symbol ?? null;

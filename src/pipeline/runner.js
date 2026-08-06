@@ -1256,18 +1256,12 @@ export function applyStep(rows, headers, s, context = {}) {
           };
         }
 
-        function matchFilt(r, { col: c, op, val }) {
-          const rv = r[c], nv = Number(val);
-          if (op === "notna") return rv !== null && rv !== undefined;
-          if (op === "isna")  return rv === null  || rv === undefined;
-          if (op === "==" || op === "=")   return String(rv) === String(val) || rv === nv;
-          if (op === "!=" || op === "<>") return String(rv) !== String(val) && rv !== nv;
-          if (op === ">")  return Number(rv) >  nv;
-          if (op === ">=") return Number(rv) >= nv;
-          if (op === "<")  return Number(rv) <  nv;
-          if (op === "<=") return Number(rv) <= nv;
-          return true;
-        }
+        // Same evaluator as matchOne above. These were two copies of one matcher
+        // inside a single step type, so `grouped_mutate` would have filtered by
+        // different rules depending on which branch ran — the expr branch kept
+        // the lenient equality (`== 10.0` matching 10) and the permissive
+        // `return true` default that the rest of the app no longer has.
+        const matchFilt = matchOne;
 
         // Aggregate calls whose argument is an EXPRESSION (`any(a != 0 & b == 2015)`)
         // are pulled out and evaluated row-wise, because columns are injected here
