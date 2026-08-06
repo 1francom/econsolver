@@ -11,12 +11,15 @@
 
 import ArtifactViewerPanel from "./ArtifactViewerPanel.jsx";
 
-export default function PanelHost({ pid, datasets, artifactViewerOpen, onCloseArtifactViewer, onOpenArtifact }) {
+export default function PanelHost({ pid, datasets, outputs, artifactViewerOpen, onCloseArtifactViewer, onOpenArtifact }) {
   if (!artifactViewerOpen) return null;
   return (
     <ArtifactViewerPanel
       pid={pid}
       datasets={datasets}
+      // Pipeline output per dataset id. Saved plots reference POST-pipeline
+      // column names, so `datasets`' raw rows alone are not enough.
+      outputs={outputs}
       onOpen={onOpenArtifact}
       onClose={onCloseArtifactViewer}
     />

@@ -31,7 +31,7 @@ const BODY_HEIGHT = 360;
  * @param onOpen    (artifact) => void — navigate to the artifact's home tab
  * @param onClose   () => void
  */
-export default function ArtifactViewerPanel({ pid, datasets = [], onOpen, onClose }) {
+export default function ArtifactViewerPanel({ pid, datasets = [], outputs = {}, onOpen, onClose }) {
   const { C, T } = useTheme();
   const [artifacts, setArtifacts] = useState([]);
   const [idx,       setIdx]       = useState(() => readPanelPref(pid, "artifactIdx", 0));
@@ -75,10 +75,33 @@ export default function ArtifactViewerPanel({ pid, datasets = [], onOpen, onClos
   }, [artifacts.length]);
 
   const current = artifacts[idx] ?? null;
-  const ds = useMemo(
-    () => datasets.find(d => d.id === (current?.entry?.datasetId ?? current?.entry?._srcId)) ?? null,
-    [datasets, current]
-  );
+  const dsId = current?.entry?.datasetId ?? current?.entry?._srcId ?? null;
+
+  // POST-pipeline rows, not raw. availableDatasets carries `rawData.rows`, so a
+  // plot built on a renamed column (`GDP` after `rename(GDP = "GDP per capita")`)
+  // finds nothing there and renders as bare axes. PlotBuilder itself is handed
+  // cleaned rows, which is why it draws the same plot correctly.
+  const rows = useMemo(() => {
+    const cleaned = outputs?.[dsId]?.cleanRows;
+    if (cleaned?.length) return cleaned;
+    return datasets.find(d => d.id === dsId)?.rows ?? null;
+  }, [outputs, datasets, dsId]);
+
+  // Columns the saved layers actually need. A plot whose columns are absent from
+  // the rows we have would draw an empty frame — a plausible-looking wrong
+  // answer — so it is reported instead.
+  const missingCols = useMemo(() => {
+    if (!rows?.length || current?.kind !== "plot") return [];
+    const present = new Set(Object.keys(rows[0] ?? {}));
+    const needed = new Set();
+    for (const ly of current.entry.layers ?? []) {
+      for (const v of Object.values(ly.aes ?? {})) {
+        if (typeof v === "string" && v) needed.add(v);
+      }
+    }
+    if (current.entry.facetCol) needed.add(current.entry.facetCol);
+    return [...needed].filter(c => !present.has(c));
+  }, [rows, current]);
 
   const navBtn = (label, disabled, onClick) => (
     <button onClick={onClick} disabled={disabled} title={label === "◀" ? "Previous" : "Next"}
@@ -126,10 +149,10 @@ export default function ArtifactViewerPanel({ pid, datasets = [], onOpen, onClos
                 }}>open</button>
             </div>
 
-            {current.kind === "plot" && ds && (
+            {current.kind === "plot" && !!rows?.length && missingCols.length === 0 && (
               <PlotCanvas
                 layers={current.entry.layers ?? []}
-                rows={ds.rows ?? []}
+                rows={rows}
                 title={current.entry.title || ""}
                 xLabel={current.entry.xLabel || ""}
                 yLabel={current.entry.yLabel || ""}
@@ -149,10 +172,19 @@ export default function ArtifactViewerPanel({ pid, datasets = [], onOpen, onClos
               />
             )}
 
-            {current.kind === "plot" && !ds && (
+            {current.kind === "plot" && !rows?.length && (
               <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
                 Source dataset “{current.entry.datasetName ?? current.entry.datasetId ?? "unknown"}” is not
                 loaded in this session — load it from the Data tab to see this plot.
+              </div>
+            )}
+
+            {current.kind === "plot" && !!rows?.length && missingCols.length > 0 && (
+              <div style={{ fontSize: T.caption.fontSize, color: C.yellow, lineHeight: 1.5 }}>
+                ⚠ This plot needs {missingCols.map(c => `“${c}”`).join(", ")}, which
+                {missingCols.length === 1 ? " is" : " are"} not in the current output of
+                “{current.entry.datasetName ?? dsId ?? "its dataset"}”. A cleaning step may have
+                renamed or dropped {missingCols.length === 1 ? "it" : "them"} since the plot was saved.
               </div>
             )}
 

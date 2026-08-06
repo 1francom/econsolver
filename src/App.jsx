@@ -3272,6 +3272,7 @@ export default function App() {
               <PanelHost
                 pid={pid}
                 datasets={availableDatasets}
+                outputs={outputs}
                 artifactViewerOpen={artifactViewerOpen}
                 onCloseArtifactViewer={() => setArtifactViewerOpen(false)}
                 onOpenArtifact={(a) => {
