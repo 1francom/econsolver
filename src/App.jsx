@@ -25,7 +25,7 @@ import { listCloudProjects, lockSession, pullProject, hasSyncSession, renameClou
 import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage, getFilteredRowCount } from "./services/data/duckdb.js";
-import { evalPredicate, predicateToSQL } from "./pipeline/predicate.js";
+import { evalPredicate, predicateToSQL, menuLabel } from "./pipeline/predicate.js";
 import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
@@ -469,7 +469,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   // `rows` is only the PREVIEW_ROWS-sized sample for a DuckDB-backed dataset, so
   // filtering it in JS searches the first 500 rows of a 900k-row table and
   // presents that as the whole table. The filter has to run where the data is.
-  const hasFilterValue = ["empty","notempty"].includes(filterOp) || filterVal !== "";
+  const hasFilterValue = ["isblank","notblank"].includes(filterOp) || filterVal !== "";
   const filterActive   = !!filterCol && !!filterOp && hasFilterValue;
   const filterNode     = useMemo(() => filterActive
     ? { type: "condition", col: filterCol, op: filterOp, value: filterVal }
@@ -765,12 +765,13 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                 {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
               </select>
               <select value={filterOp} onChange={e => setFilterOp(e.target.value)} style={controlStyle}>
-                {[
-                  ["equals","equals"],["contains","contains"],["starts","starts"],["ends","ends"],
-                  ["gt",">"],["lt","<"],["empty","empty"],["notempty","not empty"],
-                ].map(([op, label]) => <option key={op} value={op}>{label}</option>)}
+                {/* isblank/notblank, not isna/notna: this filter also drives the
+                    bulk-edit WHERE, and "empty" here has always meant null OR
+                    empty string. */}
+                {["eq","contains","startswith","endswith","gt","lt","isblank","notblank"]
+                  .map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
               </select>
-              {!["empty","notempty"].includes(filterOp) && (
+              {!["isblank","notblank"].includes(filterOp) && (
                 <input value={filterVal} onChange={e => setFilterVal(e.target.value)}
                   placeholder="value" style={{...controlStyle,width:130}}/>
               )}

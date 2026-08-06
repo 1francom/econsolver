@@ -65,7 +65,7 @@ assert.throws(() => predicateToSQL(cond("a", "wat", { value: "1" })), /unknown o
 // If one does not, a DuckDB-backed dataset shows an unfiltered view plus a
 // banner instead of a working filter — technically honest, but useless. Keep
 // this list in sync with the <select> in App.jsx's DataViewer.
-for (const op of ["equals", "contains", "starts", "ends", "gt", "lt", "empty", "notempty"]) {
+for (const op of ["eq", "contains", "startswith", "endswith", "gt", "lt", "isblank", "notblank"]) {
   const node = { type: "condition", col: "c", op, value: "1" };
   assert.doesNotThrow(
     () => predicateToSQL(node),
