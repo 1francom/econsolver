@@ -590,7 +590,10 @@ function patchDarkTheme(el) {
 
 // ─── PLOT CANVAS — renders one or more layers on a single Observable Plot ─────
 // layers: array of layer objects (for overlay/comparison) OR single-element array
-function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme, canvasRef, showSE = true,
+// Exported: the artifact viewer renders saved plots with this directly. Its
+// props are exactly the fields a saved entry carries — compare currentPlotEntry()
+// below — so no separate headless renderer is needed.
+export function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height, scheme, canvasRef, showSE = true,
   xScale = "linear", yScale = "linear",
   xDomain = [null, null], yDomain = [null, null],
   xFmt = "", yFmt = "",
