@@ -61,4 +61,16 @@ assert.throws(() => predicateToSQL(cond("n", "gt", { value: "abc" })), /non-nume
 // returned a plausible, wrong table. It must throw instead.
 assert.throws(() => predicateToSQL(cond("a", "wat", { value: "1" })), /unknown operator/i);
 
+// Every operator the Data Viewer's filter dropdown offers MUST compile to SQL.
+// If one does not, a DuckDB-backed dataset shows an unfiltered view plus a
+// banner instead of a working filter — technically honest, but useless. Keep
+// this list in sync with the <select> in App.jsx's DataViewer.
+for (const op of ["equals", "contains", "starts", "ends", "gt", "lt", "empty", "notempty"]) {
+  const node = { type: "condition", col: "c", op, value: "1" };
+  assert.doesNotThrow(
+    () => predicateToSQL(node),
+    `Data Viewer offers "${op}" but predicateToSQL cannot compile it — the filter would silently show every row behind a warning banner`
+  );
+}
+
 console.log("predicate SQL agreement OK");

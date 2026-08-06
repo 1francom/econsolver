@@ -24,7 +24,8 @@ import { signOut } from "./services/auth/authService.js";
 import { listCloudProjects, lockSession, pullProject, hasSyncSession, renameCloudProject } from "./services/sync/syncEngine.js";
 import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
-import { getTablePage } from "./services/data/duckdb.js";
+import { getTablePage, getFilteredRowCount } from "./services/data/duckdb.js";
+import { evalPredicate, predicateToSQL } from "./pipeline/predicate.js";
 import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
@@ -445,6 +446,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const [spliceCount,  setSpliceCount] = useState(0);
   const [spliceNewCol, setSpliceNewCol] = useState("");
   const [dbPageRows,   setDbPageRows]  = useState([]);  // DuckDB-fetched page
+  const [dbFilteredCount, setDbFilteredCount] = useState(null); // COUNT(*) under the active filter
   const [roundDec,     setRoundDec]    = useState("");   // "" = no rounding; "4" = 4 decimal places
   // View-level sort (like R's View() / clicking a column header). Not a
   // pipeline step: it changes what you look at, never the data or the export.
@@ -463,15 +465,42 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     setSpliceCol(first);
   }, [headers]);
 
+  // ── Filter, compiled once and pushed into SQL when the table lives in DuckDB ─
+  // `rows` is only the PREVIEW_ROWS-sized sample for a DuckDB-backed dataset, so
+  // filtering it in JS searches the first 500 rows of a 900k-row table and
+  // presents that as the whole table. The filter has to run where the data is.
+  const hasFilterValue = ["empty","notempty"].includes(filterOp) || filterVal !== "";
+  const filterActive   = !!filterCol && !!filterOp && hasFilterValue;
+  const filterNode     = useMemo(() => filterActive
+    ? { type: "condition", col: filterCol, op: filterOp, value: filterVal }
+    : null, [filterActive, filterCol, filterOp, filterVal]);
+  // predicateToSQL throws rather than emitting a permissive WHERE. A filter we
+  // cannot compile must NOT quietly fall back to filtering the preview — that
+  // is the bug. It surfaces as a banner instead (see pushdownFailed below).
+  const whereSQL = useMemo(() => {
+    if (!filterNode) return null;
+    try { return predicateToSQL(filterNode); } catch { return null; }
+  }, [filterNode]);
+
   // Async page fetch from DuckDB
   useEffect(() => {
     if (!duckdbMeta?.tableName) return;
     let cancelled = false;
-    getTablePage(duckdbMeta.tableName, page * PAGE_SIZE, PAGE_SIZE, sort)
+    getTablePage(duckdbMeta.tableName, page * PAGE_SIZE, PAGE_SIZE, sort, whereSQL)
       .then(r => { if (!cancelled) setDbPageRows(r); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [duckdbMeta?.tableName, page, sort?.col, sort?.dir]);
+  }, [duckdbMeta?.tableName, page, sort?.col, sort?.dir, whereSQL]);
+
+  // A filtered view can no longer use the cached total, so the count is a query.
+  useEffect(() => {
+    if (!duckdbMeta?.tableName || !whereSQL) { setDbFilteredCount(null); return; }
+    let cancelled = false;
+    getFilteredRowCount(duckdbMeta.tableName, whereSQL)
+      .then(n => { if (!cancelled) setDbFilteredCount(n); })
+      .catch(() => { if (!cancelled) setDbFilteredCount(null); });
+    return () => { cancelled = true; };
+  }, [duckdbMeta?.tableName, whereSQL]);
 
   // Pre-compute which columns are numeric (from preview rows — stable enough).
   const numCols = useMemo(() => {
@@ -485,26 +514,13 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     ? headers.filter(h => h.toLowerCase().includes(colFilter.toLowerCase()))
     : headers;
   const editableHeaders = headers.filter(h => !h.startsWith("__"));
+  // The same evaluator predicateToSQL mirrors. A private matcher here would make
+  // a small (JS-backed) dataset and a large (DuckDB-backed) one filter by
+  // different rules — exactly the divergence predicate.js exists to prevent.
   const filterPredicate = useMemo(() => {
-    if (!filterCol || !filterOp) return null;
-    const sval = String(filterVal ?? "");
-    const num = Number(filterVal);
-    return (r) => {
-      const raw = r[filterCol];
-      const s = raw == null ? "" : String(raw);
-      switch (filterOp) {
-        case "equals": return s === sval;
-        case "contains": return s.includes(sval);
-        case "starts": return s.startsWith(sval);
-        case "ends": return s.endsWith(sval);
-        case "gt": return Number(raw) > num;
-        case "lt": return Number(raw) < num;
-        case "empty": return raw == null || s === "";
-        case "notempty": return raw != null && s !== "";
-        default: return true;
-      }
-    };
-  }, [filterCol, filterOp, filterVal]);
+    if (!filterNode) return null;
+    return (r) => { try { return evalPredicate(filterNode, r); } catch { return false; } };
+  }, [filterNode]);
   const filteredRows = useMemo(
     () => filterPredicate ? rows.filter(filterPredicate) : rows,
     [rows, filterPredicate]
@@ -523,16 +539,24 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     : null
   );
 
-  const isDuck     = !!duckdbMeta?.tableName;
-  const totalCount = isDuck && !filterPredicate ? (duckdbMeta.rowCount ?? 0) : filteredRows.length;
+  const isDuck = !!duckdbMeta?.tableName;
+  // A filter we could compile runs in SQL over the FULL table.
+  const duckFiltered = isDuck && !!whereSQL;
+  // One we could not compile leaves the view UNFILTERED and says so. Falling
+  // back to filtering `rows` would search the 500-row preview and label the
+  // result as the whole table — the bug this whole change removes.
+  const pushdownFailed = isDuck && filterActive && !whereSQL;
+
+  const totalCount = !isDuck      ? filteredRows.length
+                   : duckFiltered ? (dbFilteredCount ?? duckdbMeta.rowCount ?? 0)
+                   :                (duckdbMeta.rowCount ?? 0);
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
-  // The DuckDB branch is already ordered by SQL; sortedRows only applies to the
-  // in-memory branch (which is also the one a view-level filter forces us onto).
-  const pageRows   = isDuck && !filterPredicate
+  // The DuckDB branch is filtered and ordered by SQL; sortedRows only applies to
+  // the in-memory branch.
+  const pageRows   = isDuck
     ? dbPageRows
     : sortedRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const whereClause = { col: filterCol, op: filterOp, value: filterVal };
-  const hasFilterValue = ["empty","notempty"].includes(filterOp) || filterVal !== "";
   const canBulkEdit = !!filterCol && hasFilterValue && !!targetCol && !!onSetWhere;
   const controlStyle = {
     padding:"2px 6px", background:C.surface, border:`1px solid ${C.border2}`,
@@ -751,7 +775,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                   placeholder="value" style={{...controlStyle,width:130}}/>
               )}
               <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
-                {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()}
+                {/* Counts come from the FULL table when it lives in DuckDB.
+                    Reporting `rows.length` there said "3 of 500" for a 900k-row
+                    dataset, which made the preview look like the whole table. */}
+                {totalCount.toLocaleString()} of {(isDuck ? (duckdbMeta.rowCount ?? 0) : rows.length).toLocaleString()}
               </span>
               {onSetWhere && (
                 <>
@@ -771,10 +798,23 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                     Clear
                   </button>
                   <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
-                    affects {filteredRows.length.toLocaleString()}
+                    {/* set_where replays over the full dataset in the pipeline,
+                        so the affected count must be the full-table count too. */}
+                    affects {totalCount.toLocaleString()}
                   </span>
                 </>
               )}
+            </div>
+          )}
+
+          {pushdownFailed && (
+            <div style={{
+              marginTop:6, padding:"0.4rem 0.7rem", borderRadius:3,
+              background:`${C.yellow}12`, border:`1px solid ${C.yellow}44`,
+              color:C.yellow, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+            }}>
+              ⚠ This filter can't run on the full {(duckdbMeta.rowCount ?? 0).toLocaleString()}-row
+              table, so the view below is UNFILTERED. Use Clean → Filter rows to filter the dataset itself.
             </div>
           )}
 
