@@ -37,16 +37,18 @@ Add multipanel/multiwindows displays, like we did with the distinct function, if
 Example: pinned plots are opened in a separate window display, just like in R we have the plot viewer.
 Feasibility: 5 (in-page floating panels) / 1 (real OS windows)
 Notes: `DistinctValuesPanel.jsx` is already exactly this pattern — `position:fixed`, minimizable, non-modal, z-index 900, deliberately non-blocking so it stays visible while you work elsewhere. Generalizing it into a `<FloatingPanel>` shell plus a panel manager (stacking, position memory) is contained. Real OS windows are the 1: `window.open` appears nowhere in the codebase and would sever the React tree, the inline-style theming and the DuckDB singleton. `SplitDivider.jsx` already covers the 2-pane split case.
-Status: ACCEPTED — spec written
-Date: 03-08-26
+Status: DONE 06-08-26
+Date: 06-08-26
+Shipped: `<FloatingPanel>` + `PanelStack` + an app-scoped Artifact Viewer over the project's saved plots and maps; `DistinctValuesPanel` migrated onto the same shell (110 → 87 lines). Scope is the MOUNT POINT, not a prop. Deferred on purpose: maps/models show a summary card rather than a live render (Leaflet's lifecycle inside a resizing panel is its own hazard), and drag/resize stays out — it unstacks the panels and hands window management back to the user.
 Spec: `docs/superpowers/specs/2026-08-03-floating-panels-design.md`. v1 = a reusable `<FloatingPanel>` + `PanelStackContext`, with two consumers at opposite scopes: a new app-scoped Artifact Viewer (saved plots/maps/models, navigated ◀ ▶ over the order `artifactOrder.js` already persists) and the migrated module-scoped Distinct Values panel. One note on your own reference: RStudio's Plots pane is **not** N floating windows, it is ONE pane with history — which is what the design follows, since free-floating windows hand window management back to the user, the opposite of the cleaner UI you were after.
 # Idea 6
 We can improve the data viewer to simulate an excel or PowerBI tools
 Example: filter values to change the specific rows
 Feasibility: 5
 Notes: much of this already shipped. `DataViewer` (App.jsx:415) has header-click sort (asc→desc→off), a view-level filter with 8 operators, inline cell editing, fill-column, add column/row, set-where, find/replace, string splice, rounding and DuckDB-backed paging. The genuine gaps vs Excel are: the filter is one column at a time (no stacking), there is no per-header autofilter dropdown with value checkboxes, and columns cannot be frozen, reordered or resized. The autofilter can reuse `getDistinctValues()` from duckdb.js — the same query `DistinctValuesPanel` already runs.
-Status: ACCEPTED — sequenced second
-Date: 03-08-26
+Status: PARTIAL 06-08-26 — the bug is fixed, the autofilter is not built
+Date: 06-08-26
+Done: the §8 correctness bug — the Data Viewer filtered the 500-row preview and reported "3 of 500" for a 900k-row table. It now compiles through `predicateToSQL` and runs on the full table, with a banner (never a silent preview-filter) when a filter cannot be pushed down. Still open: the per-header autofilter dropdown with value checkboxes, and stacking filters across several columns. Both are cheaper now — the canonical predicate and the `in` operator they need already exist.
 Spawned: grading this idea surfaced a bigger problem underneath it — the same "compare a column against something" operation is spelled five different ways across the UI (Explore shows `=`, SubsetManager shows `==`, Clean says "is null", the Data Viewer says "empty") and implemented six times in code. Franco's call: unify that first so the autofilter is built once, already speaking the canonical language. Spec: `docs/superpowers/specs/2026-08-03-unified-condition-language-design.md`. The autofilter's own design decisions are recorded in that spec's §8, along with a shipping bug it must fix — the Data Viewer's filter currently runs against the 500-row preview, so filtering a 900k-row DuckDB table silently filters the first 500 rows and presents that as the whole table.
 
 
