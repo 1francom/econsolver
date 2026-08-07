@@ -11,8 +11,9 @@ Ideas have different status: NONE (if not discussed nor processed), REJECTED, AC
 We might exploite the right click, adding some functions or copy options to it, that is a very underrated and confortable option for users, this is a general idea and very polivalent.
 Feasibility: 5
 Notes: there is not a single `onContextMenu` handler in `src/` today, so this is greenfield — but the payload already exists. `ColCard` (CleanTab.jsx:506) renders a `⋯` dropdown with rename/filter/cast/distinct/drop. Binding right-click to that same menu is one handler plus positioning. The real cost is that the menu is hardcoded inline inside `ColCard`; reusing it on the Data Viewer, Explore and Model requires extracting a shared `<ContextMenu>` primitive first. Converges with Ideas 3, 5 and 6 on that primitive.
-Status: PROCESSED
-Date: 03-08-26
+Status: PARKED — awaiting Franco's simplification pass
+Date: 06-08-26
+Parked 06-08-26: design started, then Franco parked it to first work out where the UI actually needs simplifying — the shortcut is only worth building once it is clear what it replaces. Two findings from that session worth keeping: the codebase has exactly ONE dropdown pattern today (`ColCard`'s `⋯`), so a shared `<ContextMenu>` has no competing precedent to reconcile; and the registry's 64 non-internal steps split into three groups that need very different menu treatment — parameterless (`drop`, distinct, `drop_na` on this column), form-opening (`rename`, `filter`, `type_cast`, `recode`), and not-a-single-column at all (`join`, `pivot_longer`, `group_summarize`), which do not belong on a column menu.
 # Idea 2
 The guide tour must be upgraded, we have introduced many features and reorganized some sections, so users must be guided in detail. The "How to ..." manuals must be updated as well.
 Feasibility: 6 (copy refresh) / 4 (spotlight)
@@ -24,8 +25,8 @@ Also widely general, but we can implement a lot of Power BI tools into Litux for
 Examples: Add most of the dplyr functions to the right click, so the UI is cleaner and users can apply the functions basically everywhere.
 Feasibility: 5 (surface existing steps) / 3 (true BI-grade surface)
 Notes: cheaper than it sounds — `runner.js` already implements 54 step types, so most dplyr verbs exist; the work is exposing them, not writing them. Hard constraint: every menu action must emit a pipeline step, never mutate the table in place (non-destructive invariant). Drops to 3 if "Power BI" means calculated measures and aggregation panes, which is a new surface rather than a new entry point to existing steps. Depends on Idea 1's `<ContextMenu>` primitive.
-Status: PROCESSED
-Date: 03-08-26
+Status: PARKED — same reason as Idea 1, they share the primitive
+Date: 06-08-26
 # Idea 4
 We can increase the AI comands to apply not just in the Clean section, but in all of them, allowing the users to ask for summarized tables, running regressions with subsets, building plots, etc. This might be unnecessary because Litux is already very intuitive, but just to consider.
 Feasibility: 3
