@@ -6,15 +6,23 @@
 //
 // Props:
 //   columns    [{ name, values:number[] }]  — numeric columns available to test
-//   title      string                       — section header label
+//   rows       object[] | null               — raw rows; supplying them unlocks
+//              LONG-format input (one outcome column split by a group column),
+//              i.e. R's `t.test(y ~ treat)`. Without it the panel behaves as
+//              before and only offers the two-column form, so existing callers
+//              need no change.
+//   headers    string[]                      — every column, for the group picker
+//   title      string                        — section header label
 //   defaultOpen bool
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../../../ThemeContext.jsx";
 import {
   oneSampleMeanTest, varianceTest, parameterTest,
   twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest,
+  splitByGroup, groupLevels, countsByGroup,
 } from "../../../math/SampleTests.js";
+import { sortFactorLevels } from "../../modeling/helpers.js";
 import { generateStatInferenceScript } from "../../../services/export/statInferenceScript.js";
 
 const LANGS = [["r", "R"], ["python", "Python"], ["stata", "Stata"]];
@@ -31,7 +39,7 @@ const H0_LABEL = {
   correlation: "H₀: ρ =", "var-ratio": "H₀: σ²ₐ/σ²_b =",
 };
 
-export default function SampleTestPanel({ columns = [], title = "Hypothesis Test", defaultOpen = false }) {
+export default function SampleTestPanel({ columns = [], rows = null, headers = [], title = "Hypothesis Test", defaultOpen = false }) {
   const { C, T } = useTheme();
   const [open, setOpen]   = useState(defaultOpen);
   const [mode, setMode]   = useState("mean");        // mean | variance | parameter
@@ -42,6 +50,11 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
   const [se, setSe]       = useState("");
   const [df, setDf]       = useState("");
   const [colNameB, setColB] = useState("");   // second variable (two-col modes)
+  // Long-format input: one outcome column split by two levels of a group column.
+  const [inputMode, setInputMode] = useState("cols");  // "cols" | "group"
+  const [groupCol, setGroupCol]   = useState("");
+  const [levelA, setLevelA]       = useState("");
+  const [levelB, setLevelB]       = useState("");
   const [pooled, setPooled] = useState(false); // two-mean: pooled vs Welch
   const [corrMethod, setCorrMethod] = useState("pearson");
   // proportion-count inputs
@@ -59,6 +72,24 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
   const effectiveColB = columns.some(c => c.name === colNameB) ? colNameB : (columns[1]?.name ?? columns[0]?.name ?? "");
   const selColB = columns.find(c => c.name === effectiveColB) ?? null;
 
+  // Long-format input is offered only for tests of INDEPENDENT samples.
+  // `paired` and `correlation` pair observations row by row, so two arrays built
+  // from different group memberships have no correspondence at all — pairing
+  // them by index would produce a plausible number with no meaning.
+  const GROUP_OK  = rows != null && (mode === "two-mean" || mode === "var-ratio" || mode === "two-prop");
+  const byGroup   = GROUP_OK && inputMode === "group";
+  const levels    = useMemo(
+    () => (byGroup && groupCol ? sortFactorLevels(groupLevels(rows, groupCol)) : []),
+    [byGroup, rows, groupCol]
+  );
+  // Two levels is the common case (treated/control) — pick them so the panel
+  // shows a result immediately instead of an empty form.
+  useEffect(() => {
+    if (!levels.length) return;
+    if (!levels.includes(levelA)) setLevelA(levels[0] ?? "");
+    if (!levels.includes(levelB)) setLevelB(levels[1] ?? levels[0] ?? "");
+  }, [levels]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function switchMode(next) {
     setMode(next);
     // Sensible default null for a variance test (σ² must be > 0).
@@ -75,6 +106,19 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
       if (succ === "" || nObs === "") return null;
       return onePropTest(Number(succ), Number(nObs), { p0: Number(h0), alternative: alt });
     }
+    // Long-format: build the two samples from one column split by group.
+    if (byGroup) {
+      if (!selCol || !groupCol || levelA === "" || levelB === "") return null;
+      if (String(levelA) === String(levelB)) return { error: "Pick two different group levels." };
+      if (mode === "two-prop") {
+        const c = countsByGroup(rows, selCol.name, groupCol, levelA, levelB);
+        if (c.error) return c;
+        return twoPropTest(c.s1, c.n1, c.s2, c.n2, { alternative: alt });
+      }
+      const { a, b } = splitByGroup(rows, selCol.name, groupCol, levelA, levelB);
+      if (mode === "two-mean") return twoSampleMeanTest(a, b, { alternative: alt, pooled, mu0: h0 });
+      return varianceRatioTest(a, b, { alternative: alt });
+    }
     if (mode === "two-prop") {
       if (s1 === "" || n1 === "" || s2 === "" || n2 === "") return null;
       return twoPropTest(Number(s1), Number(n1), Number(s2), Number(n2), { alternative: alt });
@@ -89,7 +133,7 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
     if (!selCol) return null;
     if (mode === "mean") return oneSampleMeanTest(selCol.values, h0, alt);
     return varianceTest(selCol.values, h0, alt);
-  }, [mode, selCol, selColB, h0, alt, estimate, se, df, pooled, corrMethod, succ, nObs, s1, n1, s2, n2, TWO_COL]);
+  }, [mode, selCol, selColB, h0, alt, estimate, se, df, pooled, corrMethod, succ, nObs, s1, n1, s2, n2, TWO_COL, byGroup, rows, groupCol, levelA, levelB]);
 
   function copyScript(lang) {
     if (!result || result.error || mode === "parameter") return;
@@ -147,10 +191,54 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
             {modeBtn("two-prop", "Two proportions (z)")}
           </div>
 
-          {/* Mean / Variance / variable A: pick a column */}
-          {mode !== "parameter" && mode !== "one-prop" && mode !== "two-prop" && (
+          {/* Input shape, for the independent-sample tests only. Long format is
+              R's `t.test(y ~ treat)`: one outcome column split by a group
+              column, which is how econometric data is actually shaped. */}
+          {GROUP_OK && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>input</span>
+              {[["cols", "two columns"], ["group", "split by group"]].map(([id, label]) => (
+                <button key={id} onClick={() => setInputMode(id)}
+                  style={{
+                    background: inputMode === id ? `${C.teal}18` : "transparent",
+                    border: `1px solid ${inputMode === id ? C.teal : C.border2}`,
+                    color: inputMode === id ? C.teal : C.textDim,
+                    fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                    padding: "0.22rem 0.6rem", borderRadius: 2, cursor: "pointer",
+                  }}>{label}</button>
+              ))}
+            </div>
+          )}
+
+          {/* Group column + the two levels being contrasted */}
+          {byGroup && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>{TWO_COL ? "variable A" : "variable"}</span>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>split by</span>
+              <select value={groupCol} onChange={e => setGroupCol(e.target.value)} style={{ ...field, maxWidth: 200 }}>
+                <option value="">— pick a column —</option>
+                {headers.filter(h => !h.startsWith("__")).map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+              {groupCol && levels.length > 0 && (
+                <>
+                  <select value={levelA} onChange={e => setLevelA(e.target.value)} style={{ ...field, maxWidth: 150 }}>
+                    {levels.map(v => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
+                  </select>
+                  <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>vs</span>
+                  <select value={levelB} onChange={e => setLevelB(e.target.value)} style={{ ...field, maxWidth: 150 }}>
+                    {levels.map(v => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
+                  </select>
+                </>
+              )}
+              {groupCol && levels.length === 0 && (
+                <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>no non-null values in this column</span>
+              )}
+            </div>
+          )}
+
+          {/* Mean / Variance / variable A: pick a column */}
+          {(byGroup || (mode !== "parameter" && mode !== "one-prop" && mode !== "two-prop")) && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>{byGroup ? (mode === "two-prop" ? "binary outcome" : "outcome") : (TWO_COL ? "variable A" : "variable")}</span>
               <select value={effectiveCol} onChange={e => setCol(e.target.value)} style={{ ...field, maxWidth: 240 }} disabled={!columns.length}>
                 {!columns.length && <option value="">— no numeric column —</option>}
                 {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -177,7 +265,7 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
           )}
 
           {/* Second variable for two-column modes */}
-          {TWO_COL && (
+          {TWO_COL && !byGroup && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>variable B</span>
               <select value={effectiveColB} onChange={e => setColB(e.target.value)} style={{ ...field, maxWidth: 240 }} disabled={!columns.length}>
@@ -211,7 +299,7 @@ export default function SampleTestPanel({ columns = [], title = "Hypothesis Test
           )}
 
           {/* Two-proportion counts */}
-          {mode === "two-prop" && (
+          {mode === "two-prop" && !byGroup && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <label style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
                 s₁ <input type="number" step="1" value={s1} onChange={e => setS1(e.target.value)} style={{ ...field, width: 70 }} />
