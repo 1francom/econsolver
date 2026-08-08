@@ -35,6 +35,94 @@ const PY_ALT = { "two-sided": "two-sided", less: "smaller", greater: "larger" };
 const rAlt = (a) => (a === "less" || a === "greater" ? a : "two.sided");
 
 /**
+ * Column-referencing snippets for the tests that take whole columns.
+ *
+ * Applies whenever the panel is backed by a real DATASET. Simulate keeps the
+ * literal-vector emitters on purpose — its samples exist nowhere but in the
+ * browser, so inlining them is the only way the script can run at all. Over a
+ * loaded dataset that same dump is fatal: at 1000 rows R refuses the input
+ * outright ("maximum number of characters accepted by R in a single line of
+ * input is 4094").
+ *
+ * @param dataset { colA, colB } — column names behind the two samples
+ */
+export function columnRefSnippet(language, op, dataset, params = {}) {
+  if (!dataset?.colA) return null;
+  const { colA: a, colB: b } = dataset;
+  const alt = params.alternative ?? "two-sided";
+  const mu0 = num(params.mu0 ?? params.nullValue);
+  const method = params.method ?? "pearson";
+  const L = (...lines) => lines.join("\n");
+  const needsB = op === "pairedMeanTest" || op === "correlationTest" ||
+                 op === "twoSampleMeanTest" || op === "varianceRatioTest";
+  if (needsB && !b) return null;
+
+  if (language === "r") {
+    const A = `df$${rName(a)}`, B = b ? `df$${rName(b)}` : null;
+    const ALT = JSON.stringify(rAlt(alt));
+    if (op === "oneSampleMeanTest") return L("# One-sample mean test", `print(t.test(${A}, mu = ${mu0}, alternative = ${ALT}))`);
+    if (op === "pairedMeanTest")    return L("# Paired mean test", `print(t.test(${A}, ${B}, paired = TRUE, mu = ${mu0}, alternative = ${ALT}))`);
+    if (op === "correlationTest")   return L("# Correlation test", `print(cor.test(${A}, ${B}, method = ${JSON.stringify(method)}, alternative = ${ALT}))`);
+    if (op === "twoSampleMeanTest") return L("# Two-sample mean test", `print(t.test(${A}, ${B}, mu = ${mu0}, alternative = ${ALT}, var.equal = ${params.pooled ? "TRUE" : "FALSE"}))`);
+    if (op === "varianceRatioTest") return L("# Variance-ratio test", `print(var.test(${A}, ${B}, alternative = ${ALT}))`);
+    if (op === "varianceTest") return L(
+      "# One-sample variance test",
+      `x <- ${A}[!is.na(${A})]`,
+      `sigma2_0 <- ${mu0}`,
+      "statistic <- (length(x) - 1) * var(x) / sigma2_0",
+      "cdf <- pchisq(statistic, df = length(x) - 1)",
+      `p_value <- ${alt === "less" ? "cdf" : alt === "greater" ? "1 - cdf" : "2 * min(cdf, 1 - cdf)"}`,
+      "print(data.frame(variance = var(x), chi_square = statistic, df = length(x) - 1, p_value = p_value))",
+    );
+    return null;
+  }
+
+  if (language === "python") {
+    const A = `df[${pyStr(a)}].dropna().astype(float)`;
+    const B = b ? `df[${pyStr(b)}].dropna().astype(float)` : null;
+    if (op === "oneSampleMeanTest") return L("# One-sample mean test", `a = ${A}`, `print(stats.ttest_1samp(a, popmean=${mu0}, alternative=${JSON.stringify(alt)}))`);
+    if (op === "pairedMeanTest")    return L("# Paired mean test", `a = ${A}`, `b = ${B}`, `print(stats.ttest_rel(a - ${mu0}, b, alternative=${JSON.stringify(alt)}))`);
+    if (op === "correlationTest")   return L("# Correlation test", `a = ${A}`, `b = ${B}`, `print(stats.${method === "spearman" ? "spearmanr" : "pearsonr"}(a, b, alternative=${JSON.stringify(alt)}))`);
+    if (op === "twoSampleMeanTest") return L("# Two-sample mean test", `a = ${A}`, `b = ${B}`, `print(stats.ttest_ind(a - ${mu0}, b, equal_var=${params.pooled ? "True" : "False"}, alternative=${JSON.stringify(alt)}))`);
+    if (op === "varianceRatioTest") return L(
+      "# Variance-ratio test", `a = ${A}`, `b = ${B}`,
+      "f_stat = np.var(a, ddof=1) / np.var(b, ddof=1)",
+      "cdf = stats.f.cdf(f_stat, len(a) - 1, len(b) - 1)",
+      `p_value = ${alt === "less" ? "cdf" : alt === "greater" ? "1 - cdf" : "2 * min(cdf, 1 - cdf)"}`,
+      'print({"F": f_stat, "df1": len(a) - 1, "df2": len(b) - 1, "p_value": p_value})',
+    );
+    if (op === "varianceTest") return L(
+      "# One-sample variance test", `x = ${A}`,
+      `sigma2_0 = ${mu0}`,
+      "statistic = (len(x) - 1) * np.var(x, ddof=1) / sigma2_0",
+      "cdf = stats.chi2.cdf(statistic, len(x) - 1)",
+      `p_value = ${alt === "less" ? "cdf" : alt === "greater" ? "1 - cdf" : "2 * min(cdf, 1 - cdf)"}`,
+      'print({"variance": float(np.var(x, ddof=1)), "chi_square": statistic, "df": len(x) - 1, "p_value": p_value})',
+    );
+    return null;
+  }
+
+  if (language === "stata") {
+    const note = `* Requested alternative: ${alt}; Stata displays one- and two-sided p-values.`;
+    if (op === "oneSampleMeanTest") return L("* One-sample mean test", `ttest ${a} == ${mu0}`, note);
+    // In Stata `ttest v1 == v2` is the PAIRED form; unpaired needs the option.
+    if (op === "pairedMeanTest")    return L("* Paired mean test", `ttest ${a} == ${b}`, note);
+    if (op === "twoSampleMeanTest") return L("* Two-sample mean test", `ttest ${a} == ${b}, unpaired${params.pooled ? "" : " unequal"}`, note);
+    if (op === "varianceRatioTest") return L("* Variance-ratio test", `sdtest ${a} == ${b}`, note);
+    if (op === "correlationTest")   return L("* Correlation test", method === "spearman" ? `spearman ${a} ${b}, stats(rho p)` : `pwcorr ${a} ${b}, sig`, "* These commands report the standard two-sided significance.");
+    if (op === "varianceTest") return L(
+      "* One-sample variance test", `scalar sigma2_0 = ${mu0}`, `quietly summarize ${a}`,
+      "scalar chi2_stat = (r(N) - 1) * r(Var) / sigma2_0",
+      "scalar cdf = chi2(r(N) - 1, chi2_stat)",
+      `scalar p_value = ${alt === "less" ? "cdf" : alt === "greater" ? "1 - cdf" : "2 * min(cdf, 1 - cdf)"}`,
+      "display chi2_stat, p_value",
+    );
+    return null;
+  }
+  return null;
+}
+
+/**
  * @param language  "r" | "python" | "stata"
  * @param op        canonical op name from statInferenceScript's normaliseOp
  * @param group     { valueCol, groupCol, levelA, levelB }

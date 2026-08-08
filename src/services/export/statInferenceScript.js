@@ -1,6 +1,6 @@
 // Standalone R / Python / Stata snippets for data-level Stat & Simulation tests.
 
-import { groupInferenceSnippet } from "./statInferenceGroupScript.js";
+import { groupInferenceSnippet, columnRefSnippet } from "./statInferenceGroupScript.js";
 
 function finiteNumber(v) {
   return typeof v === "number" && isFinite(v);
@@ -447,6 +447,14 @@ export function generateStatInferenceScript(language, op, params = {}, result = 
   if (params.group?.groupCol) {
     const grouped = groupInferenceSnippet(language, operation, params.group, params);
     if (grouped) return grouped;
+  }
+  // Backed by a real dataset: reference the columns. The literal-vector
+  // emitters below stay for Simulate, whose samples exist nowhere but in the
+  // browser — over a loaded dataset that dump is fatal (R refuses input past
+  // 4094 characters on one line).
+  if (params.dataset?.colA) {
+    const byCol = columnRefSnippet(language, operation, params.dataset, params);
+    if (byCol) return byCol;
   }
   if (language === "r") return generateR(operation, params, result);
   if (language === "python") return generatePython(operation, params, result);

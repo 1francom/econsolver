@@ -149,6 +149,10 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
       group: byGroup && selCol && groupCol
         ? { valueCol: selCol.name, groupCol, levelA, levelB }
         : undefined,
+      // A real dataset behind the panel (Explore) means the script can name the
+      // columns. Simulate passes no rows, so it keeps the literal-vector form —
+      // its data exists nowhere else.
+      dataset: rows && selCol ? { colA: selCol.name, colB: selColB?.name } : undefined,
       mu0: Number(h0), nullValue: Number(h0), alternative: alt, pooled, method: corrMethod,
       successes: Number(succ), n: Number(nObs), p0: Number(h0),
       s1: Number(s1), n1: Number(n1), s2: Number(s2), n2: Number(n2),
