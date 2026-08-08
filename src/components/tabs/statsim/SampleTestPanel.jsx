@@ -144,6 +144,11 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
     }[mode];
     const params = {
       values: selCol?.values, a: selCol?.values, b: selColB?.values,
+      // In group mode the snippet references the columns instead of inlining
+      // every observation, so it needs the names, not the values.
+      group: byGroup && selCol && groupCol
+        ? { valueCol: selCol.name, groupCol, levelA, levelB }
+        : undefined,
       mu0: Number(h0), nullValue: Number(h0), alternative: alt, pooled, method: corrMethod,
       successes: Number(succ), n: Number(nObs), p0: Number(h0),
       s1: Number(s1), n1: Number(n1), s2: Number(s2), n2: Number(n2),
