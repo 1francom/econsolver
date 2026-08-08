@@ -6,7 +6,7 @@
 // The guarantee that matters: the two input modes must produce the SAME test
 // result on the same data. That is asserted here directly rather than assumed.
 import assert from "node:assert/strict";
-import { splitByGroup, groupLevels, twoSampleMeanTest, oneSampleMeanTest } from "../SampleTests.js";
+import { splitByGroup, groupLevels, countsByGroup, twoSampleMeanTest, oneSampleMeanTest } from "../SampleTests.js";
 
 // ─── missing values are dropped, not counted as zeros ─────────────────────────
 // `Number(null)` and `Number("")` are 0, and 0 is finite, so the original
@@ -93,5 +93,26 @@ assert.deepEqual(groupLevels(rows, "region"), ["north", "south"]);
 // Null is not a level; the empty string is one.
 assert.deepEqual(groupLevels(messy, "g"), ["a", "", "b", "c"]);
 assert.deepEqual(groupLevels([], "g"), []);
+
+// ─── binary outcome → two-proportion counts ───────────────────────────────────
+{
+  const bin = [
+    { hired: 1, sex: "f" }, { hired: 0, sex: "f" }, { hired: 1, sex: "f" },
+    { hired: 0, sex: "m" }, { hired: 0, sex: "m" },
+    { hired: null, sex: "f" },   // missing, not a failure
+    { hired: 1, sex: null },     // no group, belongs to neither side
+  ];
+  assert.deepEqual(countsByGroup(bin, "hired", "sex", "f", "m"), { s1: 2, n1: 3, s2: 0, n2: 2 });
+
+  // Booleans are a legitimate binary encoding.
+  const bools = [{ x: true, g: "a" }, { x: false, g: "a" }, { x: true, g: "b" }];
+  assert.deepEqual(countsByGroup(bools, "x", "g", "a", "b"), { s1: 1, n1: 2, s2: 1, n2: 1 });
+
+  // A continuous column must be REFUSED, not silently read as "5 is a success".
+  const cont = [{ y: 5, g: "a" }, { y: 0, g: "b" }];
+  const err = countsByGroup(cont, "y", "g", "a", "b");
+  assert.ok(err.error, "a non-binary column was accepted as proportions");
+  assert.match(err.error, /not binary/i);
+}
 
 console.log("groupSplit OK");

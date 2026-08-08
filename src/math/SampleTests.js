@@ -73,6 +73,37 @@ export function groupLevels(rows, groupCol) {
  * and filtering here as well would make the long and wide paths disagree the
  * moment either cleaner changed.
  */
+/**
+ * Success counts per group for a two-proportion test, from a BINARY outcome
+ * column split by two levels of a grouping column — the binary-outcome ATE.
+ * Without this, twoPropTest could only be fed four counts typed by hand.
+ *
+ * Refuses a non-binary column rather than guessing. Treating "5" as a success
+ * would report a "proportion" of a continuous variable, which means nothing;
+ * booleans and 0/1 are accepted, everything else is an error the caller shows.
+ */
+export function countsByGroup(rows, valueCol, groupCol, levelA, levelB) {
+  const { a, b } = splitByGroup(rows, valueCol, groupCol, levelA, levelB);
+  let bad = null;
+  const tally = (arr) => {
+    let s = 0, n = 0;
+    for (const v of arr) {
+      if (v === null || v === undefined || v === "") continue;  // missing, as elsewhere
+      const x = typeof v === "boolean" ? (v ? 1 : 0) : Number(v);
+      if (!finite(x)) continue;
+      if (x !== 0 && x !== 1) { bad ??= v; continue; }
+      n += 1;
+      if (x === 1) s += 1;
+    }
+    return { s, n };
+  };
+  const A = tally(a), B = tally(b);
+  if (bad !== null) {
+    return { error: `"${valueCol}" is not binary — found ${JSON.stringify(bad)}. A proportion needs 0/1 or true/false.` };
+  }
+  return { s1: A.s, n1: A.n, s2: B.s, n2: B.n };
+}
+
 export function splitByGroup(rows, valueCol, groupCol, levelA, levelB) {
   const A = String(levelA), B = String(levelB);
   const a = [], b = [];
