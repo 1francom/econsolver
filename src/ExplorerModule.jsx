@@ -19,6 +19,7 @@ import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { getExplorePins, saveExplorePins } from "./services/Persistence/plotHistory.js";
 import ExplorePinBar from "./components/explore/ExplorePinBar.jsx";
+import SampleTestPanel from "./components/tabs/statsim/SampleTestPanel.jsx";
 import { menuLabel, normalizeOp, evalPredicate } from "./pipeline/predicate.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
@@ -2385,6 +2386,11 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     if(!filterConds.length) return rows;
     return rows.filter(row=>filterConds.every(cond=>matchCond(row,cond)));
   },[rows,filterConds]);
+  // Numeric columns available to the group-contrast panel below Group Summarize.
+  const numericCols = useMemo(
+    () => headers.filter(h => info[h]?.isNum && info[h]?.mean != null),
+    [headers, info]
+  );
   const corrRef = useRef(null);
 
   // Plot Builder gets the exact full `rows` array — no SQL sampling here. Aggregating
@@ -2651,6 +2657,19 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
               <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset} usingPreview={usingPreview}
                 duckTable={filterConds.length ? null : duckTable}/>
+            </div>
+            {/* Contrast two groups — a difference in means IS the ATE, and it
+                lives next to Group Summarize because that is where a user goes
+                looking for it. Fed filteredRows, not rows: a contrast computed
+                on the whole sample sitting beside plots of a subgroup would be
+                two surfaces disagreeing about the same data. */}
+            <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
+              <SampleTestPanel
+                columns={numericCols.map(h => ({ name: h, values: filteredRows.map(r => r[h]) }))}
+                rows={filteredRows}
+                headers={headers}
+                title="Compare groups — hypothesis test"
+              />
             </div>
           </>
         )}
