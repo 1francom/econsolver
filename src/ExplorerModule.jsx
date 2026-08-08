@@ -2607,6 +2607,12 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             "Use it to eyeball a subgroup without committing to a cleaning step",
             "Stats, plots and correlations all recompute against the filtered rows instantly",
           ]},
+          { heading: "Compare groups", items: [
+            "Below Group Summarize: pick an outcome, a group column and two of its levels",
+            "A difference in means IS the ATE — reported with its standard error, t and p, not just the two averages",
+            "Also does proportions (binary outcome) and a variance ratio; it respects the ⊘ filter, so a subgroup contrast matches the plots beside it",
+            "Copies as t.test(y ~ treat, data = df) — the script references your data instead of pasting it in",
+          ]},
           { heading: "Summary", items: [
             "5-number summary (mean, SD, median, min, max) for all numeric variables",
             "Dispersion panel: variance, IQR, skewness and kurtosis",
