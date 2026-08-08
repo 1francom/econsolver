@@ -21,8 +21,69 @@ function pFromCdf(F, alternative) {
   return 2 * Math.min(F, 1 - F);
 }
 
+// Drop missing BEFORE coercing. `Number(null)` and `Number("")` are both 0, and
+// 0 is finite, so the old `.map(Number).filter(finite)` kept every missing value
+// as a zero observation: it inflated n and pulled the mean toward zero. On
+// [10, 12, 14, null, null] that reported n = 5, mean 7.2, p = 0.075 where R's
+// t.test reports n = 3, mean 12, p = 0.009 — the same data, opposite conclusion.
+// R drops NA; so does this now.
 function cleanNumeric(values) {
-  return (values ?? []).map(Number).filter(finite);
+  return (values ?? [])
+    .filter(v => v !== null && v !== undefined && v !== "")
+    .map(Number)
+    .filter(finite);
+}
+
+// ─── LONG-FORMAT INPUT FOR THE TWO-SAMPLE TESTS ───────────────────────────────
+// Every two-sample test below takes two arrays, i.e. WIDE input — R's
+// `t.test(y1, y2)`. Econometric data is almost always LONG: one outcome column
+// and one group column, which is R's `t.test(y ~ treat)`. Without these two
+// helpers the only way to contrast two groups was to pivot the table first,
+// which is why "compute an ATE as a difference in means" read as impossible.
+
+/**
+ * Distinct levels of a grouping column, in first-seen order, as RAW values.
+ * Null and undefined are not levels; the empty string is one. Raw values are
+ * returned (not stringified) so a caller can sort them numerically.
+ */
+export function groupLevels(rows, groupCol) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rows ?? []) {
+    const g = r?.[groupCol];
+    if (g === null || g === undefined) continue;
+    const k = String(g);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(g);
+  }
+  return out;
+}
+
+/**
+ * Split one column into the two arrays a two-sample test expects, by two levels
+ * of a grouping column. `levelA` is the FIRST sample, so the order of the two
+ * levels is the direction of the contrast.
+ *
+ * Levels are matched as TEXT, matching the canonical condition language where
+ * `eq` is a string comparison — so the numeric 1 and the string "1" are one
+ * level, which is what a user picking from a dropdown means.
+ *
+ * Values pass through RAW. The tests clean their own inputs via cleanNumeric,
+ * and filtering here as well would make the long and wide paths disagree the
+ * moment either cleaner changed.
+ */
+export function splitByGroup(rows, valueCol, groupCol, levelA, levelB) {
+  const A = String(levelA), B = String(levelB);
+  const a = [], b = [];
+  for (const r of rows ?? []) {
+    const g = r?.[groupCol];
+    if (g === null || g === undefined) continue;
+    const gs = String(g);
+    if (gs === A) a.push(r[valueCol]);
+    if (gs === B) b.push(r[valueCol]);
+  }
+  return { a, b };
 }
 
 function sampleMoments(values) {
