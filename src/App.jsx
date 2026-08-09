@@ -30,6 +30,7 @@ import PanelHost from "./components/panels/PanelHost.jsx";
 import { readPanelPref, writePanelPref } from "./components/panels/panelPrefs.js";
 import { evalPredicate, predicateToSQL, menuLabel, opArity } from "./pipeline/predicate.js";
 import { stackToPredicate } from "./pipeline/filterStack.js";
+import ColumnFilterMenu from "./components/data/ColumnFilterMenu.jsx";
 import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
@@ -542,6 +543,16 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     : null
   );
 
+  // Which column's autofilter menu is open, if any.
+  const [menuCol, setMenuCol] = useState(null);
+  // One condition per column from the header menu: applying replaces that
+  // column's row rather than stacking a second one on the same column, which
+  // is what an autofilter means by "filter this column".
+  const upsertCond = (col, cond) => setConditions(cs => {
+    const rest = cs.filter(c => c.col !== col);
+    return cond ? [...rest, cond] : rest;
+  });
+
   const setCond = (i, patch) => setConditions(cs => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const addCond = () => setConditions(cs => [...cs, { col: editableHeaders[0] ?? "", op: "contains", value: "" }]);
   const rmCond  = (i) => setConditions(cs => cs.filter((_, j) => j !== i));
@@ -948,7 +959,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                         borderBottom:`1px solid ${C.border2}`,
                         color: selCol===h ? C.teal : C.text,
                         fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",
-                        userSelect:"none",
+                        userSelect:"none", position:"relative",
                       }}>
                       <div style={{display:"flex",alignItems:"center",gap:5}}>
                         {h}
@@ -972,7 +983,27 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                           }}>
                           {sort?.col === h ? (sort.dir === "asc" ? "▲" : "▼") : "⇅"}
                         </span>
+                        {/* Autofilter. Same stopPropagation reasoning as sort. */}
+                        <span
+                          onClick={e => { e.stopPropagation(); setMenuCol(m => (m === h ? null : h)); }}
+                          title={`Filter ${h}`}
+                          style={{
+                            cursor:"pointer", fontWeight:400, padding:"0 2px", lineHeight:1,
+                            fontSize: T.caption.fontSize,
+                            color: conditions.some(c => c.col === h) ? C.teal : C.textMuted,
+                            opacity: conditions.some(c => c.col === h) ? 1 : 0.45,
+                          }}>▾</span>
                       </div>
+                      {menuCol === h && (
+                        <ColumnFilterMenu
+                          col={h}
+                          tableName={duckdbMeta?.tableName ?? null}
+                          rows={rows}
+                          condition={conditions.find(c => c.col === h) ?? null}
+                          onApply={cond => { upsertCond(h, cond); setMenuCol(null); }}
+                          onClose={() => setMenuCol(null)}
+                        />
+                      )}
                     </th>
                   );
                 })}

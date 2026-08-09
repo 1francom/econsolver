@@ -65,8 +65,10 @@ assert.throws(() => predicateToSQL(cond("a", "wat", { value: "1" })), /unknown o
 // If one does not, a DuckDB-backed dataset shows an unfiltered view plus a
 // banner instead of a working filter — technically honest, but useless. Keep
 // this list in sync with the <select> in App.jsx's DataViewer.
-for (const op of ["eq", "contains", "startswith", "endswith", "gt", "lt", "isblank", "notblank"]) {
-  const node = { type: "condition", col: "c", op, value: "1" };
+// Union of the inline condition row and the per-column autofilter menu.
+for (const op of ["eq", "neq", "contains", "startswith", "endswith",
+                  "gt", "gte", "lt", "lte", "in", "isblank", "notblank"]) {
+  const node = { type: "condition", col: "c", op, value: "1", values: ["1"] };
   assert.doesNotThrow(
     () => predicateToSQL(node),
     `Data Viewer offers "${op}" but predicateToSQL cannot compile it — the filter would silently show every row behind a warning banner`
