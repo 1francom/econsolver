@@ -26,6 +26,9 @@ import { menuLabel, opArity, FILTER_OPS } from "../../pipeline/predicate.js";
  * @param condition  the stack row for this column, or null
  * @param onApply    (condition|null) => void — null clears this column's filter
  * @param onClose    () => void
+ * @param stackSize  how many conditions are active across all columns
+ * @param onPromote  () => void — turn the whole stack into a pipeline step
+ * @param onClearAll () => void — drop every condition, not just this column's
  */
 const inputS = (C, T) => ({
   width: 78, padding: "0.2rem 0.35rem", background: C.surface2,
@@ -33,7 +36,7 @@ const inputS = (C, T) => ({
   fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none",
 });
 
-export default function ColumnFilterMenu({ col, tableName, rows, condition, onApply, onClose }) {
+export default function ColumnFilterMenu({ col, tableName, rows, condition, onApply, onClose, stackSize = 0, onPromote, onClearAll }) {
   const { C, T } = useTheme();
   const [data, setData]     = useState(null);   // { values:[{value,count}], total }
   const [loading, setLoad]  = useState(true);
@@ -167,6 +170,20 @@ export default function ColumnFilterMenu({ col, tableName, rows, condition, onAp
         )}
         {btn("Apply", applyOp)}
       </div>
+
+      {/* The whole stack, reachable from here. Filtering from a column header
+          and then having to open the Edit-cells panel to find "add to pipeline"
+          was the workflow Franco flagged — the button belongs where the filter
+          was built. */}
+      {stackSize > 0 && (
+        <div style={{ padding: "0.45rem 0.6rem", borderTop: `1px solid ${C.border}`, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
+            {stackSize} condition{stackSize === 1 ? "" : "s"} active
+          </span>
+          {onPromote  && btn("→ Add to pipeline", () => { onPromote(); onClose(); }, true)}
+          {onClearAll && btn("Clear all", () => { onClearAll(); onClose(); })}
+        </div>
+      )}
 
       <div style={{ padding: "0.35rem 0.6rem", borderTop: `1px solid ${C.border}`, textAlign: "right" }}>
         {btn("Close", onClose)}

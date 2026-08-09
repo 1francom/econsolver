@@ -1017,6 +1017,9 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                           condition={conditions.find(c => c.col === h) ?? null}
                           onApply={cond => { upsertCond(h, cond); setMenuCol(null); }}
                           onClose={() => setMenuCol(null)}
+                          stackSize={conditions.length}
+                          onPromote={onAddFilter && filterNode ? () => { onAddFilter(filterNode); setConditions([]); } : null}
+                          onClearAll={() => setConditions([])}
                         />
                       )}
                     </th>
@@ -1428,7 +1431,8 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           { heading: "Views", items: [
             "Overview: shape, missing-value count, numeric column count, memory estimate, and per-column metadata",
             "Data Viewer: paginated table of the rows themselves — click a header to sort",
-            "▾ on any column header opens its autofilter: tick values from the list, or set a condition below it",
+            "▾ on any column header opens its autofilter: tick values from the list, or set a condition below it — including between, for a range",
+            "The whole stack is reachable from that menu: how many conditions are active, → Add to pipeline, and Clear all",
             "Conditions stack across columns and are ANDed — the row counter tracks the whole stack",
             "It runs on the full table, not the page you can see, and the counter reports full-table numbers",
             "The filter is a VIEW: it changes nothing until you press → Add to pipeline, which turns the stack into a real cleaning step",
