@@ -1421,7 +1421,11 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           { heading: "Views", items: [
             "Overview: shape, missing-value count, numeric column count, memory estimate, and per-column metadata",
             "Data Viewer: paginated table of the rows themselves — click a header to sort",
-            "Its filter runs on the full table, not the page you can see, and the row counter reports full-table numbers",
+            "▾ on any column header opens its autofilter: tick values from the list, or set a condition below it",
+            "Conditions stack across columns and are ANDed — the row counter tracks the whole stack",
+            "It runs on the full table, not the page you can see, and the counter reports full-table numbers",
+            "The filter is a VIEW: it changes nothing until you press → Add to pipeline, which turns the stack into a real cleaning step",
+            "Bulk edit (Set … where) uses the same stack, so you can edit exactly the rows you filtered to",
             "Filter operators read the same as in Clean and Explore — == equals, is blank — and match what you type in a formula box",
             "A \"pipeline applied\" badge means you are looking at cleaned output, not the raw file",
           ]},
