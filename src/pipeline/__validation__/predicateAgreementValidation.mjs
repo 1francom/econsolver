@@ -3,7 +3,7 @@
 // This harness asserts the SQL TEXT encodes the JS semantics — the two traps
 // being text-comparison for eq and case-insensitivity for the string ops.
 import assert from "node:assert/strict";
-import { predicateToSQL } from "../predicate.js";
+import { predicateToSQL, FILTER_OPS } from "../predicate.js";
 
 const cond = (col, op, extra = {}) => ({ type: "condition", col, op, ...extra });
 
@@ -65,10 +65,10 @@ assert.throws(() => predicateToSQL(cond("a", "wat", { value: "1" })), /unknown o
 // If one does not, a DuckDB-backed dataset shows an unfiltered view plus a
 // banner instead of a working filter — technically honest, but useless. Keep
 // this list in sync with the <select> in App.jsx's DataViewer.
-// Union of the inline condition row and the per-column autofilter menu.
-for (const op of ["eq", "neq", "contains", "startswith", "endswith",
-                  "gt", "gte", "lt", "lte", "in", "isblank", "notblank"]) {
-  const node = { type: "condition", col: "c", op, value: "1", values: ["1"] };
+// Read the list the surfaces actually render, rather than restating it — a
+// restated list is the drift this whole guard exists to prevent.
+for (const op of FILTER_OPS) {
+  const node = { type: "condition", col: "c", op, value: "1", values: ["1"], lo: 1, hi: 2 };
   assert.doesNotThrow(
     () => predicateToSQL(node),
     `Data Viewer offers "${op}" but predicateToSQL cannot compile it — the filter would silently show every row behind a warning banner`

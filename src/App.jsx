@@ -28,7 +28,7 @@ import { getTablePage, getFilteredRowCount } from "./services/data/duckdb.js";
 import { PanelStackProvider } from "./components/panels/PanelStack.jsx";
 import PanelHost from "./components/panels/PanelHost.jsx";
 import { readPanelPref, writePanelPref } from "./components/panels/panelPrefs.js";
-import { evalPredicate, predicateToSQL, menuLabel, opArity } from "./pipeline/predicate.js";
+import { evalPredicate, predicateToSQL, menuLabel, opArity, FILTER_OPS } from "./pipeline/predicate.js";
 import { stackToPredicate } from "./pipeline/filterStack.js";
 import ColumnFilterMenu from "./components/data/ColumnFilterMenu.jsx";
 import { sortRows } from "./services/data/sortRows.js";
@@ -789,16 +789,23 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                     {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
                   <select value={cond.op} onChange={e => setCond(i, { op: e.target.value })} style={controlStyle}>
-                    {/* isblank/notblank, not isna/notna: this filter also drives
-                        the bulk-edit WHERE, and "empty" here has always meant
-                        null OR empty string. */}
-                    {["eq","contains","startswith","endswith","gt","lt","in","isblank","notblank"]
-                      .map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
+                    {/* FILTER_OPS, not a local list: this row and the column
+                        header menu must offer the same operators, and two
+                        hardcoded arrays drifted apart the moment they existed. */}
+                    {FILTER_OPS.map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
                   </select>
                   {opArity(cond.op) === "list" ? (
                     <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
-                      {(cond.values?.length ?? 0)} selected — use the column header ▾
+                      {(cond.values?.length ?? 0)} selected — pick values from the column header ▾
                     </span>
+                  ) : opArity(cond.op) === "two" ? (
+                    <>
+                      <input value={cond.lo ?? ""} onChange={e => setCond(i, { lo: e.target.value })}
+                        placeholder="from" style={{...controlStyle,width:80}}/>
+                      <span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>–</span>
+                      <input value={cond.hi ?? ""} onChange={e => setCond(i, { hi: e.target.value })}
+                        placeholder="to" style={{...controlStyle,width:80}}/>
+                    </>
                   ) : opArity(cond.op) !== "none" && (
                     <input value={cond.value ?? ""} onChange={e => setCond(i, { value: e.target.value })}
                       placeholder="value" style={{...controlStyle,width:130}}/>

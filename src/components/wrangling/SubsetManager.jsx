@@ -38,6 +38,8 @@ export function applySubsetFilter(rows, filters) {
 // the null operators need a function call per language on export (%in%, grepl,
 // .isin, strpos, inlist), which opInfix refuses to guess. Widening this list
 // means teaching the three exporters first.
+// FILTER_OPS-SUBSET: six comparison operators only — see the note above; the
+// exporters have no infix form for in/contains/the null ops.
 const OPS = ["eq", "neq", "gte", "lte", "gt", "lt"];
 
 // The label shows the symbol, not the internal id — "region eq north" reads
@@ -169,7 +171,9 @@ function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
       <button
         onClick={() => onChange({
           ...subset,
-          filters: [...subset.filters, { col: headers[0] ?? "", op: ">=", val: "" }],
+          // Canonical id, not ">=" — the <select>'s options are canonical, so a
+          // legacy default rendered the dropdown with nothing selected.
+          filters: [...subset.filters, { col: headers[0] ?? "", op: "gte", val: "" }],
         })}
         style={{
           background: "none", border: `1px dashed ${C.border2}`,

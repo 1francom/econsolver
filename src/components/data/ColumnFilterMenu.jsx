@@ -17,9 +17,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import { getDistinctValues } from "../../services/data/duckdb.js";
 import { jsDistinctValues } from "../../services/data/distinctValuesFallback.js";
-import { menuLabel, opArity } from "../../pipeline/predicate.js";
-
-const OPS = ["eq", "neq", "contains", "startswith", "endswith", "gt", "gte", "lt", "lte", "isblank", "notblank"];
+import { menuLabel, opArity, FILTER_OPS } from "../../pipeline/predicate.js";
 
 /**
  * @param col        column name
@@ -29,6 +27,12 @@ const OPS = ["eq", "neq", "contains", "startswith", "endswith", "gt", "gte", "lt
  * @param onApply    (condition|null) => void — null clears this column's filter
  * @param onClose    () => void
  */
+const inputS = (C, T) => ({
+  width: 78, padding: "0.2rem 0.35rem", background: C.surface2,
+  border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text,
+  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none",
+});
+
 export default function ColumnFilterMenu({ col, tableName, rows, condition, onApply, onClose }) {
   const { C, T } = useTheme();
   const [data, setData]     = useState(null);   // { values:[{value,count}], total }
@@ -42,6 +46,8 @@ export default function ColumnFilterMenu({ col, tableName, rows, condition, onAp
   );
   const [op, setOp]   = useState(condition && condition.op !== "in" ? condition.op : "eq");
   const [val, setVal] = useState(condition && condition.op !== "in" ? (condition.value ?? "") : "");
+  const [lo, setLo]   = useState(condition?.lo ?? "");
+  const [hi, setHi]   = useState(condition?.hi ?? "");
 
   useEffect(() => {
     let cancelled = false;
@@ -84,9 +90,16 @@ export default function ColumnFilterMenu({ col, tableName, rows, condition, onAp
   );
 
   const applyList = () => onApply(checked.size ? { col, op: "in", values: [...checked] } : null);
-  const applyOp   = () => onApply(
-    opArity(op) === "none" || String(val) !== "" ? { col, op, value: val } : null
-  );
+  const applyOp = () => {
+    const arity = opArity(op);
+    if (arity === "none") return onApply({ col, op });
+    // `between` needs both ends; a half-filled range must clear rather than
+    // silently filter on one side.
+    if (arity === "two") {
+      return onApply(String(lo) !== "" && String(hi) !== "" ? { col, op, lo, hi } : null);
+    }
+    return onApply(String(val) !== "" ? { col, op, value: val } : null);
+  };
 
   const rowStyle = { display: "flex", alignItems: "center", gap: 6, padding: "0.22rem 0.6rem", fontSize: T.caption.fontSize, color: C.text, cursor: "pointer" };
 
@@ -141,12 +154,16 @@ export default function ColumnFilterMenu({ col, tableName, rows, condition, onAp
         <select value={op} onChange={e => setOp(e.target.value)}
           style={{ padding: "0.2rem 0.3rem", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3,
                    color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }}>
-          {OPS.map(o => <option key={o} value={o}>{menuLabel(o)}</option>)}
+          {FILTER_OPS.filter(o => o !== "in").map(o => <option key={o} value={o}>{menuLabel(o)}</option>)}
         </select>
-        {opArity(op) !== "none" && (
-          <input value={val} onChange={e => setVal(e.target.value)} placeholder="value"
-            style={{ width: 90, padding: "0.2rem 0.35rem", background: C.surface2, border: `1px solid ${C.border2}`,
-                     borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline: "none" }} />
+        {opArity(op) === "two" ? (
+          <>
+            <input value={lo} onChange={e => setLo(e.target.value)} placeholder="from" style={inputS(C, T)} />
+            <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>–</span>
+            <input value={hi} onChange={e => setHi(e.target.value)} placeholder="to" style={inputS(C, T)} />
+          </>
+        ) : opArity(op) !== "none" && (
+          <input value={val} onChange={e => setVal(e.target.value)} placeholder="value" style={inputS(C, T)} />
         )}
         {btn("Apply", applyOp)}
       </div>

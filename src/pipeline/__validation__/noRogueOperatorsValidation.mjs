@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const SURFACES = [
+  "src/components/data/ColumnFilterMenu.jsx",
   "src/components/wrangling/CleanTab.jsx",
   "src/components/wrangling/SubsetManager.jsx",
   "src/components/wrangling/FeatureTab.jsx",
@@ -28,6 +29,27 @@ for (const f of SURFACES) {
   if (ROGUE_ARRAY.test(readFileSync(f, "utf8"))) {
     failures.push(`${f} declares its own operator list — import OPERATORS from pipeline/predicate.js instead`);
   }
+}
+
+// An array literal of CANONICAL operator ids. The guard originally keyed only on
+// legacy spellings ("==", "is_null"), so when the Data Viewer grew a column
+// autofilter it hardcoded `["eq","neq","contains",…]` next to the inline row's
+// own `["eq","contains",…]` and the two drifted apart immediately — one had
+// `in`, the other had `neq`/`gte`/`lte`. Surfaces read FILTER_OPS instead.
+// A deliberate SUBSET is legitimate — SubsetManager offers six operators because
+// the exporters cannot translate the rest, and that is documented where it
+// happens. It must say so with this marker, so the difference between "chose a
+// subset on purpose" and "quietly grew a second vocabulary" stays auditable.
+const SUBSET_MARKER = "FILTER_OPS-SUBSET";
+const ROGUE_ID_ARRAY = /\[\s*"(eq|neq|contains|startswith|endswith|isblank|notblank|gte|lte)"\s*,/;
+for (const f of SURFACES) {
+  const lines = readFileSync(f, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    if (!ROGUE_ID_ARRAY.test(line)) return;
+    const context = [lines[i - 2], lines[i - 1], line].join("\n");
+    if (context.includes(SUBSET_MARKER)) return;
+    failures.push(`${f}:${i + 1} hardcodes a list of operator ids — import FILTER_OPS from pipeline/predicate.js, or mark it ${SUBSET_MARKER} with the reason`);
+  });
 }
 
 // A symbol/label MAP keyed by canonical ids, e.g. {eq:"=",neq:"≠",…}. This is

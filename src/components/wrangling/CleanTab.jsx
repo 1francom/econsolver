@@ -595,6 +595,7 @@ function ColIssuePanel({ col, issues }) {
 // isblank/notblank exist for set_where's legacy `empty`/`notempty` and are not
 // offered here: this builder never had them, and a refactor should not add
 // capability. They also have no translation in the filter exporters yet.
+// FILTER_OPS-SUBSET: an EXCLUSION list, not a vocabulary — see above.
 const HIDDEN_OPS = new Set(["isblank", "notblank"]);
 
 function opsFor(col, info) {
