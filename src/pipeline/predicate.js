@@ -195,6 +195,29 @@ export function opInfix(op, lang) {
   return row[lang];
 }
 
+/**
+ * Human-readable description of a predicate node, for step cards and audit
+ * text. Single owner: CleanTab's FilterBuilder used to carry its own copy, and
+ * that copy is why a pipeline card once read "country ≠ World" while the
+ * dropdown above it offered "!= not equals".
+ */
+export function describePredicate(node) {
+  if (!node) return "no conditions";
+  if (node.type === "and" || node.type === "or") {
+    const sep = node.type === "and" ? " AND " : " OR ";
+    return node.children
+      .map(c => (c.type === "condition" ? describePredicate(c) : `(${describePredicate(c)})`))
+      .join(sep);
+  }
+  const op = normalizeOp(node.op);
+  if (opArity(op) === "none") return `${node.col} ${opLabel(op)}`;
+  if (op === "between")       return `${node.col} between [${node.lo}, ${node.hi}]`;
+  if (op === "in" || op === "nin") {
+    return `${node.col} ${opLabel(op)} [${(node.values ?? []).join(", ") || node.value}]`;
+  }
+  return `${node.col} ${opShort(op)} ${node.value}`;
+}
+
 // ─── SQL compilation ──────────────────────────────────────────────────────────
 
 const sqlIdent = (col) => `"${String(col).replace(/"/g, '""')}"`;

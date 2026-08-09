@@ -418,7 +418,7 @@ function colStats(col, rows) {
   return { type: "string", n: vals.length, nulls, unique: Object.keys(freq).length, top };
 }
 
-function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColumn, onAddRow, onSetWhere, onReplace, onStrSplice, duckdbMeta }) {
+function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColumn, onAddRow, onSetWhere, onReplace, onStrSplice, onAddFilter, duckdbMeta }) {
   const { C, T } = useTheme();
   const [page,         setPage]        = useState(0);
   const [selCol,       setSelCol]      = useState(null);
@@ -808,6 +808,14 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                 </span>
               ))}
               <button onClick={addCond} style={{...chipStyle(false),cursor:"pointer"}}>+ condition</button>
+              {/* Promotion is explicit: the view filter never touches the data
+                  or the export until the user says so. The stack IS the tree a
+                  `filter` step carries, so this hands it over unchanged. */}
+              {onAddFilter && filterNode && (
+                <button onClick={() => { onAddFilter(filterNode); setConditions([]); }}
+                  title="Turn this view filter into a pipeline step"
+                  style={{...chipStyle(true),cursor:"pointer"}}>→ Add to pipeline</button>
+              )}
               <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
                 {/* Counts come from the FULL table when it lives in DuckDB.
                     Reporting `rows.length` there said "3 of 500" for a 900k-row
@@ -1762,6 +1770,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           onAddColumn={(nn, fill, dtype) => studioRef.current?.addColumnStep?.(nn, fill, dtype)}
           onAddRow={(values, count) => studioRef.current?.addRowStep?.(values, count)}
           onSetWhere={(col, where, action, value) => studioRef.current?.addSetWhereStep?.(col, where, action, value)}
+          onAddFilter={(predicate) => studioRef.current?.addFilterStep?.(predicate)}
           onReplace={(col, match, replaceWith, nn) => studioRef.current?.addReplaceStep?.(col, match, replaceWith, nn)}
           onStrSplice={(col, position, mode, text, count, nn) => studioRef.current?.addStrSpliceStep?.(col, position, mode, text, count, nn)}
           duckdbMeta={cleanedData?._duckdb ?? activeDs?._duckdb ?? null}

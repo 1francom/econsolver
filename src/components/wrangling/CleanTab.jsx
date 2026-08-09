@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { computeColStats } from "../../services/data/duckdb.js";
-import { OPERATORS, menuLabel, opLabel, opShort, opArity, evalPredicate } from "../../pipeline/predicate.js";
+import { OPERATORS, menuLabel, opArity, evalPredicate, describePredicate } from "../../pipeline/predicate.js";
 import SortRowsSection from "./SortRowsSection.jsx";
 
 // ─── STANDARDIZE DIALOG (inline) ─────────────────────────────────────────────
@@ -829,25 +829,9 @@ function FilterBuilder({ headers, info, rows, onAdd, onCancel }) {
     return { type: topLogic, children: validGroups };
   }, [groups, topLogic]);
 
-  // Build human-readable description.
-  // The operator wording comes from the shared table — this function used to
-  // carry its own symbol map, which is why a step card read "country ≠ World"
-  // while the dropdown right above it offered "!= not equals".
-  function condDesc(c) {
-    const label = opLabel(c.op);
-    if (opArity(c.op) === "none") return `${c.col} ${label}`;
-    if (c.op === "between") return `${c.col} between [${c.lo}, ${c.hi}]`;
-    if (c.op === "in" || c.op === "nin") {
-      return `${c.col} ${label} [${(c.values||[]).join(", ")||c.value}]`;
-    }
-    return `${c.col} ${opShort(c.op)} ${c.value}`;
-  }
-  function buildDesc(pred) {
-    if (!pred) return "no conditions";
-    if (pred.type === "condition") return condDesc(pred);
-    const sep = pred.type === "and" ? " AND " : " OR ";
-    return pred.children.map(c => c.type === "condition" ? condDesc(c) : `(${buildDesc(c)})`).join(sep);
-  }
+  // Description text comes from predicate.js — see describePredicate there
+  // for why this is not built locally.
+  const buildDesc = describePredicate;
 
   function apply() {
     if (filterMode === "formula") {
