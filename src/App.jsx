@@ -28,7 +28,8 @@ import { getTablePage, getFilteredRowCount } from "./services/data/duckdb.js";
 import { PanelStackProvider } from "./components/panels/PanelStack.jsx";
 import PanelHost from "./components/panels/PanelHost.jsx";
 import { readPanelPref, writePanelPref } from "./components/panels/panelPrefs.js";
-import { evalPredicate, predicateToSQL, menuLabel } from "./pipeline/predicate.js";
+import { evalPredicate, predicateToSQL, menuLabel, opArity } from "./pipeline/predicate.js";
+import { stackToPredicate } from "./pipeline/filterStack.js";
 import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
@@ -427,9 +428,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const [fillCol,      setFillCol]     = useState("");
   const [fillOp,       setFillOp]      = useState("set");
   const [fillText,     setFillText]    = useState("");
-  const [filterCol,    setFilterCol]   = useState("");
-  const [filterOp,     setFilterOp]    = useState("contains");
-  const [filterVal,    setFilterVal]   = useState("");
+  // A STACK of conditions, ANDed. Was three scalars, i.e. one condition at a
+  // time; Excel's autofilter stacks across columns and so must this.
+  //   { col, op, value?, values?, lo?, hi? }
+  const [conditions,   setConditions]  = useState([]);
   const [targetCol,    setTargetCol]   = useState("");
   const [setValue,     setSetValue]    = useState("");
   const [editPanel,    setEditPanel]   = useState("filter");
@@ -462,7 +464,6 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   useEffect(() => {
     const first = headers.find(h => !h.startsWith("__")) ?? headers[0] ?? "";
     setFillCol(first);
-    setFilterCol(first);
     setTargetCol(first);
     setReplaceCol(first);
     setSpliceCol(first);
@@ -472,11 +473,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   // `rows` is only the PREVIEW_ROWS-sized sample for a DuckDB-backed dataset, so
   // filtering it in JS searches the first 500 rows of a 900k-row table and
   // presents that as the whole table. The filter has to run where the data is.
-  const hasFilterValue = ["isblank","notblank"].includes(filterOp) || filterVal !== "";
-  const filterActive   = !!filterCol && !!filterOp && hasFilterValue;
-  const filterNode     = useMemo(() => filterActive
-    ? { type: "condition", col: filterCol, op: filterOp, value: filterVal }
-    : null, [filterActive, filterCol, filterOp, filterVal]);
+  // One canonical tree drives everything below: the SQL pushdown, the JS view
+  // filter, the bulk-edit where clause and the step the stack promotes into.
+  const filterNode   = useMemo(() => stackToPredicate(conditions), [conditions]);
+  const filterActive = !!filterNode;
   // predicateToSQL throws rather than emitting a permissive WHERE. A filter we
   // cannot compile must NOT quietly fall back to filtering the preview — that
   // is the bug. It surfaces as a banner instead (see pushdownFailed below).
@@ -532,7 +532,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   // handling deliberately matches the NULLS LAST in getTablePage's ORDER BY —
   // see sortRows.js.
   const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort]);
-  useEffect(() => { setPage(0); }, [filterCol, filterOp, filterVal]);
+  useEffect(() => { setPage(0); }, [conditions]);
   useEffect(() => { setPage(0); }, [sort?.col, sort?.dir]);
 
   // Click a header: asc → desc → off, the cycle every spreadsheet uses.
@@ -541,6 +541,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     : prev.dir === "asc" ? { col, dir: "desc" }
     : null
   );
+
+  const setCond = (i, patch) => setConditions(cs => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  const addCond = () => setConditions(cs => [...cs, { col: editableHeaders[0] ?? "", op: "contains", value: "" }]);
+  const rmCond  = (i) => setConditions(cs => cs.filter((_, j) => j !== i));
 
   const isDuck = !!duckdbMeta?.tableName;
   // A filter we could compile runs in SQL over the FULL table.
@@ -559,8 +563,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const pageRows   = isDuck
     ? dbPageRows
     : sortedRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const whereClause = { col: filterCol, op: filterOp, value: filterVal };
-  const canBulkEdit = !!filterCol && hasFilterValue && !!targetCol && !!onSetWhere;
+  // The tree shape set_where now accepts, so bulk edit inherits the whole stack
+  // instead of carrying its own private one-column filter.
+  const whereClause = { predicate: filterNode };
+  const canBulkEdit = !!filterNode && !!targetCol && !!onSetWhere;
   const controlStyle = {
     padding:"2px 6px", background:C.surface, border:`1px solid ${C.border2}`,
     borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline:"none",
@@ -764,20 +770,33 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
           {editPanel === "filter" && (
             <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
               <span style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>Rows</span>
-              <select value={filterCol} onChange={e => setFilterCol(e.target.value)} style={{...controlStyle,maxWidth:150}}>
-                {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-              </select>
-              <select value={filterOp} onChange={e => setFilterOp(e.target.value)} style={controlStyle}>
-                {/* isblank/notblank, not isna/notna: this filter also drives the
-                    bulk-edit WHERE, and "empty" here has always meant null OR
-                    empty string. */}
-                {["eq","contains","startswith","endswith","gt","lt","isblank","notblank"]
-                  .map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
-              </select>
-              {!["isblank","notblank"].includes(filterOp) && (
-                <input value={filterVal} onChange={e => setFilterVal(e.target.value)}
-                  placeholder="value" style={{...controlStyle,width:130}}/>
-              )}
+              {/* One row per stacked condition; they are ANDed. */}
+              {conditions.map((cond, i) => (
+                <span key={i} style={{display:"flex",alignItems:"center",gap:5}}>
+                  {i > 0 && <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>and</span>}
+                  <select value={cond.col} onChange={e => setCond(i, { col: e.target.value })} style={{...controlStyle,maxWidth:150}}>
+                    {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                  <select value={cond.op} onChange={e => setCond(i, { op: e.target.value })} style={controlStyle}>
+                    {/* isblank/notblank, not isna/notna: this filter also drives
+                        the bulk-edit WHERE, and "empty" here has always meant
+                        null OR empty string. */}
+                    {["eq","contains","startswith","endswith","gt","lt","in","isblank","notblank"]
+                      .map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
+                  </select>
+                  {opArity(cond.op) === "list" ? (
+                    <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
+                      {(cond.values?.length ?? 0)} selected — use the column header ▾
+                    </span>
+                  ) : opArity(cond.op) !== "none" && (
+                    <input value={cond.value ?? ""} onChange={e => setCond(i, { value: e.target.value })}
+                      placeholder="value" style={{...controlStyle,width:130}}/>
+                  )}
+                  <button onClick={() => rmCond(i)} title="Remove condition"
+                    style={{background:"transparent",border:"none",color:C.textMuted,cursor:"pointer",fontSize: T.caption.fontSize,padding:"0 3px"}}>✕</button>
+                </span>
+              ))}
+              <button onClick={addCond} style={{...chipStyle(false),cursor:"pointer"}}>+ condition</button>
               <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
                 {/* Counts come from the FULL table when it lives in DuckDB.
                     Reporting `rows.length` there said "3 of 500" for a 900k-row
