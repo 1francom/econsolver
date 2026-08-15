@@ -24,7 +24,7 @@ const TABS = [
   { id: "report",    label: "Report",    icon: "⊟", requiresOutput: true  },
 ];
 
-export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, reportUnlocked, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback, openTabs = [], isSplit = false, onToggleSplit }) {
+export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, reportUnlocked, activeDatasetId, pid, onSelectDataset, onRemoveDataset, onStartTour, onOpenFeedback, openTabs = [], isSplit = false, onToggleSplit, onToggleArtifacts, artifactsOpen = false }) {
   const { C, T, theme, setTheme } = useTheme();
   const { guest, exitGuest } = useAuth();
   const [showAppearance, setShowAppearance] = useState(false);
@@ -127,6 +127,31 @@ export default function WorkspaceBar({ activeTab, onTabChange, hasOutput, report
         onMouseLeave={e => { e.currentTarget.style.color = isSplit ? C.teal : C.textMuted; }}
       >
         ⊞
+      </button>
+
+      {/* ── Artifacts panel toggle ── */}
+      <button
+        onClick={() => onToggleArtifacts?.()}
+        title="Artifacts — saved plots and maps"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 32,
+          flexShrink: 0,
+          background: artifactsOpen ? `${C.teal}12` : "transparent",
+          border: "none",
+          borderLeft: `1px solid ${C.border}`,
+          color: artifactsOpen ? C.teal : C.textMuted,
+          cursor: "pointer",
+          fontSize: T.body.fontSize,
+          fontFamily: T.code.fontFamily,
+          transition: "color 0.12s",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.teal; }}
+        onMouseLeave={e => { e.currentTarget.style.color = artifactsOpen ? C.teal : C.textMuted; }}
+      >
+        ◫
       </button>
 
       {/* ── Feedback button ── */}

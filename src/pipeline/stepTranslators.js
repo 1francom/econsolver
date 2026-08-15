@@ -10,6 +10,13 @@
 
 import { toDfVar } from "./exporter.js";
 import { predicateToR, predicateToPython, predicateToStata, filterStepToNode } from "./predicateExport.js";
+
+// A `where` clause carrying a compound predicate TREE (what the Data Viewer's
+// stacked filters emit) is compiled by the shared exporters. Without this the
+// three helpers below read `where.col`/`where.op`, find them undefined, and fall
+// through to their permissive default — so a multi-condition set_where exported
+// as "apply to EVERY row" (`ifelse(TRUE, …)`, `pd.Series(True, …)`, `if 1`).
+const treeOf = (where) => (where && where.predicate ? where.predicate : null);
 // Same numeric-literal rule the runner applies, so an emitted script writes the
 // same type the app wrote (a typed 1/0 must not become a character column in R).
 import { coerceLiteral } from "./literals.js";
@@ -276,6 +283,8 @@ function pyValue(v, dtype = null) {
 }
 
 function pyWhere(where) {
+  const t = treeOf(where);
+  if (t) return predicateToPython(t, { df: "df" });
   if (!where?.col || !where?.op) return "pd.Series(True, index=df.index)";
   const c = pyStr(where.col);
   const v = where.value;
@@ -310,6 +319,8 @@ function rValue(v, dtype = null) {
 }
 
 function rWhere(where) {
+  const t = treeOf(where);
+  if (t) return predicateToR(t, { name: rName });
   if (!where?.col || !where?.op) return "TRUE";
   const c = rName(where.col);
   const v = where.value;
@@ -360,6 +371,8 @@ function stValue(v, dtype = null) {
 }
 
 function stWhere(where) {
+  const t = treeOf(where);
+  if (t) return predicateToStata(t, { name: stVar });
   if (!where?.col || !where?.op) return "1";
   const c = stVar(where.col);
   const v = where.value;

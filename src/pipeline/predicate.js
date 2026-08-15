@@ -42,6 +42,20 @@ export const OPERATORS = [
 
 const CANONICAL = new Set(OPERATORS.map(o => o.id));
 
+// The operators every FILTER surface offers, in the order they are shown.
+// Single owner on purpose: the Data Viewer briefly had two hardcoded arrays —
+// the column autofilter and the inline condition row — which drifted apart
+// immediately (one had `in`, the other had `neq`/`gte`/`lte`). Anything that
+// lets a user build a condition reads this list.
+//
+// `nin`, `ncontains` and `regex` are deliberately absent: they exist in the
+// canonical table for pipelines and imports, but adding them here would put ten
+// near-identical entries in a dropdown a user scans while working.
+export const FILTER_OPS = [
+  "eq", "neq", "contains", "startswith", "endswith",
+  "gt", "gte", "lt", "lte", "between", "in", "isblank", "notblank",
+];
+
 // Every legacy spelling that has ever been persisted or rendered, mapped to its
 // canonical id. RULE: an entry is NEVER deleted. Pipelines live in user-exported
 // .json files, client-encrypted sync blobs and other people's shared projects —
@@ -193,6 +207,29 @@ export function opInfix(op, lang) {
   const row = OP_INFIX[normalizeOp(op)];
   if (!row) throw new Error(`Operator "${op}" has no infix form — ${lang} needs an explicit translation.`);
   return row[lang];
+}
+
+/**
+ * Human-readable description of a predicate node, for step cards and audit
+ * text. Single owner: CleanTab's FilterBuilder used to carry its own copy, and
+ * that copy is why a pipeline card once read "country ≠ World" while the
+ * dropdown above it offered "!= not equals".
+ */
+export function describePredicate(node) {
+  if (!node) return "no conditions";
+  if (node.type === "and" || node.type === "or") {
+    const sep = node.type === "and" ? " AND " : " OR ";
+    return node.children
+      .map(c => (c.type === "condition" ? describePredicate(c) : `(${describePredicate(c)})`))
+      .join(sep);
+  }
+  const op = normalizeOp(node.op);
+  if (opArity(op) === "none") return `${node.col} ${opLabel(op)}`;
+  if (op === "between")       return `${node.col} between [${node.lo}, ${node.hi}]`;
+  if (op === "in" || op === "nin") {
+    return `${node.col} ${opLabel(op)} [${(node.values ?? []).join(", ") || node.value}]`;
+  }
+  return `${node.col} ${opShort(op)} ${node.value}`;
 }
 
 // ─── SQL compilation ──────────────────────────────────────────────────────────

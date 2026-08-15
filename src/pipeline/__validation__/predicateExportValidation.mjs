@@ -85,4 +85,31 @@ for (const [name, fn] of [["R", predicateToR], ["Python", predicateToPython], ["
   );
 }
 
+// ─── set_where must accept a predicate TREE too ───────────────────────────────
+// The Data Viewer's stacked filters feed the bulk-edit where clause, so the same
+// tree that a `filter` step carries reaches `set_where`. Its three translators
+// read where.col/where.op, so a tree made them fall through to their permissive
+// default and the step exported as "apply the edit to EVERY row".
+{
+  const { toR, toPython, toStata } = await import("../stepTranslators.js");
+  const step = {
+    type: "set_where", col: "flag", action: "set", value: "1", dtype: "number",
+    where: { predicate: { type: "and", children: [
+      { type: "condition", col: "year", op: "gte", value: 2015 },
+      { type: "condition", col: "region", op: "eq", value: "north" },
+    ]}},
+  };
+  const r = toR(step, "df"), py = toPython(step, "df"), st = toStata(step, "df");
+  assert.doesNotMatch(r,  /ifelse\(TRUE/,           "R applied the edit to every row");
+  assert.doesNotMatch(py, /pd\.Series\(True/,       "Python applied the edit to every row");
+  assert.doesNotMatch(st, /if 1$/m,                 "Stata applied the edit to every row");
+  for (const [name, out] of [["R", r], ["Python", py], ["Stata", st]]) {
+    assert.match(out, /year/,   `${name} lost a condition`);
+    assert.match(out, /region/, `${name} lost a condition`);
+  }
+  // The legacy flat clause keeps working — saved pipelines carry it.
+  const flat = { ...step, where: { col: "region", op: "equals", value: "north" } };
+  assert.match(toR(flat, "df"), /region == "north"/);
+}
+
 console.log("predicate export OK");

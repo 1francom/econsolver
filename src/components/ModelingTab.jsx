@@ -2182,6 +2182,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               "Coefficient test: post-estimation hypothesis tests on a pinned model, joint tests included",
               "Bacon decomposition (under a TWFE DiD result): shows how much weight sits on later-vs-earlier-treated comparisons",
               "Plot Builder: result-augmented charts, plus a coefficient-comparison mode across pinned models",
+              "◫ in the top bar opens the floating artifact panel without leaving this tab — useful for checking a saved plot against the spec you are building",
               "Subsets: define named subsets and run the same spec on all of them at once",
               "Subset operators read the same as Clean's filter — == equals, >= at least — and are translated per language in the exported scripts",
               "Spec Curve: coefficient stability across a threshold range",

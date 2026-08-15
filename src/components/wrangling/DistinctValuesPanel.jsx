@@ -1,12 +1,17 @@
 // src/components/wrangling/DistinctValuesPanel.jsx
-// Floating, non-modal, minimizable panel showing every distinct value of a
-// column (with counts). Unlike this app's existing modals (AuditTrail.jsx's
-// full-screen dimmed overlay), this one does NOT block the rest of the UI —
-// the point is to stay visible as a reference while the user keeps working
-// elsewhere on the page (e.g. checking country names while building a
-// country_code mapping).
+// Every distinct value of a column, with counts — content only. The floating,
+// non-modal, minimizable frame now lives in panels/FloatingPanel.jsx, which this
+// renders into; the non-blocking behaviour (stay visible as a reference while
+// the user keeps working, e.g. checking country names while building a
+// country_code mapping) is a property of that shell.
+//
+// Mounted INSIDE WranglingModule on purpose: that is what makes it module-scoped,
+// so it hides when the user leaves Clean and returns with its state intact.
+// `tab="clean"` below only tells the stack registry to release its slot while
+// hidden — it is not what decides the scope.
 import { useState, useEffect } from "react";
 import { useTheme } from "./shared.jsx";
+import FloatingPanel from "../panels/FloatingPanel.jsx";
 import { getDistinctValues } from "../../services/data/duckdb.js";
 import { jsDistinctValues } from "../../services/data/distinctValuesFallback.js";
 
@@ -48,63 +53,39 @@ export default function DistinctValuesPanel({ col, tableName, rows, minimized, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [col]);
 
-  const titleBarStyle = {
-    display: "flex", alignItems: "center", gap: 8,
-    padding: "0.5rem 0.7rem", background: C.surface,
-    borderBottom: minimized ? "none" : `1px solid ${C.border}`,
-    cursor: "default",
-  };
-
   return (
-    <div style={{
-      position: "fixed", bottom: 16, right: 16, zIndex: 900,
-      width: 320, maxWidth: "calc(100vw - 32px)",
-      background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 5,
-      boxShadow: "0 8px 28px #000a", overflow: "hidden",
-      fontFamily: T.code.fontFamily,
-    }}>
-      <div style={titleBarStyle}>
-        <span style={{ fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.1em", textTransform: "uppercase", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {col}
-        </span>
-        {!loading && !error && data && (
-          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
-            {data.total > data.values.length ? `top ${data.values.length} of ${data.total}` : `${data.total} distinct`}
-          </span>
+    <FloatingPanel
+      id="distinct-values"
+      tab="clean"
+      title={col}
+      meta={!loading && !error && data
+        ? (data.total > data.values.length ? `top ${data.values.length} of ${data.total}` : `${data.total} distinct`)
+        : null}
+      minimized={minimized}
+      onToggleMinimize={onToggleMinimize}
+      onClose={onClose}
+    >
+      <div style={{ padding: "0.4rem 0" }}>
+        {loading && (
+          <div style={{ padding: "0.7rem", fontSize: T.caption.fontSize, color: C.textMuted }}>Computing…</div>
         )}
-        <button onClick={onToggleMinimize} title={minimized ? "Expand" : "Minimize"}
-          style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer", fontSize: 13, padding: "0 4px" }}>
-          {minimized ? "▢" : "—"}
-        </button>
-        <button onClick={onClose} title="Close"
-          style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer", fontSize: 13, padding: "0 4px" }}>
-          ✕
-        </button>
+        {error && (
+          <div style={{ padding: "0.7rem", fontSize: T.caption.fontSize, color: C.red }}>{error}</div>
+        )}
+        {!loading && !error && data && data.values.length === 0 && (
+          <div style={{ padding: "0.7rem", fontSize: T.caption.fontSize, color: C.textMuted }}>No non-null values.</div>
+        )}
+        {!loading && !error && data && data.values.map((v, i) => (
+          <div key={i} style={{
+            display: "flex", justifyContent: "space-between", gap: 10,
+            padding: "0.3rem 0.7rem", fontSize: T.caption.fontSize,
+            color: C.text, borderBottom: i < data.values.length - 1 ? `1px solid ${C.border}` : "none",
+          }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(v.value)}</span>
+            <span style={{ color: C.textMuted, flexShrink: 0 }}>{v.count}</span>
+          </div>
+        ))}
       </div>
-
-      {!minimized && (
-        <div style={{ maxHeight: 320, overflowY: "auto", padding: "0.4rem 0" }}>
-          {loading && (
-            <div style={{ padding: "0.7rem", fontSize: T.caption.fontSize, color: C.textMuted }}>Computing…</div>
-          )}
-          {error && (
-            <div style={{ padding: "0.7rem", fontSize: T.caption.fontSize, color: C.red }}>{error}</div>
-          )}
-          {!loading && !error && data && data.values.length === 0 && (
-            <div style={{ padding: "0.7rem", fontSize: T.caption.fontSize, color: C.textMuted }}>No non-null values.</div>
-          )}
-          {!loading && !error && data && data.values.map((v, i) => (
-            <div key={i} style={{
-              display: "flex", justifyContent: "space-between", gap: 10,
-              padding: "0.3rem 0.7rem", fontSize: T.caption.fontSize,
-              color: C.text, borderBottom: i < data.values.length - 1 ? `1px solid ${C.border}` : "none",
-            }}>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(v.value)}</span>
-              <span style={{ color: C.textMuted, flexShrink: 0 }}>{v.count}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    </FloatingPanel>
   );
 }

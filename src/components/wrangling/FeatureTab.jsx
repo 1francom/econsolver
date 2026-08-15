@@ -148,6 +148,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
   const inpS={width:"100%",boxSizing:"border-box",padding:"0.45rem 0.7rem",background:C.surface2,
     border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"};
 
+  // FILTER_OPS-SUBSET: grouped_mutate filters offer comparisons only.
   const OPS=["eq","neq","gte","lte","gt","lt"].map(op=>[op, menuLabel(op)]);
   function addFilt(){setGmFilter(fs=>[...fs,{col:headers[0]||"",op:"eq",val:""}]);}
   function rmFilt(i){setGmFilter(fs=>fs.filter((_,j)=>j!==i));}

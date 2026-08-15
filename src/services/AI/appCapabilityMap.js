@@ -52,6 +52,10 @@ export const APP_CAPABILITY_MAP = {
   Simulate:  { purpose: "DGP builder, Monte Carlo, pre-model sample tests", subtabs: {} },
   Calculate: { purpose: "Calculator workspace", subtabs: {} },
   Report:    { purpose: "Publication output — LaTeX tables, forest plots, AI narrative & unified script", subtabs: {} },
+  // Not a tab: a floating panel reachable from every tab. Keyed here anyway
+  // because this map answers "where do I do X", and the answer for saved plots
+  // is a button rather than a destination.
+  "Artifacts panel": { purpose: "Floating panel opened with the ◫ button in the top bar, available on any tab — lists the project's saved plots and maps in their global order, renders plots inline, and can jump to an artifact's home tab", subtabs: {} },
 };
 
 // Full app map: curated shell + auto-derived pipeline operations (never drifts).

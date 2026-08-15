@@ -25,7 +25,12 @@ import { listCloudProjects, lockSession, pullProject, hasSyncSession, renameClou
 import { listSharedWithMe, pullShare } from "./services/sync/shareEngine.js";
 import { useTheme } from "./ThemeContext.jsx";
 import { getTablePage, getFilteredRowCount } from "./services/data/duckdb.js";
-import { evalPredicate, predicateToSQL, menuLabel } from "./pipeline/predicate.js";
+import { PanelStackProvider } from "./components/panels/PanelStack.jsx";
+import PanelHost from "./components/panels/PanelHost.jsx";
+import { readPanelPref, writePanelPref } from "./components/panels/panelPrefs.js";
+import { evalPredicate, predicateToSQL, menuLabel, opArity, FILTER_OPS } from "./pipeline/predicate.js";
+import { stackToPredicate } from "./pipeline/filterStack.js";
+import ColumnFilterMenu from "./components/data/ColumnFilterMenu.jsx";
 import { sortRows } from "./services/data/sortRows.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
 import CalculateTab     from './components/tabs/CalculateTab.jsx';
@@ -413,7 +418,7 @@ function colStats(col, rows) {
   return { type: "string", n: vals.length, nulls, unique: Object.keys(freq).length, top };
 }
 
-function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColumn, onAddRow, onSetWhere, onReplace, onStrSplice, duckdbMeta }) {
+function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColumn, onAddRow, onSetWhere, onReplace, onStrSplice, onAddFilter, duckdbMeta }) {
   const { C, T } = useTheme();
   const [page,         setPage]        = useState(0);
   const [selCol,       setSelCol]      = useState(null);
@@ -424,9 +429,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const [fillCol,      setFillCol]     = useState("");
   const [fillOp,       setFillOp]      = useState("set");
   const [fillText,     setFillText]    = useState("");
-  const [filterCol,    setFilterCol]   = useState("");
-  const [filterOp,     setFilterOp]    = useState("contains");
-  const [filterVal,    setFilterVal]   = useState("");
+  // A STACK of conditions, ANDed. Was three scalars, i.e. one condition at a
+  // time; Excel's autofilter stacks across columns and so must this.
+  //   { col, op, value?, values?, lo?, hi? }
+  const [conditions,   setConditions]  = useState([]);
   const [targetCol,    setTargetCol]   = useState("");
   const [setValue,     setSetValue]    = useState("");
   const [editPanel,    setEditPanel]   = useState("filter");
@@ -459,7 +465,6 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   useEffect(() => {
     const first = headers.find(h => !h.startsWith("__")) ?? headers[0] ?? "";
     setFillCol(first);
-    setFilterCol(first);
     setTargetCol(first);
     setReplaceCol(first);
     setSpliceCol(first);
@@ -469,11 +474,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   // `rows` is only the PREVIEW_ROWS-sized sample for a DuckDB-backed dataset, so
   // filtering it in JS searches the first 500 rows of a 900k-row table and
   // presents that as the whole table. The filter has to run where the data is.
-  const hasFilterValue = ["isblank","notblank"].includes(filterOp) || filterVal !== "";
-  const filterActive   = !!filterCol && !!filterOp && hasFilterValue;
-  const filterNode     = useMemo(() => filterActive
-    ? { type: "condition", col: filterCol, op: filterOp, value: filterVal }
-    : null, [filterActive, filterCol, filterOp, filterVal]);
+  // One canonical tree drives everything below: the SQL pushdown, the JS view
+  // filter, the bulk-edit where clause and the step the stack promotes into.
+  const filterNode   = useMemo(() => stackToPredicate(conditions), [conditions]);
+  const filterActive = !!filterNode;
   // predicateToSQL throws rather than emitting a permissive WHERE. A filter we
   // cannot compile must NOT quietly fall back to filtering the preview — that
   // is the bug. It surfaces as a banner instead (see pushdownFailed below).
@@ -529,7 +533,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   // handling deliberately matches the NULLS LAST in getTablePage's ORDER BY —
   // see sortRows.js.
   const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort]);
-  useEffect(() => { setPage(0); }, [filterCol, filterOp, filterVal]);
+  useEffect(() => { setPage(0); }, [conditions]);
   useEffect(() => { setPage(0); }, [sort?.col, sort?.dir]);
 
   // Click a header: asc → desc → off, the cycle every spreadsheet uses.
@@ -538,6 +542,20 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
     : prev.dir === "asc" ? { col, dir: "desc" }
     : null
   );
+
+  // Which column's autofilter menu is open, if any.
+  const [menuCol, setMenuCol] = useState(null);
+  // One condition per column from the header menu: applying replaces that
+  // column's row rather than stacking a second one on the same column, which
+  // is what an autofilter means by "filter this column".
+  const upsertCond = (col, cond) => setConditions(cs => {
+    const rest = cs.filter(c => c.col !== col);
+    return cond ? [...rest, cond] : rest;
+  });
+
+  const setCond = (i, patch) => setConditions(cs => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  const addCond = () => setConditions(cs => [...cs, { col: editableHeaders[0] ?? "", op: "contains", value: "" }]);
+  const rmCond  = (i) => setConditions(cs => cs.filter((_, j) => j !== i));
 
   const isDuck = !!duckdbMeta?.tableName;
   // A filter we could compile runs in SQL over the FULL table.
@@ -556,8 +574,10 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
   const pageRows   = isDuck
     ? dbPageRows
     : sortedRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const whereClause = { col: filterCol, op: filterOp, value: filterVal };
-  const canBulkEdit = !!filterCol && hasFilterValue && !!targetCol && !!onSetWhere;
+  // The tree shape set_where now accepts, so bulk edit inherits the whole stack
+  // instead of carrying its own private one-column filter.
+  const whereClause = { predicate: filterNode };
+  const canBulkEdit = !!filterNode && !!targetCol && !!onSetWhere;
   const controlStyle = {
     padding:"2px 6px", background:C.surface, border:`1px solid ${C.border2}`,
     borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, outline:"none",
@@ -761,19 +781,47 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
           {editPanel === "filter" && (
             <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
               <span style={{fontSize: T.caption.fontSize,color:C.teal,fontFamily: T.code.fontFamily}}>Rows</span>
-              <select value={filterCol} onChange={e => setFilterCol(e.target.value)} style={{...controlStyle,maxWidth:150}}>
-                {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-              </select>
-              <select value={filterOp} onChange={e => setFilterOp(e.target.value)} style={controlStyle}>
-                {/* isblank/notblank, not isna/notna: this filter also drives the
-                    bulk-edit WHERE, and "empty" here has always meant null OR
-                    empty string. */}
-                {["eq","contains","startswith","endswith","gt","lt","isblank","notblank"]
-                  .map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
-              </select>
-              {!["isblank","notblank"].includes(filterOp) && (
-                <input value={filterVal} onChange={e => setFilterVal(e.target.value)}
-                  placeholder="value" style={{...controlStyle,width:130}}/>
+              {/* One row per stacked condition; they are ANDed. */}
+              {conditions.map((cond, i) => (
+                <span key={i} style={{display:"flex",alignItems:"center",gap:5}}>
+                  {i > 0 && <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>and</span>}
+                  <select value={cond.col} onChange={e => setCond(i, { col: e.target.value })} style={{...controlStyle,maxWidth:150}}>
+                    {editableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                  <select value={cond.op} onChange={e => setCond(i, { op: e.target.value })} style={controlStyle}>
+                    {/* FILTER_OPS, not a local list: this row and the column
+                        header menu must offer the same operators, and two
+                        hardcoded arrays drifted apart the moment they existed. */}
+                    {FILTER_OPS.map(op => <option key={op} value={op}>{menuLabel(op)}</option>)}
+                  </select>
+                  {opArity(cond.op) === "list" ? (
+                    <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
+                      {(cond.values?.length ?? 0)} selected — pick values from the column header ▾
+                    </span>
+                  ) : opArity(cond.op) === "two" ? (
+                    <>
+                      <input value={cond.lo ?? ""} onChange={e => setCond(i, { lo: e.target.value })}
+                        placeholder="from" style={{...controlStyle,width:80}}/>
+                      <span style={{fontSize: T.caption.fontSize,color:C.textMuted}}>–</span>
+                      <input value={cond.hi ?? ""} onChange={e => setCond(i, { hi: e.target.value })}
+                        placeholder="to" style={{...controlStyle,width:80}}/>
+                    </>
+                  ) : opArity(cond.op) !== "none" && (
+                    <input value={cond.value ?? ""} onChange={e => setCond(i, { value: e.target.value })}
+                      placeholder="value" style={{...controlStyle,width:130}}/>
+                  )}
+                  <button onClick={() => rmCond(i)} title="Remove condition"
+                    style={{background:"transparent",border:"none",color:C.textMuted,cursor:"pointer",fontSize: T.caption.fontSize,padding:"0 3px"}}>✕</button>
+                </span>
+              ))}
+              <button onClick={addCond} style={{...chipStyle(false),cursor:"pointer"}}>+ condition</button>
+              {/* Promotion is explicit: the view filter never touches the data
+                  or the export until the user says so. The stack IS the tree a
+                  `filter` step carries, so this hands it over unchanged. */}
+              {onAddFilter && filterNode && (
+                <button onClick={() => { onAddFilter(filterNode); setConditions([]); }}
+                  title="Turn this view filter into a pipeline step"
+                  style={{...chipStyle(true),cursor:"pointer"}}>→ Add to pipeline</button>
               )}
               <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
                 {/* Counts come from the FULL table when it lives in DuckDB.
@@ -926,7 +974,7 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                         borderBottom:`1px solid ${C.border2}`,
                         color: selCol===h ? C.teal : C.text,
                         fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",
-                        userSelect:"none",
+                        userSelect:"none", position:"relative",
                       }}>
                       <div style={{display:"flex",alignItems:"center",gap:5}}>
                         {h}
@@ -950,7 +998,30 @@ function DataViewer({ rows, headers, filename, onPatch, onFillColumn, onAddColum
                           }}>
                           {sort?.col === h ? (sort.dir === "asc" ? "▲" : "▼") : "⇅"}
                         </span>
+                        {/* Autofilter. Same stopPropagation reasoning as sort. */}
+                        <span
+                          onClick={e => { e.stopPropagation(); setMenuCol(m => (m === h ? null : h)); }}
+                          title={`Filter ${h}`}
+                          style={{
+                            cursor:"pointer", fontWeight:400, padding:"0 2px", lineHeight:1,
+                            fontSize: T.caption.fontSize,
+                            color: conditions.some(c => c.col === h) ? C.teal : C.textMuted,
+                            opacity: conditions.some(c => c.col === h) ? 1 : 0.45,
+                          }}>▾</span>
                       </div>
+                      {menuCol === h && (
+                        <ColumnFilterMenu
+                          col={h}
+                          tableName={duckdbMeta?.tableName ?? null}
+                          rows={rows}
+                          condition={conditions.find(c => c.col === h) ?? null}
+                          onApply={cond => { upsertCond(h, cond); setMenuCol(null); }}
+                          onClose={() => setMenuCol(null)}
+                          stackSize={conditions.length}
+                          onPromote={onAddFilter && filterNode ? () => { onAddFilter(filterNode); setConditions([]); } : null}
+                          onClearAll={() => setConditions([])}
+                        />
+                      )}
                     </th>
                   );
                 })}
@@ -1360,7 +1431,12 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           { heading: "Views", items: [
             "Overview: shape, missing-value count, numeric column count, memory estimate, and per-column metadata",
             "Data Viewer: paginated table of the rows themselves — click a header to sort",
-            "Its filter runs on the full table, not the page you can see, and the row counter reports full-table numbers",
+            "▾ on any column header opens its autofilter: tick values from the list, or set a condition below it — including between, for a range",
+            "The whole stack is reachable from that menu: how many conditions are active, → Add to pipeline, and Clear all",
+            "Conditions stack across columns and are ANDed — the row counter tracks the whole stack",
+            "It runs on the full table, not the page you can see, and the counter reports full-table numbers",
+            "The filter is a VIEW: it changes nothing until you press → Add to pipeline, which turns the stack into a real cleaning step",
+            "Bulk edit (Set … where) uses the same stack, so you can edit exactly the rows you filtered to",
             "Filter operators read the same as in Clean and Explore — == equals, is blank — and match what you type in a formula box",
             "A \"pipeline applied\" badge means you are looking at cleaned output, not the raw file",
           ]},
@@ -1709,6 +1785,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           onAddColumn={(nn, fill, dtype) => studioRef.current?.addColumnStep?.(nn, fill, dtype)}
           onAddRow={(values, count) => studioRef.current?.addRowStep?.(values, count)}
           onSetWhere={(col, where, action, value) => studioRef.current?.addSetWhereStep?.(col, where, action, value)}
+          onAddFilter={(predicate) => studioRef.current?.addFilterStep?.(predicate)}
           onReplace={(col, match, replaceWith, nn) => studioRef.current?.addReplaceStep?.(col, match, replaceWith, nn)}
           onStrSplice={(col, position, mode, text, count, nn) => studioRef.current?.addStrSpliceStep?.(col, position, mode, text, count, nn)}
           duckdbMeta={cleanedData?._duckdb ?? activeDs?._duckdb ?? null}
@@ -2798,6 +2875,10 @@ export default function App() {
   // no split. `activeTab` stays the focused pane's tab so every existing
   // consumer (nav history, tour, WorkspaceBar) keeps working unchanged.
   const [panes,     setPanes]     = useState(["clean", null]);
+  const [artifactViewerOpen, setArtifactViewerOpen] = useState(false);
+  // Open/closed survives a reload, scoped per project so it cannot bleed.
+  useEffect(() => { setArtifactViewerOpen(readPanelPref(pid, "artifactOpen", false)); }, [pid]);
+  useEffect(() => { writePanelPref(pid, "artifactOpen", artifactViewerOpen); }, [pid, artifactViewerOpen]);
   const [focused,   setFocused]   = useState(0);
   const [paneRatio, setPaneRatio] = useState(0.5);
 
@@ -3217,6 +3298,8 @@ export default function App() {
                 openTabs={panes.filter(Boolean)}
                 isSplit={isSplit}
                 onToggleSplit={toggleSplit}
+                onToggleArtifacts={() => setArtifactViewerOpen(o => !o)}
+                artifactsOpen={artifactViewerOpen}
                 hasOutput={!!(tabOutput(activeTab) || tabRawData(activeTab)?.rows?.length)}
                 reportUnlocked={(modelingSession?.pinnedModels?.length ?? 0) > 0}
                 activeDatasetId={tabDsId(activeTab)}
@@ -3254,6 +3337,31 @@ export default function App() {
                   onTabChange={setActiveTab}
                 />
               )}
+
+              {/* The provider wraps BOTH the app-level host and the tab panels.
+                  DistinctValuesPanel lives inside WranglingModule, i.e. inside a
+                  tab panel — if it fell outside this provider it would silently
+                  use the fallback offset and overlap the artifact viewer. */}
+              <PanelStackProvider panes={panes}>
+              <PanelHost
+                pid={pid}
+                datasets={availableDatasets}
+                outputs={outputs}
+                artifactViewerOpen={artifactViewerOpen}
+                onCloseArtifactViewer={() => setArtifactViewerOpen(false)}
+                onOpenArtifact={(a) => {
+                  if (a.kind === "map") { navigateToTab("spatial"); return; }
+                  // Reuses the existing cross-dataset plot-open path: park the
+                  // id, switch Explore to the plot's own dataset, and let
+                  // PlotBuilder pick it up once that dataset's history loads.
+                  const dsId = a.entry?.datasetId ?? a.entry?._srcId ?? null;
+                  if (dsId) {
+                    setPendingExplorePlot({ datasetId: dsId, plotId: a.entry.id });
+                    selectDataset("explore", dsId, true);
+                  }
+                  navigateToTab("explore");
+                }}
+              />
 
               {/* ── Tab panels — kept mounted via display:none to preserve state ── */}
               <div ref={paneWrapRef} style={{flex:1,minHeight:0,position:"relative"}}>
@@ -3417,6 +3525,7 @@ export default function App() {
                 </div>
 
               </div>
+              </PanelStackProvider>
             </div>
           <AIContextSidebar
             isOpen={sidebarOpen}

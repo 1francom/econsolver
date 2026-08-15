@@ -17,6 +17,7 @@
 // they survive a browser close. Datasets are also exposed to WranglingModule's
 // Merge tab for JOIN / APPEND.
 
+import { describePredicate } from "./pipeline/predicate.js";
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
 import * as XLSX from "xlsx";
 import { useTheme } from "./ThemeContext.jsx";
@@ -1005,9 +1006,25 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       });
     },
     addSetWhereStep: (col, where, action, value) => {
+      // `where` may be a legacy flat clause OR a predicate tree from the Data
+      // Viewer's stacked filters. describePredicate handles the tree; the flat
+      // shape keeps its original wording.
+      const cond = where?.predicate
+        ? describePredicate(where.predicate)
+        : `${where?.col} ${where?.op} ${where?.value}`;
       wranglingAddStepRef.current?.({
         type: "set_where", col, where, action, value,
-        desc: `set ${col} ${action === "clear" ? "= NA" : `= ${value}`} where ${where?.col} ${where?.op} ${where?.value}`,
+        desc: `set ${col} ${action === "clear" ? "= NA" : `= ${value}`} where ${cond}`,
+      });
+    },
+    // Promote the Data Viewer's view filter into a real pipeline step. The
+    // stack is already the canonical tree, so this is a hand-off, not a
+    // conversion — nothing can be lost in translation.
+    addFilterStep: (predicate) => {
+      if (!predicate) return;
+      wranglingAddStepRef.current?.({
+        type: "filter", predicate,
+        desc: `Filter: ${describePredicate(predicate)}`,
       });
     },
     addReplaceStep: (col, match, replaceWith, nn) => {
