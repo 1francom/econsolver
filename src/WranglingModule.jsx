@@ -772,6 +772,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Lag / Lead: shift by t periods — grouped by entity, so values never leak across units",
             "First difference, interaction terms, and DiD interaction (treat × post)",
             "Date parse / extract: year, month, quarter, and more from date strings",
+            "Country code: convert a country name/ISO2/ISO3 to ISO2, ISO3, name, or continent — equivalent to R's countrycode()",
             "Mutate: a custom expression, e.g. col_a / col_b * 100",
             "if_else and case_when for conditional columns",
             "Grouped mutate: compute within groups without collapsing rows",

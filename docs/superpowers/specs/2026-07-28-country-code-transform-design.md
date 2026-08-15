@@ -1,7 +1,48 @@
 # Country code transform — design
 
 Date: 2026-07-28
-Status: OPEN (spec approved by Franco, implementation plan not yet written)
+Status: IMPLEMENTATION COMPLETE 2026-08-15 — browser validation pending Franco
+
+## Revision 2026-08-15 — continent added to v1 scope
+
+Franco needs LMU PS4 replicable, which calls `countrycode(data1$country,
+"country.name", "continent", warn = FALSE)`. The original v1 scope explicitly
+deferred continent/region (see "Out of scope" below, kept as a historical
+record). Extended per Franco's approval same day: `continent` is now a 4th
+destination alongside ISO2/ISO3/name, same architecture, same isolation
+guarantee — no new data source dependency, no scope creep into region/numeric
+ISO. Taxonomy: 5-way (Africa/Americas/Asia/Europe/Oceania), matching R's
+`countrycode(..., dest = "continent")` default exactly (no Antarctica, no
+North/South America split) — chosen so a student's Litux output and their R
+script output are directly comparable, not just structurally similar.
+
+Shipped: `src/services/data/countryCodes.js` (199-entry `COUNTRY_TABLE` +
+`matchCountry()`), `country_code` step in `registry.js`/`runner.js`, R/Python/
+Stata translators (in BOTH `stepTranslators.js` — used by `pipeline/exporter.js`
+for the Clean-tab per-step export — AND each Report-tab unified-script
+generator's own local `transpileStep` in `rScript.js`/`pythonScript.js`/
+`stataScript.js`, which turned out to be a second, independent switch
+statement per language, not a thin wrapper over `stepTranslators.js` as the
+original design assumed — see the note below), an `auditor.js` line, and a
+new "Country code" subsection in `FeatureTab.jsx` (source column, destination
+chips, auto-suggested output name, automatic full-table preview with a
+matched/unmatched summary). Validation:
+`src/services/data/__validation__/countryCodesValidation.mjs` (table
+integrity + known tricky cases) plus the existing `pipelineReliabilityValidation.mjs`
+(T1 registry↔runner sync) and `replicationIntegrityValidation.mjs`
+(translator coverage across all three languages) both extended with a
+`country_code` fixture.
+
+**Found while implementing, out of scope for this change:** `rScript.js`,
+`pythonScript.js` and `stataScript.js` each carry their own complete local
+`transpileStep` switch, duplicating most of `stepTranslators.js`'s `toR` /
+`toPython` / `toStata` (which they only delegate to for `sp_*`-prefixed
+steps). Every non-spatial step type — `country_code` included — therefore
+needs its case written twice: once in `stepTranslators.js` (for the CleanTab
+per-step preview/export path via `pipeline/exporter.js`) and once more in
+each of the three Report-tab generator files (for the unified script). This
+is exactly the "same operation implemented N times" risk class CLAUDE.md
+already tracks for the condition language — flagged, not fixed here.
 
 ## Purpose
 
@@ -17,10 +58,11 @@ derived column** (convert an existing country identifier to another format),
 which implicitly also solves the harmonization-before-join case — a
 dedicated "join key harmonizer" UI is explicitly out of scope for v1.
 
-## Scope (v1)
+## Scope (v1, extended 2026-08-15)
 
-- Formats: ISO2 ↔ ISO3 ↔ English name only. No continent/region, no ISO
-  numeric (M49) — explicitly deferred.
+- Formats: ISO2 ↔ ISO3 ↔ English name ↔ continent (5-way: Africa/Americas/
+  Asia/Europe/Oceania). No region (WB-style 7-way), no ISO numeric (M49) —
+  still explicitly deferred.
 - Universe: ISO 3166-1 sovereign states + the handful of non-sovereign
   entities World Bank already treats as separate economies (Taiwan, Hong
   Kong SAR, Macao SAR, Kosovo) — same ~217-entry universe
@@ -125,7 +167,9 @@ Eswatini/Swaziland, Czechia/Czech Republic).
 
 ## Out of scope (v1)
 
-- Continent / region / numeric ISO output.
+- Region (WB-style 7-way) / numeric ISO (M49) output. (Continent shipped
+  2026-08-15 — see revision note above; this line kept as the historical
+  record of the original cut.)
 - Fuzzy/Levenshtein matching beyond the curated alias table.
 - Exposing `country_code` to the NL command bar / AI coach.
 - A dedicated "harmonize join keys" UI distinct from the Feature-tab

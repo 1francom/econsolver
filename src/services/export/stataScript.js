@@ -395,6 +395,16 @@ function transpileStep(step, allDatasets = {}) {
       return Object.entries(step.map ?? {}).map(([from, to]) =>
         `replace ${stVar(step.col)} = "${to}" if ${stVar(step.col)} == "${from}"`).join("\n")
         || `* normalize_cats: no mapping specified`;
+    case "country_code": {
+      // Writes to a NEW string variable; unmatched rows keep "" by omission
+      // (no fallback branch — there is no original value to keep).
+      const out = stVar(step.nn);
+      const src = stVar(step.col);
+      return [
+        `generate ${out} = ""`,
+        ...Object.entries(step.map ?? {}).map(([from, to]) => `replace ${out} = "${to}" if ${src} == "${from}"`),
+      ].join("\n");
+    }
     case "extract_regex": {
       const col = stVar(step.col), out = stVar(step.nn || `${step.col}_num`);
       if (step.regex) {
