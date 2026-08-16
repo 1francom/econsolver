@@ -50,6 +50,13 @@ const CASES = [
   ["Türkiye", "TUR"],
   ["gb", "GBR"],
   ["GBR", "GBR"],
+  // Regression 2026-08-15 — Franco found these unmatched on a real OWID
+  // (Our World in Data) panel: the "Democratic Republic of Congo" variant
+  // without "the" fell through, and OWID's "(country)" disambiguation
+  // suffix for Micronesia (vs the region aggregate) wasn't covered either.
+  ["Democratic Republic of Congo", "COD"],
+  ["Democratic Republic of the Congo", "COD"],
+  ["Micronesia (country)", "FSM"],
 ];
 for (const [raw, expectIso3] of CASES) {
   const m = matchCountry(raw);

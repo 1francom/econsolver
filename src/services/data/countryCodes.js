@@ -251,16 +251,20 @@ const BASE = [
 // ─── ALIASES ────────────────────────────────────────────────────────────────
 // Keyed by iso3. Covers: (a) the World Bank "Country Name" convention — the
 // exact strings worldBank.js#fetchIndicator rows carry, and what a WDI-style
-// CSV a student pastes in will use; (b) common English abbreviations; (c)
-// historical/alternate names still in circulation in real datasets.
-// Case-insensitive at match time — do not add case variants here.
+// CSV a student pastes in will use; (b) Our World in Data's naming, e.g. the
+// "(country)" suffix OWID appends to disambiguate a real country from a
+// same-named region aggregate (e.g. "Micronesia (country)" vs "Micronesia
+// (region)"); (c) common English abbreviations; (d) historical/alternate
+// names, and near-miss article variants (with/without "the"), still in
+// circulation in real datasets. Case-insensitive at match time — do not add
+// case variants here.
 const ALIASES = {
   USA: ["USA", "US", "U.S.", "U.S.A.", "United States of America", "America"],
   GBR: ["UK", "U.K.", "Great Britain", "Britain", "England"],
   RUS: ["Russia"],
   KOR: ["South Korea", "Republic of Korea", "Korea South", "Korea, South"],
   PRK: ["North Korea", "Democratic People's Republic of Korea", "Korea North", "Korea, North"],
-  COD: ["DR Congo", "DRC", "Congo-Kinshasa", "Democratic Republic of the Congo", "Zaire"],
+  COD: ["DR Congo", "DRC", "Congo-Kinshasa", "Democratic Republic of the Congo", "Democratic Republic of Congo", "Zaire"],
   COG: ["Congo", "Congo-Brazzaville", "Republic of the Congo"],
   CIV: ["Cote d'Ivoire", "Côte d'Ivoire", "Cote D'Ivoire"],
   SWZ: ["Swaziland"],
@@ -276,7 +280,7 @@ const ALIASES = {
   TZA: ["United Republic of Tanzania"],
   GMB: ["Gambia"],
   BHS: ["Bahamas"],
-  FSM: ["Micronesia", "Federated States of Micronesia"],
+  FSM: ["Micronesia", "Federated States of Micronesia", "Micronesia (country)"],
   PSE: ["Palestine", "State of Palestine"],
   BRN: ["Brunei"],
   EGY: ["Egypt, Arab Rep."],
