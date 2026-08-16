@@ -677,12 +677,25 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
 }
 
 // ─── R FORMULA BUILDER ────────────────────────────────────────────────────────
+// One factor variable's R formula term — bare factor(col), or
+// relevel(factor(col), ref=) when a custom reference was chosen. Shared by
+// transpileModel's fmtR (2SLS/GMM/LIML control lists) and buildRFormulaStr
+// (the plain OLS/WLS/etc. formula) — same file, so no cross-layer import
+// restriction applies, unlike the sortLevels-style duplicates elsewhere in
+// this codebase; this one gets a single real definition.
+function rFactorTerm(v, fvSet, factorRefs) {
+  if (!fvSet.has(v)) return rName(v);
+  return factorRefs[v] != null
+    ? `relevel(factor(${rName(v)}), ref = ${rStr(factorRefs[v])})`
+    : `factor(${rName(v)})`;
+}
+
 // Builds the RHS of an R formula from raw variable lists + interaction terms.
 // Uses xVarsRaw/wVarsRaw (pre-expansion) when available; else falls back to
 // the post-expansion dummy columns (xVars/wVars). Factor vars are wrapped in
 // factor(). Interactions use R's * (main effects + product) or : (product only).
-function buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms) {
-  const fmt = v => fvSet.has(v) ? `factor(${rName(v)})` : rName(v);
+function buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}) {
+  const fmt = v => rFactorTerm(v, fvSet, factorRefs);
   const rawX = xVarsRaw ?? xVars;
   const rawW = wVarsRaw ?? wVars;
 
@@ -875,7 +888,7 @@ function transpileModel(model) {
     type, yVar, xVars = [], wVars = [],
     zVars = [], postVar, treatVar,
     runningVar, cutoff, bandwidth, kernel = "triangular", polyOrder = 1,
-    entityCol, timeCol, factorVars = [], feCols = null, offsetCol = null,
+    entityCol, timeCol, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null,
     treatedUnit, treatTime,
     distCol, treatmentCol,
     weightCol = null,
@@ -900,13 +913,21 @@ function transpileModel(model) {
   const nReg = (xVars?.length ?? 0) + (wVars?.length ?? 0) + (interactionTerms?.length ?? 0);
 
   const fvSet = new Set(factorVars);
-  const fmtR  = v => fvSet.has(v) ? `factor(${rName(v)})` : rName(v);
+  // relevel() only when a custom reference was actually chosen — a bare
+  // factor(col) is untouched, so a model with no reference selections emits
+  // byte-identical R to before this feature existed. NOTE: this is X
+  // regressors only. LSDV's FE dummies (feCols) are exported below as
+  // fixest's `| fe1 + fe2` absorption, numerically equivalent to explicit
+  // dummies for the coefficients on x but with NO reference-category concept
+  // of its own — there's nothing here for an FE reference to attach to, so
+  // factorRefs entries for FE columns are simply not read by this exporter.
+  const fmtR = v => rFactorTerm(v, fvSet, factorRefs);
 
   const y    = rName(yVar);
   // `0 +` suppresses the intercept (regression through the origin). Only OLS
   // exposes this; every other branch keeps `xStr` untouched.
   const xStr = (noIntercept && type === "OLS" ? "0 + " : "")
-    + buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
+    + buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs);
 
   switch (type) {
 

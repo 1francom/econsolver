@@ -444,9 +444,16 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [factorVars, setFactorVars] = useState(
     () => new Set(headers.filter(h => !numericCols.includes(h)))
   );
+  // Chosen reference category per factor column — Record<col, string>. An
+  // absent key means "auto" (first sorted level, the pre-existing default).
+  // Flat, not split by X-vs-FE: a column is never both in the same model, so
+  // one map covers applyFactors/expandInteractions AND LSDV's FE dummies.
+  // See specs/2026-08-16-factor-reference-category-design.md.
+  const [factorRefs, setFactorRefs] = useState({});
   // Re-initialize when dataset changes
   useEffect(() => {
     setFactorVars(new Set(headers.filter(h => !numericCols.includes(h))));
+    setFactorRefs({});
     // Clear all variable selectors so stale column names from the previous
     // dataset don't bleed into the new estimation.
     setYVar([]);
@@ -835,6 +842,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           setXVars(v => v.filter(x => x !== col));
           setWVars(v => v.filter(x => x !== col));
         }
+        // Un-factoring drops any chosen reference — there's no dummy
+        // expansion left for it to apply to.
+        setFactorRefs(r => {
+          if (!(col in r)) return r;
+          const { [col]: _drop, ...rest } = r;
+          return rest;
+        });
       } else {
         next.add(col);
       }
@@ -842,12 +856,25 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     });
   }, [numericCols]);
 
+  // Sets (or, with null, clears back to "auto") the reference category for
+  // one factor column. Called from the Chip popover.
+  const setFactorRef = useCallback((col, ref) => {
+    setFactorRefs(r => {
+      if (ref == null) {
+        if (!(col in r)) return r;
+        const { [col]: _drop, ...rest } = r;
+        return rest;
+      }
+      return { ...r, [col]: ref };
+    });
+  }, []);
+
   // ── PURE ESTIMATION HELPER (no setState) ────────────────────────────────────
   // Returns { result, panelFE, panelFD } on success, { error } on failure.
   // dataRows is passed explicitly so runAllSubsets can call it on filtered data.
   const _runEstimation = useCallback((dataRows) => {
     const dispatch = dispatchEstimation(dataRows, {
-      yVar, xVars, wVars, factorVars,
+      yVar, xVars, wVars, factorVars, factorRefs,
       interactionTerms,
       model, family, weightVar, seOpts, seType, panel, noIntercept,
       zVars, postVar, treatVar,
@@ -867,7 +894,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     // seType/clusterVar are captured PER MODEL at estimation time so each pinned
     // model exports with the SE it was actually run with (not the current global
     // selector). Without this, pinned models silently default to classical.
-    const specExtras = { factorVars: [...factorVars], interactionTerms, xVarsRaw: [...xVars], wVarsRaw: [...wVars], filename: cleanedData?.filename ?? null, seType, clusterVar, clusterVar2, noIntercept };
+    const specExtras = { factorVars: [...factorVars], factorRefs: { ...factorRefs }, interactionTerms, xVarsRaw: [...xVars], wVarsRaw: [...wVars], filename: cleanedData?.filename ?? null, seType, clusterVar, clusterVar2, noIntercept };
     if (dispatch?.result?.spec)      Object.assign(dispatch.result.spec,      specExtras);
     if (dispatch?.result?.fe?.spec)  Object.assign(dispatch.result.fe.spec,   specExtras);
     if (dispatch?.result?.fd?.spec)  Object.assign(dispatch.result.fd.spec,   specExtras);
@@ -876,7 +903,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
     if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
     return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, noIntercept, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, noIntercept, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, factorRefs, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── DuckDB full-table pull ────────────────────────────────────────────────
   // For DuckDB-backed datasets `rows` is only a 500-row preview — every JS
@@ -1062,8 +1089,8 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
             // Expand factors for X and Z separately. If a column appears in both,
             // its dummySQL definition is identical — last write wins, no conflict.
-            const xExpansion = await expandFactors({ xCols: xAll2, tableName: duckTable });
-            const zExpansion = await expandFactors({ xCols: zAll2, tableName: duckTable });
+            const xExpansion = await expandFactors({ xCols: xAll2, tableName: duckTable, factorRefs });
+            const zExpansion = await expandFactors({ xCols: zAll2, tableName: duckTable, factorRefs });
             const xExp = xExpansion.xColsExpanded;
             const zExp = zExpansion.xColsExpanded;
             const dummySQL2 = { ...xExpansion.dummySQL, ...zExpansion.dummySQL };
@@ -1106,7 +1133,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             });
 
             // ── First-stage F per endogenous regressor ──
-            const wExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+            const wExpansion = await expandFactors({ xCols: wVars, tableName: duckTable, factorRefs });
             const exogExp = wExpansion.xColsExpanded;
             const dummySQLAll = { ...dummySQL2, ...wExpansion.dummySQL };
 
@@ -1229,7 +1256,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (!wCol) throw new Error("WLS SQL path: weight column not selected — fallback to JS");
 
             const { xColsExpanded: wlsX, dummySQL: wlsDummy } = await expandFactors({
-              xCols: allX, tableName: duckTable,
+              xCols: allX, tableName: duckTable, factorRefs,
             });
             if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: wlsX })) {
               throw new Error("Post-expansion k exceeds threshold — fallback to JS");
@@ -1326,7 +1353,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               irlsX = expansion.xColsExpanded;
               irlsDummy = expansion.dummySQL;
             } else {
-              const expansion = await expandFactors({ xCols: allX, tableName: duckTable });
+              const expansion = await expandFactors({ xCols: allX, tableName: duckTable, factorRefs });
               irlsX = expansion.xColsExpanded;
               irlsDummy = expansion.dummySQL;
             }
@@ -1413,7 +1440,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             const controlsExpansion = isSharpRDD
               ? await expandFactors({
                   xCols: wVars.filter(v => v !== runningVar[0] && v !== yVar[0]),
-                  tableName: duckTable,
+                  tableName: duckTable, factorRefs,
                 })
               : { xColsExpanded: [], dummySQL: "" };
             const sharedRDD = {
@@ -1470,9 +1497,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (seTypeNorm !== "classical") {
               throw new Error(`GMM SQL path only supports classical SE in Fase 3b (got ${seTypeNorm}) — fallback to JS`);
             }
-            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable });
-            const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable });
-            const { xColsExpanded: zExp, dummySQL: zDummy } = await expandFactors({ xCols: zVars, tableName: duckTable });
+            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable, factorRefs });
+            const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable, factorRefs });
+            const { xColsExpanded: zExp, dummySQL: zDummy } = await expandFactors({ xCols: zVars, tableName: duckTable, factorRefs });
             const dummySQL = { ...wDummy, ...xDummy, ...zDummy };
 
             // Re-check post-expansion (k+q) against threshold.
@@ -1509,9 +1536,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (!["classical", "HC0", "HC1", "clustered", "HAC"].includes(seTypeNorm)) {
               throw new Error(`LIML SQL path does not support ${seTypeNorm} - fallback to JS`);
             }
-            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable });
-            const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable });
-            const { xColsExpanded: zExp, dummySQL: zDummy } = await expandFactors({ xCols: zVars, tableName: duckTable });
+            const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable, factorRefs });
+            const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable, factorRefs });
+            const { xColsExpanded: zExp, dummySQL: zDummy } = await expandFactors({ xCols: zVars, tableName: duckTable, factorRefs });
             const dummySQL = { ...wDummy, ...xDummy, ...zDummy };
 
             if (!shouldUseSQLPath({ ...dispatchCtx, xColsExpanded: [...xExp, ...wExp] })) {
@@ -1599,7 +1626,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             let wDummy;
 
             if (effModel === "EventStudy") {
-              const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+              const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable, factorRefs });
               eventStudySynth = buildEventStudySynthetic({
                 timeCol,
                 treatTimeCol: treatTimeCol[0],
@@ -1610,7 +1637,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               wExp = eventStudySynth.xColsExpanded;
               wDummy = { ...controlsExpansion.dummySQL, ...eventStudySynth.dummySQL };
             } else if (effModel === "TWFE") {
-              const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+              const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable, factorRefs });
               twfeSynth = buildTWFEDiDSynthetic({
                 treatCol: treatVar[0],
                 controls: controlsExpansion.xColsExpanded,
@@ -1618,7 +1645,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               wExp = twfeSynth.xColsExpanded;
               wDummy = controlsExpansion.dummySQL;
             } else {
-              const expansion = await expandFactors({ xCols: allX, tableName: duckTable });
+              const expansion = await expandFactors({ xCols: allX, tableName: duckTable, factorRefs });
               wExp = expansion.xColsExpanded;
               wDummy = expansion.dummySQL;
             }
@@ -1823,7 +1850,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           let dummySQL;
           let didSynth = null;
           if (effModel === "DiD") {
-            const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable });
+            const controlsExpansion = await expandFactors({ xCols: wVars, tableName: duckTable, factorRefs });
             didSynth = buildDiD2x2Synthetic({
               postCol: postVar[0],
               treatCol: treatVar[0],
@@ -1832,7 +1859,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             xColsExpanded = didSynth.xColsExpanded;
             dummySQL = { ...controlsExpansion.dummySQL, ...didSynth.dummySQL };
           } else {
-            const expansion = await expandFactors({ xCols: allX, tableName: duckTable });
+            const expansion = await expandFactors({ xCols: allX, tableName: duckTable, factorRefs });
             xColsExpanded = expansion.xColsExpanded;
             dummySQL = expansion.dummySQL;
           }
@@ -1982,7 +2009,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       setRunning(false);
     }
   }, [subsets, rows, cleanedData, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation, getFullRows,
-      model, family, yVar, xVars, wVars, zVars, weightVar, factorVars, seType,
+      model, family, yVar, xVars, wVars, zVars, weightVar, factorVars, factorRefs, seType,
       clusterVar, clusterVar2, timeVar, maxLag, panel, seOpts,
       postVar, treatVar, treatTimeCol, kPre, kPost, poissonEntityCol, poissonOffsetCol, poissonExtraFE, effectiveFeCols]);
 
@@ -2016,12 +2043,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       entityCol:  panel?.entityCol ?? null,
       timeCol:    panel?.timeCol   ?? null,
       factorVars: Array.from(factorVars),
+      factorRefs: { ...factorRefs },
       // SE type selected in Inference Options — exports must report the same SEs.
       seType,
       clusterVar,
       clusterVar2,
     },
-  }), [cleanedData, panel, factorVars, seType, clusterVar, clusterVar2]);
+  }), [cleanedData, panel, factorVars, factorRefs, seType, clusterVar, clusterVar2]);
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
   return (
@@ -2125,7 +2153,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               "OLS — ordinary least squares",
               "FE — fixed effects within estimator (panel required); supports N-way and nested FE",
               "FD — first differences (panel required; needs unique entity-time pairs)",
-              "LSDV — least squares dummy variables, reports the fixed effects themselves",
+              "LSDV — least squares dummy variables, reports the fixed effects themselves; the Fixed Effects picker's \"f\" badge lets you choose which level is the reference for each FE dimension",
             ]},
             { heading: "Strategies — DiD & event study", items: [
               "DiD 2×2 — classic two-group two-period difference-in-differences",
@@ -2158,7 +2186,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               "X — the regressors you care about; these are the coefficients you will report",
               "W — extra controls. They enter the same regression as X, just kept visually separate",
               "W is NOT weights and NOT instruments — survey weights are a toggle under OLS, instruments are Z in Model Configuration",
-              "Factor toggle: mark a column categorical to expand it into dummies (first level dropped)",
+              "Factor toggle: mark a column categorical to expand it into dummies — click \"f\" again to pick which level is the reference (omitted) category, or leave it on auto (first sorted level)",
               "Interaction terms are built in the selector rather than pre-computed in Clean",
             ]},
             { heading: "OLS options", items: [
@@ -2215,6 +2243,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             wVars={wVars} setWVars={setWVars}
             factorVars={factorVars}
             onToggleFactor={toggleFactor}
+            factorRefs={factorRefs}
+            onSetFactorRef={setFactorRef}
+            rows={rows}
+            duckdbTableName={cleanedData?._duckdb?.tableName}
             interactionTerms={interactionTerms}
             setInteractionTerms={setInteractionTerms}
           />
@@ -2279,6 +2311,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             rows={rows}
             headers={headers}
             panel={panel}
+            factorRefs={factorRefs}
+            onSetFactorRef={setFactorRef}
+            duckdbTableName={cleanedData?._duckdb?.tableName}
           />
 
           <InferenceOptions

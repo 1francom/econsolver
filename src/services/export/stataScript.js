@@ -89,7 +89,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -652,9 +652,9 @@ function transpileStep(step, allDatasets = {}) {
 // ─── STATA VARLIST BUILDER ────────────────────────────────────────────────────
 // Builds Stata varlist RHS. Factor vars use i. prefix; interactions use ## (*) or # (:).
 // Continuous vars inside interactions get the c. prefix (required by Stata).
-function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms) {
-  const fmtBase  = v => fvSet.has(v) ? `i.${v}` : v;
-  const fmtInInt = v => fvSet.has(v) ? `i.${v}` : `c.${v}`;
+function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}) {
+  const fmtBase  = v => stFactorTerm(v, fvSet, factorRefs);
+  const fmtInInt = v => fvSet.has(v) ? stFactorTerm(v, fvSet, factorRefs) : `c.${v}`;
   const rawX = xVarsRaw ?? xVars ?? [];
   const rawW = wVarsRaw ?? wVars ?? [];
   const parts = [...rawX, ...rawW].map(fmtBase);
@@ -677,11 +677,41 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 // ppmlhdfe) — these accept vce(cluster) but not vce(hc2)/vce(hc3) or a HAC option.
 const PANEL_TYPES = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "PoissonFE"]);
 
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null }) {
+// One factor variable's Stata term — i.col by default, or ib(#).col when a
+// custom reference was chosen AND that reference is a numeric literal.
+// Stata's factor-variable operators (i./ib./c.) require a NUMERIC variable
+// and ib#. takes the reference's literal VALUE, not a level name — so a
+// string level (e.g. "COD", "north") genuinely cannot be expressed this way
+// without an `encode` step assigning it a numeric code first. That's a
+// separate, larger gap (this exporter has no column-type info to decide
+// when `encode` is needed at all — see the pre-existing i.col-on-a-string-
+// column issue this feature's spec found but did not fix). Scope here:
+// numeric factor columns (the common case — Year, a numeric group id) get
+// full ib(#). support; a string reference falls back to i.col (identical to
+// pre-2026-08-16 behavior) with a comment explaining why, rather than
+// emitting Stata syntax that would error.
+function stFactorTerm(v, fvSet, factorRefs) {
+  if (!fvSet.has(v)) return v;
+  const ref = factorRefs[v];
+  if (ref != null && /^-?\d+(\.\d+)?$/.test(String(ref))) return `ib(${ref}).${v}`;
+  return `i.${v}`;
+}
+
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null }) {
   const lines = [];
   const fvSet = new Set(factorVars);
-  const fmtS  = v => fvSet.has(v) ? `i.${v}` : v;
-  const xList = buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
+  const fmtS  = v => stFactorTerm(v, fvSet, factorRefs);
+  const xList = buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs);
+  // A string-level reference couldn't be expressed as ib(#). — surfaced once,
+  // near the estimation command, rather than silently reverting to i.col.
+  const unexpressibleRefs = Object.entries(factorRefs)
+    .filter(([col, ref]) => fvSet.has(col) && ref != null && !/^-?\d+(\.\d+)?$/.test(String(ref)))
+    .map(([col, ref]) => `${col} (ref "${ref}")`);
+  if (unexpressibleRefs.length) {
+    lines.push(`* NOTE: Stata's ib(#). needs a NUMERIC reference value — ${unexpressibleRefs.join(", ")} `
+      + `has a string reference and falls back to i.col (default reference). `
+      + `To set it, run e.g. "encode ${unexpressibleRefs[0].split(" ")[0]}, generate(...)" first and reference the numeric code.`);
+  }
 
   // Stata SE option matching the user's selection (was hardcoded ", robust").
   // Returns the trailing option string ("" = classical default, no comma).

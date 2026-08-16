@@ -53,6 +53,7 @@ function buildScript(tab, result, allDatasets = {}) {
       bandwidth:  spec.bandwidth  ?? null,
       kernel:     spec.kernel     ?? "triangular",
       factorVars:        spec.factorVars        ?? [],
+      factorRefs:        spec.factorRefs        ?? {},
       interactionTerms:  spec.interactionTerms  ?? [],
       xVarsRaw:          spec.xVarsRaw          ?? null,
       wVarsRaw:          spec.wVarsRaw          ?? null,

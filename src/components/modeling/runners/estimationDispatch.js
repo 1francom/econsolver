@@ -20,7 +20,7 @@ import { materializeFEInteraction } from "../../../core/generate/feInteraction.j
 
 export function dispatchEstimation(dataRows, ctx) {
   const {
-    yVar, xVars, wVars, factorVars,
+    yVar, xVars, wVars, factorVars, factorRefs = {},
     interactionTerms = [],
     model, family, weightVar, seOpts, seType, panel, noIntercept = false,
     zVars, postVar, treatVar,
@@ -41,9 +41,9 @@ export function dispatchEstimation(dataRows, ctx) {
   if (!y) return { error: "Select a dependent variable (Y)." };
   // ── Interaction + factor expansion (outside try to avoid TDZ) ──────────────
   const { rows: ixRows, xVars: ixX, wVars: ixW } =
-    expandInteractions(dataRows, xVars, wVars, interactionTerms, factorVars);
-  const { rows: _r1, vars: expX } = applyFactors(ixRows, ixX, factorVars);
-  const { rows: expRows, vars: expW } = applyFactors(_r1, ixW, factorVars);
+    expandInteractions(dataRows, xVars, wVars, interactionTerms, factorVars, factorRefs);
+  const { rows: _r1, vars: expX } = applyFactors(ixRows, ixX, factorVars, factorRefs);
+  const { rows: expRows, vars: expW } = applyFactors(_r1, ixW, factorVars, factorRefs);
   dataRows = expRows; // parameter reassignment: safe in JS
 
   // ── FE interaction materialization (PanelTab "FE interaction" picker) ───────
@@ -225,9 +225,13 @@ export function dispatchEstimation(dataRows, ctx) {
       const legacyLSDVCols = timeFEForLegacy ? [ec, tc].filter(Boolean) : [ec].filter(Boolean);
       const isLegacyLSDV = isLegacyFeSet(feCols, legacyLSDVCols);
       const res = isLegacyLSDV
-        ? runLSDV(dataRows, y, allX, ec, tc, { timeFE: timeFEForLegacy }, seOpts)
-        : runLSDVMulti(dataRows, y, allX, feCols, seOpts);
+        ? runLSDV(dataRows, y, allX, ec, tc, { timeFE: timeFEForLegacy }, seOpts, factorRefs)
+        : runLSDVMulti(dataRows, y, allX, feCols, seOpts, factorRefs);
       if (!res || res.error) return { error: res?.error ?? "LSDV failed. Check panel structure." };
+      // factorRefs is NOT added to the wrapResult options here — ModelingTab's
+      // specExtras is the single place that stamps it onto dispatch.result.spec
+      // for every model type, X-factor and LSDV-FE alike. Adding it here too
+      // would be a second source of truth for the same field.
       return { result: wrapResult("LSDV", res, { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols }), panelFE: null, panelFD: null };
 
     } else if (effModel === "EventStudy") {

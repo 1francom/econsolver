@@ -41,14 +41,33 @@ export function sortFactorLevels(rawLevels) {
     : rawLevels.map(String).sort();
 }
 
-export function applyFactors(rows, vars, factorVars) {
+// Floats a user-chosen reference level to the front of an already-sorted
+// levels array, leaving every other level's relative order untouched — the
+// omitted-category convention downstream (dummyLevels = levels.slice(1))
+// stays correct either way, it just omits whichever level is at index 0.
+// `ref` arrives from the UI as a string; levels here are already strings
+// (sortFactorLevels normalizes numeric levels via .map(String)), so a plain
+// string compare is enough. Silently no-ops if ref isn't an actual level of
+// this column (subsetted data, a stale saved model, a typo) — falling back
+// to the existing first-level default rather than throwing, same tolerance
+// this codebase already gives refPeriod in event studies.
+function reorderForReference(sortedLevels, ref) {
+  if (ref == null) return sortedLevels;
+  const i = sortedLevels.indexOf(String(ref));
+  if (i <= 0) return sortedLevels; // not found, or already first — no-op
+  const rest = sortedLevels.slice();
+  const [chosen] = rest.splice(i, 1);
+  return [chosen, ...rest];
+}
+
+export function applyFactors(rows, vars, factorVars, factorRefs = {}) {
   const toExpand = vars.filter(v => factorVars.has(v));
   if (!toExpand.length) return { rows, vars };
   let expandedVars = [...vars];
   let expandedRows = rows;
   for (const col of toExpand) {
     const rawLevels  = [...new Set(rows.map(r => r[col]).filter(v => v != null))];
-    const levels      = sortFactorLevels(rawLevels);
+    const levels      = reorderForReference(sortFactorLevels(rawLevels), factorRefs[col]);
     const dummyLevels = levels.slice(1); // drop first = reference category
     const dummyCols   = dummyLevels.map(lv => `${col}_${lv.replace(/\s+/g, "_")}`);
     expandedRows = expandedRows.map(r => {
@@ -77,7 +96,7 @@ export function applyFactors(rows, vars, factorVars) {
 //                   product columns are added.
 // term.type === ":": only product columns are added; callers must include
 //                   main effects separately if desired.
-export function expandInteractions(rows, xVars, wVars, interactionTerms, factorVars) {
+export function expandInteractions(rows, xVars, wVars, interactionTerms, factorVars, factorRefs = {}) {
   if (!interactionTerms?.length) return { rows, xVars, wVars };
   const fvSet = factorVars instanceof Set ? factorVars : new Set(factorVars ?? []);
   let augRows = rows;
@@ -92,7 +111,7 @@ export function expandInteractions(rows, xVars, wVars, interactionTerms, factorV
     const ensureAndGetCols = (col) => {
       if (!fvSet.has(col)) return [col];
       const rawLevels = [...new Set(augRows.map(r => r[col]).filter(v => v != null))];
-      const levels = sortFactorLevels(rawLevels);
+      const levels = reorderForReference(sortFactorLevels(rawLevels), factorRefs[col]);
       const lvs = levels.slice(1);
       const dcs = lvs.map(lv => `${col}_${lv.replace(/\s+/g, '_')}`);
       const missing = dcs.filter(dc => !(dc in (augRows[0] ?? {})));

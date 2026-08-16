@@ -100,4 +100,56 @@ console.log("Test 4: vs R lm() on factorExpansionFixture.csv (year: numeric 9/10
   });
 }
 
-console.log("\nAll factor-expansion checks passed (Bug 1 + Bug 2 fixed, validated against R 4.4.1 lm()).");
+// ── Custom reference category (2026-08-16 feature) vs R relevel() ────────────
+
+console.log("Test 5: custom reference (year ref=10) vs R lm(relevel(factor(year), ref='10'))");
+{
+  const csv = readFileSync(join(__dirname, "factorExpansionFixture.csv"), "utf8").trim().split("\n");
+  const header = csv[0].split(",");
+  const rows = csv.slice(1).map(line => {
+    const cells = line.split(",");
+    const r = {};
+    header.forEach((h, i) => { r[h] = cells[i]; });
+    return {
+      id: Number(r.id), y: Number(r.y), x1: Number(r.x1),
+      year: Number(r.year), grader: r.grader === "" ? null : r.grader,
+    };
+  });
+
+  const bench = JSON.parse(readFileSync(join(__dirname, "factorExpansionBenchmarks.json"), "utf8"));
+  const customRef = bench.customRef;
+  assert(customRef != null, "benchmarks.json has a customRef block (re-run factorExpansionRValidation.R if missing)");
+
+  const { rows: er, vars } = applyFactors(rows, ["x1", "year", "grader"], new Set(["year", "grader"]), { year: "10" });
+  const res = runOLS(er, "y", vars);
+
+  // Dummy naming: ref=10 means levels reorder to [10,9,11], drop first (10) →
+  // dummies for 9 and 11 — year_9/year_11, NOT year_10/year_11.
+  const litNames = ["(Intercept)", ...vars];
+  assert(JSON.stringify(litNames) === JSON.stringify(["(Intercept)", "x1", "year_9", "year_11", "grader_B", "grader_C"]),
+    `param order/names with custom ref: ${JSON.stringify(litNames)}`);
+
+  const rNames = ["(Intercept)", "x1", `relevel(factor(year), ref = "10")9`, `relevel(factor(year), ref = "10")11`, "factor(grader)B", "factor(grader)C"];
+  rNames.forEach((rName, i) => {
+    const rCoef = customRef.coefficients[rName];
+    const rSE   = customRef.se[rName];
+    assert(Math.abs(res.beta[i] - rCoef) < 1e-6, `coef[${rName}]: R=${rCoef} Litux=${res.beta[i]}`);
+    assert(Math.abs(res.se[i] - rSE) < 1e-4, `SE[${rName}]: R=${rSE} Litux=${res.se[i]}`);
+  });
+
+  // Reference choice is a reparameterization: x1 and grader's coefficients
+  // must be BYTE-IDENTICAL (well, to the same tolerance) to the default-
+  // reference model above — only the year block and the intercept move.
+  const defaultRun = applyFactors(rows, ["x1", "year", "grader"], new Set(["year", "grader"]));
+  const resDefault = runOLS(defaultRun.rows, "y", defaultRun.vars);
+  assert(Math.abs(res.beta[1] - resDefault.beta[1]) < 1e-9, "x1 coefficient is invariant to the year reference choice");
+  assert(Math.abs(res.beta[4] - resDefault.beta[4]) < 1e-9, "grader_B coefficient is invariant to the year reference choice");
+
+  // Requesting a reference that isn't an actual level must fall back to the
+  // default (first-level) behavior silently, not throw or drop the column.
+  const missingRef = applyFactors(rows, ["x1", "year", "grader"], new Set(["year", "grader"]), { year: "1999" });
+  assert(JSON.stringify(missingRef.vars) === JSON.stringify(defaultRun.vars),
+    "an unknown reference level falls back to the default (first-level) dummy set");
+}
+
+console.log("\nAll factor-expansion checks passed (Bug 1 + Bug 2 fixed + custom reference category, validated against R 4.4.1 lm()/relevel()).");
