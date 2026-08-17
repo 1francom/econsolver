@@ -19,6 +19,7 @@
 import { useState, useRef } from "react";
 import { useTheme } from "./shared.jsx";
 import PlotExportBar from "../shared/PlotExportBar.jsx";
+import { stripGroundRect } from "../../services/export/plotExporter.js";
 
 // Safe min/max for large arrays — Math.min(...bigArray) blows the call stack
 const arrMin = (a, fallback = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fallback;
@@ -462,8 +463,9 @@ function exportSVG(svgId, filename) {
     src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
   }
   // Strip dark background rect so export is transparent (journal-friendly)
-  src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
-  src = src.replace(/<rect[^>]*fill="#0f0f0f"[^>]*\/>/g, '');
+  // Palette-derived (covers current + legacy grounds); was two regexes pinned to
+  // superseded DARK values here and in two sibling files.
+  src = stripGroundRect(src);
   // Add XML declaration for strict SVG parsers
   src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
   const blob = new Blob([src], { type: "image/svg+xml;charset=utf-8" });

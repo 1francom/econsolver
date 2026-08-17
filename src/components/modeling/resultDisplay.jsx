@@ -12,6 +12,7 @@ import { generatePythonScript } from "../../services/export/pythonScript.js";
 import { generateStataScript }  from "../../services/export/stataScript.js";
 import { downloadReplicationBundle } from "../../services/export/replicationBundle.js";
 import { isLogVarName } from "../../core/validation/logVarDetection.js";
+import { stripGroundRect } from "../../services/export/plotExporter.js";
 
 export function Lbl({ children, color }) {
   const { C, T } = useTheme();
@@ -159,8 +160,9 @@ export function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", f
     let src = new XMLSerializer().serializeToString(el);
     if (!src.includes('xmlns="http://www.w3.org/2000/svg"'))
       src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
-    src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
-    src = src.replace(/<rect[^>]*fill="#0f0f0f"[^>]*\/>/g, '');
+    // Palette-derived (covers current + legacy grounds); was two regexes pinned to
+    // superseded DARK values here and in two sibling files.
+    src = stripGroundRect(src);
     src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml;charset=utf-8" }));

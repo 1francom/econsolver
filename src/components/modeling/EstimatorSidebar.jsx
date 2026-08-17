@@ -18,33 +18,33 @@ import { useTheme, Section, InfoBox } from "./shared.jsx";
 // Groups determine dropdown sections.
 export const MODELS = [
   // Linear
-  { id: "OLS",              label: "OLS",              group: "Linear",    desc: "Ordinary Least Squares",                                               color: "#7ab896" },
+  { id: "OLS",              label: "OLS",              group: "Linear",    desc: "Ordinary Least Squares",                                               tone: "green" },
   // Panel (pure panel estimators — no DiD/event-study)
-  { id: "FE",               label: "FE",               group: "Panel",     desc: "Fixed Effects (within estimator) — panel required",                    color: "#6e9ec8" },
-  { id: "FD",               label: "FD",               group: "Panel",     desc: "First Differences — unique (i,t) pairs required",                      color: "#6e9ec8" },
-  { id: "LSDV",             label: "LSDV",             group: "Panel",     desc: "Least Squares Dummy Variables — panel required",                        color: "#6e9ec8" },
+  { id: "FE",               label: "FE",               group: "Panel",     desc: "Fixed Effects (within estimator) — panel required",                    tone: "blue" },
+  { id: "FD",               label: "FD",               group: "Panel",     desc: "First Differences — unique (i,t) pairs required",                      tone: "blue" },
+  { id: "LSDV",             label: "LSDV",             group: "Panel",     desc: "Least Squares Dummy Variables — panel required",                        tone: "blue" },
   // DiD
-  { id: "DiD",              label: "DiD 2×2",          group: "DiD",       desc: "Classic Difference-in-Differences",                                     color: "#6ec8b4" },
-  { id: "TWFE",             label: "TWFE DiD",         groups: ["DiD"],    desc: "Two-Way Fixed Effects DiD — panel required",                            color: "#6ec8b4" },
-  { id: "CallawayCS",       label: "CS DiD (2021)",    groups: ["DiD", "Event Study"], desc: "Callaway & Sant'Anna (2021) staggered DiD — panel required", color: "#6ec8b4" },
-  { id: "SunAbraham",       label: "Sun-Abraham (2021)", groups: ["DiD", "Event Study"], desc: "Sun & Abraham (2021) interaction-weighted staggered DiD",  color: "#6ec8b4" },
-  { id: "CHDiD",            label: "Staggered DiD (CH)", groups: ["DiD"], planned: true, desc: "Callaway-Heckman (planned)", color: "#6ec8b4" },
+  { id: "DiD",              label: "DiD 2×2",          group: "DiD",       desc: "Classic Difference-in-Differences",                                     tone: "teal" },
+  { id: "TWFE",             label: "TWFE DiD",         groups: ["DiD"],    desc: "Two-Way Fixed Effects DiD — panel required",                            tone: "teal" },
+  { id: "CallawayCS",       label: "CS DiD (2021)",    groups: ["DiD", "Event Study"], desc: "Callaway & Sant'Anna (2021) staggered DiD — panel required", tone: "teal" },
+  { id: "SunAbraham",       label: "Sun-Abraham (2021)", groups: ["DiD", "Event Study"], desc: "Sun & Abraham (2021) interaction-weighted staggered DiD",  tone: "teal" },
+  { id: "CHDiD",            label: "Staggered DiD (CH)", groups: ["DiD"], planned: true, desc: "Callaway-Heckman (planned)", tone: "teal" },
   // Event Study
-  { id: "EventStudy",       label: "Classical (TWFE)", groups: ["Event Study"], desc: "Dynamic DiD / event study — panel required",                       color: "#6ec8b4" },
+  { id: "EventStudy",       label: "Classical (TWFE)", groups: ["Event Study"], desc: "Dynamic DiD / event study — panel required",                       tone: "teal" },
   // IV
-  { id: "2SLS",             label: "2SLS / IV",        group: "IV",        desc: "Two-Stage Least Squares",                                               color: "#c8a96e" },
-  { id: "GMM",              label: "Two-Step GMM",     group: "IV",        desc: "Efficient GMM — HC-robust Ω̂ + J-test",                                  color: "#c8a96e" },
-  { id: "LIML",             label: "LIML",             group: "IV",        desc: "Limited Info. Max. Likelihood / k-class",                               color: "#c8a96e" },
+  { id: "2SLS",             label: "2SLS / IV",        group: "IV",        desc: "Two-Stage Least Squares",                                               tone: "gold" },
+  { id: "GMM",              label: "Two-Step GMM",     group: "IV",        desc: "Efficient GMM — HC-robust Ω̂ + J-test",                                  tone: "gold" },
+  { id: "LIML",             label: "LIML",             group: "IV",        desc: "Limited Info. Max. Likelihood / k-class",                               tone: "gold" },
   // RD
-  { id: "RDD",              label: "Sharp RDD",        group: "RD",        desc: "Regression Discontinuity Design",                                       color: "#c88e6e" },
-  { id: "FuzzyRDD",         label: "Fuzzy RDD",        group: "RD",        desc: "Fuzzy Regression Discontinuity Design",                                 color: "#c88e6e" },
-  { id: "SpatialRDD",       label: "Spatial RD",       group: "RD",        desc: "Geographic RD at a boundary (Keele & Titiunik 2015)",                   color: "#c88e6e" },
+  { id: "RDD",              label: "Sharp RDD",        group: "RD",        desc: "Regression Discontinuity Design",                                       tone: "orange" },
+  { id: "FuzzyRDD",         label: "Fuzzy RDD",        group: "RD",        desc: "Fuzzy Regression Discontinuity Design",                                 tone: "orange" },
+  { id: "SpatialRDD",       label: "Spatial RD",       group: "RD",        desc: "Geographic RD at a boundary (Keele & Titiunik 2015)",                   tone: "orange" },
   // Spatial econometrics
-  { id: "SpatialRegression", label: "Spatial Reg.",    group: "Spatial",   desc: "SLX, SAR, SEM, and SDM with a spatial weights matrix",                 color: "#6ec8b4" },
+  { id: "SpatialRegression", label: "Spatial Reg.",    group: "Spatial",   desc: "SLX, SAR, SEM, and SDM with a spatial weights matrix",                 tone: "teal" },
   // Synthetic
-  { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)", color: "#6e9ec8" },
+  { id: "SyntheticControl", label: "Synthetic Control", group: "Synthetic", desc: "Abadie-Diamond-Hainmueller (Frank-Wolfe weights + placebo inference)", tone: "blue" },
   // Count outcomes
-  { id: "NegBinFE",        label: "Negative Binomial FE", group: "Count outcomes", desc: "NB2 with absorbed fixed effects and overdispersion", color: "#9e7ec8" },
+  { id: "NegBinFE",        label: "Negative Binomial FE", group: "Count outcomes", desc: "NB2 with absorbed fixed effects and overdispersion", tone: "violet" },
 ];
 
 // ordered group list (controls render order)
@@ -73,7 +73,7 @@ export default function EstimatorSidebar({
   family,          // "linear" | "poisson" | "logit" | "probit"
   onFamilySelect,  // (family: string) => void
 }) {
-  const { C, T } = useTheme();
+  const { C, T, elev } = useTheme();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
@@ -113,7 +113,7 @@ export default function EstimatorSidebar({
               background: C.surface2,
               border: `1px solid ${C.gold}`,
               borderRadius: 4,
-              color: selected.color,
+              color: C[selected.tone] ?? C.text,
               cursor: "pointer",
               fontFamily: T.code.fontFamily, fontSize: T.body.fontSize,
               letterSpacing: "0.06em",
@@ -142,7 +142,7 @@ export default function EstimatorSidebar({
                 borderRadius: 4,
                 maxHeight: 420,
                 overflowY: "auto",
-                boxShadow: "0 8px 24px #00000080",
+                ...elev.popover,
               }}
             >
               {grouped.map(({ group, items }) => (
@@ -181,11 +181,11 @@ export default function EstimatorSidebar({
                           justifyContent: "space-between",
                           gap: 8,
                           padding: "7px 12px",
-                          background: isSelected ? `${m.color}14` : "transparent",
+                          background: isSelected ? `${C[m.tone]}14` : "transparent",
                           border: "none",
-                          borderLeft: `3px solid ${isSelected ? m.color : "transparent"}`,
+                          borderLeft: `3px solid ${isSelected ? C[m.tone] : "transparent"}`,
                           borderBottom: `1px solid ${C.border}`,
-                          color: m.planned ? C.textMuted : !avail ? C.textMuted : isSelected ? m.color : C.textDim,
+                          color: m.planned ? C.textMuted : !avail ? C.textMuted : isSelected ? C[m.tone] : C.textDim,
                           cursor: m.planned ? "not-allowed" : !avail ? "not-allowed" : "pointer",
                           fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
                           textAlign: "left",
@@ -193,11 +193,11 @@ export default function EstimatorSidebar({
                           transition: "background 0.1s",
                         }}
                         onMouseEnter={e => { if (avail && !isSelected && !m.planned) e.currentTarget.style.background = `${C.border}50`; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = isSelected ? `${m.color}14` : "transparent"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = isSelected ? `${C[m.tone]}14` : "transparent"; }}
                       >
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           {!avail && <span style={{ fontSize: T.caption.fontSize }}>🔒</span>}
-                          {isSelected && <span style={{ color: m.color, fontSize: T.caption.fontSize }}>●</span>}
+                          {isSelected && <span style={{ color: C[m.tone], fontSize: T.caption.fontSize }}>●</span>}
                           {m.label}
                         </span>
                         <span style={{

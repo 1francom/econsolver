@@ -1,10 +1,13 @@
 // ─── ECON STUDIO · spatial/plot/legend.js ─ (moved verbatim from SpatialTab.jsx)
-import { MONO_STACK } from "../../../../theme.js";
 
 // Fixed margins so y-axis labels like "34.52°S" always fit
 export const GEO_MARGIN = { top: 20, right: 20, bottom: 34, left: 72 };
 
-export function appendSvgLegend(svg, legend, C, plotW, plotH, gutterW = 160) {
+// `font` is the mono stack to draw with — pass T.code.fontFamily. It used to
+// import MONO_STACK directly, which froze the legend to the default family and
+// silently ignored the user's data/code font choice. Falls back to a generic
+// monospace so a caller that forgets the argument still renders something sane.
+export function appendSvgLegend(svg, legend, C, plotW, plotH, gutterW = 160, font = "ui-monospace, monospace") {
   if (!svg || !legend) return;
   const ns = "http://www.w3.org/2000/svg";
   const svgW = plotW + gutterW;
@@ -17,7 +20,7 @@ export function appendSvgLegend(svg, legend, C, plotW, plotH, gutterW = 160) {
       ? legend.cats.map(v => ({ label: String(v), color: legend.cmap[v] }))
       : null;
   const g = document.createElementNS(ns, "g");
-  g.setAttribute("font-family", MONO_STACK);
+  g.setAttribute("font-family", font);
   g.setAttribute("font-size", "9");
   const x = plotW + 12;
   const y = 18;

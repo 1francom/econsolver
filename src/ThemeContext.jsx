@@ -1,13 +1,21 @@
 // ─── ECON STUDIO · src/ThemeContext.jsx ───────────────────────────────────────
 // Provides { C, T, space, radius, elev, theme, setTheme, prefs, setPrefs }.
 // theme persisted under "econ_theme"; appearance prefs under "econ_prefs".
+//
+// The context VALUE SHAPE is load-bearing — 104 components destructure it. Add
+// keys freely; never rename or remove one.
 
-import { createContext, useContext, useState, useEffect } from "react";
-import { DARK, LIGHT, buildTokens } from "./theme.js";
+import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
+import { DARK, getPalette, buildTokens } from "./theme.js";
 
 const THEME_KEY = "econ_theme";
 const PREFS_KEY = "econ_prefs";
-const DEFAULT_PREFS = { sansFont: "IBM Plex Sans", density: "comfortable", plotPalette: "teal-gold" };
+const DEFAULT_PREFS = {
+  sansFont: "IBM Plex Sans",
+  monoFont: "IBM Plex Mono",
+  density: "comfortable",
+  plotPalette: "teal-gold",
+};
 
 const initialTokens = buildTokens({ theme: "dark", ...DEFAULT_PREFS });
 const ThemeCtx = createContext({
@@ -19,22 +27,33 @@ const ThemeCtx = createContext({
 function loadPrefs() {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
+    // Spread over defaults so a pref added after a user's prefs were persisted
+    // (e.g. monoFont) resolves rather than coming back undefined.
     return raw ? { ...DEFAULT_PREFS, ...JSON.parse(raw) } : DEFAULT_PREFS;
   } catch { return DEFAULT_PREFS; }
 }
 
-// Inject font links once. Plex Sans + Plex Mono are always loaded (baseline);
-// Inter / Geist load on demand when chosen.
+// ─── Font loading ────────────────────────────────────────────────────────────
+// The baseline pair (Plex Sans + Plex Mono) is preloaded statically in
+// index.html so the first paint already has it — injecting it here meant every
+// cold load painted in system-ui and then reflowed. Non-default families load
+// on demand, only when actually selected.
 const FONT_HREFS = {
-  baseline: "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
-  Inter:    "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
-  Geist:    "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap",
+  "Inter":             "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
+  "Geist":             "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap",
+  "Plus Jakarta Sans": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap",
+  "JetBrains Mono":    "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap",
 };
-function ensureFont(key) {
-  const id = "econ-font-" + key;
+
+function ensureFont(family) {
+  const href = FONT_HREFS[family];
+  if (!href) return; // baseline families are already in index.html
+  const id = "econ-font-" + family.replace(/\s+/g, "-");
   if (document.getElementById(id)) return;
   const link = document.createElement("link");
-  link.id = id; link.rel = "stylesheet"; link.href = FONT_HREFS[key];
+  link.id = id;
+  link.rel = "stylesheet";
+  link.href = href;
   link.crossOrigin = "anonymous";
   document.head.appendChild(link);
 }
@@ -46,38 +65,68 @@ export function ThemeProvider({ children }) {
   });
   const [prefs, setPrefsState] = useState(loadPrefs);
 
-  function setTheme(t) {
+  const setTheme = useCallback((t) => {
     setThemeState(t);
     try { localStorage.setItem(THEME_KEY, t); } catch {}
-  }
-  function setPrefs(patch) {
+  }, []);
+
+  const setPrefs = useCallback((patch) => {
     setPrefsState((p) => {
       const next = { ...p, ...patch };
       try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
-  }
+  }, []);
 
-  const C = theme === "light" ? LIGHT : DARK;
-  const { T, space, radius, elev } = buildTokens({
-    theme, sansFont: prefs.sansFont, density: prefs.density,
-  });
+  // Memoised deliberately, and it is not just a micro-optimisation.
+  //
+  // buildTokens() allocates a fresh T/space/radius/elev on every call, so without
+  // this every ThemeProvider render produced new object identities for all of
+  // them — which (a) re-rendered all ~100 useTheme consumers on any provider
+  // render, and (b) made C/T unusable in a dependency array, since an effect
+  // depending on them would re-run forever. PlotBuilder's render effect needs
+  // exactly that dependency to redraw when the theme changes, so stable
+  // identities are a correctness requirement, not a perf tweak.
+  const C = useMemo(() => getPalette(theme), [theme]);
+  const { T, space, radius, elev } = useMemo(
+    () => buildTokens({
+      theme, sansFont: prefs.sansFont, monoFont: prefs.monoFont, density: prefs.density,
+    }),
+    [theme, prefs.sansFont, prefs.monoFont, prefs.density],
+  );
 
-  // Always load baseline; conditionally load the chosen non-baseline font.
-  useEffect(() => { ensureFont("baseline"); }, []);
+  // Load whichever non-baseline families are currently selected.
+  useEffect(() => { ensureFont(prefs.sansFont); }, [prefs.sansFont]);
+  useEffect(() => { ensureFont(prefs.monoFont); }, [prefs.monoFont]);
+
+  // Bridge palette tokens to CSS custom properties. index.css needs these for
+  // rules that cannot be expressed inline: scrollbar chrome, :focus-visible.
+  // data-theme drives `color-scheme`, which controls how native form controls
+  // (date pickers, selects) render their own chrome.
   useEffect(() => {
-    if (prefs.sansFont === "Inter" || prefs.sansFont === "Geist") ensureFont(prefs.sansFont);
-  }, [prefs.sansFont]);
+    const root = document.documentElement;
+    root.setAttribute("data-theme", theme);
+    root.style.setProperty("--c-bg", C.bg);
+    root.style.setProperty("--c-surface", C.surface);
+    root.style.setProperty("--c-border", C.border);
+    root.style.setProperty("--c-border2", C.border2);
+    root.style.setProperty("--c-border3", C.border3);
+    root.style.setProperty("--c-text", C.text);
+    root.style.setProperty("--c-gold", C.gold);
+  }, [theme, C]);
 
-  // Sync body background + base font so the area outside React root matches.
+  // Sync body background + base font so the area outside the React root matches
+  // (overscroll gutters, the strip below a short page).
   useEffect(() => { document.body.style.background = C.bg; }, [C.bg]);
+  useEffect(() => { document.body.style.color = C.text; }, [C.text]);
   useEffect(() => { document.body.style.fontFamily = T.body.fontFamily; }, [T.body.fontFamily]);
 
-  return (
-    <ThemeCtx.Provider value={{ C, T, space, radius, elev, theme, setTheme, prefs, setPrefs }}>
-      {children}
-    </ThemeCtx.Provider>
+  const value = useMemo(
+    () => ({ C, T, space, radius, elev, theme, setTheme, prefs, setPrefs }),
+    [C, T, space, radius, elev, theme, setTheme, prefs, setPrefs],
   );
+
+  return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>;
 }
 
 export function useTheme() { return useContext(ThemeCtx); }
