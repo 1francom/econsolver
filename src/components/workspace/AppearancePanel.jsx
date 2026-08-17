@@ -1,4 +1,5 @@
-import { useTheme } from "../../ThemeContext.jsx";
+import { useEffect } from "react";
+import { useTheme, preloadAllFonts } from "../../ThemeContext.jsx";
 import { SANS_STACK, MONO_STACKS, PALETTES } from "../../theme.js";
 
 // Derived from the registries so adding a font or a palette to theme.js surfaces
@@ -18,6 +19,12 @@ const DEFAULTS = {
 
 export default function AppearancePanel({ onClose }) {
   const { C, T, space, radius, elev, theme, setTheme, prefs, setPrefs } = useTheme();
+
+  // Every font chip below previews itself in its own family, but the app only
+  // loads the family it is currently using. Without this the four non-baseline
+  // chips render in the fallback face — you cannot see what you are picking
+  // until you have already picked it.
+  useEffect(() => { preloadAllFonts(); }, []);
 
   const wrap = {
     position: "absolute", top: "100%", right: 0, marginTop: space[2],

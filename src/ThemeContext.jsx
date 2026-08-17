@@ -58,6 +58,24 @@ function ensureFont(family) {
   document.head.appendChild(link);
 }
 
+/**
+ * Load every offered family, not just the selected one.
+ *
+ * On-demand loading is right for the app at large, but it breaks the one surface
+ * that has to render several families at once: the font pickers in
+ * AppearancePanel preview each option in its own face, and an unselected family
+ * has no @font-face registered at all — so all four non-baseline chips rendered
+ * in the fallback and looked broken. You could not see what you were choosing
+ * until after you chose it.
+ *
+ * Call this when a surface needs the whole set. Deliberately NOT called at boot:
+ * it is four extra stylesheet + woff2 fetches, worth paying only at the moment
+ * the user opens the appearance controls.
+ */
+export function preloadAllFonts() {
+  for (const family of Object.keys(FONT_HREFS)) ensureFont(family);
+}
+
 export function ThemeProvider({ children }) {
   const [theme, setThemeState] = useState(() => {
     try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
