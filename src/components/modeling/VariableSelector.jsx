@@ -18,7 +18,7 @@
 //   rows               {object[]}  – for the popover's distinct-values JS fallback
 //   duckdbTableName    {string}    – for the popover's full-table distinct-values fetch
 
-import { VarPanel, mono, useTheme } from "./shared.jsx";
+import { VarPanel, useTheme } from "./shared.jsx";
 
 // Models that expose an X (Features) selector.
 //
@@ -91,12 +91,12 @@ export default function VariableSelector({
 
   const selStyle = {
     background: C.bg, color: C.text, border: `1px solid ${C.border2}`,
-    borderRadius: 3, padding: "1px 4px", fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10,
+    borderRadius: 3, padding: "1px 4px", fontFamily: T?.code?.fontFamily, fontSize: T?.caption?.fontSize ?? 10,
     flex: 1, minWidth: 0, cursor: "pointer",
   };
   const typeBtnStyle = {
     background: C.surface, color: C.teal, border: `1px solid ${C.teal}`,
-    borderRadius: 3, padding: "1px 6px", fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10,
+    borderRadius: 3, padding: "1px 6px", fontFamily: T?.code?.fontFamily, fontSize: T?.caption?.fontSize ?? 10,
     cursor: "pointer", flexShrink: 0, minWidth: 22, textAlign: "center",
   };
 
@@ -161,7 +161,7 @@ export default function VariableSelector({
       {/* ── Interactions ── */}
       {showInteractions && (
         <div style={{ marginTop: 8, padding: "6px 8px", border: `1px solid ${C.border}`, borderRadius: 4 }}>
-          <div style={{ fontFamily: mono, fontSize: T?.caption?.fontSize ?? 10, color: C.teal, marginBottom: 6, letterSpacing: "0.04em" }}>
+          <div style={{ fontFamily: T?.code?.fontFamily, fontSize: T?.caption?.fontSize ?? 10, color: C.teal, marginBottom: 6, letterSpacing: "0.04em" }}>
             INTERACTIONS
           </div>
           {interactionTerms.map((term, i) => (
@@ -202,8 +202,12 @@ export default function VariableSelector({
           >
             + add
           </button>
+          {/* fontSize below was `(T.caption.fontSize ?? 10) - 1`, but the token is
+              the string "10px", so "10px" - 1 evaluated to NaN and React dropped
+              the property — this hint had no explicit size at all. Caption already
+              sits at the 9px density floor, so there is no smaller step to take. */}
           {interactionTerms.length > 0 && (
-            <div style={{ fontFamily: mono, fontSize: (T?.caption?.fontSize ?? 10) - 1, color: C.textMuted, marginTop: 6 }}>
+            <div style={{ fontFamily: T?.code?.fontFamily, fontSize: T?.caption?.fontSize, color: C.textMuted, marginTop: 6 }}>
               * = main effects + interaction · : = interaction only
             </div>
           )}

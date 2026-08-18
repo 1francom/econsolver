@@ -85,7 +85,7 @@ import CoefficientTestPanel from "../components/modeling/CoefficientTestPanel.js
 import ExtractPanel         from "./modeling/ExtractPanel.jsx";
 import SubsetManager, { applySubsetFilter } from "./wrangling/SubsetManager.jsx";
 import { runPipeline } from "../pipeline/runner.js";
-import { useTheme, mono }  from "../components/modeling/shared.jsx";
+import { useTheme }  from "../components/modeling/shared.jsx";
 import { useSessionLogOptional } from "../services/session/sessionLog.jsx";
 import PlotBuilder          from "./PlotBuilder.jsx";
 import { buildModelPlotPreamble } from "../services/export/modelPlotScript.js";
@@ -165,7 +165,7 @@ function CSResultsPanel({
           borderRadius: 4, fontSize: T.code.fontSize, fontFamily: T.code.fontFamily,
         }}>
           <span style={{ color: C.textMuted }}>Overall ATT: </span>
-          <span style={{ color: overallAtt >= 0 ? C.teal : "#e05c5c" }}>
+          <span style={{ color: overallAtt >= 0 ? C.teal : C.red }}>
             {overallAtt >= 0 ? "+" : ""}{overallAtt.toFixed(4)}
           </span>
           {overallSE != null && (
@@ -289,7 +289,7 @@ function CSResultsPanel({
                     <td style={{ textAlign: "right", padding: "6px 14px", color: C.textDim }}>
                       {c.e != null ? c.e : (c.t != null && c.g != null ? c.t - c.g : "—")}
                     </td>
-                    <td style={{ textAlign: "right", padding: "6px 14px", color: c.att >= 0 ? C.teal : "#e05c5c" }}>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: c.att >= 0 ? C.teal : C.red }}>
                       {c.att?.toFixed(4) ?? "—"}
                     </td>
                     <td style={{ textAlign: "right", padding: "6px 14px", color: C.textDim }}>
@@ -304,7 +304,7 @@ function CSResultsPanel({
                       {p != null ? (p < 0.001 ? "<0.001" : p.toFixed(4)) : "—"}
                       <span style={{ marginLeft: 5, color: C.gold }}>{stars(p)}</span>
                     </td>
-                    <td style={{ textAlign: "right", padding: "6px 14px", color: c.isPre ? "#e05c5c" : C.teal }}>
+                    <td style={{ textAlign: "right", padding: "6px 14px", color: c.isPre ? C.red : C.teal }}>
                       {c.isPre ? "pre" : "post"}
                     </td>
                   </tr>

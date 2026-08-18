@@ -1,2 +1,88 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #080808; } /* overridden by ThemeProvider via style.background */
+
+/* ─── Text rendering ────────────────────────────────────────────────────────
+   The single highest-impact sharpness fix in the app. On a near-black ground,
+   Chrome/Safari default to subpixel (RGB) antialiasing, which thickens light
+   text and fringes it with colour — light-on-dark is exactly the case subpixel
+   rendering handles worst. Forcing grayscale antialiasing makes glyph weight
+   match the designed weight instead of blooming.
+
+   These are inherited, so they must live on :root/body rather than being
+   re-declared per component (this codebase styles inline, so there is no other
+   place to put them).                                                        */
+:root {
+  -webkit-font-smoothing: antialiased;   /* grayscale AA — kills the dark-mode bloom */
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;    /* kerning + ligatures over raw speed */
+  font-synthesis: none;                  /* never fake a weight the family lacks */
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  /* Fallback ground until ThemeProvider sets style.background from C.bg.
+     Kept in sync with DARK.bg in src/theme.js — a mismatch shows as a one-frame
+     flash of the wrong colour on load. */
+  background: #0a0a09;
+  /* Fallback stack for the pre-hydration frame: matches the metrics of the
+     default sans closely enough that the swap does not reflow layout. */
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+}
+
+/* SVG text does not inherit -webkit-font-smoothing from an HTML ancestor in
+   every engine, so plot axis labels, tick values and legends were rendering
+   with subpixel AA while the surrounding UI did not. That inconsistency is
+   most visible exactly where it matters least to have it: numeric tick labels. */
+svg text {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Axis rules, gridlines and zero-lines are 1px strokes. Left to geometric
+   antialiasing they land on half-pixel boundaries and smear into a 2px grey
+   band, which is what made plots read as soft next to the crisp UI chrome.
+   crispEdges snaps them to the pixel grid. Scoped to straight-line marks only —
+   applying it to paths/circles would alias curves into staircases. */
+svg [aria-label$="rule"] line,
+svg [aria-label$="rule"] path,
+svg [aria-label="x-grid"] line,
+svg [aria-label="y-grid"] line,
+svg .tick line {
+  shape-rendering: crispEdges;
+}
+
+/* ─── Theme bridge ──────────────────────────────────────────────────────────
+   Stylesheet rules cannot read the React context, so ThemeProvider mirrors a
+   few palette tokens onto :root as custom properties. The hex fallbacks below
+   are the DARK values, used only for the frame before hydration. Keep them in
+   sync with DARK in src/theme.js.                                            */
+
+/* Focus visibility: the app is entirely inline-styled with no :focus handling,
+   so keyboard focus was invisible. :focus-visible only matches keyboard focus,
+   so mouse users see no change. */
+:focus-visible {
+  outline: 1px solid var(--c-gold, #c8a96e);
+  outline-offset: 1px;
+}
+
+/* Scrollbars: the default Chrome scrollbar is a bright stripe that breaks a
+   near-black panel, and a dark stripe that breaks a white one. Themed both ways. */
+* { scrollbar-width: thin; scrollbar-color: var(--c-border3, #3a3a35) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--c-border2, #2e2e2a);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--c-border3, #3a3a35);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* Native form controls (date pickers, selects, checkboxes) render their own
+   chrome from the OS light/dark setting, not from ours — a light-mode date
+   input on a dark panel was a white block. color-scheme flips them. */
+:root { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }

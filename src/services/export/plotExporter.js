@@ -4,6 +4,8 @@
 // and serialize to SVG (download) or rasterise to PNG (via offscreen canvas).
 // Pure JS, no React, no external deps.
 
+import { DARK } from "../../theme.js";
+
 // ─── PRESETS ─────────────────────────────────────────────────────────────────
 export const PRESETS = {
   default:      { label: "Default",      bg: null },          // no transform
@@ -14,30 +16,213 @@ export const PRESETS = {
 
 // ─── COLOR TRANSFORM MAPS ────────────────────────────────────────────────────
 // Applied via string-replace on serialized SVG.
-// Journal: replace dark EconSolver bg with white/light, text with dark.
-const JOURNAL_MAP = [
-  ["#080808", "#ffffff"],
-  ["#0f0f0f", "#ffffff"],
-  ["#131313", "#f5f5f5"],
-  ["#161616", "#f0f0f0"],
-  ["#1c1c1c", "#cccccc"],
-  ["#252525", "#dddddd"],
-  ["#ddd8cc", "#111111"],
-  ["#888888", "#555555"],
-  ["#444444", "#888888"],
-  // keep accent colors as-is (teal #6ec8b4, gold #c8a96e, blue #6e9ec8)
-];
+//
+// These MUST be derived from the palette, not written as literals. They were
+// literals, pinned to a superseded revision of DARK — the moment the palette was
+// refined, every entry stopped matching and the Journal preset silently exported
+// a dark-background figure instead of a white one. A string-replace map keyed on
+// hex values is only ever as correct as its last sync with theme.js.
+//
+// LEGACY_DARK covers plots serialized before the palette refresh (a saved
+// artifact re-exported later), so both generations transform correctly.
 
-// Minimal: same color map as journal but also strip grid/axis lines.
-const MINIMAL_MAP = JOURNAL_MAP;
+const LEGACY_DARK = {
+  bg: "#080808", surface: "#0f0f0f", surface2: "#131313", surface3: "#161616",
+  border: "#1c1c1c", border2: "#252525",
+  text: "#ddd8cc", textDim: "#888888", textMuted: "#444444",
+};
 
-// Presentation: keep dark bg, boost accent visibility (subtle brightening).
-const PRESENTATION_MAP = [
-  // Keep dark bg as-is. Slightly brighten text for readability on projector.
-  ["#ddd8cc", "#f0ece4"],
-  ["#888888", "#aaaaaa"],
-  ["#444444", "#777777"],
-];
+// Journal / Minimal: dark ground → white, light text → dark. Accent colours
+// (teal / gold / blue …) are deliberately left untouched so series stay identifiable.
+function lightenMap() {
+  const pairs = [
+    ["bg",        "#ffffff"],
+    ["surface",   "#ffffff"],
+    ["surface2",  "#f5f5f5"],
+    ["surface3",  "#f0f0f0"],
+    ["border",    "#cccccc"],
+    ["border2",   "#dddddd"],
+    ["text",      "#111111"],
+    ["textDim",   "#555555"],
+    ["textMuted", "#888888"],
+  ];
+  const out = [];
+  for (const [token, to] of pairs) {
+    for (const src of [DARK[token], LEGACY_DARK[token]]) {
+      if (src) out.push([src, to]);
+    }
+  }
+  return out;
+}
+
+// Presentation: keep the dark ground, lift text for projector legibility.
+function presentationMap() {
+  const pairs = [
+    ["text",      "#f0ece4"],
+    ["textDim",   "#aaaaaa"],
+    ["textMuted", "#777777"],
+  ];
+  const out = [];
+  for (const [token, to] of pairs) {
+    for (const src of [DARK[token], LEGACY_DARK[token]]) {
+      if (src) out.push([src, to]);
+    }
+  }
+  return out;
+}
+
+const JOURNAL_MAP      = lightenMap();
+const MINIMAL_MAP      = JOURNAL_MAP;
+const PRESENTATION_MAP = presentationMap();
+
+// ─── STRIP GROUND RECT ───────────────────────────────────────────────────────
+/**
+ * Remove the opaque background rect from a serialized SVG so the export is
+ * transparent (journal-friendly).
+ *
+ * Three call sites (ModelPlots, ResidualPlots, resultDisplay) each carried their
+ * own copy of this as two regexes matching `fill="#080808"` / `fill="#0f0f0f"` —
+ * literal values from a superseded revision of DARK. Once the palette was
+ * refined, none of them matched and every exported SVG silently kept its dark
+ * ground. Centralised here and keyed off the palette so there is one place to
+ * keep in sync, and it covers both the current and the legacy values.
+ */
+export function stripGroundRect(svgString) {
+  const grounds = [
+    DARK.bg, DARK.surface,
+    LEGACY_DARK.bg, LEGACY_DARK.surface,
+  ].filter(Boolean);
+  let s = svgString;
+  for (const hex of new Set(grounds)) {
+    // Escape the leading # for use in a character-class-free pattern.
+    const h = hex.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    s = s.replace(new RegExp(`<rect[^>]*fill="${h}"[^>]*/>`, "gi"), "");
+    s = s.replace(new RegExp(`<rect[^>]*fill="${h}"[^>]*></rect>`, "gi"), "");
+  }
+  return s;
+}
+
+// ─── FONT EMBEDDING ──────────────────────────────────────────────────────────
+// A serialized SVG loaded through `new Image()` from a blob URL is an ISOLATED
+// document: it cannot see the page's <link> to Google Fonts. The family NAME
+// survives serialization, so the SVG asks for "IBM Plex Mono", finds nothing, and
+// falls back to the platform's generic monospace. Result: every exported PNG/SVG
+// used a different typeface from the plot on screen — the axis labels, tick values
+// and legend of a "publication-ready" figure were not the ones the user approved.
+//
+// Fix: resolve the @font-face rules to actual font bytes and inline them as
+// data: URIs inside the SVG, so the isolated document is self-contained.
+//
+// Requires `fonts.googleapis.com` + `fonts.gstatic.com` in the CSP `connect-src`
+// (fetch, NOT style-src/font-src — those govern <link> and url() loads, which is
+// a different directive; see the CSP notes in CLAUDE.md).
+
+const FONT_CSS_URLS = {
+  "IBM Plex Mono":  "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap",
+  "IBM Plex Sans":  "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap",
+  "Inter":          "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
+  "Geist":          "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap",
+  "Plus Jakarta Sans": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap",
+  "JetBrains Mono": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap",
+};
+
+// family → Promise<string> of @font-face CSS with data: URIs. Cached because an
+// export bar can fire repeatedly and the bytes never change within a session.
+const fontCssCache = new Map();
+
+async function toDataURI(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("font fetch " + res.status);
+  const buf = new Uint8Array(await res.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+  return "data:font/woff2;base64," + btoa(bin);
+}
+
+/**
+ * Fetch a family's @font-face rules and rewrite each src url() to a data: URI.
+ * Only the latin subset is embedded — plot text is numbers and column names, and
+ * embedding every unicode-range subset would inflate a downloaded .svg several-fold.
+ * Resolves to "" on any failure: a wrong-typeface export is a much better outcome
+ * than no export at all, so this never rejects into the caller.
+ */
+function embeddedFontCSS(family) {
+  if (fontCssCache.has(family)) return fontCssCache.get(family);
+  const url = FONT_CSS_URLS[family];
+  if (!url) return Promise.resolve("");
+
+  const p = (async () => {
+    try {
+      const cssRes = await fetch(url);
+      if (!cssRes.ok) return "";
+      const css = await cssRes.text();
+      // Google returns one @font-face per weight × unicode-range subset.
+      const blocks = css.match(/@font-face\s*\{[^}]*\}/g) ?? [];
+      const latin = blocks.filter((b) => {
+        const m = b.match(/unicode-range:\s*([^;]+);/);
+        // No unicode-range at all → single-subset file, keep it.
+        return !m || /U\+0{0,3}0-0{0,2}FF/i.test(m[1]) || /U\+0000/i.test(m[1]);
+      });
+      const out = [];
+      for (const block of latin) {
+        const m = block.match(/src:\s*url\((https:\/\/[^)]+\.woff2)\)/);
+        if (!m) continue;
+        try {
+          const dataUri = await toDataURI(m[1]);
+          out.push(block.replace(m[1], dataUri));
+        } catch { /* skip this subset, keep the others */ }
+      }
+      return out.join("\n");
+    } catch {
+      return "";
+    }
+  })();
+
+  fontCssCache.set(family, p);
+  return p;
+}
+
+/** Families referenced by name anywhere in a serialized SVG string. */
+function familiesUsedIn(svgString) {
+  return Object.keys(FONT_CSS_URLS).filter((f) => svgString.includes(f));
+}
+
+/**
+ * Inject a <style> carrying self-contained @font-face rules for every family the
+ * SVG references. Returns the SVG string unchanged if nothing could be embedded.
+ */
+export async function inlineFonts(svgString) {
+  const families = familiesUsedIn(svgString);
+  if (!families.length) return svgString;
+  const cssParts = await Promise.all(families.map(embeddedFontCSS));
+  const css = cssParts.filter(Boolean).join("\n");
+  if (!css) return svgString;
+  const style = `<style type="text/css"><![CDATA[\n${css}\n]]></style>`;
+  // Insert immediately after the opening <svg …> tag.
+  return svgString.replace(/(<svg\b[^>]*>)/, `$1${style}`);
+}
+
+// ─── EXPORT BACKGROUND ───────────────────────────────────────────────────────
+/**
+ * Resolve the canvas fill for a rasterised export.
+ *
+ * A preset that declares a background wins. Otherwise ("default" preset, bg:null)
+ * the figure must keep the ground it was rendered against — this used to fall back
+ * to a hardcoded "#080808", so exporting from light mode produced dark-on-dark
+ * text on a near-black canvas. Reading the live element's computed background
+ * follows the active theme without the exporter needing to know about it.
+ */
+export function resolveExportBg(preset, el) {
+  const declared = PRESETS[preset]?.bg;
+  if (declared) return declared;
+  let node = el;
+  while (node && node.nodeType === 1) {
+    const bg = getComputedStyle(node).backgroundColor;
+    if (bg && bg !== "transparent" && !/rgba\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(bg)) return bg;
+    node = node.parentElement;
+  }
+  return DARK.bg;
+}
 
 // ─── APPLY PRESET ─────────────────────────────────────────────────────────────
 /**
@@ -182,7 +367,7 @@ export function appendLegend(svgEl, items, width, height) {
  * @param {string} filename            — base filename without extension
  * @param {string} preset              — key from PRESETS
  */
-export function downloadSVG(el, filename = "plot", preset = "default") {
+export async function downloadSVG(el, filename = "plot", preset = "default") {
   const svg = getSVGElement(el);
   if (!svg) return;
   const legendItems = getLegendItems(el, svg);
@@ -194,6 +379,7 @@ export function downloadSVG(el, filename = "plot", preset = "default") {
   }
   let src = new XMLSerializer().serializeToString(clone);
   src = applyPreset(src, preset);
+  src = await inlineFonts(src);
   src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
   const blob = new Blob([src], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -212,7 +398,7 @@ export function downloadSVG(el, filename = "plot", preset = "default") {
  * @param {string} preset              — key from PRESETS
  * @param {number} scale               — pixel multiplier (default 2 for retina)
  */
-export function downloadPNG(el, filename = "plot", preset = "default", scale = 2) {
+export async function downloadPNG(el, filename = "plot", preset = "default", scale = 2) {
   const svg = getSVGElement(el);
   if (!svg) return;
   const legendItems = getLegendItems(el, svg);
@@ -231,8 +417,9 @@ export function downloadPNG(el, filename = "plot", preset = "default", scale = 2
 
   let src = new XMLSerializer().serializeToString(clone);
   src = applyPreset(src, preset);
+  src = await inlineFonts(src);
 
-  const bgColor = PRESETS[preset]?.bg ?? "#080808";
+  const bgColor = resolveExportBg(preset, el);
   const blob = new Blob([src], { type: "image/svg+xml" });
   const url  = URL.createObjectURL(blob);
   const img  = new Image();
@@ -272,7 +459,7 @@ export async function downloadCombinedPNG(elA, elB, filename = "plot_combined", 
   const svgB = getSVGElement(elB);
   if (!svgA || !svgB) return;
 
-  function prep(svg) {
+  async function prep(svg) {
     const { width: rawW, height: rawH } = svg.getBoundingClientRect();
     const w = rawW || 600;
     const h = rawH || 360;
@@ -282,6 +469,7 @@ export async function downloadCombinedPNG(elA, elB, filename = "plot_combined", 
     clone.setAttribute("height", String(h));
     let src = new XMLSerializer().serializeToString(clone);
     src = applyPreset(src, preset);
+    src = await inlineFonts(src);
     return { src, w, h };
   }
 
@@ -296,8 +484,8 @@ export async function downloadCombinedPNG(elA, elB, filename = "plot_combined", 
     });
   }
 
-  const { src: srcA, w: wA, h: hA } = prep(svgA);
-  const { src: srcB, w: wB, h: hB } = prep(svgB);
+  const [{ src: srcA, w: wA, h: hA }, { src: srcB, w: wB, h: hB }] =
+    await Promise.all([prep(svgA), prep(svgB)]);
   const [imgA, imgB] = await Promise.all([loadImg(srcA), loadImg(srcB)]);
 
   const totalW = wA + gap + wB;
@@ -307,7 +495,7 @@ export async function downloadCombinedPNG(elA, elB, filename = "plot_combined", 
   canvas.height = totalH * scale;
   const ctx = canvas.getContext("2d");
   ctx.scale(scale, scale);
-  const bgColor = PRESETS[preset]?.bg ?? "#080808";
+  const bgColor = resolveExportBg(preset, elA);
   ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, totalW, totalH);
   ctx.drawImage(imgA, 0,       0, wA, hA);
@@ -331,14 +519,15 @@ export async function downloadGridPNG(els, filename = "compare", { cols = 2, gap
   const svgs = (els || []).map(getSVGElement).filter(Boolean);
   if (!svgs.length) return;
 
-  const prep = (svg) => {
+  const prep = async (svg) => {
     const { width: rawW, height: rawH } = svg.getBoundingClientRect();
     const w = rawW || 480, h = rawH || 200;
     const clone = svg.cloneNode(true);
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     clone.setAttribute("width", String(w));
     clone.setAttribute("height", String(h));
-    return { src: applyPreset(new XMLSerializer().serializeToString(clone), preset), w, h };
+    const src = await inlineFonts(applyPreset(new XMLSerializer().serializeToString(clone), preset));
+    return { src, w, h };
   };
   const loadImg = (src) => new Promise((resolve, reject) => {
     const url = URL.createObjectURL(new Blob([src], { type: "image/svg+xml" }));
@@ -348,7 +537,7 @@ export async function downloadGridPNG(els, filename = "compare", { cols = 2, gap
     img.src = url;
   });
 
-  const items = svgs.map(prep);
+  const items = await Promise.all(svgs.map(prep));
   const imgs  = await Promise.all(items.map(it => loadImg(it.src)));
   const cellW = Math.max(...items.map(i => i.w));
   const cellH = Math.max(...items.map(i => i.h));

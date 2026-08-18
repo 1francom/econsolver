@@ -3,18 +3,18 @@
 
 import { useState, useEffect } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
-import { MONO_STACK } from "../../theme.js";
 import { getDistinctValues } from "../../services/data/duckdb.js";
 import { jsDistinctValues } from "../../services/data/distinctValuesFallback.js";
 
 // Re-export so consumers can import from one place.
 export { useTheme };
 
-// Static fallback for non-React contexts.
-export { DARK as C } from "../../theme.js";
-
-const tokenMono = MONO_STACK;
-export { tokenMono as mono };
+// NOTE: this module used to also export `DARK as C` and a static `mono` string.
+// Both are gone deliberately. They were snapshots of the dark palette / default
+// mono stack, so any component using them silently ignored the active theme and
+// the user's font choice — a light-mode component reading that `C` would have
+// rendered dark-palette colours on a white ground. Use `useTheme()` and read
+// `C.*` / `T.code.fontFamily` / `T.data.fontFamily` instead.
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 
