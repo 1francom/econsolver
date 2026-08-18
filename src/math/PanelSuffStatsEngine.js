@@ -47,8 +47,26 @@ function sandwich(XtXinv, meat, scale) {
  * @param {number[][]|null} [args.meat]   precomputed Σ êᵢ² x̃ᵢx̃ⱼ (from SQL); null = classical SE
  * @param {string|null} [args.hcType]  "HC0" | "HC1" | null
  */
+// Overall + adjusted R² on the RAW outcome, i.e. the fit of the full model with
+// the absorbed FE included — fixest's "r2"/"ar2" (its "wr2" is R2_within).
+// Needs Σy and Σy² over the UN-demeaned outcome, which buildWithinSuffStats
+// carries as sumYRaw/YtYRaw. Both are null for the FD mode and for any cached
+// suff-stats entry built before those fields existed, hence the null guard —
+// callers then keep the pre-existing "—" rather than a wrong number.
+function rawFitStats(YtYRaw, sumYRaw, n, SSR, df) {
+  if (!Number.isFinite(YtYRaw) || !Number.isFinite(sumYRaw) || !(n > 1)) {
+    return { R2: null, adjR2: null };
+  }
+  const TSS = YtYRaw - (sumYRaw * sumYRaw) / n;
+  if (!(TSS > 0)) return { R2: null, adjR2: null };
+  return {
+    R2:    1 - SSR / TSS,
+    adjR2: df > 0 ? 1 - (SSR / df) / (TSS / (n - 1)) : null,
+  };
+}
+
 export function runFEFromSuffStats({
-  n, n_units, XtX, XtY, YtY, sumY, varNames,
+  n, n_units, XtX, XtY, YtY, sumY, sumYRaw = null, YtYRaw = null, varNames,
   meat = null, hcType = null,
 }) {
   if (typeof hcType === "string") hcType = hcType.toUpperCase();
@@ -70,6 +88,7 @@ export function runFEFromSuffStats({
   // SST_within of recentered ỹ
   const SST = YtY - (sumY * sumY) / n;
   const R2_within = SST > 0 ? 1 - SSR / SST : 0;
+  const { R2, adjR2 } = rawFitStats(YtYRaw, sumYRaw, n, SSR, df_fe);
 
   let se;
   if (meat !== null) {
@@ -96,6 +115,7 @@ export function runFEFromSuffStats({
     pVals:    pVals.slice(1),
     varNames: varNames.slice(1),
     R2_within,
+    R2, adjR2,
     R2_between: null,    // not computable from suff stats alone
     n,
     units: n_units,
@@ -122,7 +142,7 @@ export function runFEFromSuffStats({
  * Matches PanelEngine.runTWFEDiD df convention.
  */
 export function runTWFEFromSuffStats({
-  n, n_units, n_times, XtX, XtY, YtY, sumY, varNames,
+  n, n_units, n_times, XtX, XtY, YtY, sumY, sumYRaw = null, YtYRaw = null, varNames,
   meat = null, hcType = null,
 }) {
   if (typeof hcType === "string") hcType = hcType.toUpperCase();
@@ -142,6 +162,7 @@ export function runTWFEFromSuffStats({
 
   const SST = YtY - (sumY * sumY) / n;
   const R2_within = SST > 0 ? 1 - SSR / SST : 0;
+  const { R2, adjR2 } = rawFitStats(YtYRaw, sumYRaw, n, SSR, df_fe);
 
   let se;
   if (meat !== null) {
@@ -166,6 +187,7 @@ export function runTWFEFromSuffStats({
     pVals:    pVals.slice(1),
     varNames: varNames.slice(1),
     R2_within,
+    R2, adjR2,
     R2_between: null,
     n,
     units: n_units,

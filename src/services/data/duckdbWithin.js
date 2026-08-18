@@ -102,6 +102,12 @@ export async function buildWithinSuffStats(tableName, yCol, xCols, unitCol, opts
     finalProj.push(`base._u_ AS _u_`);
     finalProj.push(`base._g AS _g`);
     if (timeCol) finalProj.push(`base._t_h AS _t_h`);
+    // Raw (un-demeaned) outcome, carried so the overall/adjusted R² — the fit of
+    // the full model INCLUDING the absorbed FE, which is what fixest reports as
+    // "Adj. R2" — can be computed in the same pass. Without it the SQL fast path
+    // could only report Within R², so those tiles read "—" above the dispatch
+    // threshold while the JS path below it filled them in.
+    finalProj.push(`base._yb_ AS _yraw_`);
 
     withinCTEPrefix = `WITH ${baseCTE},
       um AS (SELECT ${umAggs.join(", ")} FROM base GROUP BY _u_),
@@ -154,6 +160,7 @@ export async function buildWithinSuffStats(tableName, yCol, xCols, unitCol, opts
       );
     }
     finalProj.push(`base._u_ AS _u_`, `base._t_ AS _t_`, `base._g AS _g`, `base._t_h AS _t_h`);
+    finalProj.push(`base._yb_ AS _yraw_`);   // see the FE branch — raw y for overall/adj R²
 
     withinCTEPrefix = `WITH ${baseCTE},
       um AS (SELECT ${umAggs.join(", ")} FROM base GROUP BY _u_),
@@ -176,6 +183,12 @@ export async function buildWithinSuffStats(tableName, yCol, xCols, unitCol, opts
     `SUM(_y_ * _y_) AS yty`,
   ];
   if (mode === "TWFE") aggs.push(`COUNT(DISTINCT _t_) AS n_times`);
+  // FD is deliberately excluded: its regression IS on differences, so its R² is
+  // already the right one (matching runFDMulti), and wf has no _yraw_ there.
+  if (mode === "FE" || mode === "TWFE") {
+    aggs.push(`SUM(_yraw_) AS sum_yraw`);
+    aggs.push(`SUM(_yraw_ * _yraw_) AS yty_raw`);
+  }
   for (let i = 0; i < k; i++) {
     aggs.push(`SUM(_x_${i}) AS sum_x_${i}`);
     aggs.push(`SUM(_x_${i} * _y_) AS sum_xy_${i}`);
@@ -196,6 +209,9 @@ export async function buildWithinSuffStats(tableName, yCol, xCols, unitCol, opts
   const nTimes  = mode === "TWFE" ? num(r.n_times) : null;
   const sumY    = num(r.sum_y);
   const YtY     = num(r.yty);
+  const hasRaw  = mode === "FE" || mode === "TWFE";
+  const sumYRaw = hasRaw ? num(r.sum_yraw) : null;
+  const YtYRaw  = hasRaw ? num(r.yty_raw)  : null;
 
   // Sanity guard for TWFE degenerate panels
   if (mode === "TWFE" && (nUnits < 2 || nTimes < 2)) return null;
@@ -224,6 +240,7 @@ export async function buildWithinSuffStats(tableName, yCol, xCols, unitCol, opts
   return {
     n, n_units: nUnits, n_times: nTimes,
     XtX, XtY, YtY, sumY,
+    sumYRaw, YtYRaw,
     varNames: ["(Intercept)", ...xCols],
     mode, unitCol, timeCol: (mode === "FD" || mode === "TWFE") ? timeCol : null,
     withinCTEPrefix,

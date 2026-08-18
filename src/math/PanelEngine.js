@@ -155,6 +155,18 @@ export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
   const SST_w   = dmYvals.reduce((s, v) => s + (v - dmYmean) ** 2, 0);
   const R2_within = 1 - res.SSR / SST_w;
 
+  // R² overall + adjusted R², on the RAW (un-demeaned) outcome — i.e. the fit of
+  // the full model including the absorbed FE, which is what fixest reports as
+  // "Adj. R2" (its "Within R2" is R2_within above). df_fe already counts the FE
+  // levels as parameters, so adj-R² = 1 − (SSR/df_fe)/(TSS/(n−1)) matches fixest.
+  const yVals  = valid.map(r => r[yCol]);
+  const yMean  = yVals.reduce((a, b) => a + b, 0) / yVals.length;
+  const SST_t  = yVals.reduce((s, v) => s + (v - yMean) ** 2, 0);
+  const R2      = SST_t > 0 ? 1 - res.SSR / SST_t : null;
+  const adjR2   = SST_t > 0 && valid.length > 1
+    ? 1 - (res.SSR / df_fe) / (SST_t / (valid.length - 1))
+    : null;
+
   // Recovered fixed effects (fixest::fixef equivalent), so the levels can be
   // written back as columns. Computed from the partial residual y − xβ, NOT
   // from the within regression, which sweeps them out. See recoverFixedEffects
@@ -168,7 +180,13 @@ export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
     pVals:    corrP.slice(1),
     varNames: xCols,
     R2_within,
+    R2,
+    adjR2,
     n:    valid.length,
+    // Entity count for the FIRST FE dimension — the "Units" the UI reports.
+    // runFE's single-way wrapper overrides this with its own count; they agree
+    // by construction (same valid set, same column).
+    units: nLevels[0],
     feCols,
     nLevels,          // level count per FE dimension, in feCols order
     fixef,            // { estimates, perRow, intercept, normalization, warnings }

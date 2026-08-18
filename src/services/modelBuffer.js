@@ -44,11 +44,28 @@ export async function setProject(pid) {
   _buf = Array.isArray(rec?.models) ? rec.models : [];
 }
 
+// Panel estimation returns a WRAPPER — { type:"FE", fe: <EstimationResult>, fd: null }
+// — because PanelResults renders FE and FD side by side under one tab strip.
+// The buffer must hold real EstimationResults: everything downstream reads flat
+// fields (ModelBufferBar's `n`, the restore path's `spec`, ModelComparison's
+// `beta`/`se`, and trimResult, which keeps NONE of the wrapper's keys — so a
+// pinned panel model survived a reload as an empty husk). Unwrap on the way in;
+// keys set on the wrapper at pin time (label, subsetName, datasetId) win.
+function unwrapPanel(r) {
+  const inner = r?.fe ?? r?.fd;
+  if (!inner) return r;
+  const { fe, fd, ...wrapperExtras } = r;
+  return { ...inner, ...wrapperExtras };
+}
+
 export function add(result) {
   if (!result) return null;
+  result = unwrapPanel(result);
   // Evict oldest if full
   if (_buf.length >= MAX) _buf = _buf.slice(_buf.length - MAX + 1);
-  const id = result.id ?? genId();
+  // EstimationResults carry their own uuid, so pinning the same result twice
+  // would otherwise put two entries under one id (remove/get would hit both).
+  const id = (result.id && !_buf.some(r => r.id === result.id)) ? result.id : genId();
   const entry = { ...result, id };
   _buf = [..._buf, entry];
   _persist();
