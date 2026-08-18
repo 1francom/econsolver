@@ -117,6 +117,17 @@ function buildDecision(step, before, after) {
       return `Unified ${n} category variant${n !== 1 ? "s" : ""} in "${step.col}" to canonical forms.`;
     }
 
+    case "country_code": {
+      // Matched/unmatched counts are frozen onto the step at Apply time in
+      // FeatureTab.jsx (the same distinct-value pass that built s.map) —
+      // recomputing from before/after rows here would double the work for
+      // no new information, unlike winz below which has no such record.
+      const n = Object.keys(step.map ?? {}).length;
+      const unmatched = step.unmatchedCount ?? 0;
+      return `Country code: "${step.col}" → "${step.nn}" (${step.destination}), ${n} matched` +
+             (unmatched ? `, ${unmatched} unmatched → null.` : ".");
+    }
+
     case "winz": {
       const winsorized = before.rows.filter(r => {
         const v = r[step.col];

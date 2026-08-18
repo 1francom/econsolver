@@ -1,7 +1,9 @@
 // ─── ECON STUDIO · components/wrangling/FeatureTab.jsx ─────────────────────
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useTheme, Lbl, Collapsible, Btn } from "./shared.jsx";
-import { computeColStats } from "../../services/data/duckdb.js";
+import { computeColStats, getDistinctValues } from "../../services/data/duckdb.js";
+import { jsDistinctValues } from "../../services/data/distinctValuesFallback.js";
+import { matchCountry } from "../../services/data/countryCodes.js";
 const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import FormatTab from "./FormatTab.jsx";
@@ -569,6 +571,12 @@ function FeatureEngineeringTab({rows,headers,panel,info,onAdd,duckdbTableName}){
   const [dateParts,setDateParts]=useState({year:false,month:true,day:false,week:false,quarter:false,dow:false,isweekend:false});
   const [dateNames,setDateNames]=useState({year:"",month:"",day:"",week:"",quarter:"",dow:"",isweekend:""});
   const [dateParseMode,setDateParseMode]=useState("YYYYMMDD");
+  // Country code state
+  const [ccSrc,setCcSrc]=useState("");
+  const [ccDest,setCcDest]=useState("iso3");
+  const [ccNn,setCcNn]=useState("");
+  const [ccPreview,setCcPreview]=useState(null); // {resolved:[{value,count,match}], total, unmatchedCount}
+  const [ccLoading,setCcLoading]=useState(false);
 
   const numC=headers.filter(h=>info[h]?.isNum);
 
@@ -678,6 +686,58 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
     setDateNames({year:"",month:"",day:"",week:"",quarter:"",dow:"",isweekend:""});
   };
   const canExtract=dateSrc&&Object.values(dateParts).some(Boolean);
+
+  // ── Country code ──────────────────────────────────────────────────────────
+  // Auto-suggested output column name — same "editable, resets only if the
+  // user hasn't touched it" convention as the other transforms in this tab.
+  const prevCcAutoRef=useRef("");
+  useEffect(()=>{
+    const auto=ccSrc?`${ccSrc}_${ccDest}`:"";
+    if(ccNn===""||ccNn===prevCcAutoRef.current){setCcNn(auto);prevCcAutoRef.current=auto;}
+  },[ccSrc,ccDest]);
+
+  // Preview, automatic on column/destination change — resolves EVERY distinct
+  // value currently in the column (full dataset via DuckDB, not the 500-row
+  // JS preview: an unmatched value past row 500 would otherwise miss the
+  // preview and still end up null post-Apply with no warning).
+  useEffect(()=>{
+    if(!ccSrc){setCcPreview(null);return;}
+    let cancelled=false;
+    setCcLoading(true);
+    (async()=>{
+      try{
+        const d = duckdbTableName
+          ? await getDistinctValues(duckdbTableName, ccSrc)
+          : jsDistinctValues(rows, ccSrc);
+        if(cancelled) return;
+        const resolved = d.values.map(({value,count})=>({value,count,match:matchCountry(value)}));
+        const unmatchedCount = resolved.filter(r=>!r.match).reduce((s,r)=>s+r.count,0);
+        setCcPreview({resolved,total:d.total,unmatchedCount});
+      } finally {
+        if(!cancelled) setCcLoading(false);
+      }
+    })();
+    return ()=>{cancelled=true;};
+  },[ccSrc,duckdbTableName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const doCountryCode=()=>{
+    if(!ccSrc||!ccPreview) return;
+    const n=ccNn.trim();if(!n)return;
+    // Freeze the resolution into a literal map — runner.js and every exporter
+    // only ever see this dictionary, never countryCodes.js's alias table.
+    const map={};
+    let unmatched=0;
+    for(const {value,match} of ccPreview.resolved){
+      if(match) map[String(value)]=match[ccDest];
+      else unmatched++;
+    }
+    const destLabel={iso2:"ISO2",iso3:"ISO3",name:"Name",continent:"Continent"}[ccDest];
+    onAdd({type:"country_code",col:ccSrc,nn:n,destination:ccDest,map,unmatchedCount:unmatched,
+      desc:`Country code: ${ccSrc} → ${n} (${destLabel}, ${Object.keys(map).length} matched${unmatched?`, ${unmatched} unmatched`:""})`});
+    setCcSrc("");setCcNn("");setCcPreview(null);prevCcAutoRef.current="";
+  };
+  const ccMatchedDistinct=ccPreview?ccPreview.resolved.filter(r=>r.match).length:0;
+  const ccUnmatchedDistinct=ccPreview?ccPreview.resolved.length-ccMatchedDistinct:0;
 
   const inpS={width:"100%",boxSizing:"border-box",padding:"0.42rem 0.65rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"};
 
@@ -866,6 +926,75 @@ const doDiD=()=>{const n=nm.trim()||`${dtc}_x_${dpc}`;if(!dtc||!dpc)return;onAdd
             </div>
           )}
           <Btn onClick={doDateExtract} color={C.violet} v="solid" dis={!canExtract} ch="Add date steps →"/>
+        </div>
+      )}
+      </Collapsible>
+
+      {/* ── Country code ── */}
+      <Collapsible title="Country code" color={C.blue}>
+      {(
+        <div>
+          <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.blue}`,borderRadius:4,marginBottom:"1.2rem",fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.6}}>
+            Convert a country identifier (name, ISO2, or ISO3) to another format. Equivalent to R's <span style={{color:C.gold}}>countrycode()</span>. Unmatched values become <span style={{color:C.gold}}>null</span> — check the preview below before applying.
+          </div>
+
+          {/* Source column — any column, not just numeric */}
+          <Lbl color={C.blue}>Source column</Lbl>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:"1.1rem"}}>
+            {headers.map(h=>(
+              <button key={h} onClick={()=>setCcSrc(h)}
+                style={{display:"flex",alignItems:"center",gap:5,padding:"0.28rem 0.6rem",
+                  border:`1px solid ${ccSrc===h?C.blue:C.border2}`,
+                  background:ccSrc===h?`${C.blue}18`:"transparent",
+                  color:ccSrc===h?C.blue:C.textDim,
+                  borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
+                {ccSrc===h?"✓ ":""}{h}
+              </button>
+            ))}
+          </div>
+
+          {/* Destination */}
+          <Lbl color={C.blue}>Destination</Lbl>
+          <div style={{display:"flex",gap:6,marginBottom:"1.1rem"}}>
+            {[["iso2","ISO2"],["iso3","ISO3"],["name","Name"],["continent","Continent"]].map(([k,l])=>(
+              <button key={k} onClick={()=>setCcDest(k)}
+                style={{padding:"0.3rem 0.75rem",border:`1px solid ${ccDest===k?C.blue:C.border2}`,
+                  background:ccDest===k?`${C.blue}18`:"transparent",
+                  color:ccDest===k?C.blue:C.textDim,
+                  borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.12s"}}>
+                {ccDest===k?"✓ ":""}{l}
+              </button>
+            ))}
+          </div>
+
+          {ccSrc&&(<>
+            <Lbl color={C.blue}>Output column name</Lbl>
+            <input value={ccNn} onChange={e=>{setCcNn(e.target.value);prevCcAutoRef.current="";}}
+              placeholder={`${ccSrc}_${ccDest}`}
+              style={{...inpS,marginBottom:"1.1rem"}}/>
+
+            {/* Preview — matched/unmatched summary + a few offending values,
+                mirroring the Distinct Values panel's own presentation. */}
+            {ccLoading&&(
+              <div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"0.9rem"}}>Reading distinct values…</div>
+            )}
+            {!ccLoading&&ccPreview&&(
+              <div style={{padding:"0.55rem 0.85rem",background:C.surface,border:`1px solid ${ccUnmatchedDistinct?C.orange:C.border}`,borderRadius:3,marginBottom:"0.9rem",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,lineHeight:1.7}}>
+                <div style={{color:C.textDim}}>
+                  <span style={{color:C.teal}}>{ccMatchedDistinct}</span>/{ccPreview.resolved.length} distinct value{ccPreview.resolved.length===1?"":"s"} matched
+                  {ccPreview.total>ccPreview.resolved.length?` (top ${ccPreview.resolved.length.toLocaleString()} of ${ccPreview.total.toLocaleString()} by frequency)`:""}
+                </div>
+                {ccUnmatchedDistinct>0&&(
+                  <div style={{color:C.orange,marginTop:3}}>
+                    {ccUnmatchedDistinct} unmatched → null ({ccPreview.unmatchedCount.toLocaleString()} row{ccPreview.unmatchedCount===1?"":"s"}): {" "}
+                    {ccPreview.resolved.filter(r=>!r.match).slice(0,8).map(r=>String(r.value)).join(", ")}
+                    {ccUnmatchedDistinct>8?", …":""}
+                  </div>
+                )}
+              </div>
+            )}
+            <Btn onClick={doCountryCode} color={C.blue} v="solid" dis={!ccNn.trim()||!ccPreview} ch="Add country_code step →"/>
+          </>)}
         </div>
       )}
       </Collapsible>

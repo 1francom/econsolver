@@ -1690,6 +1690,20 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    case "country_code": {
+      // s.map is a frozen exact-match dictionary built once in FeatureTab.jsx
+      // from countryCodes.js#matchCountry() — this case never resolves a
+      // country name itself, same contract as recode/normalize_cats.
+      const map = s.map || {};
+      R = rows.map(r => {
+        const v = r[s.col];
+        const k = v != null ? String(v) : null;
+        return { ...r, [s.nn]: (k != null && map[k] !== undefined) ? map[k] : null };
+      });
+      if (!H.includes(s.nn)) H = [...H, s.nn];
+      break;
+    }
+
     // ── SPATIAL STEPS ─────────────────────────────────────────────────────────
     // Column-adding spatial ops. All SpatialEngine calls are pure sync JS.
     // Steps referencing another dataset resolve it via context.datasets[id]

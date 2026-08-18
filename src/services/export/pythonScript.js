@@ -393,6 +393,12 @@ function transpileStep(step, allDatasets = {}) {
       if (!step.map || !Object.keys(step.map).length) return `# normalize_cats: no mapping specified`;
       return `df[${pyStr(step.col)}] = df[${pyStr(step.col)}].replace(${JSON.stringify(step.map)})`;
     }
+    case "country_code": {
+      // Writes to a NEW column; no fallback — .map() already yields NaN for
+      // an unmapped key, which is the correct "unmatched" result here.
+      const map = step.map ?? {};
+      return `df[${pyStr(step.nn)}] = df[${pyStr(step.col)}].map(${JSON.stringify(map)})`;
+    }
     case "trim_outliers":
       // Fixed bounds captured at step-creation time (matches the app + R script).
       return `df = df[(df[${pyStr(step.col)}] >= ${Number(step.lo)}) & (df[${pyStr(step.col)}] <= ${Number(step.hi)})].reset_index(drop=True)`;

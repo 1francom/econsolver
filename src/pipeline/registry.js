@@ -570,6 +570,37 @@ export const STEP_REGISTRY = [
     defaultStep: () => ({ type: "geocode", addressCol: "", latCol: "lat", lonCol: "lon", provider: "photon", bbox: "11.35,48.02,11.75,48.25", endpoint: "" }),
   },
 
+  {
+    type: "country_code",
+    label: "Country code / continent",
+    category: "features",
+    // internal: true — the AI cannot safely fabricate `map` without the
+    // dataset's real distinct values (same reasoning as sp_* and patch).
+    // The alias table (countryCodes.js) is resolved once in FeatureTab.jsx
+    // and frozen into `map` before onAdd() — see the spec's "UI-time only"
+    // note. runner.js and the R/Python/Stata exporters only ever see a
+    // plain exact-match dictionary, never the alias table itself.
+    internal: true,
+    description: "Convert a country identifier (name, ISO2, or ISO3) to another format — ISO2, ISO3, English name, or continent. Equivalent to R's countrycode(). Unmatched values become null.",
+    schema: [
+      { key: "col", type: "col", label: "Source column" },
+      { key: "destination", type: "select", label: "Destination", options: [
+        { value: "iso2",      label: "ISO2" },
+        { value: "iso3",      label: "ISO3" },
+        { value: "name",      label: "Name" },
+        { value: "continent", label: "Continent" },
+      ]},
+      { key: "nn",  type: "text", label: "Output column name" },
+      { key: "map", type: "map",  label: "Resolved value map (frozen at Apply time)" },
+    ],
+    toLabel: s => {
+      const n = Object.keys(s.map || {}).length;
+      const unmatched = s.unmatchedCount ?? 0;
+      return `country_code ${s.col} → ${s.nn} (${s.destination}, ${n} matched${unmatched ? `, ${unmatched} unmatched` : ""})`;
+    },
+    defaultStep: () => ({ type: "country_code", col: "", nn: "", destination: "iso3", map: {}, unmatchedCount: 0 }),
+  },
+
   // ── RESHAPE ─────────────────────────────────────────────────────────────────
 
   {

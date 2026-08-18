@@ -246,6 +246,16 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       return `${dfVar} <- ${dfVar} |> mutate(${col} = dplyr::case_match(${col},\n${cases},\n  .default = ${col}\n))`;
     }
 
+    case "country_code": {
+      // Differs from recode: writes to a NEW column (nn), and an unmatched
+      // value stays NA rather than falling back to the original value.
+      const map     = step.map ?? {};
+      const entries = Object.entries(map);
+      if (!entries.length) return `${dfVar} <- ${dfVar} |> mutate(${nn} = NA_character_)`;
+      const cases = entries.map(([k, v]) => `  ${rStr(k)} ~ ${rStr(v)}`).join(",\n");
+      return `${dfVar} <- ${dfVar} |> mutate(${nn} = dplyr::case_match(${col},\n${cases},\n  .default = NA_character_\n))`;
+    }
+
     case "distinct": {
       const cols = step.subset?.length ? `, ${step.subset.map(rName).join(", ")}` : "";
       return `${dfVar} <- ${dfVar} |> distinct(${cols.replace(/^, /, "")}${cols ? ", " : ""}.keep_all = TRUE)`;

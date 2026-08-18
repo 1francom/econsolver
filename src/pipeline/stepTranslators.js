@@ -483,6 +483,17 @@ export function toR(step, df = "df", allDatasets = {}) {
       return `${df} <- ${df} |> mutate(${col} = dplyr::case_match(${col},\n${cases},\n  .default = ${col}\n))`;
     }
 
+    case "country_code": {
+      // Differs from recode: writes to a NEW column (nn), and an unmatched
+      // value stays NA rather than falling back to the original value — the
+      // step's own map only ever contains entries matchCountry() resolved.
+      const map     = step.map ?? {};
+      const entries = Object.entries(map);
+      if (!entries.length) return `${df} <- ${df} |> mutate(${nn} = NA_character_)`;
+      const cases = entries.map(([k, v]) => `  ${rStr(k)} ~ ${rStr(v)}`).join(",\n");
+      return `${df} <- ${df} |> mutate(${nn} = dplyr::case_match(${col},\n${cases},\n  .default = NA_character_\n))`;
+    }
+
     case "winz": {
       const lo  = Number(step.lo).toFixed(6);
       const hi  = Number(step.hi).toFixed(6);
@@ -1041,6 +1052,18 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return Object.entries(map)
         .map(([k, val]) => `replace ${v} = "${val}" if ${v} == "${k}"`)
         .join("\n");
+    }
+
+    case "country_code": {
+      // Writes to a new string variable o. Unmatched rows keep Stata's
+      // empty string ("") by omission — there is no fallback branch,
+      // matching R/Python's NA/NaN for the same unmatched case.
+      const map     = step.map ?? {};
+      const entries = Object.entries(map);
+      return [
+        `generate ${o} = ""`,
+        ...entries.map(([k, val]) => `replace ${o} = "${val}" if ${v} == "${k}"`),
+      ].join("\n");
     }
 
     case "winz": {
@@ -1630,6 +1653,17 @@ export function toPython(step, df = "df", allDatasets = {}) {
         .map(([k, v]) => `${pyStr(k)}: ${pyStr(v)}`)
         .join(", ") + "}";
       return `${df}[${c}] = ${df}[${c}].map(${mapStr}).fillna(${df}[${c}])`;
+    }
+
+    case "country_code": {
+      // No .fillna(): an unmapped key already yields NaN from .map(), which
+      // is the correct "unmatched" result here — unlike recode, there is no
+      // original value to fall back to (the output is a NEW column).
+      const map    = step.map ?? {};
+      const mapStr = "{" + Object.entries(map)
+        .map(([k, v]) => `${pyStr(k)}: ${pyStr(v)}`)
+        .join(", ") + "}";
+      return `${df}[${o}] = ${df}[${c}].map(${mapStr})`;
     }
 
     case "winz": {

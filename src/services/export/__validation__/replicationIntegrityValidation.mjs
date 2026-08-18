@@ -55,6 +55,7 @@ const CFG = {
   quickclean:    { col: "region", mode: "upper" },
   recode:        { col: "region", map: { north: "N", south: "S" } },
   normalize_cats:{ col: "cat", map: { arg: "Argentina", ARG: "Argentina" } },
+  country_code:  { col: "region", nn: "region_iso3", destination: "iso3", map: { north: "NOR", south: "ZAF" }, unmatchedCount: 0 },
   distinct:      { subset: ["region"], keep: "first" },
   winz:          { col: "wage", lo: 1100, hi: 2400, nn: "wage_w" },
   ai_tr:         { col: "region", js: "value.toUpperCase()" },
