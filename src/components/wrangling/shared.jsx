@@ -4,16 +4,15 @@
 
 import { useState } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
-import { MONO_STACK } from "../../theme.js";
 
 // Re-export useTheme so consumers can import from one place.
 export { useTheme };
 
-// Static fallback for non-React contexts (module-level utils, tests, etc.)
-export { DARK as C } from "../../theme.js";
-
-const tokenMono = MONO_STACK;
-export { tokenMono as mono };
+// NOTE: this module used to also export `DARK as C` and a static `mono` string.
+// Both are gone deliberately — see the matching note in modeling/shared.jsx.
+// They froze the dark palette and the default mono stack at import time, so any
+// consumer silently ignored the active theme and the user's font choice.
+// Use `useTheme()` → `C.*` and `T.code.fontFamily` / `T.data.fontFamily`.
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
 export function Lbl({ children, color, mb = 6 }) {

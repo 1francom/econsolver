@@ -74,11 +74,11 @@ export function GroupTimePlot({ attgt = [], critVal = 1.96 }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, fontFamily: T.body.fontFamily, fontSize: 12, color: C.textMuted }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#e05c5c", display: "inline-block" }} />
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.red, display: "inline-block" }} />
           pre-treatment
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#6ec8b4", display: "inline-block" }} />
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.teal, display: "inline-block" }} />
           post
         </span>
       </div>
@@ -126,7 +126,7 @@ export function GroupTimePlot({ attgt = [], critVal = 1.96 }) {
               {cells.map((c, i) => {
                 const cx = xScale(c.t);
                 const cy = yScale(c.att);
-                const col = c.isPre ? "#e05c5c" : "#6ec8b4";
+                const col = c.isPre ? C.red : C.teal;
                 return (
                   <g key={i}>
                     <line
@@ -211,7 +211,7 @@ export function EventStudyDynamicPlot({ byE = [], critVal = 1.96 }) {
         {/* CI bars + dots */}
         {byE.map((x, i) => {
           const cx = xScale(x.e);
-          const col = x.e < 0 ? "#e05c5c" : "#6ec8b4";
+          const col = x.e < 0 ? C.red : C.teal;
           return (
             <g key={i}>
               <line
@@ -247,11 +247,11 @@ export function EventStudyDynamicPlot({ byE = [], critVal = 1.96 }) {
         ))}
         {/* Legend */}
         <g>
-          <circle cx={fw - PAD.right - 140} cy={18} r={4} fill="#e05c5c" />
+          <circle cx={fw - PAD.right - 140} cy={18} r={4} fill={C.red} />
           <text x={fw - PAD.right - 130} y={22} fontSize={11} fill={C.textMuted} fontFamily={T.body.fontFamily}>
             pre-treatment
           </text>
-          <circle cx={fw - PAD.right - 44} cy={18} r={4} fill="#6ec8b4" />
+          <circle cx={fw - PAD.right - 44} cy={18} r={4} fill={C.teal} />
           <text x={fw - PAD.right - 34} y={22} fontSize={11} fill={C.textMuted} fontFamily={T.body.fontFamily}>
             post
           </text>
@@ -336,7 +336,7 @@ export function GroupAggPlot({ byG = [], critVal = 1.96 }) {
           const cy = yScale(i);
           const cLo = xScale(x.att - critVal * x.se);
           const cHi = xScale(x.att + critVal * x.se);
-          const col = x.att >= 0 ? "#6ec8b4" : "#e05c5c";
+          const col = x.att >= 0 ? C.teal : C.red;
           return (
             <g key={i}>
               <text
@@ -401,7 +401,7 @@ export function CalendarAggPlot({ byT = [], critVal = 1.96 }) {
         {/* Connected line */}
         <polyline
           points={byT.map(x => `${xScale(x.t)},${yScale(x.att)}`).join(" ")}
-          fill="none" stroke="#6ec8b4" strokeWidth={1.5}
+          fill="none" stroke={C.teal} strokeWidth={1.5}
         />
         {/* CI bars + dots */}
         {byT.map((x, i) => (
@@ -409,9 +409,9 @@ export function CalendarAggPlot({ byT = [], critVal = 1.96 }) {
             <line
               x1={xScale(x.t)} x2={xScale(x.t)}
               y1={yScale(x.att - critVal * x.se)} y2={yScale(x.att + critVal * x.se)}
-              stroke="#6ec8b4" strokeWidth={1.5}
+              stroke={C.teal} strokeWidth={1.5}
             />
-            <circle cx={xScale(x.t)} cy={yScale(x.att)} r={4} fill="#6ec8b4" />
+            <circle cx={xScale(x.t)} cy={yScale(x.att)} r={4} fill={C.teal} />
             <text
               x={xScale(x.t)} y={H - PAD.bottom + 18}
               textAnchor="middle" fontSize={11} fill={C.textMuted}

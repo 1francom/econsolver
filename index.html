@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Litux</title>
+
+    <!-- Baseline typography, loaded statically rather than injected by
+         ThemeProvider after mount. Injecting it meant every cold load painted in
+         system-ui first and then reflowed once the stylesheet arrived — that
+         flash read as an unfinished UI. preconnect opens the TLS handshake to
+         the font host in parallel with the CSS request instead of after it.
+         Non-default families (Inter / Geist / Plus Jakarta / JetBrains Mono)
+         still load on demand from ThemeContext when selected. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      crossorigin="anonymous"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    />
     <!-- Import map: pins CDN ESM modules to exact versions with SRI integrity hashes.
          Browser verifies hash before executing — blocks tampered CDN scripts.
          Requires Chrome 112+, Firefox 115+, Safari 17.4+. -->

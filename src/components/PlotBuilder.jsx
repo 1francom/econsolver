@@ -18,7 +18,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "./modeling/shared.jsx";
-import { PLOT_PALETTES, MONO_STACK } from "../theme.js";
+import { PLOT_PALETTES } from "../theme.js";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
 import { buildGgplot, buildMatplotlibPlot, buildStataPlot, resolvePlotPreamble } from "../services/export/plotScript.js";
@@ -563,28 +563,36 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
   return marks;
 }
 
-// ─── PATCH DARK THEME ─────────────────────────────────────────────────────────
-function patchDarkTheme(el) {
+// ─── PATCH PLOT CHROME TO THE ACTIVE THEME ────────────────────────────────────
+// Observable Plot emits its own defaults (black axis rules, a browser-default
+// <figure> legend) that have to be overridden after render.
+//
+// This was `patchDarkTheme(el)` with the dark greys written in as literals, so on
+// the light palette it painted #9a9a9a legend text onto white and near-black
+// #252525 axis rules — it only ever produced a correct result for one of the two
+// themes. It now takes the active palette and type tokens, which also means the
+// legend heading follows the user's mono font choice instead of being pinned to
+// the default stack.
+function patchPlotChrome(el, C, T) {
   el.querySelectorAll("line[stroke='black'], line[stroke='#000']").forEach(l => {
-    l.setAttribute("stroke", "#252525");
+    l.setAttribute("stroke", C.border2);
   });
-  // Patch color legend figures for dark theme
   el.querySelectorAll("figure").forEach(f => {
     f.style.background = "transparent";
-    f.style.color = "#9a9a9a";
+    f.style.color = C.textDim;
     f.style.margin = "0";
   });
   el.querySelectorAll("figure h2").forEach(h => {
-    h.style.fontFamily = MONO_STACK;
-    h.style.fontSize = "9px";
+    h.style.fontFamily = T.code.fontFamily;
+    h.style.fontSize = T.caption.fontSize;
     h.style.letterSpacing = "0.15em";
     h.style.textTransform = "uppercase";
-    h.style.color = "#6a6a6a";
+    h.style.color = C.textMuted;
     h.style.fontWeight = "400";
     h.style.margin = "6px 0 3px";
   });
   el.querySelectorAll("figure span[style]").forEach(s => {
-    s.style.color = "#9a9a9a";
+    s.style.color = C.textDim;
   });
 }
 
@@ -833,7 +841,9 @@ export function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height,
           background: "transparent",
           color:      C.text,
           fontFamily: T.code.fontFamily,
-          fontSize:   "10px",
+          // Was a fixed "10px", so plot text ignored the density preference while
+          // every surrounding label scaled with it.
+          fontSize:   T.caption.fontSize,
           overflow:   "visible",
         },
         x: {
@@ -877,7 +887,7 @@ export function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height,
         color: colorOpts,
         marks,
       });
-      patchDarkTheme(el);
+      patchPlotChrome(el, C, T);
       container.replaceChildren(el);
     } catch (e) {
       container.replaceChildren();
@@ -885,7 +895,12 @@ export function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height,
       if (onRenderError) onRenderError(e.message);
     }
     return () => { if (ref.current) ref.current.replaceChildren(); };
-  }, [Plt, layers, rows, xLabel, yLabel, width, height, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder, facetCol, facetCols]);
+    // C and T belong here: the effect reads C.text / C.textMuted / C.border2 and
+    // T.code.fontFamily when building the plot, and patchPlotChrome() rewrites the
+    // rendered chrome from them. Without them a theme or font switch left every
+    // plot painted in the previous theme until some unrelated dep happened to
+    // change. Safe as deps only because ThemeProvider memoises both identities.
+  }, [Plt, layers, rows, xLabel, yLabel, width, height, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder, facetCol, facetCols, C, T]);
 
   if (err) return <div style={{ color: C.red, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "1.5rem" }}>{err}</div>;
   if (!Plt) return <div style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "1.5rem" }}>Loading Observable Plot…</div>;

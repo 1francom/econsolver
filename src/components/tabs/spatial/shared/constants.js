@@ -1,10 +1,10 @@
 // ─── ECON STUDIO · spatial/shared/constants.js ───────────────────────────────
 // Shared constants and tiny helpers for the Spatial module. Pure JS, no deps.
 
-import { MONO_STACK } from "../../../../theme.js";
-
-const tokenMono = MONO_STACK;
-export { tokenMono as mono };
+// NOTE: this module used to export a static `mono` string (a snapshot of the
+// default mono stack). Nothing imported it, and it could not follow the user's
+// font choice, so it was removed rather than left as a footgun. Components read
+// `T.code.fontFamily` from `useTheme()`.
 
 export const arrMin = a => a.reduce((m, v) => v < m ? v : m, a[0]);
 export const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
