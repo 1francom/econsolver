@@ -9,12 +9,12 @@
 EconSolver is a **privacy-first, browser-based econometrics research platform** — a GUI alternative to R and Stata for PhD/thesis students and policy analysts at research institutions. The aesthetic follows the work it supports: serious, precise, and data-forward.
 
 **Design character:**
-- **Dark-first.** The default theme is a near-black canvas (#080808) that keeps the researcher's focus on data, not chrome.
+- **Dark-first.** The default theme is a warm near-black canvas (`#0a0a09`) that keeps the researcher's focus on data, not chrome. Deliberately not pure black — `#080808` caused halation against light text on high-contrast displays and left the surface ladder no headroom.
 - **Researcher-serious.** No decorative gradients, no playful rounded corners, no heavy iconography. Panels feel like a well-designed terminal or a high-end IDE, not a consumer SaaS dashboard.
 - **Sharp geometry.** Radii are deliberately kept at 0–6 px. Everything is rectilinear. The sharpness signals precision.
 - **Low-chrome.** The UI surfaces themselves are quiet. Color is used for role and hierarchy, not decoration. The gold accent is reserved strictly for active/selected states and heading emphasis.
 - **Data-forward.** Coefficients, tables, model output, and code are the primary content. The interface exists to deliver them cleanly.
-- **Light mode supported.** A LIGHT palette exists for users who prefer it. The character remains identical — sharp, minimal, serious — just on a warm off-white base (#f4f3f0) rather than near-black.
+- **Light mode supported.** A LIGHT palette exists for users who prefer it. The character remains identical — sharp, minimal, serious — just on a warm off-white base (`#eeece7`) rather than near-black. The canvas is the *darkest* tone in the light ladder so panels read as floating above it — an earlier ladder had `surface2` darker than `bg`, which made a nested panel appear to sink below the app background.
 
 The typography anchors the feel: IBM Plex Sans for all prose/chrome, IBM Plex Mono for all numbers, coefficients, and code. The split is absolute and structural, not aesthetic.
 
@@ -28,18 +28,18 @@ Tokens live in `src/theme.js` under `DARK` and `LIGHT` objects. Access them via 
 
 | Token | Hex | Role |
 |-------|-----|------|
-| `C.bg` | `#080808` | App background — the outermost canvas |
-| `C.surface` | `#0f0f0f` | Primary panels, cards, sidebars |
-| `C.surface2` | `#131313` | Nested panels, inner card backgrounds |
-| `C.surface3` | `#161616` | Deeply nested elements, hover backgrounds |
-| `C.border` | `#1c1c1c` | Default hairline dividers between surfaces |
-| `C.border2` | `#252525` | Stronger dividers, active panel outlines |
+| `C.bg` | `#0a0a09` | App background — the outermost canvas |
+| `C.surface` | `#111110` | Primary panels, cards, sidebars |
+| `C.surface2` | `#161615` | Nested panels, inner card backgrounds |
+| `C.surface3` | `#1c1c1a` | Deeply nested elements, hover backgrounds |
+| `C.border` | `#232320` | Default hairline dividers between surfaces |
+| `C.border2` | `#2e2e2a` | Stronger dividers, active panel outlines |
 | `C.gold` | `#c8a96e` | Primary accent — active/selected state, heading emphasis, primary CTA |
 | `C.goldDim` | `#7a6040` | Muted gold — secondary accents, disabled-but-present states |
 | `C.goldFaint` | `#1a1408` | Gold tint fill — selected row/chip backgrounds |
 | `C.text` | `#ddd8cc` | Primary text — prose, labels, body copy |
-| `C.textDim` | `#888` | Secondary text — subtitles, meta, placeholders |
-| `C.textMuted` | `#444` | Tertiary text — disabled labels, faint hints |
+| `C.textDim` | `#9a948a` | Secondary text — subtitles, meta, placeholders |
+| `C.textMuted` | `#706b62` | Tertiary text — disabled labels, faint hints |
 | `C.green` | `#7ab896` | Positive values, statistical significance, success states |
 | `C.red` | `#c47070` | Negative values, errors, warning states |
 | `C.yellow` | `#c8b46e` | Warnings, caution indicators |
@@ -53,18 +53,18 @@ Tokens live in `src/theme.js` under `DARK` and `LIGHT` objects. Access them via 
 
 | Token | Hex | Role |
 |-------|-----|------|
-| `C.bg` | `#f4f3f0` | App background — warm off-white canvas |
+| `C.bg` | `#eeece7` | App background — warm off-white canvas |
 | `C.surface` | `#ffffff` | Primary panels, cards |
-| `C.surface2` | `#f0eeeb` | Nested panels |
-| `C.surface3` | `#eceae6` | Deeply nested elements, hover backgrounds |
-| `C.border` | `#d8d5cf` | Default hairline dividers |
-| `C.border2` | `#c8c4bc` | Stronger dividers, active outlines |
+| `C.surface2` | `#f7f6f3` | Nested panels |
+| `C.surface3` | `#f1efeb` | Deeply nested elements, hover backgrounds |
+| `C.border` | `#dcd8d0` | Default hairline dividers |
+| `C.border2` | `#c9c4ba` | Stronger dividers, active outlines |
 | `C.gold` | `#a07020` | Primary accent — active/selected, heading emphasis |
 | `C.goldDim` | `#c8a050` | Muted gold accent |
 | `C.goldFaint` | `#fdf5e0` | Gold tint fill for selected rows/chips |
 | `C.text` | `#1a1814` | Primary text |
 | `C.textDim` | `#555` | Secondary text |
-| `C.textMuted` | `#999` | Tertiary / disabled text |
+| `C.textMuted` | `#7a746a` | Tertiary / disabled text |
 | `C.green` | `#2e7850` | Positive / significant |
 | `C.red` | `#a03030` | Negative / error |
 | `C.yellow` | `#807010` | Warning |
@@ -79,6 +79,44 @@ Tokens live in `src/theme.js` under `DARK` and `LIGHT` objects. Access them via 
 - **Gold first, teal second.** Gold (`C.gold`) is the primary interactive accent — use it for active tabs, selected chips, primary buttons, and emphasis headings. Teal (`C.teal`) is the secondary accent for informational states, running indicators, and module eyebrow labels.
 - **Green/red are semantic only.** Never use green for "success" that isn't statistically or numerically meaningful, and never use red just for visual interest.
 - **Blue/purple/orange/violet/yellow** are reserved for categorical data series, badges, and model comparison highlights. Do not repurpose them for navigation chrome.
+
+### The Palette Registry
+
+Palettes live in `PALETTES` in `src/theme.js` (`{ dark, light }`), resolved by
+`getPalette(theme)`. **Adding a palette is one entry** with the same keys — every
+key is load-bearing, since ~100 components read them by name. Elevation, scrollbar
+chrome, the focus ring and the `AppearancePanel` theme row all derive from the
+registry, so a new axis (e.g. a cool Slate/Zinc one) needs nothing else.
+
+The shipped axis is deliberately **warm**: gold + teal on warm near-black / warm
+off-white. Cool greys make the gold accent read muddy, so do not mix a cool grey
+into `dark`/`light` — add a separate palette instead.
+
+### NEVER write a palette hex as a literal
+
+This is not a style preference. A hex literal that duplicates a palette value is a
+latent bug with a delay fuse: it keeps working until the palette is refined, then
+fails **silently**. Refining the palette on 2026-08-17 instantly broke three places
+that had copied its values:
+
+1. `JOURNAL_MAP` / `PRESENTATION_MAP` in `plotExporter.js` — string-replace maps
+   keyed on old hexes. A "Journal" export would have emitted a dark-background
+   figure instead of a white one, with no error.
+2. `ModelPlots` / `ResidualPlots` / `resultDisplay` — three private copies of two
+   regexes stripping the plot ground by `fill="#080808"`. All three stopped
+   matching, so every exported SVG kept its dark ground. Now one palette-derived
+   `stripGroundRect()`.
+3. The elevation ladder, which hardcoded its border hexes and referenced
+   `#2e2e2e` — a colour with no token at all.
+
+The fix in each case was **single ownership plus derivation**, never a careful
+re-sync. If you need a palette value outside a component, import the palette and
+read the token; if you need it in a regex or a transform map, derive the pattern
+from the token at module load.
+
+Two matching escape hatches were also removed: `wrangling/shared.jsx` and
+`modeling/shared.jsx` used to export `DARK as C`. Anything importing that got the
+dark palette regardless of the active theme. Always use `useTheme()`.
 
 ---
 
@@ -105,18 +143,57 @@ Tokens live in `src/theme.js` under the `T` object. Access via `const { T } = us
 | `T.h2` | sans | 15px | 600 | 0 | 1.3 | Section headers within a module |
 | `T.h3` | sans | 13px | 500 | 0 | 1.3 | Subsection headers, collapsible panel titles |
 | `T.body` | sans | 13px | 400 | 0 | 1.5 | Prose, descriptions, tooltip text |
-| `T.label` | sans | 10px | 500 | 0.2em | 1.3 | ALL-CAPS tracked caps labels, eyebrows, field labels |
+| `T.label` | sans | 10px | 500 | 0.12em | 1.3 | ALL-CAPS tracked caps labels, eyebrows, field labels |
 | `T.data` | **mono** | 13px | 400 | 0 | 1.4 | Coefficients, SE, t-stats, p-values, table cells, numeric output |
 | `T.code` | **mono** | 12px | 400 | 0 | 1.5 | Replication code, pipeline expressions, column-name references |
-| `T.caption` | sans | 10px | 400 | 0.04em | 1.4 | Hints, metadata lines, footnotes |
+| `T.caption` | sans | 10px | 400 | 0.03em | 1.4 | Hints, metadata lines, footnotes |
 
-### Sans Font Switching
+### Font Switching
 
-The sans family is user-switchable between **IBM Plex Sans** (default), **Inter**, and **Geist** via user preferences (`prefs.fontFamily`). The mono family is always IBM Plex Mono and is not switchable.
+Both families are user-switchable, independently, from `AppearancePanel`:
+
+- **Sans** (`prefs.sansFont`) — IBM Plex Sans (default), Inter, Geist, Plus Jakarta Sans. Source: `SANS_STACK`.
+- **Mono** (`prefs.monoFont`) — IBM Plex Mono (default), JetBrains Mono. Source: `MONO_STACKS`.
+
+The mono family used to be fixed. It is switchable because in a tool whose entire
+output is numeric, the mono choice carries more weight than the sans one.
+
+The baseline pair (Plex Sans + Plex Mono) is loaded statically in `index.html` with
+`preconnect`, so the first paint already has it. Other families load on demand from
+`ThemeContext` when selected.
+
+**Never import `MONO_STACK` (or any static font string) into a component.** It is a
+snapshot of the default and cannot follow the user's choice — read
+`T.code.fontFamily` / `T.data.fontFamily` instead. The `mono` exports that used to
+exist in `wrangling/shared.jsx`, `modeling/shared.jsx` and
+`spatial/shared/constants.js` were removed for exactly this reason.
+
+### Text Rendering (global, `src/index.css`)
+
+`index.css` carries the app's only global rules — the codebase styles inline, so
+there is nowhere else inherited properties can live. Do not remove these:
+
+| Rule | Why |
+|------|-----|
+| `-webkit-font-smoothing: antialiased` + `-moz-osx-font-smoothing: grayscale` | The single highest-impact sharpness fix. Browsers default to subpixel (RGB) AA, which is worst exactly in our case — light text on a near-black ground — thickening glyphs and fringing them with colour. Grayscale AA makes rendered weight match designed weight. |
+| `text-rendering: optimizeLegibility` | Kerning and ligatures over raw speed. |
+| `font-synthesis: none` | Never fake a weight the family does not ship. |
+| `svg text { -webkit-font-smoothing: antialiased }` | SVG text does not reliably inherit smoothing from an HTML ancestor, so plot tick labels were rendering with subpixel AA while the UI around them was not. |
+| `shape-rendering: crispEdges` on rules / gridlines / ticks | 1px strokes otherwise land on half-pixel boundaries and smear into 2px grey bands — the main reason plots read soft next to crisp chrome. Scoped to straight-line marks only; applying it to paths or circles would staircase curves. |
+| `color-scheme` via `:root[data-theme]` | Native controls (date pickers, selects) render chrome from the OS setting, not ours — a light date input on a dark panel was a white block. |
+
+`ThemeProvider` mirrors a few tokens onto `:root` as CSS custom properties
+(`--c-bg`, `--c-border2`, `--c-border3`, `--c-gold`, …) because stylesheet rules
+cannot read React context. The scrollbar and `:focus-visible` rules consume those,
+so they follow the theme. Hex fallbacks in `index.css` cover the pre-hydration frame
+only and must stay in sync with `DARK`.
 
 ### Tabular Numbers
 
-`T.data` applies `font-variant-numeric: tabular-nums` so that columns of coefficients align on decimal points regardless of digit widths.
+`T.data` applies `font-variant-numeric: tabular-nums slashed-zero` — tabular figures
+keep coefficient columns aligned on the decimal point regardless of digit widths, and
+the slashed zero disambiguates 0 from O in output that gets read off-screen. Both
+degrade to a no-op on a family lacking the feature.
 
 ---
 
@@ -324,33 +401,38 @@ Avoid deeply nested scroll containers. Only one element per module should own th
 
 Access via `const { elev } = useTheme()` — the object already reflects the active theme.
 
+The ladder is **built from the active palette** by `buildElevation(C, theme)`, not
+written out as literals. The border column below therefore names a token, not a hex
+— a new palette gets a correct ladder automatically. `ELEV_DARK` / `ELEV_LIGHT` are
+still exported for retro-compatibility, but they are now derived values.
+
 **DARK theme** (source: `ELEV_DARK` in `src/theme.js`):
 
 | Level | Token | Border | Box Shadow | Use |
 |-------|-------|--------|------------|-----|
-| Flat | `elev.flat` | `1px solid #1c1c1c` | `none` | Dividers, table borders, flat cards |
-| Raised | `elev.raised` | `1px solid #252525` | `inset 0 1px 0 rgba(255,255,255,0.03)` | Panels, cards, sidebars |
-| Popover | `elev.popover` | `1px solid #252525` | `0 8px 24px rgba(0,0,0,0.6)` | Dropdowns, context menus, small overlays |
-| Modal | `elev.modal` | `1px solid #2e2e2e` | `0 16px 48px rgba(0,0,0,0.7)` | Dialog overlays, settings panels |
-| Tooltip | `elev.tooltip` | `1px solid #2e2e2e` | `0 4px 12px rgba(0,0,0,0.5)` | Hover tooltips, info popovers |
+| Flat | `elev.flat` | `1px solid C.border` | `none` | Dividers, table borders, flat cards |
+| Raised | `elev.raised` | `1px solid C.border2` | `inset 0 1px 0 rgba(255,255,255,0.03)` | Panels, cards, sidebars |
+| Popover | `elev.popover` | `1px solid C.border2` | `0 8px 24px rgba(0,0,0,0.6)` | Dropdowns, context menus, small overlays |
+| Modal | `elev.modal` | `1px solid C.border3` | `0 16px 48px rgba(0,0,0,0.7)` | Dialog overlays, settings panels |
+| Tooltip | `elev.tooltip` | `1px solid C.border3` | `0 4px 12px rgba(0,0,0,0.5)` | Hover tooltips, info popovers |
 
 **LIGHT theme** (source: `ELEV_LIGHT` in `src/theme.js`):
 
 | Level | Token | Border | Box Shadow |
 |-------|-------|--------|------------|
-| Flat | `elev.flat` | `1px solid #d8d5cf` | `none` |
-| Raised | `elev.raised` | `1px solid #d8d5cf` | `0 1px 2px rgba(0,0,0,0.04)` |
-| Popover | `elev.popover` | `1px solid #c8c4bc` | `0 8px 24px rgba(0,0,0,0.12)` |
-| Modal | `elev.modal` | `1px solid #c8c4bc` | `0 16px 48px rgba(0,0,0,0.18)` |
-| Tooltip | `elev.tooltip` | `1px solid #c8c4bc` | `0 4px 12px rgba(0,0,0,0.12)` |
+| Flat | `elev.flat` | `1px solid C.border` | `none` |
+| Raised | `elev.raised` | `1px solid C.border` | `0 1px 2px rgba(0,0,0,0.04)` |
+| Popover | `elev.popover` | `1px solid C.border2` | `0 8px 24px rgba(0,0,0,0.12)` |
+| Modal | `elev.modal` | `1px solid C.border2` | `0 16px 48px rgba(0,0,0,0.18)` |
+| Tooltip | `elev.tooltip` | `1px solid C.border2` | `0 4px 12px rgba(0,0,0,0.12)` |
 
 ### Dark Theme Strategy
 
-On `#080808`, box shadows are nearly invisible — a pure black surface absorbs dark shadow. On dark, elevation is communicated through **lighter top-borders** (the raised surface appears to catch light from above) and **a subtle inset white glow** (`inset 0 1px 0 rgba(255,255,255,0.03)`) for raised surfaces. Reserve actual box-shadow for popover/modal level and above. Background lightening across the surface stack (`C.bg` → `C.surface` → `C.surface2` → `C.surface3`) also contributes to perceived depth.
+On a near-black ground, box shadows are nearly invisible — a very dark surface absorbs dark shadow. On dark, elevation is communicated through **lighter borders** (the raised surface appears to catch light from above) and **a subtle inset white glow** (`inset 0 1px 0 rgba(255,255,255,0.045)`) for raised surfaces. Reserve actual box-shadow for popover/modal level and above. Background lightening across the surface stack (`C.bg` → `C.surface` → `C.surface2` → `C.surface3`) also contributes to perceived depth.
 
 ### Light Theme Strategy
 
-On light, conventional drop shadows work as expected — `elev.raised` uses a 1px soft shadow; `elev.popover` and above use increasingly strong `rgba(0,0,0,*)` shadows. Border width stays 1px throughout.
+On light, conventional drop shadows work as expected. Each level uses **two layers** — a tight contact shadow plus a broader diffuse one — because a single broad shadow reads as blur rather than depth. The shadow colour is a warm near-black (`rgba(28,25,20,*)`) rather than pure black, so it sits on the warm ground without going grey. Border width stays 1px throughout.
 
 ### Usage
 

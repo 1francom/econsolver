@@ -14,6 +14,7 @@
 // Depends on: theme tokens from ./shared.jsx
 
 import { useTheme } from "./shared.jsx";
+import { stripGroundRect } from "../../services/export/plotExporter.js";
 
 const arrMin = (a, fallback = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fallback;
 const arrMax = (a, fallback = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fallback;
@@ -25,8 +26,9 @@ function exportSVG(svgId, filename) {
   let src = new XMLSerializer().serializeToString(el);
   if (!src.includes('xmlns="http://www.w3.org/2000/svg"'))
     src = src.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
-  src = src.replace(/<rect[^>]*fill="#080808"[^>]*\/>/g, '');
-  src = src.replace(/<rect[^>]*fill="#0f0f0f"[^>]*\/>/g, '');
+  // Palette-derived (covers current + legacy grounds); was two regexes pinned to
+  // superseded DARK values here and in two sibling files.
+  src = stripGroundRect(src);
   src = '<?xml version="1.0" encoding="UTF-8"?>\n' + src;
   const blob = new Blob([src], { type: "image/svg+xml;charset=utf-8" });
   const a = document.createElement("a");

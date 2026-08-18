@@ -15,39 +15,27 @@
 // This component is display-only — all logic lives in services/privacy/.
 
 import { useMemo } from "react";
-import { MONO_STACK } from "../../theme.js";
+
 import { useTheme } from "../../ThemeContext.jsx";
 import { PII_SENSITIVITY }  from "../services/privacy/piiDetector.js";
 import { buildEgressReport } from "../services/privacy/privacyFilter.js";
 import { maskStringValue }   from "../services/privacy/anonymizer.js";
 
-// ─── THEME (mirrors WranglingModule shared constants) ─────────────────────────
-const C = {
-  bg:       "#0b0b0f",
-  surface:  "#111118",
-  surface2: "#16161f",
-  border:   "#1e1e2e",
-  border2:  "#252535",
-  text:     "#e8e8f0",
-  textDim:  "#9090a8",
-  textMuted:"#5a5a72",
-  teal:     "#4ec9b0",
-  gold:     "#dbb26a",
-  red:      "#e06c75",
-  orange:   "#ce9178",
-  yellow:   "#e5c07b",
-  green:    "#98c379",
-  blue:     "#61afef",
-  violet:   "#c678dd",
-  purple:   "#9a7fd4",
-};
-
 // ─── SENSITIVITY PALETTE ──────────────────────────────────────────────────────
-const SENS_COLOR = {
-  [PII_SENSITIVITY.HIGH]:   C.red,
-  [PII_SENSITIVITY.MEDIUM]: C.yellow,
-  [PII_SENSITIVITY.LOW]:    C.blue,
-  [PII_SENSITIVITY.NONE]:   C.textMuted,
+// Token NAMES, not values — resolved against the active palette at render time
+// via C[SENS_TOKEN[s]]. A module-level map of hex values cannot follow the theme.
+//
+// This file previously carried its OWN local `C` object holding a VS Code Dark+
+// palette (#0b0b0f / #4ec9b0 / #e06c75 …) that shared nothing with the app's warm
+// gold+teal scheme and shadowed the themed `C`. The panel therefore rendered as a
+// visually foreign surface and stayed dark even in light mode. It is currently
+// mounted nowhere, so this was latent rather than visible — fixed now so it does
+// not ship off-palette the moment someone wires it up.
+const SENS_TOKEN = {
+  [PII_SENSITIVITY.HIGH]:   "red",
+  [PII_SENSITIVITY.MEDIUM]: "yellow",
+  [PII_SENSITIVITY.LOW]:    "blue",
+  [PII_SENSITIVITY.NONE]:   "textMuted",
 };
 const SENS_LABEL = {
   [PII_SENSITIVITY.HIGH]:   "HIGH",
@@ -58,12 +46,12 @@ const SENS_LABEL = {
 
 // ─── MICRO COMPONENTS ─────────────────────────────────────────────────────────
 function Btn({ onClick, disabled, color, solid, children, sm }) {
-  const { T } = useTheme();
+  const { C, T } = useTheme();
   const base = {
     padding:     sm ? "0.22rem 0.55rem" : "0.32rem 0.75rem",
     borderRadius: 3,
     cursor:      disabled ? "not-allowed" : "pointer",
-    fontFamily: MONO_STACK,
+    fontFamily: T.code.fontFamily,
     fontSize:    T.caption.fontSize,
     border:      `1px solid ${color ?? C.border2}`,
     background:  solid ? (color ?? C.teal) : "transparent",
@@ -75,13 +63,13 @@ function Btn({ onClick, disabled, color, solid, children, sm }) {
 }
 
 function Badge({ sensitivity }) {
-  const { T } = useTheme();
-  const color = SENS_COLOR[sensitivity] ?? C.textMuted;
+  const { C, T } = useTheme();
+  const color = C[SENS_TOKEN[sensitivity]] ?? C.textMuted;
   return (
     <span style={{
       fontSize: T.caption.fontSize, letterSpacing: "0.15em", textTransform: "uppercase",
       padding: "2px 6px", border: `1px solid ${color}`, borderRadius: 2,
-      color, fontFamily: MONO_STACK,
+      color, fontFamily: T.code.fontFamily,
     }}>
       {SENS_LABEL[sensitivity] ?? "UNKNOWN"}
     </span>
@@ -89,11 +77,11 @@ function Badge({ sensitivity }) {
 }
 
 function SectionHead({ children }) {
-  const { T } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{
       fontSize: T.caption.fontSize, color: C.teal, letterSpacing: "0.24em",
-      textTransform: "uppercase", fontFamily: MONO_STACK,
+      textTransform: "uppercase", fontFamily: T.code.fontFamily,
       padding: "0.5rem 1rem", background: C.surface,
       borderBottom: `1px solid ${C.border}`,
     }}>
@@ -104,9 +92,9 @@ function SectionHead({ children }) {
 
 // ─── COLUMN ROW ───────────────────────────────────────────────────────────────
 function ColumnRow({ col, entry, sampleValues, onChange }) {
-  const { T } = useTheme();
+  const { C, T } = useTheme();
   const { sensitivity, suppress, alias = "", reasons = [] } = entry;
-  const color = SENS_COLOR[sensitivity] ?? C.textMuted;
+  const color = C[SENS_TOKEN[sensitivity]] ?? C.textMuted;
   const isHigh = sensitivity === PII_SENSITIVITY.HIGH;
 
   return (
@@ -121,7 +109,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
       background: suppress ? `${C.red}15` : C.bg,
     }}>
       {/* Column name */}
-      <div style={{ fontFamily: MONO_STACK, fontSize: T.caption.fontSize, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {col}
         {reasons.length > 0 && (
           <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 2 }}>
@@ -142,7 +130,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
             onChange={e => onChange(col, { suppress: e.target.checked })}
             style={{ accentColor: C.red }}
           />
-          <span style={{ fontFamily: MONO_STACK, fontSize: T.caption.fontSize, color: suppress ? C.red : C.textDim }}>
+          <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: suppress ? C.red : C.textDim }}>
             Suppress
           </span>
         </label>
@@ -159,7 +147,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
               width: "100%", boxSizing: "border-box",
               padding: "0.25rem 0.45rem",
               background: C.surface2, border: `1px solid ${C.border2}`,
-              borderRadius: 3, color: C.text, fontFamily: MONO_STACK, fontSize: T.caption.fontSize,
+              borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
               outline: "none",
             }}
           />
@@ -176,7 +164,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
                : String(v ?? "—"));
           return (
             <span key={i} style={{
-              fontSize: T.caption.fontSize, fontFamily: MONO_STACK, color: C.textMuted,
+              fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.textMuted,
               padding: "1px 5px", border: `1px solid ${C.border}`,
               borderRadius: 2, whiteSpace: "nowrap",
             }}>
@@ -191,7 +179,7 @@ function ColumnRow({ col, entry, sampleValues, onChange }) {
 
 // ─── EGRESS SUMMARY BAR ───────────────────────────────────────────────────────
 function EgressBar({ report }) {
-  const { T } = useTheme();
+  const { C, T } = useTheme();
   return (
     <div style={{
       padding: "0.55rem 1rem",
@@ -199,21 +187,21 @@ function EgressBar({ report }) {
       borderBottom: `1px solid ${C.border}`,
       display: "flex", gap: 16, alignItems: "center",
     }}>
-      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: MONO_STACK, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.1em", textTransform: "uppercase" }}>
         Egress preview
       </span>
       {report.safe.length > 0 && (
-        <span style={{ fontSize: T.caption.fontSize, fontFamily: MONO_STACK, color: C.green }}>
+        <span style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.green }}>
           ✓ {report.safe.length} safe
         </span>
       )}
       {report.aliased.length > 0 && (
-        <span style={{ fontSize: T.caption.fontSize, fontFamily: MONO_STACK, color: C.yellow }}>
+        <span style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.yellow }}>
           ◈ {report.aliased.length} aliased
         </span>
       )}
       {report.suppressed.length > 0 && (
-        <span style={{ fontSize: T.caption.fontSize, fontFamily: MONO_STACK, color: C.red }}>
+        <span style={{ fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily, color: C.red }}>
           ✕ {report.suppressed.length} suppressed
         </span>
       )}
@@ -230,7 +218,7 @@ export default function PrivacyConfigPanel({
   onConfirm,
   onCancel,
 }) {
-  const { T } = useTheme();
+  const { C, T } = useTheme();
   const report = useMemo(
     () => buildEgressReport(headers, piiConfig),
     [headers, piiConfig]
@@ -251,7 +239,7 @@ export default function PrivacyConfigPanel({
 
   return (
     <div style={{
-      background: C.bg, color: C.text, fontFamily: MONO_STACK,
+      background: C.bg, color: C.text, fontFamily: T.code.fontFamily,
       border: `1px solid ${C.border}`, borderRadius: 4,
       overflow: "hidden", display: "flex", flexDirection: "column",
       maxHeight: "80vh",

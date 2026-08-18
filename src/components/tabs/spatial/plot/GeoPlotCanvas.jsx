@@ -344,7 +344,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
              tickFormat: d => d < 0 ? `${Math.abs(d).toFixed(2)}°S` : `${d.toFixed(2)}°N` },
         marks,
       });
-      appendSvgLegend(svg, plotLegend, C, plotW, plotH, legendW);
+      appendSvgLegend(svg, plotLegend, C, plotW, plotH, legendW, T.code.fontFamily);
       el.appendChild(svg);
     } catch (e) {
       const errDiv = document.createElement("div");
