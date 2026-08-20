@@ -3,7 +3,8 @@
 **Date:** 2026-08-20
 **Status:** OPEN — approved by Franco, implementation plan not yet written
 **Scope:** make pinned models and saved plots exportable to a JSON file and importable back,
-mirroring the existing Clean `pipeline.json` round-trip.
+mirroring the existing Clean `pipeline.json` round-trip — plus the cross-session portability
+check that round-trip turns out to be missing (§7).
 
 ---
 
@@ -33,7 +34,8 @@ So this is mostly plumbing plus one real correctness fix (§3).
 | What a model file carries | **The recipe, not the result.** Importing fills the sidebar; the user presses Estimate against *their* data. No foreign coefficients enter the model buffer. |
 | Missing columns on import | **Apply partially + banner.** Fields whose column is absent are left empty and named explicitly by role. Never a silent partial spec. |
 | Multiple items in one file | **Explore appends, Model picks.** Plots are appended to `plotHistory` (non-destructive; the existing history picker is the tray). Models open a modal listing the N specs; the user picks one. |
-| Derived datasets | **Out of scope** — separate spec (§7). |
+| Derived datasets | **Out of scope** — separate spec (§8), together with Spatial maps. |
+| Spatial steps in `pipeline.json` | **Already captured** — no unification needed; the gap is portability, not coverage (§7). |
 
 ---
 
@@ -179,7 +181,73 @@ cleared and reported rather than left pointing at nothing.
 
 ---
 
-## 7. Out of scope (explicit)
+## 7. `pipeline.json` portability (Clean importer)
+
+Checking whether Spatial work reaches the Clean export answered yes — and surfaced a
+pre-existing hole in the round-trip that already ships.
+
+**What the export already captures, verified:** the `sp_*` column-adders append to the
+*same* per-dataset `pipeline` array Clean uses — `addStepTo` calls
+`wranglingAddStepRef.current(step)` (`DataStudio.jsx:1055`), which is Clean's own `addStep`
+— and all 11 `sp_*` types are in the registry, so `ImportPipelineButton` already accepts
+them. Data Viewer cell edits are captured too: `patch` is a pipeline step
+(`registry.js:690`). Spatial's dataset *producers* are the exception and belong with the
+derived-datasets spec (§8), since they go through `handleSaveSubset(recipe)`, not the
+pipeline.
+
+**The hole:** two kinds of step are not portable across sessions, and the importer checks
+neither. It validates `type` ∈ `STEP_TYPES` and `exprGuard`, then reports success.
+
+### 7.1 Dataset references
+
+Steps carrying a session-local dataset id (`genId()` in `DataStudio`):
+
+| Field | Steps |
+|---|---|
+| `rightId` | `join`, `append`, `bind_cols`, `union`, `intersect`, `setdiff` |
+| `gridDatasetId` | `sp_grid_assign`, `sp_metric_buffer`, `sp_buffer_exposure`, `sp_aggregate_grid` |
+| `polyDatasetId` | `sp_spatial_join`, `sp_boundary_dist` |
+| `refDatasetId` | `sp_nearest` |
+| `bufferDatasetId` | `sp_buffer_exposure` |
+| `srcDatasetId` / `tgtDatasetId` | `sp_areal_interp` |
+
+Imported into another project these resolve to nothing, and the step fails or no-ops at
+replay with the import having said "success".
+
+**The list above is documentation, not the implementation.** A hand-maintained list in the
+importer is the same drift the condition-language dialects were: declare the fields in
+`STEP_REGISTRY` — the schema entry becomes `{ key: "rightId", type: "dataset", … }` instead
+of `type: "text"` — and derive the check from the registry, so a step type added later is
+covered without touching the importer. `pipelineReliabilityValidation.mjs` gets a test
+asserting every field whose key matches `/^(right|.*Dataset)Id$/` is declared `type:"dataset"`,
+so a new step cannot quietly reintroduce an unchecked reference.
+
+The sentinels `"self"` (`sp_nearest`) and `"active"` (`sp_buffer_exposure`,
+`sp_areal_interp`) mean "the current frame" and are **portable** — they must not be flagged.
+
+On import, unresolvable references are reported per step (`step 4 · sp_spatial_join →
+polyDatasetId: no such dataset in this session`) alongside the missing-column banner from
+§6. The import is not aborted: a pipeline is usually mostly portable, and the user can
+rebind the reference in Clean.
+
+### 7.2 Row-identity steps
+
+`patch` matches on `__ri` — `rows.map(r => r.__ri === s.ri ? …)` in `runner.js`. Row ids are
+assigned per dataset by `ensureRowIds`, so replaying foreign patches edits whichever row
+happens to carry that `__ri`: arbitrary cells, silently, with no warning.
+`inject_column` is the same class (it carries a dense array lifted from a model result),
+though it at least guards on length and warns.
+
+Resolution: the export payload already writes `filename`; it also stamps `datasetId`. On
+import, if the target dataset's id matches, `patch`/`inject_column` steps are **kept** —
+this is the re-import-your-own-pipeline case, where those edits are real work. If it does
+not match, they are **dropped and reported by count** (`3 row-level edits dropped — they
+belong to another dataset`). Neither silently applying them nor silently dropping them is
+acceptable.
+
+---
+
+## 8. Out of scope (explicit)
 
 - **Derived datasets.** Verified during design and worse than a missing export: Clean's
   `doSaveSubset()` calls `onSaveSubset(name, rows, headers)` with **no recipe**
@@ -191,11 +259,13 @@ cleared and reported rather than left pointing at nothing.
   starting from the recipe fix, not from the file format.
 - Importing results/numbers (foreign coefficients in the model buffer).
 - Column remapping UI.
-- Spatial maps (`spatial_maps` store) — a third artifact type, deliberately not covered.
+- Spatial maps (`spatial_maps` store) — go with the derived-datasets spec (Franco's call),
+  since Spatial's dataset producers and its saved maps are the same cross-session
+  dataset-identity problem.
 
 ---
 
-## 8. Testing
+## 9. Testing
 
 - `MODEL_SPEC_FIELDS` round-trip: `applySpec(collectSpec(s))` reproduces `s` for one
   fixture per estimator group (Linear / Panel / DiD / IV / RD / SC / Spatial), so no
@@ -204,4 +274,11 @@ cleared and reported rather than left pointing at nothing.
 - Unknown `type`, unknown `geom`, and a wrong `kind` each abort with a message.
 - A spec containing a function-valued field (e.g. `resolveSpatialWeights`) serialises
   without it.
+- **§7 registry guard**: every `STEP_REGISTRY` schema field whose key matches
+  `/^(right|.*Dataset)Id$/` is declared `type:"dataset"` — added to
+  `pipelineReliabilityValidation.mjs`, negative-controlled by flipping one back to `"text"`.
+- A `pipeline.json` with an unresolvable `rightId` imports the rest and reports that step;
+  one using the `"self"`/`"active"` sentinels reports nothing.
+- `patch` steps are kept when the target `datasetId` matches the payload's and dropped with
+  a count when it does not.
 - `npm run build` and `npm run lint:undef` green. Browser validation by Franco.
