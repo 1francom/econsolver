@@ -108,7 +108,14 @@ for (const [group, state] of Object.entries(STATE)) {
   check(`${group}: spec is JSON-serialisable`,
     JSON.stringify(spec) === JSON.stringify(JSON.parse(JSON.stringify(spec))));
   const out = {};
-  const { missing } = applySpec(spec, makeSetters(out), { headers: ALL_COLS, datasetIds: ["ds_7"] });
+  // panelRef fields are COMPARED against the dataset's declared panel, so the
+  // round-trip ctx must state the panel this fixture was estimated on —
+  // otherwise the Panel group reports a mismatch against a null panel.
+  const { missing } = applySpec(spec, makeSetters(out), {
+    headers: ALL_COLS,
+    datasetIds: ["ds_7"],
+    panel: { entityCol: state.entityCol ?? null, timeCol: state.timeCol ?? null },
+  });
   check(`${group}: nothing reported missing`, missing.length === 0,
     missing.map(m => m.key).join(", "));
   for (const f of MODEL_SPEC_FIELDS) {
@@ -411,7 +418,11 @@ export function applySpec(spec = {}, setters = {}, ctx = {}) {
         break;
       }
       case "column": {
-        if (v == null || v === "") { write(f, f.wrapped ? null : ""); break; }
+        // Preserve the incoming falsy value verbatim — ModelingTab's column
+        // state is inconsistent about its empty (clusterVar defaults to null,
+        // spatialGeomCol to ""), and normalising here would make a round-trip
+        // fail on a field the user never touched.
+        if (v == null || v === "") { write(f, f.wrapped ? null : v); break; }
         if (headers.has(v)) write(f, v);
         else { report(f, v, "no-column"); write(f, f.wrapped ? null : ""); }
         break;

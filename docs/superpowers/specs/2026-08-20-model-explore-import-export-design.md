@@ -87,9 +87,16 @@ and must never be serialised — the table is also the allowlist that keeps it o
 2. `onRestore` uses `applySpec` → closes the 12-field/`seType` gap as a side effect.
 3. Import uses `applySpec` → no second restore path is written.
 
-The serialised spec is **flat** — `panel` is a state object in `ModelingTab`, but it travels
-as `entityCol`/`timeCol`, since a nested container has no `kind` and would bypass the checks
-in §6.
+The serialised spec is **flat** — `panel` travels as `entityCol`/`timeCol`, since a nested
+container has no `kind` and would bypass the checks in §6.
+
+**`entityCol`/`timeCol` are recorded but never applied.** `panel` is
+`cleanedData.panelIndex` — a property of the dataset, declared in Clean's Panel tab, not
+sidebar state; there is no setter to restore it into. They get `kind: "panelRef"`: written
+on export, compared on import, and reported when they disagree (`spec expects panel (id,
+year); this dataset declares (firm, t)`). Silently filling a panel estimator's sidebar while
+the dataset is declared on different indices would produce a model that estimates cleanly
+and answers a different question.
 
 The full field set is the `_runEstimation` dependency array (`ModelingTab.jsx:900`):
 `model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode,
