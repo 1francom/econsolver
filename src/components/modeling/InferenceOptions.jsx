@@ -20,19 +20,7 @@
 
 import { useState } from "react";
 import { useTheme, Chip } from "./shared.jsx";
-
-// ─── SE type definitions ──────────────────────────────────────────────────────
-const SE_TYPES = [
-  { id: "classical", label: "Classical",     hint: "Homoskedastic OLS standard errors (default)" },
-  { id: "hc1",       label: "HC1 (Robust)",  hint: "MacKinnon-White HC1 heteroskedasticity-robust SE — most common robust option" },
-  { id: "hc2",       label: "HC2",           hint: "HC2 leverage-corrected robust SE — unbiased under homoskedasticity; default in R's iv_robust" },
-  { id: "hc3",       label: "HC3",           hint: "HC3 leverage-corrected robust SE — preferred in small samples" },
-  { id: "clustered", label: "Clustered",     hint: "Cluster-robust SE: accounts for within-group correlation" },
-  { id: "cr2",       label: "CR2",           hint: "Bias-reduced cluster-robust SE (Bell-McCaffrey) — the clubSandwich / estimatr default; preferred with few clusters" },
-  { id: "cr3",       label: "CR3",           hint: "Cluster jackknife approximation — more conservative than CR2" },
-  { id: "twoway",    label: "Two-Way",       hint: "Two-way cluster-robust SE (Cameron-Gelbach-Miller)" },
-  { id: "hac",       label: "HAC",           hint: "Newey-West heteroskedasticity-and-autocorrelation-consistent SE" },
-];
+import { SE_TYPES } from "./modelSpec.js";
 
 // Models where HAC makes sense (time series / panel)
 const HAC_COMPATIBLE = new Set(["FE", "FD", "TWFE", "DiD", "TWFEDiD", "EventStudy", "OLS", "WLS", "2SLS", "GMM", "LIML"]);
