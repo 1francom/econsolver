@@ -43,6 +43,30 @@
 
 ## Task 1: `modelSpec.js` — the canonical spec table
 
+> **SUPERSEDED IN PART — read this before using the code blocks below.** Task 1 shipped, was
+> quality-reviewed, and the review found real defects that were fixed in a follow-up commit.
+> The code blocks in this task are the *first* draft; the file on disk is the truth. The
+> amendments, all of which the reviewer reproduced with runnable repros:
+> - `feCols` gained `allowSynthetic` — `selectedFeCols` can hold `"state×year"`, a label built
+>   at `ModelConfiguration.jsx:90` that is not a real column until estimation, and `columns`
+>   filtering was silently downgrading a validated nested-FE spec to plain one-way FE.
+> - Every field gained a `def`, and `applySpec` now writes it for fields absent from the spec.
+>   Without it `applySpec` was a **merge onto the current sidebar, not a set** — restoring a
+>   partial spec kept the previous model's `seType` and bandwidth.
+> - `collectSpec` now serialises an explicit `null` for `columns`, because `selectedFeCols:
+>   null` ("use the estimator's default FE") and `[]` ("none") are different states.
+> - Added the two missing HAC fields, `timeVar` and `maxLag` — `seOpts` is a 5-tuple and the
+>   table declared 3.
+> - `applySpec` no longer throws on malformed input (it is the untrusted-file path), normalises
+>   on write as `collectSpec` does on read, clears to `def` and reports on `enum`/`scalar`
+>   failure, and validates `model`/`family` as enums.
+> - `factorRefs` levels are validated when `ctx.levels` is supplied; the doc comment states
+>   plainly that they are not validated otherwise.
+> - Returned `missing` renamed to **`unapplied`** — it carries `panel-mismatch` and
+>   `unknown-value` too. Tasks 3 and 5 below already use the new name.
+> - Harness now drives the round-trip from the fixture keys and asserts a full key-set
+>   snapshot, so deleting a field fails the harness instead of just producing fewer checks.
+
 **Files:**
 - Create: `src/components/modeling/modelSpec.js`
 - Create: `src/components/modeling/__validation__/modelSpecValidation.mjs`
@@ -328,9 +352,15 @@ export const MODEL_SPEC_FIELDS = [
   { key: "spatialWeightsStyle",    kind: "scalar",     setter: "setSpatialWeightsStyle" },
   { key: "spatialWeightsK",        kind: "scalar",     setter: "setSpatialWeightsK" },
   { key: "spatialWeightsD",        kind: "scalar",     setter: "setSpatialWeightsD" },
-  { key: "spatialWeightsICol",     kind: "column",     setter: "setSpatialWeightsICol", role: "Weights i column" },
-  { key: "spatialWeightsJCol",     kind: "column",     setter: "setSpatialWeightsJCol", role: "Weights j column" },
-  { key: "spatialWeightsWCol",     kind: "column",     setter: "setSpatialWeightsWCol", role: "Weights w column" },
+  // NOT kind:"column". These name columns in the WEIGHTS dataset — the one
+  // spatialWeightsDatasetId points at — not in the dataset being modelled:
+  // resolveSpatialWeights reads them as ds.rows.map(r => r[iCol])
+  // (ModelingTab.jsx:625-631). Header-checking them against the active dataset
+  // would make every imported spatial spec falsely report "i — not in this
+  // dataset" and then clear a perfectly valid value.
+  { key: "spatialWeightsICol",     kind: "scalar",     setter: "setSpatialWeightsICol" },
+  { key: "spatialWeightsJCol",     kind: "scalar",     setter: "setSpatialWeightsJCol" },
+  { key: "spatialWeightsWCol",     kind: "scalar",     setter: "setSpatialWeightsWCol" },
 
   { key: "seType",            kind: "enum", values: SE_TYPE_IDS, setter: "setSeType" },
   { key: "clusterVar",        kind: "column",     setter: "setClusterVar",  role: "Cluster variable" },
@@ -562,6 +592,10 @@ At the top of `src/components/ModelingTab.jsx`, alongside the other `./modeling/
 import { collectSpec, applySpec } from "./modeling/modelSpec.js";
 ```
 
+**Name collision:** `ModelingTab.jsx:813` already has a local `const modelSpec = useMemo(...)`
+feeding `generateCoachingSignals`. Import the *functions*, as above — do not import the
+module namespace as `modelSpec`, and do not rename the existing local.
+
 - [ ] **Step 2: Replace the `specExtras` line**
 
 At `ModelingTab.jsx:897`, replace:
@@ -623,12 +657,12 @@ At `ModelingTab.jsx:3845`, replace the whole `onRestore={(id) => { … }}` prop 
             // are trimmed — no raw arrays, so plots needing row-level data
             // cannot render from the pinned copy alone). applySpec is the same
             // path the model.json import uses; there is no second restorer.
-            const { missing } = applySpec(r.spec ?? {}, SPEC_SETTERS, {
+            const { unapplied } = applySpec(r.spec ?? {}, SPEC_SETTERS, {
               headers,
               datasetIds: (availableDatasets || []).map(d => d.id),
               panel,
             });
-            setSpecNotice(missing.length ? missing : null);
+            setSpecNotice(unapplied.length ? unapplied : null);
           }}
 ```
 
@@ -684,6 +718,8 @@ Immediately before the `<ModelBufferBar` element (`ModelingTab.jsx:~3839`), add:
                 {" — "}
                 {m.reason === "no-column"      ? "not in this dataset"
                  : m.reason === "no-dataset"    ? "no such dataset in this session"
+                 : m.reason === "no-level"      ? "not a level of this column"
+                 : m.reason === "bad-shape"     ? "malformed in the file — reset to default"
                  : m.reason === "panel-mismatch" ? "this dataset declares a different panel index"
                  : "unrecognised value"}
               </div>
@@ -1154,12 +1190,12 @@ Then insert immediately **before** the `{specNotice && (` block added in Task 3 
           models={pinnedModels}
           filenameBase={(cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100)}
           onApply={(spec) => {
-            const { missing } = applySpec(spec, SPEC_SETTERS, {
+            const { unapplied } = applySpec(spec, SPEC_SETTERS, {
               headers,
               datasetIds: (availableDatasets || []).map(d => d.id),
               panel,
             });
-            setSpecNotice(missing.length ? missing : null);
+            setSpecNotice(unapplied.length ? unapplied : null);
           }}
         />
 ```

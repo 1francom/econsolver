@@ -181,6 +181,13 @@ the import with the offending list, rather than applying something that will no-
 
 ### Partial application
 
+**A field naming a column in a *referenced* dataset is not a `column`.** The spatial
+weights `i`/`j`/`w` fields name columns of the weights dataset that
+`spatialWeightsDatasetId` points at, read as `ds.rows.map(r => r[iCol])`
+(`ModelingTab.jsx:625-631`). Checking them against the active dataset's headers would
+report every imported spatial spec as broken and clear valid values, so they are `scalar`.
+Only the `datasetRef` itself is verifiable here; what lives inside that dataset is not.
+
 `applySpec` returns `missing[]`; the banner names the role, not just the column:
 `yVar: log_gdp — not in this dataset`. `datasetRef` fields (`spatialWeightsDatasetId`) are
 treated the same way — a dataset id from another session cannot resolve, so the field is
