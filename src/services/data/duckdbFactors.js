@@ -43,7 +43,24 @@ async function defaultFetchLevels(tableName, col) {
   return sortLevels(r.toArray().map(row => row.lvl));
 }
 
-export async function expandFactors({ xCols, tableName, fetchLevels }) {
+// Floats a user-chosen reference level to the front of an already-sorted
+// levels array. Own local copy, not shared with components/modeling/helpers.js's
+// identically-named helper — same layering reason sortLevels above is its own
+// copy (services/ must not import from components/), and the two callers keep
+// different element types (this one leaves numbers as numbers; helpers.js's
+// levels are already .map(String)'d), so `ref` is compared via String() on
+// both sides rather than assuming a shared type. Silently no-ops if ref isn't
+// an actual level of this column.
+function reorderForReference(sortedLevels, ref) {
+  if (ref == null) return sortedLevels;
+  const i = sortedLevels.findIndex(v => String(v) === String(ref));
+  if (i <= 0) return sortedLevels;
+  const rest = sortedLevels.slice();
+  const [chosen] = rest.splice(i, 1);
+  return [chosen, ...rest];
+}
+
+export async function expandFactors({ xCols, tableName, fetchLevels, factorRefs = {} }) {
   const fetch = fetchLevels ?? ((col) => defaultFetchLevels(tableName, col));
   const xColsExpanded = [];
   const dummySQL = {};
@@ -53,7 +70,7 @@ export async function expandFactors({ xCols, tableName, fetchLevels }) {
       xColsExpanded.push(x);
       continue;
     }
-    const levels = await fetch(factorCol);
+    const levels = reorderForReference(await fetch(factorCol), factorRefs[factorCol]);
     for (let i = 1; i < levels.length; i++) {
       const lvl = levels[i];
       const dummyName = `${factorCol}_${String(lvl).replace(/[^A-Za-z0-9_]/g, "_")}`;

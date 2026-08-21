@@ -25,9 +25,27 @@ out <- list(
   df2 = unname(s$fstatistic["dendf"])
 )
 
+# ── Custom reference category (2026-08-16 feature) ──────────────────────────
+# Same fixture, but year's reference is set to 10 instead of the default
+# (numerically-first) 9 — exercises relevel(), which is what rScript.js now
+# emits for a user-chosen reference. Coefficients on x1 and factor(grader)
+# must be UNCHANGED from the default-reference model (reference choice is a
+# reparameterization, not a different model); only the year dummies + the
+# intercept shift.
+m2 <- lm(y ~ x1 + relevel(factor(year), ref = "10") + factor(grader), data = df)
+s2 <- summary(m2)
+coefs2 <- coef(s2)
+customRef <- list(
+  coefficients = setNames(as.list(coefs2[, "Estimate"]), rownames(coefs2)),
+  se = setNames(as.list(coefs2[, "Std. Error"]), rownames(coefs2))
+)
+
 library(jsonlite)
+out$customRef <- customRef
 writeLines(toJSON(out, auto_unbox = TRUE, pretty = TRUE, digits = 10),
            "src/math/__validation__/factorExpansionBenchmarks.json")
 cat("Wrote factorExpansionBenchmarks.json\n")
 cat("n =", out$n, " nDroppedNA =", out$nDroppedNA, "\n")
 print(coefs)
+cat("\n-- custom reference (year ref=10) --\n")
+print(coefs2)

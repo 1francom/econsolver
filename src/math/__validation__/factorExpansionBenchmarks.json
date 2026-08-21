@@ -25,5 +25,23 @@
   "adjRSquared": 0.99602598601,
   "fStat": 2056.2049129837,
   "df1": 5,
-  "df2": 36
+  "df2": 36,
+  "customRef": {
+    "coefficients": {
+      "(Intercept)": 3.2261123742,
+      "x1": 0.48901128578,
+      "relevel(factor(year), ref = \"10\")9": -1.1817974747,
+      "relevel(factor(year), ref = \"10\")11": -1.9830928889,
+      "factor(grader)B": 0.57719137471,
+      "factor(grader)C": -0.41274216303
+    },
+    "se": {
+      "(Intercept)": 0.044720699932,
+      "x1": 0.0059952972934,
+      "relevel(factor(year), ref = \"10\")9": 0.037283272004,
+      "relevel(factor(year), ref = \"10\")11": 0.036458146761,
+      "factor(grader)B": 0.038481199188,
+      "factor(grader)C": 0.035609095185
+    }
+  }
 }

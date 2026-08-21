@@ -41,6 +41,30 @@ async function validateExpand() {
   // silently become the reference category (CASE WHEN ... ELSE 0 did that).
   check("dummySQL emits NULL (not 0) when factor is NULL",
     /IS NULL THEN NULL/.test(out.dummySQL.country_FR));
+
+  // Custom reference category (2026-08-16 feature).
+  const outRef = await expandFactors({
+    xCols: ["factor(country)"], fetchLevels: fakeLevels, factorRefs: { country: "FR" },
+  });
+  check("custom ref (FR) dropped instead of the default (DE)",
+    !outRef.xColsExpanded.includes("country_FR") && outRef.xColsExpanded.includes("country_DE"));
+  check("the other levels are still both present",
+    outRef.xColsExpanded.includes("country_DE") && outRef.xColsExpanded.includes("country_IT"));
+
+  // Numeric column, custom ref given as a string (as the UI always sends it).
+  const outRefNum = await expandFactors({
+    xCols: ["factor(year)"], fetchLevels: fakeLevels, factorRefs: { year: "2011" },
+  });
+  check("custom ref on a numeric factor matches via string compare",
+    !outRefNum.xColsExpanded.includes("year_2011") && outRefNum.xColsExpanded.includes("year_2010"));
+
+  // A reference that isn't an actual level of the column must fall back to
+  // the default (first sorted level) silently, not throw or drop everything.
+  const outRefMiss = await expandFactors({
+    xCols: ["factor(country)"], fetchLevels: fakeLevels, factorRefs: { country: "ES" },
+  });
+  check("unknown ref falls back to the default reference (DE dropped)",
+    !outRefMiss.xColsExpanded.includes("country_DE") && outRefMiss.xColsExpanded.includes("country_FR"));
 }
 
 function validateSortLevels() {

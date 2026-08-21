@@ -13,6 +13,10 @@
 //   setWVars           {fn}
 //   interactionTerms   {Array}     – [{var1, var2, type:"*"|":"}]
 //   setInteractionTerms {fn}
+//   factorRefs         {Record<col,string>} – chosen reference category per factor col
+//   onSetFactorRef     {fn}        – (col, ref|null) => void, from the Chip popover
+//   rows               {object[]}  – for the popover's distinct-values JS fallback
+//   duckdbTableName    {string}    – for the popover's full-table distinct-values fetch
 
 import { VarPanel, useTheme } from "./shared.jsx";
 
@@ -60,6 +64,10 @@ export default function VariableSelector({
   setWVars,
   factorVars,
   onToggleFactor,
+  factorRefs,
+  onSetFactorRef,
+  rows,
+  duckdbTableName,
   interactionTerms = [],
   setInteractionTerms,
 }) {
@@ -126,6 +134,10 @@ export default function VariableSelector({
           }
           factorVars={factorVars}
           onToggleFactor={onToggleFactor}
+          factorRefs={factorRefs}
+          onSetFactorRef={onSetFactorRef}
+          rows={rows}
+          duckdbTableName={duckdbTableName}
         />
       )}
 
@@ -139,6 +151,10 @@ export default function VariableSelector({
           onToggle={setWVars}
           factorVars={factorVars}
           onToggleFactor={onToggleFactor}
+          factorRefs={factorRefs}
+          onSetFactorRef={onSetFactorRef}
+          rows={rows}
+          duckdbTableName={duckdbTableName}
         />
       )}
 

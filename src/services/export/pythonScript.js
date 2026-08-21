@@ -77,6 +77,11 @@ export function generatePythonScript(config = {}) {
   if (pkgs.has("statsmodels")) {
     lines.push("import statsmodels.formula.api as smf");
     lines.push("import statsmodels.api as sm");
+    // Only load-bearing when a factor regressor has a custom reference
+    // category (C(col, Treatment(reference=...))) — harmless unused import
+    // otherwise, and cheaper than tracking "does this model actually use
+    // Treatment()" through every branch that can reach this import block.
+    lines.push("from patsy.contrasts import Treatment");
   }
   if (pkgs.has("linearmodels")) {
     lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS, BetweenOLS");
@@ -113,7 +118,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push("# ── Estimation ─────────────────────────────────────────────────────────────");
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null, basePeriod: model.basePeriod ?? null }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null, basePeriod: model.basePeriod ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -629,11 +634,28 @@ function transpileStep(step, allDatasets = {}) {
   }
 }
 
+// One factor variable's patsy formula term — bare C(col), or
+// C(col, Treatment(reference=)) when a custom reference was chosen. Shared
+// by transpileModel's fmtPy and buildPyFormulaStr — same file, single real
+// definition (see rScript.js's identically-motivated rFactorTerm).
+//
+// SINGLE-quoted, not pyStr() (double-quoted): this term is always assembled
+// INTO a formula string that is itself wrapped in double quotes
+// (`smf.ols("y ~ C(x, Treatment(reference=\"...\"))", ...)`), so a
+// double-quoted inner literal would close the outer string early and break
+// the generated script. Escapes any single quote in the level value itself.
+function pyFactorTerm(v, fvSet, factorRefs) {
+  if (!fvSet.has(v)) return v;
+  if (factorRefs[v] == null) return `C(${v})`;
+  const ref = String(factorRefs[v]).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return `C(${v}, Treatment(reference='${ref}'))`;
+}
+
 // ─── PYTHON FORMULA BUILDER ───────────────────────────────────────────────────
 // Builds Patsy (statsmodels) RHS formula string. Uses xVarsRaw/wVarsRaw (pre-
 // expansion) when available; factor vars wrapped in C(); interactions use * or :.
-function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms) {
-  const fmt  = v => fvSet.has(v) ? `C(${v})` : v;
+function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}) {
+  const fmt  = v => pyFactorTerm(v, fvSet, factorRefs);
   const rawX = xVarsRaw ?? xVars;
   const rawW = wVarsRaw ?? wVars;
   const parts = [...rawX, ...rawW].map(fmt);
@@ -652,12 +674,19 @@ function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null, basePeriod = null }) {
+function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null, basePeriod = null }) {
   const lines = [];
   const fvSet    = new Set(factorVars);
-  const fmtPy    = v => fvSet.has(v) ? `C(${v})` : v;
+  // Treatment(reference=) only when a custom reference was actually chosen —
+  // X regressors only, same LSDV-FE-has-no-reference-concept note as the R
+  // exporter (LSDV's ≤2-way case exports linearmodels' entity_effects=True
+  // absorption here, not a C(col) formula; only its 3+-way fallback branch
+  // uses C(col), and that branch is left un-referenced too for consistency —
+  // no UI path offers a reference for it, and partial support would be worse
+  // than none, per the project's "no permissive default" convention).
+  const fmtPy = v => pyFactorTerm(v, fvSet, factorRefs);
   const xFormula = allX.map(v => `"${v}"`).join(", ");
-  const pyFormStr = buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms);
+  const pyFormStr = buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs);
 
   // statsmodels `.fit(...)` covariance argument matching the SE the user selected
   // in Litux (was hardcoded "HC3"). statsmodels supports HC1/HC2/HC3 natively.
@@ -1332,6 +1361,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   lines.push("import numpy as np");
   lines.push("import statsmodels.formula.api as smf");
   lines.push("import statsmodels.api as sm");
+  lines.push("from patsy.contrasts import Treatment");
   if (needsLinear) lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS");
   if (needs2SLS)   lines.push("from linearmodels.iv import IV2SLS");
   lines.push("");
@@ -1481,6 +1511,7 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
   lines.push("import numpy as np");
   lines.push("import statsmodels.formula.api as smf");
   lines.push("import statsmodels.api as sm");
+  lines.push("from patsy.contrasts import Treatment");
   if (["FE","FD","2SLS","TWFE"].includes(model.type)) {
     lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS");
     lines.push("from linearmodels.iv import IV2SLS");

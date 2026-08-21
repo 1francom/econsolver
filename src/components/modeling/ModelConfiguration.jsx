@@ -25,7 +25,7 @@
 //   kernel       {string}    setKernel {fn}
 
 import { useMemo, useState } from "react";
-import { VarPanel, Section, Chip, useTheme } from "./shared.jsx";
+import { VarPanel, Section, Chip, FactorReferencePopover, useTheme } from "./shared.jsx";
 
 const inputStyle = (C, T) => ({
   width: "100%",
@@ -63,8 +63,14 @@ function InstrumentSelector({ numericCols, yVar, xVars, wVars, zVars, setZVars }
 // [entityCol] only, since that estimator historically demeans by entity alone —
 // see estimationDispatch.js) but lets the user narrow/reorder for THIS
 // estimation only — does not mutate the stored panel declaration.
-function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCols }) {
+// showFactorRef/factorRefs/onSetFactorRef/rows/duckdbTableName are only
+// passed by the LSDV call site — LSDV is the only estimator that fits
+// explicit per-level FE dummies, so it's the only one where "reference
+// category" is a meaningful choice (see specs/2026-08-16-factor-reference-category-design.md).
+// Every other caller omits them and gets the exact pre-2026-08-16 picker.
+function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCols, showFactorRef, factorRefs, onSetFactorRef, rows, duckdbTableName }) {
   const { C } = useTheme();
+  const [openRefFor, setOpenRefFor] = useState(null);
   // panel.feCols is only populated once the user clicks "Set/Update panel
   // index" in the Panel tab after this feature landed — a panel declared
   // before that (or re-visited without re-clicking) has entityCol/timeCol
@@ -104,10 +110,33 @@ function FEColumnPicker({ panel, selectedFeCols, setSelectedFeCols, defaultFeCol
   return (
     <Section title="Fixed Effects" color={C.teal}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {availableFeCols.map(col => (
-          <Chip key={col} label={col} selected={effective.includes(col)} onClick={() => toggle(col)}
-            color={col === interactionLabel ? C.gold : C.teal} />
-        ))}
+        {availableFeCols.map(col => {
+          // The interaction chip (e.g. "state×year") isn't a real dataset
+          // column until estimation time (materializeFEInteraction), so it
+          // has no distinct values to fetch — no reference picker for it.
+          const canPickRef = showFactorRef && col !== interactionLabel && effective.includes(col);
+          return (
+            <div key={col} style={{ position: "relative" }}>
+              <Chip label={col} selected={effective.includes(col)} onClick={() => toggle(col)}
+                color={col === interactionLabel ? C.gold : C.teal}
+                factored={canPickRef ? true : undefined}
+                refLabel={canPickRef ? factorRefs?.[col] : undefined}
+                onFactor={canPickRef ? () => setOpenRefFor(col) : undefined}
+              />
+              {openRefFor === col && (
+                <FactorReferencePopover
+                  col={col}
+                  rows={rows}
+                  duckdbTableName={duckdbTableName}
+                  currentRef={factorRefs?.[col] ?? null}
+                  color={C.teal}
+                  onSelect={ref => { onSetFactorRef(col, ref); setOpenRefFor(null); }}
+                  onClose={() => setOpenRefFor(null)}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
       {hasInteraction && (
         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
@@ -944,6 +973,9 @@ export default function ModelConfiguration({
   rows,
   headers,
   panel,
+  factorRefs,
+  onSetFactorRef,
+  duckdbTableName,
 }) {
   const { C, T } = useTheme();
   if (model === "2SLS" || model === "GMM" || model === "LIML") {
@@ -1059,7 +1091,8 @@ export default function ModelConfiguration({
     // toggle anymore — the Fixed Effects picker below is now the sole,
     // authoritative source for which dimensions LSDV absorbs, same as
     // FE/TWFE/EventStudy).
-    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault} />;
+    return <FEColumnPicker panel={panel} selectedFeCols={selectedFeCols} setSelectedFeCols={setSelectedFeCols} defaultFeCols={feColsDefault}
+      showFactorRef factorRefs={factorRefs} onSetFactorRef={onSetFactorRef} rows={rows} duckdbTableName={duckdbTableName} />;
   }
 
   if (model === "SyntheticControl") {

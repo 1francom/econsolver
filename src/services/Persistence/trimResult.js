@@ -19,7 +19,7 @@ export function trimResult(r) {
   if (!r || typeof r !== "object") return null;
   const {
     id, type, label, modelLabel, datasetId, spec, yVar, xVars, zVars, wVars, varNames,
-    beta, se, pVals, tStats, testStats, R2, adjR2, n, df, Fstat, Fpval,
+    beta, se, pVals, tStats, testStats, R2, adjR2, R2Within, R2Between, units, n, df, Fstat, Fpval,
     att, attSE, attP, late, lateSE, lateP, seType, kernel, bandwidth, cutoff,
     runningVar, treatVar, postVar, entityCol, timeCol,
     firstStages, jStat, jDf, jPval, kappa,
@@ -32,7 +32,7 @@ export function trimResult(r) {
     spec: spec ?? { yVar, xVars, zVars, wVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel },
     varNames, beta, se, pVals,
     tStats: tStats ?? testStats,
-    R2, adjR2, n, df, Fstat, Fpval,
+    R2, adjR2, R2Within, R2Between, units, n, df, Fstat, Fpval,
     att, attSE, attP, late, lateSE, lateP, seType,
     ...(Array.isArray(firstStages)
       ? { firstStages: firstStages.map(trimFirstStage).filter(Boolean) }

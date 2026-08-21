@@ -155,6 +155,18 @@ export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
   const SST_w   = dmYvals.reduce((s, v) => s + (v - dmYmean) ** 2, 0);
   const R2_within = 1 - res.SSR / SST_w;
 
+  // R² overall + adjusted R², on the RAW (un-demeaned) outcome — i.e. the fit of
+  // the full model including the absorbed FE, which is what fixest reports as
+  // "Adj. R2" (its "Within R2" is R2_within above). df_fe already counts the FE
+  // levels as parameters, so adj-R² = 1 − (SSR/df_fe)/(TSS/(n−1)) matches fixest.
+  const yVals  = valid.map(r => r[yCol]);
+  const yMean  = yVals.reduce((a, b) => a + b, 0) / yVals.length;
+  const SST_t  = yVals.reduce((s, v) => s + (v - yMean) ** 2, 0);
+  const R2      = SST_t > 0 ? 1 - res.SSR / SST_t : null;
+  const adjR2   = SST_t > 0 && valid.length > 1
+    ? 1 - (res.SSR / df_fe) / (SST_t / (valid.length - 1))
+    : null;
+
   // Recovered fixed effects (fixest::fixef equivalent), so the levels can be
   // written back as columns. Computed from the partial residual y − xβ, NOT
   // from the within regression, which sweeps them out. See recoverFixedEffects
@@ -168,7 +180,13 @@ export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
     pVals:    corrP.slice(1),
     varNames: xCols,
     R2_within,
+    R2,
+    adjR2,
     n:    valid.length,
+    // Entity count for the FIRST FE dimension — the "Units" the UI reports.
+    // runFE's single-way wrapper overrides this with its own count; they agree
+    // by construction (same valid set, same column).
+    units: nLevels[0],
     feCols,
     nLevels,          // level count per FE dimension, in feCols order
     fixef,            // { estimates, perRow, intercept, normalization, warnings }
@@ -665,7 +683,7 @@ function findInvariantRegressor(rows, xCols, feCols) {
 // reference). LSDV is the explicit-dummy method by definition, so it does NOT use
 // demeanByFE. Entity intercepts α̂ are reconstructed from the FIRST FE dimension.
 // For D=1 and D=2 this is numerically identical to the original unit/timeFE LSDV.
-export function runLSDVMulti(rows, yCol, xCols, feCols, seOpts = {}) {
+export function runLSDVMulti(rows, yCol, xCols, feCols, seOpts = {}, feRefs = {}) {
   const D = feCols.length;
   if (D < 1) return { error: "LSDV requires at least one FE column." };
 
@@ -678,13 +696,31 @@ export function runLSDVMulti(rows, yCol, xCols, feCols, seOpts = {}) {
       : [...lv].sort((a, b) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
   };
 
+  // Floats a user-chosen reference level to index 0, leaving the rest of the
+  // sorted order untouched — everything downstream (dummy columns, alphas,
+  // varNames labels) reads feLevels[d][0]/.slice(1), so this one reorder is
+  // the entire feature for LSDV. Own local copy (math/ may not import from
+  // components/ or services/ — same layering reason the other two copies of
+  // this helper exist). Silently no-ops if the requested ref isn't an actual
+  // level of this dimension.
+  const reorderForReference = (sortedLevels, ref) => {
+    if (ref == null) return sortedLevels;
+    const i = sortedLevels.findIndex(v => String(v) === String(ref));
+    if (i <= 0) return sortedLevels;
+    const rest = sortedLevels.slice();
+    const [chosen] = rest.splice(i, 1);
+    return [chosen, ...rest];
+  };
+
   const valid = rows.filter(r =>
     typeof r[yCol] === "number" && isFinite(r[yCol]) &&
     feCols.every(c => r[c] != null) &&
     xCols.every(c => typeof r[c] === "number" && isFinite(r[c]))
   );
 
-  const feLevels = feCols.map(c => sortLevels([...new Set(valid.map(r => r[c]))]));
+  const feLevels = feCols.map(c =>
+    reorderForReference(sortLevels([...new Set(valid.map(r => r[c]))]), feRefs[c])
+  );
   const nLevels  = feLevels.map(lv => lv.length);
 
   // Guard matches the original heuristic: n ≥ k_reg + Σ(levels) + 2.
@@ -770,13 +806,13 @@ export function runLSDVMulti(rows, yCol, xCols, feCols, seOpts = {}) {
 // Backward-compatible wrapper — unit FE (+ optional time FE via opts.timeFE).
 // Preserves the original valid-set (timeCol required non-null even when timeFE is off)
 // and the legacy output shape (units/times/timeFE/refUnit/refTime + "unit:"/"time:" labels).
-export function runLSDV(rows, yCol, xCols, unitCol, timeCol, opts = {}, seOpts = {}) {
+export function runLSDV(rows, yCol, xCols, unitCol, timeCol, opts = {}, seOpts = {}, feRefs = {}) {
   const timeFE = opts.timeFE ?? false;
   // Original LSDV dropped rows with a null timeCol regardless of timeFE.
   const src = timeCol != null ? rows.filter(r => r[timeCol] != null) : rows;
   const feCols = timeFE ? [unitCol, timeCol] : [unitCol];
 
-  const out = runLSDVMulti(src, yCol, xCols, feCols, seOpts);
+  const out = runLSDVMulti(src, yCol, xCols, feCols, seOpts, feRefs);
   if (out.error) return out;
 
   const units = out.feLevels[0];

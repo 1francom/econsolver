@@ -290,6 +290,8 @@ function wrapFE(eng, spec) {
     pVals:     clean(eng.pVals),
     R2Within:  eng.R2_within  ?? null,
     R2Between: eng.R2_between ?? null,
+    R2:        eng.R2    ?? null,
+    adjR2:     eng.adjR2 ?? null,
     n:         eng.n     ?? 0,
     df:        eng.df    ?? 0,
     units:     eng.units ?? null,

@@ -213,6 +213,54 @@ section("T5 · generator determinism (date line excluded)");
   }
 }
 
+// ─── T6 — FACTOR REFERENCE CATEGORY (2026-08-16 feature) ──────────────────────
+// A custom reference nests a quoted level value INSIDE an already-quoted
+// formula string in Python — exactly the class of bug this section pins:
+// Treatment(reference="2") double-quoted inside "y ~ C(x, ...)" would close
+// the outer string early and emit invalid Python that T2's undefined/
+// [object Object] check would never catch (it's syntactically broken, not
+// "garbage-valued").
+section("T6 · factor reference category export");
+{
+  const refCfg = {
+    filename: "d.csv", pipeline: [], allDatasets: ALL_DATASETS,
+    model: { type: "OLS", yVar: "wage", xVars: ["region"], wVars: [], xVarsRaw: ["region"], wVarsRaw: [],
+      factorVars: ["region"], factorRefs: { region: "north" }, seType: "classical" },
+  };
+  const r  = generateRScript(refCfg);
+  const py = generatePythonScript(refCfg);
+
+  check("R emits relevel() with the chosen reference",
+    /relevel\(factor\(region\),\s*ref\s*=\s*"north"\)/.test(r));
+  check("Python emits C(region, Treatment(reference='north'))",
+    /C\(region,\s*Treatment\(reference='north'\)\)/.test(py));
+  check("Python imports patsy.contrasts.Treatment",
+    /from patsy\.contrasts import Treatment/.test(py));
+  // The real regression check: the Treatment(...) term must NOT close the
+  // outer double-quoted formula string early. If it did, the line would
+  // contain an odd number of `"` before the first `, data=` — a cheap,
+  // reliable proxy for "the formula string parses as one token".
+  const olsLine = py.split("\n").find(l => l.includes("smf.ols("));
+  const beforeData = olsLine?.split(", data=")[0] ?? "";
+  check("Python formula string's quotes stay balanced (Treatment ref doesn't break out of it)",
+    (beforeData.match(/"/g) || []).length % 2 === 0, olsLine);
+
+  // Numeric reference → Stata gets ib(#).; string reference → falls back to
+  // i.col with an explanatory NOTE, never invalid ib(word).col syntax.
+  const stataNum = generateStataScript({ ...refCfg, model: { ...refCfg.model, factorRefs: { region: "3" } } });
+  check("Stata emits ib(#). for a numeric reference", /ib\(3\)\.region/.test(stataNum));
+  const stataStr = generateStataScript(refCfg); // region: "north" — not numeric
+  check("Stata falls back to i.col for a string reference (no invalid ib(north).region)",
+    /\bi\.region\b/.test(stataStr) && !/ib\(north\)/.test(stataStr));
+  check("Stata explains the string-reference fallback in a NOTE", /NOTE.*ib\(#\)/.test(stataStr));
+
+  // No reference chosen at all → byte-identical to pre-feature output (no
+  // relevel/Treatment/ib appears anywhere).
+  const noRefCfg = { ...refCfg, model: { ...refCfg.model, factorRefs: {} } };
+  const rNoRef = generateRScript(noRefCfg);
+  check("no factorRefs entry → plain factor(), no relevel()", /factor\(region\)/.test(rNoRef) && !/relevel/.test(rNoRef));
+}
+
 // ─── GAP SUMMARY ──────────────────────────────────────────────────────────────
 if (Object.keys(gapReport).length) {
   console.log("\n⚠ translator gaps:");
