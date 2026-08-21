@@ -429,14 +429,24 @@ export function applySpec(spec = {}, setters = {}, ctx = {}) {
 // ── specFormula ──────────────────────────────────────────────────────────────
 // Human-readable one-liner for the import picker modal.
 export function specFormula(spec = {}) {
+  if (!spec || typeof spec !== "object") return "(no outcome)";
   const y = spec.yVar;
   if (!y) return "(no outcome)";
   // Raw sidebar arrays, not the engine's expanded design matrix — a formula
   // reading "y ~ year_2011 + year_2012 + …" is not what the user selected.
-  const rhs = [...(spec.xVarsRaw ?? []), ...(spec.wVarsRaw ?? [])];
+  //
+  // `Array.isArray`, not `.length` — this reads a hand-edited or malformed
+  // model.json (the import picker's whole job), and an array-like duck-typed
+  // value (`{length: 2, 0: "a", 1: "b"}`) has a `.length` but no `.join`,
+  // which threw before this got parseModelFile-shape validation upstream too.
+  const xVarsRaw = Array.isArray(spec.xVarsRaw) ? spec.xVarsRaw : [];
+  const wVarsRaw = Array.isArray(spec.wVarsRaw) ? spec.wVarsRaw : [];
+  const zVars    = Array.isArray(spec.zVars)    ? spec.zVars    : [];
+  const feCols   = Array.isArray(spec.feCols)   ? spec.feCols   : [];
+  const rhs = [...xVarsRaw, ...wVarsRaw];
   const base = `${y} ~ ${rhs.length ? rhs.join(" + ") : "1"}`;
   const parts = [base];
-  if ((spec.zVars ?? []).length)  parts.push(`| ${spec.zVars.join(" + ")}`);
-  if ((spec.feCols ?? []).length) parts.push(`| ${spec.feCols.join(" + ")}`);
+  if (zVars.length)  parts.push(`| ${zVars.join(" + ")}`);
+  if (feCols.length) parts.push(`| ${feCols.join(" + ")}`);
   return parts.join(" ");
 }

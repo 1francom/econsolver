@@ -729,6 +729,36 @@ section("specFormula");
   check("no y yields a placeholder", specFormula({}) === "(no outcome)");
 }
 
+// ── artifactIO fallout, review item 2: duck-typed arrays in a hand-edited ────
+// model.json (e.g. {"length":1} instead of a real array) must not crash the
+// import picker. specFormula guarded with `.length` then called `.join`,
+// which throws on any array-like non-array. Must use Array.isArray.
+section("specFormula survives duck-typed non-array fields (a hand-edited file)");
+{
+  let threw = false;
+  let out = null;
+  try {
+    out = specFormula({ yVar: "wage", xVarsRaw: { length: 2, 0: "a", 1: "b" } });
+  } catch { threw = true; }
+  check("array-like xVarsRaw does not throw", !threw, out);
+
+  threw = false;
+  try { specFormula({ yVar: "wage", wVarsRaw: "not-an-array" }); } catch { threw = true; }
+  check("string wVarsRaw does not throw", !threw);
+
+  threw = false;
+  try { specFormula({ yVar: "wage", zVars: { length: 1 } }); } catch { threw = true; }
+  check("array-like zVars does not throw", !threw);
+
+  threw = false;
+  try { specFormula({ yVar: "wage", feCols: { length: 1 } }); } catch { threw = true; }
+  check("array-like feCols does not throw", !threw);
+
+  threw = false;
+  try { specFormula({ yVar: "wage", xVarsRaw: null, wVarsRaw: null, zVars: null, feCols: null }); } catch { threw = true; }
+  check("null list fields do not throw", !threw);
+}
+
 section("SE_TYPES vocabulary is well-formed (single-owner migration lands in Task 2)");
 check("every SE_TYPES entry has id + label",
   SE_TYPES.length > 0 && SE_TYPES.every(s => typeof s.id === "string" && typeof s.label === "string"));
