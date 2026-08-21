@@ -416,6 +416,18 @@ function ModelHistory({ history, onRestore, onClear }) {
   );
 }
 
+// Renders an applySpec `unapplied` entry's offending value for the banner.
+// A `bad-shape` report's value is by definition NOT a string — it is whatever
+// malformed thing the file carried (an object, an array, a nested map), and
+// `String(v)` turns every one of those into "[object Object]".
+function fmtSpecValue(v) {
+  if (typeof v === "string" || typeof v === "number") return String(v);
+  let s;
+  try { s = JSON.stringify(v); } catch { s = null; }
+  if (typeof s !== "string") s = String(v);
+  return s.length > 60 ? s.slice(0, 60) + "…" : s;
+}
+
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onSessionStateChange, onCoachQuestion, onExtract, pid, datasetId, onSwitchDataset }) {
   const { C, T } = useTheme();
@@ -463,6 +475,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setZVars([]);
     setPostVar([]);
     setTreatVar([]);
+    // The unapplied-fields banner names columns that were missing from the
+    // PREVIOUS dataset. Switching datasets can make every one of them resolve,
+    // so a surviving banner is a claim about data that is no longer loaded.
+    setSpecNotice(null);
   }, [cleanedData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sufficient-statistics cache (Fase 0) ─────────────────────────────────────
@@ -936,13 +952,20 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     // seType/clusterVar are captured PER MODEL at estimation time so each pinned
     // model exports with the SE it was actually run with (not the current global
     // selector). Without this, pinned models silently default to classical.
-    // collectSpec is the single owner of what a spec contains (modelSpec.js).
-    // xVarsRaw/wVarsRaw/filename are NOT spec fields — they are replication
-    // metadata the exporters read, so they stay stamped alongside it.
+    // collectSpec is the single owner of what a spec contains (modelSpec.js) —
+    // including xVarsRaw/wVarsRaw, whose SPEC keys are deliberately distinct
+    // from the engine's expanded `spec.xVars`/`spec.wVars` so this Object.assign
+    // never clobbers them. `filename` is NOT a spec field — it is replication
+    // metadata the exporters read, so it stays stamped alongside it.
     const specExtras = {
       ...collectSpec({
         model, family, yVar, xVars, wVars, zVars, weightVar,
         factorVars, factorRefs, interactionTerms, noIntercept,
+        // `feCols` is declared `nullable` (null = "use the estimator's own FE
+        // default"), but this call site passes the RESOLVED list on purpose:
+        // the recipe must record the FE set the model actually ran with, so
+        // the collect side never emits null here. Do not "fix" this to
+        // selectedFeCols — the nullable branch is for imported/legacy specs.
         selectedFeCols: effectiveFeCols,
         entityCol: panel?.entityCol ?? null, timeCol: panel?.timeCol ?? null,
         treatVar, postVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
@@ -956,7 +979,6 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol,
         seType, clusterVar, clusterVar2, timeVar, maxLag,
       }),
-      xVarsRaw: [...xVars], wVarsRaw: [...wVars],
       filename: cleanedData?.filename ?? null,
     };
     if (dispatch?.result?.spec)      Object.assign(dispatch.result.spec,      specExtras);
@@ -3908,21 +3930,42 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
             color: C.textDim, lineHeight: 1.6,
           }}>
-            <div style={{ color: C.gold, marginBottom: 4 }}>
-              {specNotice.length} field{specNotice.length !== 1 ? "s" : ""} could not be applied
-            </div>
-            {specNotice.map((m, i) => (
-              <div key={i}>
-                {m.role}: <span style={{ color: C.text }}>{String(m.value)}</span>
-                {" — "}
-                {m.reason === "no-column"      ? "not in this dataset"
-                 : m.reason === "no-dataset"    ? "no such dataset in this session"
-                 : m.reason === "no-level"      ? "not a level of this column"
-                 : m.reason === "bad-shape"     ? "malformed in the file — reset to default"
-                 : m.reason === "panel-mismatch" ? "this dataset declares a different panel index"
-                 : "unrecognised value"}
-              </div>
-            ))}
+            {(() => {
+              const legacy = specNotice.find(m => m.reason === "legacy-spec");
+              const rest   = specNotice.filter(m => m.reason !== "legacy-spec");
+              return <>
+                {legacy && <>
+                  <div style={{ color: C.gold, marginBottom: 4 }}>
+                    Restored from a pin saved before full spec capture
+                  </div>
+                  <div style={{ marginBottom: rest.length ? 8 : 0 }}>
+                    Only the settings this pin stored were restored — the estimator
+                    ({fmtSpecValue(legacy.value) || "unknown"}) was recovered from the
+                    result itself. Outcome family and the estimator-specific settings
+                    (treated unit, event windows, Callaway/Sun-Abraham, spatial weights,
+                    Poisson FE) were never saved with it and are back at their defaults.
+                    Re-check the sidebar before estimating.
+                  </div>
+                </>}
+                {rest.length > 0 && (
+                  <div style={{ color: C.gold, marginBottom: 4 }}>
+                    {rest.length} field{rest.length !== 1 ? "s" : ""} could not be applied
+                  </div>
+                )}
+                {rest.map((m, i) => (
+                  <div key={i}>
+                    {m.role}: <span style={{ color: C.text }}>{fmtSpecValue(m.value)}</span>
+                    {" — "}
+                    {m.reason === "no-column"      ? "not in this dataset"
+                     : m.reason === "no-dataset"    ? "no such dataset in this session"
+                     : m.reason === "no-level"      ? "not a level of this column"
+                     : m.reason === "bad-shape"     ? "malformed in the file — reset to default"
+                     : m.reason === "panel-mismatch" ? "this dataset declares a different panel index"
+                     : "unrecognised value"}
+                  </div>
+                ))}
+              </>;
+            })()}
             <button onClick={() => setSpecNotice(null)}
               style={{ marginTop: 6, padding: "0.18rem 0.55rem", background: "transparent",
                 border: `1px solid ${C.border2}`, color: C.textDim, borderRadius: 2,
@@ -3948,8 +3991,26 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             // are trimmed — no raw arrays, so plots needing row-level data
             // cannot render from the pinned copy alone). applySpec is the same
             // path the model.json import uses; there is no second restorer.
-            const { unapplied } = applySpec(r.spec ?? {}, SPEC_SETTERS, SPEC_CTX);
-            setSpecNotice(unapplied.length ? unapplied : null);
+            //
+            // `spec.model` did not exist before modelSpec.js landed, and no
+            // engine writes it — so EVERY pin already persisted in a user's
+            // IndexedDB model_buffer has a spec with no `model` key. applySpec
+            // resets an absent key to its `def` and reports nothing, so an RDD
+            // pin would restore as OLS in complete silence. Seed the estimator
+            // from the result itself; `spec.model` still wins when present, and
+            // an unrecognised `r.type` now surfaces as `unknown-value`.
+            const rawSpec = (r.spec && typeof r.spec === "object" && !Array.isArray(r.spec)) ? r.spec : {};
+            const restoreSpec = { model: r.type, ...rawSpec };
+            const { unapplied } = applySpec(restoreSpec, SPEC_SETTERS, SPEC_CTX);
+            // family and the estimator-specific blocks (treatedUnit, kPre/kPost,
+            // cs*, sa*, spatial*, poisson*) were never stored on a legacy pin.
+            // Resetting them to their defaults is correct; doing it silently is
+            // not — say so rather than let the sidebar quietly disagree.
+            const notice = ("model" in rawSpec)
+              ? unapplied
+              : [{ key: "_legacySpec", role: "Pinned before full spec capture",
+                   value: r.type ?? "", reason: "legacy-spec" }, ...unapplied];
+            setSpecNotice(notice.length ? notice : null);
           }}
           onRemove={(id) => {
             modelBuffer.remove(id);

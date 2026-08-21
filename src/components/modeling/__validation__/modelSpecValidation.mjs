@@ -40,8 +40,8 @@ const EXPECTED_KEYS = [
   "spatialGeomCol","spatialModel","spatialWeightsD","spatialWeightsDatasetId",
   "spatialWeightsICol","spatialWeightsJCol","spatialWeightsK","spatialWeightsMode",
   "spatialWeightsStyle","spatialWeightsType","spatialWeightsWCol","synthTreatTime",
-  "timeCol","timeVar","treatTimeCol","treatVar","treatedUnit","wVars","weightVar",
-  "xVars","yVar","zVars",
+  "timeCol","timeVar","treatTimeCol","treatVar","treatedUnit","wVarsRaw","weightVar",
+  "xVarsRaw","yVar","zVars",
 ];
 
 section("field-table shape (review item 9)");
@@ -324,7 +324,7 @@ section("applySpec is a full replace, not a merge");
 
   // Legacy/partial spec — the exact scenario estimationDispatch.js produces
   // for several estimators: only a handful of keys present.
-  const specB = { model: "OLS", yVar: "wage", xVars: ["educ"] };
+  const specB = { model: "OLS", yVar: "wage", xVarsRaw: ["educ"] };
   applySpec(specB, makeSetters(out), { headers: ALL_COLS, datasetIds: [], modelIds: MODEL_IDS });
   check("seType reset to default, not left at spec A's hc3", out.seType === "classical", out.seType);
   check("bwMode reset to default", out.bwMode === "ik", out.bwMode);
@@ -384,9 +384,9 @@ section("applySpec never throws on malformed input");
 }
 {
   const out = {};
-  const { unapplied } = applySpec({ xVars: "educ" }, makeSetters(out), { headers: ALL_COLS, datasetIds: [] });
+  const { unapplied } = applySpec({ xVarsRaw: "educ" }, makeSetters(out), { headers: ALL_COLS, datasetIds: [] });
   check("bad-shape xVars falls back to def []", JSON.stringify(out.xVars) === "[]", JSON.stringify(out.xVars));
-  check("bad-shape xVars reported", unapplied.some(m => m.key === "xVars" && m.reason === "bad-shape"),
+  check("bad-shape xVars reported", unapplied.some(m => m.key === "xVarsRaw" && m.reason === "bad-shape"),
     JSON.stringify(unapplied));
 }
 {
@@ -551,7 +551,7 @@ section("def objects are cloned per call and the table's own instances are froze
     !("poisoned" in outE.factorRefs), JSON.stringify(outE.factorRefs));
 }
 {
-  const xVarsField = MODEL_SPEC_FIELDS.find(f => f.key === "xVars");
+  const xVarsField = MODEL_SPEC_FIELDS.find(f => f.key === "xVarsRaw");
   let threw = false;
   try { xVarsField.def.push("mutated"); } catch { threw = true; }
   check("mutating the table's own xVars def array throws (frozen, strict mode)", threw);
@@ -615,6 +615,108 @@ section("enum guard: empty modelIds skips validation, undefined resets, non-prim
   const { unapplied } = applySpec({ family: undefined }, makeSetters(out), { headers: ALL_COLS, datasetIds: [] });
   check("explicit undefined resets family to its default", out.family === "linear", out.family);
   check("undefined family not reported", !unapplied.some(m => m.key === "family"));
+}
+
+// ── Fix 2: the raw sidebar arrays must NOT occupy the `xVars`/`wVars` SPEC ──
+//    keys. runners/estimationDispatch.js writes the EXPANDED design matrix
+//    there and ModelingTab's specExtras Object.assigns collectSpec's output
+//    over the engine's spec — same key means the expansion is clobbered.
+section("Fix 2: collectSpec emits xVarsRaw/wVarsRaw, never xVars/wVars");
+{
+  const spec = collectSpec(STATE.OLS);
+  check("collectSpec does not emit an `xVars` key", !("xVars" in spec), JSON.stringify(Object.keys(spec)));
+  check("collectSpec does not emit a `wVars` key", !("wVars" in spec));
+  check("collectSpec emits xVarsRaw with the RAW sidebar selection",
+    JSON.stringify(spec.xVarsRaw) === JSON.stringify(["educ", "exper"]), JSON.stringify(spec.xVarsRaw));
+  check("collectSpec emits wVarsRaw", JSON.stringify(spec.wVarsRaw) === "[]", JSON.stringify(spec.wVarsRaw));
+
+  // The concrete regression: an engine spec carrying an expanded design matrix
+  // must survive `Object.assign(engineSpec, collectSpec(state))` untouched.
+  const engineSpec = { xVars: ["educ", "year_2011", "year_2012"], wVars: ["exper_sq"] };
+  Object.assign(engineSpec, spec);
+  check("Object.assign(engineSpec, collectSpec(...)) leaves the expanded xVars intact",
+    JSON.stringify(engineSpec.xVars) === JSON.stringify(["educ", "year_2011", "year_2012"]),
+    JSON.stringify(engineSpec.xVars));
+  check("...and the expanded wVars intact",
+    JSON.stringify(engineSpec.wVars) === JSON.stringify(["exper_sq"]), JSON.stringify(engineSpec.wVars));
+  check("specFormula reads the raw keys, not the expanded ones",
+    specFormula(engineSpec) === "wage ~ educ + exper", specFormula(engineSpec));
+}
+{
+  // ModelingTab must no longer stamp xVarsRaw/wVarsRaw by hand — collectSpec
+  // produces both, and a second source would drift.
+  const src = readFileSync(MODELING_TAB, "utf8");
+  check("ModelingTab no longer hand-stamps xVarsRaw/wVarsRaw in specExtras",
+    !/xVarsRaw:\s*\[\.\.\.xVars\]/.test(src));
+}
+
+// ── Fix 1: a legacy pin's spec has NO `model` key ─────────────────────────────
+//    `spec.model` did not exist before modelSpec.js, and no engine writes it.
+//    applySpec resets an absent key to its def ("OLS") and reports NOTHING, so
+//    an RDD pin restores as OLS in silence unless onRestore seeds the estimator
+//    from the result's own `type`.
+section("Fix 1: a legacy spec (no `model` key) keeps its estimator when seeded");
+{
+  const legacySpec = { yVar: "y", xVarsRaw: ["educ"], seType: "hc1",
+                       runningVar: "score", cutoff: "50", bwMode: "manual", bwManual: "12.5" };
+  const CTX = { headers: ALL_COLS, datasetIds: [], modelIds: MODEL_IDS };
+
+  // Exactly what onRestore builds: { model: r.type, ...r.spec }.
+  const seeded = {};
+  const { unapplied } = applySpec({ model: "RDD", ...legacySpec }, makeSetters(seeded), CTX);
+  check("seeded legacy spec restores the RDD estimator, not OLS", seeded.model === "RDD", seeded.model);
+  check("the legacy spec's own stored fields still apply",
+    seeded.seType === "hc1" && seeded.cutoff === "50" && seeded.bwManual === "12.5",
+    JSON.stringify([seeded.seType, seeded.cutoff, seeded.bwManual]));
+  check("seeding reports nothing spurious", unapplied.length === 0, JSON.stringify(unapplied));
+
+  // NEGATIVE CONTROL — drop the seed and the estimator silently becomes OLS.
+  const bare = {};
+  const r2 = applySpec(legacySpec, makeSetters(bare), CTX);
+  check("without the seed the estimator really does fall back to OLS (the bug)",
+    bare.model === "OLS", bare.model);
+  check("...and applySpec reports nothing about it, which is why it was silent",
+    r2.unapplied.every(m => m.key !== "model"), JSON.stringify(r2.unapplied));
+
+  // An unrecognised result type must surface, not become OLS in silence.
+  const odd = {};
+  const r3 = applySpec({ model: "NotAnEstimator", ...legacySpec }, makeSetters(odd), CTX);
+  check("an unrecognised r.type surfaces as unknown-value",
+    r3.unapplied.some(m => m.key === "model" && m.reason === "unknown-value"), JSON.stringify(r3.unapplied));
+}
+{
+  // The seed lives in ModelingTab.jsx's onRestore; pin it as text so deleting
+  // it turns this check red (same technique as the def-sync check above).
+  const src = readFileSync(MODELING_TAB, "utf8").replace(/\s+/g, " ");
+  check("onRestore seeds the spec as { model: r.type, ...rawSpec }",
+    src.includes("const restoreSpec = { model: r.type, ...rawSpec };"),
+    "no `const restoreSpec = { model: r.type, ...rawSpec };` found in ModelingTab.jsx");
+  check("onRestore flags a legacy spec (no `model` key) with reason legacy-spec",
+    /\("model" in rawSpec\)/.test(src) && src.includes('reason: "legacy-spec"'));
+  check("the banner renders the legacy-spec entry with its own copy",
+    src.includes('m.reason === "legacy-spec"'));
+}
+
+// ── Fix 3 / Fix 4 ────────────────────────────────────────────────────────────
+section("Fix 3/4: stale-notice reset and a non-string banner value");
+{
+  const src = readFileSync(MODELING_TAB, "utf8");
+  const eff = src.slice(src.indexOf("setFactorVars(new Set(headers.filter"), src.indexOf("[cleanedData]"));
+  check("the dataset-switch reset effect also clears specNotice",
+    eff.includes("setSpecNotice(null)"), "setSpecNotice(null) not found in the [cleanedData] reset effect");
+  check("the banner formats values through fmtSpecValue, not String()",
+    src.includes("fmtSpecValue(m.value)") && !src.includes("{String(m.value)}"));
+}
+{
+  // The values a bad-shape report actually carries are objects and arrays.
+  const out = {};
+  const { unapplied } = applySpec({ bwMode: { nested: true }, factorRefs: ["a", "b"] },
+    makeSetters(out), { headers: ALL_COLS, datasetIds: [] });
+  check("bad-shape reports really do carry non-string values (what Fix 4 is for)",
+    unapplied.some(m => m.reason === "bad-shape" && typeof m.value === "object"),
+    JSON.stringify(unapplied));
+  check("String() on such a value is the useless [object Object] the fix removes",
+    String(unapplied.find(m => m.reason === "bad-shape" && !Array.isArray(m.value)).value) === "[object Object]");
 }
 
 section("specFormula");

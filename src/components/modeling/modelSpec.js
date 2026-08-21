@@ -78,8 +78,16 @@ export const MODEL_SPEC_FIELDS = [
   { key: "family",            kind: "enum", values: FAMILIES,      def: "linear", setter: "setFamily", role: "Outcome family" },
 
   { key: "yVar",              kind: "column",     setter: "setYVar",       wrapped: true, def: null, role: "Outcome (Y)" },
-  { key: "xVars",             kind: "columns",    setter: "setXVars",      def: Object.freeze([]),   role: "Regressors (X)" },
-  { key: "wVars",             kind: "columns",    setter: "setWVars",      def: Object.freeze([]),   role: "Controls (W)" },
+  // SPEC key is `xVarsRaw`/`wVarsRaw`, STATE key is `xVars`/`wVars`. The engine
+  // (runners/estimationDispatch.js) writes the EXPANDED design-matrix columns —
+  // factor dummies and interaction products — to `spec.xVars`/`spec.wVars`, and
+  // every exporter reads them expecting exactly that. specExtras assigns
+  // collectSpec's output over the engine's spec, so emitting `xVars` here would
+  // clobber the expanded list with the raw sidebar arrays (SunAbraham's export
+  // then loses its cohort/period filtering and emits the period column as a
+  // control). The raw arrays have always had their own keys for this reason.
+  { key: "xVarsRaw",          kind: "columns",    setter: "setXVars", stateKey: "xVars", def: Object.freeze([]),   role: "Regressors (X)" },
+  { key: "wVarsRaw",          kind: "columns",    setter: "setWVars", stateKey: "wVars", def: Object.freeze([]),   role: "Controls (W)" },
   { key: "zVars",             kind: "columns",    setter: "setZVars",      def: Object.freeze([]),   role: "Instruments (Z)" },
   { key: "weightVar",         kind: "column",     setter: "setWeightVar",  wrapped: true, def: null, role: "Weights" },
 
@@ -423,7 +431,9 @@ export function applySpec(spec = {}, setters = {}, ctx = {}) {
 export function specFormula(spec = {}) {
   const y = spec.yVar;
   if (!y) return "(no outcome)";
-  const rhs = [...(spec.xVars ?? []), ...(spec.wVars ?? [])];
+  // Raw sidebar arrays, not the engine's expanded design matrix — a formula
+  // reading "y ~ year_2011 + year_2012 + …" is not what the user selected.
+  const rhs = [...(spec.xVarsRaw ?? []), ...(spec.wVarsRaw ?? [])];
   const base = `${y} ~ ${rhs.length ? rhs.join(" + ") : "1"}`;
   const parts = [base];
   if ((spec.zVars ?? []).length)  parts.push(`| ${spec.zVars.join(" + ")}`);
