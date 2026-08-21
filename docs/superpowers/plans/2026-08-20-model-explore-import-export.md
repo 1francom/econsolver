@@ -66,6 +66,19 @@
 >   `unknown-value` too. Tasks 3 and 5 below already use the new name.
 > - Harness now drives the round-trip from the fixture keys and asserts a full key-set
 >   snapshot, so deleting a field fails the harness instead of just producing fewer checks.
+>
+> **A second review round, after Task 3 wired it in, forced two more:**
+> - **X and W travel under `xVarsRaw`/`wVarsRaw`, not `xVars`/`wVars`.** `estimationDispatch.js`
+>   sets `spec.xVars` to the **expanded** design matrix (factor dummies, interaction products);
+>   the sidebar list is the raw one. That is exactly why the old `specExtras` wrote separate
+>   `xVarsRaw`/`wVarsRaw` keys. Spreading `collectSpec` over `result.spec` clobbered the
+>   expanded arrays, and SunAbraham's export read `spec.xVars` to get its cohort/period/unit
+>   filtered controls — so it started emitting the period column as a control. Fixed with the
+>   table's existing `stateKey` mechanism: `{ key: "xVarsRaw", stateKey: "xVars", … }`. Every
+>   exporter keeps its current contract untouched, and `specFormula` reads the raw keys.
+> - **Legacy pins recover their estimator from `r.type`** — see Task 3's `onRestore`. `cutoff`
+>   deliberately keeps the sidebar's *string*, not the engine's parsed number: it restores into
+>   a text input, and the emitters interpolate it.
 
 **Files:**
 - Create: `src/components/modeling/modelSpec.js`
@@ -643,7 +656,6 @@ with:
         // the user's HAC settings rather than merely failing to carry them.
         seType, clusterVar, clusterVar2, timeVar, maxLag,
       }),
-      xVarsRaw: [...xVars], wVarsRaw: [...wVars],
       filename: cleanedData?.filename ?? null,
     };
 ```
@@ -673,7 +685,14 @@ At `ModelingTab.jsx:3845`, replace the whole `onRestore={(id) => { … }}` prop 
             // are trimmed — no raw arrays, so plots needing row-level data
             // cannot render from the pinned copy alone). applySpec is the same
             // path the model.json import uses; there is no second restorer.
-            const { unapplied } = applySpec(r.spec ?? {}, SPEC_SETTERS, SPEC_CTX);
+            // `model: r.type` first, so spec.model wins when present but a pin
+            // saved BEFORE this table existed still recovers its estimator.
+            // Those specs have no `model` key — the old specExtras never wrote
+            // one — and applySpec resets an absent key to its def, silently, so
+            // without this an RDD pin restores as OLS while the result panel
+            // still says "RDD Results".
+            const { unapplied } = applySpec(
+              { model: r.type, ...(r.spec ?? {}) }, SPEC_SETTERS, SPEC_CTX);
             setSpecNotice(unapplied.length ? unapplied : null);
           }}
 ```
